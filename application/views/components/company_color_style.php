@@ -93,13 +93,23 @@
         }
 
         #book-appointment-wizard .book-step {
-            background: <?= $company_color ?>;
-            filter: brightness(75%);
+            background: #FFFCFC;
+            color: #000;
         }
 
         #book-appointment-wizard .book-step strong {
-            color: <?= $company_color ?>;
-            filter: brightness(200%);
+            color: #000;
+            filter: none;
+        }
+
+        #book-appointment-wizard .book-step.active-step {
+            background: #FFFCFC;
+            color: #000;
+        }
+
+        #book-appointment-wizard .book-step.active-step strong {
+            color: #000;
+            filter: none;
         }
 
         body .ui-widget.ui-widget-content {
@@ -189,9 +199,9 @@
         }
 
         #book-appointment-wizard #company-name .display-booking-selection {
-            color: <?= $company_color ?>;
+            color: #FFFCFC;
             border-right-color: <?= $company_color ?>;
-            filter: brightness(280%);
+            filter: none;
         }
     </style>
 <?php endif; ?>

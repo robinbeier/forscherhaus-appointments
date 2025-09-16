@@ -54,7 +54,7 @@ body {
     }
 
     .display-booking-selection {
-        color: #225d4d;
+        color: #FFFCFC;
         border-right-color: #225d4d !important;
         font-size: 60%;
         font-weight: normal;
@@ -131,7 +131,8 @@ body {
     height: 35px;
     width: 35px;
     float: left;
-    background: #225d4d;
+    background: #FFFCFC;
+    color: #000;
     padding: 8px;
     margin-right: 12px;
     margin-top: 6px;
@@ -147,7 +148,7 @@ body {
     font-size: 12px;
     display: block;
     text-align: center;
-    color: #0bb98d;
+    color: #000;
     transition: all 0.3s linear;
     cursor: default;
 }
@@ -157,14 +158,14 @@ body {
     height: 45px;
     width: 45px;
     float: left;
-    background: #fff;
+    background: #FFFCFC;
     padding: 7px;
     margin-right: 13px;
     margin-top: 0;
 }
 
 #book-appointment-wizard .active-step strong {
-    color: #429a82;
+    color: #000;
     font-size: 21px;
 }
 
