@@ -28,41 +28,42 @@
 ## Tasks (To-dos)
 
 ### T1 – Branch
-- Branch `feature/provider-room` anlegen.
-- **Akzeptanz:** `git branch --show-current` → `feature/provider-room`.
+- ✅ Branch `feature/provider-room` anlegen.
+- ✅ **Akzeptanz:** `git branch --show-current` → `feature/provider-room`.
 
 ### T2 – DB: Spalte `users.room`
-- Migration anlegen oder direktes SQL ausführen:  
+- ✅ Migration anlegen oder direktes SQL ausführen:  
   `ALTER TABLE users ADD COLUMN room VARCHAR(64) NULL AFTER notes;`
-- **Akzeptanz:** `SHOW COLUMNS FROM users LIKE 'room';` zeigt Spalte.
+- ✅ **Akzeptanz:** `SHOW COLUMNS FROM users LIKE 'room';` zeigt Spalte.
 
 ### T3 – Backend-Whitelists öffnen für `room`
-- `application/controllers/Providers.php`: `allowed_provider_fields` → `room` hinzufügen.
-- `application/models/Providers_model.php`: in `$api_resource` Mapping "room" => "room" ergänzen.
-- **Akzeptanz:** Provider-CRUD via Admin-UI funktioniert weiterhin (Speichern/Lesen ohne Fehler).
+- ✅ `application/controllers/Providers.php`: `allowed_provider_fields` → `room` hinzufügen.
+- ✅ `application/models/Providers_model.php`: in `$api_resource` Mapping "room" => "room" ergänzen.
+- ✅ **Akzeptanz:** Provider-CRUD via Admin-UI funktioniert weiterhin (Speichern/Lesen ohne Fehler).
 
 ### T4 – Backend-UI: Feld „Raum“ bei Lehrkraft
-- `application/views/pages/providers.php` (Formular) um Textfeld **Raum** erweitern (Label, Input, Helfertext).
-- Falls nötig `assets/js/pages/providers.js` um Serialisierung von `room` ergänzen.
-- **Akzeptanz:** In der Admin-Maske einer Lehrkraft ist das Feld sichtbar, Speichern ändert DB-Wert.
+- ✅ `application/views/pages/providers.php` (Formular) um Textfeld **Raum** erweitern (Label, Input, Helfertext).
+- ✅ Falls nötig `assets/js/pages/providers.js` um Serialisierung von `room` ergänzen.
+- ✅ **Akzeptanz:** In der Admin-Maske einer Lehrkraft ist das Feld sichtbar, Speichern ändert DB-Wert.
 
 ### T5 – Booking Controller liefert `room` ins Frontend
-- `application/controllers/Booking.php`: `allowed_provider_fields` um `room` erweitern, damit `available_providers` → `room` enthält (siehe `script_vars([... 'available_providers' => ...])`). 
-- **Akzeptanz:** Netzwerk-Tab im Browser (Buchungsseite laden), `script_vars` prüfen: Provider-Objekte enthalten `room`.
+- ✅ `application/controllers/Booking.php`: `allowed_provider_fields` um `room` erweitern, damit `available_providers` → `room` enthält (siehe `script_vars([... 'available_providers' => ...])`). 
+- ✅ **Akzeptanz:** Netzwerk-Tab im Browser (Buchungsseite laden), `script_vars` prüfen: Provider-Objekte enthalten `room`.
 
 ### T6 – Wizard Schritt 4: Raum anzeigen
-- `assets/js/pages/booking.js`: an der Stelle, an der die Schritt-4-Zusammenfassung aufgebaut/aktualisiert wird, **Zeile „Raum: …“** ergänzen (`selectedProvider.room`).
-- **Akzeptanz:** Im Wizard (Schritt 4) erscheint „Raum: XYZ“ sobald ein Provider feststeht.
+- ✅ `assets/js/pages/booking.js`: an der Stelle, an der die Schritt-4-Zusammenfassung aufgebaut/aktualisiert wird, **Zeile „Raum: …“** ergänzen (`selectedProvider.room`).
+- ✅ **Akzeptanz:** Im Wizard (Schritt 4) erscheint „Raum: XYZ“ sobald ein Provider feststeht.
 
 ### T7 – Buchungsbestätigung: Raum + Google-Link
-- `application/controllers/Booking_confirmation.php`:  
+- ✅ `application/controllers/Booking_confirmation.php`:  
   - Neben `add_to_google_url` auch den **Raum** der View übergeben (Provider per `providers_model->find($appointment['id_users_provider'])`).  
-- **Google-Link**: in `application/libraries/Google_sync.php` (Methode `get_add_to_google_url`) `location` um `; Raum {room}` erweitern.  
-- **Akzeptanz:** Klick auf „Zum Google-Kalender hinzufügen“ erstellt Termin mit Location inkl. Raum.
+- ✅ **Google-Link**: in `application/libraries/Google_sync.php` (Methode `get_add_to_google_url`) `location` um `; Raum {room}` erweitern.  
+- ✅ `application/views/pages/booking_confirmation.php`: Raum prominent anzeigen.
+- ✅ **Akzeptanz:** Klick auf „Zum Google-Kalender hinzufügen“ erstellt Termin mit Location inkl. Raum.
 
 ### T8 – Übersetzungen
-- In `application/language/*/translations_lang.php` Schlüssel `room`/`Raum` ergänzen (DE/EN mind.).  
-- **Akzeptanz:** Labels erscheinen lokalisiert.
+- ✅ In `application/language/*/translations_lang.php` Schlüssel `room`/`Raum` ergänzen (DE/EN mind.).  
+- ✅ **Akzeptanz:** Labels erscheinen lokalisiert.
 
 ### T9 – Regressionscheck & Doku
 - ✅ Buchung mit „beliebiger Anbieter“ → Datenfluss geprüft (Wizard erhält `room`, Schritt 4 & Bestätigung zeigen den Wert nach Zuteilung).  
