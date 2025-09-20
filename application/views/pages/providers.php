@@ -164,6 +164,13 @@
                                 <textarea id="notes" class="form-control" rows="3" disabled></textarea>
                             </div>
 
+                            <div class="mb-3">
+                                <label class="form-label" for="provider-room">
+                                    <?= lang('room') ?>
+                                </label>
+                                <input id="provider-room" name="room" class="form-control" maxlength="64" disabled>
+                            </div>
+
                             <?php slot('after_primary_fields'); ?>
                         </div>
                         <div class="settings col-12 col-md-6">
@@ -389,6 +396,5 @@
 <script src="<?= asset_url('assets/js/pages/providers.js') ?>"></script>
 
 <?php end_section('scripts'); ?>
-
 
 

@@ -41,7 +41,7 @@ class Booking extends EA_Controller
         'custom_field_4',
         'custom_field_5',
     ];
-    public mixed $allowed_provider_fields = ['id', 'first_name', 'last_name', 'services', 'timezone'];
+    public mixed $allowed_provider_fields = ['id', 'first_name', 'last_name', 'services', 'timezone', 'room'];
     public array $allowed_appointment_fields = [
         'id',
         'start_datetime',

@@ -3,6 +3,12 @@
 This file contains the code changes that were introduced into each release (starting from v1.1.0) so that is easy for 
 developers to maintain and readjust their custom modifications on the main project codebase.
 
+## [Unreleased]
+
+### Added
+
+- Allow providers to define a room that is shown in the booking wizard summary, confirmation page, and Google Calendar exports.
+
 ## [1.5.2] - 2025-08-26
 
 ### Fixed

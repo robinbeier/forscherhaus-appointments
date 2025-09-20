@@ -452,6 +452,16 @@ class Google_sync
         }
 
         // Base params (everything except add)
+        $location = setting('company_name');
+
+        if (!empty($appointment['location'])) {
+            $location = $appointment['location'];
+        }
+
+        if (!empty($provider['room'])) {
+            $location .= '; Raum ' . $provider['room'];
+        }
+
         $params = [
             'action' => 'TEMPLATE',
             'text' => $service['name'],
@@ -459,7 +469,7 @@ class Google_sync
                 $appointment_start_instance->format('Ymd\THis\Z') .
                 '/' .
                 $appointment_end_instance->format('Ymd\THis\Z'),
-            'location' => setting('company_name'),
+            'location' => $location,
             'details' => 'View/Change Appointment: ' . site_url('booking/reschedule/' . $appointment['hash']),
         ];
 

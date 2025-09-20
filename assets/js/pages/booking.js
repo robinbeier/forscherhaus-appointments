@@ -671,6 +671,10 @@ App.Pages.Booking = (function () {
 
         const serviceOptionText = serviceId ? $selectService.find('option:selected').text() : lang('service');
         const providerOptionText = providerId ? $selectProvider.find('option:selected').text() : lang('provider');
+        const selectedProvider = vars('available_providers').find(
+            (availableProvider) => Number(availableProvider.id) === Number(providerId),
+        );
+        const providerRoom = App.Utils.String.escapeHtml(selectedProvider?.room ?? '');
 
         if (serviceId || providerId) {
             $displayBookingSelection.text(`${serviceOptionText} │ ${providerOptionText}`);
@@ -713,6 +717,10 @@ App.Pages.Booking = (function () {
                 </div> 
                 <div class="mb-2 fw-bold text-muted">
                     ${providerOptionText}
+                </div>
+                <div class="mb-2" ${!providerRoom ? 'hidden' : ''}>
+                    <i class="fas fa-door-open me-2"></i>
+                    ${providerRoom}
                 </div>
                 <div class="mb-2">
                     <i class="fas fa-calendar-day me-2"></i>
