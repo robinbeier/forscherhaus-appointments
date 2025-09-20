@@ -58,8 +58,7 @@
 - `application/controllers/Booking_confirmation.php`:  
   - Neben `add_to_google_url` auch den **Raum** der View übergeben (Provider per `providers_model->find($appointment['id_users_provider'])`).  
 - **Google-Link**: in `application/libraries/Google_sync.php` (Methode `get_add_to_google_url`) `location` um `; Raum {room}` erweitern.  
-- `application/views/pages/booking_confirmation.php`: Raum prominent anzeigen.
-- **Akzeptanz:** Bestätigungsseite zeigt Raum; Klick auf „Zum Google-Kalender hinzufügen“ erstellt Termin mit Location inkl. Raum.
+- **Akzeptanz:** Klick auf „Zum Google-Kalender hinzufügen“ erstellt Termin mit Location inkl. Raum.
 
 ### T8 – Übersetzungen
 - In `application/language/*/translations_lang.php` Schlüssel `room`/`Raum` ergänzen (DE/EN mind.).  
