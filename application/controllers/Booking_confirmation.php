@@ -54,8 +54,6 @@ class Booking_confirmation extends EA_Controller
 
         $appointment = $occurrences[0];
 
-        $provider = $this->providers_model->find($appointment['id_users_provider']);
-
         $add_to_google_url = $this->google_sync->get_add_to_google_url($appointment['id']);
 
         html_vars([
@@ -65,7 +63,6 @@ class Booking_confirmation extends EA_Controller
             'matomo_analytics_url' => setting('matomo_analytics_url'),
             'matomo_analytics_site_id' => setting('matomo_analytics_site_id'),
             'add_to_google_url' => $add_to_google_url,
-            'provider_room' => $provider['room'] ?? null,
         ]);
 
         $this->load->view('pages/booking_confirmation');
