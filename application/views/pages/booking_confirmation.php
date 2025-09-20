@@ -28,6 +28,16 @@
         <i class="fas fa-plus me-2"></i>
         <?= lang('add_to_google_calendar') ?>
     </a>
+
+    <div class="mt-4" <?= empty(vars('provider_room')) ? 'hidden' : '' ?> >
+        <div class="fw-bold text-muted mb-1">
+            <?= lang('room') ?>
+        </div>
+        <div>
+            <i class="fas fa-door-open me-2"></i>
+            <?= html_escape(vars('provider_room')) ?>
+        </div>
+    </div>
 </div>
 
 <?php end_section('content'); ?>
