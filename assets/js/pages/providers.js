@@ -26,6 +26,7 @@ App.Pages.Providers = (function () {
     const $city = $('#city');
     const $state = $('#state');
     const $zipCode = $('#zip-code');
+    const $room = $('#provider-room');
     const $isPrivate = $('#is-private');
     const $notes = $('#notes');
     const $language = $('#language');
@@ -165,6 +166,7 @@ App.Pages.Providers = (function () {
                 city: $city.val(),
                 state: $state.val(),
                 zip_code: $zipCode.val(),
+                room: $room.val(),
                 is_private: Number($isPrivate.prop('checked')),
                 notes: $notes.val(),
                 language: $language.val(),
@@ -382,6 +384,7 @@ App.Pages.Providers = (function () {
         $city.val(provider.city);
         $state.val(provider.state);
         $zipCode.val(provider.zip_code);
+        $room.val(provider.room ? provider.room : '');
         $isPrivate.prop('checked', provider.is_private);
         $notes.val(provider.notes);
         $language.val(provider.language);
