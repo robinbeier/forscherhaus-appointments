@@ -66,8 +66,8 @@
 - **Akzeptanz:** Labels erscheinen lokalisiert.
 
 ### T9 – Regressionscheck & Doku
-- Buchung mit „beliebiger Anbieter“ → nach Provider-Zuteilung erscheint Raum korrekt.  
-- README/CHANGELOG Eintrag.
+- ✅ Buchung mit „beliebiger Anbieter“ → Datenfluss geprüft (Wizard erhält `room`, Schritt 4 & Bestätigung zeigen den Wert nach Zuteilung).  
+- ✅ README/CHANGELOG Eintrag ergänzt.
 
 ## Manuelle Tests (Kurzform)
 1) **Admin**: Raum für Lehrkraft setzen → speichern → erneut öffnen: Wert bleibt.  

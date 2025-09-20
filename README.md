@@ -48,7 +48,7 @@ The application is designed to be flexible enough so that it can handle any ente
 * Customers and appointments management.
 * Services and providers organization.
 * Working plan and booking rules.
-* Google Calendar synchronization.
+* Google Calendar synchronization (including provider room information for bookings).
 * Email notifications system.
 * Self hosted installation.
 * Translated user interface.
