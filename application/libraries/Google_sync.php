@@ -459,7 +459,13 @@ class Google_sync
         }
 
         if (!empty($provider['room'])) {
-            $location .= '; Raum ' . $provider['room'];
+            $room_label = lang('room');
+
+            if ($room_label === false || $room_label === null || $room_label === '') {
+                $room_label = 'Room';
+            }
+
+            $location .= '; ' . $room_label . ' ' . $provider['room'];
         }
 
         $params = [

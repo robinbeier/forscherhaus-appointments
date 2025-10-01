@@ -131,15 +131,14 @@ $languages = [
 
 $config['language_codes'] = $languages;
 
-$language_code = isset($_SERVER['HTTP_ACCEPT_LANGUAGE']) ? substr($_SERVER['HTTP_ACCEPT_LANGUAGE'], 0, 2) : 'en';
+$config['language'] = Config::LANGUAGE;
 
-$config['language'] =
-    $_GET['language'] ??
-    (isset($_SERVER['HTTP_ACCEPT_LANGUAGE'], $languages[$language_code])
-        ? $languages[$language_code]
-        : Config::LANGUAGE);
+if (isset($_GET['language']) && in_array($_GET['language'], $config['available_languages'], true))
+{
+    $config['language'] = $_GET['language'];
+}
 
-$config['language_code'] = array_search($config['language'], $languages) ?: 'en';
+$config['language_code'] = array_search($config['language'], $languages, true) ?: 'de';
 
 /*
 |--------------------------------------------------------------------------
@@ -152,47 +151,7 @@ $config['language_code'] = array_search($config['language'], $languages) ?: 'en'
 |
 */
 $config['available_languages'] = [
-    'albanian',
-    'arabic',
-    'bosnian',
-    'bulgarian',
-    'catalan',
-    'chinese',
-    'croatian',
-    'czech',
-    'danish',
-    'dutch',
-    'english',
-    'estonian',
-    'finnish',
-    'french',
     'german',
-    'greek',
-    'hebrew',
-    'hindi',
-    'hungarian',
-    'italian',
-    'japanese',
-    'latvian',
-    'lithuanian',
-    'luxembourgish',
-    'marathi',
-    'norwegian',
-    'persian',
-    'polish',
-    'portuguese',
-    'portuguese-br',
-    'romanian',
-    'russian',
-    'serbian',
-    'slovak',
-    'slovenian',
-    'spanish',
-    'swedish',
-    'thai',
-    'traditional-chinese',
-    'turkish',
-    'ukrainian',
 ];
 
 /*

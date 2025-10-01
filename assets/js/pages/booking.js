@@ -944,10 +944,6 @@ App.Pages.Booking = (function () {
 
         const additionalInfoParts = [];
 
-        if (service.duration) {
-            additionalInfoParts.push(`${lang('duration')}: ${service.duration} ${lang('minutes')}`);
-        }
-
         if (Number(service.price) > 0) {
             additionalInfoParts.push(`${lang('price')}: ${Number(service.price).toFixed(2)} ${service.currency}`);
         }
