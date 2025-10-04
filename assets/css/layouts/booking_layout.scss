@@ -176,11 +176,9 @@ body {
 }
 
 #book-appointment-wizard #available-hours {
-    overflow: auto;
     margin: 15px 0;
     padding-right: 10px;
     width: auto;
-    max-height: 250px;
 }
 
 #book-appointment-wizard #available-hours div {
@@ -423,4 +421,14 @@ body {
         border-bottom: 1px solid #e4e1c9;
         text-align: left;
     }
+}
+
+/* Remove inner scroll on booking time list */
+#book-appointment-wizard #available-hours,
+#book-appointment-wizard .available-hours,
+#book-appointment-wizard .time-list,
+#book-appointment-wizard [data-ea-component="time-list"] {
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
 }
