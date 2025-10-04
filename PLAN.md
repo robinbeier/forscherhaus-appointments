@@ -64,7 +64,7 @@ git checkout -b feat/booking-remove-inner-scroll
 - [✅] Entsprechende **Höhenberechnung entfernen/deaktivieren** (keine neue Logik hinzufügen).
 
 ### E) Build & Test
-- [ ] Abhängigkeiten & Build (gemäß Projekt‑README):
+- [✅] Abhängigkeiten & Build (gemäß Projekt‑README):
   ```bash
   npm install
   composer install
@@ -72,14 +72,14 @@ git checkout -b feat/booking-remove-inner-scroll
   # oder
   npm run build    # gebündelter Build
   ```
-- [ ] **Visuelle Tests**:
+- [✅] **Visuelle Tests**:
   - iOS Safari & Android Chrome, plus Desktop (Chrome/Firefox/Safari).
   - Buchung Schritt „Datum & Uhrzeit“ öffnen.
   - **Erwartung:** Die **Seite scrollt**; die Zeitliste zeigt unterhalb der sichtbaren Zeiten **weitere Einträge**, ohne innere Scrollbar.
   - **Kein** Abschneiden des letzten Eintrags. **Keine** doppelte Scrollbarkeit (nur Body scrollt).
 
 ### F) Git & PR
-- [ ] Commit:
+- [✅] Commit:
   ```bash
   git add -A
   git commit -m "feat(booking): remove inner scroll on time list; use page scroll"
