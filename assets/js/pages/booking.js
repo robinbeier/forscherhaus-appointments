@@ -708,7 +708,7 @@ App.Pages.Booking = (function () {
                 selectedTime;
         }
 
-        const timezoneOptionText = $selectTimezone.find('option:selected').text();
+        const displayDuration = Math.max(Number(service.duration) - 5, 1);
 
         $('#appointment-details').html(`
             <div>
@@ -728,11 +728,7 @@ App.Pages.Booking = (function () {
                 </div> 
                 <div class="mb-2">
                     <i class="fas fa-clock me-2"></i>
-                    ${service.duration} ${lang('minutes')}
-                </div>
-                <div class="mb-2">
-                    <i class="fas fa-globe me-2"></i>
-                    ${timezoneOptionText}
+                    ${displayDuration} ${lang('minutes')}
                 </div> 
                 <div class="mb-2" ${!Number(service.price) ? 'hidden' : ''}>
                     <i class="fas fa-cash-register me-2"></i>
@@ -740,6 +736,19 @@ App.Pages.Booking = (function () {
                 </div>
             </div>     
         `);
+
+        const $appointmentDetails = $('#appointment-details');
+
+        $appointmentDetails.find('.fas.fa-globe').closest('div').remove();
+
+        const $durationRow = $appointmentDetails.find('.fas.fa-clock').closest('div');
+
+        if ($durationRow.length) {
+            $durationRow.html(`
+                <i class="fas fa-clock me-2"></i>
+                ${displayDuration} ${lang('minutes')}
+            `);
+        }
 
         // Render the customer information
 

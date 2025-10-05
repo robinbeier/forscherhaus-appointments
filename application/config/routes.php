@@ -164,5 +164,7 @@ $route['api/v1/availabilities']['get'] = 'api/v1/availabilities_api_v1/get';
 |
 */
 
+$route['appointments/ics/(:any)'] = 'appointments/ics/$1';
+
 /* End of file routes.php */
 /* Location: ./application/config/routes.php */
