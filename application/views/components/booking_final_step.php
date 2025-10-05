@@ -12,16 +12,7 @@
     <div class="frame-container">
         <h2 class="frame-title"><?= lang('appointment_confirmation') ?></h2>
 
-        <div class="row frame-content m-auto pt-md-4 mb-4">
-            <div id="appointment-details" class="col-12 col-md-6 text-center text-md-start mb-2 mb-md-0">
-                <!-- JS -->
-            </div>
-
-            <div id="customer-details" class="col-12 col-md-6 text-center text-md-end">
-                <!-- JS -->
-            </div>
-
-        </div>
+        <?php $this->load->view('appointments/partials/_appointment_summary'); ?>
 
         <?php slot('after_details'); ?>
 
