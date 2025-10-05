@@ -76,7 +76,7 @@ class Booking_confirmation extends EA_Controller
         $display_duration_minutes = max($duration_minutes - 5, 1);
 
         $appointment_summary = [
-            'title' => '',
+            'title' => $service['name'] ?? '',
             'subtitle' => trim($provider['first_name'] . ' ' . $provider['last_name']),
             'room' => $provider['room'] ?? '',
             'datetime' => trim(format_date($start_at) . ' ' . format_time($start_at)),
