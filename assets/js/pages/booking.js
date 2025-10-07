@@ -371,16 +371,23 @@ App.Pages.Booking = (function () {
 
             $selectProvider.append(new Option(lang('please_select'), ''));
 
-            vars('available_providers').forEach((provider) => {
-                // If the current provider is able to provide the selected service, add him to the list box.
-                const canServeService =
-                    provider.services.filter((providerServiceId) => Number(providerServiceId) === Number(serviceId))
-                        .length > 0;
-
-                if (canServeService) {
-                    $selectProvider.append(new Option(provider.first_name + ' ' + provider.last_name, provider.id));
-                }
+            const providersForService = vars('available_providers').filter((provider) => {
+                return provider.services.some((providerServiceId) => Number(providerServiceId) === Number(serviceId));
             });
+
+            providersForService
+                .sort((leftProvider, rightProvider) => {
+                    const leftName = (leftProvider.last_name || leftProvider.first_name || '').trim();
+                    const rightName = (rightProvider.last_name || rightProvider.first_name || '').trim();
+                    return leftName.localeCompare(rightName, undefined, {sensitivity: 'base'});
+                })
+                .forEach((provider) => {
+                    const displayLabel = (provider.last_name || provider.first_name || '').trim();
+                    const option = new Option(displayLabel, provider.id);
+                    option.dataset.firstName = provider.first_name || '';
+                    option.dataset.lastName = provider.last_name || '';
+                    $selectProvider.append(option);
+                });
 
             const providerOptionCount = $selectProvider.find('option').length;
 

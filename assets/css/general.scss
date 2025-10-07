@@ -515,3 +515,24 @@ body .clearfix {
 .cc-window {
     z-index: 999 !important;
 }
+
+#wizard-frame-4 .booking-policy-check {
+    align-items: flex-start;
+}
+
+#wizard-frame-4 .booking-policy-label {
+    font-size: 1rem;
+    font-weight: 500;
+}
+
+@media (max-width: 576px) {
+    #wizard-frame-4 .booking-policy-label {
+        font-size: 1.125rem;
+        font-weight: 600;
+        line-height: 1.45;
+    }
+
+    #wizard-frame-4 .booking-policy-label a {
+        text-decoration: underline;
+    }
+}
