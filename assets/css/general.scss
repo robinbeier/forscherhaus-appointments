@@ -525,6 +525,31 @@ body .clearfix {
     font-weight: 500;
 }
 
+#wizard-frame-4 .form-check-input.is-invalid ~ .booking-policy-label,
+#wizard-frame-4 .booking-policy-label.attention {
+    color: #dc3545;
+    animation: privacy-policy-attention 600ms ease-in-out 0s 3;
+}
+
+#wizard-frame-4 .form-check-input.is-invalid ~ .booking-policy-label a,
+#wizard-frame-4 .booking-policy-label.attention a {
+    text-decoration: underline;
+}
+
+@keyframes privacy-policy-attention {
+    0%, 100% {
+        transform: translateY(0);
+    }
+
+    20%, 60% {
+        transform: translateY(-4px);
+    }
+
+    40%, 80% {
+        transform: translateY(4px);
+    }
+}
+
 @media (max-width: 576px) {
     #wizard-frame-4 .booking-policy-label {
         font-size: 1.125rem;

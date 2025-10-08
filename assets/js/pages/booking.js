@@ -597,10 +597,19 @@ App.Pages.Booking = (function () {
             }
 
             const $acceptToPrivacyPolicy = $('#accept-to-privacy-policy');
+            const $privacyPolicyLabel = $acceptToPrivacyPolicy
+                .closest('.booking-policy-check')
+                .find('.booking-policy-label');
 
             $acceptToPrivacyPolicy.removeClass('is-invalid');
+            $privacyPolicyLabel.removeClass('attention');
 
             if ($acceptToPrivacyPolicy.length && !$acceptToPrivacyPolicy.prop('checked')) {
+                if ($privacyPolicyLabel.length) {
+                    void $privacyPolicyLabel[0].offsetWidth;
+                    $privacyPolicyLabel.addClass('attention');
+                }
+
                 $acceptToPrivacyPolicy.addClass('is-invalid');
                 return;
             }

@@ -10,7 +10,7 @@
 
 <div id="wizard-frame-4" class="wizard-frame" style="display:none;">
     <div class="frame-container">
-        <h2 class="frame-title"><?= lang('appointment_confirmation') ?></h2>
+        <h1 class="frame-title frame-title--confirm"><?= lang('appointment_confirmation') ?></h1>
 
         <?php $this->load->view('appointments/partials/_appointment_summary'); ?>
 

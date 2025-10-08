@@ -27,7 +27,7 @@ $customer_column_classes = $customer_column_classes ?? 'col-12 col-md-6 text-cen
         <?php if (!empty($appointment)): ?>
             <div class="summary-details">
                 <?php if (!empty($appointment['title'])): ?>
-                    <div class="summary-title fw-bold fs-3 mb-2">
+                    <div class="summary-title fw-semibold fs-4 text-primary mb-2">
                         <?= htmlspecialchars($appointment['title'], ENT_QUOTES, 'UTF-8') ?>
                     </div>
                 <?php endif; ?>
@@ -82,7 +82,7 @@ $customer_column_classes = $customer_column_classes ?? 'col-12 col-md-6 text-cen
             <?php if (!empty($customer)): ?>
                 <div>
                     <?php if (!empty($customer['title'])): ?>
-                        <div class="mb-2 fw-bold fs-3">
+                        <div class="mb-2 fw-semibold fs-5 text-secondary">
                             <?= htmlspecialchars($customer['title'], ENT_QUOTES, 'UTF-8') ?>
                         </div>
                     <?php endif; ?>
