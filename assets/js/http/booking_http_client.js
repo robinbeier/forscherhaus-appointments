@@ -77,6 +77,7 @@ App.Http.Booking = (function () {
 
         $.post(url, data).done((response) => {
             $availableHours.empty();
+            App.Pages.Booking.resetTimeSelectionScroll();
 
             // The response contains the available hours for the selected provider and service. Fill the available
             // hours div with response data.

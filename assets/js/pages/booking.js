@@ -48,6 +48,7 @@ App.Pages.Booking = (function () {
      * @type {Boolean}
      */
     let manageMode = vars('manage_mode') || false;
+    let hasScrolledToNextButton = false; // Avoid repeated auto-scrolls after time selection.
 
     /**
      * Detect the month step.
@@ -59,6 +60,23 @@ App.Pages.Booking = (function () {
      */
     function detectDatepickerMonthChangeStep(previousDateTimeMoment, nextDateTimeMoment) {
         return previousDateTimeMoment.isAfter(nextDateTimeMoment) ? -1 : 1;
+    }
+
+    function scrollToNextButton() {
+        const nextButton = document.getElementById('button-next-2');
+
+        if (!nextButton) {
+            return;
+        }
+
+        nextButton.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+        });
+    }
+
+    function resetTimeSelectionScroll() {
+        hasScrolledToNextButton = false;
     }
 
     /**
@@ -497,8 +515,13 @@ App.Pages.Booking = (function () {
          */
         $availableHours.on('click', '.available-hour', (event) => {
             $availableHours.find('.selected-hour').removeClass('selected-hour');
-            $(event.target).addClass('selected-hour');
+            $(event.currentTarget).addClass('selected-hour');
             App.Pages.Booking.updateConfirmFrame();
+
+            if (!hasScrolledToNextButton) {
+                hasScrolledToNextButton = true;
+                scrollToNextButton();
+            }
         });
 
         if (manageMode) {
@@ -1007,5 +1030,6 @@ App.Pages.Booking = (function () {
         updateConfirmFrame,
         updateServiceDescription,
         validateCustomerForm,
+        resetTimeSelectionScroll,
     };
 })();
