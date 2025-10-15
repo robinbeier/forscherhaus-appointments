@@ -143,6 +143,8 @@ App.Http.Booking = (function () {
                 App.Pages.Booking.updateConfirmFrame();
             }
 
+            App.Pages.Booking.scrollToFirstAvailableHour();
+
             if (!$availableHours.find('.available-hour').length) {
                 $availableHours.text(lang('no_available_hours'));
             }

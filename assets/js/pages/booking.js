@@ -75,6 +75,26 @@ App.Pages.Booking = (function () {
         });
     }
 
+    function scrollToFirstAvailableHour() {
+        const $wizardFrame = $('#wizard-frame-2');
+
+        if (!$wizardFrame.length || !$wizardFrame.is(':visible')) {
+            return;
+        }
+
+        const slotElement =
+            $wizardFrame.find('.selected-hour').get(0) || $wizardFrame.find('.available-hour').get(0);
+
+        if (!slotElement) {
+            return;
+        }
+
+        slotElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+        });
+    }
+
     function resetTimeSelectionScroll() {
         hasScrolledToNextButton = false;
     }
@@ -479,7 +499,13 @@ App.Pages.Booking = (function () {
                 .fadeOut(() => {
                     $('.active-step').removeClass('active-step');
                     $('#step-' + nextTabIndex).addClass('active-step');
-                    $('#wizard-frame-' + nextTabIndex).fadeIn();
+                    const $nextFrame = $('#wizard-frame-' + nextTabIndex);
+
+                    $nextFrame.fadeIn(() => {
+                        if (nextTabIndex === 2) {
+                            scrollToFirstAvailableHour();
+                        }
+                    });
                 });
 
             // Scroll to the top of the page. On a small screen, especially on a mobile device, this is very useful.
@@ -504,7 +530,13 @@ App.Pages.Booking = (function () {
                 .fadeOut(() => {
                     $('.active-step').removeClass('active-step');
                     $('#step-' + prevTabIndex).addClass('active-step');
-                    $('#wizard-frame-' + prevTabIndex).fadeIn();
+                    const $prevFrame = $('#wizard-frame-' + prevTabIndex);
+
+                    $prevFrame.fadeIn(() => {
+                        if (prevTabIndex === 2) {
+                            scrollToFirstAvailableHour();
+                        }
+                    });
                 });
         });
 
@@ -1031,5 +1063,6 @@ App.Pages.Booking = (function () {
         updateServiceDescription,
         validateCustomerForm,
         resetTimeSelectionScroll,
+        scrollToFirstAvailableHour,
     };
 })();
