@@ -37,26 +37,56 @@ App.Utils.CalendarTableView = (function () {
     const moment = window.moment;
     let lastFocusedEventData;
 
+    const SWIPE_HORIZONTAL_THRESHOLD = 30;
+    const SWIPE_VERTICAL_THRESHOLD = 20;
+
+    const swipeState = {
+        active: false,
+        startX: 0,
+        startY: 0,
+        pointerId: null,
+        handled: false,
+        ignore: false,
+    };
+
+    const swipeListeners = {
+        pointerdown: null,
+        pointermove: null,
+        pointerup: null,
+        pointercancel: null,
+        lostpointercapture: null,
+    };
+
+    function goToPreviousRange() {
+        const dayInterval = Number($selectFilterItem.val());
+        const currentDate = App.Utils.UI.getDateTimePickerValue($selectDate);
+        const startDate = moment(currentDate).subtract(1, 'days');
+        const endDate = startDate.clone().add(dayInterval - 1, 'days');
+
+        App.Utils.UI.setDateTimePickerValue($selectDate, startDate.toDate());
+        createView(startDate.toDate(), endDate.toDate());
+    }
+
+    function goToNextRange() {
+        const dayInterval = Number($selectFilterItem.val());
+        const currentDate = App.Utils.UI.getDateTimePickerValue($selectDate);
+        const startDate = moment(currentDate).add(1, 'days');
+        const endDate = startDate.clone().add(dayInterval - 1, 'days');
+
+        App.Utils.UI.setDateTimePickerValue($selectDate, startDate.toDate());
+        createView(startDate.toDate(), endDate.toDate());
+    }
+
     /**
      * Add the utility event listeners.
      */
     function addEventListeners() {
         $calendar.on('click', '.calendar-header .btn.previous', () => {
-            const dayInterval = $selectFilterItem.val();
-            const currentDate = App.Utils.UI.getDateTimePickerValue($selectDate);
-            const startDate = moment(currentDate).subtract(1, 'days');
-            const endDate = startDate.clone().add(dayInterval - 1, 'days');
-            App.Utils.UI.setDateTimePickerValue($selectDate, startDate.toDate());
-            createView(startDate.toDate(), endDate.toDate());
+            goToPreviousRange();
         });
 
         $calendar.on('click', '.calendar-header .btn.next', () => {
-            const dayInterval = $selectFilterItem.val();
-            const currentDate = App.Utils.UI.getDateTimePickerValue($selectDate);
-            const startDate = moment(currentDate).add(1, 'days');
-            const endDate = startDate.clone().add(dayInterval - 1, 'days');
-            App.Utils.UI.setDateTimePickerValue($selectDate, startDate.toDate());
-            createView(startDate.toDate(), endDate.toDate());
+            goToNextRange();
         });
 
         $calendarToolbar.on('change', '#select-filter-item', () => {
@@ -729,12 +759,20 @@ App.Utils.CalendarTableView = (function () {
             eventClick: onEventClick,
             eventResize: onEventResize,
             eventDrop: onEventDrop,
+            dateClick: (info) => onDateClick(info, fullCalendar),
             select: (info) => onSelect(info, fullCalendar),
         });
 
         fullCalendar.render();
 
+        if (fullCalendar.el) {
+            fullCalendar.el.style.touchAction = 'manipulation';
+            fullCalendar.el.style.msTouchAction = 'manipulation';
+            fullCalendar.el.dataset.providerId = provider.id;
+        }
+
         $wrapper.data('fullCalendar', fullCalendar);
+        $wrapper.data('providerId', provider.id);
 
         fullCalendar.gotoDate(goToDate);
 
@@ -1753,14 +1791,35 @@ App.Utils.CalendarTableView = (function () {
         }
     }
 
+    function onDateClick(info, fullCalendar) {
+        if (info.allDay) {
+            return;
+        }
+
+        if (!shouldHandleTap(info.jsEvent)) {
+            return;
+        }
+
+        selectSlotFromPoint(info, fullCalendar);
+    }
+
     function onSelect(info, fullCalendar) {
         if (info.allDay) {
             return;
         }
 
-        const $providerColumn = $(info.jsEvent.target).parents('.provider-column');
+        let $providerColumn = $([]);
 
-        const providerId = $providerColumn.data('provider').id;
+        if (info.jsEvent && info.jsEvent.target) {
+            $providerColumn = $(info.jsEvent.target).closest('.provider-column');
+        }
+
+        if (!$providerColumn.length) {
+            $providerColumn = $(fullCalendar.el).closest('.provider-column');
+        }
+
+        const providerData = $providerColumn.data('provider');
+        const providerId = providerData ? providerData.id : null;
 
         const buttons = [
             {
@@ -1839,6 +1898,43 @@ App.Utils.CalendarTableView = (function () {
         return false;
     }
 
+    function shouldHandleTap(jsEvent) {
+        if (!jsEvent) {
+            return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        }
+
+        if (typeof jsEvent.pointerType === 'string') {
+            return jsEvent.pointerType !== 'mouse';
+        }
+
+        if (jsEvent.type && jsEvent.type.indexOf('touch') === 0) {
+            return true;
+        }
+
+        return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    }
+
+    function selectSlotFromPoint(info, calendarInstance) {
+        if (!calendarInstance) {
+            return;
+        }
+
+        const selectionEnd = getDefaultSelectionEnd(info.date, calendarInstance);
+
+        calendarInstance.select({
+            start: info.date,
+            end: selectionEnd,
+            allDay: false,
+        });
+    }
+
+    function getDefaultSelectionEnd(startDate, calendarInstance) {
+        const slotDuration = calendarInstance.getOption('slotDuration') || {minutes: 15};
+        const duration = moment.duration(slotDuration);
+
+        return moment(startDate).add(duration).toDate();
+    }
+
     /**
      * Set Table Calendar View
      *
@@ -1876,6 +1972,120 @@ App.Utils.CalendarTableView = (function () {
         $('.calendar-view .not-working').outerHeight((dateColumnHeight > height ? dateColumnHeight : height) - 70);
     }
 
+    function bindSwipeNavigation() {
+        const calendarElement = $calendar[0];
+
+        if (!calendarElement || swipeListeners.pointerdown) {
+            return;
+        }
+
+        calendarElement.style.touchAction = 'manipulation';
+        calendarElement.style.msTouchAction = 'manipulation';
+
+        swipeListeners.pointerdown = handlePointerDown;
+        swipeListeners.pointermove = handlePointerMove;
+        swipeListeners.pointerup = handlePointerEnd;
+        swipeListeners.pointercancel = resetSwipeState;
+        swipeListeners.lostpointercapture = resetSwipeState;
+
+        calendarElement.addEventListener('pointerdown', swipeListeners.pointerdown, {passive: true});
+        calendarElement.addEventListener('pointermove', swipeListeners.pointermove, {passive: true});
+        calendarElement.addEventListener('pointerup', swipeListeners.pointerup, {passive: true});
+        calendarElement.addEventListener('pointercancel', swipeListeners.pointercancel, {passive: true});
+        calendarElement.addEventListener('lostpointercapture', swipeListeners.lostpointercapture, {
+            passive: true,
+        });
+    }
+
+    function handlePointerDown(event) {
+        if (!shouldHandleTap(event) || swipeState.active) {
+            return;
+        }
+
+        const target = event.target;
+
+        if (!target || typeof target.closest !== 'function') {
+            return;
+        }
+
+        if (target.closest('.fc-event, .fc-popover, .popover, .btn, button, input, select, textarea')) {
+            swipeState.ignore = true;
+            swipeState.active = false;
+            return;
+        }
+
+        const scrollContainer = target.closest('.calendar-view > div, .fc-scroller');
+
+        if (scrollContainer && scrollContainer.scrollWidth > scrollContainer.clientWidth + 1) {
+            const maxScrollLeft = scrollContainer.scrollWidth - scrollContainer.clientWidth;
+            const scrollLeft = scrollContainer.scrollLeft;
+            const isAtEdge = scrollLeft <= 1 || scrollLeft >= maxScrollLeft - 1;
+
+            if (!isAtEdge) {
+                swipeState.ignore = true;
+                swipeState.active = false;
+                return;
+            }
+        }
+
+        swipeState.active = true;
+        swipeState.startX = event.clientX;
+        swipeState.startY = event.clientY;
+        swipeState.pointerId = event.pointerId;
+        swipeState.handled = false;
+        swipeState.ignore = false;
+    }
+
+    function handlePointerMove(event) {
+        if (!swipeState.active || swipeState.pointerId !== event.pointerId || swipeState.ignore) {
+            return;
+        }
+
+        if (!shouldHandleTap(event)) {
+            swipeState.ignore = true;
+            return;
+        }
+
+        const deltaX = event.clientX - swipeState.startX;
+        const deltaY = Math.abs(event.clientY - swipeState.startY);
+
+        if (deltaY > SWIPE_VERTICAL_THRESHOLD) {
+            swipeState.ignore = true;
+            return;
+        }
+
+        if (swipeState.handled) {
+            return;
+        }
+
+        if (Math.abs(deltaX) < SWIPE_HORIZONTAL_THRESHOLD) {
+            return;
+        }
+
+        swipeState.handled = true;
+
+        if (deltaX > 0) {
+            goToPreviousRange();
+        } else {
+            goToNextRange();
+        }
+    }
+
+    function handlePointerEnd(event) {
+        if (swipeState.pointerId !== event.pointerId) {
+            return;
+        }
+
+        resetSwipeState();
+    }
+
+    function resetSwipeState() {
+        swipeState.active = false;
+        swipeState.pointerId = null;
+        swipeState.handled = false;
+        swipeState.ignore = false;
+    }
+
     /**
      * Initialize Page
      */
@@ -1889,6 +2099,8 @@ App.Utils.CalendarTableView = (function () {
             .toDate();
 
         createView(startDate, endDate);
+
+        bindSwipeNavigation();
 
         $('#insert-working-plan-exception').hide();
 
