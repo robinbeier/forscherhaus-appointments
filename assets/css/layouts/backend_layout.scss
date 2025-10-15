@@ -344,6 +344,17 @@ body legend {
     font-size: 15.2px;
 }
 
+#calendar {
+    touch-action: manipulation;
+    -ms-touch-action: manipulation;
+}
+
+#calendar .calendar-wrapper,
+#calendar .fc-view-harness,
+#calendar .fc-scroller {
+    touch-action: manipulation;
+}
+
 #select-filter-item {
     margin-bottom: 10px;
 }
@@ -605,6 +616,36 @@ body .form-horizontal .controls {
 #calendar .calendar-view .date-column .provider-column .event.unavailability {
     background: #409482;
     color: #fff;
+}
+
+@media (pointer: coarse) {
+    #calendar-page #calendar .fc-toolbar .fc-button,
+    #calendar-page #calendar .calendar-header .btn {
+        min-height: 48px;
+        min-width: 48px;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+    }
+
+    #calendar-page #calendar .fc-timegrid-slot,
+    #calendar-page #calendar .fc-timegrid-slot-lane {
+        min-height: 3.25rem;
+    }
+
+    #calendar-page #calendar .fc-daygrid-day-frame {
+        min-height: 3.25rem;
+    }
+
+    #calendar-page #calendar .fc-event,
+    #calendar .calendar-view .date-column .provider-column .event {
+        min-height: 44px;
+        padding: 0.35rem 0.5rem;
+    }
+
+    #calendar-page #calendar .calendar-header .form-control,
+    #calendar-page #calendar .calendar-header .form-select {
+        min-height: 48px;
+    }
 }
 
 @media (min-width: 768px) {
