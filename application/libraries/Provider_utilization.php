@@ -129,8 +129,8 @@ class Provider_utilization
             $total_slots = 0;
             $booked_slots = 0;
         } else {
-            $total_slots = (int) round($total_minutes / $slot_size);
-            $booked_slots = (int) round($booked_minutes / $slot_size);
+            $total_slots = intdiv($total_minutes, $slot_size);
+            $booked_slots = intdiv($booked_minutes, $slot_size);
 
             if ($booked_slots > $total_slots) {
                 $booked_slots = $total_slots;
