@@ -82,6 +82,7 @@ App.Pages.Installation = (function () {
     function validate() {
         try {
             const $fields = $('input');
+            const $requiredFields = $fields.not('#phone-number');
 
             $alert.removeClass('alert-danger').prop('hidden', true);
 
@@ -90,7 +91,7 @@ App.Pages.Installation = (function () {
             // Check for empty fields.
             let missingRequired = false;
 
-            $fields.each((index, field) => {
+            $requiredFields.each((index, field) => {
                 if (!$(field).val()) {
                     $(field).addClass('is-invalid');
                     missingRequired = true;
