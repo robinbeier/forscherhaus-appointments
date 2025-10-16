@@ -21,6 +21,16 @@
 
     <div id="header-menu" class="collapse navbar-collapse flex-row-reverse px-2">
         <ul class="navbar-nav">
+            <?php $is_admin = session('role_slug') === DB_SLUG_ADMIN; ?>
+            <?php $dashboard_classes = trim(($active_menu === 'dashboard' ? 'active' : '') . ' ' . ($is_admin ? '' : 'd-none')); ?>
+            <li class="nav-item <?= $dashboard_classes ?>">
+                <a href="<?= site_url('dashboard') ?>" class="nav-link"
+                   data-tippy-content="<?= lang('dashboard') ?>">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    <?= lang('dashboard') ?>
+                </a>
+            </li>
+
             <?php $hidden = can('view', PRIV_APPOINTMENTS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_APPOINTMENTS ? 'active' : ''; ?>
             <li class="nav-item <?= $active . $hidden ?>">

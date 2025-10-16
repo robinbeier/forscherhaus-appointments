@@ -185,6 +185,9 @@ function vendor(done) {
         .pipe(rename({suffix: '.min'}))
         .pipe(gulp.dest('assets/vendor/flatpickr'));
 
+    // chart.js
+    gulp.src(['node_modules/chart.js/dist/chart.umd.min.js']).pipe(gulp.dest('assets/vendor/chart.js'));
+
     done();
 }
 

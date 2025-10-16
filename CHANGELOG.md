@@ -8,6 +8,7 @@ developers to maintain and readjust their custom modifications on the main proje
 ### Added
 
 - Allow providers to define a room that is shown in the booking wizard summary, confirmation page, and Google Calendar exports.
+- Introduce an admin utilization dashboard with configurable conflict threshold and per-provider metrics.
 
 ## [1.5.2] - 2025-08-26
 
