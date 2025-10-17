@@ -528,6 +528,7 @@ $available_calendar_links = array_filter($calendar_links);
 $show_calendar_dropdown = !vars('is_past_event') && !empty($available_calendar_links);
 $manage_url = vars('manage_url');
 $is_manageable = vars('is_manageable');
+$appointment_pdf_data = vars('appointment_pdf_data') ?? [];
 $appointment_registered_short = lang('appointment_registered_short') ?: lang('appointment_registered');
 $appointment_registered_message = lang('appointment_registered') ?: 'Ihr Termin ist erfolgreich registriert worden.';
 $manage_appointment_cta = lang('manage_appointment_cta') ?: 'Manage appointment';
@@ -541,9 +542,16 @@ $manage_link_locked_hint =
     'This appointment can no longer be changed online.');
 $copy_link_button = lang('copy_link_button') ?: 'Copy link';
 $share_link_button = lang('share_link_button') ?: 'Share';
+$pdf_save_button = lang('save_pdf_button') ?: 'Save PDF';
 $add_to_calendar_grouped = lang('add_to_calendar_grouped') ?: 'Add to calendar';
 $add_to_calendar_hint = lang('add_to_calendar_hint') ?: 'Der Verwaltungslink wird im Kalendereintrag gespeichert.';
 $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_booking_page');
+$pdf_export_preparing_message = lang('pdf_export_preparing') ?: 'Preparing PDF download...';
+$pdf_export_ready_message = lang('pdf_export_ready') ?: 'PDF download started.';
+$pdf_export_failed_message = lang('pdf_export_failed') ?: 'PDF export failed. Please try again.';
+$pdf_time_suffix_raw = lang('pdf_export_time_suffix');
+$pdf_time_suffix = $pdf_time_suffix_raw === false ? '' : $pdf_time_suffix_raw;
+$pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confirmation';
 ?>
 
 <div class="booking-confirmation-wrapper">
@@ -652,6 +660,12 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
 
                 <div class="booking-utility-links booking-utility-links--mobile">
                     <button type="button"
+                            class="btn btn-ghost pdf-button"
+                            data-generate-pdf>
+                        <i class="fas fa-file icon" aria-hidden="true"></i>
+                        <span class="label"><?= $pdf_save_button ?></span>
+                    </button>
+                    <button type="button"
                             class="btn btn-ghost share-button"
                             data-share-url="<?= htmlspecialchars($manage_url, ENT_QUOTES, 'UTF-8') ?>">
                         <i class="fas fa-share-alt icon" aria-hidden="true"></i>
@@ -665,6 +679,12 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
 
         <div class="booking-utilities">
             <div class="booking-utility-links">
+                <button type="button"
+                        class="btn btn-ghost pdf-button"
+                        data-generate-pdf>
+                    <i class="fas fa-file icon" aria-hidden="true"></i>
+                    <span class="label"><?= $pdf_save_button ?></span>
+                </button>
                 <button type="button"
                         class="btn btn-ghost share-button"
                         data-share-url="<?= htmlspecialchars($manage_url, ENT_QUOTES, 'UTF-8') ?>">
@@ -700,12 +720,16 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
 <?php end_section('content'); ?>
 
 <?php section('scripts'); ?>
+<script src="<?= asset_url('assets/vendor/html2canvas/html2canvas.min.js') ?>"></script>
+<script src="<?= asset_url('assets/vendor/jspdf/jspdf.umd.min.js') ?>"></script>
+<script src="<?= asset_url('assets/vendor/qrcode/qrcode.min.js') ?>"></script>
 <script>
     (function () {
         const manageUrl = <?= json_encode($manage_url) ?>;
         const buttons = document.querySelectorAll('[data-copy-target]');
         const shareButtons = document.querySelectorAll('[data-share-url]');
         const dropdownToggles = document.querySelectorAll('[data-calendar-dropdown-toggle]');
+        const calendarLinks = document.querySelectorAll('[data-calendar-dropdown-menu] .dropdown-item');
         const toast = document.querySelector('[data-copy-toast]');
         const toastMessageCopied = <?= json_encode(lang('link_copied_confirmation') ?: 'Link copied') ?>;
         const toastMessageFallback = <?= json_encode(
@@ -718,6 +742,62 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
         const shareText = <?= json_encode(
             lang('share_link_text') ?: 'Change or cancel the appointment via this link.',
         ) ?>;
+        const pdfButtons = document.querySelectorAll('[data-generate-pdf]');
+        const pdfTemplateUrl = <?= json_encode(
+            asset_url('pdf/template.html'),
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        ) ?>;
+        const pdfLogoUrl = <?= json_encode(
+            asset_url('pdf/logo.png'),
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        ) ?>;
+        const appointmentPdfData = <?= json_encode(
+            $appointment_pdf_data,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        ) ?>;
+        const pdfExportPreparingMessage = <?= json_encode($pdf_export_preparing_message) ?>;
+        const pdfExportReadyMessage = <?= json_encode($pdf_export_ready_message) ?>;
+        const pdfExportFailedMessage = <?= json_encode($pdf_export_failed_message) ?>;
+        const pdfTimeSuffix = <?= json_encode($pdf_time_suffix) ?>;
+        const pdfFilenamePrefix = <?= json_encode($pdf_filename_prefix) ?>;
+        const pdfDurationUnit = <?= json_encode(lang('pdf_export_duration_unit') ?: 'min') ?>;
+        const pdfLinkLabel = <?= json_encode(lang('pdf_export_link_label') ?: 'Management link') ?>;
+        const pdfQrCaption = <?= json_encode(
+            lang('pdf_export_qr_caption') ?: 'Scan with your phone to open the management link.',
+        ) ?>;
+        const guardMessage = 'Verwaltungslink noch nicht gesichert – jetzt kopieren?';
+        const guardEnabled = false;
+
+        let detailsSaved = !guardEnabled;
+
+        const handleBeforeUnload = (event) => {
+            if (detailsSaved) {
+                return undefined;
+            }
+
+            event.preventDefault();
+            event.returnValue = guardMessage;
+            return guardMessage;
+        };
+
+        const markDetailsSaved = () => {
+            if (!guardEnabled || detailsSaved) {
+                return;
+            }
+
+            detailsSaved = true;
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
+
+        if (guardEnabled) {
+            window.addEventListener('beforeunload', handleBeforeUnload);
+            window.addEventListener('booking-confirmation:details-saved', markDetailsSaved);
+        }
+
+        window.App = window.App || {};
+        window.App.Pages = window.App.Pages || {};
+        window.App.Pages.BookingConfirmation = window.App.Pages.BookingConfirmation || {};
+        window.App.Pages.BookingConfirmation.markDetailsSaved = markDetailsSaved;
 
         const showToast = (message) => {
             if (!toast) {
@@ -735,6 +815,347 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
             }, 3000);
         };
 
+        const escapeHtml = (value) => value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+
+        const setupPdfExport = () => {
+            if (!pdfButtons.length) {
+                return;
+            }
+
+            if (!appointmentPdfData || !appointmentPdfData.manageUrl) {
+                console.warn('PDF export aborted: missing appointment data.');
+
+                return;
+            }
+
+            if (!window.jspdf || !window.jspdf.jsPDF || typeof window.html2canvas === 'undefined' || typeof window.QRCode === 'undefined' || typeof moment === 'undefined') {
+                console.warn('PDF export aborted: missing dependencies.');
+
+                return;
+            }
+
+            let templateCache = null;
+            let logoCache = null;
+            let qrCache = null;
+            let isGenerating = false;
+
+            const localeBase = (appointmentPdfData.locale || 'de-DE').toLowerCase();
+            const momentLocale =
+                localeBase.indexOf('de') === 0 ? 'de' : (localeBase.indexOf('en') === 0 ? 'en' : localeBase);
+
+            const fetchTemplate = () => {
+                if (templateCache) {
+                    return Promise.resolve(templateCache);
+                }
+
+                return fetch(pdfTemplateUrl, {cache: 'no-cache'})
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('Template request failed.');
+                        }
+
+                        return response.text();
+                    })
+                    .then((text) => {
+                        templateCache = text;
+
+                        return text;
+                    });
+            };
+
+            const fetchLogo = () => {
+                if (logoCache) {
+                    return Promise.resolve(logoCache);
+                }
+
+                return fetch(pdfLogoUrl)
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('Logo request failed.');
+                        }
+
+                        return response.blob();
+                    })
+                    .then((blob) => new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+
+                        reader.onload = () => {
+                            logoCache = reader.result;
+                            resolve(reader.result);
+                        };
+
+                        reader.onerror = () => reject(new Error('Logo conversion failed.'));
+                        reader.readAsDataURL(blob);
+                    }));
+            };
+
+            const generateQr = () => {
+                if (qrCache) {
+                    return Promise.resolve(qrCache);
+                }
+
+                return new Promise((resolve, reject) => {
+                    window.QRCode.toDataURL(
+                        appointmentPdfData.manageUrl,
+                        {
+                            margin: 1,
+                            width: 256,
+                            errorCorrectionLevel: 'H',
+                        },
+                        (error, url) => {
+                            if (error) {
+                                reject(error);
+
+                                return;
+                            }
+
+                            qrCache = url;
+                            resolve(url);
+                        },
+                    );
+                });
+            };
+
+            const buildTemplateValues = (logoDataUrl, qrDataUrl) => {
+                const timezone = appointmentPdfData.timezone || (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+                const durationMinutes = Math.max(parseInt(appointmentPdfData.durationMin, 10) || 0, 0);
+                const locale = (appointmentPdfData.locale || 'de-DE').replace('_', '-');
+
+                const startMoment = appointmentPdfData.startISO
+                    ? moment.tz(appointmentPdfData.startISO, timezone)
+                    : moment.tz(timezone);
+                const endMoment = appointmentPdfData.endISO
+                    ? moment.tz(appointmentPdfData.endISO, timezone)
+                    : startMoment.clone().add(durationMinutes || 30, 'minutes');
+
+                const startDate = startMoment.toDate();
+                const endDate = endMoment.toDate();
+
+                const dateFormatter = new Intl.DateTimeFormat(locale, {
+                    weekday: 'short',
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    timeZone: timezone,
+                });
+
+                const timeFormatter = new Intl.DateTimeFormat(locale, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false,
+                    timeZone: timezone,
+                });
+
+                const dateLabel = dateFormatter.format(startDate);
+                const startTimeLabel = timeFormatter.format(startDate);
+                const endTimeLabel = timeFormatter.format(endDate);
+                const nonBreakingSpace = '\u00A0';
+                const defaultTimeSuffix = pdfTimeSuffix === undefined || pdfTimeSuffix === null
+                    ? (locale.toLowerCase().startsWith('de') ? 'Uhr' : '')
+                    : pdfTimeSuffix;
+                const effectiveTimeSuffix = pdfTimeSuffix === undefined || pdfTimeSuffix === null
+                    ? defaultTimeSuffix
+                    : pdfTimeSuffix;
+                const suffixText = effectiveTimeSuffix ? effectiveTimeSuffix : '';
+                const timeRange =
+                    startTimeLabel +
+                    '–' +
+                    endTimeLabel +
+                    (suffixText ? nonBreakingSpace + suffixText : '');
+                const durationSuffix =
+                    durationMinutes > 0
+                        ? nonBreakingSpace +
+                          '(' +
+                          durationMinutes +
+                          nonBreakingSpace +
+                          (pdfDurationUnit || (locale.toLowerCase().startsWith('de') ? 'Min' : 'min')) +
+                          ')'
+                        : '';
+                const appointmentRange = dateLabel + ' · ' + timeRange + durationSuffix;
+
+                const todayDate = moment().tz(timezone).format('DD.MM.YYYY');
+                const fileDate = startMoment.format('YYYY-MM-DD');
+
+                return {
+                    schoolName: appointmentPdfData.schoolName || '',
+                    title: appointmentPdfData.title || '',
+                    teacher: appointmentPdfData.teacher || '',
+                    room: appointmentPdfData.room || '',
+                    appointmentRange,
+                    manageUrlAttr: appointmentPdfData.manageUrl || '',
+                    manageUrlText: appointmentPdfData.manageUrl || '',
+                    linkLabel: pdfLinkLabel,
+                    qrPngDataUrl: qrDataUrl,
+                    qrCaption: pdfQrCaption,
+                    logoDataUrl,
+                    todayDate,
+                    appointmentId: appointmentPdfData.appointmentId || '',
+                    fileDate,
+                };
+            };
+
+            const renderTemplate = (templateString, values) => {
+                const rawKeys = {
+                    qrPngDataUrl: true,
+                    logoDataUrl: true,
+                };
+
+                return templateString.replace(/{{\s*([^}]+)\s*}}/g, (match, key) => {
+                    const normalizedKey = key.trim();
+
+                    if (!Object.prototype.hasOwnProperty.call(values, normalizedKey)) {
+                        return '';
+                    }
+
+                    const value = values[normalizedKey] == null ? '' : values[normalizedKey];
+
+                    if (rawKeys[normalizedKey]) {
+                        return value;
+                    }
+
+                    return escapeHtml(value.toString());
+                });
+            };
+
+            const setButtonsDisabled = (state) => {
+                isGenerating = state;
+
+                pdfButtons.forEach((button) => {
+                    if (state) {
+                        button.setAttribute('aria-busy', 'true');
+                        button.disabled = true;
+                    } else {
+                        button.removeAttribute('aria-busy');
+                        button.disabled = false;
+                    }
+                });
+            };
+
+            const handlePdfRequest = (event) => {
+                event.preventDefault();
+
+                if (isGenerating) {
+                    return;
+                }
+
+                setButtonsDisabled(true);
+                showToast(pdfExportPreparingMessage);
+
+                let container = null;
+                let templateValues = null;
+
+                Promise.all([fetchTemplate(), fetchLogo(), generateQr()])
+                    .then(([templateString, logoDataUrl, qrDataUrl]) => {
+                        templateValues = buildTemplateValues(logoDataUrl, qrDataUrl);
+                        const htmlString = renderTemplate(templateString, templateValues);
+
+                        container = document.createElement('div');
+                        container.style.position = 'fixed';
+                        container.style.left = '-10000px';
+                        container.style.top = '0';
+                        container.style.width = '793px';
+                        container.style.background = '#ffffff';
+                        container.style.zIndex = '-1';
+
+                        const parser = new DOMParser();
+                        const parsedDocument = parser.parseFromString(htmlString, 'text/html');
+                        const fragment = document.createDocumentFragment();
+
+                        if (parsedDocument.head) {
+                            parsedDocument.head.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => {
+                                fragment.appendChild(node.cloneNode(true));
+                            });
+                        }
+
+                        if (parsedDocument.body) {
+                            Array.from(parsedDocument.body.childNodes).forEach((node) => {
+                                fragment.appendChild(node.cloneNode(true));
+                            });
+                        }
+
+                        container.appendChild(fragment);
+                        document.body.appendChild(container);
+
+                        const manageLinkElement = container.querySelector('[data-manage-link]');
+                        const containerRect = container.getBoundingClientRect();
+                        const linkRect = manageLinkElement ? manageLinkElement.getBoundingClientRect() : null;
+
+                        return window.html2canvas(container, {
+                            scale: 2,
+                            useCORS: true,
+                            logging: false,
+                            windowWidth: container.offsetWidth || 793,
+                        }).then((canvas) => {
+                            const doc = new window.jspdf.jsPDF({
+                                orientation: 'portrait',
+                                unit: 'mm',
+                                format: 'a4',
+                            });
+
+                            const pdfSubject = pdfFilenamePrefix.replace(/-/g, ' ');
+
+                            doc.setProperties({
+                                title: 'Terminbestätigung – ' + (templateValues.schoolName || ''),
+                                subject: pdfSubject,
+                                author: templateValues.schoolName || '',
+                            });
+
+                            const imgWidth = 210;
+                            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                            const imageData = canvas.toDataURL('image/jpeg', 0.95);
+
+                            doc.addImage(imageData, 'JPEG', 0, 0, imgWidth, imgHeight);
+
+                            const containerWidthPx = container.offsetWidth || 793;
+
+                            if (linkRect) {
+                                const offsetX = linkRect.left - containerRect.left;
+                                const offsetY = linkRect.top - containerRect.top;
+                                const pxToPdf = imgWidth / containerWidthPx;
+
+                                doc.link(
+                                    offsetX * pxToPdf,
+                                    offsetY * pxToPdf,
+                                    linkRect.width * pxToPdf,
+                                    linkRect.height * pxToPdf,
+                                    {
+                                        url: appointmentPdfData.manageUrl,
+                                    },
+                                );
+                            }
+
+                            const filename = pdfFilenamePrefix + '-' + (templateValues.fileDate || 'export') + '.pdf';
+                            doc.save(filename);
+
+                            markDetailsSaved();
+                            showToast(pdfExportReadyMessage);
+                        });
+                    })
+                    .catch((error) => {
+                        console.error('PDF export failed', error);
+                        showToast(pdfExportFailedMessage);
+                    })
+                    .finally(() => {
+                        if (container && container.parentNode) {
+                            container.parentNode.removeChild(container);
+                        }
+
+                        setButtonsDisabled(false);
+                    });
+            };
+
+            pdfButtons.forEach((button) => {
+                button.addEventListener('click', handlePdfRequest);
+            });
+        };
+
+        setupPdfExport();
+
         buttons.forEach((button) => {
             button.addEventListener('click', () => {
                 const value = button.getAttribute('data-copy-target');
@@ -745,6 +1166,7 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
 
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(value).then(() => {
+                        markDetailsSaved();
                         showToast(toastMessageCopied);
                     }).catch(() => {
                         showToast(toastMessageFallback);
@@ -755,9 +1177,15 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
                     tempInput.value = value;
                     document.body.appendChild(tempInput);
                     tempInput.select();
-                    document.execCommand('copy');
+                    const copySucceeded = document.execCommand('copy');
                     document.body.removeChild(tempInput);
-                    showToast(toastMessageFallback);
+
+                    if (copySucceeded) {
+                        markDetailsSaved();
+                        showToast(toastMessageCopied);
+                    } else {
+                        showToast(toastMessageFallback);
+                    }
                 }
             });
         });
@@ -782,6 +1210,24 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
                     }
                 } else {
                     showToast(shareUnavailableMessage);
+                }
+            });
+        });
+
+        const handleCalendarExport = () => {
+            markDetailsSaved();
+        };
+
+        calendarLinks.forEach((link) => {
+            link.addEventListener('click', handleCalendarExport);
+            link.addEventListener('auxclick', (event) => {
+                if (event.button === 1) {
+                    handleCalendarExport();
+                }
+            });
+            link.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    handleCalendarExport();
                 }
             });
         });

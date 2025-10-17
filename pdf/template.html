@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="de">
+    <head>
+        <meta charset="utf-8" />
+        <title>Terminbestätigung – {{schoolName}}</title>
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <style>
+            :root {
+                --brand: #2e7d32;
+                --ink: #2f3540;
+                --ink-muted: #5a6270;
+                --border: #e6e8eb;
+                --success-bg: #e9f6ee;
+                --radius: 12px;
+            }
+
+            @page {
+                size: A4;
+                margin: 20mm;
+            }
+
+            body {
+                margin: 0;
+                padding: 0;
+                background: #fff;
+                font:
+                    11pt/1.45 'Inter',
+                    system-ui,
+                    -apple-system,
+                    'Segoe UI',
+                    Roboto,
+                    'Helvetica Neue',
+                    Arial,
+                    'Noto Sans',
+                    sans-serif;
+                color: var(--ink);
+            }
+
+            .page {
+                padding: 20mm;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                gap: 12mm;
+                min-height: calc(297mm - 40mm);
+            }
+
+            .hdr,
+            .ftr {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                align-items: center;
+            }
+
+            .brand {
+                display: flex;
+                align-items: center;
+                gap: 10pt;
+            }
+
+            .brand__logo {
+                height: 24pt;
+            }
+
+            .brand__name {
+                font:
+                    600 12pt/1.2 'Inter',
+                    system-ui;
+                letter-spacing: 0.2pt;
+            }
+
+            .hdr__title {
+                font:
+                    600 10.5pt/1.3 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+            }
+
+            .banner {
+                background: var(--success-bg);
+                border: 1px solid #d7eddd;
+                border-radius: var(--radius);
+                padding: 9pt 12pt;
+                display: flex;
+                flex-direction: column;
+                gap: 3pt;
+            }
+
+            .banner__title {
+                font:
+                    600 12pt/1.3 'Inter',
+                    system-ui;
+                margin: 0;
+            }
+
+            .banner__sub {
+                font:
+                    9.5pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+                margin: 0;
+            }
+
+            .grid {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) 34mm;
+                column-gap: 18mm;
+                align-items: start;
+            }
+
+            .left {
+                display: flex;
+                flex-direction: column;
+                gap: 10pt;
+            }
+
+            .right {
+                display: flex;
+                flex-direction: column;
+                gap: 6pt;
+                align-items: flex-start;
+            }
+
+            .h1 {
+                font:
+                    700 16pt/1.25 'Inter',
+                    system-ui;
+                margin: 0;
+                letter-spacing: 0.1pt;
+                text-transform: none;
+            }
+
+            .kv {
+                display: grid;
+                grid-template-columns: 32mm minmax(0, 1fr);
+                column-gap: 8pt;
+                row-gap: 6pt;
+                margin: 0;
+            }
+
+            .kv dt {
+                margin: 0;
+                font:
+                    600 10.8pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink);
+            }
+
+            .kv dd {
+                margin: 0;
+                font:
+                    11pt/1.45 'Inter',
+                    system-ui;
+                color: var(--ink);
+            }
+
+            .muted {
+                color: var(--ink-muted);
+            }
+
+            .important {
+                margin: 0;
+                font:
+                    10.2pt/1.5 'Inter',
+                    system-ui;
+            }
+
+            .link-group {
+                display: flex;
+                flex-direction: column;
+                gap: 6pt;
+            }
+
+            .link-label {
+                font:
+                    600 10.5pt/1.35 'Inter',
+                    system-ui;
+                color: var(--ink);
+            }
+
+            .linkbox {
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 7pt 9pt;
+                word-break: break-word;
+            }
+
+            .linkbox a {
+                color: var(--brand);
+                text-decoration: underline;
+                font:
+                    11pt/1.45 'Inter',
+                    system-ui;
+            }
+
+            .qr {
+                width: 32mm;
+                height: 32mm;
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 1.5mm;
+                box-sizing: border-box;
+            }
+
+            .qr img {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+
+            .qr-cap {
+                font:
+                    9.5pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+            }
+
+            .ftr {
+                margin-top: auto;
+                font:
+                    9.5pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            <header class="hdr">
+                <div class="brand">
+                    <img class="brand__logo" src="{{logoDataUrl}}" alt="Forscherhaus Logo" />
+                    <div class="brand__name">{{schoolName}}</div>
+                </div>
+                <div class="hdr__title">Terminbestätigung</div>
+            </header>
+
+            <section class="banner">
+                <div class="banner__title">✅ Termin gebucht</div>
+                <div class="banner__sub">Ihr Termin ist erfolgreich registriert worden.</div>
+            </section>
+
+            <main class="grid">
+                <section class="left">
+                    <h1 class="h1">{{title}}</h1>
+                    <dl class="kv">
+                        <dt>Lehrkraft</dt>
+                        <dd>{{teacher}}</dd>
+                        <dt>Raum</dt>
+                        <dd>{{room}}</dd>
+                        <dt>Datum &amp; Uhrzeit</dt>
+                        <dd class="date-line">{{appointmentRange}}</dd>
+                    </dl>
+                    <p class="muted important">
+                        <strong>Wichtig:</strong> Bewahren Sie den folgenden Verwaltungslink auf. Ohne ihn können Sie
+                        den Termin später nicht ändern oder stornieren.
+                    </p>
+                    <div class="link-group">
+                        <div class="link-label">{{linkLabel}}</div>
+                        <div class="linkbox">
+                            <a href="{{manageUrlAttr}}" data-manage-link>{{manageUrlText}}</a>
+                        </div>
+                    </div>
+                </section>
+
+                <aside class="right">
+                    <div class="qr">
+                        <img src="{{qrPngDataUrl}}" alt="QR-Code zum Verwaltungslink" />
+                    </div>
+                    <div class="qr-cap">{{qrCaption}}</div>
+                </aside>
+            </main>
+
+            <footer class="ftr">
+                <div>Referenz: {{appointmentId}}</div>
+                <div>{{schoolName}} • {{todayDate}}</div>
+            </footer>
+        </div>
+    </body>
+</html>

@@ -118,6 +118,23 @@ class Booking_confirmation extends EA_Controller
             'ics' => build_ics_download_url($appointment['hash']),
         ];
 
+        $language_code = config('language_code') ?: 'de';
+        $locale = $language_code === 'de' ? 'de-DE' : ($language_code === 'en' ? 'en-US' : $language_code);
+
+        $appointment_pdf_data = [
+            'schoolName' => setting('company_name') ?: 'Forscherhaus',
+            'title' => $service['name'] ?? '',
+            'teacher' => trim($provider['first_name'] . ' ' . $provider['last_name']),
+            'room' => $provider['room'] ?? '',
+            'startISO' => $start_at->format(DateTimeInterface::ATOM),
+            'endISO' => $end_at->format(DateTimeInterface::ATOM),
+            'durationMin' => $duration_minutes,
+            'manageUrl' => $manage_url,
+            'locale' => $locale,
+            'timezone' => $provider['timezone'],
+            'appointmentId' => (string) ($appointment['id'] ?? ''),
+        ];
+
         $book_advance_timeout = (int) setting('book_advance_timeout');
         $manage_limit =
             $book_advance_timeout > 0
@@ -141,6 +158,7 @@ class Booking_confirmation extends EA_Controller
             'is_past_event' => $is_past_event,
             'manage_url' => $manage_url,
             'is_manageable' => $is_manageable,
+            'appointment_pdf_data' => $appointment_pdf_data,
         ]);
 
         $this->load->view('pages/booking_confirmation');
