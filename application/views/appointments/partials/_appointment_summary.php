@@ -37,41 +37,41 @@ $should_render_secondary_column = $show_customer || $should_render_secondary_con
                 <?php endif; ?>
 
                 <?php if (!empty($appointment['subtitle'])): ?>
-                    <div class="summary-subtitle fw-bold text-muted">
+                    <div class="summary-subtitle fw-semibold text-muted">
                         <?= htmlspecialchars($appointment['subtitle'], ENT_QUOTES, 'UTF-8') ?>
                     </div>
                 <?php endif; ?>
 
                 <?php if (!empty($appointment['room'])): ?>
-                    <div class="summary-item">
+                    <div class="summary-item summary-item--room">
                         <i class="fas fa-door-open"></i>
                         <span><?= htmlspecialchars($appointment['room'], ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
                 <?php endif; ?>
 
                 <?php if (!empty($appointment['datetime'])): ?>
-                    <div class="summary-item">
+                    <div class="summary-item summary-item--datetime">
                         <i class="fas fa-calendar-day"></i>
                         <span><?= htmlspecialchars($appointment['datetime'], ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
                 <?php endif; ?>
 
                 <?php if (!empty($appointment['duration'])): ?>
-                    <div class="summary-item">
+                    <div class="summary-item summary-item--duration">
                         <i class="fas fa-clock"></i>
                         <span><?= htmlspecialchars($appointment['duration'], ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
                 <?php endif; ?>
 
                 <?php if (!empty($appointment['timezone'])): ?>
-                    <div class="summary-item">
+                    <div class="summary-item summary-item--timezone">
                         <i class="fas fa-globe"></i>
                         <span><?= htmlspecialchars($appointment['timezone'], ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
                 <?php endif; ?>
 
                 <?php if (!empty($appointment['price'])): ?>
-                    <div class="summary-item">
+                    <div class="summary-item summary-item--price">
                         <i class="fas fa-cash-register"></i>
                         <span><?= htmlspecialchars($appointment['price'], ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
