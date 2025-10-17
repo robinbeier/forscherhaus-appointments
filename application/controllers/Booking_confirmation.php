@@ -60,7 +60,10 @@ class Booking_confirmation extends EA_Controller
             $provider = $this->providers_model->find((int) $appointment['id_users_provider']);
             $customer = $this->customers_model->find((int) $appointment['id_users_customer']);
         } catch (InvalidArgumentException $exception) {
-            log_message('error', 'Booking confirmation failed to resolve related entities: ' . $exception->getMessage());
+            log_message(
+                'error',
+                'Booking confirmation failed to resolve related entities: ' . $exception->getMessage(),
+            );
 
             show_404();
 
@@ -80,9 +83,11 @@ class Booking_confirmation extends EA_Controller
             'subtitle' => trim($provider['first_name'] . ' ' . $provider['last_name']),
             'room' => $provider['room'] ?? '',
             'datetime' => trim(format_date($start_at) . ' ' . format_time($start_at)),
-            'duration' => $display_duration_minutes > 0 ? sprintf('%d %s', $display_duration_minutes, lang('minutes')) : '',
+            'duration' =>
+                $display_duration_minutes > 0 ? sprintf('%d %s', $display_duration_minutes, lang('minutes')) : '',
             'timezone' => '',
-            'price' => $service['price'] > 0 ? number_format((float) $service['price'], 2) . ' ' . $service['currency'] : '',
+            'price' =>
+                $service['price'] > 0 ? number_format((float) $service['price'], 2) . ' ' . $service['currency'] : '',
         ];
 
         $location_label = $this->build_location_label($appointment, $provider, $service);
@@ -93,17 +98,18 @@ class Booking_confirmation extends EA_Controller
             $calendar_end_at = $start_at->add(new DateInterval('PT1M'));
         }
 
+        $manage_url = site_url('booking/reschedule/' . $appointment['hash']);
+
+        $event_description = trim(lang('calendar_event_manage_hint') . ' ' . $manage_url);
+
         $event = [
             'title' => $service['name'],
-            'description' => site_url('booking/reschedule/' . $appointment['hash']),
+            'description' => $event_description ?: $manage_url,
             'location' => $location_label,
             'start' => $start_at,
             'end' => $calendar_end_at,
             'timezone' => $provider['timezone'],
-            'attendees' => array_values(array_filter([
-                $provider['email'] ?? null,
-                $customer['email'] ?? null,
-            ])),
+            'attendees' => array_values(array_filter([$provider['email'] ?? null, $customer['email'] ?? null])),
         ];
 
         $calendar_links = [
@@ -111,6 +117,16 @@ class Booking_confirmation extends EA_Controller
             'outlook' => build_outlook_calendar_link($event),
             'ics' => build_ics_download_url($appointment['hash']),
         ];
+
+        $book_advance_timeout = (int) setting('book_advance_timeout');
+        $manage_limit =
+            $book_advance_timeout > 0
+                ? (new DateTimeImmutable('now', $provider_timezone))->add(
+                    new DateInterval('PT' . $book_advance_timeout . 'M'),
+                )
+                : null;
+
+        $is_manageable = !isset($manage_limit) || $start_at >= $manage_limit;
 
         $is_past_event = $end_at <= new DateTimeImmutable('now', $provider_timezone);
 
@@ -123,6 +139,8 @@ class Booking_confirmation extends EA_Controller
             'appointment_summary' => $appointment_summary,
             'calendar_links' => $calendar_links,
             'is_past_event' => $is_past_event,
+            'manage_url' => $manage_url,
+            'is_manageable' => $is_manageable,
         ]);
 
         $this->load->view('pages/booking_confirmation');

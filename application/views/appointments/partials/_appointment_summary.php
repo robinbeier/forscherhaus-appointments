@@ -16,9 +16,13 @@ $wrapper_classes = $wrapper_classes ?? 'row frame-content m-auto pt-md-4 mb-4';
 $appointment_details_id = $appointment_details_id ?? 'appointment-details';
 $customer_details_id = $customer_details_id ?? 'customer-details';
 $show_customer = $show_customer ?? true;
-$appointment_column_classes = $appointment_column_classes
-    ?? 'col-12 col-md-6 text-center text-md-start mb-2 mb-md-0';
+$appointment_column_classes = $appointment_column_classes ?? 'col-12 col-md-6 text-center text-md-start mb-2 mb-md-0';
 $customer_column_classes = $customer_column_classes ?? 'col-12 col-md-6 text-center text-md-end';
+$secondary_column_content = $secondary_column_content ?? null;
+
+$should_render_customer_details = $show_customer && !empty($customer);
+$should_render_secondary_content = !empty($secondary_column_content);
+$should_render_secondary_column = $show_customer || $should_render_secondary_content;
 ?>
 
 <div class="<?= htmlspecialchars($wrapper_classes, ENT_QUOTES, 'UTF-8') ?>">
@@ -27,7 +31,7 @@ $customer_column_classes = $customer_column_classes ?? 'col-12 col-md-6 text-cen
         <?php if (!empty($appointment)): ?>
             <div class="summary-details">
                 <?php if (!empty($appointment['title'])): ?>
-                    <div class="summary-title fw-semibold fs-4 text-primary mb-2">
+                    <div class="summary-title fw-semibold fs-4 text-primary mb-2" lang="de">
                         <?= htmlspecialchars($appointment['title'], ENT_QUOTES, 'UTF-8') ?>
                     </div>
                 <?php endif; ?>
@@ -76,10 +80,14 @@ $customer_column_classes = $customer_column_classes ?? 'col-12 col-md-6 text-cen
         <?php endif; ?>
     </div>
 
-    <?php if ($show_customer): ?>
+    <?php if ($should_render_secondary_column): ?>
         <div id="<?= htmlspecialchars($customer_details_id, ENT_QUOTES, 'UTF-8') ?>"
              class="<?= htmlspecialchars($customer_column_classes, ENT_QUOTES, 'UTF-8') ?>">
-            <?php if (!empty($customer)): ?>
+            <?php if ($should_render_secondary_content): ?>
+                <?= $secondary_column_content ?>
+            <?php endif; ?>
+
+            <?php if ($should_render_customer_details): ?>
                 <div>
                     <?php if (!empty($customer['title'])): ?>
                         <div class="mb-2 fw-semibold fs-5 text-secondary">
