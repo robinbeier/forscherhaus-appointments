@@ -149,6 +149,15 @@ function vendor(done) {
         gulp.dest('assets/vendor/jquery-jeditable'),
     );
 
+    // html2canvas
+    gulp.src(['node_modules/html2canvas/dist/html2canvas.min.js']).pipe(gulp.dest('assets/vendor/html2canvas'));
+
+    // jspdf
+    gulp.src(['node_modules/jspdf/dist/jspdf.umd.min.js']).pipe(gulp.dest('assets/vendor/jspdf'));
+
+    // qrcode (pre-bundled browser build)
+    gulp.src(['resources/vendor/qrcode/qrcode.min.js']).pipe(gulp.dest('assets/vendor/qrcode'));
+
     // moment
     gulp.src(['node_modules/moment/min/moment.min.js']).pipe(gulp.dest('assets/vendor/moment'));
 
