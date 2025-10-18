@@ -9,7 +9,7 @@
             :root {
                 --brand: #2e7d32;
                 --ink: #2f3540;
-                --ink-muted: #5a6270;
+                --ink-muted: #475467;
                 --border: #e6e8eb;
                 --success-bg: #e9f6ee;
                 --radius: 12px;
@@ -59,12 +59,14 @@
             .hdr__title {
                 margin: 0;
                 font:
-                    700 18pt/1.25 'Inter',
+                    600 16pt/1.25 'Inter',
                     system-ui;
+                color: var(--ink-muted);
                 letter-spacing: 0.1pt;
+                text-transform: none;
             }
             .brand__logo {
-                height: 56px; /* 48–64px je nach Logo */
+                height: 64px; /* 48–64px je nach Logo */
             }
 
             /* ===== Erfolgsbanner ===== */
@@ -113,10 +115,12 @@
             /* Abschnittstitel (ehem. .h1) jetzt semantisch <h2> */
             .section-title {
                 font:
-                    700 16pt/1.25 'Inter',
+                    600 14.5pt/1.25 'Inter',
                     system-ui;
                 margin: 0;
-                letter-spacing: 0.1pt;
+                color: var(--ink);
+                letter-spacing: 0pt;
+                text-transform: none;
             }
 
             /* Key-Value-Liste */
@@ -146,12 +150,13 @@
             } /* verhindert unschöne Umbrüche in der Zeitspanne */
             .duration {
                 color: var(--ink-muted);
+                white-space: nowrap;
             } /* Dauer in eigener Zeile, wie auf der Webseite */
 
             /* Key-Box (Link sichern) */
             .key-callout {
-                display: grid;
-                grid-template-columns: 9pt 1fr;
+                display: flex;
+                align-items: flex-start;
                 gap: 6pt;
                 padding: 8pt 10pt;
                 border: 1px solid #d7eddd;
@@ -165,6 +170,7 @@
             .key-ic {
                 font-size: 12pt;
                 line-height: 1;
+                flex: 0 0 auto;
             }
 
             /* Linkgruppe */
@@ -181,7 +187,7 @@
             }
             .linkbox {
                 border: 1px solid var(--border);
-                border-radius: 10px;
+                border-radius: var(--radius);
                 padding: 7pt 9pt;
             }
             .linkbox a {
@@ -205,7 +211,7 @@
                 width: 32mm;
                 height: 32mm;
                 border: 1px solid var(--border);
-                border-radius: 8px;
+                border-radius: var(--radius);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -269,14 +275,13 @@
 
                         <dt>Datum &amp; Uhrzeit</dt>
                         <dd>
-                            <span class="datetime">{{appointmentDateTime}}</span><br />
-                            <span class="duration">{{{appointmentDuration}}}</span>
+                            <span class="datetime">{{appointmentDateTime}}</span>
+                            <span class="duration">({{appointmentDuration}})</span>
                         </dd>
                     </dl>
 
                     <!-- Key-Box: Link sichern -->
                     <div class="key-callout" role="note" aria-label="Wichtiger Hinweis">
-                        <div class="key-ic" aria-hidden="true">🔑</div>
                         <div>
                             <strong>Wichtig:</strong> Nur mit diesem Link können Sie Ihre Buchung später ändern oder
                             stornieren.
