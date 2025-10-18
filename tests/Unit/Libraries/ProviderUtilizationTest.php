@@ -73,7 +73,44 @@ class ProviderUtilizationTest extends TestCase {
         $this->assertFalse($result['has_plan']);
     }
 
-    private function createLibrary(array $appointments): Provider_utilization
+    public function testCalculateDoesNotOvercountPartialSlots(): void
+    {
+        $appointments = [
+            [
+                'start_datetime' => '2024-01-02 08:00:00',
+                'end_datetime' => '2024-01-02 08:20:00',
+            ],
+        ];
+
+        $library = $this->createLibrary($appointments, 20);
+
+        $provider = [
+            'id' => 3,
+            'first_name' => 'Jamie',
+            'last_name' => 'Lee',
+            'email' => 'jamie@example.org',
+            'services' => [1],
+            'settings' => [
+                'working_plan' => json_encode([
+                    'tuesday' => [
+                        'start' => '08:00',
+                        'end' => '08:30',
+                        'breaks' => [],
+                    ],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $result = $library->calculate($provider, '2024-01-02', '2024-01-02', []);
+
+        $this->assertSame(1, $result['total']);
+        $this->assertSame(1, $result['booked']);
+        $this->assertSame(0, $result['open']);
+        $this->assertSame(1.0, $result['fill_rate']);
+    }
+
+    private function createLibrary(array $appointments, int $serviceDuration = 30): Provider_utilization
     {
         $appointmentsModel = $this->createMock(Appointments_model::class);
         $appointmentsModel
@@ -85,7 +122,7 @@ class ProviderUtilizationTest extends TestCase {
             ->method('get')
             ->willReturn([
                 [
-                    'duration' => 30,
+                    'duration' => $serviceDuration,
                     'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
                 ],
             ]);

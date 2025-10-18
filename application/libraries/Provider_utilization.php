@@ -125,17 +125,11 @@ class Provider_utilization
             $day = $day->add(new DateInterval('P1D'));
         }
 
-        if ($slot_size <= 0) {
-            $total_slots = 0;
-            $booked_slots = 0;
-        } else {
-            $total_slots = intdiv($total_minutes, $slot_size);
-            $booked_slots = intdiv($booked_minutes, $slot_size);
-
-            if ($booked_slots > $total_slots) {
-                $booked_slots = $total_slots;
-            }
-        }
+        [$total_slots, $booked_slots] = $this->calculateSlotCounts(
+            $total_minutes,
+            $booked_minutes,
+            $slot_size,
+        );
 
         $open_minutes = max(0, $total_minutes - $booked_minutes);
 
@@ -161,6 +155,22 @@ class Provider_utilization
         }
 
         return $day;
+    }
+
+    protected function calculateSlotCounts(int $total_minutes, int $booked_minutes, int $slot_size): array
+    {
+        if ($slot_size <= 0) {
+            return [0, 0];
+        }
+
+        $total_slots = intdiv($total_minutes, $slot_size);
+        $booked_slots = intdiv($booked_minutes, $slot_size);
+
+        if ($booked_slots > $total_slots) {
+            $booked_slots = $total_slots;
+        }
+
+        return [$total_slots, $booked_slots];
     }
 
     protected function determineSlotSize(array $provider): int
