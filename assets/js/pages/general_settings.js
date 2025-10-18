@@ -49,6 +49,18 @@ App.Pages.GeneralSettings = (function () {
                 throw new Error(lang('fields_are_required'));
             }
 
+            const $threshold = $('[data-field="dashboard_conflict_threshold"]');
+
+            if ($threshold.length) {
+                const rawValue = $threshold.val();
+                const numericValue = parseFloat(rawValue);
+
+                if (rawValue === '' || Number.isNaN(numericValue) || numericValue < 0 || numericValue > 1) {
+                    $threshold.addClass('is-invalid');
+                    throw new Error(lang('dashboard_conflict_threshold_invalid'));
+                }
+            }
+
             return false;
         } catch (error) {
             App.Layouts.Backend.displayNotification(error.message);

@@ -192,6 +192,18 @@ body .ui-datepicker .ui-datepicker-buttonpane button {
     padding: 6px 16px;
 }
 
+#dashboard-page .dashboard-filters .form-check {
+    margin-bottom: 0;
+}
+
+#dashboard-page .utilization-badge {
+    font-size: 0.85rem;
+}
+
+#dashboard-page tr[data-no-plan='true'] {
+    opacity: 0.75;
+}
+
 .breaks tr:hover td {
     background: #ffffc2 !important;
 }

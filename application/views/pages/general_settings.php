@@ -232,6 +232,30 @@
                             </div>
                         </div>
 
+                        <div class="row mb-5">
+                            <div class="col-12">
+                                <h5 class="text-black-50 mb-3 fw-light"><?= lang('dashboard') ?></h5>
+
+                                <div class="mb-3">
+                                    <label class="form-label" for="dashboard-conflict-threshold">
+                                        <?= lang('dashboard_conflict_threshold') ?>
+                                    </label>
+                                    <input type="number"
+                                           id="dashboard-conflict-threshold"
+                                           class="form-control"
+                                           data-field="dashboard_conflict_threshold"
+                                           min="0"
+                                           max="1"
+                                           step="0.05">
+                                    <div class="form-text text-muted">
+                                        <small>
+                                            <?= lang('dashboard_conflict_threshold_hint') ?>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <?php slot('after_primary_fields'); ?>
                     </fieldset>
                 </form>
