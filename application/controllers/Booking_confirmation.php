@@ -77,12 +77,21 @@ class Booking_confirmation extends EA_Controller
 
         $duration_minutes = (int) round(($end_at->getTimestamp() - $start_at->getTimestamp()) / 60);
         $display_duration_minutes = max($duration_minutes - 5, 1);
+        $language_code = config('language_code') ?: 'de';
+        $locale = $this->resolveLocale($language_code);
+        $appointment_datetime_start_label = $this->formatAppointmentStartLabel($start_at, $locale);
+        $appointment_datetime_end_label = $this->formatAppointmentEndLabel($end_at, $locale);
+        $appointment_datetime_full_label = $this->formatAppointmentFullLabel($start_at, $end_at, $locale);
+
+        $booking_number = $this->buildBookingNumber($appointment, $start_at);
 
         $appointment_summary = [
             'title' => $service['name'] ?? '',
             'subtitle' => trim($provider['first_name'] . ' ' . $provider['last_name']),
             'room' => $provider['room'] ?? '',
-            'datetime' => trim(format_date($start_at) . ' ' . format_time($start_at)),
+            'datetime' => $appointment_datetime_start_label,
+            'datetime_end' => $appointment_datetime_end_label,
+            'datetime_full' => $appointment_datetime_full_label,
             'duration' =>
                 $display_duration_minutes > 0 ? sprintf('%d %s', $display_duration_minutes, lang('minutes')) : '',
             'timezone' => '',
@@ -118,8 +127,17 @@ class Booking_confirmation extends EA_Controller
             'ics' => build_ics_download_url($appointment['hash']),
         ];
 
-        $language_code = config('language_code') ?: 'de';
-        $locale = $language_code === 'de' ? 'de-DE' : ($language_code === 'en' ? 'en-US' : $language_code);
+        $share_payload = $this->buildSharePayload(
+            $appointment_summary,
+            $manage_url,
+            $location_label,
+            $service,
+            $provider,
+            $duration_minutes,
+            $start_at,
+            $end_at,
+            $locale,
+        );
 
         $appointment_pdf_data = [
             'schoolName' => setting('company_name') ?: 'Forscherhaus',
@@ -133,6 +151,7 @@ class Booking_confirmation extends EA_Controller
             'locale' => $locale,
             'timezone' => $provider['timezone'],
             'appointmentId' => (string) ($appointment['id'] ?? ''),
+            'bookingNumber' => $booking_number,
         ];
 
         $book_advance_timeout = (int) setting('book_advance_timeout');
@@ -159,9 +178,221 @@ class Booking_confirmation extends EA_Controller
             'manage_url' => $manage_url,
             'is_manageable' => $is_manageable,
             'appointment_pdf_data' => $appointment_pdf_data,
+            'share_payload' => $share_payload,
         ]);
 
         $this->load->view('pages/booking_confirmation');
+    }
+
+    protected function resolveLocale(string $language_code): string
+    {
+        if ($language_code === 'de') {
+            return 'de-DE';
+        }
+
+        if ($language_code === 'en') {
+            return 'en-US';
+        }
+
+        return $language_code;
+    }
+
+    protected function formatAppointmentStartLabel(DateTimeInterface $start_at, string $locale): string
+    {
+        if (class_exists('\IntlDateFormatter')) {
+            $timezone = $start_at->getTimezone() ?: new DateTimeZone(date_default_timezone_get());
+            $formatter = new \IntlDateFormatter(
+                $locale,
+                \IntlDateFormatter::NONE,
+                \IntlDateFormatter::NONE,
+                $timezone->getName(),
+                \IntlDateFormatter::GREGORIAN,
+                'EEE, d. MMM y, HH:mm',
+            );
+
+            $formatted = $formatter->format($start_at);
+
+            if ($formatted !== false) {
+                return $formatted;
+            }
+        }
+
+        return sprintf('%s, %s', format_date($start_at), format_time($start_at));
+    }
+
+    protected function formatAppointmentEndLabel(DateTimeInterface $end_at, string $locale): string
+    {
+        if (class_exists('\IntlDateFormatter')) {
+            $timezone = $end_at->getTimezone() ?: new DateTimeZone(date_default_timezone_get());
+            $formatter = new \IntlDateFormatter(
+                $locale,
+                \IntlDateFormatter::NONE,
+                \IntlDateFormatter::NONE,
+                $timezone->getName(),
+                \IntlDateFormatter::GREGORIAN,
+                'HH:mm',
+            );
+
+            $formatted = $formatter->format($end_at);
+
+            if ($formatted !== false) {
+                return $formatted;
+            }
+        }
+
+        return format_time($end_at);
+    }
+
+    protected function formatAppointmentFullLabel(
+        DateTimeInterface $start_at,
+        DateTimeInterface $end_at,
+        string $locale,
+    ): string {
+        if (class_exists('\IntlDateFormatter')) {
+            $timezone = $start_at->getTimezone() ?: new DateTimeZone(date_default_timezone_get());
+            $startFormatter = new \IntlDateFormatter(
+                $locale,
+                \IntlDateFormatter::NONE,
+                \IntlDateFormatter::NONE,
+                $timezone->getName(),
+                \IntlDateFormatter::GREGORIAN,
+                'EEE, d. MMM y, HH:mm',
+            );
+
+            $endFormatter = new \IntlDateFormatter(
+                $locale,
+                \IntlDateFormatter::NONE,
+                \IntlDateFormatter::NONE,
+                $timezone->getName(),
+                \IntlDateFormatter::GREGORIAN,
+                'HH:mm',
+            );
+
+            $startFormatted = $startFormatter->format($start_at);
+            $endFormatted = $endFormatter->format($end_at);
+
+            if ($startFormatted !== false && $endFormatted !== false) {
+                return $startFormatted . '–' . $endFormatted;
+            }
+        }
+
+        return sprintf('%s, %s–%s', format_date($start_at), format_time($start_at), format_time($end_at));
+    }
+
+    protected function buildBookingNumber(array $appointment, DateTimeInterface $start_at): string
+    {
+        $prefix = 'FH';
+        $date_fragment = $start_at->format('Ymd-His');
+
+        if (!empty($appointment['id'])) {
+            $identifier = str_pad((string) $appointment['id'], 6, '0', STR_PAD_LEFT);
+        } elseif (!empty($appointment['hash'])) {
+            $identifier = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $appointment['hash']), 0, 6));
+        } else {
+            $identifier = strtoupper(substr(hash('crc32b', json_encode($appointment)), 0, 6));
+        }
+
+        return sprintf('%s-%s-%s', $prefix, $date_fragment, $identifier);
+    }
+
+    protected function buildSharePayload(
+        array $appointment_summary,
+        string $manage_url,
+        string $location_label,
+        array $service,
+        array $provider,
+        int $duration_minutes,
+        DateTimeInterface $start_at,
+        DateTimeInterface $end_at,
+        string $locale,
+    ): array {
+        $title_parts = [];
+
+        if (!empty($service['name'])) {
+            $title_parts[] = $service['name'];
+        }
+
+        $provider_name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
+
+        if ($provider_name !== '') {
+            $title_parts[] = $provider_name;
+        }
+
+        $share_title = implode(' – ', array_filter($title_parts));
+
+        if ($share_title === '') {
+            $fallback_title = lang('share_link_title');
+
+            if (!is_string($fallback_title) || $fallback_title === '') {
+                $fallback_title = 'Appointment details';
+            }
+
+            $share_title = $fallback_title;
+        }
+
+        $share_lines = [];
+
+        $minutes_label = lang('minutes');
+
+        if (!is_string($minutes_label) || trim($minutes_label) === '') {
+            $minutes_label = 'minutes';
+        } else {
+            $minutes_label = rtrim($minutes_label, " \t\n\r\0\x0B.:");
+        }
+
+        $datetime_line = $this->formatAppointmentFullLabel($start_at, $end_at, $locale);
+
+        if ($datetime_line === '') {
+            $datetime_line = $appointment_summary['datetime_full'] ?? '';
+
+            if ($datetime_line === '' && !empty($appointment_summary['datetime'])) {
+                $datetime_line = $appointment_summary['datetime'];
+
+                if (!empty($appointment_summary['datetime_end'])) {
+                    $datetime_line .= '–' . $appointment_summary['datetime_end'];
+                }
+            }
+        }
+
+        if ($datetime_line !== '') {
+            if ($duration_minutes > 0) {
+                $datetime_line .= sprintf(' (%d %s)', $duration_minutes, $minutes_label);
+            }
+
+            $share_lines[] = $datetime_line;
+        }
+
+        if ($location_label !== '') {
+            $share_lines[] = $location_label;
+        }
+
+        $share_link_hint = lang('share_link_text');
+
+        if (is_string($share_link_hint) && $share_link_hint !== '') {
+            if (strpos($share_link_hint, '%s') !== false) {
+                $share_lines[] = sprintf($share_link_hint, $manage_url);
+            } else {
+                $share_lines[] = trim($share_link_hint . ' ' . $manage_url);
+            }
+        } else {
+            $link_label = lang('manage_link_label');
+
+            if (!is_string($link_label) || $link_label === '') {
+                $link_label = 'Booking link';
+            }
+
+            $share_lines[] = $link_label . ': ' . $manage_url;
+        }
+
+        $share_lines = array_values(
+            array_filter($share_lines, static fn($line) => is_string($line) && trim($line) !== ''),
+        );
+
+        return [
+            'title' => $share_title,
+            'text' => implode("\n", $share_lines),
+            'url' => $manage_url,
+        ];
     }
 
     protected function build_location_label(array $appointment, array $provider, array $service): string

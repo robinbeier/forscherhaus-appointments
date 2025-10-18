@@ -50,9 +50,33 @@ $should_render_secondary_column = $show_customer || $should_render_secondary_con
                 <?php endif; ?>
 
                 <?php if (!empty($appointment['datetime'])): ?>
+                    <?php
+                    $datetime_full = $appointment['datetime_full'] ?? '';
+                    $datetime_end = $appointment['datetime_end'] ?? '';
+                    $datetime_accessible_label = $datetime_full ?: $appointment['datetime'];
+                    ?>
                     <div class="summary-item summary-item--datetime">
                         <i class="fas fa-calendar-day"></i>
-                        <span><?= htmlspecialchars($appointment['datetime'], ENT_QUOTES, 'UTF-8') ?></span>
+                        <span class="summary-datetime-value"
+                              <?= $datetime_accessible_label !== $appointment['datetime']
+                                  ? 'aria-label="' .
+                                      htmlspecialchars($datetime_accessible_label, ENT_QUOTES, 'UTF-8') .
+                                      '"'
+                                  : '' ?>>
+                            <span class="datetime-start"><?= htmlspecialchars(
+                                $appointment['datetime'],
+                                ENT_QUOTES,
+                                'UTF-8',
+                            ) ?></span>
+                            <?php if (!empty($datetime_end)): ?>
+                                <span class="datetime-separator" aria-hidden="true"> – </span>
+                                <span class="datetime-end"><?= htmlspecialchars(
+                                    $datetime_end,
+                                    ENT_QUOTES,
+                                    'UTF-8',
+                                ) ?></span>
+                            <?php endif; ?>
+                        </span>
                     </div>
                 <?php endif; ?>
 
