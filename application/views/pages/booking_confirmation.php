@@ -134,6 +134,17 @@
         color: #56cc9d;
     }
 
+    .summary-datetime-value {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .summary-datetime-value .datetime-separator,
+    .summary-datetime-value .datetime-end {
+        display: none;
+    }
+
     .booking-manage-card {
         display: flex;
         flex-direction: column;
@@ -438,6 +449,28 @@
     }
 
     @media (min-width: 768px) {
+        .summary-datetime-value {
+            gap: 0.35rem;
+        }
+
+        .summary-datetime-value .datetime-separator,
+        .summary-datetime-value .datetime-end {
+            display: inline;
+        }
+    }
+
+    @media (min-width: 768px) and (max-width: 1023.98px) {
+        .booking-utility-links--mobile {
+            margin-top: 1rem;
+            justify-content: center;
+        }
+
+        .booking-utility-links--mobile .btn-ghost {
+            min-width: min(220px, 100%);
+        }
+    }
+
+    @media (min-width: 768px) {
         .booking-confirmation-wrapper {
             padding-inline: clamp(24px, 5vw, 40px);
         }
@@ -534,17 +567,16 @@ $appointment_registered_message = lang('appointment_registered') ?: 'Ihr Termin 
 $manage_appointment_cta = lang('manage_appointment_cta') ?: 'Manage appointment';
 $manage_appointment_cta_locked = lang('manage_appointment_cta_locked') ?: lang('appointment_locked');
 $manage_link_hint =
-    lang('manage_link_hint') ?:
-    'Important: Without this link you will not be able to change or cancel the appointment later.';
+    lang('manage_link_hint') ?: 'Please save this now: You will need this link to change or cancel your booking later.';
 $manage_link_locked_hint =
     lang('manage_link_locked_hint') ?:
     (lang('appointment_locked_message') ?:
     'This appointment can no longer be changed online.');
-$copy_link_button = lang('copy_link_button') ?: 'Copy link';
+$copy_link_button = lang('copy_link_button') ?: 'Copy booking link';
 $share_link_button = lang('share_link_button') ?: 'Share';
 $pdf_save_button = lang('save_pdf_button') ?: 'Save PDF';
 $add_to_calendar_grouped = lang('add_to_calendar_grouped') ?: 'Add to calendar';
-$add_to_calendar_hint = lang('add_to_calendar_hint') ?: 'Der Verwaltungslink wird im Kalendereintrag gespeichert.';
+$add_to_calendar_hint = lang('add_to_calendar_hint') ?: 'The booking link is stored in the calendar event.';
 $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_booking_page');
 $pdf_export_preparing_message = lang('pdf_export_preparing') ?: 'Preparing PDF download...';
 $pdf_export_ready_message = lang('pdf_export_ready') ?: 'PDF download started.';
@@ -552,6 +584,30 @@ $pdf_export_failed_message = lang('pdf_export_failed') ?: 'PDF export failed. Pl
 $pdf_time_suffix_raw = lang('pdf_export_time_suffix');
 $pdf_time_suffix = $pdf_time_suffix_raw === false ? '' : $pdf_time_suffix_raw;
 $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confirmation';
+$share_payload = vars('share_payload') ?? [];
+$share_fallback_title = lang('share_link_title');
+
+if (!is_string($share_fallback_title) || $share_fallback_title === '') {
+    $share_fallback_title = 'Appointment details';
+}
+
+$share_link_label = lang('manage_link_label');
+
+if (!is_string($share_link_label) || $share_link_label === '') {
+    $share_link_label = 'Booking link';
+}
+
+$share_fallback_text_template = lang('share_link_text');
+
+if (is_string($share_fallback_text_template) && $share_fallback_text_template !== '') {
+    if (strpos($share_fallback_text_template, '%s') !== false) {
+        $share_fallback_text = sprintf($share_fallback_text_template, $manage_url);
+    } else {
+        $share_fallback_text = trim($share_fallback_text_template . ' ' . $manage_url);
+    }
+} else {
+    $share_fallback_text = $share_link_label . ': ' . $manage_url;
+}
 ?>
 
 <div class="booking-confirmation-wrapper">
@@ -738,10 +794,9 @@ $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confir
         const shareUnavailableMessage = <?= json_encode(
             lang('share_link_unavailable') ?: 'Sharing is not available on this device.',
         ) ?>;
-        const shareTitle = <?= json_encode(lang('share_link_title') ?: 'Appointment details') ?>;
-        const shareText = <?= json_encode(
-            lang('share_link_text') ?: 'Change or cancel the appointment via this link.',
-        ) ?>;
+        const sharePayload = <?= json_encode($share_payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+        const shareFallbackTitle = <?= json_encode($share_fallback_title) ?>;
+        const shareFallbackText = <?= json_encode($share_fallback_text) ?>;
         const pdfButtons = document.querySelectorAll('[data-generate-pdf]');
         const pdfTemplateUrl = <?= json_encode(
             asset_url('pdf/template.html'),
@@ -761,11 +816,11 @@ $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confir
         const pdfTimeSuffix = <?= json_encode($pdf_time_suffix) ?>;
         const pdfFilenamePrefix = <?= json_encode($pdf_filename_prefix) ?>;
         const pdfDurationUnit = <?= json_encode(lang('pdf_export_duration_unit') ?: 'min') ?>;
-        const pdfLinkLabel = <?= json_encode(lang('pdf_export_link_label') ?: 'Management link') ?>;
+        const pdfLinkLabel = <?= json_encode(lang('pdf_export_link_label') ?: 'Booking link') ?>;
         const pdfQrCaption = <?= json_encode(
-            lang('pdf_export_qr_caption') ?: 'Scan with your phone to open the management link.',
+            lang('pdf_export_qr_caption') ?: 'Scan with your phone to open the booking link.',
         ) ?>;
-        const guardMessage = 'Verwaltungslink noch nicht gesichert – jetzt kopieren?';
+        const guardMessage = 'Buchungs-Link noch nicht gesichert – jetzt kopieren?';
         const guardEnabled = false;
 
         let detailsSaved = !guardEnabled;
@@ -954,32 +1009,41 @@ $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confir
                 const dateLabel = dateFormatter.format(startDate);
                 const startTimeLabel = timeFormatter.format(startDate);
                 const endTimeLabel = timeFormatter.format(endDate);
-                const nonBreakingSpace = '\u00A0';
+                const escapedDateLabel = escapeHtml(dateLabel);
+                const escapedStartTimeLabel = escapeHtml(startTimeLabel);
+                const escapedEndTimeLabel = escapeHtml(endTimeLabel);
                 const defaultTimeSuffix = pdfTimeSuffix === undefined || pdfTimeSuffix === null
                     ? (locale.toLowerCase().startsWith('de') ? 'Uhr' : '')
                     : pdfTimeSuffix;
                 const effectiveTimeSuffix = pdfTimeSuffix === undefined || pdfTimeSuffix === null
                     ? defaultTimeSuffix
                     : pdfTimeSuffix;
-                const suffixText = effectiveTimeSuffix ? effectiveTimeSuffix : '';
-                const timeRange =
-                    startTimeLabel +
-                    '–' +
-                    endTimeLabel +
-                    (suffixText ? nonBreakingSpace + suffixText : '');
-                const durationSuffix =
+                const suffixTextRaw = effectiveTimeSuffix ? effectiveTimeSuffix : '';
+                const escapedSuffixText = suffixTextRaw ? escapeHtml(suffixTextRaw) : '';
+                const timeRange = escapedStartTimeLabel + '&ndash;' + escapedEndTimeLabel;
+                const appointmentDateTime =
+                    escapedDateLabel +
+                    ', ' +
+                    timeRange +
+                    (escapedSuffixText ? '&nbsp;' + escapedSuffixText : '');
+                const durationUnitLabel =
+                    pdfDurationUnit || (locale.toLowerCase().startsWith('de') ? 'Min' : 'min');
+                const escapedDurationUnit = escapeHtml(durationUnitLabel);
+                const appointmentDuration =
                     durationMinutes > 0
-                        ? nonBreakingSpace +
-                          '(' +
-                          durationMinutes +
-                          nonBreakingSpace +
-                          (pdfDurationUnit || (locale.toLowerCase().startsWith('de') ? 'Min' : 'min')) +
-                          ')'
+                        ? escapeHtml(String(durationMinutes)) + '&nbsp;' + escapedDurationUnit
                         : '';
-                const appointmentRange = dateLabel + ' · ' + timeRange + durationSuffix;
+                const appointmentRange =
+                    appointmentDateTime +
+                    (appointmentDuration ? '&nbsp;(' + appointmentDuration + ')' : '');
 
                 const todayDate = moment().tz(timezone).format('DD.MM.YYYY');
                 const fileDate = startMoment.format('YYYY-MM-DD');
+                const manageUrlText = appointmentPdfData.manageUrl || '';
+                const manageUrlEscaped = escapeHtml(manageUrlText);
+                const manageUrlWbr = manageUrlEscaped.replace(/\//g, '/<wbr>');
+                const bookingNumber =
+                    appointmentPdfData.bookingNumber || appointmentPdfData.appointmentId || '';
 
                 return {
                     schoolName: appointmentPdfData.schoolName || '',
@@ -988,13 +1052,17 @@ $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confir
                     room: appointmentPdfData.room || '',
                     appointmentRange,
                     manageUrlAttr: appointmentPdfData.manageUrl || '',
-                    manageUrlText: appointmentPdfData.manageUrl || '',
+                    manageUrlText,
+                    manageUrlWbr,
+                    appointmentDateTime,
+                    appointmentDuration,
                     linkLabel: pdfLinkLabel,
                     qrPngDataUrl: qrDataUrl,
                     qrCaption: pdfQrCaption,
                     logoDataUrl,
                     todayDate,
                     appointmentId: appointmentPdfData.appointmentId || '',
+                    bookingNumber,
                     fileDate,
                 };
             };
@@ -1003,23 +1071,39 @@ $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confir
                 const rawKeys = {
                     qrPngDataUrl: true,
                     logoDataUrl: true,
+                    appointmentDuration: true,
+                    appointmentDateTime: true,
+                    appointmentRange: true,
+                    manageUrlWbr: true,
                 };
 
-                return templateString.replace(/{{\s*([^}]+)\s*}}/g, (match, key) => {
+                const resolveValue = (key, raw = false) => {
                     const normalizedKey = key.trim();
 
                     if (!Object.prototype.hasOwnProperty.call(values, normalizedKey)) {
                         return '';
                     }
 
-                    const value = values[normalizedKey] == null ? '' : values[normalizedKey];
+                    const rawValue = values[normalizedKey] == null ? '' : values[normalizedKey];
+                    const stringValue =
+                        typeof rawValue === 'string' ? rawValue : (rawValue != null ? String(rawValue) : '');
 
-                    if (rawKeys[normalizedKey]) {
-                        return value;
+                    if (raw || rawKeys[normalizedKey]) {
+                        return stringValue;
                     }
 
-                    return escapeHtml(value.toString());
-                });
+                    return escapeHtml(stringValue);
+                };
+
+                let rendered = templateString.replace(/{{{\s*([^}]+)\s*}}}/g, (match, key) =>
+                    resolveValue(key, true),
+                );
+
+                rendered = rendered.replace(/{{\s*([^}]+)\s*}}/g, (match, key) =>
+                    resolveValue(key, false),
+                );
+
+                return rendered;
             };
 
             const setButtonsDisabled = (state) => {
@@ -1192,15 +1276,39 @@ $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confir
 
         shareButtons.forEach((button) => {
             button.addEventListener('click', async () => {
-                const url = button.getAttribute('data-share-url') || manageUrl;
+                const defaultUrl = typeof manageUrl === 'string' ? manageUrl : '';
+                const payloadUrl =
+                    button.getAttribute('data-share-url') ||
+                    (sharePayload && typeof sharePayload.url === 'string' ? sharePayload.url : '') ||
+                    defaultUrl;
+
+                if (!payloadUrl) {
+                    showToast(shareUnavailableMessage);
+                    return;
+                }
+
+                const normalizedTitle =
+                    sharePayload && typeof sharePayload.title === 'string' && sharePayload.title.trim() !== ''
+                        ? sharePayload.title
+                        : shareFallbackTitle;
+
+                const normalizedText =
+                    sharePayload && typeof sharePayload.text === 'string' && sharePayload.text.trim() !== ''
+                        ? sharePayload.text
+                        : shareFallbackText;
+
+                const resolvedText = payloadUrl && !normalizedText.includes(payloadUrl)
+                    ? `${normalizedText}\n${payloadUrl}`
+                    : normalizedText;
 
                 if (navigator.share) {
                     try {
-                        await navigator.share({
-                            title: shareTitle,
-                            text: shareText,
-                            url
-                        });
+                        const shareData = {
+                            title: normalizedTitle,
+                            text: resolvedText
+                        };
+
+                        await navigator.share(shareData);
                     } catch (error) {
                         if (!error || error.name === 'AbortError') {
                             return;
