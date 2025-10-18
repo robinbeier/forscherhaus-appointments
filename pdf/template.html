@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="de-DE">
+    <head>
+        <meta charset="utf-8" />
+        <title>Terminbestätigung – {{schoolName}}</title>
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="language" content="de-DE" />
+        <style>
+            :root {
+                --brand: #2e7d32;
+                --ink: #2f3540;
+                --ink-muted: #475467;
+                --border: #e6e8eb;
+                --success-bg: #e9f6ee;
+                --radius: 12px;
+            }
+
+            @page {
+                size: A4;
+                margin: 20mm;
+            }
+            html {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            body {
+                margin: 0;
+                padding: 0;
+                background: #fff;
+                color: var(--ink);
+                font:
+                    11pt/1.45 'Inter',
+                    system-ui,
+                    -apple-system,
+                    'Segoe UI',
+                    Roboto,
+                    'Helvetica Neue',
+                    Arial,
+                    'Noto Sans',
+                    sans-serif;
+            }
+
+            .page {
+                padding: 20mm;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                gap: 12mm;
+                min-height: calc(297mm - 40mm);
+            }
+
+            /* ===== Header ===== */
+            .hdr {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                align-items: center;
+            }
+            .hdr__title {
+                margin: 0;
+                font:
+                    600 16pt/1.25 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+                letter-spacing: 0.1pt;
+                text-transform: none;
+            }
+            .brand__logo {
+                /* height: 84px; /* 48–64px je nach Logo */
+                height: 84px;
+                width: auto;
+                max-width: 196px;
+            }
+
+            /* ===== Erfolgsbanner ===== */
+            .banner {
+                background: var(--success-bg);
+                border: 1px solid #d7eddd;
+                border-radius: var(--radius);
+                padding: 9pt 12pt;
+                display: flex;
+                flex-direction: column;
+                gap: 3pt;
+            }
+            .banner__title {
+                font:
+                    600 12pt/1.3 'Inter',
+                    system-ui;
+                margin: 0;
+            }
+            .banner__sub {
+                font:
+                    9.5pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+                margin: 0;
+            }
+
+            /* ===== Layout Hauptbereich ===== */
+            .grid {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) 34mm;
+                column-gap: 18mm;
+                align-items: start;
+            }
+            .left {
+                display: flex;
+                flex-direction: column;
+                gap: 10pt;
+            }
+            .right {
+                display: flex;
+                flex-direction: column;
+                gap: 6pt;
+                align-items: flex-start;
+            }
+
+            /* Abschnittstitel (ehem. .h1) jetzt semantisch <h2> */
+            .section-title {
+                font:
+                    600 14.5pt/1.25 'Inter',
+                    system-ui;
+                margin: 0;
+                color: var(--ink);
+                letter-spacing: 0pt;
+                text-transform: none;
+            }
+
+            /* Key-Value-Liste */
+            .kv {
+                display: grid;
+                grid-template-columns: 32mm minmax(0, 1fr);
+                column-gap: 8pt;
+                row-gap: 6pt;
+                margin: 0;
+            }
+            .kv dt {
+                margin: 0;
+                font:
+                    600 10.8pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink);
+            }
+            .kv dd {
+                margin: 0;
+                font:
+                    11pt/1.45 'Inter',
+                    system-ui;
+                color: var(--ink);
+            }
+            .datetime {
+                white-space: nowrap;
+            } /* verhindert unschöne Umbrüche in der Zeitspanne */
+            .duration {
+                color: var(--ink-muted);
+                white-space: nowrap;
+            } /* Dauer in eigener Zeile, wie auf der Webseite */
+
+            /* Key-Box (Link sichern) */
+            .key-callout {
+                display: flex;
+                align-items: flex-start;
+                gap: 6pt;
+                padding: 8pt 10pt;
+                border: 1px solid #d7eddd;
+                background: var(--success-bg);
+                border-radius: 10px;
+                font:
+                    10.2pt/1.5 'Inter',
+                    system-ui;
+                margin: 2pt 0 0 0;
+            }
+            .key-ic {
+                font-size: 12pt;
+                line-height: 1;
+                flex: 0 0 auto;
+            }
+
+            /* Linkgruppe */
+            .link-group {
+                display: flex;
+                flex-direction: column;
+                gap: 6pt;
+            }
+            .link-label {
+                font:
+                    600 10.5pt/1.35 'Inter',
+                    system-ui;
+                color: var(--ink);
+            }
+            .linkbox {
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                padding: 7pt 9pt;
+            }
+            .linkbox a {
+                color: var(--brand);
+                text-decoration: underline;
+                font:
+                    11pt/1.45 ui-monospace,
+                    SFMono-Regular,
+                    Menlo,
+                    Consolas,
+                    'Liberation Mono',
+                    monospace; /* monospaced */
+            }
+            .linkbox a .url {
+                word-break: keep-all;
+                overflow-wrap: normal; /* echte Trennung nur per <wbr> nach "/" */
+            }
+
+            /* QR */
+            .qr {
+                width: 32mm;
+                height: 32mm;
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 1.5mm;
+                box-sizing: border-box;
+            }
+            .qr img {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+            .qr-cap {
+                font:
+                    9.5pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+            }
+
+            /* Footer */
+            .ftr {
+                margin-top: auto;
+                font:
+                    9.5pt/1.4 'Inter',
+                    system-ui;
+                color: var(--ink-muted);
+                display: grid;
+                grid-template-columns: 1fr auto;
+                align-items: center;
+            }
+            .help {
+                color: var(--ink-muted);
+                margin-top: 6pt;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            <!-- HEADER -->
+            <header class="hdr" role="banner">
+                <h1 class="hdr__title">Terminbestätigung</h1>
+                <img class="brand__logo" src="{{logoDataUrl}}" alt="Forscherhaus Logo" />
+            </header>
+
+            <!-- STATUS -->
+            <section class="banner" aria-live="polite">
+                <div class="banner__title">✅ Termin gebucht</div>
+                <div class="banner__sub">Ihr Termin ist erfolgreich registriert worden.</div>
+            </section>
+
+            <!-- HAUPT-INHALT -->
+            <main class="grid" role="main">
+                <section class="left">
+                    <h2 class="section-title">{{title}}</h2>
+
+                    <dl class="kv">
+                        <dt>Lehrkraft</dt>
+                        <dd>{{teacher}}</dd>
+
+                        <dt>Raum</dt>
+                        <dd>{{room}}</dd>
+
+                        <dt>Datum &amp; Uhrzeit</dt>
+                        <dd>
+                            <span class="datetime">{{appointmentDateTime}}</span>
+                            <span class="duration">({{appointmentDuration}})</span>
+                        </dd>
+                    </dl>
+
+                    <!-- Key-Box: Link sichern -->
+                    <div class="key-callout" role="note" aria-label="Wichtiger Hinweis">
+                        <div>
+                            <strong>Wichtig:</strong> Nur mit diesem Link können Sie Ihre Buchung später ändern oder
+                            stornieren.
+                        </div>
+                    </div>
+
+                    <!-- Buchungs-Link -->
+                    <div class="link-group">
+                        <div class="link-label">Buchungs‑Link</div>
+                        <div class="linkbox">
+                            <a href="{{manageUrlAttr}}" data-manage-link>
+                                <span class="url">{{{manageUrlWbr}}}</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Kontakt / Support -->
+                    <p class="help">Fragen? Schreiben Sie Herrn Beier bei Sdui eine Nachricht.</p>
+                </section>
+
+                <aside class="right" aria-label="QR-Code">
+                    <div class="qr">
+                        <!-- Bevorzugt SVG oder hochauflösendes PNG (≥900 px) mit ausreichender Quiet Zone, ECC M–H -->
+                        <img src="{{qrPngDataUrl}}" alt="QR‑Code zum Buchungs‑Link" />
+                    </div>
+                    <div class="qr-cap">Per Smartphone scannen, um den Buchungs‑Link zu öffnen.</div>
+                </aside>
+            </main>
+
+            <!-- FOOTER -->
+            <footer class="ftr" role="contentinfo">
+                <div>Buchungsnr.: {{bookingNumber}}</div>
+                <div>{{schoolName}} • {{todayDate}}</div>
+            </footer>
+        </div>
+    </body>
+</html>
