@@ -92,10 +92,10 @@
     </div>
 </div>
 
-<?php end_section(); ?>
+<?php end_section('content'); ?>
 
 <?php section('scripts'); ?>
     <script src="<?= asset_url('assets/vendor/chart.js/chart.umd.min.js') ?>"></script>
     <script src="<?= asset_url('assets/js/http/dashboard_http_client.js') ?>"></script>
     <script src="<?= asset_url('assets/js/pages/dashboard.js') ?>"></script>
-<?php end_section(); ?>
+<?php end_section('scripts'); ?>
