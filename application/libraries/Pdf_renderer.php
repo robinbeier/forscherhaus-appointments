@@ -13,6 +13,7 @@
 
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use Throwable;
 
 /**
  * PDF renderer library.
@@ -83,7 +84,10 @@ class Pdf_renderer
     {
         $html = $this->CI->load->view($view, $data, true);
 
-        return $this->render_html($html, $options);
+        $renderOptions = $options;
+        $this->dumpDebugHtmlIfRequested($html, $renderOptions);
+
+        return $this->render_html($html, $renderOptions);
     }
 
     /**
@@ -113,7 +117,10 @@ class Pdf_renderer
     {
         $html = $this->CI->load->view($view, $data, true);
 
-        $this->stream_html($html, $filename, $options);
+        $renderOptions = $options;
+        $this->dumpDebugHtmlIfRequested($html, $renderOptions);
+
+        $this->stream_html($html, $filename, $renderOptions);
     }
 
     /**
@@ -132,6 +139,39 @@ class Pdf_renderer
         $dompdf->stream($filename, [
             'Attachment' => $attachment,
         ]);
+    }
+
+    /**
+     * Dump the generated HTML to a file when requested via debug option.
+     */
+    protected function dumpDebugHtmlIfRequested(string $html, array &$options): void
+    {
+        if (empty($options['debug_dump_path'])) {
+            return;
+        }
+
+        $path = (string) $options['debug_dump_path'];
+        unset($options['debug_dump_path']);
+
+        if ($path === '') {
+            return;
+        }
+
+        $directory = dirname($path);
+
+        if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
+            log_message('error', 'Pdf_renderer debug dump failed to create directory: ' . $directory);
+
+            return;
+        }
+
+        try {
+            if (@file_put_contents($path, $html) === false) {
+                log_message('error', 'Pdf_renderer debug dump failed to write file: ' . $path);
+            }
+        } catch (Throwable $exception) {
+            log_message('error', 'Pdf_renderer debug dump failed: ' . $exception->getMessage());
+        }
     }
 
     /**

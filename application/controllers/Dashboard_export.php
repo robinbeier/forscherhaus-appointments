@@ -68,16 +68,19 @@ class Dashboard_export extends EA_Controller
                 'threshold' => $threshold,
             ]);
 
-            $summary = $this->buildSummary($metrics);
+            $summary = $this->buildSummary($metrics, $threshold);
+
+            $this->load->helper('donut');
 
             $view_data = [
                 'school_name' => $this->resolveSchoolName(),
                 'logo_data_url' => $this->resolveLogoDataUrl(),
-                'generated_at' => $this->formatDate(new DateTimeImmutable('now')),
+                'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
                 'period_label' => $this->formatPeriod($period['start'], $period['end']),
                 'service_label' => $this->resolveServiceLabel($normalized_service_id),
                 'status_label' => $this->resolveStatusLabel($normalized_statuses),
                 'threshold_percent' => $this->formatPercent($threshold, 0),
+                'threshold_ratio' => $threshold,
                 'summary' => $summary,
                 'metrics' => $this->mapMetricsForView($metrics, $threshold),
             ];
@@ -88,6 +91,7 @@ class Dashboard_export extends EA_Controller
                 $this->buildFilename($period['start'], $period['end']),
                 [
                     'attachment' => true,
+                    'debug_dump_path' => APPPATH . '../storage/logs/dashboard_principal_pdf_dump.html',
                 ],
             );
         } catch (Throwable $exception) {
@@ -213,10 +217,11 @@ class Dashboard_export extends EA_Controller
      * Build a formatted summary DTO for the PDF.
      *
      * @param array $metrics
+     * @param float $threshold
      *
      * @return array
      */
-    protected function buildSummary(array $metrics): array
+    protected function buildSummary(array $metrics, float $threshold): array
     {
         $total_target = 0;
         $total_booked = 0;
@@ -225,11 +230,17 @@ class Dashboard_export extends EA_Controller
         $fallback_count = 0;
         $explicit_target_count = 0;
         $with_plan_count = 0;
+        $missing_to_threshold_total = 0;
 
         foreach ($metrics as $metric) {
             $total_target += (int) ($metric['target'] ?? 0);
             $total_booked += (int) ($metric['booked'] ?? 0);
             $total_open += (int) ($metric['open'] ?? 0);
+            $target = (int) ($metric['target'] ?? 0);
+            $booked = (int) ($metric['booked'] ?? 0);
+            $threshold_target = (int) ceil($threshold * $target);
+            $gap_to_threshold = max($threshold_target - $booked, 0);
+            $missing_to_threshold_total += $gap_to_threshold;
 
             if (!empty($metric['needs_attention'])) {
                 $attention_count++;
@@ -266,6 +277,11 @@ class Dashboard_export extends EA_Controller
             'explicit_target_count' => $explicit_target_count,
             'without_target_count' => max($provider_count - $explicit_target_count, 0),
             'with_plan_count' => $with_plan_count,
+            'missing_to_threshold_total' => $missing_to_threshold_total,
+            'missing_to_threshold_total_formatted' => $this->formatNumber($missing_to_threshold_total),
+            'booked_distinct_total' => $total_booked,
+            'booked_distinct_total_formatted' => $this->formatNumber($total_booked),
+            'providers_below_threshold' => $attention_count,
         ];
     }
 
@@ -285,14 +301,22 @@ class Dashboard_export extends EA_Controller
             $rounded_percent = round($fill_rate_percent);
 
             $target = (int) ($metric['target'] ?? 0);
+            $booked = (int) ($metric['booked'] ?? 0);
+            $open = (int) ($metric['open'] ?? 0);
 
             $fill_rate_decimals = $fill_rate_percent > 0 && $fill_rate_percent < 100 ? 1 : 0;
+
+            $threshold_target = (int) ceil($threshold * $target);
+            $gap_to_threshold = max($threshold_target - $booked, 0);
 
             return [
                 'provider_name' => (string) ($metric['provider_name'] ?? ''),
                 'target' => $this->formatNumber($target),
-                'booked' => $this->formatNumber((int) ($metric['booked'] ?? 0)),
-                'open' => $this->formatNumber((int) ($metric['open'] ?? 0)),
+                'booked' => $this->formatNumber($booked),
+                'open' => $this->formatNumber($open),
+                'target_raw' => $target,
+                'booked_raw' => $booked,
+                'open_raw' => $open,
                 'fill_rate' => $fill_rate,
                 'fill_rate_percent' => $this->formatPercent($fill_rate, $fill_rate_decimals),
                 'fill_rate_percent_value' => max(0, min(100, $rounded_percent)),
@@ -306,6 +330,9 @@ class Dashboard_export extends EA_Controller
                 'has_explicit_target' => !empty($metric['has_explicit_target']),
                 'is_zero_target' => $target === 0,
                 'threshold_percent' => $threshold * 100,
+                'threshold_absolute' => $threshold_target,
+                'gap_to_threshold' => $gap_to_threshold,
+                'gap_to_threshold_formatted' => $this->formatNumber($gap_to_threshold),
             ];
         }, $metrics);
     }
@@ -382,9 +409,15 @@ class Dashboard_export extends EA_Controller
      */
     protected function resolveLogoDataUrl(): ?string
     {
-        $logo_path = FCPATH . 'logo.png';
+        $paths = [APPPATH . 'views/exports/logo.png', FCPATH . 'logo.png'];
 
-        return $this->pdfRenderer->image_to_data_url($logo_path);
+        foreach ($paths as $path) {
+            if (is_file($path) && is_readable($path)) {
+                return $this->pdfRenderer->image_to_data_url($path);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -411,7 +444,39 @@ class Dashboard_export extends EA_Controller
      */
     protected function formatPeriod(DateTimeImmutable $start, DateTimeImmutable $end): string
     {
-        return $this->formatDate($start) . ' - ' . $this->formatDate($end);
+        $start_day = $start->format('j.');
+        $end_day = $end->format('j.');
+        $start_month = $this->resolveMonthAbbreviation((int) $start->format('n'), $start);
+        $end_month = $this->resolveMonthAbbreviation((int) $end->format('n'), $end);
+        $start_year = $start->format('Y');
+        $end_year = $end->format('Y');
+
+        if ($start_year === $end_year && $start->format('m') === $end->format('m')) {
+            return sprintf('%s–%s %s %s', $start_day, $end_day, $start_month, $start_year);
+        }
+
+        if ($start_year === $end_year) {
+            return sprintf('%s %s – %s %s %s', $start_day, $start_month, $end_day, $end_month, $start_year);
+        }
+
+        return sprintf('%s %s %s – %s %s %s', $start_day, $start_month, $start_year, $end_day, $end_month, $end_year);
+    }
+
+    /**
+     * Format the generated-at timestamp for display.
+     *
+     * @param DateTimeImmutable $date
+     *
+     * @return string
+     */
+    protected function formatGeneratedAt(DateTimeImmutable $date): string
+    {
+        $day = $date->format('j.');
+        $month = $this->resolveMonthAbbreviation((int) $date->format('n'), $date);
+        $year = $date->format('Y');
+        $time = $date->format('H:i');
+
+        return sprintf('%s %s %s, %s Uhr', $day, $month, $year, $time);
     }
 
     /**
@@ -452,5 +517,41 @@ class Dashboard_export extends EA_Controller
     protected function buildFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
     {
         return sprintf('dashboard-schulleitung-%s-%s.pdf', $start->format('Ymd'), $end->format('Ymd'));
+    }
+
+    /**
+     * Resolve the localized month abbreviation.
+     *
+     * @param int $month
+     * @param DateTimeImmutable|null $fallback
+     *
+     * @return string
+     */
+    protected function resolveMonthAbbreviation(int $month, ?DateTimeImmutable $fallback = null): string
+    {
+        $months = [
+            1 => 'Jan',
+            2 => 'Feb',
+            3 => 'Mär',
+            4 => 'Apr',
+            5 => 'Mai',
+            6 => 'Jun',
+            7 => 'Jul',
+            8 => 'Aug',
+            9 => 'Sep',
+            10 => 'Okt',
+            11 => 'Nov',
+            12 => 'Dez',
+        ];
+
+        if (array_key_exists($month, $months)) {
+            return $months[$month];
+        }
+
+        if ($fallback) {
+            return $fallback->format('M');
+        }
+
+        return '';
     }
 }
