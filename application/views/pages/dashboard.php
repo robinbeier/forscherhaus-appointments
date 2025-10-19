@@ -33,31 +33,34 @@
                                         <i class="fas fa-sliders-h me-2"></i>
                                         <?= lang('dashboard_options') ?>
                                     </button>
-                                    <div class="dropdown-menu dropdown-menu-end p-3 dashboard-options-dropdown" aria-labelledby="dashboard-options-toggle">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" id="dashboard-hide-without-target">
-                                            <label class="form-check-label d-flex align-items-center gap-2" for="dashboard-hide-without-target">
-                                                <span><?= lang('dashboard_hide_without_target') ?></span>
-                                                <span id="dashboard-hidden-counter" class="text-muted small" data-pattern="<?= lang(
-                                                    'dashboard_hidden_counter_pattern',
-                                                ) ?>"></span>
-                                            </label>
+                                    <div class="dropdown-menu dropdown-menu-end dashboard-options-dropdown" aria-labelledby="dashboard-options-toggle">
+                                        <div class="px-3 py-2 d-none">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="dashboard-hide-without-target">
+                                                <label class="form-check-label d-flex align-items-center gap-2" for="dashboard-hide-without-target">
+                                                    <span><?= lang('dashboard_hide_without_target') ?></span>
+                                                    <span id="dashboard-hidden-counter" class="text-muted small" data-pattern="<?= lang(
+                                                        'dashboard_hidden_counter_pattern',
+                                                    ) ?>"></span>
+                                                </label>
+                                            </div>
                                         </div>
+                                        <div class="dropdown-divider d-none"></div>
+                                        <button type="button" class="dropdown-item d-flex align-items-center gap-2" id="dashboard-download-teacher">
+                                            <i class="fas fa-file-download text-muted"></i>
+                                            <span><?= lang('dashboard_download_teacher_pdf') ?></span>
+                                        </button>
+                                        <button type="button" class="dropdown-item d-flex align-items-center gap-2" id="dashboard-download-principal">
+                                            <i class="fas fa-file-download text-muted"></i>
+                                            <span><?= lang('dashboard_download_principal_pdf') ?></span>
+                                        </button>
+                                        <button type="button" class="dropdown-item d-flex align-items-center gap-2" id="dashboard-threshold-button">
+                                            <i class="fas fa-bullseye text-muted"></i>
+                                            <span><?= lang('dashboard_conflict_threshold') ?></span>
+                                            <span class="badge bg-light text-dark ms-auto" id="dashboard-threshold-display"></span>
+                                        </button>
                                     </div>
                                 </div>
-                                <button type="button" class="btn btn-outline-secondary w-100 w-lg-auto" id="dashboard-download-teacher">
-                                    <i class="fas fa-file-download me-2"></i>
-                                    <?= lang('dashboard_download_teacher_pdf') ?>
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary w-100 w-lg-auto" id="dashboard-download-principal">
-                                    <i class="fas fa-file-download me-2"></i>
-                                    <?= lang('dashboard_download_principal_pdf') ?>
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary w-100 w-lg-auto" id="dashboard-threshold-button">
-                                    <i class="fas fa-bullseye me-2"></i>
-                                    <?= lang('dashboard_conflict_threshold') ?>
-                                    <span class="badge bg-light text-dark ms-2" id="dashboard-threshold-display"></span>
-                                </button>
                                 <button type="submit" class="btn btn-primary w-100 w-lg-auto ms-lg-auto">
                                     <i class="fas fa-sync-alt me-2"></i>
                                     <?= lang('refresh') ?>
@@ -102,7 +105,7 @@
                             <thead>
                                 <tr>
                                     <th><?= lang('provider') ?></th>
-                                    <th><?= lang('target') ?></th>
+                                    <th><?= lang('class_size_default') ?></th>
                                     <th><?= lang('booked') ?></th>
                                     <th><?= lang('open') ?></th>
                                     <th><?= lang('fill_rate') ?></th>

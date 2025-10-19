@@ -111,10 +111,19 @@ class Dashboard_metrics
             );
 
             $booked_count = $this->countBookedAppointments((int) $provider['id'], $start, $end, $statuses, $service_id);
+            $class_size_default = $this->extractClassSizeDefault($provider);
 
-            [$target, $is_fallback] = $this->resolveTarget($provider, $summary);
+            [$target, $is_fallback] = $this->resolveTarget($provider, $summary, $class_size_default);
 
-            $metrics[] = $this->formatRow($provider, $summary, $target, $booked_count, $threshold, $is_fallback);
+            $metrics[] = $this->formatRow(
+                $provider,
+                $summary,
+                $target,
+                $booked_count,
+                $threshold,
+                $is_fallback,
+                $class_size_default,
+            );
         }
 
         usort($metrics, static fn($left, $right) => $left['fill_rate'] <=> $right['fill_rate']);
@@ -132,7 +141,7 @@ class Dashboard_metrics
         );
 
         if (empty($normalized)) {
-            return ['approved', 'pending'];
+            return ['Booked'];
         }
 
         return $normalized;
@@ -190,11 +199,28 @@ class Dashboard_metrics
         return (int) ($result['aggregate'] ?? 0);
     }
 
-    protected function resolveTarget(array $provider, array $summary): array
+    protected function extractClassSizeDefault(array $provider): ?int
     {
-        $class_size = (int) ($provider['class_size_default'] ?? 0);
+        if (!array_key_exists('class_size_default', $provider)) {
+            return null;
+        }
 
-        if ($class_size > 0) {
+        $value = $provider['class_size_default'];
+
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $int_value = (int) $value;
+
+        return $int_value > 0 ? $int_value : null;
+    }
+
+    protected function resolveTarget(array $provider, array $summary, ?int $class_size_default = null): array
+    {
+        $class_size = $class_size_default ?? $this->extractClassSizeDefault($provider);
+
+        if ($class_size !== null) {
             return [$class_size, false];
         }
 
@@ -223,6 +249,7 @@ class Dashboard_metrics
         int $booked,
         float $threshold,
         bool $is_fallback,
+        ?int $class_size_default,
     ): array {
         $open = $target > 0 ? max($target - $booked, 0) : 0;
         $fill_rate = $this->computeFillRate($booked, $target);
@@ -243,7 +270,8 @@ class Dashboard_metrics
             'needs_attention' => $needs_attention,
             'has_plan' => (bool) ($summary['has_plan'] ?? false),
             'is_target_fallback' => $is_fallback,
-            'has_explicit_target' => !$is_fallback && $target > 0,
+            'class_size_default' => $class_size_default,
+            'has_explicit_target' => $class_size_default !== null,
         ];
     }
 }

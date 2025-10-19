@@ -371,6 +371,10 @@ App.Pages.Dashboard = (function () {
             const fillPercentage = item.target > 0 ? (item.fill_rate * 100).toFixed(1) : '0.0';
             const hasConflict = item.has_explicit_target && item.target > 0 && item.fill_rate < threshold;
             const remaining = item.target > 0 ? item.open : '—';
+            const explicitTarget =
+                typeof item.class_size_default === 'number' && item.class_size_default > 0
+                    ? item.class_size_default
+                    : null;
             const $row = $('<tr/>', {
                 'data-has-plan': item.has_plan ? 'true' : 'false',
                 'data-has-explicit-target': item.has_explicit_target ? 'true' : 'false',
@@ -380,7 +384,9 @@ App.Pages.Dashboard = (function () {
 
             const $targetCell = $('<td/>');
 
-            if (item.target > 0) {
+            if (explicitTarget !== null) {
+                $('<span/>', {text: explicitTarget}).appendTo($targetCell);
+            } else if (item.target > 0) {
                 $('<span/>', {text: item.target}).appendTo($targetCell);
             } else {
                 $('<span/>', {

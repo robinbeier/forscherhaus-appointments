@@ -58,7 +58,7 @@ class Dashboard extends EA_Controller
 
         $appointment_status_options = json_decode(setting('appointment_status_options', '[]'), true) ?? [];
         $threshold = (float) setting('dashboard_conflict_threshold', '0.75');
-        $default_statuses = ['approved', 'pending'];
+        $default_statuses = ['Booked'];
         $services = $this->services_model->get(null, null, null, 'name ASC');
         $service_options = array_map(static function (array $service): array {
             return [

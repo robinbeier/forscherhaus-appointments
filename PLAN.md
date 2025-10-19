@@ -32,7 +32,7 @@
 -   Neue Library `application/libraries/Dashboard_metrics.php`: kapselt Berechnung (`resolveTarget`, `countBookedAppointments`, `computeFillRate`, `formatRow`). Greift auf `appointments_model` und `providers_model`.
 -   `Dashboard`-Controller:
     -   `__construct`: neue Library/Modelle laden.
-    -   `index()`: Script Vars für `dashboard_conflict_threshold`, Service-Liste (Name + ID) und Default-Status (`['approved','pending']`) bereitstellen.
+    -   `index()`: Script Vars für `dashboard_conflict_threshold`, Service-Liste (Name + ID) und Default-Status (`['Booked']`) bereitstellen.
     -   `metrics()`:
         -   Filter-Parsing erweitern (`service_id`, optional `provider_ids`, Status-Array).
         -   Gebuchte Termine pro Lehrkraft zählen (`appointments.id_users_provider`) nach Zeitraum, Status, Service.
@@ -45,9 +45,9 @@
 
 -   `application/views/pages/dashboard.php`:
     -   Filterleiste um Service-Dropdown (Select2) und Optional-Menu (Button mit Dropdown) erweitern.
-    -   Toggle „Lehrkräfte ohne Ziel ausblenden“ + Counter (`(n ausgeblendet)`).
+    -   (Optional) Toggle „Lehrkräfte ohne Ziel ausblenden“ + Counter (`(n ausgeblendet)`) im Options-Menü vorbereiten; kann bei konsistent gepflegten Klassengrößen ausgeblendet werden.
     -   Aktionen für PDF-Downloads (Lehrer\*innen / Schulleitung) und Einstellung „Konfliktschwelle“ (Modal oder Inline-Input).
-    -   Tabelle Header zu `Lehrkraft | Ziel | Gebucht | Offen | Auslastung | Status`.
+    -   Tabelle Header zu `Lehrkraft | Klassengröße | Gebucht | Offen | Auslastung | Status`.
 -   `assets/js/pages/dashboard.js`:
     -   Filter-Handling (Service/Status defaults, Schwellenwert anpassbar, hidden providers Counter).
     -   Chart-Daten auf `target`-Nenner umstellen; Bar-Labels `booked/target (xx%)`.
