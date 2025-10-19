@@ -9,7 +9,7 @@
 ## Architektur-Notizen
 
 -   Default-Zielgröße wird als `class_size_default` direkt an Provider (`users`-Tabelle mit `ea_`-Präfix) geführt.
--   Dashboard-Backend liefert konsolidierte Kennzahlen (`target`, `bookedDistinct`, `open`, `fill_rate`, `needs_attention`) gefiltert nach Zeitraum, Service, Status.
+-   Dashboard-Backend liefert konsolidierte Kennzahlen (`target`, `booked`, `open`, `fill_rate`, `needs_attention`) gefiltert nach Zeitraum, Service, Status.
 -   Serverseitiges PDF-Rendering via `dompdf/dompdf` (Composer-Dependency) mit Templates unter `application/views/exports/`.
 -   Dateien werden on-the-fly gestreamt; Sammel-PDFs entstehen serverseitig ohne Zwischenablage auf dem Dateisystem.
 
@@ -29,13 +29,13 @@
 
 ### 3. Dashboard Backend
 
--   Neue Library `application/libraries/Dashboard_metrics.php`: kapselt Berechnung (`resolveTarget`, `countBookedDistinct`, `computeFillRate`, `formatRow`). Greift auf `appointments_model` und `providers_model`.
+-   Neue Library `application/libraries/Dashboard_metrics.php`: kapselt Berechnung (`resolveTarget`, `countBookedAppointments`, `computeFillRate`, `formatRow`). Greift auf `appointments_model` und `providers_model`.
 -   `Dashboard`-Controller:
     -   `__construct`: neue Library/Modelle laden.
     -   `index()`: Script Vars für `dashboard_conflict_threshold`, Service-Liste (Name + ID) und Default-Status (`['approved','pending']`) bereitstellen.
     -   `metrics()`:
         -   Filter-Parsing erweitern (`service_id`, optional `provider_ids`, Status-Array).
-        -   Distinct-Kunden zählen (`appointments.id_users_customer`) nach Zeitraum, Status, Service.
+        -   Gebuchte Termine pro Lehrkraft zählen (`appointments.id_users_provider`) nach Zeitraum, Status, Service.
         -   `target` bestimmen: `provider.class_size_default` oder Fallback über `Provider_utilization`.
         -   Ergebnis-Array `{provider_id, provider_name, target, booked, open, fill_rate, needs_attention, has_plan}` sortiert nach `fill_rate` ASC zurückgeben.
 -   `application/libraries/Provider_utilization.php`: API erweitern, sodass `calculate()` auch `capacity_minutes` zurückgibt oder neue Methode bereitstellt, damit Dashboard den Fallback nutzen kann, ohne Slots als „total“ zu reporten.
@@ -91,7 +91,7 @@
 
 -   Neue Unit-Tests:
     -   `tests/Unit/Models/ProvidersModelTest.php`: Persistenz von `class_size_default` (Insert/Update, Validierungsfehler).
-    -   `tests/Unit/Libraries/DashboardMetricsTest.php`: Ziel-Fallback-Kaskade, Distinct-Haushalte, Schwellenwert-Flag.
+    -   `tests/Unit/Libraries/DashboardMetricsTest.php`: Ziel-Fallback-Kaskade, Terminzählung, Schwellenwert-Flag.
     -   `tests/Unit/Controllers/DashboardTest.php`: `metrics`-Endpoint (mit Mocks) liefert erwartete JSON-Struktur & Sortierung.
 -   Smoke-/Feature-Tests (manuell / ggf. Codeception falls vorhanden):
     -   Provider-Formular: CRUD inkl. Klassengröße.
@@ -101,8 +101,7 @@
 
 ## Offene Punkte
 
-1. Haushaltsdefinition: Grundlage ist die Kombination aus Klassenleitung und Eltern-Nachname; mehrere Buchungen mit gleichem Nachnamen gelten als unterschiedliche Haushalte, sofern die Klassenleitung differiert.
-2. Chart-Darstellung in PDFs: Priorisieren CSS-basierte Progress-Anzeige (z. B. Balken/Kreis) – robustere und wartungsarme Variante ohne zusätzliche Libraries.
-3. Struktur Sammel-PDF: Kein Inhaltsverzeichnis, keine expliziten Trennseiten; sicherstellen, dass jede Seite eindeutig einer Lehrkraft zugeordnet ist (kein Seitenmix).
-4. Mehrsprachigkeit: PDFs durchgehend auf Deutsch ausliefern (Texte & Labels).
-5. Zielbearbeitung: Keine Inline-Änderung im Dashboard – `class_size_default` bleibt exklusiv im Provider-Stammdatensatz pflegbar; Dashboard zeigt nur an.
+1. Chart-Darstellung in PDFs: Priorisieren CSS-basierte Progress-Anzeige (z. B. Balken/Kreis) – robustere und wartungsarme Variante ohne zusätzliche Libraries.
+2. Struktur Sammel-PDF: Kein Inhaltsverzeichnis, keine expliziten Trennseiten; sicherstellen, dass jede Seite eindeutig einer Lehrkraft zugeordnet ist (kein Seitenmix).
+3. Mehrsprachigkeit: PDFs durchgehend auf Deutsch ausliefern (Texte & Labels).
+4. Zielbearbeitung: Keine Inline-Änderung im Dashboard – `class_size_default` bleibt exklusiv im Provider-Stammdatensatz pflegbar; Dashboard zeigt nur an.
