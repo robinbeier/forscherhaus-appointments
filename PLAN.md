@@ -105,8 +105,8 @@
 ### 6. Alternative Rendering-Strategie (Option A1 – Headless Chrome/Puppeteer)
 
 -   **Architektur:** Sidecar-Service `pdf-renderer` (Node.js + Puppeteer) rendert HTML → PDF; PHP ruft HTTP-API an.
--   **Container:** `pdf-renderer/` mit `package.json`, `server.js` (Express, `/pdf`-Endpoint), `Dockerfile` auf Basis `ghcr.io/puppeteer/puppeteer:22-jammy`, Fonts (DejaVu/Liberation/Noto) installieren.
--   **Compose:** Service einhängen (`docker-compose.yml`), `shm_size: 1gb`, optional `PDF_TOKEN`, Healthcheck `/healthz`.
+-   **Container:** ✅ `pdf-renderer/` mit `package.json`, `server.js` (Express, `/pdf`-Endpoint), `Dockerfile` auf Basis `ghcr.io/puppeteer/puppeteer:22`, Fonts (DejaVu/Liberation/Noto) installieren.
+-   **Compose:** ✅ Service eingebunden (`docker-compose.yml`), `shm_size: 1gb`, optional `PDF_TOKEN`, Healthcheck `/healthz`.
 -   **PHP-Anbindung:** `PdfRenderer`-Client via `guzzlehttp/guzzle` (`renderHtml($html, ['waitFor' => 'chartsReady'])`) → PDF-Bytes streamen.
 -   **Report-HTML:** vollständige HTML-Seite inkl. lokal gebundelter Assets (Chart.js/ECharts, Fonts), Druck-CSS (`@page A4`), Script setzt `window.chartsReady = true` nach Chart-Initialisierung.
 -   **Tests:** `docker compose up pdf-renderer`, `curl` POST `/pdf` Smoke-Test.
