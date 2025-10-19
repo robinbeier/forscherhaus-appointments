@@ -11,14 +11,15 @@
  * @since       v1.8.0
  * ---------------------------------------------------------------------------- */
 
-use Dompdf\Dompdf;
-use Dompdf\Options;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\GuzzleException;
+use RuntimeException;
 use Throwable;
 
 /**
  * PDF renderer library.
  *
- * Lightweight wrapper around Dompdf to render and stream HTML templates.
+ * Wrapper around the headless Chrome renderer sidecar.
  *
  * @package Libraries
  */
@@ -26,20 +27,19 @@ class Pdf_renderer
 {
     protected EA_Controller|CI_Controller $CI;
 
-    /**
-     * @var string
-     */
+    protected Client $client;
+
+    protected array $endpoints;
+
+    protected ?string $token;
+
     protected string $defaultPaper;
 
-    /**
-     * @var string
-     */
     protected string $defaultOrientation;
 
-    /**
-     * @var array
-     */
-    protected array $dompdfOptions;
+    protected array $defaultMargin;
+
+    protected ?string $defaultWaitFor;
 
     /**
      * Pdf_renderer constructor.
@@ -53,22 +53,38 @@ class Pdf_renderer
         $defaults = [
             'paper' => 'A4',
             'orientation' => 'portrait',
-            'options' => [
-                'defaultFont' => 'DejaVu Sans',
-                'isRemoteEnabled' => true,
-                'isHtml5ParserEnabled' => true,
-                'isPhpEnabled' => false,
-                'dpi' => 96,
-                'chroot' => FCPATH,
-                'fontHeightRatio' => 1.1,
+            'margin' => [
+                'top' => '12mm',
+                'right' => '12mm',
+                'bottom' => '14mm',
+                'left' => '12mm',
             ],
+            'wait_for' => 'networkidle',
+            'timeout' => 30.0,
+            'connect_timeout' => 5.0,
+            'base_url' => null,
+            'fallback_urls' => [],
+            'token' => null,
         ];
 
         $config = array_replace_recursive($defaults, $config);
 
-        $this->defaultPaper = $config['paper'];
-        $this->defaultOrientation = $config['orientation'];
-        $this->dompdfOptions = $config['options'];
+        $this->defaultPaper = (string) ($config['paper'] ?? $defaults['paper']);
+        $this->defaultOrientation = (string) ($config['orientation'] ?? $defaults['orientation']);
+        $this->defaultMargin = $this->normalizeMargin($config['margin'] ?? []);
+        $this->defaultWaitFor = $config['wait_for'] !== null ? (string) $config['wait_for'] : null;
+
+        $timeout = (float) ($config['timeout'] ?? $defaults['timeout']);
+        $connectTimeout = (float) ($config['connect_timeout'] ?? $defaults['connect_timeout']);
+
+        $this->token = $this->resolveToken($config);
+        $this->endpoints = $this->resolveEndpoints($config);
+
+        $this->client = new Client([
+            'timeout' => $timeout,
+            'connect_timeout' => $connectTimeout,
+            'http_errors' => false,
+        ]);
     }
 
     /**
@@ -84,10 +100,7 @@ class Pdf_renderer
     {
         $html = $this->CI->load->view($view, $data, true);
 
-        $renderOptions = $options;
-        $this->dumpDebugHtmlIfRequested($html, $renderOptions);
-
-        return $this->render_html($html, $renderOptions);
+        return $this->render_html($html, $options);
     }
 
     /**
@@ -100,9 +113,27 @@ class Pdf_renderer
      */
     public function render_html(string $html, array $options = []): string
     {
-        $dompdf = $this->buildDompdf($html, $options);
+        $renderOptions = $options;
+        $this->dumpDebugHtmlIfRequested($html, $renderOptions);
 
-        return $dompdf->output();
+        $payload = $this->buildPayload($html, $renderOptions);
+
+        $lastException = null;
+
+        foreach ($this->endpoints as $endpoint) {
+            try {
+                return $this->callRenderer($endpoint, $payload);
+            } catch (Throwable $exception) {
+                $lastException = $exception;
+                log_message('error', 'Pdf_renderer failed for endpoint ' . $endpoint . ': ' . $exception->getMessage());
+            }
+        }
+
+        if ($lastException instanceof Throwable) {
+            throw new RuntimeException('PDF rendering failed for all configured endpoints.', 0, $lastException);
+        }
+
+        throw new RuntimeException('PDF rendering failed: no renderer endpoint available.');
     }
 
     /**
@@ -117,10 +148,7 @@ class Pdf_renderer
     {
         $html = $this->CI->load->view($view, $data, true);
 
-        $renderOptions = $options;
-        $this->dumpDebugHtmlIfRequested($html, $renderOptions);
-
-        $this->stream_html($html, $filename, $renderOptions);
+        $this->stream_html($html, $filename, $options);
     }
 
     /**
@@ -132,46 +160,24 @@ class Pdf_renderer
      */
     public function stream_html(string $html, string $filename, array $options = []): void
     {
-        $dompdf = $this->buildDompdf($html, $options);
+        $renderOptions = $options;
+        $attachment = array_key_exists('attachment', $renderOptions) ? (bool) $renderOptions['attachment'] : true;
+        unset($renderOptions['attachment']);
 
-        $attachment = array_key_exists('attachment', $options) ? (bool) $options['attachment'] : true;
+        $pdf = $this->render_html($html, $renderOptions);
 
-        $dompdf->stream($filename, [
-            'Attachment' => $attachment,
-        ]);
-    }
+        $sanitizedFilename = $this->sanitizeFilename($filename);
+        $dispositionType = $attachment ? 'attachment' : 'inline';
 
-    /**
-     * Dump the generated HTML to a file when requested via debug option.
-     */
-    protected function dumpDebugHtmlIfRequested(string $html, array &$options): void
-    {
-        if (empty($options['debug_dump_path'])) {
-            return;
-        }
+        $output = $this->CI->output;
 
-        $path = (string) $options['debug_dump_path'];
-        unset($options['debug_dump_path']);
+        $output->set_header('Content-Type: application/pdf');
+        $output->set_header(sprintf('Content-Disposition: %s; filename="%s"', $dispositionType, $sanitizedFilename));
+        $output->set_header('Content-Length: ' . strlen($pdf));
+        $output->set_output($pdf);
+        $output->_display();
 
-        if ($path === '') {
-            return;
-        }
-
-        $directory = dirname($path);
-
-        if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
-            log_message('error', 'Pdf_renderer debug dump failed to create directory: ' . $directory);
-
-            return;
-        }
-
-        try {
-            if (@file_put_contents($path, $html) === false) {
-                log_message('error', 'Pdf_renderer debug dump failed to write file: ' . $path);
-            }
-        } catch (Throwable $exception) {
-            log_message('error', 'Pdf_renderer debug dump failed: ' . $exception->getMessage());
-        }
+        exit();
     }
 
     /**
@@ -211,79 +217,270 @@ class Pdf_renderer
     }
 
     /**
-     * Build a Dompdf instance configured with the provided HTML.
-     *
-     * @param string $html
-     * @param array $options
-     *
-     * @return Dompdf
+     * Dump the generated HTML to a file when requested via debug option.
      */
-    protected function buildDompdf(string $html, array $options = []): Dompdf
+    protected function dumpDebugHtmlIfRequested(string $html, array &$options): void
     {
-        $dompdf = new Dompdf($this->createOptions($options));
+        if (empty($options['debug_dump_path'])) {
+            return;
+        }
 
-        $dompdf->loadHtml($html);
+        $path = (string) $options['debug_dump_path'];
+        unset($options['debug_dump_path']);
 
-        $paper = $options['paper'] ?? $this->defaultPaper;
-        $orientation = $options['orientation'] ?? $this->defaultOrientation;
+        if ($path === '') {
+            return;
+        }
 
-        $dompdf->setPaper($paper, $orientation);
-        $dompdf->render();
+        $directory = dirname($path);
 
-        return $dompdf;
+        if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
+            log_message('error', 'Pdf_renderer debug dump failed to create directory: ' . $directory);
+
+            return;
+        }
+
+        try {
+            if (@file_put_contents($path, $html) === false) {
+                log_message('error', 'Pdf_renderer debug dump failed to write file: ' . $path);
+            }
+        } catch (Throwable $exception) {
+            log_message('error', 'Pdf_renderer debug dump failed: ' . $exception->getMessage());
+        }
     }
 
     /**
-     * Create Dompdf options from the configured defaults.
-     *
-     * @param array $options
-     *
-     * @return Options
+     * Build the payload that will be posted to the renderer sidecar.
      */
-    protected function createOptions(array $options = []): Options
+    protected function buildPayload(string $html, array $options): array
     {
-        $config = array_replace_recursive($this->dompdfOptions, $options['options'] ?? []);
+        $paper = (string) ($options['paper'] ?? ($options['format'] ?? $this->defaultPaper));
+        $orientation = (string) ($options['orientation'] ?? $this->defaultOrientation);
 
-        $dompdfOptions = new Options();
+        $payload = [
+            'html' => $html,
+            'format' => $paper,
+            'orientation' => $orientation,
+            'landscape' => $this->shouldForceLandscape($orientation, $options),
+        ];
 
-        if (array_key_exists('tempDir', $config) && is_string($config['tempDir'])) {
-            $dompdfOptions->setTempDir($config['tempDir']);
+        $waitFor = $this->resolveWaitFor($options);
+
+        if ($waitFor !== null) {
+            $payload['waitFor'] = $waitFor;
         }
 
-        if (array_key_exists('chroot', $config) && is_array($config['chroot'])) {
-            $dompdfOptions->setChroot($config['chroot']);
-        } elseif (array_key_exists('chroot', $config) && is_string($config['chroot'])) {
-            $dompdfOptions->setChroot([$config['chroot']]);
+        $margin = $this->normalizeMargin($options['margin'] ?? $this->defaultMargin);
+
+        if (!empty($margin)) {
+            $payload['margin'] = $margin;
         }
 
-        if (array_key_exists('defaultFont', $config)) {
-            $dompdfOptions->setDefaultFont($config['defaultFont']);
+        return $payload;
+    }
+
+    /**
+     * Decide what wait strategy should be used for the renderer request.
+     */
+    protected function resolveWaitFor(array $options): ?string
+    {
+        if (array_key_exists('waitFor', $options)) {
+            $value = $options['waitFor'];
+
+            if ($value === null || $value === '') {
+                return null;
+            }
+
+            return (string) $value;
         }
 
-        if (array_key_exists('isRemoteEnabled', $config)) {
-            $dompdfOptions->setIsRemoteEnabled((bool) $config['isRemoteEnabled']);
+        if (array_key_exists('wait_for', $options)) {
+            $value = $options['wait_for'];
+
+            if ($value === null || $value === '') {
+                return null;
+            }
+
+            return (string) $value;
         }
 
-        if (array_key_exists('isHtml5ParserEnabled', $config)) {
-            $dompdfOptions->setIsHtml5ParserEnabled((bool) $config['isHtml5ParserEnabled']);
+        return $this->defaultWaitFor;
+    }
+
+    /**
+     * Normalise the provided margin array into the format expected by the renderer.
+     */
+    protected function normalizeMargin(array $margin): array
+    {
+        $keys = ['top', 'right', 'bottom', 'left'];
+        $normalized = [];
+
+        foreach ($keys as $key) {
+            if (!array_key_exists($key, $margin)) {
+                continue;
+            }
+
+            $value = $margin[$key];
+
+            if ($value === null) {
+                continue;
+            }
+
+            if (is_numeric($value)) {
+                $value = $value . 'mm';
+            } else {
+                $value = (string) $value;
+            }
+
+            $trimmed = trim($value);
+
+            if ($trimmed !== '') {
+                $normalized[$key] = $trimmed;
+            }
         }
 
-        if (array_key_exists('isPhpEnabled', $config)) {
-            $dompdfOptions->setIsPhpEnabled((bool) $config['isPhpEnabled']);
+        return $normalized;
+    }
+
+    /**
+     * Determine whether the renderer should produce a landscape PDF.
+     */
+    protected function shouldForceLandscape(string $orientation, array $options): bool
+    {
+        if (isset($options['landscape']) && is_bool($options['landscape'])) {
+            return $options['landscape'];
         }
 
-        if (array_key_exists('dpi', $config)) {
-            $dompdfOptions->setDpi((int) $config['dpi']);
+        return strtolower($orientation) === 'landscape';
+    }
+
+    /**
+     * Execute the HTTP call towards the renderer service.
+     *
+     * @param string $endpoint
+     * @param array $payload
+     *
+     * @return string
+     */
+    protected function callRenderer(string $endpoint, array $payload): string
+    {
+        $url = rtrim($endpoint, '/') . '/pdf';
+
+        try {
+            $response = $this->client->post($url, [
+                'headers' => $this->buildHeaders(),
+                'json' => $payload,
+            ]);
+        } catch (GuzzleException $exception) {
+            throw new RuntimeException('Pdf_renderer HTTP request failed: ' . $exception->getMessage(), 0, $exception);
         }
 
-        if (array_key_exists('fontHeightRatio', $config)) {
-            $dompdfOptions->setFontHeightRatio((float) $config['fontHeightRatio']);
+        $status = $response->getStatusCode();
+
+        if ($status >= 200 && $status < 300) {
+            return (string) $response->getBody();
         }
 
-        if (array_key_exists('enableFontSubsetting', $config)) {
-            $dompdfOptions->setIsFontSubsettingEnabled((bool) $config['enableFontSubsetting']);
+        $body = (string) $response->getBody();
+
+        throw new RuntimeException(
+            sprintf('Pdf_renderer responded with status %d: %s', $status, $body !== '' ? $body : 'no body'),
+        );
+    }
+
+    /**
+     * Build the HTTP headers for the renderer request.
+     */
+    protected function buildHeaders(): array
+    {
+        $headers = [
+            'Accept' => 'application/pdf',
+        ];
+
+        if ($this->token) {
+            $headers['X-Pdf-Token'] = $this->token;
         }
 
-        return $dompdfOptions;
+        return $headers;
+    }
+
+    /**
+     * Resolve the renderer token from configuration / environment.
+     */
+    protected function resolveToken(array $config): ?string
+    {
+        $token = $config['token'] ?? env('PDF_RENDERER_TOKEN');
+
+        if ($token === null) {
+            return null;
+        }
+
+        $token = trim((string) $token);
+
+        return $token !== '' ? $token : null;
+    }
+
+    /**
+     * Resolve the renderer endpoints from configuration / environment.
+     *
+     * @throws RuntimeException
+     */
+    protected function resolveEndpoints(array $config): array
+    {
+        $candidates = [];
+
+        $configured = $config['base_url'] ?? env('PDF_RENDERER_URL', '');
+
+        if (is_string($configured) && trim($configured) !== '') {
+            $candidates[] = $configured;
+        }
+
+        $fallbacks = $config['fallback_urls'] ?? [];
+
+        if (!is_array($fallbacks)) {
+            $fallbacks = [$fallbacks];
+        }
+
+        $defaults = ['http://pdf-renderer:3000', 'http://localhost:3003'];
+
+        $candidates = array_merge($candidates, $fallbacks, $defaults);
+
+        $normalized = [];
+
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate)) {
+                continue;
+            }
+
+            $trimmed = rtrim(trim($candidate), '/');
+
+            if ($trimmed === '') {
+                continue;
+            }
+
+            if (!in_array($trimmed, $normalized, true)) {
+                $normalized[] = $trimmed;
+            }
+        }
+
+        if (empty($normalized)) {
+            throw new RuntimeException('No PDF renderer endpoint configured.');
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Sanitize a filename for use in the Content-Disposition header.
+     */
+    protected function sanitizeFilename(string $filename): string
+    {
+        $sanitized = str_replace(["\r", "\n"], '', trim($filename));
+
+        if ($sanitized === '') {
+            return 'report.pdf';
+        }
+
+        return $sanitized;
     }
 }

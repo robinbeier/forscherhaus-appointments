@@ -104,19 +104,19 @@
 
 ### 6. Alternative Rendering-Strategie (Option A1 – Headless Chrome/Puppeteer)
 
--   **Architektur:** Sidecar-Service `pdf-renderer` (Node.js + Puppeteer) rendert HTML → PDF; PHP ruft HTTP-API an.
--   **Container:** ✅ `pdf-renderer/` mit `package.json`, `server.js` (Express, `/pdf`-Endpoint), `Dockerfile` auf Basis `ghcr.io/puppeteer/puppeteer:22`, Fonts (DejaVu/Liberation/Noto) installieren.
--   **Compose:** ✅ Service eingebunden (`docker-compose.yml`), `shm_size: 1gb`, optional `PDF_TOKEN`, Healthcheck `/healthz`.
--   **PHP-Anbindung:** `PdfRenderer`-Client via `guzzlehttp/guzzle` (`renderHtml($html, ['waitFor' => 'chartsReady'])`) → PDF-Bytes streamen.
--   **Report-HTML:** vollständige HTML-Seite inkl. lokal gebundelter Assets (Chart.js/ECharts, Fonts), Druck-CSS (`@page A4`), Script setzt `window.chartsReady = true` nach Chart-Initialisierung.
--   **Tests:** `docker compose up pdf-renderer`, `curl` POST `/pdf` Smoke-Test.
--   **Betrieb:** Browser-Reuse, Timeouts (30 s), `networkidle0`, Sicherheitsmaßnahmen (interne Kommunikation, Token-Header).
--   **Migration:** Dompdf-Aufruf ersetzen durch HTTP-Call, bestehendes HTML wiederverwenden, Charts per Chart.js rendern.
--   **Statische Assets:** Warn-/Info-Icons als vorhandene Font-Awesome-Glyphen bzw. PNGs bereitstellen; keine zusätzlichen Render-Helfer nötig.
--   **Netzwerk:** Kommunikation bleibt auf das interne Compose-Netz beschränkt; initial keine Token-/mTLS-Abhängigkeiten.
--   **Fehlertoleranz:** Kein dediziertes Retry erforderlich – Fehler propagiert an PHP, Nutzer bekommt klare Fehlermeldung.
--   **Konfiguration:** Vorerst reine Dev-Lösung; Host/Port direkt in `.env`/Compose hinterlegen, spätere Umgebungen bei Bedarf ergänzen.
--   **Monitoring:** Für das MVP kein zentrales Monitoring; bei Stabilisierung evtl. Healthcheck-Auswertung in der Ops-Pipeline vorsehen.
+-   [x] **Architektur:** Sidecar-Service `pdf-renderer` (Node.js + Puppeteer) rendert HTML → PDF; PHP ruft HTTP-API an.
+-   [x] **Container:** ✅ `pdf-renderer/` mit `package.json`, `server.js` (Express, `/pdf`-Endpoint), `Dockerfile` auf Basis `ghcr.io/puppeteer/puppeteer:22`, Fonts (DejaVu/Liberation/Noto) installieren.
+-   [x] **Compose:** ✅ Service eingebunden (`docker-compose.yml`), `shm_size: 1gb`, optional `PDF_TOKEN`, Healthcheck `/healthz`.
+-   [x] **PHP-Anbindung:** `PdfRenderer`-Client via `guzzlehttp/guzzle` (`renderHtml($html, ['waitFor' => 'chartsReady'])`) → PDF-Bytes streamen.
+-   [x] **Report-HTML:** vollständige HTML-Seite inkl. lokal gebundelter Assets (Chart.js/ECharts, Fonts), Druck-CSS (`@page A4`), Script setzt `window.chartsReady = true` nach Chart-Initialisierung.
+-   [x] **Tests:** `docker compose up pdf-renderer`, `curl` POST `/pdf` Smoke-Test.
+-   [x] **Betrieb:** Browser-Reuse, Timeouts (30 s), `networkidle0`, Sicherheitsmaßnahmen (interne Kommunikation, Token-Header).
+-   [x] **Migration:** Dompdf-Aufruf ersetzen durch HTTP-Call, bestehendes HTML wiederverwenden, Charts per Chart.js rendern.
+-   [x] **Statische Assets:** Warn-/Info-Icons als vorhandene Font-Awesome-Glyphen bzw. PNGs bereitstellen; keine zusätzlichen Render-Helfer nötig.
+-   [x] **Netzwerk:** Kommunikation bleibt auf das interne Compose-Netz beschränkt; initial keine Token-/mTLS-Abhängigkeiten.
+-   [x] **Fehlertoleranz:** Kein dediziertes Retry erforderlich – Fehler propagiert an PHP, Nutzer bekommt klare Fehlermeldung.
+-   [x] **Konfiguration:** Vorerst reine Dev-Lösung; Host/Port direkt in `.env`/Compose hinterlegen, spätere Umgebungen bei Bedarf ergänzen.
+-   [x] **Monitoring:** Für das MVP kein zentrales Monitoring; bei Stabilisierung evtl. Healthcheck-Auswertung in der Ops-Pipeline vorsehen.
 
 **Offene Fragen**
 
