@@ -131,7 +131,7 @@ class Provider_utilization
 
         $open_slots = max(0, $total_slots - $booked_slots);
 
-        $fill_rate = $total_slots > 0 ? $booked_slots / $total_slots : 0.0;
+        $fill_rate = $total_slots > 0 ? (float) ($booked_slots / $total_slots) : 0.0;
 
         return [
             'total' => $total_slots,
