@@ -6,25 +6,21 @@
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <style>
             :root {
-                --brand: #2e7d32;
-                --brand-muted: #c8e6c9;
-                --ink: #1f2933;
-                --ink-muted: #475467;
-                --border: #dfe3eb;
-                --border-strong: #ccd2db;
-                --background: #f6f8fb;
-                --background-strong: #e9eef5;
-                --attention: #ab1f1f;
-                --attention-light: #fce8e8;
-                --shadow: rgba(15, 23, 42, 0.07);
-                --radius: 12px;
-                --warning: #b45309;
-                --warning-light: #fef3c7;
+                --accent: #2563eb;
+                --accent-weak: #dbeafe;
+                --ink: #111827;
+                --ink-muted: #6b7280;
+                --border: #e5e7eb;
+                --background: #f8fafc;
+                --card: #ffffff;
+                --warn: #b45309;
+                --warn-bg: #fff7ed;
+                --radius: 10pt;
             }
 
             @page {
                 size: A4;
-                margin: 16mm 18mm 18mm;
+                margin: 12mm 12mm 14mm;
             }
 
             html {
@@ -54,15 +50,15 @@
             .page {
                 display: flex;
                 flex-direction: column;
-                min-height: calc(297mm - 34mm);
-                gap: 16pt;
+                gap: 18pt;
+                min-height: calc(297mm - 26mm);
             }
 
             .header {
                 display: flex;
-                gap: 12pt;
                 align-items: flex-start;
                 justify-content: space-between;
+                gap: 12pt;
             }
 
             .header__titles {
@@ -72,9 +68,9 @@
             }
 
             .header__title {
+                margin: 0;
                 font-size: 21pt;
                 font-weight: 600;
-                margin: 0;
             }
 
             .header__meta {
@@ -94,106 +90,137 @@
                 display: block;
             }
 
-            .kpi-grid {
+            .summary-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(180pt, 1fr));
+                grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+                gap: 14pt;
+                align-items: start;
+            }
+
+            .kpis {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 12pt;
             }
 
-            .kpi {
-                padding: 12pt;
+            .card {
+                background: var(--card);
                 border: 1px solid var(--border);
                 border-radius: var(--radius);
-                background: #fff;
-                box-shadow: 0 1px 2px var(--shadow);
+                padding: 12pt;
+                display: flex;
+                flex-direction: column;
+                gap: 10pt;
             }
-                .kpi__label { margin: 0 0 6pt; font-size: 11pt; }
-                .kpi__chart { display: flex; align-items: center; gap: 12pt; }
-                .kpi__meta { margin: 0; font-size: 9pt; color: var(--ink-muted); }
 
-            .donut-figure {
+            .card h3 {
+                margin: 0;
+                font-size: 11pt;
+                font-weight: 600;
+            }
+
+            .donut {
+                display: flex;
+                align-items: center;
+                gap: 10pt;
+            }
+
+            .donut__figure {
                 position: relative;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
             }
 
-            .donut-figure__image {
+            .donut__image {
+                width: 120px;
+                height: 120px;
                 display: block;
-                width: 72px;
-                height: 72px;
             }
 
-            .donut-figure__label {
+            .donut__figure--fallback {
+                width: 120px;
+                height: 120px;
+                border-radius: 50%;
+                border: 10px solid var(--accent-weak);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .donut__label {
                 position: absolute;
-                font-size: 11pt;
+                font-size: 16pt;
+                font-weight: 700;
+                color: var(--ink);
+            }
+
+            .donut__stats {
+                display: flex;
+                flex-direction: column;
+                gap: 4pt;
+            }
+
+            .donut__value {
+                font-size: 16pt;
+                font-weight: 700;
+            }
+
+            .donut__caption {
+                margin: 0;
+                color: var(--ink-muted);
+                font-size: 9pt;
+            }
+
+            .meta-card {
+                display: flex;
+                align-items: baseline;
+                justify-content: space-between;
+                margin-top: 12pt;
+                padding: 10pt 12pt;
+                border-radius: var(--radius);
+                border: 1px dashed var(--border);
+                font-size: 9.5pt;
+                color: var(--ink-muted);
+            }
+
+            .meta-card strong {
+                font-size: 14pt;
                 font-weight: 600;
                 color: var(--ink);
             }
 
-            .donut-figure--fallback {
-                width: 72px;
-                height: 72px;
-                border-radius: 50%;
-                border: 8px solid #e9eef5;
-                background: #fff;
-            }
-
-            /* Hinweis-/Callout-Box im Stil der Eltern-PDF (nur als Warnhinweis getönt) */
             .callout {
-                display: flex; gap: 10pt; align-items: flex-start;
-                padding: 10pt 12pt; border-radius: var(--radius);
-                border: 1px solid var(--warning); background: var(--warning-light);
-            }
-                .callout__icon { width: 14pt; height: 14pt; margin-top: 2pt; }
-                .callout__title { margin: 0 0 2pt; font-size: 10.5pt; font-weight: 600; }
-                .callout__text { margin: 0; font-size: 9.5pt; }
-
-            /* Tabelle: neue „bis 75 %“-Spalte + Sekundärhinweis im Status */
-            .table__hint { margin-top: 3pt; font-size: 8.5pt; color: var(--ink-muted); }
-
-            /* Zeilen farblich ganz leicht akzentuieren, wenn < 75 % */
-            .table__row--alert td { background: rgba(220, 38, 38, 0.05); }
-
-            /* Kein Zeilenumbruch bei Prozent/Chips */
-            .nowrap { white-space: nowrap; }
-
-            .actions-grid {
-                display: grid;
-                grid-template-columns: 2fr 3fr;
-                gap: 12pt;
-            }
-
-            .card {
-                border: 1px solid var(--border);
+                border: 1px solid var(--warn);
+                background: var(--warn-bg);
                 border-radius: var(--radius);
-                background: #fff;
-                padding: 12pt;
+                padding: 14pt;
                 display: flex;
                 flex-direction: column;
                 gap: 8pt;
             }
 
-            .card__title {
+            .callout h3 {
                 margin: 0;
                 font-size: 11pt;
                 font-weight: 600;
+                color: var(--warn);
             }
 
-            .card__list {
+            .callout p {
                 margin: 0;
-                padding-left: 12pt;
+                font-size: 9.5pt;
+                color: var(--ink);
+            }
+
+            .callout ul {
+                margin: 4pt 0 0;
+                padding-left: 16pt;
                 font-size: 9.5pt;
             }
 
-            .card__list li {
+            .callout li {
                 margin-bottom: 4pt;
-            }
-
-            .card__meta {
-                font-size: 9pt;
-                color: var(--ink-muted);
-                margin: 0;
             }
 
             .table-wrapper {
@@ -210,108 +237,106 @@
             }
 
             thead th {
-                background: var(--background-strong);
-                color: var(--ink-muted);
-                text-transform: uppercase;
-                letter-spacing: 0.3pt;
-                font-size: 8.8pt;
+                background: var(--accent-weak);
+                color: var(--ink);
                 font-weight: 600;
-                padding: 7pt 9pt;
+                padding: 8pt 10pt;
                 text-align: left;
+                border-bottom: 1px solid var(--border);
             }
 
             tbody td {
-                padding: 8pt 9pt;
+                padding: 8pt 10pt;
                 border-bottom: 1px solid var(--border);
-                vertical-align: top;
+                color: var(--ink);
             }
 
             tbody tr:last-child td {
                 border-bottom: none;
             }
 
-            .table__row--alert {
-                background: var(--attention-light);
+            tbody tr {
+                break-inside: avoid;
+                page-break-inside: avoid;
             }
 
-            .table__row--fallback {
-                background-image: linear-gradient(
-                    135deg,
-                    rgba(0, 0, 0, 0.04) 25%,
-                    rgba(0, 0, 0, 0) 25%
-                );
-                background-size: 12pt 12pt;
+            tbody tr.alert td {
+                background: rgba(37, 99, 235, 0.08);
             }
 
-            .provider {
-                font-weight: 600;
-                margin: 0;
-            }
-
-            .status-chip {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                padding: 3pt 8pt;
-                border-radius: 16pt;
-                font-size: 8.5pt;
-                font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.3pt;
-                border: 1px solid transparent;
-            }
-
-            .status-chip--alert {
-                background: var(--attention-light);
-                border-color: var(--attention);
-                color: var(--attention);
-            }
-
-            .status-chip--ok {
-                background: rgba(46, 125, 50, 0.12);
-                border-color: rgba(46, 125, 50, 0.32);
-                color: var(--brand);
-            }
-
-            .status-chip--brand {
-                background: var(--brand);
-                color: #fff;
-            }
-
-            .status-chip--muted {
-                background: var(--background-strong);
-                border-color: var(--border-strong);
-                color: var(--ink-muted);
-            }
-
-            .table__number {
+            .col-right {
                 text-align: right;
             }
 
-            .table__progress {
-                margin-top: 5pt;
-                height: 6pt;
-                background: var(--background-strong);
+            .nowrap {
+                white-space: nowrap;
+            }
+
+            .provider {
+                margin: 0;
+                font-weight: 600;
+            }
+
+            .provider__meta {
+                margin-top: 3pt;
+                font-size: 8.8pt;
+                color: var(--ink-muted);
+            }
+
+            .bar {
+                margin-top: 6pt;
+                height: 8px;
+                background: #f3f4f6;
                 border-radius: 999px;
                 overflow: hidden;
             }
 
-            .table__progress-bar {
+            .bar__fill {
                 height: 100%;
-                background: var(--brand);
+                background: var(--accent);
             }
 
-            .table__progress-bar.is-alert {
-                background: var(--attention);
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 6pt;
+                padding: 2pt 8pt;
+                border-radius: 9999px;
+                font-size: 9pt;
+                font-weight: 600;
+                border: 1px solid var(--border);
             }
 
-            .empty-state {
-                padding: 18pt;
-                text-align: center;
+            .badge--accent {
+                color: var(--accent);
+                background: rgba(37, 99, 235, 0.12);
+                border-color: rgba(37, 99, 235, 0.32);
+            }
+
+            .badge--warn {
+                color: var(--warn);
+                background: var(--warn-bg);
+                border-color: rgba(180, 83, 9, 0.4);
+            }
+
+            .badge--warn::before {
+                content: '•';
+                font-size: 12pt;
+                line-height: 1;
+                color: var(--warn);
+            }
+
+            .badge--muted {
                 color: var(--ink-muted);
-                font-size: 11pt;
+                background: #f3f4f6;
+                border-color: var(--border);
             }
 
+            .legend {
+                font-size: 8.8pt;
+                color: var(--ink-muted);
+                margin-top: 6pt;
+            }
         </style>
     </head>
     <body>
@@ -332,17 +357,17 @@
                 (int) ($metric['gap_to_threshold'] ?? max((int) ceil($thresholdRatio * $targetRaw) - $bookedRaw, 0));
             $thresholdAbsolute = (int) ($metric['threshold_absolute'] ?? (int) ceil($thresholdRatio * $targetRaw));
 
-            $statusTone = 'ok';
+            $statusVariant = 'accent';
             $statusLabel = 'Im Ziel';
 
             if (!empty($metric['is_zero_target'])) {
-                $statusTone = 'muted';
+                $statusVariant = 'muted';
                 $statusLabel = 'Kein Ziel gepflegt';
             } elseif ($gapToThreshold > 0) {
-                $statusTone = 'alert';
+                $statusVariant = 'warn';
                 $statusLabel = 'Unter ' . number_format($thresholdRatio * 100, 0, ',', '.') . ' %';
             } elseif ($openRaw <= 0 && $targetRaw > 0) {
-                $statusTone = 'brand';
+                $statusVariant = 'accent';
                 $statusLabel = 'Voll ausgelastet';
             }
 
@@ -361,7 +386,7 @@
                 'gap_to_threshold' => $gapToThreshold,
                 'gap_to_threshold_formatted' => $formatNumber($gapToThreshold),
                 'threshold_absolute' => $thresholdAbsolute,
-                'status_tone' => $statusTone,
+                'status_variant' => $statusVariant,
                 'status_label' => $statusLabel,
                 'status_secondary' => $secondaryLabel,
             ]);
@@ -391,7 +416,7 @@
             ' / ' .
             number_format($teachersTotal, 0, ',', '.') .
             ' im Ziel';
-        $gapTotalLabel = number_format($gapTotal, 0, ',', '.') . ' bis ' . ($threshold_percent ?? '75 %');
+        $gapTotalFormatted = number_format($gapTotal, 0, ',', '.');
 
         $topInterventions = array_slice(
             array_filter($preparedMetrics, static fn(array $metric): bool => $metric['gap_to_threshold'] > 0),
@@ -408,18 +433,18 @@
         $donutImageThickness = 20;
 
         $primaryDonutImage = donut_image_data_url($fillRateValue, $donutImageSize, $donutImageThickness, [
-            'background' => '#e9eef5',
-            'foreground' => '#2e7d32',
+            'background' => '#e5e7eb',
+            'foreground' => '#2563eb',
         ]);
 
         $progressInTarget = $teachersTotal > 0 ? max(0.0, min(1.0, $inTargetCount / $teachersTotal)) : 0.0;
 
         $inTargetDonutImage = donut_image_data_url($progressInTarget, $donutImageSize, $donutImageThickness, [
-            'background' => '#e9eef5',
-            'foreground' => '#2e7d32',
+            'background' => '#e5e7eb',
+            'foreground' => '#2563eb',
         ]);
         ?>
-        <div class="page page--front">
+        <div class="page">
             <header class="header" role="banner">
                 <div class="header__titles">
                     <h1 class="header__title">Schulleitungsreport</h1>
@@ -435,182 +460,181 @@
                 <?php endif; ?>
             </header>
 
-            <section class="kpi-grid" aria-label="Kennzahlenübersicht">
-                <article class="kpi">
-                    <h2 class="kpi__label">Gesamtauslastung</h2>
-                    <div class="kpi__chart">
-                        <?php if ($primaryDonutImage !== null): ?>
-                            <div class="donut-figure">
-                                <img src="<?= html_escape($primaryDonutImage) ?>" alt="" class="donut-figure__image" />
-                                <span class="donut-figure__label"><?= html_escape(
-                                    $summary['fill_rate_formatted'] ?? '0 %',
-                                ) ?></span>
+            <section class="summary-grid" aria-label="Kennzahlenübersicht">
+                <div>
+                    <div class="kpis">
+                        <article class="card" aria-label="Gesamtauslastung">
+                            <h3>Gesamtauslastung</h3>
+                            <div class="donut">
+                                <?php if ($primaryDonutImage !== null): ?>
+                                    <div class="donut__figure">
+                                        <img src="<?= html_escape($primaryDonutImage) ?>" alt="" class="donut__image" />
+                                        <span class="donut__label"><?= html_escape(
+                                            $summary['fill_rate_formatted'] ?? '0 %',
+                                        ) ?></span>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="donut__figure donut__figure--fallback">
+                                        <span class="donut__label"><?= html_escape(
+                                            $summary['fill_rate_formatted'] ?? '0 %',
+                                        ) ?></span>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="donut__stats">
+                                    <div class="donut__value"><?= html_escape(
+                                        $summary['fill_rate_formatted'] ?? '0 %',
+                                    ) ?></div>
+                                    <p class="donut__caption">
+                                        <?= html_escape($bookedDistinctFormatted) ?> von <?= html_escape(
+     $targetTotalFormatted,
+ ) ?>
+                                        Haushalten erreicht
+                                    </p>
+                                </div>
                             </div>
-                        <?php else: ?>
-                            <div class="donut-figure donut-figure--fallback">
-                                <span class="donut-figure__label"><?= html_escape(
-                                    $summary['fill_rate_formatted'] ?? '0 %',
-                                ) ?></span>
+                        </article>
+
+                        <article class="card" aria-label="Lehrkräfte im Zielkorridor">
+                            <h3>Lehrkräfte ≥ <?= html_escape($threshold_percent ?? '75 %') ?></h3>
+                            <div class="donut">
+                                <?php if ($inTargetDonutImage !== null): ?>
+                                    <div class="donut__figure">
+                                        <img src="<?= html_escape(
+                                            $inTargetDonutImage,
+                                        ) ?>" alt="" class="donut__image" />
+                                        <span class="donut__label"><?= html_escape(
+                                            number_format($progressInTarget * 100, 0, ',', '.'),
+                                        ) ?> %</span>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="donut__figure donut__figure--fallback">
+                                        <span class="donut__label"><?= html_escape(
+                                            number_format($progressInTarget * 100, 0, ',', '.'),
+                                        ) ?> %</span>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="donut__stats">
+                                    <div class="donut__value"><?= html_escape(
+                                        number_format($progressInTarget * 100, 0, ',', '.'),
+                                    ) ?> %</div>
+                                    <p class="donut__caption"><?= html_escape($inTargetLabel) ?></p>
+                                </div>
                             </div>
-                        <?php endif; ?>
-                        <p class="kpi__meta">
-                            <?= html_escape($bookedDistinctFormatted) ?> von <?= html_escape($targetTotalFormatted) ?>
-                            Haushalten erreicht
-                        </p>
+                        </article>
                     </div>
-                </article>
-            </section>
 
-        <!-- Kachel: Lehrkräfte ≥ 75 % -->
-        <article class="kpi">
-        <h2 class="kpi__label">Lehrkräfte ≥ <?= html_escape($threshold_percent ?? '75 %') ?></h2>
-                    <div class="kpi__chart">
-            <?php if ($inTargetDonutImage !== null): ?>
-                <div class="donut-figure">
-                    <img src="<?= html_escape($inTargetDonutImage) ?>" alt="" class="donut-figure__image" />
-                    <span class="donut-figure__label"><?= html_escape(
-                        number_format($progressInTarget * 100, 0, ',', '.'),
-                    ) ?> %</span>
+                    <div class="meta-card">
+                        <span>Fehlend bis <?= html_escape($threshold_percent ?? '75 %') ?></span>
+                        <strong><?= html_escape($gapTotalFormatted) ?></strong>
+                    </div>
                 </div>
-            <?php else: ?>
-                <div class="donut-figure donut-figure--fallback">
-                    <span class="donut-figure__label"><?= html_escape(
-                        number_format($progressInTarget * 100, 0, ',', '.'),
-                    ) ?> %</span>
-                </div>
-            <?php endif; ?>
-            <p class="kpi__meta"><?= html_escape($inTargetLabel) ?></p>
-        </div>
-        </article>
 
-        <!-- Kachel: Fehlend bis 75 % (gesamt) -->
-        <article class="kpi">
-        <h2 class="kpi__label">Fehlend bis <?= html_escape($threshold_percent ?? '75 %') ?> (gesamt)</h2>
-        <div class="kpi__chart">
-            <svg width="0" height="0" aria-hidden="true"></svg>
-            <p class="kpi__meta" style="font-size: 16pt; font-weight: 600; margin: 0;">
-            <?= html_escape($gapTotalLabel) ?>
-            </p>
-        </div>
-        </article>
-
-        <section aria-label="Handlungsbedarf" class="callout">
-        <!-- kleines Warnicon -->
-        <svg class="callout__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <circle cx="12" cy="12" r="10" stroke-width="1.5"></circle>
-            <line x1="12" y1="7" x2="12" y2="13" stroke-width="1.5"></line>
-            <circle cx="12" cy="17" r="1.2" fill="currentColor"></circle>
-        </svg>
-        <div class="callout__content">
-            <p class="callout__title">Handlungsbedarf</p>
-            <p class="callout__text">
-            <strong><?= html_escape(number_format($belowCount, 0, ',', '.')) ?></strong> von
-            <?= html_escape(number_format($teachersTotal, 0, ',', '.')) ?> Lehrkräften liegen unter
-            <?= html_escape($threshold_percent ?? '75 %') ?>. Insgesamt fehlen
-            <strong><?= html_escape(number_format($gapTotal, 0, ',', '.')) ?></strong> Buchungen bis zur Schwelle.
-            Bitte priorisieren Sie die Top 3 unten.
-            </p>
-        </div>
-        </section>
-
-
-            <section class="actions-grid" aria-label="Handlungsempfehlungen">
-                <article class="card">
+                <aside class="callout">
+                    <h3>Handlungsbedarf</h3>
+                    <p>
+                        <strong><?= html_escape(number_format($belowCount, 0, ',', '.')) ?></strong>
+                        von <?= html_escape(number_format($teachersTotal, 0, ',', '.')) ?>
+                        Lehrkräften liegen unter <?= html_escape($threshold_percent ?? '75 %') ?>.
+                    </p>
+                    <p>
+                        Es fehlen insgesamt
+                        <strong><?= html_escape($gapTotalFormatted) ?></strong> Buchungen bis zur Schwelle.
+                    </p>
                     <?php if (!empty($topInterventions)): ?>
-                        <h4 class="card__title">Top 3 Lehrkräfte mit größtem Bedarf</h4>
-                        <ol class="card__list">
+                        <ul>
                             <?php foreach ($topInterventions as $intervention): ?>
                                 <li>
-                                    <?= html_escape($intervention['provider_name'] ?? '') ?>:
-                                    <?= html_escape(
+                                    <?= html_escape($intervention['provider_name'] ?? '') ?>
+                                    &ndash;
+                                    <strong><?= html_escape(
                                         $intervention['gap_to_threshold_formatted'] ??
                                             $formatNumber((int) ($intervention['gap_to_threshold'] ?? 0)),
-                                    ) ?>
-                                    fehlend
+                                    ) ?></strong>
+                                    offen
                                 </li>
                             <?php endforeach; ?>
-                        </ol>
+                        </ul>
+                        <p>Empfehlung: Priorisierte Elternansprache bis zur Schwelle von <?= html_escape(
+                            $threshold_percent ?? '75 %',
+                        ) ?>.</p>
                     <?php else: ?>
-                        <p class="card__meta">Alle Lehrkräfte liegen aktuell im Zielkorridor.</p>
+                        <p>Alle Lehrkräfte liegen aktuell im Zielkorridor.</p>
                     <?php endif; ?>
-                    <p class="card__meta">Empfehlung: Priorisierte Elternansprache bis zur Schwelle von <?= html_escape(
-                        $threshold_percent ?? '75 %',
-                    ) ?>.</p>
-                </article>
+                </aside>
             </section>
 
             <section class="table-wrapper" aria-label="Auslastung je Lehrkraft">
-                <table>
-                    <thead>
-                    <tr>
-                        <th style="width: 30%;">Lehrkraft</th>
-                        <th style="width: 14%;" class="table__number">Klassengröße</th>
-                        <th style="width: 14%;" class="table__number">Gebucht</th>
-                        <th style="width: 16%;">Auslastung</th>
-                        <th style="width: 12%;" class="table__number">bis&nbsp;75&nbsp;%</th>
-                        <th style="width: 14%;">Status</th>
-                    </tr>
-                    </thead>
-
-                    <tbody>
-                        <?php foreach ($preparedMetrics as $metric): ?>
-                            <?php
-                            $rowClasses = [];
-
-                            if (!empty($metric['needs_attention'])) {
-                                $rowClasses[] = 'table__row--alert';
-                            }
-
-                            if (!empty($metric['is_target_fallback'])) {
-                                $rowClasses[] = 'table__row--fallback';
-                            }
-
-                            $rowClass = implode(' ', $rowClasses);
-                            ?>
-                            <tr<?= $rowClass ? ' class="' . html_escape($rowClass) . '"' : '' ?>>
-                                <td>
-                                    <p class="provider"><?= html_escape($metric['provider_name'] ?? '') ?></p>
-                                </td>
-                                <td class="table__number">
-                                    <?= !empty($metric['is_zero_target'])
-                                        ? '&mdash;'
-                                        : html_escape($metric['target'] ?? '0') ?>
-                                </td>
-                                <td class="table__number"><?= html_escape($metric['booked'] ?? '0') ?></td>
-                                <td>
-                                    <div><?= html_escape($metric['fill_rate_percent'] ?? '0 %') ?></div>
-                                    <div class="table__progress" role="presentation">
-                                        <div
-                                            class="table__progress-bar<?= !empty($metric['needs_attention'])
-                                                ? ' is-alert'
-                                                : '' ?>"
-                                            style="width: <?= (int) ($metric['is_zero_target']
-                                                ? 0
-                                                : $metric['fill_rate_percent_value'] ?? 0) ?>%;"
-                                        ></div>
-                                    </div>
-                                </td>
-                                <!-- NEU: bis 75 % -->
-                                <td class="table__number nowrap">
-                                <?= (int) ($metric['gap_to_threshold'] ?? 0) > 0
-                                    ? html_escape(
-                                        $metric['gap_to_threshold_formatted'] ??
-                                            (string) (int) ($metric['gap_to_threshold'] ?? 0),
-                                    )
-                                    : '&mdash;' ?>
-                                </td>
-
-                                <td>
-                                <span class="status-chip status-chip--<?= html_escape($metric['status_tone']) ?>">
-                                    <?= html_escape($metric['status_label']) ?>
-                                </span>
-                                </td>
+                <?php if (!empty($preparedMetrics)): ?>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Lehrkraft</th>
+                                <th class="col-right">Klassengröße</th>
+                                <th class="col-right">Gebucht</th>
+                                <th>Auslastung</th>
+                                <th class="col-right">bis <?= html_escape($threshold_percent ?? '75 %') ?></th>
+                                <th>Status</th>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($preparedMetrics as $metric): ?>
+                                <?php
+                                $rowClass = !empty($metric['needs_attention']) ? ' class="alert"' : '';
+                                $fillPercent = (int) (!empty($metric['is_zero_target'])
+                                    ? 0
+                                    : max(0, min(100, (int) ($metric['fill_rate_percent_value'] ?? 0))));
+                                ?>
+                                <tr<?= $rowClass ?>>
+                                    <td>
+                                        <p class="provider"><?= html_escape($metric['provider_name'] ?? '') ?></p>
+                                        <?php if (!empty($metric['status_secondary'])): ?>
+                                            <div class="provider__meta"><?= html_escape(
+                                                $metric['status_secondary'],
+                                            ) ?></div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="col-right">
+                                        <?= !empty($metric['is_zero_target'])
+                                            ? '&mdash;'
+                                            : html_escape($metric['target'] ?? '0') ?>
+                                    </td>
+                                    <td class="col-right"><?= html_escape($metric['booked'] ?? '0') ?></td>
+                                    <td>
+                                        <span><?= html_escape($metric['fill_rate_percent'] ?? '0 %') ?></span>
+                                        <div class="bar" role="presentation">
+                                            <div class="bar__fill" style="width: <?= $fillPercent ?>%;"></div>
+                                        </div>
+                                    </td>
+                                    <td class="col-right nowrap">
+                                        <?= (int) ($metric['gap_to_threshold'] ?? 0) > 0
+                                            ? html_escape(
+                                                $metric['gap_to_threshold_formatted'] ??
+                                                    (string) (int) ($metric['gap_to_threshold'] ?? 0),
+                                            )
+                                            : '&mdash;' ?>
+                                    </td>
+                                    <td>
+                                        <span class="badge badge--<?= html_escape($metric['status_variant']) ?>">
+                                            <?= html_escape($metric['status_label']) ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <p class="legend">Keine Daten für die ausgewählten Filter vorhanden.</p>
+                <?php endif; ?>
             </section>
 
+            <p class="legend">
+                bis <?= html_escape(
+                    $threshold_percent ?? '75 %',
+                ) ?> = Anzahl benötigter Buchungen, um den Zielwert zu erreichen.
+            </p>
         </div>
+        <script>
+            window.chartsReady = true;
+        </script>
     </body>
 </html>
