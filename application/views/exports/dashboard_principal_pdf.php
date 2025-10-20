@@ -258,7 +258,7 @@ $topAttention = array_slice($needsAttentionMetrics, 0, 5);
         <article class="card" aria-label="Fehlende Kunder bis Schwelle">
           <h3>Fehlend bis <?= html_escape($thresholdPercent) ?></h3>
           <div class="kpi">
-            <span>Fehlende Kinder</span>
+            <span>Fehlende Eltern</span>
             <strong><?= html_escape($gapTotalFormatted) ?></strong>
           </div>
         </article>
