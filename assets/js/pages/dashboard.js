@@ -379,10 +379,34 @@ App.Pages.Dashboard = (function () {
             const $row = $('<tr/>', {
                 'data-has-plan': item.has_plan ? 'true' : 'false',
                 'data-has-explicit-target': item.has_explicit_target ? 'true' : 'false',
+                'data-has-capacity-gap': item.has_capacity_gap ? 'true' : 'false',
                 'data-provider-id': item.provider_id ?? '',
             });
 
-            $('<td/>', {text: item.provider_name}).appendTo($row);
+            const $providerCell = $('<td/>', {class: 'dashboard-provider-cell'});
+
+            $('<div/>', {
+                class: 'dashboard-provider-name',
+                text: item.provider_name,
+            }).appendTo($providerCell);
+
+            const $meta = $('<div/>', {class: 'dashboard-provider-meta'});
+
+            $('<span/>', {
+                class: 'dashboard-provider-slots',
+                text: formatSlotsSummary(item),
+            }).appendTo($meta);
+
+            if (item.has_capacity_gap) {
+                $('<span/>', {
+                    class: 'badge bg-warning text-dark dashboard-capacity-gap-badge',
+                    text: lang('dashboard_slots_gap_badge'),
+                    title: lang('dashboard_slots_gap_hint'),
+                }).appendTo($meta);
+            }
+
+            $meta.appendTo($providerCell);
+            $providerCell.appendTo($row);
 
             const $targetCell = $('<td/>');
 
@@ -442,6 +466,49 @@ App.Pages.Dashboard = (function () {
             $statusCell.appendTo($row);
             $row.appendTo($tableBody);
         });
+    }
+
+    function formatSlotsSummary(item) {
+        const fallback = lang('dashboard_slots_summary_fallback') || 'Slots: —';
+        const placeholder = '—';
+
+        const planned = parseSlotValue(item?.slots_planned, {allowZero: true});
+        const required = parseSlotValue(item?.slots_required);
+
+        if (planned === null && required === null) {
+            return fallback;
+        }
+
+        const plannedText = planned === null ? placeholder : planned;
+        const requiredText = required === null ? placeholder : required;
+
+        const pattern = lang('dashboard_slots_summary') || 'Slots: %planned% / %required%';
+
+        return pattern.replace('%planned%', plannedText).replace('%required%', requiredText);
+    }
+
+    function parseSlotValue(value, options = {}) {
+        const {allowZero = false} = options;
+
+        if (value === null || value === undefined) {
+            return null;
+        }
+
+        const numeric = Number(value);
+
+        if (!Number.isFinite(numeric)) {
+            return null;
+        }
+
+        if (numeric < 0) {
+            return null;
+        }
+
+        if (numeric === 0 && !allowZero) {
+            return null;
+        }
+
+        return Math.round(numeric);
     }
 
     function getVisibleMetrics() {
