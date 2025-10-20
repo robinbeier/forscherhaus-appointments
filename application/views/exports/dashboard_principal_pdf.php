@@ -225,6 +225,7 @@ $needsAttentionMetrics = array_filter(
     static fn(array $metric): bool => (int) ($metric['gap_to_threshold'] ?? 0) > 0,
 );
 $topAttention = array_slice($needsAttentionMetrics, 0, 5);
+$capacityGapLabel = lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke';
 ?>
 <div class="page">
   <header class="header" role="banner">
@@ -309,6 +310,9 @@ $topAttention = array_slice($needsAttentionMetrics, 0, 5);
             <li>
               <?= html_escape($metric['provider_name'] ?? '') ?>
               – <strong><?= html_escape($metric['gap_to_threshold_formatted'] ?? '0') ?></strong> offen
+              <?php if (!empty($metric['has_capacity_gap'])): ?>
+                , <?= html_escape($capacityGapLabel) ?>
+              <?php endif; ?>
             </li>
           <?php endforeach; ?>
         </ul>
@@ -341,7 +345,6 @@ $topAttention = array_slice($needsAttentionMetrics, 0, 5);
               $badgeClass = $isUnderThreshold ? 'badge--warn' : 'badge--neutral';
               $slotSummary = $formatSlotsSummary($metric);
               $hasCapacityGap = !empty($metric['has_capacity_gap']);
-              $capacityGapLabel = lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke';
               ?>
           <tr>
             <td>
