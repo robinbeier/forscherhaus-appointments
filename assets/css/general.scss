@@ -308,6 +308,35 @@ body .ui-datepicker .ui-datepicker-buttonpane button {
     font-size: 0.85rem;
 }
 
+#dashboard-page .dashboard-provider-cell {
+    vertical-align: middle;
+}
+
+#dashboard-page .dashboard-provider-name {
+    font-weight: 600;
+    line-height: 1.15;
+}
+
+#dashboard-page .dashboard-provider-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: #6c757d;
+}
+
+#dashboard-page .dashboard-provider-slots {
+    color: inherit;
+}
+
+#dashboard-page .dashboard-capacity-gap-badge {
+    font-size: 0.7rem;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+}
+
 #dashboard-page tr[data-no-plan='true'] {
     opacity: 0.75;
 }

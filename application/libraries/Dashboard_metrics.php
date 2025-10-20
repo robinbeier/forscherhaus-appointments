@@ -273,9 +273,13 @@ class Dashboard_metrics
         bool $is_fallback,
         ?int $class_size_default,
     ): array {
+        $total_slots = $this->extractTotalSlots($summary);
         $open = $target > 0 ? max($target - $booked, 0) : 0;
         $fill_rate = $this->computeFillRate($booked, $target);
         $needs_attention = $target > 0 && $fill_rate < $threshold;
+        $slots_required = max($target, 0);
+        $slots_planned = $total_slots;
+        $has_capacity_gap = $slots_required > 0 && $slots_planned < $slots_required;
         $display_name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
 
         if ($display_name === '') {
@@ -291,9 +295,29 @@ class Dashboard_metrics
             'fill_rate' => $fill_rate,
             'needs_attention' => $needs_attention,
             'has_plan' => (bool) ($summary['has_plan'] ?? false),
+            'slots_planned' => $slots_planned,
+            'slots_required' => $slots_required,
+            'has_capacity_gap' => $has_capacity_gap,
             'is_target_fallback' => $is_fallback,
             'class_size_default' => $class_size_default,
             'has_explicit_target' => $class_size_default !== null,
         ];
+    }
+
+    protected function extractTotalSlots(array $summary): int
+    {
+        if (!array_key_exists('total', $summary)) {
+            return 0;
+        }
+
+        $total = $summary['total'];
+
+        if (!is_numeric($total)) {
+            return 0;
+        }
+
+        $int_total = (int) round($total);
+
+        return $int_total > 0 ? $int_total : 0;
     }
 }

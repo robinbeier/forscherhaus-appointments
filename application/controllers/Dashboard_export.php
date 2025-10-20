@@ -26,6 +26,8 @@ class Dashboard_export extends EA_Controller
 
     protected Services_model $servicesModel;
 
+    protected Appointments_model $appointmentsModel;
+
     /**
      * Dashboard_export constructor.
      */
@@ -36,10 +38,13 @@ class Dashboard_export extends EA_Controller
         $this->load->library('dashboard_metrics');
         $this->load->library('pdf_renderer');
         $this->load->model('services_model');
+        $this->load->model('appointments_model');
+        $this->load->helper('date');
 
         $this->dashboardMetrics = $this->dashboard_metrics;
         $this->pdfRenderer = $this->pdf_renderer;
         $this->servicesModel = $this->services_model;
+        $this->appointmentsModel = $this->appointments_model;
     }
 
     /**
@@ -96,6 +101,72 @@ class Dashboard_export extends EA_Controller
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render principal dashboard export: ' . $exception->getMessage());
+            abort(400, $exception->getMessage());
+        }
+    }
+
+    /**
+     * Render the teacher bundle PDF for the selected filters.
+     */
+    public function teacher_pdf(): void
+    {
+        try {
+            $this->assertAdmin();
+
+            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+
+            $statuses = request('statuses', []);
+            $service_id = request('service_id');
+            $provider_ids = request('provider_ids', []);
+
+            $normalized_statuses = $this->normalizeStatuses($statuses);
+            $normalized_service_id = $this->normalizeServiceId($service_id);
+            $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
+            $threshold = (float) setting('dashboard_conflict_threshold', '0.75');
+
+            $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
+                'statuses' => $normalized_statuses,
+                'service_id' => $normalized_service_id,
+                'provider_ids' => $normalized_provider_ids,
+                'threshold' => $threshold,
+            ]);
+
+            $mappedMetrics = $this->mapMetricsForView($metrics, $threshold);
+            $appointments = $this->loadAppointmentsByProvider(
+                $metrics,
+                $period['start'],
+                $period['end'],
+                $normalized_statuses,
+                $normalized_service_id,
+            );
+
+            $teacherReports = $this->mapTeacherReports($metrics, $mappedMetrics, $appointments);
+
+            $view_data = [
+                'school_name' => $this->resolveSchoolName(),
+                'logo_data_url' => $this->resolveLogoDataUrl(),
+                'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
+                'period_label' => $this->formatPeriod($period['start'], $period['end']),
+                'service_label' => $this->resolveServiceLabel($normalized_service_id),
+                'status_label' => $this->resolveStatusLabel($normalized_statuses),
+                'teachers' => $teacherReports,
+                'filters' => [
+                    'start' => $period['start'],
+                    'end' => $period['end'],
+                ],
+            ];
+
+            $this->pdfRenderer->stream_view(
+                'exports/dashboard_teacher_pdf',
+                $view_data,
+                $this->buildTeacherFilename($period['start'], $period['end']),
+                [
+                    'attachment' => true,
+                    'debug_dump_path' => APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html',
+                ],
+            );
+        } catch (Throwable $exception) {
+            log_message('error', 'Failed to render teacher dashboard export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
         }
     }
@@ -303,6 +374,18 @@ class Dashboard_export extends EA_Controller
             $target = (int) ($metric['target'] ?? 0);
             $booked = (int) ($metric['booked'] ?? 0);
             $open = (int) ($metric['open'] ?? 0);
+            $slots_planned = null;
+            $slots_required = null;
+
+            if (array_key_exists('slots_planned', $metric) && $metric['slots_planned'] !== null) {
+                $slots_planned = (int) round((float) $metric['slots_planned']);
+                $slots_planned = max(0, $slots_planned);
+            }
+
+            if (array_key_exists('slots_required', $metric) && $metric['slots_required'] !== null) {
+                $slots_required = (int) round((float) $metric['slots_required']);
+                $slots_required = max(0, $slots_required);
+            }
 
             $fill_rate_decimals = $fill_rate_percent > 0 && $fill_rate_percent < 100 ? 1 : 0;
 
@@ -333,6 +416,12 @@ class Dashboard_export extends EA_Controller
                 'threshold_absolute' => $threshold_target,
                 'gap_to_threshold' => $gap_to_threshold,
                 'gap_to_threshold_formatted' => $this->formatNumber($gap_to_threshold),
+                'slots_planned_raw' => $slots_planned,
+                'slots_planned_formatted' => $slots_planned !== null ? $this->formatNumber($slots_planned) : null,
+                'slots_required_raw' => $slots_required,
+                'slots_required_formatted' => $slots_required !== null ? $this->formatNumber($slots_required) : null,
+                'has_capacity_gap' => !empty($metric['has_capacity_gap']),
+                'provider_id' => (int) ($metric['provider_id'] ?? 0),
             ];
         }, $metrics);
     }
@@ -421,6 +510,72 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
+     * Resolve the locale that should be used for localized formatting.
+     *
+     * @return string|null
+     */
+    protected function resolveLocale(): ?string
+    {
+        try {
+            $language = (string) setting('language');
+        } catch (Throwable $exception) {
+            log_message('debug', 'Falling back to default locale for exports: ' . $exception->getMessage());
+
+            return null;
+        }
+
+        $normalized = strtolower(str_replace(['_', ' '], ['-', '-'], trim($language)));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        $localeMap = [
+            'de' => 'de-DE',
+            'de-de' => 'de-DE',
+            'deutsch' => 'de-DE',
+            'german' => 'de-DE',
+            'en' => 'en-US',
+            'en-us' => 'en-US',
+            'en-gb' => 'en-GB',
+            'english' => 'en-US',
+            'fr' => 'fr-FR',
+            'fr-fr' => 'fr-FR',
+            'french' => 'fr-FR',
+            'pt' => 'pt-PT',
+            'pt-pt' => 'pt-PT',
+            'pt-br' => 'pt-BR',
+            'portuguese' => 'pt-PT',
+            'es' => 'es-ES',
+            'es-es' => 'es-ES',
+            'spanish' => 'es-ES',
+            'it' => 'it-IT',
+            'it-it' => 'it-IT',
+            'italian' => 'it-IT',
+            'hu' => 'hu-HU',
+            'hu-hu' => 'hu-HU',
+            'hungarian' => 'hu-HU',
+        ];
+
+        if (array_key_exists($normalized, $localeMap)) {
+            return $localeMap[$normalized];
+        }
+
+        if (preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $normalized) === 1) {
+            $parts = explode('-', $normalized);
+            $parts[0] = strtolower($parts[0]);
+
+            if (isset($parts[1])) {
+                $parts[1] = strtoupper($parts[1]);
+            }
+
+            return implode('-', $parts);
+        }
+
+        return null;
+    }
+
+    /**
      * Format a DateTime instance according to the installation settings.
      *
      * @param DateTimeImmutable $date
@@ -429,9 +584,47 @@ class Dashboard_export extends EA_Controller
      */
     protected function formatDate(DateTimeImmutable $date): string
     {
-        $format = setting('date_format') ?: 'd.m.Y';
+        $defaultFormat = 'Y-m-d';
 
-        return $date->format($format);
+        try {
+            if (function_exists('format_date')) {
+                $formattedDate = format_date($date);
+            } else {
+                $format = function_exists('get_date_format') ? get_date_format() : $defaultFormat;
+                $formattedDate = $date->format($format);
+            }
+        } catch (Throwable $exception) {
+            log_message('error', 'Invalid date format configuration: ' . $exception->getMessage());
+            $formattedDate = $date->format($defaultFormat);
+        }
+
+        if (!class_exists('\IntlDateFormatter')) {
+            return $formattedDate;
+        }
+
+        $locale = $this->resolveLocale();
+
+        if ($locale === null) {
+            return $formattedDate;
+        }
+
+        $timezone = $date->getTimezone() ?: new DateTimeZone(date_default_timezone_get());
+        $formatter = new \IntlDateFormatter(
+            $locale,
+            \IntlDateFormatter::NONE,
+            \IntlDateFormatter::NONE,
+            $timezone->getName(),
+            \IntlDateFormatter::GREGORIAN,
+            'EEE',
+        );
+
+        $dayName = $formatter->format($date);
+
+        if ($dayName === false) {
+            return $formattedDate;
+        }
+
+        return sprintf('%s, %s', $dayName, $formattedDate);
     }
 
     /**
@@ -520,6 +713,14 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
+     * Build a file name for the teacher export download.
+     */
+    protected function buildTeacherFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
+    {
+        return sprintf('dashboard-lehrkraefte-%s-%s.pdf', $start->format('Ymd'), $end->format('Ymd'));
+    }
+
+    /**
      * Resolve the localized month abbreviation.
      *
      * @param int $month
@@ -553,5 +754,236 @@ class Dashboard_export extends EA_Controller
         }
 
         return '';
+    }
+
+    /**
+     * Map the raw metrics and appointments into teacher report DTOs.
+     *
+     * @param array $rawMetrics
+     * @param array $mappedMetrics
+     * @param array $appointments
+     *
+     * @return array
+     */
+    protected function mapTeacherReports(array $rawMetrics, array $mappedMetrics, array $appointments): array
+    {
+        $reports = [];
+
+        foreach ($mappedMetrics as $index => $metric) {
+            $raw = $rawMetrics[$index] ?? [];
+
+            $provider_id = (int) ($metric['provider_id'] ?? ($raw['provider_id'] ?? 0));
+            if ($provider_id <= 0) {
+                continue;
+            }
+
+            $target = max(0, (int) ($metric['target_raw'] ?? ($raw['target'] ?? 0)));
+            $booked = max(0, (int) ($metric['booked_raw'] ?? ($raw['booked'] ?? 0)));
+            $open = max(0, (int) ($metric['open_raw'] ?? ($raw['open'] ?? $target - $booked)));
+
+            if ($open === 0) {
+                $open = max(0, $target - $booked);
+            }
+
+            $slots_planned_raw = $metric['slots_planned_raw'] ?? ($raw['slots_planned'] ?? null);
+            $slots_required_raw = $metric['slots_required_raw'] ?? ($raw['slots_required'] ?? null);
+
+            $slots_planned = $slots_planned_raw !== null ? max(0, (int) $slots_planned_raw) : null;
+            $slots_required = $slots_required_raw !== null ? max(0, (int) $slots_required_raw) : null;
+
+            $fill_rate = $target > 0 ? $booked / $target : 0.0;
+            $fill_rate_percent = $this->formatPercent($fill_rate, $fill_rate > 0 && $fill_rate < 1 ? 1 : 0);
+
+            $progress_base = max($target, 1);
+            $progress_booked = $progress_base > 0 ? max(0, min(100, round(($booked / $progress_base) * 100))) : 0;
+            $progress_open =
+                $progress_base > 0 ? max(0, min(100 - $progress_booked, round(($open / $progress_base) * 100))) : 0;
+
+            $appointments_for_provider = $appointments[$provider_id] ?? [];
+            $appointment_rows = array_map(function (array $appointment): array {
+                $start = new DateTimeImmutable($appointment['start_datetime']);
+                $end = new DateTimeImmutable($appointment['end_datetime']);
+
+                return [
+                    'parent_lastname' => $this->resolveCustomerLastName($appointment),
+                    'date' => $this->formatDate($start),
+                    'start' => $this->formatTime($start),
+                    'end' => $this->formatTime($end),
+                    'notes' => '',
+                ];
+            }, $appointments_for_provider);
+
+            $slotInfoWithTarget = lang('dashboard_teacher_pdf_slot_info_with_target') ?: '%s von %s Terminen gebucht';
+            $slotInfoWithoutTarget = lang('dashboard_teacher_pdf_slot_info_without_target') ?: '%s Termine gebucht';
+
+            $reports[] = [
+                'provider_id' => $provider_id,
+                'provider_name' => (string) ($metric['provider_name'] ?? ''),
+                'target' => $target,
+                'target_formatted' => $target > 0 ? $this->formatNumber($target) : '—',
+                'booked' => $booked,
+                'booked_formatted' => $this->formatNumber($booked),
+                'booked_percent_formatted' => $fill_rate_percent,
+                'booked_percent_value' => $fill_rate > 0 ? round($fill_rate * 100, 1) : 0.0,
+                'open' => $open,
+                'open_formatted' => $this->formatNumber($open),
+                'slots_planned' => $slots_planned,
+                'slots_planned_formatted' => $slots_planned !== null ? $this->formatNumber($slots_planned) : '—',
+                'slots_required' => $slots_required,
+                'slots_required_formatted' => $slots_required !== null ? $this->formatNumber($slots_required) : '—',
+                'has_capacity_gap' => !empty($metric['has_capacity_gap']),
+                'appointments' => $appointment_rows,
+                'appointments_count' => count($appointment_rows),
+                'fill_rate_value' => $fill_rate,
+                'progress' => [
+                    'booked_percent' => $progress_booked,
+                    'open_percent' => $progress_open,
+                ],
+                'slot_info_text' =>
+                    $target > 0
+                        ? sprintf($slotInfoWithTarget, $this->formatNumber($booked), $this->formatNumber($target))
+                        : sprintf($slotInfoWithoutTarget, $this->formatNumber($booked)),
+            ];
+        }
+
+        return $reports;
+    }
+
+    /**
+     * Load appointment rows grouped by provider for the teacher report.
+     *
+     * @param array $metrics
+     * @param DateTimeImmutable $start
+     * @param DateTimeImmutable $end
+     * @param array $statuses
+     * @param int|null $service_id
+     *
+     * @return array
+     */
+    protected function loadAppointmentsByProvider(
+        array $metrics,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        array $statuses,
+        ?int $service_id,
+    ): array {
+        $provider_ids = array_unique(
+            array_map(static fn(array $metric): int => (int) ($metric['provider_id'] ?? 0), $metrics),
+        );
+
+        $provider_ids = array_values(array_filter($provider_ids, static fn(int $id): bool => $id > 0));
+
+        if (empty($provider_ids)) {
+            return [];
+        }
+
+        $query = $this->appointmentsModel
+            ->query()
+            ->select([
+                'appointments.id',
+                'appointments.id_users_provider',
+                'appointments.start_datetime',
+                'appointments.end_datetime',
+                'appointments.id_users_customer',
+                'appointments.notes',
+                'appointments.status',
+                'customers.first_name AS customer_first_name',
+                'customers.last_name AS customer_last_name',
+                'customers.email AS customer_email',
+                'customers.phone_number AS customer_phone_number',
+            ])
+            ->join('users AS customers', 'customers.id = appointments.id_users_customer', 'left')
+            ->where('appointments.is_unavailability', false)
+            ->where_in('appointments.id_users_provider', $provider_ids)
+            ->where('appointments.start_datetime <', $end->setTime(23, 59, 59)->format('Y-m-d H:i:s'))
+            ->where('appointments.end_datetime >', $start->setTime(0, 0, 0)->format('Y-m-d H:i:s'));
+
+        if (!empty($statuses)) {
+            $query->where_in('appointments.status', $statuses);
+        }
+
+        if ($service_id !== null) {
+            $query->where('appointments.id_services', $service_id);
+        }
+
+        $rows = $query
+            ->order_by('appointments.start_datetime', 'ASC')
+            ->get()
+            ->result_array();
+
+        $grouped = [];
+
+        foreach ($rows as $row) {
+            $provider_id = (int) ($row['id_users_provider'] ?? 0);
+
+            if ($provider_id <= 0) {
+                continue;
+            }
+
+            $grouped[$provider_id][] = $row;
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Resolve the customer last name with fallback.
+     *
+     * @param array $appointment
+     *
+     * @return string
+     */
+    protected function resolveCustomerLastName(array $appointment): string
+    {
+        $last_name = trim((string) ($appointment['customer_last_name'] ?? ''));
+
+        if ($last_name !== '') {
+            return $last_name;
+        }
+
+        $first_name = trim((string) ($appointment['customer_first_name'] ?? ''));
+
+        if ($first_name !== '') {
+            return $first_name;
+        }
+
+        $email = trim((string) ($appointment['customer_email'] ?? ''));
+
+        if ($email !== '') {
+            return $email;
+        }
+
+        $phone = trim((string) ($appointment['customer_phone_number'] ?? ''));
+
+        if ($phone !== '') {
+            return $phone;
+        }
+
+        return '—';
+    }
+
+    /**
+     * Format a DateTime instance according to the installation time format setting.
+     *
+     * @param DateTimeImmutable $date
+     *
+     * @return string
+     */
+    protected function formatTime(DateTimeImmutable $date): string
+    {
+        $defaultFormat = 'H:i';
+
+        try {
+            if (function_exists('get_time_format')) {
+                $format = get_time_format();
+            } else {
+                $format = $defaultFormat;
+            }
+        } catch (Throwable $exception) {
+            log_message('error', 'Invalid time format configuration: ' . $exception->getMessage());
+            $format = $defaultFormat;
+        }
+
+        return $date->format($format);
     }
 }
