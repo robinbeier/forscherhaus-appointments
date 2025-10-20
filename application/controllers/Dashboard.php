@@ -32,7 +32,8 @@ class Dashboard extends EA_Controller
         parent::__construct();
 
         $this->load->model('providers_model');
-        $this->load->library('provider_utilization');
+        $this->load->model('services_model');
+        $this->load->library('dashboard_metrics');
         $this->load->library('accounts');
     }
 
@@ -57,10 +58,20 @@ class Dashboard extends EA_Controller
 
         $appointment_status_options = json_decode(setting('appointment_status_options', '[]'), true) ?? [];
         $threshold = (float) setting('dashboard_conflict_threshold', '0.75');
+        $default_statuses = ['Booked'];
+        $services = $this->services_model->get(null, null, null, 'name ASC');
+        $service_options = array_map(static function (array $service): array {
+            return [
+                'id' => (int) $service['id'],
+                'name' => $service['name'],
+            ];
+        }, $services);
 
         script_vars([
             'appointment_status_options' => $appointment_status_options,
             'dashboard_conflict_threshold' => $threshold,
+            'dashboard_default_statuses' => $default_statuses,
+            'dashboard_service_options' => $service_options,
             'date_format' => setting('date_format'),
             'time_format' => setting('time_format'),
             'first_weekday' => setting('first_weekday'),
@@ -108,31 +119,21 @@ class Dashboard extends EA_Controller
                 throw new InvalidArgumentException(lang('filter_period_required'));
             }
 
-            $providers = $this->providers_model->get_available_providers(false);
+            $service_id = request('service_id');
+            $provider_ids = request('provider_ids', []);
 
-            $metrics = [];
-
-            foreach ($providers as $provider) {
-                $summary = $this->provider_utilization->calculate($provider, $start_date, $end_date, $statuses);
-
-                $display_name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
-
-                if ($display_name === '') {
-                    $display_name = $provider['email'] ?? (string) $provider['id'];
-                }
-
-                $metrics[] = [
-                    'provider_id' => (int) $provider['id'],
-                    'provider_name' => $display_name,
-                    'total' => (int) $summary['total'],
-                    'booked' => (int) $summary['booked'],
-                    'open' => (int) $summary['open'],
-                    'fill_rate' => (float) $summary['fill_rate'],
-                    'has_plan' => (bool) $summary['has_plan'],
-                ];
+            if ($provider_ids !== null && !is_array($provider_ids)) {
+                $provider_ids = [$provider_ids];
             }
 
-            usort($metrics, static fn ($a, $b) => $a['fill_rate'] <=> $b['fill_rate']);
+            $threshold = (float) setting('dashboard_conflict_threshold', '0.75');
+
+            $metrics = $this->dashboard_metrics->collect($start, $end, [
+                'statuses' => $statuses,
+                'service_id' => $service_id,
+                'provider_ids' => $provider_ids ?? [],
+                'threshold' => $threshold,
+            ]);
 
             json_response($metrics);
         } catch (Throwable $e) {

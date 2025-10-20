@@ -27,6 +27,7 @@ class Providers_model extends EA_Model
         'id' => 'integer',
         'is_private' => 'boolean',
         'id_roles' => 'integer',
+        'class_size_default' => 'integer',
     ];
 
     /**
@@ -47,6 +48,7 @@ class Providers_model extends EA_Model
         'language' => 'language',
         'notes' => 'notes',
         'room' => 'room',
+        'classSizeDefault' => 'class_size_default',
         'isPrivate' => 'is_private',
         'ldapDn' => 'ldap_dn',
         'roleId' => 'id_roles',
@@ -94,11 +96,7 @@ class Providers_model extends EA_Model
         }
 
         // Make sure all required fields are provided.
-        if (
-            empty($provider['first_name']) ||
-            empty($provider['last_name']) ||
-            empty($provider['email'])
-        ) {
+        if (empty($provider['first_name']) || empty($provider['last_name']) || empty($provider['email'])) {
             throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($provider, true));
         }
 
@@ -171,6 +169,18 @@ class Providers_model extends EA_Model
             throw new InvalidArgumentException(
                 'The provided email address is already in use, please use a different one.',
             );
+        }
+
+        if (array_key_exists('class_size_default', $provider)) {
+            $class_size_default = $provider['class_size_default'];
+
+            if ($class_size_default === '') {
+                $class_size_default = null;
+            }
+
+            if ($class_size_default !== null && (!is_numeric($class_size_default) || (int) $class_size_default < 0)) {
+                throw new InvalidArgumentException('Invalid class size provided: ' . $class_size_default);
+            }
         }
     }
 

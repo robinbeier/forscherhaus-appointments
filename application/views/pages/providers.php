@@ -170,6 +170,15 @@
                                 <input id="provider-room" name="room" class="form-control" maxlength="64" disabled>
                             </div>
 
+                            <div class="mb-3">
+                                <label class="form-label" for="provider-class-size-default">
+                                    <?= lang('class_size_default') ?>
+                                </label>
+                                <input type="number" id="provider-class-size-default"
+                                       name="class_size_default" class="form-control"
+                                       min="0" step="1" disabled>
+                            </div>
+
                             <?php slot('after_primary_fields'); ?>
                         </div>
                         <div class="settings col-12 col-md-6">
@@ -395,5 +404,4 @@
 <script src="<?= asset_url('assets/js/pages/providers.js') ?>"></script>
 
 <?php end_section('scripts'); ?>
-
 

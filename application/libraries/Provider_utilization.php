@@ -80,8 +80,13 @@ class Provider_utilization
     /**
      * Calculate utilization metrics for a provider.
      */
-    public function calculate(array $provider, string $start_date, string $end_date, array $statuses = []): array
-    {
+    public function calculate(
+        array $provider,
+        string $start_date,
+        string $end_date,
+        array $statuses = [],
+        ?int $service_id = null,
+    ): array {
         if (!array_key_exists('id', $provider)) {
             throw new InvalidArgumentException('Provider id is required.');
         }
@@ -95,9 +100,9 @@ class Provider_utilization
 
         $slot_size = $this->determineSlotSize($provider);
 
-        $statuses = array_values(array_filter(array_map('strval', $statuses), static fn ($value) => $value !== ''));
+        $statuses = array_values(array_filter(array_map('strval', $statuses), static fn($value) => $value !== ''));
 
-        $appointments = $this->fetchAppointments((int) $provider['id'], $start, $end, $statuses);
+        $appointments = $this->fetchAppointments((int) $provider['id'], $start, $end, $statuses, $service_id);
 
         $total_minutes = 0;
         $booked_minutes = 0;
@@ -125,17 +130,13 @@ class Provider_utilization
             $day = $day->add(new DateInterval('P1D'));
         }
 
-        [$total_slots, $booked_slots] = $this->calculateSlotCounts(
-            $total_minutes,
-            $booked_minutes,
-            $slot_size,
-        );
+        [$total_slots, $booked_slots] = $this->calculateSlotCounts($total_minutes, $booked_minutes, $slot_size);
 
         $open_minutes = max(0, $total_minutes - $booked_minutes);
 
         $open_slots = max(0, $total_slots - $booked_slots);
 
-        $fill_rate = $total_slots > 0 ? $booked_slots / $total_slots : 0.0;
+        $fill_rate = $total_slots > 0 ? (float) ($booked_slots / $total_slots) : 0.0;
 
         return [
             'total' => $total_slots,
@@ -143,6 +144,8 @@ class Provider_utilization
             'open' => $open_slots,
             'fill_rate' => $fill_rate,
             'has_plan' => $has_plan,
+            'capacity_minutes' => $total_minutes,
+            'booked_minutes' => $booked_minutes,
         ];
     }
 
@@ -237,6 +240,7 @@ class Provider_utilization
         DateTimeImmutable $start,
         DateTimeImmutable $end,
         array $statuses,
+        ?int $service_id = null,
     ): array {
         $query = $this->appointments_model
             ->query()
@@ -248,6 +252,10 @@ class Provider_utilization
 
         if ($statuses) {
             $query->where_in('status', $statuses);
+        }
+
+        if ($service_id !== null) {
+            $query->where('appointments.id_services', $service_id);
         }
 
         $records = $query->get()->result_array();
@@ -287,7 +295,7 @@ class Provider_utilization
 
         $date_key = $day->format('Y-m-d');
 
-        $plan = $working_plan_exceptions[$date_key] ?? $working_plan[strtolower($day->format('l'))] ?? null;
+        $plan = $working_plan_exceptions[$date_key] ?? ($working_plan[strtolower($day->format('l'))] ?? null);
 
         if (!$plan || empty($plan['start']) || empty($plan['end'])) {
             return [
@@ -334,7 +342,10 @@ class Provider_utilization
                 continue;
             }
 
-            $break_start = DateTimeImmutable::createFromFormat('Y-m-d H:i', $day->format('Y-m-d') . ' ' . $break['start']);
+            $break_start = DateTimeImmutable::createFromFormat(
+                'Y-m-d H:i',
+                $day->format('Y-m-d') . ' ' . $break['start'],
+            );
             $break_end = DateTimeImmutable::createFromFormat('Y-m-d H:i', $day->format('Y-m-d') . ' ' . $break['end']);
 
             if (!$break_start || !$break_end || $break_end <= $break_start) {
@@ -396,8 +407,11 @@ class Provider_utilization
         return $periods;
     }
 
-    protected function subtractPeriod(array $periods, DateTimeImmutable $block_start, DateTimeImmutable $block_end): array
-    {
+    protected function subtractPeriod(
+        array $periods,
+        DateTimeImmutable $block_start,
+        DateTimeImmutable $block_end,
+    ): array {
         $result = [];
 
         foreach ($periods as $period) {
@@ -432,7 +446,7 @@ class Provider_utilization
             }
         }
 
-        return array_values(array_filter($result, static fn ($period) => $period['end'] > $period['start']));
+        return array_values(array_filter($result, static fn($period) => $period['end'] > $period['start']));
     }
 
     protected function calculateMinutes(array $periods): int
