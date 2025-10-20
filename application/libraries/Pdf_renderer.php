@@ -409,7 +409,7 @@ class Pdf_renderer
      */
     protected function resolveToken(array $config): ?string
     {
-        $token = $config['token'] ?? env('PDF_RENDERER_TOKEN');
+        $token = $config['token'] ?? env('PDF_TOKEN');
 
         if ($token === null) {
             return null;
