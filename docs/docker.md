@@ -39,6 +39,8 @@ In the host machine the server is accessible from `http://localhost` and the dat
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`) and Mailpit from `http://localhost:8025`.
 
+The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the environment variable `PDF_RENDERER_URL=http://localhost:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically.
+
 Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integration is available on `http://localhost:8100` (credentials are `admin` / `admin`). 
 
 While activating CalDAV sync with the local Docker-based Baikal, you will need to first create a new Baikal user and then the credentials you defined along with the http://baikal/dav.php URL

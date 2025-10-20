@@ -167,6 +167,7 @@ App.Pages.Dashboard = (function () {
             endDate: filters.endDate,
             statuses: filters.statuses,
             serviceId: filters.serviceId,
+            providerIds: getDownloadProviderIds(),
         });
     }
 
@@ -378,6 +379,7 @@ App.Pages.Dashboard = (function () {
             const $row = $('<tr/>', {
                 'data-has-plan': item.has_plan ? 'true' : 'false',
                 'data-has-explicit-target': item.has_explicit_target ? 'true' : 'false',
+                'data-provider-id': item.provider_id ?? '',
             });
 
             $('<td/>', {text: item.provider_name}).appendTo($row);
@@ -447,6 +449,18 @@ App.Pages.Dashboard = (function () {
         const filtered = hideWithoutTarget ? metrics.filter((item) => item.has_explicit_target) : metrics.slice();
 
         return filtered;
+    }
+
+    function getDownloadProviderIds() {
+        if (!Array.isArray(metrics) || !metrics.length) {
+            return [];
+        }
+
+        const ids = metrics
+            .map((item) => item?.provider_id)
+            .filter((value) => Number.isInteger(value) || (typeof value === 'number' && !Number.isNaN(value)));
+
+        return Array.from(new Set(ids));
     }
 
     function updateHiddenCounter() {
