@@ -108,6 +108,7 @@ class Dashboard_metrics
                 $start->format('Y-m-d'),
                 $end->format('Y-m-d'),
                 $statuses,
+                $service_id,
             );
 
             $booked_count = $this->countBookedAppointments((int) $provider['id'], $start, $end, $statuses, $service_id);
@@ -115,11 +116,13 @@ class Dashboard_metrics
 
             [$target, $is_fallback] = $this->resolveTarget($provider, $summary, $class_size_default);
 
+            $booked_for_metrics = $this->resolveBookedMetric($summary, $booked_count, $is_fallback);
+
             $metrics[] = $this->formatRow(
                 $provider,
                 $summary,
                 $target,
-                $booked_count,
+                $booked_for_metrics,
                 $threshold,
                 $is_fallback,
                 $class_size_default,
@@ -231,6 +234,25 @@ class Dashboard_metrics
         }
 
         return [$fallback, true];
+    }
+
+    protected function resolveBookedMetric(array $summary, int $appointment_count, bool $is_fallback): int
+    {
+        if ($is_fallback) {
+            $booked_slots = $summary['booked'] ?? null;
+
+            if (is_numeric($booked_slots)) {
+                $booked_slots = (int) round($booked_slots);
+
+                if ($booked_slots < 0) {
+                    $booked_slots = 0;
+                }
+
+                return $booked_slots;
+            }
+        }
+
+        return $appointment_count;
     }
 
     protected function computeFillRate(int $booked, int $target): float

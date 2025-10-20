@@ -80,8 +80,13 @@ class Provider_utilization
     /**
      * Calculate utilization metrics for a provider.
      */
-    public function calculate(array $provider, string $start_date, string $end_date, array $statuses = []): array
-    {
+    public function calculate(
+        array $provider,
+        string $start_date,
+        string $end_date,
+        array $statuses = [],
+        ?int $service_id = null,
+    ): array {
         if (!array_key_exists('id', $provider)) {
             throw new InvalidArgumentException('Provider id is required.');
         }
@@ -97,7 +102,7 @@ class Provider_utilization
 
         $statuses = array_values(array_filter(array_map('strval', $statuses), static fn($value) => $value !== ''));
 
-        $appointments = $this->fetchAppointments((int) $provider['id'], $start, $end, $statuses);
+        $appointments = $this->fetchAppointments((int) $provider['id'], $start, $end, $statuses, $service_id);
 
         $total_minutes = 0;
         $booked_minutes = 0;
@@ -235,6 +240,7 @@ class Provider_utilization
         DateTimeImmutable $start,
         DateTimeImmutable $end,
         array $statuses,
+        ?int $service_id = null,
     ): array {
         $query = $this->appointments_model
             ->query()
@@ -246,6 +252,10 @@ class Provider_utilization
 
         if ($statuses) {
             $query->where_in('status', $statuses);
+        }
+
+        if ($service_id !== null) {
+            $query->where('appointments.id_services', $service_id);
         }
 
         $records = $query->get()->result_array();
