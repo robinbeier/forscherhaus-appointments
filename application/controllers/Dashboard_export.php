@@ -303,6 +303,18 @@ class Dashboard_export extends EA_Controller
             $target = (int) ($metric['target'] ?? 0);
             $booked = (int) ($metric['booked'] ?? 0);
             $open = (int) ($metric['open'] ?? 0);
+            $slots_planned = null;
+            $slots_required = null;
+
+            if (array_key_exists('slots_planned', $metric) && $metric['slots_planned'] !== null) {
+                $slots_planned = (int) round((float) $metric['slots_planned']);
+                $slots_planned = max(0, $slots_planned);
+            }
+
+            if (array_key_exists('slots_required', $metric) && $metric['slots_required'] !== null) {
+                $slots_required = (int) round((float) $metric['slots_required']);
+                $slots_required = max(0, $slots_required);
+            }
 
             $fill_rate_decimals = $fill_rate_percent > 0 && $fill_rate_percent < 100 ? 1 : 0;
 
@@ -333,6 +345,11 @@ class Dashboard_export extends EA_Controller
                 'threshold_absolute' => $threshold_target,
                 'gap_to_threshold' => $gap_to_threshold,
                 'gap_to_threshold_formatted' => $this->formatNumber($gap_to_threshold),
+                'slots_planned_raw' => $slots_planned,
+                'slots_planned_formatted' => $slots_planned !== null ? $this->formatNumber($slots_planned) : null,
+                'slots_required_raw' => $slots_required,
+                'slots_required_formatted' => $slots_required !== null ? $this->formatNumber($slots_required) : null,
+                'has_capacity_gap' => !empty($metric['has_capacity_gap']),
             ];
         }, $metrics);
     }

@@ -74,12 +74,14 @@ tbody tr:last-child td{border-bottom:none;}
 .col-right{text-align:right;}
 .col-size{width:10%;}
 .col-booked{width:12%;}
-.col-fill{width:16%;}
-.col-gap{width:12%;white-space:nowrap;}
-.col-status{width:19%; text-align:center;}
+.col-fill{width:14%;}
+.col-gap{width:10%;white-space:nowrap;}
+.col-status{width:23%; text-align:center;}
 .nowrap{white-space:nowrap;}
 .provider{margin:0;font-weight:600;}
-.provider__meta{margin:2pt 0 0 0;color:var(--ink-muted);font-size:8.8pt;}
+.provider__meta{margin:2pt 0 0 0;color:var(--ink-muted);font-size:8.8pt;display:flex;gap:6pt;align-items:center;flex-wrap:wrap;}
+.provider__slots{color:inherit;}
+.provider__badge{font-size:7.8pt;padding:1pt 6pt;}
 
 /* Balken */
 .bar{margin-top:6pt;height:8px;background:#F3F4F6;border-radius:999px;overflow:hidden;}
@@ -89,6 +91,7 @@ tbody tr:last-child td{border-bottom:none;}
 .badge{display:inline-flex;align-items:center;gap:6pt;padding:2pt 8pt;border-radius:9999px;font-size:9pt;font-weight:600;border:1px solid var(--border);}
 .badge--warn{color:var(--warn);background:var(--warn-bg);border-color:rgba(180,83,9,.4);}
 .badge--neutral{color:var(--ink);background:#F3F4F6;border-color:var(--border);}
+.col-status .badge{white-space:nowrap;}
 
 .footer{margin-top:auto;display:flex;justify-content:space-between;align-items:center;font-size:8.6pt;color:var(--ink-muted);padding:6pt 8pt 0;border-top:1px solid rgba(17,24,39,.12);}
 
@@ -111,6 +114,35 @@ $thresholdRatio = isset($threshold_ratio) ? (float) $threshold_ratio : 0.75;
 $thresholdPercent = $threshold_percent ?? number_format($thresholdRatio * 100, 0, ',', '.') . ' %';
 $metrics = $metrics ?? [];
 $preparedMetrics = [];
+$formatSlotsSummary = static function (array $metric) use ($formatNumber): string {
+    $template = lang('dashboard_slots_summary') ?: 'Slots: %planned% / %required%';
+    $fallback = lang('dashboard_slots_summary_fallback') ?: 'Slots: —';
+    $placeholder = '—';
+
+    $plannedRaw = $metric['slots_planned_raw'] ?? null;
+    $requiredRaw = $metric['slots_required_raw'] ?? null;
+
+    $planned = $placeholder;
+    if ($plannedRaw !== null) {
+        $plannedValue = max(0, (int) $plannedRaw);
+        $planned = $formatNumber($plannedValue);
+    }
+
+    $required = $placeholder;
+    if ($requiredRaw !== null) {
+        $requiredValue = max(0, (int) $requiredRaw);
+
+        if ($requiredValue > 0) {
+            $required = $formatNumber($requiredValue);
+        }
+    }
+
+    if ($planned === $placeholder && $required === $placeholder) {
+        return $fallback;
+    }
+
+    return str_replace(['%planned%', '%required%'], [$planned, $required], $template);
+};
 
 foreach ($metrics as $metric) {
     $target = (int) ($metric['target_raw'] ?? ($metric['target'] ?? 0));
@@ -141,6 +173,7 @@ foreach ($metrics as $metric) {
         'status_variant' => $statusVariant,
         'status_label' => $statusLabel,
         'needs_attention' => $gapToThreshold > 0,
+        'has_capacity_gap' => !empty($metric['has_capacity_gap']),
     ]);
 }
 
@@ -255,10 +288,10 @@ $topAttention = array_slice($needsAttentionMetrics, 0, 5);
           </div>
         </article>
 
-        <article class="card" aria-label="Fehlende Kunder bis Schwelle">
+        <article class="card" aria-label="Fehlende Eltern bis Schwelle">
           <h3>Fehlend bis <?= html_escape($thresholdPercent) ?></h3>
           <div class="kpi">
-            <span>Fehlende Eltern</span>
+            <span>Fehlende Eltern:</span>
             <strong><?= html_escape($gapTotalFormatted) ?></strong>
           </div>
         </article>
@@ -306,10 +339,19 @@ $topAttention = array_slice($needsAttentionMetrics, 0, 5);
               $fillPercent = (int) max(0, min(100, (int) ($metric['fill_rate_percent_value'] ?? 0)));
               $isUnderThreshold = (int) ($metric['gap_to_threshold'] ?? 0) > 0;
               $badgeClass = $isUnderThreshold ? 'badge--warn' : 'badge--neutral';
+              $slotSummary = $formatSlotsSummary($metric);
+              $hasCapacityGap = !empty($metric['has_capacity_gap']);
+              $capacityGapLabel = lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke';
               ?>
           <tr>
             <td>
               <p class="provider"><?= html_escape($metric['provider_name'] ?? '') ?></p>
+              <div class="provider__meta">
+                <span class="provider__slots"><?= html_escape($slotSummary) ?></span>
+                <?php if ($hasCapacityGap): ?>
+                  <span class="pill pill--warn provider__badge"><?= html_escape($capacityGapLabel) ?></span>
+                <?php endif; ?>
+              </div>
             </td>
             <td class="col-right col-size">
               <?= !empty($metric['is_zero_target'])
