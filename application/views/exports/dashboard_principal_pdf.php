@@ -165,7 +165,7 @@ $gapTotal = array_sum(
 $bookedDistinctFormatted = $summary['booked_distinct_total_formatted'] ?? ($summary['booked_total_formatted'] ?? '0');
 $targetTotalFormatted = $summary['target_total_formatted'] ?? '0';
 $fillRateValue = (float) ($summary['fill_rate'] ?? 0.0);
-$generatedAt = date('d.m.Y, H:i');
+$generatedAt = $generated_at_text ?? date('d.m.Y, H:i');
 
 $donutImageSize = 120;
 $donutImageThickness = 20;

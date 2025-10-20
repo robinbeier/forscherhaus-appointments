@@ -25,12 +25,12 @@ class TestCase extends PHPUnitTestCase
     {
         self::$CI = &get_instance();
 
-        self::requireFile(APPPATH . 'libraries/Provider_utilization.php');
-
         self::ensureLegacyClass('Appointments_model');
         self::ensureLegacyClass('Services_model');
         self::ensureLegacyClass('Unavailabilities_model');
         self::ensureLegacyClass('Blocked_periods_model');
+
+        self::requireFile(APPPATH . 'libraries/Provider_utilization.php');
     }
 
     /**
@@ -60,25 +60,37 @@ class TestCase extends PHPUnitTestCase
             return;
         }
 
-        switch ($class) {
-            case 'Appointments_model':
-                eval('class Appointments_model { public function query() {} }');
-                break;
-            case 'Services_model':
-                eval(
-                    'class Services_model { public function get($where = null, $limit = null, $offset = null, $orderBy = null) {} }'
-                );
-                break;
-            case 'Unavailabilities_model':
-                eval(
-                    'class Unavailabilities_model { public function get($where = null, $limit = null, $offset = null, $orderBy = null) {} }'
-                );
-                break;
-            case 'Blocked_periods_model':
-                eval('class Blocked_periods_model { public function get_for_period($startDate, $endDate) {} }');
-                break;
-            default:
-                eval('class ' . $class . ' {}');
+        $modelFiles = [
+            'Appointments_model' => APPPATH . 'models/Appointments_model.php',
+            'Services_model' => APPPATH . 'models/Services_model.php',
+            'Unavailabilities_model' => APPPATH . 'models/Unavailabilities_model.php',
+            'Blocked_periods_model' => APPPATH . 'models/Blocked_periods_model.php',
+        ];
+
+        if (isset($modelFiles[$class])) {
+            self::requireFile(APPPATH . 'core/EA_Model.php');
+            self::requireFile($modelFiles[$class]);
         }
+
+        if (class_exists($class, false)) {
+            return;
+        }
+
+        $stubs = [
+            'Appointments_model' => 'class Appointments_model { public function query() {} }',
+            'Services_model' =>
+                'class Services_model { public function get($where = null, $limit = null, $offset = null, $orderBy = null) {} }',
+            'Unavailabilities_model' =>
+                'class Unavailabilities_model { public function get($where = null, $limit = null, $offset = null, $orderBy = null) {} }',
+            'Blocked_periods_model' =>
+                'class Blocked_periods_model { public function get_for_period($startDate, $endDate) {} }',
+        ];
+
+        if (isset($stubs[$class])) {
+            eval($stubs[$class]);
+            return;
+        }
+
+        eval('class ' . $class . ' {}');
     }
 }

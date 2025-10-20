@@ -4,12 +4,15 @@ namespace Tests\Unit\Libraries;
 
 use Appointments_model;
 use Blocked_periods_model;
+use CI_DB_query_builder;
+use CI_DB_result;
 use Provider_utilization;
 use Services_model;
 use Tests\TestCase;
 use Unavailabilities_model;
 
-class ProviderUtilizationTest extends TestCase {
+class ProviderUtilizationTest extends TestCase
+{
     public function testCalculateReturnsExpectedSlots(): void
     {
         $appointments = [
@@ -113,19 +116,15 @@ class ProviderUtilizationTest extends TestCase {
     private function createLibrary(array $appointments, int $serviceDuration = 30): Provider_utilization
     {
         $appointmentsModel = $this->createMock(Appointments_model::class);
-        $appointmentsModel
-            ->method('query')
-            ->willReturn(new FakeAppointmentsQueryBuilder($appointments));
+        $appointmentsModel->method('query')->willReturn($this->createAppointmentsQueryBuilder($appointments));
 
         $servicesModel = $this->createMock(Services_model::class);
-        $servicesModel
-            ->method('get')
-            ->willReturn([
-                [
-                    'duration' => $serviceDuration,
-                    'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
-                ],
-            ]);
+        $servicesModel->method('get')->willReturn([
+            [
+                'duration' => $serviceDuration,
+                'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            ],
+        ]);
 
         $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
         $unavailabilitiesModel->method('get')->willReturn([]);
@@ -140,49 +139,24 @@ class ProviderUtilizationTest extends TestCase {
             $blockedPeriodsModel,
         );
     }
-}
 
-class FakeAppointmentsQueryBuilder
-{
-    private array $records;
-
-    public function __construct(array $records)
+    private function createAppointmentsQueryBuilder(array $appointments): CI_DB_query_builder
     {
-        $this->records = $records;
+        $builder = $this->createMock(CI_DB_query_builder::class);
+
+        $builder->method('select')->willReturnSelf();
+        $builder->method('where')->willReturnSelf();
+        $builder->method('where_in')->willReturnSelf();
+        $builder->method('get')->willReturn($this->createAppointmentsResult($appointments));
+
+        return $builder;
     }
 
-    public function select($fields)
+    private function createAppointmentsResult(array $appointments): CI_DB_result
     {
-        return $this;
-    }
+        $result = $this->createMock(CI_DB_result::class);
+        $result->method('result_array')->willReturn($appointments);
 
-    public function where($field, $value)
-    {
-        return $this;
-    }
-
-    public function where_in($field, $values)
-    {
-        return $this;
-    }
-
-    public function get(): FakeAppointmentsResult
-    {
-        return new FakeAppointmentsResult($this->records);
-    }
-}
-
-class FakeAppointmentsResult
-{
-    private array $records;
-
-    public function __construct(array $records)
-    {
-        $this->records = $records;
-    }
-
-    public function result_array(): array
-    {
-        return $this->records;
+        return $result;
     }
 }
