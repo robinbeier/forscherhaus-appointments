@@ -64,6 +64,22 @@ class Services_model extends EA_Model
      */
     public function save(array $service): int
     {
+        if (
+            array_key_exists('buffer_before', $service) &&
+            (int) $service['buffer_before'] > 0 &&
+            (int) $service['buffer_before'] < EVENT_MINIMUM_DURATION
+        ) {
+            $service['buffer_before'] = EVENT_MINIMUM_DURATION;
+        }
+
+        if (
+            array_key_exists('buffer_after', $service) &&
+            (int) $service['buffer_after'] > 0 &&
+            (int) $service['buffer_after'] < EVENT_MINIMUM_DURATION
+        ) {
+            $service['buffer_after'] = EVENT_MINIMUM_DURATION;
+        }
+
         $this->validate($service);
 
         if (empty($service['id'])) {
