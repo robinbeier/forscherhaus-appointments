@@ -9,6 +9,11 @@ developers to maintain and readjust their custom modifications on the main proje
 
 - Allow providers to define a room that is shown in the booking wizard summary, confirmation page, and Google Calendar exports.
 - Add service-specific buffer times that synchronize provider availability, appointment buffers, and calendar exports.
+- Introduce an admin utilization dashboard with configurable conflict threshold and per-provider metrics.
+
+### Fixed
+
+- Cannot modify appointment if provider changes time zone (#1789)
 
 ## [1.5.2] - 2025-08-26
 

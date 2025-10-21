@@ -27,6 +27,7 @@ App.Pages.Providers = (function () {
     const $state = $('#state');
     const $zipCode = $('#zip-code');
     const $room = $('#provider-room');
+    const $classSizeDefault = $('#provider-class-size-default');
     const $isPrivate = $('#is-private');
     const $notes = $('#notes');
     const $language = $('#language');
@@ -203,6 +204,9 @@ App.Pages.Providers = (function () {
                 return;
             }
 
+            const classSizeValue = $classSizeDefault.val().trim();
+            provider.class_size_default = classSizeValue === '' ? '' : classSizeValue;
+
             App.Pages.Providers.save(provider);
         });
 
@@ -323,6 +327,17 @@ App.Pages.Providers = (function () {
                 throw new Error(lang('username_already_exists'));
             }
 
+            const classSizeValue = $classSizeDefault.val().trim();
+
+            if (classSizeValue !== '') {
+                const parsedClassSize = Number(classSizeValue);
+
+                if (!Number.isInteger(parsedClassSize) || parsedClassSize < 0) {
+                    $classSizeDefault.addClass('is-invalid');
+                    throw new Error(lang('invalid_class_size'));
+                }
+            }
+
             return true;
         } catch (error) {
             $('#providers .form-message').addClass('alert-danger').text(error.message).show();
@@ -385,6 +400,11 @@ App.Pages.Providers = (function () {
         $state.val(provider.state);
         $zipCode.val(provider.zip_code);
         $room.val(provider.room ? provider.room : '');
+        $classSizeDefault.val(
+            provider.class_size_default === null || provider.class_size_default === undefined
+                ? ''
+                : provider.class_size_default,
+        );
         $isPrivate.prop('checked', provider.is_private);
         $notes.val(provider.notes);
         $language.val(provider.language);
