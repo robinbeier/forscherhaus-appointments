@@ -197,6 +197,11 @@ function vendor(done) {
     // chart.js
     gulp.src(['node_modules/chart.js/dist/chart.umd.min.js']).pipe(gulp.dest('assets/vendor/chart.js'));
 
+    // chartjs-chart-matrix
+    gulp.src(['node_modules/chartjs-chart-matrix/dist/chartjs-chart-matrix.min.js']).pipe(
+        gulp.dest('assets/vendor/chartjs-chart-matrix'),
+    );
+
     done();
 }
 

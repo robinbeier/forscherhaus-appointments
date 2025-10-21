@@ -341,6 +341,73 @@ body .ui-datepicker .ui-datepicker-buttonpane button {
     opacity: 0.75;
 }
 
+#dashboard-page #heatmap-utilization .heatmap-loading {
+    color: #6c757d;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-loading .spinner-border {
+    width: 2.5rem;
+    height: 2.5rem;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-empty {
+    font-size: 0.95rem;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-canvas {
+    position: relative;
+    min-height: 360px;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-canvas canvas {
+    width: 100% !important;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-legend-title {
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-legend-scale {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-legend-gradient {
+    flex: 1 1 auto;
+    height: 0.75rem;
+    border-radius: 999px;
+    background-image: linear-gradient(90deg, #e1f1ff, #0d6efd);
+}
+
+#dashboard-page #heatmap-utilization .heatmap-legend-min,
+#dashboard-page #heatmap-utilization .heatmap-legend-max {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-accessibility table {
+    width: 100%;
+}
+
+#dashboard-page #heatmap-utilization .heatmap-accessibility td,
+#dashboard-page #heatmap-utilization .heatmap-accessibility th {
+    padding: 0.25rem 0.5rem;
+}
+
 .breaks tr:hover td {
     background: #ffffc2 !important;
 }

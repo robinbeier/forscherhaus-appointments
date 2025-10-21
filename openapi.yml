@@ -22,6 +22,7 @@ tags:
   - name: appointments
   - name: availabilities
   - name: blocked_periods
+  - name: dashboard
   - name: customers
   - name: providers
   - name: secretaries
@@ -60,6 +61,65 @@ paths:
                   type: string
         '401':
           description: Unauthorized
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - BearerToken: [ ]
+        - BasicAuth: [ ]
+  /dashboard/heatmap:
+    post:
+      tags:
+        - dashboard
+      summary: Get dashboard heatmap utilization metrics
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                start_date:
+                  type: string
+                  format: date
+                  description: Start date (inclusive) in YYYY-MM-DD format.
+                end_date:
+                  type: string
+                  format: date
+                  description: End date (inclusive) in YYYY-MM-DD format.
+                statuses:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional list of appointment statuses to include.
+                service_id:
+                  type: integer
+                  description: Optional service filter identifier.
+              required:
+                - start_date
+                - end_date
+      responses:
+        '200':
+          description: Heatmap metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardHeatmapResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -2800,6 +2860,66 @@ components:
         secretToken: SecureSecretTokenHere
         isSslVerified: true
         notes: This is a webhook.
+    DashboardHeatmapMeta:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        intervalMinutes:
+          type: integer
+        timezone:
+          type: string
+        total:
+          type: integer
+        percentile95:
+          type: number
+          format: float
+        rangeLabel:
+          type: string
+      required:
+        - startDate
+        - endDate
+        - intervalMinutes
+        - timezone
+        - total
+        - percentile95
+        - rangeLabel
+    DashboardHeatmapSlot:
+      type: object
+      properties:
+        weekday:
+          type: integer
+          minimum: 1
+          maximum: 5
+        time:
+          type: string
+          pattern: '^\\d{2}:\\d{2}$'
+        count:
+          type: integer
+        percent:
+          type: number
+          format: float
+      required:
+        - weekday
+        - time
+        - count
+        - percent
+    DashboardHeatmapResponse:
+      type: object
+      properties:
+        meta:
+          $ref: '#/components/schemas/DashboardHeatmapMeta'
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardHeatmapSlot'
+      required:
+        - meta
+        - slots
     WebhookPayload:
       type: object
       properties:

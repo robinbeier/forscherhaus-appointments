@@ -34,6 +34,7 @@ class Dashboard extends EA_Controller
         $this->load->model('providers_model');
         $this->load->model('services_model');
         $this->load->library('dashboard_metrics');
+        $this->load->library('dashboard_heatmap');
         $this->load->library('accounts');
     }
 
@@ -136,6 +137,62 @@ class Dashboard extends EA_Controller
             ]);
 
             json_response($metrics);
+        } catch (Throwable $e) {
+            json_exception($e);
+        }
+    }
+
+    /**
+     * Provide heatmap utilization metrics for the selected filters.
+     */
+    public function heatmap(): void
+    {
+        try {
+            if (session('role_slug') !== DB_SLUG_ADMIN) {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            $start_date = request('start_date');
+            $end_date = request('end_date');
+            $statuses = request('statuses', []);
+
+            if ($statuses !== null && !is_array($statuses)) {
+                $statuses = [$statuses];
+            }
+
+            if (!$start_date || !$end_date) {
+                throw new InvalidArgumentException(lang('filter_period_required'));
+            }
+
+            $start = DateTimeImmutable::createFromFormat('Y-m-d', $start_date);
+            $end = DateTimeImmutable::createFromFormat('Y-m-d', $end_date);
+
+            if (!$start || $start->format('Y-m-d') !== $start_date || !$end || $end->format('Y-m-d') !== $end_date) {
+                throw new InvalidArgumentException(lang('filter_period_required'));
+            }
+
+            if ($start > $end) {
+                throw new InvalidArgumentException(lang('filter_period_required'));
+            }
+
+            $service_id = request('service_id');
+            $provider_ids = request('provider_ids', []);
+
+            if ($provider_ids !== null && !is_array($provider_ids)) {
+                $provider_ids = [$provider_ids];
+            }
+
+            $heatmap = $this->dashboard_heatmap->collect($start, $end, [
+                'statuses' => $statuses,
+                'service_id' => $service_id,
+                'provider_ids' => $provider_ids ?? [],
+            ]);
+
+            json_response($heatmap);
+        } catch (InvalidArgumentException $e) {
+            json_response(['success' => false, 'message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
             json_exception($e);
         }

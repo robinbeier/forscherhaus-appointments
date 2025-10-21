@@ -15,6 +15,8 @@
  * This module implements the utilization dashboard related HTTP requests.
  */
 App.Http.Dashboard = (function () {
+    let heatmapRequest = null;
+
     /**
      * Fetch utilization metrics for the provided filters.
      *
@@ -48,6 +50,39 @@ App.Http.Dashboard = (function () {
         }
 
         return $.post(url, payload);
+    }
+
+    function fetchHeatmap(filters) {
+        const url = App.Utils.Url.siteUrl('dashboard/heatmap');
+        const payload = {
+            csrf_token: vars('csrf_token'),
+            start_date: filters.startDate,
+            end_date: filters.endDate,
+        };
+
+        if (Array.isArray(filters.statuses)) {
+            payload.statuses = filters.statuses;
+        }
+
+        if (filters.serviceId) {
+            payload.service_id = filters.serviceId;
+        }
+
+        if (Array.isArray(filters.providerIds) && filters.providerIds.length) {
+            payload.provider_ids = filters.providerIds;
+        }
+
+        if (heatmapRequest && typeof heatmapRequest.abort === 'function') {
+            heatmapRequest.abort();
+        }
+
+        heatmapRequest = $.post(url, payload);
+
+        heatmapRequest.always(() => {
+            heatmapRequest = null;
+        });
+
+        return heatmapRequest;
     }
 
     function downloadTeacherExport(filters = {}) {
@@ -105,6 +140,7 @@ App.Http.Dashboard = (function () {
 
     return {
         fetch,
+        fetchHeatmap,
         downloadTeacherExport,
         downloadPrincipalExport,
     };

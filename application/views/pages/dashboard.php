@@ -46,6 +46,11 @@
                                             </div>
                                         </div>
                                         <div class="dropdown-divider d-none"></div>
+                                        <button type="button" class="dropdown-item d-flex align-items-center gap-2" id="dashboard-show-heatmap">
+                                            <i class="fas fa-th text-muted"></i>
+                                            <span><?= lang('dashboard_heatmap_menu') ?></span>
+                                        </button>
+                                        <div class="dropdown-divider"></div>
                                         <button type="button" class="dropdown-item d-flex align-items-center gap-2" id="dashboard-download-teacher">
                                             <i class="fas fa-file-download text-muted"></i>
                                             <span><?= lang('dashboard_download_teacher_pdf') ?></span>
@@ -125,6 +130,46 @@
             </div>
         </div>
     </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card" id="heatmap-utilization" hidden>
+                <div class="card-header d-flex align-items-center">
+                    <h5 class="mb-0 fw-light">
+                        <?= lang('dashboard_heatmap_title') ?>
+                    </h5>
+                    <span class="badge bg-light text-dark ms-auto" id="dashboard-heatmap-context" hidden></span>
+                </div>
+                <div class="card-body">
+                    <div class="heatmap-loading text-center py-5" role="status" aria-live="polite">
+                        <div class="spinner-border text-primary" role="presentation"></div>
+                        <p class="mt-3 mb-0"><?= lang('dashboard_heatmap_loading') ?></p>
+                    </div>
+                    <div class="alert alert-warning mt-3" id="dashboard-heatmap-error" role="alert" hidden></div>
+                    <div class="heatmap-content" id="dashboard-heatmap-content" hidden>
+                        <div class="heatmap-empty text-muted" id="dashboard-heatmap-empty" hidden>
+                            <?= lang('dashboard_heatmap_empty') ?>
+                        </div>
+                        <div class="heatmap-canvas">
+                            <canvas id="dashboard-heatmap-canvas" height="360" tabindex="0" role="img" aria-live="polite"></canvas>
+                        </div>
+                        <div class="heatmap-legend mt-3">
+                            <span class="heatmap-legend-title"><?= lang('dashboard_heatmap_legend_title') ?></span>
+                            <div class="heatmap-legend-scale" aria-hidden="true">
+                                <span class="heatmap-legend-min">0</span>
+                                <div class="heatmap-legend-gradient"></div>
+                                <span class="heatmap-legend-max" id="dashboard-heatmap-legend-max">0</span>
+                            </div>
+                            <div class="text-muted small mt-1">
+                                <?= lang('dashboard_heatmap_legend_hint') ?>
+                            </div>
+                        </div>
+                        <div class="visually-hidden-focusable heatmap-accessibility" id="dashboard-heatmap-accessibility" aria-live="polite"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="modal fade" id="dashboard-threshold-modal" tabindex="-1" aria-labelledby="dashboard-threshold-modal-label" aria-hidden="true">
@@ -163,6 +208,7 @@
 
 <?php section('scripts'); ?>
     <script src="<?= asset_url('assets/vendor/chart.js/chart.umd.min.js') ?>"></script>
+    <script src="<?= asset_url('assets/vendor/chartjs-chart-matrix/chartjs-chart-matrix.min.js') ?>"></script>
     <script src="<?= asset_url('assets/js/http/dashboard_http_client.js') ?>"></script>
     <script src="<?= asset_url('assets/js/pages/dashboard.js') ?>"></script>
 <?php end_section('scripts'); ?>

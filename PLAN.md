@@ -54,6 +54,13 @@
 -   Routing ergänzen: `$route['dashboard/export/teacher.pdf']['get'] = 'dashboard_export/teacher_pdf';` und Dashboard-Buttons auf Fehlerfälle testen.
 -   Dokumentation/Tooltip im Dashboard aktualisieren, sobald das Layout final ist.
 
+### 3. Heatmap-Auslastung
+
+-   Neue Library `Dashboard_heatmap` aggregiert bestätigte Buchungen nach Zeit-Slots (Standard 30 Minuten bzw. Service-Dauer ≥ 30 Minuten) und cached Ergebnisse 60 Sekunden.
+-   Endpoint `dashboard/heatmap` (POST) übernimmt Datums-, Status- und Service-Filter, liefert JSON `{meta, slots}` inkl. 95. Perzentil (Farbnormierung) und validiert mit HTTP 422.
+-   OpenAPI sowie `application/config/routes.php` dokumentieren/registrieren den Endpoint; Zugriffe nur für Admins.
+-   Dashboard-Dropdown ergänzt Heatmap-Eintrag, neue Card rendert Chart.js-Matrix-Heatmap inkl. Legende, Kontext-Badge, Fehlermeldungen & barrierefreier Tabelle.
+
 ## Konfiguration & Settings-Verwaltung
 
 -   Keine neuen Settings erforderlich; `dashboard_conflict_threshold` bleibt Drehpunkt für Konflikt-Logik.

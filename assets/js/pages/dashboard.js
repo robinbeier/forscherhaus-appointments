@@ -9,6 +9,460 @@
  * @since       v1.5.0
  * ---------------------------------------------------------------------------- */
 
+App.Components = App.Components || {};
+
+App.Components.DashboardHeatmap = (function () {
+    const $card = $('#heatmap-utilization');
+    const $loading = $card.find('.heatmap-loading');
+    const $content = $('#dashboard-heatmap-content');
+    const $error = $('#dashboard-heatmap-error');
+    const $contextBadge = $('#dashboard-heatmap-context');
+    const $canvasContainer = $card.find('.heatmap-canvas');
+    const $canvas = $('#dashboard-heatmap-canvas');
+    const $legend = $card.find('.heatmap-legend');
+    const $legendMax = $('#dashboard-heatmap-legend-max');
+    const $empty = $('#dashboard-heatmap-empty');
+    const $accessibility = $('#dashboard-heatmap-accessibility');
+
+    const weekdays = [1, 2, 3, 4, 5];
+    const weekdayLabels = {
+        1: lang('monday_short'),
+        2: lang('tuesday_short'),
+        3: lang('wednesday_short'),
+        4: lang('thursday_short'),
+        5: lang('friday_short'),
+    };
+
+    const locale = vars('language_code') || 'de-DE';
+    const countFormatter = new Intl.NumberFormat(locale, {maximumFractionDigits: 0});
+    const percentFormatter = new Intl.NumberFormat(locale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+
+    let active = false;
+    let chart = null;
+    let lastFilters = null;
+
+    function activate(filters) {
+        if (!$card.length) {
+            return;
+        }
+
+        active = true;
+        $card.removeAttr('hidden');
+
+        if (filters) {
+            lastFilters = filters;
+            load(filters);
+        } else {
+            showError(lang('filter_period_required'));
+        }
+    }
+
+    function onFiltersUpdated(filters) {
+        lastFilters = filters;
+
+        if (!active || !filters) {
+            return;
+        }
+
+        load(filters);
+    }
+
+    function load(filters) {
+        if (!$card.length || !filters) {
+            return;
+        }
+
+        showLoading();
+
+        App.Http.Dashboard.fetchHeatmap(filters)
+            .done((response) => {
+                if (!response || typeof response !== 'object') {
+                    showError(lang('unexpected_issues'));
+                    return;
+                }
+
+                render(response);
+            })
+            .fail((jqXHR) => {
+                const message = jqXHR?.responseJSON?.message ?? lang('unexpected_issues');
+                showError(message);
+            });
+    }
+
+    function showLoading() {
+        $card.removeAttr('hidden');
+        $loading.removeAttr('hidden');
+        $error.attr('hidden', true);
+        $content.attr('hidden', true);
+    }
+
+    function showError(message) {
+        $card.removeAttr('hidden');
+        $loading.attr('hidden', true);
+        $content.attr('hidden', true);
+        $error.text(message).removeAttr('hidden');
+    }
+
+    function destroyChart() {
+        if (chart) {
+            chart.destroy();
+            chart = null;
+        }
+    }
+
+    function render(data) {
+        const slots = Array.isArray(data.slots) ? data.slots : [];
+        const meta = data.meta || {};
+        const total = Number(meta.total ?? 0);
+        const times = getUniqueTimes(slots);
+
+        $loading.attr('hidden', true);
+        $error.attr('hidden', true);
+        $content.removeAttr('hidden');
+
+        updateContext(meta);
+
+        if (!slots.length || total === 0) {
+            destroyChart();
+            showEmptyState();
+            updateLegend(0);
+            renderAccessibility(slots, times, meta);
+
+            return;
+        }
+
+        hideEmptyState();
+
+        const normalizationMax = resolveNormalizationMax(slots, meta);
+
+        drawChart(slots, times, normalizationMax, meta);
+        updateLegend(normalizationMax);
+        renderAccessibility(slots, times, meta);
+    }
+
+    function showEmptyState() {
+        $canvasContainer.attr('hidden', true);
+        $legend.attr('hidden', true);
+        $empty.removeAttr('hidden');
+    }
+
+    function hideEmptyState() {
+        $canvasContainer.removeAttr('hidden');
+        $legend.removeAttr('hidden');
+        $empty.attr('hidden', true);
+    }
+
+    function updateContext(meta) {
+        if (!$contextBadge.length) {
+            return;
+        }
+
+        if (!meta || !meta.rangeLabel) {
+            $contextBadge.attr('hidden', true);
+
+            return;
+        }
+
+        const interval = Number(meta.intervalMinutes ?? 0);
+        const formattedInterval = interval > 0 ? countFormatter.format(interval) : '0';
+        const label = lang('dashboard_heatmap_context_pattern')
+            .replace('%range%', meta.rangeLabel)
+            .replace('%minutes%', formattedInterval);
+
+        $contextBadge.text(label).removeAttr('hidden');
+    }
+
+    function resolveNormalizationMax(slots, meta) {
+        const counts = slots.map((slot) => Number(slot.count ?? slot.v ?? 0));
+        const maxCount = counts.length ? Math.max(...counts) : 0;
+        const percentile = Number(meta.percentile95 ?? 0);
+
+        if (percentile > 0) {
+            return percentile;
+        }
+
+        return maxCount;
+    }
+
+    function drawChart(slots, times, normalizationMax, meta) {
+        const context = $canvas[0]?.getContext('2d');
+
+        if (!context) {
+            return;
+        }
+
+        destroyChart();
+
+        const safeMax = normalizationMax > 0 ? normalizationMax : 1;
+        const interval = Number(meta.intervalMinutes ?? 0) || 30;
+
+        chart = new Chart(context, {
+            type: 'matrix',
+            data: {
+                datasets: [
+                    {
+                        data: slots.map((slot) => ({
+                            x: slot.time,
+                            y: String(slot.weekday ?? slot.y ?? ''),
+                            v: Number(slot.count ?? slot.v ?? 0),
+                            percent: Number(slot.percent ?? 0),
+                        })),
+                        backgroundColor(ctx) {
+                            const value = Number(ctx.raw?.v ?? 0);
+
+                            return colorFor(value, safeMax);
+                        },
+                        borderColor: '#ffffff',
+                        borderWidth: 1,
+                        hoverBorderColor: '#0d6efd',
+                        borderRadius: 4,
+                        width(renderContext) {
+                            const area = renderContext.chart.chartArea;
+
+                            if (!area || !times.length) {
+                                return 0;
+                            }
+
+                            return Math.max(area.width / times.length - 4, 0);
+                        },
+                        height(renderContext) {
+                            const area = renderContext.chart.chartArea;
+
+                            if (!area || !weekdays.length) {
+                                return 0;
+                            }
+
+                            return Math.max(area.height / weekdays.length - 4, 0);
+                        },
+                    },
+                ],
+            },
+            options: {
+                maintainAspectRatio: false,
+                responsive: true,
+                animation: false,
+                scales: {
+                    x: {
+                        type: 'category',
+                        labels: times,
+                        offset: true,
+                        grid: {display: false},
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: false,
+                        },
+                    },
+                    y: {
+                        type: 'category',
+                        labels: weekdays.map((day) => String(day)),
+                        offset: true,
+                        reverse: true,
+                        grid: {display: false},
+                        ticks: {
+                            callback(value) {
+                                return weekdayLabels[value] ?? weekdayLabels[Number(value)] ?? value;
+                            },
+                        },
+                    },
+                },
+                plugins: {
+                    legend: {display: false},
+                    tooltip: {
+                        callbacks: {
+                            title(items) {
+                                const item = items?.[0];
+
+                                if (!item) {
+                                    return '';
+                                }
+
+                                const raw = item.raw || {};
+                                const weekday = Number(raw.y ?? raw.weekday);
+                                const start = raw.x;
+                                const end = computeEndTime(start, interval);
+                                const prefix = weekdayLabels[weekday] ?? weekday;
+
+                                if (!start || !end) {
+                                    return prefix || '';
+                                }
+
+                                return `${prefix} ${start}–${end}`;
+                            },
+                            label(context) {
+                                const value = Number(context.raw?.v ?? 0);
+                                const formatted = countFormatter.format(value);
+
+                                return `${lang('dashboard_heatmap_tooltip_bookings')}: ${formatted}`;
+                            },
+                            afterBody(items) {
+                                const item = items?.[0];
+
+                                if (!item) {
+                                    return '';
+                                }
+
+                                const percentValue = Number(item.raw?.percent ?? 0);
+                                const formatted = percentFormatter.format(percentValue);
+
+                                return `${lang('dashboard_heatmap_tooltip_share')}: ${formatted} %`;
+                            },
+                        },
+                    },
+                },
+                onHover(event, elements) {
+                    if (!event?.native) {
+                        return;
+                    }
+
+                    event.native.target.style.cursor = elements?.length ? 'pointer' : 'default';
+                },
+            },
+        });
+    }
+
+    function getUniqueTimes(slots) {
+        const times = [];
+        const seen = new Set();
+
+        slots.forEach((slot) => {
+            const time = slot.time;
+
+            if (!time || seen.has(time)) {
+                return;
+            }
+
+            seen.add(time);
+            times.push(time);
+        });
+
+        return times.sort((left, right) => timeToMinutes(left) - timeToMinutes(right));
+    }
+
+    function timeToMinutes(value) {
+        const parts = String(value).split(':');
+
+        if (parts.length < 2) {
+            return 0;
+        }
+
+        const hours = Number(parts[0]);
+        const minutes = Number(parts[1]);
+
+        return hours * 60 + minutes;
+    }
+
+    function colorFor(value, max) {
+        if (max <= 0) {
+            return 'rgba(225, 241, 255, 1)';
+        }
+
+        const ratio = Math.min(Math.max(value, 0), max) / max;
+        const start = [225, 241, 255];
+        const end = [13, 110, 253];
+        const red = Math.round(start[0] + (end[0] - start[0]) * ratio);
+        const green = Math.round(start[1] + (end[1] - start[1]) * ratio);
+        const blue = Math.round(start[2] + (end[2] - start[2]) * ratio);
+
+        return `rgb(${red}, ${green}, ${blue})`;
+    }
+
+    function computeEndTime(time, interval) {
+        if (!time) {
+            return '';
+        }
+
+        const safeInterval = interval > 0 ? interval : 30;
+        const parsed = moment(time, 'HH:mm');
+
+        if (!parsed.isValid()) {
+            return '';
+        }
+
+        return parsed.clone().add(safeInterval, 'minutes').format('HH:mm');
+    }
+
+    function updateLegend(value) {
+        if (!$legendMax.length) {
+            return;
+        }
+
+        const normalized = value > 0 ? Math.ceil(value) : 0;
+        $legendMax.text(countFormatter.format(normalized));
+    }
+
+    function renderAccessibility(slots, times, meta) {
+        if (!$accessibility.length) {
+            return;
+        }
+
+        if (!times.length) {
+            $accessibility.empty();
+
+            return;
+        }
+
+        const interval = Number(meta.intervalMinutes ?? 0) || 30;
+        const grouped = {};
+
+        slots.forEach((slot) => {
+            const weekday = Number(slot.weekday ?? slot.y);
+            const time = slot.time;
+
+            if (!grouped[weekday]) {
+                grouped[weekday] = {};
+            }
+
+            grouped[weekday][time] = slot;
+        });
+
+        let html = '<table><thead><tr>';
+        html += `<th scope="col">${lang('dashboard_heatmap_accessibility_weekday')}</th>`;
+        times.forEach((time) => {
+            html += `<th scope="col">${time}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+
+        weekdays.forEach((weekday) => {
+            html += `<tr><th scope="row">${weekdayLabels[weekday] ?? weekday}</th>`;
+            times.forEach((time) => {
+                const slot = grouped[weekday]?.[time] ?? {count: 0, percent: 0};
+                const ariaLabel = escapeAttr(buildAriaLabel(weekday, time, interval, slot));
+                const displayCount = countFormatter.format(Number(slot.count ?? slot.v ?? 0));
+
+                html += `<td tabindex="0" aria-label="${ariaLabel}">${displayCount}</td>`;
+            });
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+
+        $accessibility.html(html);
+    }
+
+    function buildAriaLabel(weekday, time, interval, slot) {
+        const prefix = weekdayLabels[weekday] ?? weekday;
+        const end = computeEndTime(time, interval) || time;
+        const bookings = countFormatter.format(Number(slot.count ?? slot.v ?? 0));
+        const percentage = percentFormatter.format(Number(slot.percent ?? 0));
+
+        return `${prefix} ${time}–${end}, ${lang('dashboard_heatmap_tooltip_bookings')}: ${bookings}, ${lang('dashboard_heatmap_tooltip_share')}: ${percentage} %`;
+    }
+
+    function escapeAttr(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    return {
+        activate,
+        onFiltersUpdated,
+    };
+})();
+
 /**
  * Dashboard page.
  *
@@ -30,17 +484,20 @@ App.Pages.Dashboard = (function () {
     const $thresholdDisplay = $('#dashboard-threshold-display');
     const $thresholdForm = $('#dashboard-threshold-form');
     const $thresholdInput = $('#dashboard-threshold-input');
+    const $heatmapToggle = $('#dashboard-show-heatmap');
     const thresholdModalElement = document.getElementById('dashboard-threshold-modal');
 
     const appointmentStatusOptions = vars('appointment_status_options') || [];
     const defaultStatuses = vars('dashboard_default_statuses') || [];
     const serviceOptions = vars('dashboard_service_options') || [];
+    const heatmap = App.Components.DashboardHeatmap;
 
     let threshold = parseFloat(vars('dashboard_conflict_threshold')) || 0.75;
     let thresholdModal;
     let datePicker;
     let chart;
     let metrics = [];
+    let lastFilters = null;
 
     function initialize() {
         populateStatusOptions();
@@ -71,6 +528,7 @@ App.Pages.Dashboard = (function () {
         $downloadPrincipal.on('click', onDownloadPrincipal);
         $thresholdButton.on('click', onThresholdButtonClick);
         $thresholdForm.on('submit', onThresholdFormSubmit);
+        $heatmapToggle.on('click', onHeatmapToggle);
 
         updateHiddenCounter();
         loadMetrics();
@@ -134,6 +592,25 @@ App.Pages.Dashboard = (function () {
     function onFiltersSubmit(event) {
         event.preventDefault();
         loadMetrics();
+    }
+
+    function onHeatmapToggle(event) {
+        event.preventDefault();
+
+        if (!heatmap) {
+            return;
+        }
+
+        const filters = lastFilters || getFilters();
+
+        heatmap.activate(filters);
+
+        const toggleElement = document.getElementById('dashboard-options-toggle');
+        const dropdown = toggleElement ? bootstrap.Dropdown.getInstance(toggleElement) : null;
+
+        if (dropdown && typeof dropdown.hide === 'function') {
+            dropdown.hide();
+        }
     }
 
     function onHideToggleChange() {
@@ -218,6 +695,8 @@ App.Pages.Dashboard = (function () {
 
         hideError();
 
+        heatmap?.onFiltersUpdated(filters);
+
         App.Http.Dashboard.fetch(filters)
             .done((response) => {
                 metrics = Array.isArray(response) ? response : [];
@@ -247,12 +726,16 @@ App.Pages.Dashboard = (function () {
             Array.isArray(selectedStatuses) && selectedStatuses.length ? selectedStatuses : defaultStatuses;
         const serviceId = $service.val() || null;
 
-        return {
+        const filters = {
             startDate: range.start,
             endDate: range.end,
             statuses,
             serviceId,
         };
+
+        lastFilters = filters;
+
+        return filters;
     }
 
     function getSelectedRange() {
