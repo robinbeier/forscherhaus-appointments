@@ -30,6 +30,7 @@ class Appointments_api_v1 extends EA_Controller
         $this->load->model('providers_model');
         $this->load->model('services_model');
         $this->load->model('settings_model');
+        $this->load->model('unavailabilities_model');
 
         $this->load->library('api');
         $this->load->library('webhooks_client');
@@ -47,6 +48,8 @@ class Appointments_api_v1 extends EA_Controller
     public function index(): void
     {
         try {
+            $include_buffer_blocks = filter_var(request('include_buffer_blocks'), FILTER_VALIDATE_BOOLEAN);
+
             $keyword = $this->api->request_keyword();
 
             $limit = $this->api->request_limit();
@@ -125,6 +128,8 @@ class Appointments_api_v1 extends EA_Controller
                 if (!empty($with)) {
                     $this->appointments_model->load($appointment, $with);
                 }
+
+                $this->append_buffer_blocks($appointment, $include_buffer_blocks);
             }
 
             json_response($appointments);
@@ -164,6 +169,24 @@ class Appointments_api_v1 extends EA_Controller
         }
     }
 
+    private function append_buffer_blocks(array &$appointment, bool $include): void
+    {
+        if (!$include || empty($appointment['id'])) {
+            return;
+        }
+
+        $buffer_blocks = $this->unavailabilities_model->get([
+            'id_parent_appointment' => $appointment['id'],
+            'is_unavailability' => true,
+        ]);
+
+        foreach ($buffer_blocks as &$block) {
+            $this->unavailabilities_model->api_encode($block);
+        }
+
+        $appointment['bufferBlocks'] = array_values($buffer_blocks);
+    }
+
     /**
      * Get a single appointment.
      *
@@ -172,6 +195,8 @@ class Appointments_api_v1 extends EA_Controller
     public function show(?int $id = null): void
     {
         try {
+            $include_buffer_blocks = filter_var(request('include_buffer_blocks'), FILTER_VALIDATE_BOOLEAN);
+
             $occurrences = $this->appointments_model->get(['id' => $id]);
 
             if (empty($occurrences)) {
@@ -195,6 +220,8 @@ class Appointments_api_v1 extends EA_Controller
             if (!empty($with)) {
                 $this->appointments_model->load($appointment, $with);
             }
+
+            $this->append_buffer_blocks($appointment, $include_buffer_blocks);
 
             json_response($appointment);
         } catch (Throwable $e) {

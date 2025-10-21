@@ -31,11 +31,15 @@ class Services extends EA_Controller
         'location',
         'availabilities_type',
         'attendants_number',
+        'buffer_before',
+        'buffer_after',
         'is_private',
         'id_service_categories',
     ];
     public array $optional_service_fields = [
         'id_service_categories' => null,
+        'buffer_before' => 0,
+        'buffer_after' => 0,
     ];
 
     /**

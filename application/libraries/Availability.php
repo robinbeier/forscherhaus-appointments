@@ -548,23 +548,38 @@ class Availability
     {
         $available_hours = [];
 
+        $duration = (int) $service['duration'];
+        $interval_minutes = $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED ? $duration : 15;
+        $duration_interval = new DateInterval('PT' . $duration . 'M');
+        $slot_interval = new DateInterval('PT' . $interval_minutes . 'M');
+        $buffer_before = max(0, (int) ($service['buffer_before'] ?? 0));
+        $buffer_after = max(0, (int) ($service['buffer_after'] ?? 0));
+        $buffer_before_interval = new DateInterval('PT' . $buffer_before . 'M');
+        $buffer_after_interval = new DateInterval('PT' . $buffer_after . 'M');
+
         foreach ($empty_periods as $period) {
-            $start_hour = new DateTime($date . ' ' . $period['start']);
+            $period_start = new DateTimeImmutable($date . ' ' . $period['start']);
+            $period_end = new DateTimeImmutable($date . ' ' . $period['end']);
 
-            $end_hour = new DateTime($date . ' ' . $period['end']);
+            $current_start = $period_start->add($buffer_before_interval);
+            $latest_start = $period_end->sub($buffer_after_interval)->sub($duration_interval);
 
-            $interval = $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED ? (int) $service['duration'] : 15;
+            if ($latest_start < $current_start) {
+                continue;
+            }
 
-            $current_hour = $start_hour;
+            while ($current_start <= $latest_start) {
+                $window_start = $buffer_before > 0 ? $current_start->sub($buffer_before_interval) : $current_start;
+                $window_end = $current_start->add($duration_interval);
+                $window_end = $buffer_after > 0 ? $window_end->add($buffer_after_interval) : $window_end;
 
-            $diff = $current_hour->diff($end_hour);
+                if ($window_start < $period_start || $window_end > $period_end) {
+                    $current_start = $current_start->add($slot_interval);
+                    continue;
+                }
 
-            while ($diff->h * 60 + $diff->i >= (int) $service['duration'] && $diff->invert === 0) {
-                $available_hours[] = $current_hour->format('H:i');
-
-                $current_hour->add(new DateInterval('PT' . $interval . 'M'));
-
-                $diff = $current_hour->diff($end_hour);
+                $available_hours[] = $current_start->format('H:i');
+                $current_start = $current_start->add($slot_interval);
             }
         }
 

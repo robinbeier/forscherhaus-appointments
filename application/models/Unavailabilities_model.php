@@ -27,6 +27,7 @@ class Unavailabilities_model extends EA_Model
         'id_users_provider' => 'integer',
         'id_users_customer' => 'integer',
         'id_services' => 'integer',
+        'id_parent_appointment' => 'integer',
     ];
 
     /**
@@ -44,6 +45,7 @@ class Unavailabilities_model extends EA_Model
         'hash' => 'hash',
         'providerId' => 'id_users_provider',
         'googleCalendarId' => 'id_google_calendar',
+        'parentAppointmentId' => 'id_parent_appointment',
     ];
 
     /**
@@ -388,6 +390,10 @@ class Unavailabilities_model extends EA_Model
                 $unavailability['id_users_provider'] !== null ? (int) $unavailability['id_users_provider'] : null,
             'googleCalendarId' =>
                 $unavailability['id_google_calendar'] !== null ? (int) $unavailability['id_google_calendar'] : null,
+            'parentAppointmentId' =>
+                $unavailability['id_parent_appointment'] !== null
+                    ? (int) $unavailability['id_parent_appointment']
+                    : null,
         ];
 
         $unavailability = $encoded_resource;
@@ -437,6 +443,10 @@ class Unavailabilities_model extends EA_Model
 
         if (array_key_exists('googleCalendarId', $unavailability)) {
             $decoded_request['id_google_calendar'] = $unavailability['googleCalendarId'];
+        }
+
+        if (array_key_exists('parentAppointmentId', $unavailability)) {
+            $decoded_request['id_parent_appointment'] = $unavailability['parentAppointmentId'];
         }
 
         $decoded_request['is_unavailability'] = true;

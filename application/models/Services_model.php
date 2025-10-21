@@ -27,6 +27,8 @@ class Services_model extends EA_Model
         'id' => 'integer',
         'price' => 'float',
         'attendants_number' => 'integer',
+        'buffer_before' => 'integer',
+        'buffer_after' => 'integer',
         'is_private' => 'boolean',
         'id_service_categories' => 'integer',
     ];
@@ -45,6 +47,8 @@ class Services_model extends EA_Model
         'color' => 'color',
         'availabilitiesType' => 'availabilities_type',
         'attendantsNumber' => 'attendants_number',
+        'bufferBefore' => 'buffer_before',
+        'bufferAfter' => 'buffer_after',
         'isPrivate' => 'is_private',
         'serviceCategoryId' => 'id_service_categories',
     ];
@@ -114,6 +118,17 @@ class Services_model extends EA_Model
                     'The service duration cannot be less than ' . EVENT_MINIMUM_DURATION . ' minutes long.',
                 );
             }
+        }
+
+        $buffer_before = array_key_exists('buffer_before', $service) ? (int) $service['buffer_before'] : 0;
+        $buffer_after = array_key_exists('buffer_after', $service) ? (int) $service['buffer_after'] : 0;
+
+        if ($buffer_before < 0 || $buffer_before > 240) {
+            throw new InvalidArgumentException(lang('buffer_limit_error'));
+        }
+
+        if ($buffer_after < 0 || $buffer_after > 240) {
+            throw new InvalidArgumentException(lang('buffer_limit_error'));
         }
 
         // Availabilities type must have the correct value.
@@ -417,6 +432,8 @@ class Services_model extends EA_Model
             'location' => $service['location'],
             'availabilitiesType' => $service['availabilities_type'],
             'attendantsNumber' => (int) $service['attendants_number'],
+            'bufferBefore' => (int) ($service['buffer_before'] ?? 0),
+            'bufferAfter' => (int) ($service['buffer_after'] ?? 0),
             'isPrivate' => (bool) $service['is_private'],
             'serviceCategoryId' =>
                 $service['id_service_categories'] !== null ? (int) $service['id_service_categories'] : null,
@@ -469,6 +486,14 @@ class Services_model extends EA_Model
 
         if (array_key_exists('attendantsNumber', $service)) {
             $decoded_resource['attendants_number'] = $service['attendantsNumber'];
+        }
+
+        if (array_key_exists('bufferBefore', $service)) {
+            $decoded_resource['buffer_before'] = $service['bufferBefore'];
+        }
+
+        if (array_key_exists('bufferAfter', $service)) {
+            $decoded_resource['buffer_after'] = $service['bufferAfter'];
         }
 
         if (array_key_exists('serviceCategoryId', $service)) {

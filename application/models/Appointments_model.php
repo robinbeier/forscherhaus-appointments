@@ -18,6 +18,15 @@
  */
 class Appointments_model extends EA_Model
 {
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->load->model('unavailabilities_model');
+        $this->load->model('services_model');
+        $this->load->model('providers_model');
+    }
+
     /**
      * @var array
      */
@@ -27,6 +36,7 @@ class Appointments_model extends EA_Model
         'id_users_provider' => 'integer',
         'id_users_customer' => 'integer',
         'id_services' => 'integer',
+        'id_parent_appointment' => 'integer',
     ];
 
     /**
@@ -47,6 +57,7 @@ class Appointments_model extends EA_Model
         'customerId' => 'id_users_customer',
         'googleCalendarId' => 'id_google_calendar',
         'caldavCalendarId' => 'id_caldav_calendar',
+        'parentAppointmentId' => 'id_parent_appointment',
     ];
 
     /**
@@ -210,16 +221,32 @@ class Appointments_model extends EA_Model
      */
     protected function insert(array $appointment): int
     {
-        $appointment['book_datetime'] = date('Y-m-d H:i:s');
-        $appointment['create_datetime'] = date('Y-m-d H:i:s');
-        $appointment['update_datetime'] = date('Y-m-d H:i:s');
-        $appointment['hash'] = random_string('alnum', 12);
-
-        if (!$this->db->insert('appointments', $appointment)) {
-            throw new RuntimeException('Could not insert appointment.');
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start appointment transaction.');
         }
 
-        return $this->db->insert_id();
+        try {
+            $appointment['book_datetime'] = date('Y-m-d H:i:s');
+            $appointment['create_datetime'] = date('Y-m-d H:i:s');
+            $appointment['update_datetime'] = date('Y-m-d H:i:s');
+            $appointment['hash'] = random_string('alnum', 12);
+
+            if (!$this->db->insert('appointments', $appointment)) {
+                throw new RuntimeException('Could not insert appointment.');
+            }
+
+            $appointment_id = $this->db->insert_id();
+            $created_appointment = $this->find($appointment_id);
+            $this->sync_buffer_unavailabilities($created_appointment);
+
+            $this->db->trans_commit();
+
+            return $appointment_id;
+        } catch (Throwable $exception) {
+            $this->db->trans_rollback();
+
+            throw $exception;
+        }
     }
 
     /**
@@ -233,13 +260,28 @@ class Appointments_model extends EA_Model
      */
     protected function update(array $appointment): int
     {
-        $appointment['update_datetime'] = date('Y-m-d H:i:s');
-
-        if (!$this->db->update('appointments', $appointment, ['id' => $appointment['id']])) {
-            throw new RuntimeException('Could not update appointment record.');
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start appointment transaction.');
         }
 
-        return $appointment['id'];
+        try {
+            $appointment['update_datetime'] = date('Y-m-d H:i:s');
+
+            if (!$this->db->update('appointments', $appointment, ['id' => $appointment['id']])) {
+                throw new RuntimeException('Could not update appointment record.');
+            }
+
+            $updated_appointment = $this->find((int) $appointment['id']);
+            $this->sync_buffer_unavailabilities($updated_appointment);
+
+            $this->db->trans_commit();
+
+            return $appointment['id'];
+        } catch (Throwable $exception) {
+            $this->db->trans_rollback();
+
+            throw $exception;
+        }
     }
 
     /**
@@ -354,7 +396,175 @@ class Appointments_model extends EA_Model
      */
     public function delete(int $appointment_id): void
     {
-        $this->db->delete('appointments', ['id' => $appointment_id]);
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start appointment transaction.');
+        }
+
+        try {
+            $this->db
+                ->where('id_parent_appointment', $appointment_id)
+                ->where('is_unavailability', true)
+                ->delete('appointments');
+
+            $this->db->delete('appointments', ['id' => $appointment_id]);
+
+            $this->db->trans_commit();
+        } catch (Throwable $exception) {
+            $this->db->trans_rollback();
+
+            throw $exception;
+        }
+    }
+
+    protected function sync_buffer_unavailabilities(array $appointment): void
+    {
+        $is_unavailability = filter_var($appointment['is_unavailability'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        if ($is_unavailability || empty($appointment['id']) || empty($appointment['id_services'])) {
+            return;
+        }
+
+        $service = $this->services_model->find((int) $appointment['id_services']);
+
+        $buffer_before = max(0, (int) ($service['buffer_before'] ?? 0));
+        $buffer_after = max(0, (int) ($service['buffer_after'] ?? 0));
+
+        $this->db
+            ->where('id_parent_appointment', $appointment['id'])
+            ->where('is_unavailability', true)
+            ->delete('appointments');
+
+        if ($buffer_before === 0 && $buffer_after === 0) {
+            return;
+        }
+
+        $appointment_start = new DateTimeImmutable($appointment['start_datetime']);
+        $appointment_end = new DateTimeImmutable($appointment['end_datetime']);
+
+        $buffers = [];
+
+        if ($buffer_before > 0) {
+            $start = $appointment_start->sub(new DateInterval('PT' . $buffer_before . 'M'));
+            $end = $appointment_start;
+
+            $this->assert_buffer_window_is_valid($appointment, $start, $end, 'before');
+
+            $buffers[] = ['start' => $start, 'end' => $end];
+        }
+
+        if ($buffer_after > 0) {
+            $start = $appointment_end;
+            $end = $appointment_end->add(new DateInterval('PT' . $buffer_after . 'M'));
+
+            $this->assert_buffer_window_is_valid($appointment, $start, $end, 'after');
+
+            $buffers[] = ['start' => $start, 'end' => $end];
+        }
+
+        foreach ($buffers as $buffer) {
+            $this->create_buffer_block($appointment, $buffer['start'], $buffer['end']);
+        }
+    }
+
+    protected function create_buffer_block(array $appointment, DateTimeImmutable $start, DateTimeImmutable $end): void
+    {
+        $this->unavailabilities_model->save([
+            'start_datetime' => $start->format('Y-m-d H:i:s'),
+            'end_datetime' => $end->format('Y-m-d H:i:s'),
+            'id_users_provider' => $appointment['id_users_provider'],
+            'id_parent_appointment' => $appointment['id'],
+            'notes' => lang('buffer_block_note'),
+        ]);
+    }
+
+    protected function assert_buffer_window_is_valid(
+        array $appointment,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        string $position,
+    ): void {
+        if ($end <= $start) {
+            throw new RuntimeException(lang('buffer_invalid_window_error'));
+        }
+
+        $appointment_start = new DateTimeImmutable($appointment['start_datetime']);
+        $appointment_end = new DateTimeImmutable($appointment['end_datetime']);
+
+        if ($position === 'before' && $start->format('Y-m-d') !== $appointment_start->format('Y-m-d')) {
+            throw new RuntimeException(lang('buffer_outside_schedule_error'));
+        }
+
+        if ($position === 'after' && $end->format('Y-m-d') !== $appointment_end->format('Y-m-d')) {
+            throw new RuntimeException(lang('buffer_outside_schedule_error'));
+        }
+
+        $day_bounds = $this->get_provider_day_bounds($appointment_start, $appointment['id_users_provider']);
+
+        if ($day_bounds) {
+            if ($start < $day_bounds['start'] || $end > $day_bounds['end']) {
+                throw new RuntimeException(lang('buffer_outside_schedule_error'));
+            }
+        }
+
+        $builder = $this->db
+            ->from('appointments')
+            ->where('id_users_provider', $appointment['id_users_provider'])
+            ->where('start_datetime <', $end->format('Y-m-d H:i:s'))
+            ->where('end_datetime >', $start->format('Y-m-d H:i:s'));
+
+        if (!empty($appointment['id'])) {
+            $builder->where('id !=', $appointment['id']);
+        }
+
+        $builder
+            ->group_start()
+            ->where('id_parent_appointment IS NULL', null, false)
+            ->or_where('id_parent_appointment !=', $appointment['id'])
+            ->group_end();
+
+        $conflicts = $builder->count_all_results();
+
+        if ($conflicts > 0) {
+            throw new RuntimeException(lang('buffer_conflict_error'));
+        }
+    }
+
+    protected function get_provider_day_bounds(DateTimeImmutable $date, int $provider_id): ?array
+    {
+        try {
+            $provider = $this->providers_model->find($provider_id);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (empty($provider['settings']['working_plan'])) {
+            return null;
+        }
+
+        $working_plan = json_decode($provider['settings']['working_plan'], true) ?: [];
+        $working_plan_exceptions = [];
+
+        if (!empty($provider['settings']['working_plan_exceptions'])) {
+            $working_plan_exceptions = json_decode($provider['settings']['working_plan_exceptions'], true) ?: [];
+        }
+
+        $date_key = $date->format('Y-m-d');
+
+        if (array_key_exists($date_key, $working_plan_exceptions)) {
+            $plan = $working_plan_exceptions[$date_key];
+        } else {
+            $day_name = strtolower($date->format('l'));
+            $plan = $working_plan[$day_name] ?? null;
+        }
+
+        if (empty($plan['start']) || empty($plan['end'])) {
+            return null;
+        }
+
+        return [
+            'start' => new DateTimeImmutable($date->format('Y-m-d') . ' ' . $plan['start']),
+            'end' => new DateTimeImmutable($date->format('Y-m-d') . ' ' . $plan['end']),
+        ];
     }
 
     /**
@@ -575,6 +785,8 @@ class Appointments_model extends EA_Model
                 $appointment['id_google_calendar'] !== null ? $appointment['id_google_calendar'] : null,
             'caldavCalendarId' =>
                 $appointment['id_caldav_calendar'] !== null ? $appointment['id_caldav_calendar'] : null,
+            'parentAppointmentId' =>
+                $appointment['id_parent_appointment'] !== null ? (int) $appointment['id_parent_appointment'] : null,
         ];
 
         $appointment = $encoded_resource;
@@ -640,6 +852,10 @@ class Appointments_model extends EA_Model
 
         if (array_key_exists('caldavCalendarId', $appointment)) {
             $decoded_request['id_caldav_calendar'] = $appointment['caldavCalendarId'];
+        }
+
+        if (array_key_exists('parentAppointmentId', $appointment)) {
+            $decoded_request['id_parent_appointment'] = $appointment['parentAppointmentId'];
         }
 
         $decoded_request['is_unavailability'] = false;

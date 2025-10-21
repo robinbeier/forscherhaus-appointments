@@ -486,3 +486,13 @@ $lang['please_select'] = 'Vyberte prosím';
 $lang['secret_header'] = 'Secret Header';
 $lang['search'] = 'Search';
 // End
+
+$lang['buffer_before'] = 'Buffer before (minutes)';
+$lang['buffer_after'] = 'Buffer after (minutes)';
+$lang['buffer_before_hint'] = 'Keeps time blocked for the provider before the appointment.';
+$lang['buffer_after_hint'] = 'Keeps time blocked for the provider after the appointment.';
+$lang['buffer_limit_error'] = 'Buffers must be between 0 and 240 minutes.';
+$lang['buffer_block_note'] = 'Service buffer';
+$lang['buffer_invalid_window_error'] = 'Buffer time window is invalid.';
+$lang['buffer_outside_schedule_error'] = 'Buffer time cannot extend outside the provider working hours.';
+$lang['buffer_conflict_error'] = 'Buffer time collides with another appointment or unavailability.';

@@ -99,6 +99,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: include_buffer_blocks
+          in: query
+          schema:
+            type: boolean
+          description: Include buffer unavailability blocks in the response
         - name: aggregates
           in: query
           schema:
@@ -188,6 +193,11 @@ paths:
           required: true
           schema:
             type: integer
+        - name: include_buffer_blocks
+          in: query
+          schema:
+            type: boolean
+          description: Include buffer unavailability blocks in the response
       responses:
         '200':
           description: OK
@@ -1979,6 +1989,10 @@ components:
           type: string
         caldavCalendarId:
           type: string
+        bufferBlocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnavailabilityRecord'
       example:
         id: 1
         book: '2021-01-01 12:00:00'
@@ -1994,6 +2008,7 @@ components:
         serviceId: 6
         googleCalendarId: null
         caldavCalendarId: null
+        bufferBlocks: []
     AppointmentPayload:
       type: object
       properties:
@@ -2048,6 +2063,8 @@ components:
           type: string
         caldavCalendarId:
           type: string
+        parentAppointmentId:
+          type: integer
       example:
         id: 1
         book: '2021-01-01 12:00:00'
@@ -2058,6 +2075,7 @@ components:
         notes: This is a test unavailability.
         providerId: 2
         googleCalendarId: null
+        parentAppointmentId: 1
         caldavCalendarId: null
     UnavailabilityPayload:
       type: object
@@ -2072,12 +2090,15 @@ components:
           type: string
         providerId:
           type: integer
+        parentAppointmentId:
+          type: integer
       example:
         start: '2021-01-01 17:00:00'
         end: '2021-01-01 18:00:00'
         location: Test Street 1A, 12345 Some State, Some Place
         notes: This is a test appointment.
         providerId: 2
+        parentAppointmentId: 1
     CustomerRecord:
       type: object
       properties:
@@ -2205,6 +2226,10 @@ components:
           type: string
         attendantsNumber:
           type: integer
+        bufferBefore:
+          type: integer
+        bufferAfter:
+          type: integer
         isPrivate:
           type: boolean
         categoryId:
@@ -2219,6 +2244,8 @@ components:
         description: This is a test service.
         availabilitiesType: flexible
         attendantsNumber: 1
+        bufferBefore: 10
+        bufferAfter: 5
         isPrivate: false
         serviceCategoryId: null
     ServicePayload:
@@ -2240,6 +2267,10 @@ components:
           type: string
         attendantsNumber:
           type: integer
+        bufferBefore:
+          type: integer
+        bufferAfter:
+          type: integer
         isPrivate:
           type: boolean
         serviceCategoryId:
@@ -2253,6 +2284,8 @@ components:
         description: This is a test service.
         availabilitiesType: flexible
         attendantsNumber: 1
+        bufferBefore: 10
+        bufferAfter: 5
         isPrivate: false
         serviceCategoryId: null
     ServiceCategoryRecord:
