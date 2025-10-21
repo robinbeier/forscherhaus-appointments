@@ -265,6 +265,7 @@ class Appointments_model extends EA_Model
         }
 
         try {
+            $original_appointment = $this->find((int) $appointment['id']);
             $appointment['update_datetime'] = date('Y-m-d H:i:s');
 
             if (!$this->db->update('appointments', $appointment, ['id' => $appointment['id']])) {
@@ -272,7 +273,10 @@ class Appointments_model extends EA_Model
             }
 
             $updated_appointment = $this->find((int) $appointment['id']);
-            $this->sync_buffer_unavailabilities($updated_appointment);
+
+            if ($this->should_sync_buffer_unavailabilities($original_appointment, $updated_appointment)) {
+                $this->sync_buffer_unavailabilities($updated_appointment);
+            }
 
             $this->db->trans_commit();
 
@@ -414,6 +418,33 @@ class Appointments_model extends EA_Model
 
             throw $exception;
         }
+    }
+
+    protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
+    {
+        $is_unavailability = filter_var($updated['is_unavailability'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        if ($is_unavailability || empty($updated['id_services'])) {
+            return false;
+        }
+
+        if ($original['start_datetime'] !== $updated['start_datetime']) {
+            return true;
+        }
+
+        if ($original['end_datetime'] !== $updated['end_datetime']) {
+            return true;
+        }
+
+        if ((int) $original['id_users_provider'] !== (int) $updated['id_users_provider']) {
+            return true;
+        }
+
+        if ((int) $original['id_services'] !== (int) $updated['id_services']) {
+            return true;
+        }
+
+        return false;
     }
 
     protected function sync_buffer_unavailabilities(array $appointment): void
