@@ -49,6 +49,48 @@ Openldap is configured to run through `openldap` container and ports `389` and `
 
 Phpldapadmin, an admin portal for openldap is available on `http://localhost:8200` (credentials are `cn=admin,dc=example,dc=org` / `admin`).
 
+## Restoring a Server Dump Locally
+
+Use this workflow when you want your local setup to run with a database dump from production/staging.
+
+```bash
+cd /path/to/forscherhaus-appointments
+
+# Stop the current stack.
+docker compose down
+
+# Optional safety backup of the current local MySQL data directory.
+backup_tgz="/tmp/forscherhaus-mysql-$(date +%Y%m%d-%H%M%S).tgz"
+tar -czf "$backup_tgz" -C docker mysql
+
+# Clean reset local MySQL data (destructive for local DB state).
+mkdir -p docker/mysql
+find docker/mysql -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+# Start the required services.
+docker compose up -d mysql php-fpm nginx
+
+# Wait until MySQL is ready.
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+
+# Import the dump file.
+gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
+
+# Run migrations to bring schema/settings to current code level.
+docker compose exec -T php-fpm php index.php console migrate
+```
+
+Verify after import:
+
+```bash
+docker compose exec -T mysql mysql -uroot -psecret -e "
+USE easyappointments;
+SELECT version FROM ea_migrations;
+SHOW COLUMNS FROM ea_users LIKE 'class_size_default';
+SELECT name, value FROM ea_settings WHERE name='dashboard_conflict_threshold';
+"
+```
+
 **Attention:** This configuration is meant to make development easier. It is not intended to server as a production environment!
 
 A production image of Easy!Appointments can be found at: https://github.com/alextselegidis/easyappointments-docker
