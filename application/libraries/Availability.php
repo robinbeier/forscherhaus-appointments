@@ -548,12 +548,13 @@ class Availability
     {
         $available_hours = [];
 
-        $duration = (int) $service['duration'];
-        $interval_minutes = $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED ? $duration : 15;
-        $duration_interval = new DateInterval('PT' . $duration . 'M');
-        $slot_interval = new DateInterval('PT' . $interval_minutes . 'M');
         $buffer_before = max(0, (int) ($service['buffer_before'] ?? 0));
         $buffer_after = max(0, (int) ($service['buffer_after'] ?? 0));
+        $duration = (int) $service['duration'];
+        $fixed_slot_interval = $duration + $buffer_before + $buffer_after;
+        $interval_minutes = $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED ? $fixed_slot_interval : 15;
+        $duration_interval = new DateInterval('PT' . $duration . 'M');
+        $slot_interval = new DateInterval('PT' . $interval_minutes . 'M');
         $buffer_before_interval = new DateInterval('PT' . $buffer_before . 'M');
         $buffer_after_interval = new DateInterval('PT' . $buffer_after . 'M');
 
