@@ -47,9 +47,7 @@ class DashboardHeatmapTest extends TestCase
 
     public function testCollectUsesServiceDurationForInterval(): void
     {
-        $appointments = [
-            ['start_datetime' => '2024-03-04 10:15:00'],
-        ];
+        $appointments = [['start_datetime' => '2024-03-04 10:15:00']];
 
         $servicesModel = $this->createMock(Services_model::class);
         $servicesModel
@@ -67,7 +65,7 @@ class DashboardHeatmapTest extends TestCase
 
         $this->assertSame(45, $result['meta']['intervalMinutes']);
 
-        $slot = $this->findSlot($result['slots'], 1, '10:00');
+        $slot = $this->findSlot($result['slots'], 1, '09:45');
         $this->assertNotNull($slot);
         $this->assertSame(1, $slot['count']);
     }
@@ -87,7 +85,7 @@ class DashboardHeatmapTest extends TestCase
             'slots' => [],
         ];
 
-        $cache = new class($cached) {
+        $cache = new class ($cached) {
             private array $store;
 
             public function __construct(array $cached)
@@ -134,10 +132,12 @@ class DashboardHeatmapTest extends TestCase
         $appointmentsModel = $this->createMock(Appointments_model::class);
         $appointmentsModel->method('query')->willReturn($this->createAppointmentsQueryBuilder($appointments));
 
-        $servicesModel = $servicesModel ?? $this->createMock(Services_model::class);
-        $servicesModel->method('find')->willThrowException(new InvalidArgumentException('Not used'));
+        if ($servicesModel === null) {
+            $servicesModel = $this->createMock(Services_model::class);
+            $servicesModel->method('find')->willThrowException(new InvalidArgumentException('Not used'));
+        }
 
-        $cache = new class() {
+        $cache = new class {
             public function get($key)
             {
                 return false;
