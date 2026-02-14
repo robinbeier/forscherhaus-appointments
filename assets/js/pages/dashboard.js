@@ -83,7 +83,11 @@ App.Components.DashboardHeatmap = (function () {
 
                 render(response);
             })
-            .fail((jqXHR) => {
+            .fail((jqXHR, textStatus) => {
+                if (textStatus === 'abort' || jqXHR?.statusText === 'abort') {
+                    return;
+                }
+
                 const message = jqXHR?.responseJSON?.message ?? lang('unexpected_issues');
                 showError(message);
             });
@@ -260,7 +264,10 @@ App.Components.DashboardHeatmap = (function () {
                         grid: {display: false},
                         ticks: {
                             callback(value) {
-                                return weekdayLabels[value] ?? weekdayLabels[Number(value)] ?? value;
+                                const label = this.getLabelForValue(value);
+                                const weekday = Number(label);
+
+                                return weekdayLabels[weekday] ?? label;
                             },
                         },
                     },

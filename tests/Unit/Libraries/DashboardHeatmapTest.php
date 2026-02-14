@@ -70,6 +70,24 @@ class DashboardHeatmapTest extends TestCase
         $this->assertSame(1, $slot['count']);
     }
 
+    public function testCollectKeepsEarlyMorningBookingInOriginalSlot(): void
+    {
+        $appointments = [['start_datetime' => '2024-02-05 05:45:00']];
+
+        $library = $this->createLibrary($appointments);
+
+        $start = new DateTimeImmutable('2024-02-05');
+        $end = new DateTimeImmutable('2024-02-09');
+
+        $result = $library->collect($start, $end, ['statuses' => ['Booked']]);
+
+        $this->assertSame('05:30–20:00', $result['meta']['rangeLabel']);
+
+        $slot = $this->findSlot($result['slots'], 1, '05:30');
+        $this->assertNotNull($slot);
+        $this->assertSame(1, $slot['count']);
+    }
+
     public function testCollectReturnsCachedResultWhenAvailable(): void
     {
         $cached = [

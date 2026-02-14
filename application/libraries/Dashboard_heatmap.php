@@ -166,10 +166,7 @@ class Dashboard_heatmap
                 }
 
                 $minute_of_day = (int) $start_at->format('H') * 60 + (int) $start_at->format('i');
-                $aligned_minute = max(
-                    $this->default_start_minute,
-                    $this->alignMinute($minute_of_day, $interval_minutes),
-                );
+                $aligned_minute = $this->alignMinute($minute_of_day, $interval_minutes);
                 $slot_key = $aligned_minute;
 
                 $counts[$weekday][$slot_key] = ($counts[$weekday][$slot_key] ?? 0) + 1;
@@ -356,7 +353,7 @@ class Dashboard_heatmap
 
     protected function normalizeRange(int $min, int $max, int $interval): array
     {
-        $min_aligned = max($this->default_start_minute, $this->alignMinute($min, $interval));
+        $min_aligned = max(0, $this->alignMinute($min, $interval));
         $max_candidate = max($this->default_end_minute, $max);
         $max_aligned = $this->alignMinute(max($min_aligned + $interval, $max_candidate - 1), $interval) + $interval;
         $max_aligned = min($max_aligned, 24 * 60);
