@@ -248,6 +248,94 @@ class AppointmentsModelBufferBlockTest extends TestCase
         }
     }
 
+    public function test_sync_service_buffer_unavailabilities_includes_recently_ended_appointments(): void
+    {
+        $provider_id = $this->findProviderId();
+        $customer_id = $this->findCustomerId();
+
+        if ($provider_id === null || $customer_id === null) {
+            $this->markTestSkipped('Provider or customer record missing for buffer sync test.');
+        }
+
+        $service_id = $this->createService([
+            'buffer_before' => 0,
+            'buffer_after' => 0,
+        ]);
+
+        try {
+            $slot = $this->findFutureSlotForProvider($provider_id, 0);
+
+            if ($slot === null) {
+                $this->markTestSkipped('No suitable future provider slot found for trailing buffer sync test.');
+            }
+
+            $appointment_id = $this->appointmentsModel->save([
+                'start_datetime' => $slot['start']->format('Y-m-d H:i:s'),
+                'end_datetime' => $slot['end']->format('Y-m-d H:i:s'),
+                'id_users_provider' => $provider_id,
+                'id_users_customer' => $customer_id,
+                'id_services' => $service_id,
+                'location' => '',
+                'notes' => 'Recent appointment buffer sync test',
+                'color' => '#7cbae8',
+                'status' => '',
+                'is_unavailability' => false,
+            ]);
+
+            try {
+                $this->assertCount(0, $this->getBufferBlocks($appointment_id));
+
+                $now = new \DateTimeImmutable();
+                $past_start = $now->sub(new \DateInterval('PT' . (EVENT_MINIMUM_DURATION + 1) . 'M'));
+                $past_end = $now->sub(new \DateInterval('PT1M'));
+                $future_buffer_end = $past_end->add(new \DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+
+                if ($future_buffer_end->format('Y-m-d') !== $past_end->format('Y-m-d')) {
+                    $this->markTestSkipped('Current time is too close to midnight for trailing buffer sync test.');
+                }
+
+                if ($this->hasProviderOverlap($provider_id, $past_start, $future_buffer_end)) {
+                    $this->markTestSkipped(
+                        'Provider has overlapping records near the current time for buffer sync test.',
+                    );
+                }
+
+                $original_working_plan = $this->providersModel->get_setting($provider_id, 'working_plan');
+                $this->providersModel->set_setting($provider_id, 'working_plan', '{}');
+
+                try {
+                    $CI = &get_instance();
+                    $CI->db->update(
+                        'appointments',
+                        [
+                            'start_datetime' => $past_start->format('Y-m-d H:i:s'),
+                            'end_datetime' => $past_end->format('Y-m-d H:i:s'),
+                        ],
+                        ['id' => $appointment_id],
+                    );
+
+                    $service = $this->servicesModel->find($service_id);
+                    $service['buffer_after'] = EVENT_MINIMUM_DURATION;
+                    $this->servicesModel->save($service);
+
+                    $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+
+                    $buffer_blocks = $this->getBufferBlocks($appointment_id);
+
+                    $this->assertCount(1, $buffer_blocks);
+                    $this->assertSame($past_end->format('Y-m-d H:i:s'), $buffer_blocks[0]['start_datetime']);
+                    $this->assertSame($future_buffer_end->format('Y-m-d H:i:s'), $buffer_blocks[0]['end_datetime']);
+                } finally {
+                    $this->providersModel->set_setting($provider_id, 'working_plan', $original_working_plan);
+                }
+            } finally {
+                $this->appointmentsModel->delete($appointment_id);
+            }
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
     public function test_manage_mode_excludes_linked_buffer_blocks_from_available_periods(): void
     {
         $provider_id = $this->findProviderId();

@@ -437,6 +437,11 @@ class Appointments_model extends EA_Model
 
         try {
             $now = date('Y-m-d H:i:s');
+            $service = $this->services_model->find($service_id);
+            $buffer_after = max(0, (int) ($service['buffer_after'] ?? 0));
+            $resync_cutoff = (new DateTimeImmutable($now))
+                ->sub(new DateInterval('PT' . $buffer_after . 'M'))
+                ->format('Y-m-d H:i:s');
 
             $appointments = $this->db
                 ->select('appointments.*')
@@ -452,7 +457,7 @@ class Appointments_model extends EA_Model
                 ->where('appointments.id_services', $service_id)
                 ->where('appointments.is_unavailability', false)
                 ->group_start()
-                ->where('appointments.end_datetime >=', $now)
+                ->where('appointments.end_datetime >=', $resync_cutoff)
                 ->or_where('buffer_blocks.id IS NOT NULL', null, false)
                 ->group_end()
                 ->group_by('appointments.id')
