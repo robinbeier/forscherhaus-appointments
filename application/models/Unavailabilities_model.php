@@ -472,10 +472,6 @@ class Unavailabilities_model extends EA_Model
             $decoded_request['id_google_calendar'] = $unavailability['googleCalendarId'];
         }
 
-        if (array_key_exists('parentAppointmentId', $unavailability)) {
-            $decoded_request['id_parent_appointment'] = $unavailability['parentAppointmentId'];
-        }
-
         $decoded_request['is_unavailability'] = true;
 
         $unavailability = $decoded_request;

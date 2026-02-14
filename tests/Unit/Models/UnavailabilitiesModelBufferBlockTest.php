@@ -19,6 +19,23 @@ class UnavailabilitiesModelBufferBlockTest extends TestCase
         $this->unavailabilitiesModel = $CI->unavailabilities_model;
     }
 
+    public function test_api_decode_ignores_client_parent_appointment_id(): void
+    {
+        $payload = [
+            'start' => '2030-01-10 10:00:00',
+            'end' => '2030-01-10 10:15:00',
+            'notes' => 'Manual block',
+            'providerId' => 1,
+            'parentAppointmentId' => 999999,
+        ];
+
+        $this->unavailabilitiesModel->api_decode($payload);
+
+        $this->assertArrayNotHasKey('id_parent_appointment', $payload);
+        $this->assertSame(1, $payload['id_users_provider']);
+        $this->assertTrue($payload['is_unavailability']);
+    }
+
     public function test_cannot_update_generated_buffer_block(): void
     {
         $provider_id = $this->findProviderId();
