@@ -41,6 +41,9 @@ class Services extends EA_Controller
         'buffer_before' => 0,
         'buffer_after' => 0,
     ];
+    public array $optional_service_update_fields = [
+        'id_service_categories' => null,
+    ];
 
     /**
      * Services constructor.
@@ -189,7 +192,12 @@ class Services extends EA_Controller
 
             $this->services_model->only($service, $this->allowed_service_fields);
 
-            $this->services_model->optional($service, $this->optional_service_fields);
+            if (!empty($service['id'])) {
+                $existing_service = $this->services_model->find((int) $service['id']);
+                $service = array_merge($existing_service, $service);
+            }
+
+            $this->services_model->optional($service, $this->optional_service_update_fields);
 
             $service_id = $this->services_model->save($service);
 

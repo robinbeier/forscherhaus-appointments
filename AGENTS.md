@@ -61,6 +61,13 @@ npm run build
 
 npm run docs
 
+# Frontend-Assets (bei DEBUG_MODE=false werden `*.min.js`/`*.min.css` geladen)
+
+# Nach Änderungen in assets/js oder assets/css: Assets neu bauen und Browser hart neu laden.
+
+npx gulp scripts
+npx gulp styles
+
 # Tests (verbindlich im Docker-Compose-Netz, CI-paritär)
 
 docker compose run --rm php-fpm composer test
