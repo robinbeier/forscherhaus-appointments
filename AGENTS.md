@@ -91,6 +91,27 @@ php index.php console backup
 php index.php console backup /path/to/backup/folder
 php index.php console sync
 
+# Console-CLI (Wartung/Setup)
+
+php index.php console help
+php index.php console migrate
+php index.php console migrate up
+php index.php console migrate down
+php index.php console migrate fresh # Achtung: destruktiv (setzt Migrationsstand zurück)
+php index.php console seed # Nur für Testdaten
+php index.php console install # Nur für frische Instanzen (migrate fresh + seed)
+php index.php console backup
+php index.php console backup /path/to/backup/folder
+php index.php console sync
+
+# Docker-Workflows (aus docs/docker.md)
+
+docker compose down
+docker compose up -d mysql php-fpm nginx
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
+docker compose exec -T php-fpm php index.php console migrate
+
 ## Coding Style & Konventionen
 
 -   Editor/Format: .editorconfig (4‑Spaces, LF, Final Newline).
