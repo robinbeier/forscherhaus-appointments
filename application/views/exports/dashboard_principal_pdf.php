@@ -110,7 +110,7 @@ $escapeNoBreak = static function (?string $value): string {
     return str_replace(' ', '&nbsp;', $escaped);
 };
 
-$thresholdRatio = isset($threshold_ratio) ? (float) $threshold_ratio : 0.75;
+$thresholdRatio = isset($threshold_ratio) ? (float) $threshold_ratio : 0.9;
 $thresholdPercent = $threshold_percent ?? number_format($thresholdRatio * 100, 0, ',', '.') . ' %';
 $metrics = $metrics ?? [];
 $preparedMetrics = [];

@@ -59,6 +59,28 @@
                                             <i class="fas fa-file-download text-muted"></i>
                                             <span><?= lang('dashboard_download_principal_pdf') ?></span>
                                         </button>
+                                        <div class="dropdown-divider"></div>
+                                        <div class="px-3 py-2 dashboard-export-teachers">
+                                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                                <span class="small text-muted fw-semibold"><?= lang(
+                                                    'dashboard_export_teachers',
+                                                ) ?></span>
+                                                <div class="btn-group btn-group-sm" role="group" aria-label="<?= lang(
+                                                    'dashboard_export_teachers',
+                                                ) ?>">
+                                                    <button type="button" class="btn btn-outline-secondary" id="dashboard-export-select-all">
+                                                        <?= lang('dashboard_export_select_all') ?>
+                                                    </button>
+                                                    <button type="button" class="btn btn-outline-secondary" id="dashboard-export-select-none">
+                                                        <?= lang('dashboard_export_select_none') ?>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="small text-muted" id="dashboard-export-teachers-empty" hidden>
+                                                <?= lang('dashboard_export_no_teachers') ?>
+                                            </div>
+                                            <div id="dashboard-export-teachers-list" class="dashboard-export-teachers-list"></div>
+                                        </div>
                                         <button type="button" class="dropdown-item d-flex align-items-center gap-2" id="dashboard-threshold-button">
                                             <i class="fas fa-bullseye text-muted"></i>
                                             <span><?= lang('dashboard_conflict_threshold') ?></span>

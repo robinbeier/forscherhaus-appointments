@@ -491,6 +491,10 @@ App.Pages.Dashboard = (function () {
     const $thresholdDisplay = $('#dashboard-threshold-display');
     const $thresholdForm = $('#dashboard-threshold-form');
     const $thresholdInput = $('#dashboard-threshold-input');
+    const $exportTeachersList = $('#dashboard-export-teachers-list');
+    const $exportTeachersEmpty = $('#dashboard-export-teachers-empty');
+    const $exportSelectAll = $('#dashboard-export-select-all');
+    const $exportSelectNone = $('#dashboard-export-select-none');
     const $heatmapToggle = $('#dashboard-show-heatmap');
     const thresholdModalElement = document.getElementById('dashboard-threshold-modal');
 
@@ -498,12 +502,14 @@ App.Pages.Dashboard = (function () {
     const defaultStatuses = vars('dashboard_default_statuses') || [];
     const serviceOptions = vars('dashboard_service_options') || [];
     const heatmap = App.Components.DashboardHeatmap;
+    const initialThreshold = parseFloat(vars('dashboard_conflict_threshold'));
 
-    let threshold = parseFloat(vars('dashboard_conflict_threshold')) || 0.75;
+    let threshold = Number.isFinite(initialThreshold) ? initialThreshold : 0.9;
     let thresholdModal;
     let datePicker;
     let chart;
     let metrics = [];
+    let selectedTeacherProviderIds = [];
     let lastFilters = null;
 
     function initialize() {
@@ -535,6 +541,9 @@ App.Pages.Dashboard = (function () {
         $downloadPrincipal.on('click', onDownloadPrincipal);
         $thresholdButton.on('click', onThresholdButtonClick);
         $thresholdForm.on('submit', onThresholdFormSubmit);
+        $exportSelectAll.on('click', onExportSelectAll);
+        $exportSelectNone.on('click', onExportSelectNone);
+        $exportTeachersList.on('change', 'input[type="checkbox"][data-provider-id]', onTeacherExportSelectionChange);
         $heatmapToggle.on('click', onHeatmapToggle);
 
         updateHiddenCounter();
@@ -628,15 +637,36 @@ App.Pages.Dashboard = (function () {
 
     function onDownloadTeacher(event) {
         event.preventDefault();
-        triggerDownload(App.Http.Dashboard.downloadTeacherExport);
+
+        const filters = getFilters();
+
+        if (!filters) {
+            showError(lang('filter_period_required'));
+            return;
+        }
+
+        const providerIds = getSelectedTeacherProviderIds();
+
+        if (!providerIds.length) {
+            showError(lang('dashboard_export_select_teacher_required'));
+            return;
+        }
+
+        hideError();
+
+        App.Http.Dashboard.downloadTeacherExport({
+            startDate: filters.startDate,
+            endDate: filters.endDate,
+            statuses: filters.statuses,
+            serviceId: filters.serviceId,
+            threshold,
+            providerIds,
+        });
     }
 
     function onDownloadPrincipal(event) {
         event.preventDefault();
-        triggerDownload(App.Http.Dashboard.downloadPrincipalExport);
-    }
 
-    function triggerDownload(downloadFn) {
         const filters = getFilters();
 
         if (!filters) {
@@ -646,12 +676,12 @@ App.Pages.Dashboard = (function () {
 
         hideError();
 
-        downloadFn({
+        App.Http.Dashboard.downloadPrincipalExport({
             startDate: filters.startDate,
             endDate: filters.endDate,
             statuses: filters.statuses,
             serviceId: filters.serviceId,
-            providerIds: getDownloadProviderIds(),
+            threshold,
         });
     }
 
@@ -707,6 +737,7 @@ App.Pages.Dashboard = (function () {
         App.Http.Dashboard.fetch(filters)
             .done((response) => {
                 metrics = Array.isArray(response) ? response : [];
+                refreshTeacherExportSelection();
                 updateHiddenCounter();
                 renderChart();
                 renderTable();
@@ -714,11 +745,122 @@ App.Pages.Dashboard = (function () {
             .fail((jqXHR) => {
                 const message = jqXHR?.responseJSON?.message ?? lang('unexpected_issues');
                 metrics = [];
+                refreshTeacherExportSelection();
                 showError(message);
                 updateHiddenCounter();
                 renderChart();
                 renderTable();
             });
+    }
+
+    function onExportSelectAll(event) {
+        event.preventDefault();
+        setAllTeacherExportSelections(true);
+    }
+
+    function onExportSelectNone(event) {
+        event.preventDefault();
+        setAllTeacherExportSelections(false);
+    }
+
+    function onTeacherExportSelectionChange() {
+        selectedTeacherProviderIds = getCheckedTeacherExportProviderIds();
+    }
+
+    function refreshTeacherExportSelection() {
+        const providers = getTeacherExportProviders();
+        selectedTeacherProviderIds = providers.map((provider) => provider.id);
+        renderTeacherExportProviderList(providers);
+    }
+
+    function getTeacherExportProviders() {
+        if (!Array.isArray(metrics) || !metrics.length) {
+            return [];
+        }
+
+        const map = new Map();
+
+        metrics.forEach((item) => {
+            const providerId = Number(item?.provider_id);
+
+            if (!Number.isInteger(providerId) || providerId <= 0 || map.has(providerId)) {
+                return;
+            }
+
+            map.set(providerId, {
+                id: providerId,
+                name: String(item?.provider_name || ''),
+            });
+        });
+
+        return Array.from(map.values()).sort((left, right) => left.name.localeCompare(right.name, 'de'));
+    }
+
+    function renderTeacherExportProviderList(providers) {
+        if (!$exportTeachersList.length) {
+            return;
+        }
+
+        $exportTeachersList.empty();
+
+        if (!providers.length) {
+            $exportTeachersEmpty.prop('hidden', false);
+            return;
+        }
+
+        $exportTeachersEmpty.prop('hidden', true);
+
+        providers.forEach((provider) => {
+            const checkboxId = `dashboard-export-teacher-${provider.id}`;
+            const $item = $('<div/>', {class: 'dashboard-export-teachers-item'});
+            const $checkbox = $('<input/>', {
+                type: 'checkbox',
+                class: 'form-check-input',
+                id: checkboxId,
+                'data-provider-id': provider.id,
+                checked: true,
+            });
+            const labelText = provider.name || `#${provider.id}`;
+            const $label = $('<label/>', {
+                for: checkboxId,
+                text: labelText,
+            });
+
+            $item.append($checkbox, $label).appendTo($exportTeachersList);
+        });
+    }
+
+    function setAllTeacherExportSelections(isSelected) {
+        if (!$exportTeachersList.length) {
+            return;
+        }
+
+        $exportTeachersList.find('input[type="checkbox"][data-provider-id]').prop('checked', isSelected);
+        selectedTeacherProviderIds = isSelected ? getTeacherExportProviders().map((provider) => provider.id) : [];
+    }
+
+    function getCheckedTeacherExportProviderIds() {
+        if (!$exportTeachersList.length) {
+            return [];
+        }
+
+        const ids = [];
+
+        $exportTeachersList.find('input[type="checkbox"][data-provider-id]:checked').each((index, element) => {
+            const providerId = Number($(element).data('provider-id'));
+
+            if (Number.isInteger(providerId) && providerId > 0) {
+                ids.push(providerId);
+            }
+        });
+
+        return Array.from(new Set(ids));
+    }
+
+    function getSelectedTeacherProviderIds() {
+        return Array.from(new Set(selectedTeacherProviderIds)).filter(
+            (providerId) => Number.isInteger(providerId) && providerId > 0,
+        );
     }
 
     function getFilters() {
@@ -1006,18 +1148,6 @@ App.Pages.Dashboard = (function () {
         const filtered = hideWithoutTarget ? metrics.filter((item) => item.has_explicit_target) : metrics.slice();
 
         return filtered;
-    }
-
-    function getDownloadProviderIds() {
-        if (!Array.isArray(metrics) || !metrics.length) {
-            return [];
-        }
-
-        const ids = metrics
-            .map((item) => item?.provider_id)
-            .filter((value) => Number.isInteger(value) || (typeof value === 'number' && !Number.isNaN(value)));
-
-        return Array.from(new Set(ids));
     }
 
     function updateHiddenCounter() {

@@ -21,7 +21,7 @@ class Migration_Add_dashboard_conflict_threshold_setting extends EA_Migration
         if (!$this->db->get_where('settings', ['name' => 'dashboard_conflict_threshold'])->num_rows()) {
             $this->db->insert('settings', [
                 'name' => 'dashboard_conflict_threshold',
-                'value' => '0.75',
+                'value' => '0.90',
             ]);
         }
     }
