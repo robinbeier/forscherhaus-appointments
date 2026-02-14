@@ -892,10 +892,6 @@ class Appointments_model extends EA_Model
             $decoded_request['id_caldav_calendar'] = $appointment['caldavCalendarId'];
         }
 
-        if (array_key_exists('parentAppointmentId', $appointment)) {
-            $decoded_request['id_parent_appointment'] = $appointment['parentAppointmentId'];
-        }
-
         $decoded_request['is_unavailability'] = false;
 
         $appointment = $decoded_request;
