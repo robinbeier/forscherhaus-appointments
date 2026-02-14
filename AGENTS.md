@@ -61,13 +61,15 @@ npm run build
 
 npm run docs
 
-# Tests (bevorzugt per Composer-Alias)
+# Tests (verbindlich im Docker-Compose-Netz, CI-paritär)
 
-composer test
+docker compose run --rm php-fpm composer test
 
-# Alternativ:
+# Alternative (direkter PHPUnit-Aufruf im selben Container)
 
-APP_ENV=testing php vendor/bin/phpunit
+docker compose run --rm php-fpm APP_ENV=testing php vendor/bin/phpunit
+
+# Hinweis: DB_HOST='mysql' ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler config.php.
 
 # Console-CLI (Wartung/Setup)
 
@@ -104,13 +106,13 @@ npx prettier --write application/**/*.php
 -   Ablage: tests/Unit/ (und bei Bedarf tests/Integration/).
 -   Namensschema: BookingServiceTest.php; Szenarien test_canCreateAppointment, test_failsOnOverlap.
 -   Abdeckung: Erfolgs‑ und Fehlpfade (inkl. Grenzfälle: Terminüberschneidung, Zeitzonen).
--   Tests lokal ausführen und bei PRs grün halten.
+-   Tests lokal im Docker-Compose-Netz ausführen und bei PRs grün halten.
 
 ## Commit- & PR-Richtlinien
 
 -   Commits: kurz, Präsens, imperativ (z. B. Fix booking validation).
 -   PR-Checkliste:
--   Tests grün (composer test)
+-   Tests grün (`docker compose run --rm php-fpm composer test`)
 -   Migrations + Rollback vorhanden (falls DB‑Änderungen)
 -   config-sample.php/Docs aktualisiert (falls nötig)
 -   Screenshots/GIFs bei UI‑Änderungen
@@ -120,7 +122,7 @@ npx prettier --write application/**/*.php
 ## Qualitätssicherung (vor Merge)
 
 -   Lint/Format sauber (Prettier, Editorconfig).
--   composer test grün; relevante neue Tests vorhanden.
+-   `docker compose run --rm php-fpm composer test` grün; relevante neue Tests vorhanden.
 -   Migrations laufen vorwärts und rückwärts.
 -   npm run build erfolgreich; keine ungeprüften build/‑Artefakte committet.
 -   Logs unter storage/logs/ bereinigt.

@@ -39,6 +39,27 @@ In the host machine the server is accessible from `http://localhost` and the dat
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`) and Mailpit from `http://localhost:8025`.
 
+## Running Tests
+
+Use the Docker Compose PHP service as the canonical test environment:
+
+```bash
+docker compose run --rm php-fpm composer test
+```
+
+Alternative command in the same container context:
+
+```bash
+docker compose run --rm php-fpm APP_ENV=testing php vendor/bin/phpunit
+```
+
+Inside the Compose network, `DB_HOST='mysql'` resolves through Docker DNS to the `mysql` service.
+When running PHP directly on the host, MySQL is reachable via `localhost:3306`, but only if your
+`config.php` uses a host-resolvable DB host (for example `127.0.0.1` or `localhost`).
+
+Warning: Running host-side `composer test` while `DB_HOST='mysql'` is configured will fail with a
+`php_network_getaddresses: getaddrinfo for mysql failed` error.
+
 The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the environment variable `PDF_RENDERER_URL=http://localhost:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically.
 
 Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integration is available on `http://localhost:8100` (credentials are `admin` / `admin`). 
