@@ -359,6 +359,10 @@ class Availability
         if ($exclude_appointment_id) {
             $escaped_exclude_appointment_id = $this->CI->db->escape($exclude_appointment_id);
             $where .= ' AND id != ' . $escaped_exclude_appointment_id;
+            $where .=
+                ' AND (id_parent_appointment IS NULL OR id_parent_appointment != ' .
+                $escaped_exclude_appointment_id .
+                ')';
         }
 
         $appointments = array_values(

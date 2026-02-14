@@ -248,6 +248,73 @@ class AppointmentsModelBufferBlockTest extends TestCase
         }
     }
 
+    public function test_manage_mode_excludes_linked_buffer_blocks_from_available_periods(): void
+    {
+        $provider_id = $this->findProviderId();
+        $customer_id = $this->findCustomerId();
+
+        if ($provider_id === null || $customer_id === null) {
+            $this->markTestSkipped('Provider or customer record missing for availability test.');
+        }
+
+        $service_id = $this->createService([
+            'buffer_before' => 0,
+            'buffer_after' => EVENT_MINIMUM_DURATION,
+        ]);
+
+        try {
+            $slot = $this->findFutureSlotForProvider($provider_id, EVENT_MINIMUM_DURATION);
+
+            if ($slot === null) {
+                $this->markTestSkipped('No suitable future provider slot found for availability test.');
+            }
+
+            $appointment_id = $this->appointmentsModel->save([
+                'start_datetime' => $slot['start']->format('Y-m-d H:i:s'),
+                'end_datetime' => $slot['end']->format('Y-m-d H:i:s'),
+                'id_users_provider' => $provider_id,
+                'id_users_customer' => $customer_id,
+                'id_services' => $service_id,
+                'location' => '',
+                'notes' => 'Manage-mode availability test',
+                'color' => '#7cbae8',
+                'status' => '',
+                'is_unavailability' => false,
+            ]);
+
+            try {
+                $this->assertCount(1, $this->getBufferBlocks($appointment_id));
+
+                $CI = &get_instance();
+                $CI->load->library('availability');
+                $provider = $this->providersModel->find($provider_id);
+
+                $periods = $CI->availability->get_available_periods(
+                    $slot['start']->format('Y-m-d'),
+                    $provider,
+                    $appointment_id,
+                );
+
+                $slot_start = $slot['start']->format('H:i');
+                $slot_end = $slot['end']->format('H:i');
+                $contains_original_slot = false;
+
+                foreach ($periods as $period) {
+                    if ($period['start'] <= $slot_start && $period['end'] >= $slot_end) {
+                        $contains_original_slot = true;
+                        break;
+                    }
+                }
+
+                $this->assertTrue($contains_original_slot);
+            } finally {
+                $this->appointmentsModel->delete($appointment_id);
+            }
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
     private function createService(array $overrides = []): int
     {
         $service = array_merge(
