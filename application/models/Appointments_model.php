@@ -474,11 +474,13 @@ class Appointments_model extends EA_Model
 
         $buffers = [];
 
+        $attendants_number = (int) ($service['attendants_number'] ?? 1);
+
         if ($buffer_before > 0) {
             $start = $appointment_start->sub(new DateInterval('PT' . $buffer_before . 'M'));
             $end = $appointment_start;
 
-            $this->assert_buffer_window_is_valid($appointment, $start, $end, 'before');
+            $this->assert_buffer_window_is_valid($appointment, $start, $end, 'before', $attendants_number);
 
             $buffers[] = ['start' => $start, 'end' => $end];
         }
@@ -487,7 +489,7 @@ class Appointments_model extends EA_Model
             $start = $appointment_end;
             $end = $appointment_end->add(new DateInterval('PT' . $buffer_after . 'M'));
 
-            $this->assert_buffer_window_is_valid($appointment, $start, $end, 'after');
+            $this->assert_buffer_window_is_valid($appointment, $start, $end, 'after', $attendants_number);
 
             $buffers[] = ['start' => $start, 'end' => $end];
         }
@@ -513,6 +515,7 @@ class Appointments_model extends EA_Model
         DateTimeImmutable $start,
         DateTimeImmutable $end,
         string $position,
+        int $attendants_number = 1,
     ): void {
         if ($end <= $start) {
             throw new RuntimeException(lang('buffer_invalid_window_error'));
@@ -547,11 +550,15 @@ class Appointments_model extends EA_Model
             $builder->where('id !=', $appointment['id']);
         }
 
-        $builder
-            ->group_start()
-            ->where('id_parent_appointment IS NULL', null, false)
-            ->or_where('id_parent_appointment !=', $appointment['id'])
-            ->group_end();
+        if ($attendants_number > 1) {
+            $builder->where('id_parent_appointment IS NULL', null, false);
+        } else {
+            $builder
+                ->group_start()
+                ->where('id_parent_appointment IS NULL', null, false)
+                ->or_where('id_parent_appointment !=', $appointment['id'])
+                ->group_end();
+        }
 
         $conflicts = $builder->count_all_results();
 

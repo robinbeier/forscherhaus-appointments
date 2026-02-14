@@ -191,10 +191,15 @@ class Services extends EA_Controller
             $service = request('service');
 
             $this->services_model->only($service, $this->allowed_service_fields);
+            $has_category_id = array_key_exists('id_service_categories', $service);
 
             if (!empty($service['id'])) {
                 $existing_service = $this->services_model->find((int) $service['id']);
                 $service = array_merge($existing_service, $service);
+            }
+
+            if (!$has_category_id) {
+                $service['id_service_categories'] = null;
             }
 
             $this->services_model->optional($service, $this->optional_service_update_fields);
