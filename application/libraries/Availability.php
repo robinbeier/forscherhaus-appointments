@@ -359,6 +359,10 @@ class Availability
         if ($exclude_appointment_id) {
             $escaped_exclude_appointment_id = $this->CI->db->escape($exclude_appointment_id);
             $where .= ' AND id != ' . $escaped_exclude_appointment_id;
+            $where .=
+                ' AND (id_parent_appointment IS NULL OR id_parent_appointment != ' .
+                $escaped_exclude_appointment_id .
+                ')';
         }
 
         $appointments = array_values(
@@ -548,23 +552,42 @@ class Availability
     {
         $available_hours = [];
 
+        $buffer_before = max(0, (int) ($service['buffer_before'] ?? 0));
+        $buffer_after = max(0, (int) ($service['buffer_after'] ?? 0));
+        $duration = (int) $service['duration'];
+        $fixed_slot_interval = $duration + $buffer_before + $buffer_after;
+        $interval_minutes = $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED ? $fixed_slot_interval : 15;
+        $duration_interval = new DateInterval('PT' . $duration . 'M');
+        $slot_interval = new DateInterval('PT' . $interval_minutes . 'M');
+        $buffer_before_interval = new DateInterval('PT' . $buffer_before . 'M');
+        $buffer_after_interval = new DateInterval('PT' . $buffer_after . 'M');
+
         foreach ($empty_periods as $period) {
-            $start_hour = new DateTime($date . ' ' . $period['start']);
+            $period_start = new DateTimeImmutable($date . ' ' . $period['start']);
+            $period_end = new DateTimeImmutable($date . ' ' . $period['end']);
 
-            $end_hour = new DateTime($date . ' ' . $period['end']);
+            $current_start =
+                $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED
+                    ? $period_start->add($buffer_before_interval)
+                    : $period_start;
+            $latest_start = $period_end->sub($buffer_after_interval)->sub($duration_interval);
 
-            $interval = $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED ? (int) $service['duration'] : 15;
+            if ($latest_start < $current_start) {
+                continue;
+            }
 
-            $current_hour = $start_hour;
+            while ($current_start <= $latest_start) {
+                $window_start = $buffer_before > 0 ? $current_start->sub($buffer_before_interval) : $current_start;
+                $window_end = $current_start->add($duration_interval);
+                $window_end = $buffer_after > 0 ? $window_end->add($buffer_after_interval) : $window_end;
 
-            $diff = $current_hour->diff($end_hour);
+                if ($window_start < $period_start || $window_end > $period_end) {
+                    $current_start = $current_start->add($slot_interval);
+                    continue;
+                }
 
-            while ($diff->h * 60 + $diff->i >= (int) $service['duration'] && $diff->invert === 0) {
-                $available_hours[] = $current_hour->format('H:i');
-
-                $current_hour->add(new DateInterval('PT' . $interval . 'M'));
-
-                $diff = $current_hour->diff($end_hour);
+                $available_hours[] = $current_start->format('H:i');
+                $current_start = $current_start->add($slot_interval);
             }
         }
 

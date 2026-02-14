@@ -971,6 +971,7 @@ App.Utils.CalendarTableView = (function () {
 
         for (const index in unavailabilities) {
             const unavailability = unavailabilities[index];
+            const isGeneratedBufferBlock = Number(unavailability.id_parent_appointment) > 0;
 
             if (Number(unavailability.id_users_provider) !== Number($providerColumn.data('provider').id)) {
                 continue;
@@ -983,8 +984,8 @@ App.Utils.CalendarTableView = (function () {
                 allDay: false,
                 color: '#879DB4',
                 display: 'block',
-                editable: true,
-                className: 'fc-unavailability fc-custom',
+                editable: !isGeneratedBufferBlock,
+                className: isGeneratedBufferBlock ? 'fc-unavailability fc-buffer-block' : 'fc-unavailability fc-custom',
                 data: unavailability,
             };
 

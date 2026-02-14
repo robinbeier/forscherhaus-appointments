@@ -61,13 +61,22 @@ npm run build
 
 npm run docs
 
-# Tests (bevorzugt per Composer-Alias)
+# Frontend-Assets (bei DEBUG_MODE=false werden `*.min.js`/`*.min.css` geladen)
 
-composer test
+# Nach Änderungen in assets/js oder assets/css: Assets neu bauen und Browser hart neu laden.
 
-# Alternativ:
+npx gulp scripts
+npx gulp styles
 
-APP_ENV=testing php vendor/bin/phpunit
+# Tests (verbindlich im Docker-Compose-Netz, CI-paritär)
+
+docker compose run --rm php-fpm composer test
+
+# Alternative (direkter PHPUnit-Aufruf im selben Container)
+
+docker compose run --rm php-fpm APP_ENV=testing php vendor/bin/phpunit
+
+# Hinweis: DB_HOST='mysql' ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler config.php.
 
 # Console-CLI (Wartung/Setup)
 
@@ -81,6 +90,27 @@ php index.php console install # Nur für frische Instanzen (migrate fresh + seed
 php index.php console backup
 php index.php console backup /path/to/backup/folder
 php index.php console sync
+
+# Console-CLI (Wartung/Setup)
+
+php index.php console help
+php index.php console migrate
+php index.php console migrate up
+php index.php console migrate down
+php index.php console migrate fresh # Achtung: destruktiv (setzt Migrationsstand zurück)
+php index.php console seed # Nur für Testdaten
+php index.php console install # Nur für frische Instanzen (migrate fresh + seed)
+php index.php console backup
+php index.php console backup /path/to/backup/folder
+php index.php console sync
+
+# Docker-Workflows (aus docs/docker.md)
+
+docker compose down
+docker compose up -d mysql php-fpm nginx
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
+docker compose exec -T php-fpm php index.php console migrate
 
 ## Coding Style & Konventionen
 
@@ -104,13 +134,13 @@ npx prettier --write application/**/*.php
 -   Ablage: tests/Unit/ (und bei Bedarf tests/Integration/).
 -   Namensschema: BookingServiceTest.php; Szenarien test_canCreateAppointment, test_failsOnOverlap.
 -   Abdeckung: Erfolgs‑ und Fehlpfade (inkl. Grenzfälle: Terminüberschneidung, Zeitzonen).
--   Tests lokal ausführen und bei PRs grün halten.
+-   Tests lokal im Docker-Compose-Netz ausführen und bei PRs grün halten.
 
 ## Commit- & PR-Richtlinien
 
 -   Commits: kurz, Präsens, imperativ (z. B. Fix booking validation).
 -   PR-Checkliste:
--   Tests grün (composer test)
+-   Tests grün (`docker compose run --rm php-fpm composer test`)
 -   Migrations + Rollback vorhanden (falls DB‑Änderungen)
 -   config-sample.php/Docs aktualisiert (falls nötig)
 -   Screenshots/GIFs bei UI‑Änderungen
@@ -120,7 +150,12 @@ npx prettier --write application/**/*.php
 ## Qualitätssicherung (vor Merge)
 
 -   Lint/Format sauber (Prettier, Editorconfig).
--   composer test grün; relevante neue Tests vorhanden.
+-   `docker compose run --rm php-fpm composer test` grün; relevante neue Tests vorhanden.
 -   Migrations laufen vorwärts und rückwärts.
 -   npm run build erfolgreich; keine ungeprüften build/‑Artefakte committet.
 -   Logs unter storage/logs/ bereinigt.
+
+## Domänen-Invariante (derzeit)
+
+-   `services.attendants_number` ist aktuell hart auf `1` begrenzt.
+-   Reviews/Fixes für `attendants_number > 1` nur umsetzen, wenn der Produktentscheid explizit auf Multi-Attendant geändert wird.

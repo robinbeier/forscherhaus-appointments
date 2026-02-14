@@ -261,11 +261,6 @@ class Appointments extends EA_Controller
         $provider_timezone = new DateTimeZone($provider['timezone']);
         $calendar_start = new DateTimeImmutable($appointment['start_datetime'], $provider_timezone);
         $calendar_end = new DateTimeImmutable($appointment['end_datetime'], $provider_timezone);
-        $calendar_end = $calendar_end->sub(new DateInterval('PT5M'));
-
-        if ($calendar_end <= $calendar_start) {
-            $calendar_end = $calendar_start->add(new DateInterval('PT1M'));
-        }
 
         $calendar_appointment = $appointment;
         $calendar_appointment['start_datetime'] = $calendar_start->format('Y-m-d H:i:s');

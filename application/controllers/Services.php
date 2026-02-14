@@ -31,10 +31,17 @@ class Services extends EA_Controller
         'location',
         'availabilities_type',
         'attendants_number',
+        'buffer_before',
+        'buffer_after',
         'is_private',
         'id_service_categories',
     ];
     public array $optional_service_fields = [
+        'id_service_categories' => null,
+        'buffer_before' => 0,
+        'buffer_after' => 0,
+    ];
+    public array $optional_service_update_fields = [
         'id_service_categories' => null,
     ];
 
@@ -46,6 +53,7 @@ class Services extends EA_Controller
         parent::__construct();
 
         $this->load->model('services_model');
+        $this->load->model('appointments_model');
         $this->load->model('roles_model');
 
         $this->load->library('accounts');
@@ -184,10 +192,43 @@ class Services extends EA_Controller
             $service = request('service');
 
             $this->services_model->only($service, $this->allowed_service_fields);
+            $has_category_id = array_key_exists('id_service_categories', $service);
+            $buffer_values_changed = false;
 
-            $this->services_model->optional($service, $this->optional_service_fields);
+            if (!empty($service['id'])) {
+                $existing_service = $this->services_model->find((int) $service['id']);
+                $service = array_merge($existing_service, $service);
 
-            $service_id = $this->services_model->save($service);
+                $buffer_values_changed =
+                    (int) ($existing_service['buffer_before'] ?? 0) !== (int) ($service['buffer_before'] ?? 0) ||
+                    (int) ($existing_service['buffer_after'] ?? 0) !== (int) ($service['buffer_after'] ?? 0);
+            }
+
+            if (!$has_category_id) {
+                $service['id_service_categories'] = null;
+            }
+
+            $this->services_model->optional($service, $this->optional_service_update_fields);
+
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service transaction.');
+            }
+
+            try {
+                $service_id = $this->services_model->save($service);
+
+                if ($buffer_values_changed) {
+                    $this->appointments_model->sync_service_buffer_unavailabilities($service_id);
+                }
+
+                if (!$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit service transaction.');
+                }
+            } catch (Throwable $exception) {
+                $this->db->trans_rollback();
+
+                throw $exception;
+            }
 
             $service = $this->services_model->find($service_id);
 
