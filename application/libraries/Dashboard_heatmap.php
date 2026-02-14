@@ -138,8 +138,6 @@ class Dashboard_heatmap
             return $cached;
         }
 
-        $booked_statuses = $this->filterBookedStatuses($statuses);
-
         $counts = [];
         for ($weekday = $this->first_weekday; $weekday <= $this->last_weekday; $weekday++) {
             $counts[$weekday] = [];
@@ -149,8 +147,8 @@ class Dashboard_heatmap
         $min_minute = $this->default_start_minute;
         $max_minute_exclusive = $this->default_end_minute;
 
-        if (!empty($booked_statuses)) {
-            $appointments = $this->fetchAppointments($start, $end, $booked_statuses, $service_id, $provider_ids);
+        if (!empty($statuses)) {
+            $appointments = $this->fetchAppointments($start, $end, $statuses, $service_id, $provider_ids);
 
             foreach ($appointments as $appointment) {
                 $start_at = $this->parseStart($appointment['start_datetime'] ?? null);
@@ -236,17 +234,6 @@ class Dashboard_heatmap
         }
 
         return $normalized;
-    }
-
-    protected function filterBookedStatuses(array $statuses): array
-    {
-        $booked = array_values(array_intersect($statuses, ['Booked']));
-
-        if (empty($booked) && in_array('Booked', $statuses, true)) {
-            return ['Booked'];
-        }
-
-        return $booked;
     }
 
     protected function normalizeServiceId($service_id): ?int

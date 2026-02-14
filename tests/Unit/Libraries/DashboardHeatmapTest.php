@@ -88,6 +88,53 @@ class DashboardHeatmapTest extends TestCase
         $this->assertSame(1, $slot['count']);
     }
 
+    public function testCollectUsesRequestedStatusesForQuery(): void
+    {
+        $appointments = [['start_datetime' => '2024-02-05 08:00:00']];
+
+        /** @var CI_DB_query_builder&MockObject $builder */
+        $builder = $this->createMock(CI_DB_query_builder::class);
+        $builder->method('select')->willReturnSelf();
+        $builder->method('where')->willReturnSelf();
+        $builder
+            ->expects($this->once())
+            ->method('where_in')
+            ->with('appointments.status', ['Pending'])
+            ->willReturnSelf();
+        $builder->method('order_by')->willReturnSelf();
+        $builder->method('get')->willReturn($this->createAppointmentsResult($appointments));
+
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel
+            ->expects($this->once())
+            ->method('query')
+            ->willReturn($builder);
+
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel->method('find')->willThrowException(new InvalidArgumentException('Not used'));
+
+        $cache = new class {
+            public function get($key)
+            {
+                return false;
+            }
+
+            public function save($key, $value, $ttl)
+            {
+                return true;
+            }
+        };
+
+        $library = new Dashboard_heatmap($appointmentsModel, $servicesModel, $cache, 'Europe/Berlin');
+
+        $start = new DateTimeImmutable('2024-02-05');
+        $end = new DateTimeImmutable('2024-02-09');
+
+        $result = $library->collect($start, $end, ['statuses' => ['Pending']]);
+
+        $this->assertSame(1, $result['meta']['total']);
+    }
+
     public function testCollectReturnsCachedResultWhenAvailable(): void
     {
         $cached = [
