@@ -180,6 +180,10 @@ class Services_model extends EA_Model
                 'The provided attendants number is invalid: ' . $service['attendants_number'],
             );
         }
+
+        if ((int) $service['attendants_number'] !== 1) {
+            throw new InvalidArgumentException('Only attendants_number=1 is currently supported.');
+        }
     }
 
     /**

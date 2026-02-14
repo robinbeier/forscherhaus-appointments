@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Models;
 
+use InvalidArgumentException;
 use Services_model;
 use Tests\TestCase;
 
@@ -90,6 +91,16 @@ class ServicesModelUpdateTest extends TestCase
         } finally {
             $this->servicesModel->delete($service_id);
         }
+    }
+
+    public function test_create_with_attendants_number_above_one_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Only attendants_number=1 is currently supported.');
+
+        $this->createService([
+            'attendants_number' => 2,
+        ]);
     }
 
     private function createService(array $overrides = []): int

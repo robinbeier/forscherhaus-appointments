@@ -133,3 +133,8 @@ npx prettier --write application/**/*.php
 -   Migrations laufen vorwärts und rückwärts.
 -   npm run build erfolgreich; keine ungeprüften build/‑Artefakte committet.
 -   Logs unter storage/logs/ bereinigt.
+
+## Domänen-Invariante (derzeit)
+
+-   `services.attendants_number` ist aktuell hart auf `1` begrenzt.
+-   Reviews/Fixes für `attendants_number > 1` nur umsetzen, wenn der Produktentscheid explizit auf Multi-Attendant geändert wird.
