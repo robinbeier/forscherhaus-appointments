@@ -93,6 +93,15 @@ class ServicesModelUpdateTest extends TestCase
         }
     }
 
+    public function test_create_with_sub_minimum_buffer_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $this->createService([
+            'buffer_before' => EVENT_MINIMUM_DURATION - 1,
+        ]);
+    }
+
     public function test_create_with_attendants_number_above_one_is_rejected(): void
     {
         $this->expectException(InvalidArgumentException::class);

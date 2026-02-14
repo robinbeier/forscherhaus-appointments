@@ -64,22 +64,6 @@ class Services_model extends EA_Model
      */
     public function save(array $service): int
     {
-        if (
-            array_key_exists('buffer_before', $service) &&
-            (int) $service['buffer_before'] > 0 &&
-            (int) $service['buffer_before'] < EVENT_MINIMUM_DURATION
-        ) {
-            $service['buffer_before'] = EVENT_MINIMUM_DURATION;
-        }
-
-        if (
-            array_key_exists('buffer_after', $service) &&
-            (int) $service['buffer_after'] > 0 &&
-            (int) $service['buffer_after'] < EVENT_MINIMUM_DURATION
-        ) {
-            $service['buffer_after'] = EVENT_MINIMUM_DURATION;
-        }
-
         $this->validate($service);
 
         if (empty($service['id'])) {
@@ -139,11 +123,15 @@ class Services_model extends EA_Model
         $buffer_before = array_key_exists('buffer_before', $service) ? (int) $service['buffer_before'] : 0;
         $buffer_after = array_key_exists('buffer_after', $service) ? (int) $service['buffer_after'] : 0;
 
-        if ($buffer_before < 0 || $buffer_before > 240) {
+        if (
+            $buffer_before < 0 ||
+            $buffer_before > 240 ||
+            ($buffer_before > 0 && $buffer_before < EVENT_MINIMUM_DURATION)
+        ) {
             throw new InvalidArgumentException(lang('buffer_limit_error'));
         }
 
-        if ($buffer_after < 0 || $buffer_after > 240) {
+        if ($buffer_after < 0 || $buffer_after > 240 || ($buffer_after > 0 && $buffer_after < EVENT_MINIMUM_DURATION)) {
             throw new InvalidArgumentException(lang('buffer_limit_error'));
         }
 

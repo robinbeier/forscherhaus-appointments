@@ -260,6 +260,7 @@ App.Pages.Services = (function () {
 
             const bufferBefore = Number($bufferBefore.val() || 0);
             const bufferAfter = Number($bufferAfter.val() || 0);
+            const minimumDuration = Number(vars('event_minimum_duration'));
 
             if (
                 Number.isNaN(bufferBefore) ||
@@ -267,7 +268,9 @@ App.Pages.Services = (function () {
                 bufferBefore < 0 ||
                 bufferAfter < 0 ||
                 bufferBefore > 240 ||
-                bufferAfter > 240
+                bufferAfter > 240 ||
+                (bufferBefore > 0 && bufferBefore < minimumDuration) ||
+                (bufferAfter > 0 && bufferAfter < minimumDuration)
             ) {
                 $bufferBefore.addClass('is-invalid');
                 $bufferAfter.addClass('is-invalid');

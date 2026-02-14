@@ -25,6 +25,7 @@ class Services_api_v1 extends EA_Controller
     {
         parent::__construct();
 
+        $this->load->model('appointments_model');
         $this->load->library('api');
         $this->load->library('webhooks_client');
 
@@ -161,7 +162,29 @@ class Services_api_v1 extends EA_Controller
 
             $this->services_model->api_decode($service, $original_service);
 
-            $service_id = $this->services_model->save($service);
+            $buffer_values_changed =
+                (int) ($original_service['buffer_before'] ?? 0) !== (int) ($service['buffer_before'] ?? 0) ||
+                (int) ($original_service['buffer_after'] ?? 0) !== (int) ($service['buffer_after'] ?? 0);
+
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service transaction.');
+            }
+
+            try {
+                $service_id = $this->services_model->save($service);
+
+                if ($buffer_values_changed) {
+                    $this->appointments_model->sync_service_buffer_unavailabilities($service_id);
+                }
+
+                if (!$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit service transaction.');
+                }
+            } catch (Throwable $exception) {
+                $this->db->trans_rollback();
+
+                throw $exception;
+            }
 
             $updated_service = $this->services_model->find($service_id);
 

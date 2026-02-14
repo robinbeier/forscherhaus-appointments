@@ -420,6 +420,46 @@ class Appointments_model extends EA_Model
         }
     }
 
+    /**
+     * Regenerate future buffer unavailability blocks for all appointments of a service.
+     *
+     * @param int $service_id Service ID.
+     */
+    public function sync_service_buffer_unavailabilities(int $service_id): void
+    {
+        if ($service_id <= 0) {
+            throw new InvalidArgumentException('The service ID argument cannot be empty.');
+        }
+
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start service buffer sync transaction.');
+        }
+
+        try {
+            $appointments = $this->db
+                ->from('appointments')
+                ->where('id_services', $service_id)
+                ->where('is_unavailability', false)
+                ->where('end_datetime >=', date('Y-m-d H:i:s'))
+                ->order_by('start_datetime', 'ASC')
+                ->get()
+                ->result_array();
+
+            foreach ($appointments as $appointment) {
+                $this->cast($appointment);
+                $this->sync_buffer_unavailabilities($appointment);
+            }
+
+            if (!$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit service buffer sync transaction.');
+            }
+        } catch (Throwable $exception) {
+            $this->db->trans_rollback();
+
+            throw $exception;
+        }
+    }
+
     protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
     {
         $is_unavailability = filter_var($updated['is_unavailability'] ?? false, FILTER_VALIDATE_BOOLEAN);
