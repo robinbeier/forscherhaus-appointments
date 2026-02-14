@@ -32,7 +32,9 @@ Ziel dieser Datei: **Konsistente, merge‑fähige Beiträge von ChatGPT Codex** 
 ## Lokale Entwicklung & Prerequisites
 
 -   **Option A (Host):** Apache/Nginx, PHP ≥ 8.1 (empfohlen 8.2+), MySQL, Node.js (npm), Composer.
--   **Option B (Docker):** `docker-compose up` für CI‑paritätische Umgebung (inkl. PHP, MySQL, ggf. Cron/Scheduler).
+-   **Option B (Docker):** `docker compose up` für CI‑paritätische Umgebung (inkl. PHP, MySQL, ggf. Cron/Scheduler).
+-   Bei Host-PHP + Docker-`pdf-renderer`: `PDF_RENDERER_URL=http://localhost:3003` setzen.
+-   TODO: `docker-compose.restore.yml` ist derzeit untracked; Restore-Workflow erst nach Tracking/Doku standardisieren.
 
 **Erstinstallation**
 
@@ -66,6 +68,19 @@ composer test
 # Alternativ:
 
 APP_ENV=testing php vendor/bin/phpunit
+
+# Console-CLI (Wartung/Setup)
+
+php index.php console help
+php index.php console migrate
+php index.php console migrate up
+php index.php console migrate down
+php index.php console migrate fresh # Achtung: destruktiv (setzt Migrationsstand zurück)
+php index.php console seed # Nur für Testdaten
+php index.php console install # Nur für frische Instanzen (migrate fresh + seed)
+php index.php console backup
+php index.php console backup /path/to/backup/folder
+php index.php console sync
 
 ## Coding Style & Konventionen
 
