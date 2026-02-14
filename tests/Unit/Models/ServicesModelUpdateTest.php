@@ -93,6 +93,41 @@ class ServicesModelUpdateTest extends TestCase
         }
     }
 
+    public function test_update_with_null_buffer_fields_is_normalized_before_persisting(): void
+    {
+        $service_id = $this->createService([
+            'buffer_before' => 20,
+            'buffer_after' => 15,
+        ]);
+
+        $CI = &get_instance();
+        $sql_mode_row = $CI->db->query('SELECT @@SESSION.sql_mode AS sql_mode')->row_array();
+        $previous_sql_mode = $sql_mode_row['sql_mode'] ?? '';
+        $strict_sql_mode = $previous_sql_mode;
+
+        if (!str_contains($strict_sql_mode, 'STRICT_TRANS_TABLES')) {
+            $strict_sql_mode = trim($strict_sql_mode . ',STRICT_TRANS_TABLES', ',');
+        }
+
+        $CI->db->query('SET SESSION sql_mode = ' . $CI->db->escape($strict_sql_mode));
+
+        try {
+            $existing_service = $this->servicesModel->find($service_id);
+            $existing_service['buffer_before'] = null;
+            $existing_service['buffer_after'] = null;
+
+            $this->servicesModel->save($existing_service);
+
+            $saved_service = $this->servicesModel->find($service_id);
+
+            $this->assertSame(0, (int) $saved_service['buffer_before']);
+            $this->assertSame(0, (int) $saved_service['buffer_after']);
+        } finally {
+            $CI->db->query('SET SESSION sql_mode = ' . $CI->db->escape($previous_sql_mode));
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
     public function test_create_with_sub_minimum_buffer_is_rejected(): void
     {
         $this->expectException(InvalidArgumentException::class);

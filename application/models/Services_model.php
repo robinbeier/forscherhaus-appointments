@@ -65,6 +65,7 @@ class Services_model extends EA_Model
     public function save(array $service): int
     {
         $this->validate($service);
+        $service = $this->normalize_buffer_values($service);
 
         if (empty($service['id'])) {
             return $this->insert($service);
@@ -195,6 +196,21 @@ class Services_model extends EA_Model
         if ((int) $service['attendants_number'] !== 1) {
             throw new InvalidArgumentException('Only attendants_number=1 is currently supported.');
         }
+    }
+
+    protected function normalize_buffer_values(array $service): array
+    {
+        if (array_key_exists('buffer_before', $service)) {
+            $buffer_before = $service['buffer_before'];
+            $service['buffer_before'] = $buffer_before === '' || $buffer_before === null ? 0 : (int) $buffer_before;
+        }
+
+        if (array_key_exists('buffer_after', $service)) {
+            $buffer_after = $service['buffer_after'];
+            $service['buffer_after'] = $buffer_after === '' || $buffer_after === null ? 0 : (int) $buffer_after;
+        }
+
+        return $service;
     }
 
     /**
