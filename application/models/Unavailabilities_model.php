@@ -204,6 +204,8 @@ class Unavailabilities_model extends EA_Model
      */
     protected function update(array $unavailability): int
     {
+        $this->assert_unavailability_is_mutable((int) $unavailability['id']);
+
         $unavailability['update_datetime'] = date('Y-m-d H:i:s');
 
         if (!$this->db->update('appointments', $unavailability, ['id' => $unavailability['id']])) {
@@ -222,7 +224,32 @@ class Unavailabilities_model extends EA_Model
      */
     public function delete(int $unavailability_id): void
     {
+        $this->assert_unavailability_is_mutable($unavailability_id);
+
         $this->db->delete('appointments', ['id' => $unavailability_id]);
+    }
+
+    protected function assert_unavailability_is_mutable(int $unavailability_id): void
+    {
+        if ($unavailability_id <= 0) {
+            return;
+        }
+
+        $row = $this->db
+            ->select('id_parent_appointment')
+            ->from('appointments')
+            ->where('id', $unavailability_id)
+            ->where('is_unavailability', true)
+            ->get()
+            ->row_array();
+
+        if (!$row) {
+            return;
+        }
+
+        if (!empty($row['id_parent_appointment'])) {
+            throw new RuntimeException('Buffer-generated unavailability blocks cannot be modified directly.');
+        }
     }
 
     /**

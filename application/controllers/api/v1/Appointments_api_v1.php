@@ -117,6 +117,8 @@ class Appointments_api_v1 extends EA_Controller
                 : $this->appointments_model->search($keyword, $limit, $offset, $order_by);
 
             foreach ($appointments as &$appointment) {
+                $appointment_id = (int) $appointment['id'];
+
                 $this->appointments_model->api_encode($appointment);
 
                 $this->aggregates($appointment);
@@ -129,7 +131,7 @@ class Appointments_api_v1 extends EA_Controller
                     $this->appointments_model->load($appointment, $with);
                 }
 
-                $this->append_buffer_blocks($appointment, $include_buffer_blocks);
+                $this->append_buffer_blocks($appointment, $include_buffer_blocks, $appointment_id);
             }
 
             json_response($appointments);
@@ -169,14 +171,16 @@ class Appointments_api_v1 extends EA_Controller
         }
     }
 
-    private function append_buffer_blocks(array &$appointment, bool $include): void
+    private function append_buffer_blocks(array &$appointment, bool $include, ?int $appointment_id = null): void
     {
-        if (!$include || empty($appointment['id'])) {
+        $appointment_id = $appointment_id ?: (int) ($appointment['id'] ?? 0);
+
+        if (!$include || $appointment_id <= 0) {
             return;
         }
 
         $buffer_blocks = $this->unavailabilities_model->get([
-            'id_parent_appointment' => $appointment['id'],
+            'id_parent_appointment' => $appointment_id,
             'is_unavailability' => true,
         ]);
 
@@ -210,6 +214,7 @@ class Appointments_api_v1 extends EA_Controller
             $with = $this->api->request_with();
 
             $appointment = $this->appointments_model->find($id);
+            $appointment_id = (int) $appointment['id'];
 
             $this->appointments_model->api_encode($appointment);
 
@@ -221,7 +226,7 @@ class Appointments_api_v1 extends EA_Controller
                 $this->appointments_model->load($appointment, $with);
             }
 
-            $this->append_buffer_blocks($appointment, $include_buffer_blocks);
+            $this->append_buffer_blocks($appointment, $include_buffer_blocks, $appointment_id);
 
             json_response($appointment);
         } catch (Throwable $e) {

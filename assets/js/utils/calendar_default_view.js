@@ -1298,6 +1298,7 @@ App.Utils.CalendarDefaultView = (function () {
                 // Add custom unavailability periods (they are always displayed on the calendar, even if the provider
                 // won't work on that day).
                 response.unavailabilities.forEach((unavailability) => {
+                    const isGeneratedBufferBlock = Number(unavailability.id_parent_appointment) > 0;
                     let notes = unavailability.notes ? ' - ' + unavailability.notes : '';
 
                     if (unavailability.notes && unavailability.notes.length > 30) {
@@ -1310,8 +1311,10 @@ App.Utils.CalendarDefaultView = (function () {
                         end: moment(unavailability.end_datetime).toDate(),
                         allDay: false,
                         color: '#879DB4',
-                        editable: true,
-                        className: 'fc-unavailability fc-custom',
+                        editable: !isGeneratedBufferBlock,
+                        className: isGeneratedBufferBlock
+                            ? 'fc-unavailability fc-buffer-block'
+                            : 'fc-unavailability fc-custom',
                         data: unavailability,
                         display: 'block',
                     };
