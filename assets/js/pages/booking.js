@@ -82,8 +82,7 @@ App.Pages.Booking = (function () {
             return;
         }
 
-        const slotElement =
-            $wizardFrame.find('.selected-hour').get(0) || $wizardFrame.find('.available-hour').get(0);
+        const slotElement = $wizardFrame.find('.selected-hour').get(0) || $wizardFrame.find('.available-hour').get(0);
 
         if (!slotElement) {
             return;
@@ -779,7 +778,7 @@ App.Pages.Booking = (function () {
                 selectedTime;
         }
 
-        const displayDuration = Math.max(Number(service.duration) - 5, 1);
+        const displayDuration = Math.max(Number(service.duration), 1);
 
         $('#appointment-details').html(`
             <div>
