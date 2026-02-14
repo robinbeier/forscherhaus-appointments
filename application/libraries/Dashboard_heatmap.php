@@ -16,6 +16,7 @@ use DateTimeZone;
 use Exception;
 use InvalidArgumentException;
 use RuntimeException;
+use Throwable;
 
 /**
  * Dashboard heatmap aggregation library.
@@ -36,9 +37,9 @@ class Dashboard_heatmap
     protected Services_model $services_model;
 
     /**
-     * @var CI_Cache|object
+     * @var CI_Cache|object|null
      */
-    protected $cache;
+    protected $cache = null;
 
     protected DateTimeZone $timezone;
 
@@ -61,7 +62,7 @@ class Dashboard_heatmap
         ?Appointments_model $appointments_model = null,
         ?Services_model $services_model = null,
         $cache = null,
-        ?string $timezone = null
+        ?string $timezone = null,
     ) {
         $this->CI = &get_instance();
 
@@ -82,11 +83,42 @@ class Dashboard_heatmap
         if ($cache) {
             $this->cache = $cache;
         } else {
-            $this->CI->load->driver('cache', ['adapter' => 'file']);
-            $this->cache = $this->CI->cache;
+            $this->initializeCache();
         }
 
         $this->timezone = $this->resolveTimezone($timezone);
+    }
+
+    protected function initializeCache(): void
+    {
+        try {
+            $this->CI->load->driver('cache', ['adapter' => 'file']);
+
+            $cache = $this->CI->cache ?? null;
+
+            if (
+                is_object($cache) &&
+                method_exists($cache, 'get_loaded_driver') &&
+                method_exists($cache, 'load_driver')
+            ) {
+                $adapter = $cache->get_loaded_driver();
+
+                if (is_string($adapter) && $adapter !== '') {
+                    $cache->load_driver($adapter);
+                }
+            }
+
+            if (is_object($cache) && method_exists($cache, 'get') && method_exists($cache, 'save')) {
+                $this->cache = $cache;
+
+                return;
+            }
+        } catch (Throwable $e) {
+            log_message('error', 'Dashboard heatmap: cache bootstrap failed - ' . $e->getMessage());
+        }
+
+        $this->cache = null;
+        log_message('error', 'Dashboard heatmap: cache unavailable, continuing without cache.');
     }
 
     /**
@@ -133,8 +165,11 @@ class Dashboard_heatmap
                     continue;
                 }
 
-                $minute_of_day = ((int) $start_at->format('H') * 60) + (int) $start_at->format('i');
-                $aligned_minute = max($this->default_start_minute, $this->alignMinute($minute_of_day, $interval_minutes));
+                $minute_of_day = (int) $start_at->format('H') * 60 + (int) $start_at->format('i');
+                $aligned_minute = max(
+                    $this->default_start_minute,
+                    $this->alignMinute($minute_of_day, $interval_minutes),
+                );
                 $slot_key = $aligned_minute;
 
                 $counts[$weekday][$slot_key] = ($counts[$weekday][$slot_key] ?? 0) + 1;
@@ -176,7 +211,7 @@ class Dashboard_heatmap
         array $statuses,
         ?int $service_id,
         array $provider_ids,
-        int $interval_minutes
+        int $interval_minutes,
     ): string {
         $payload = [
             'start' => $start->format('Y-m-d'),
@@ -195,8 +230,8 @@ class Dashboard_heatmap
         $normalized = array_values(
             array_filter(
                 array_map(static fn($value) => trim((string) $value), $statuses),
-                static fn($value) => $value !== ''
-            )
+                static fn($value) => $value !== '',
+            ),
         );
 
         if (empty($normalized)) {
@@ -265,7 +300,7 @@ class Dashboard_heatmap
         DateTimeImmutable $end,
         array $statuses,
         ?int $service_id,
-        array $provider_ids
+        array $provider_ids,
     ): array {
         $start_boundary = $start->setTime(0, 0, 0)->format('Y-m-d H:i:s');
         $end_boundary = $end->setTime(23, 59, 59)->format('Y-m-d H:i:s');
@@ -344,13 +379,8 @@ class Dashboard_heatmap
         }
     }
 
-    protected function formatSlots(
-        array $counts,
-        int $range_start,
-        int $range_end,
-        int $interval,
-        int $total
-    ): array {
+    protected function formatSlots(array $counts, int $range_start, int $range_end, int $interval, int $total): array
+    {
         $slots = [];
 
         foreach ($counts as $weekday => $day_counts) {
