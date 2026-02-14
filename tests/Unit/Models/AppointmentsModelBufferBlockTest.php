@@ -336,6 +336,79 @@ class AppointmentsModelBufferBlockTest extends TestCase
         }
     }
 
+    public function test_trailing_buffer_validation_uses_appointment_end_day_bounds(): void
+    {
+        $provider_id = $this->findProviderId();
+        $customer_id = $this->findCustomerId();
+
+        if ($provider_id === null || $customer_id === null) {
+            $this->markTestSkipped('Provider or customer record missing for overnight buffer validation test.');
+        }
+
+        $service_id = $this->createService([
+            'buffer_before' => 0,
+            'buffer_after' => EVENT_MINIMUM_DURATION,
+        ]);
+
+        $original_working_plan = $this->providersModel->get_setting($provider_id, 'working_plan');
+        $appointment_id = null;
+
+        try {
+            $this->providersModel->set_setting(
+                $provider_id,
+                'working_plan',
+                json_encode([
+                    'monday' => [
+                        'start' => '23:00',
+                        'end' => '23:59',
+                        'breaks' => [],
+                    ],
+                    'tuesday' => [
+                        'start' => '00:00',
+                        'end' => '01:00',
+                        'breaks' => [],
+                    ],
+                ]),
+            );
+
+            $start = new \DateTimeImmutable('2099-01-05 23:55:00');
+            $end = $start->add(new \DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+            $buffer_end = $end->add(new \DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+
+            if ($this->hasProviderOverlap($provider_id, $start, $buffer_end)) {
+                $this->markTestSkipped(
+                    'Provider has overlapping records in overnight slot for buffer validation test.',
+                );
+            }
+
+            $appointment_id = $this->appointmentsModel->save([
+                'start_datetime' => $start->format('Y-m-d H:i:s'),
+                'end_datetime' => $end->format('Y-m-d H:i:s'),
+                'id_users_provider' => $provider_id,
+                'id_users_customer' => $customer_id,
+                'id_services' => $service_id,
+                'location' => '',
+                'notes' => 'Overnight trailing buffer bounds test',
+                'color' => '#7cbae8',
+                'status' => '',
+                'is_unavailability' => false,
+            ]);
+
+            $buffer_blocks = $this->getBufferBlocks($appointment_id);
+
+            $this->assertCount(1, $buffer_blocks);
+            $this->assertSame($end->format('Y-m-d H:i:s'), $buffer_blocks[0]['start_datetime']);
+            $this->assertSame($buffer_end->format('Y-m-d H:i:s'), $buffer_blocks[0]['end_datetime']);
+        } finally {
+            if ($appointment_id !== null) {
+                $this->appointmentsModel->delete($appointment_id);
+            }
+
+            $this->providersModel->set_setting($provider_id, 'working_plan', $original_working_plan);
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
     public function test_manage_mode_excludes_linked_buffer_blocks_from_available_periods(): void
     {
         $provider_id = $this->findProviderId();

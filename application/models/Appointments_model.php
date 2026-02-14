@@ -601,7 +601,8 @@ class Appointments_model extends EA_Model
             throw new RuntimeException(lang('buffer_outside_schedule_error'));
         }
 
-        $day_bounds = $this->get_provider_day_bounds($appointment_start, $appointment['id_users_provider']);
+        $day_bounds_date = $position === 'after' ? $appointment_end : $appointment_start;
+        $day_bounds = $this->get_provider_day_bounds($day_bounds_date, $appointment['id_users_provider']);
 
         if ($day_bounds) {
             if ($start < $day_bounds['start'] || $end > $day_bounds['end']) {
