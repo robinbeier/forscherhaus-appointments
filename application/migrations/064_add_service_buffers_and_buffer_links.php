@@ -55,8 +55,8 @@ class Migration_Add_service_buffers_and_buffer_links extends EA_Migration
 
             $this->db->query(
                 'ALTER TABLE `' .
-                $this->db->dbprefix('appointments') .
-                '` ADD INDEX `idx_parent_appointment` (`id_parent_appointment`)',
+                    $this->db->dbprefix('appointments') .
+                    '` ADD INDEX `idx_parent_appointment` (`id_parent_appointment`)',
             );
         }
     }
