@@ -105,6 +105,149 @@ class AppointmentsModelBufferBlockTest extends TestCase
         }
     }
 
+    public function test_sync_service_buffer_unavailabilities_ignores_stale_sibling_blocks(): void
+    {
+        $provider_id = $this->findProviderId();
+        $customer_id = $this->findCustomerId();
+
+        if ($provider_id === null || $customer_id === null) {
+            $this->markTestSkipped('Provider or customer record missing for buffer sync test.');
+        }
+
+        $slot_pair = $this->findFutureSlotPairForBufferSwap($provider_id);
+
+        if ($slot_pair === null) {
+            $this->markTestSkipped('No suitable pair of future slots found for sibling buffer sync test.');
+        }
+
+        $service_id = $this->createService([
+            'buffer_before' => EVENT_MINIMUM_DURATION,
+            'buffer_after' => 0,
+        ]);
+
+        $appointment_ids = [];
+
+        try {
+            foreach ([$slot_pair['first'], $slot_pair['second']] as $slot) {
+                $appointment_ids[] = $this->appointmentsModel->save([
+                    'start_datetime' => $slot['start']->format('Y-m-d H:i:s'),
+                    'end_datetime' => $slot['end']->format('Y-m-d H:i:s'),
+                    'id_users_provider' => $provider_id,
+                    'id_users_customer' => $customer_id,
+                    'id_services' => $service_id,
+                    'location' => '',
+                    'notes' => 'Sibling buffer sync test',
+                    'color' => '#7cbae8',
+                    'status' => '',
+                    'is_unavailability' => false,
+                ]);
+            }
+
+            $service = $this->servicesModel->find($service_id);
+            $service['buffer_before'] = 0;
+            $service['buffer_after'] = EVENT_MINIMUM_DURATION;
+            $this->servicesModel->save($service);
+
+            $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+
+            foreach ([0, 1] as $index) {
+                $appointment_id = $appointment_ids[$index];
+                $slot = $index === 0 ? $slot_pair['first'] : $slot_pair['second'];
+                $buffer_blocks = $this->getBufferBlocks($appointment_id);
+
+                $this->assertCount(1, $buffer_blocks);
+                $this->assertSame($slot['end']->format('Y-m-d H:i:s'), $buffer_blocks[0]['start_datetime']);
+                $this->assertSame(
+                    $slot['end']->add(new \DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'))->format('Y-m-d H:i:s'),
+                    $buffer_blocks[0]['end_datetime'],
+                );
+            }
+        } finally {
+            foreach (array_reverse($appointment_ids) as $appointment_id) {
+                $this->appointmentsModel->delete($appointment_id);
+            }
+
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
+    public function test_sync_service_buffer_unavailabilities_updates_past_appointments_with_future_buffers(): void
+    {
+        $provider_id = $this->findProviderId();
+        $customer_id = $this->findCustomerId();
+
+        if ($provider_id === null || $customer_id === null) {
+            $this->markTestSkipped('Provider or customer record missing for buffer sync test.');
+        }
+
+        $service_id = $this->createService([
+            'buffer_before' => 0,
+            'buffer_after' => EVENT_MINIMUM_DURATION,
+        ]);
+
+        try {
+            $slot = $this->findFutureSlotForProvider($provider_id, EVENT_MINIMUM_DURATION);
+
+            if ($slot === null) {
+                $this->markTestSkipped('No suitable future provider slot found for trailing buffer sync test.');
+            }
+
+            $appointment_id = $this->appointmentsModel->save([
+                'start_datetime' => $slot['start']->format('Y-m-d H:i:s'),
+                'end_datetime' => $slot['end']->format('Y-m-d H:i:s'),
+                'id_users_provider' => $provider_id,
+                'id_users_customer' => $customer_id,
+                'id_services' => $service_id,
+                'location' => '',
+                'notes' => 'Trailing buffer sync test',
+                'color' => '#7cbae8',
+                'status' => '',
+                'is_unavailability' => false,
+            ]);
+
+            try {
+                $buffer_blocks = $this->getBufferBlocks($appointment_id);
+                $this->assertCount(1, $buffer_blocks);
+
+                $now = new \DateTimeImmutable();
+                $past_start = $now->sub(new \DateInterval('PT' . (EVENT_MINIMUM_DURATION + 1) . 'M'));
+                $past_end = $now->sub(new \DateInterval('PT1M'));
+                $future_buffer_end = $now->add(new \DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+
+                $CI = &get_instance();
+                $CI->db->update(
+                    'appointments',
+                    [
+                        'start_datetime' => $past_start->format('Y-m-d H:i:s'),
+                        'end_datetime' => $past_end->format('Y-m-d H:i:s'),
+                    ],
+                    ['id' => $appointment_id],
+                );
+
+                $CI->db->update(
+                    'appointments',
+                    [
+                        'start_datetime' => $past_end->format('Y-m-d H:i:s'),
+                        'end_datetime' => $future_buffer_end->format('Y-m-d H:i:s'),
+                    ],
+                    ['id' => (int) $buffer_blocks[0]['id']],
+                );
+
+                $service = $this->servicesModel->find($service_id);
+                $service['buffer_after'] = 0;
+                $this->servicesModel->save($service);
+
+                $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+
+                $this->assertCount(0, $this->getBufferBlocks($appointment_id));
+            } finally {
+                $this->appointmentsModel->delete($appointment_id);
+            }
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
     private function createService(array $overrides = []): int
     {
         $service = array_merge(
@@ -189,6 +332,49 @@ class AppointmentsModelBufferBlockTest extends TestCase
             }
 
             return ['start' => $start, 'end' => $end];
+        }
+
+        return null;
+    }
+
+    private function findFutureSlotPairForBufferSwap(int $provider_id): ?array
+    {
+        $provider = $this->providersModel->find($provider_id);
+        $working_plan = json_decode($provider['settings']['working_plan'] ?? '{}', true) ?: [];
+        $provider_timezone = new \DateTimeZone($provider['timezone'] ?? date_default_timezone_get());
+        $search_start = new \DateTimeImmutable('2099-01-01 00:00:00', $provider_timezone);
+        $duration_interval = new \DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M');
+
+        for ($day_offset = 0; $day_offset < 370; $day_offset++) {
+            $date = $search_start->add(new \DateInterval('P' . $day_offset . 'D'));
+            $day_name = strtolower($date->format('l'));
+            $plan = $working_plan[$day_name] ?? null;
+
+            if (empty($plan['start']) || empty($plan['end'])) {
+                continue;
+            }
+
+            $day_start = new \DateTimeImmutable($date->format('Y-m-d') . ' ' . $plan['start'], $provider_timezone);
+            $day_end = new \DateTimeImmutable($date->format('Y-m-d') . ' ' . $plan['end'], $provider_timezone);
+
+            $first_start = $day_start->add($duration_interval);
+            $first_end = $first_start->add($duration_interval);
+            $second_start = $first_end->add($duration_interval);
+            $second_end = $second_start->add($duration_interval);
+            $second_after_end = $second_end->add($duration_interval);
+
+            if ($second_after_end > $day_end) {
+                continue;
+            }
+
+            if ($this->hasProviderOverlap($provider_id, $day_start, $second_after_end)) {
+                continue;
+            }
+
+            return [
+                'first' => ['start' => $first_start, 'end' => $first_end],
+                'second' => ['start' => $second_start, 'end' => $second_end],
+            ];
         }
 
         return null;

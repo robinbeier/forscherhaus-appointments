@@ -436,14 +436,38 @@ class Appointments_model extends EA_Model
         }
 
         try {
+            $now = date('Y-m-d H:i:s');
+
             $appointments = $this->db
+                ->select('appointments.*')
                 ->from('appointments')
-                ->where('id_services', $service_id)
-                ->where('is_unavailability', false)
-                ->where('end_datetime >=', date('Y-m-d H:i:s'))
-                ->order_by('start_datetime', 'ASC')
+                ->join(
+                    'appointments AS buffer_blocks',
+                    'buffer_blocks.id_parent_appointment = appointments.id AND ' .
+                        'buffer_blocks.is_unavailability = 1 AND ' .
+                        'buffer_blocks.end_datetime >= ' .
+                        $this->db->escape($now),
+                    'left',
+                )
+                ->where('appointments.id_services', $service_id)
+                ->where('appointments.is_unavailability', false)
+                ->group_start()
+                ->where('appointments.end_datetime >=', $now)
+                ->or_where('buffer_blocks.id IS NOT NULL', null, false)
+                ->group_end()
+                ->group_by('appointments.id')
+                ->order_by('appointments.start_datetime', 'ASC')
                 ->get()
                 ->result_array();
+
+            $appointment_ids = array_map(static fn(array $appointment): int => (int) $appointment['id'], $appointments);
+
+            if (!empty($appointment_ids)) {
+                $this->db
+                    ->where_in('id_parent_appointment', $appointment_ids)
+                    ->where('is_unavailability', true)
+                    ->delete('appointments');
+            }
 
             foreach ($appointments as $appointment) {
                 $this->cast($appointment);
