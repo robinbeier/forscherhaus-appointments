@@ -200,7 +200,60 @@ if ($teacherCount > 0) {
       <span>1/1</span>
     </footer>
   </div>
-<?php else: ?>
+  <?php
+    /* ?>
+          <section class="card card--outreach" aria-label="<?= html_escape($outreachTitle) ?>">
+            <h3><?= html_escape($outreachTitle) ?></h3>
+            <?php if ($slotInfo): ?>
+              <p class="outreach__status"><?= html_escape($outreachStatusLabel) ?>: <?= html_escape($slotInfo) ?></p>
+            <?php endif; ?>
+            <div class="outreach__grid">
+              <article class="outreach__variant">
+                <h4><?= html_escape($sduiLabel) ?></h4>
+                <p class="outreach__template"><?= html_escape(
+                    lang('dashboard_teacher_pdf_outreach_template_sdui') ?:
+                    "Sehr geehrte {{Anrede}},\nSie haben bisher noch keinen Termin für den Klassenleitungssprechtag gebucht.\nIch lade Sie herzlich ein, einen Termin zu buchen.\nZeitraum & freie Zeiten finden Sie direkt im Buchungssystem: dasforscherhaus-leg.de\nFalls Ihnen keiner der Termine passt, antworten Sie bitte kurz – wir finden eine Alternative.\nHerzliche Grüße\n{{Lehrkraft}}",
+                ) ?></p>
+                <p class="checklist-inline">
+                  <strong><?= html_escape($checklistLabel) ?>:</strong>
+                  <span class="checklist-inline-items">
+                    <span>&#9744; <?= html_escape($checklistStepOne) ?></span>
+                    <span>&#9744; <?= html_escape($checklistStepTwo) ?></span>
+                    <span>&#9744; <?= html_escape($checklistStepThree) ?></span>
+                  </span>
+                </p>
+              </article>
+            </div>
+          </section>
+  <?php */
+    ?>
+ /* ?>
+          <section class="card card--outreach" aria-label="<?= html_escape($outreachTitle) ?>">
+            <h3><?= html_escape($outreachTitle) ?></h3>
+            <?php if ($slotInfo): ?>
+              <p class="outreach__status"><?= html_escape($outreachStatusLabel) ?>: <?= html_escape($slotInfo) ?></p>
+            <?php endif; ?>
+            <div class="outreach__grid">
+              <article class="outreach__variant">
+                <h4><?= html_escape($sduiLabel) ?></h4>
+                <p class="outreach__template"><?= html_escape(
+                    lang('dashboard_teacher_pdf_outreach_template_sdui') ?:
+                    "Sehr geehrte {{Anrede}},\nSie haben bisher noch keinen Termin für den Klassenleitungssprechtag gebucht.\nIch lade Sie herzlich ein, einen Termin zu buchen.\nZeitraum & freie Zeiten finden Sie direkt im Buchungssystem: dasforscherhaus-leg.de\nFalls Ihnen keiner der Termine passt, antworten Sie bitte kurz – wir finden eine Alternative.\nHerzliche Grüße\n{{Lehrkraft}}",
+                ) ?></p>
+                <p class="checklist-inline">
+                  <strong><?= html_escape($checklistLabel) ?>:</strong>
+                  <span class="checklist-inline-items">
+                    <span>&#9744; <?= html_escape($checklistStepOne) ?></span>
+                    <span>&#9744; <?= html_escape($checklistStepTwo) ?></span>
+                    <span>&#9744; <?= html_escape($checklistStepThree) ?></span>
+                  </span>
+                </p>
+              </article>
+            </div>
+          </section>
+          <?php */<?php
+
+    else: ?>
   <?php foreach ($teacherPages as $pageIndex => $pageData):
 
       $pageNumber = $pageIndex + 1;
@@ -329,6 +382,8 @@ if ($teacherCount > 0) {
         </section>
 
         <?php if ($isLastChunk): ?>
+          <?php
+            /* ?>
           <section class="card card--outreach" aria-label="<?= html_escape($outreachTitle) ?>">
             <h3><?= html_escape($outreachTitle) ?></h3>
             <?php if ($slotInfo): ?>
@@ -352,6 +407,8 @@ if ($teacherCount > 0) {
               </article>
             </div>
           </section>
+          <?php */
+            ?>
         <?php endif; ?>
       </section>
 

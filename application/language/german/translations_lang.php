@@ -593,3 +593,13 @@ $lang['dashboard_teacher_pdf_checklist_step_one'] = 'Erinnerung gesendet';
 $lang['dashboard_teacher_pdf_checklist_step_two'] = 'Telefonversuch dokumentiert';
 $lang['dashboard_teacher_pdf_checklist_step_three'] = 'Alternative Zeiten angeboten';
 // End
+
+$lang['buffer_before'] = 'Buffer before (minutes)';
+$lang['buffer_after'] = 'Buffer after (minutes)';
+$lang['buffer_before_hint'] = 'Keeps time blocked for the provider before the appointment.';
+$lang['buffer_after_hint'] = 'Keeps time blocked for the provider after the appointment.';
+$lang['buffer_limit_error'] = 'Buffers must be 0 or at least the minimum event duration (max 240 minutes).';
+$lang['buffer_block_note'] = 'Service buffer';
+$lang['buffer_invalid_window_error'] = 'Buffer time window is invalid.';
+$lang['buffer_outside_schedule_error'] = 'Buffer time cannot extend outside the provider working hours.';
+$lang['buffer_conflict_error'] = 'Buffer time collides with another appointment or unavailability.';

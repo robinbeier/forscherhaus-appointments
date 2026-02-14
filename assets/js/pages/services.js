@@ -24,6 +24,8 @@ App.Pages.Services = (function () {
     const $serviceCategoryId = $('#service-category-id');
     const $availabilitiesType = $('#availabilities-type');
     const $attendantsNumber = $('#attendants-number');
+    const $bufferBefore = $('#buffer-before');
+    const $bufferAfter = $('#buffer-after');
     const $isPrivate = $('#is-private');
     const $location = $('#location');
     const $description = $('#description');
@@ -110,6 +112,8 @@ App.Pages.Services = (function () {
             $serviceCategoryId.val('');
             $availabilitiesType.val('flexible');
             $attendantsNumber.val('1');
+            $bufferBefore.val('0');
+            $bufferAfter.val('0');
         });
 
         /**
@@ -141,6 +145,8 @@ App.Pages.Services = (function () {
                 color: App.Components.ColorSelection.getColor($color),
                 availabilities_type: $availabilitiesType.val(),
                 attendants_number: $attendantsNumber.val(),
+                buffer_before: Number($bufferBefore.val() || 0),
+                buffer_after: Number($bufferAfter.val() || 0),
                 is_private: Number($isPrivate.prop('checked')),
                 id_service_categories: $serviceCategoryId.val() || undefined,
             };
@@ -252,6 +258,25 @@ App.Pages.Services = (function () {
                 throw new Error(lang('invalid_duration'));
             }
 
+            const bufferBefore = Number($bufferBefore.val() || 0);
+            const bufferAfter = Number($bufferAfter.val() || 0);
+            const minimumDuration = Number(vars('event_minimum_duration'));
+
+            if (
+                Number.isNaN(bufferBefore) ||
+                Number.isNaN(bufferAfter) ||
+                bufferBefore < 0 ||
+                bufferAfter < 0 ||
+                bufferBefore > 240 ||
+                bufferAfter > 240 ||
+                (bufferBefore > 0 && bufferBefore < minimumDuration) ||
+                (bufferAfter > 0 && bufferAfter < minimumDuration)
+            ) {
+                $bufferBefore.addClass('is-invalid');
+                $bufferAfter.addClass('is-invalid');
+                throw new Error(lang('buffer_limit_error'));
+            }
+
             return true;
         } catch (error) {
             $services.find('.form-message').addClass('alert-danger').text(error.message).show();
@@ -270,6 +295,8 @@ App.Pages.Services = (function () {
         $services.find('.record-details').find('input, select, textarea').val('').prop('disabled', true);
         $services.find('.record-details .form-label span').prop('hidden', true);
         $services.find('.record-details #is-private').prop('checked', false);
+        $bufferBefore.val('0');
+        $bufferAfter.val('0');
         $services.find('.record-details h4 a').remove();
 
         $services.find('.add-edit-delete-group').show();
@@ -297,6 +324,8 @@ App.Pages.Services = (function () {
         $location.val(service.location);
         $availabilitiesType.val(service.availabilities_type);
         $attendantsNumber.val(service.attendants_number);
+        $bufferBefore.val(service.buffer_before ?? 0);
+        $bufferAfter.val(service.buffer_after ?? 0);
         $isPrivate.prop('checked', service.is_private);
         App.Components.ColorSelection.setColor($color, service.color);
 

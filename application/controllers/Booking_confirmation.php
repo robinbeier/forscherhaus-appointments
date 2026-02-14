@@ -76,7 +76,7 @@ class Booking_confirmation extends EA_Controller
         $end_at = new DateTimeImmutable($appointment['end_datetime'], $provider_timezone);
 
         $duration_minutes = (int) round(($end_at->getTimestamp() - $start_at->getTimestamp()) / 60);
-        $display_duration_minutes = max($duration_minutes - 5, 1);
+        $display_duration_minutes = max($duration_minutes, 1);
         $language_code = config('language_code') ?: 'de';
         $locale = $this->resolveLocale($language_code);
         $appointment_datetime_start_label = $this->formatAppointmentStartLabel($start_at, $locale);
@@ -101,11 +101,7 @@ class Booking_confirmation extends EA_Controller
 
         $location_label = $this->build_location_label($appointment, $provider, $service);
 
-        $calendar_end_at = $end_at->sub(new DateInterval('PT5M'));
-
-        if ($calendar_end_at <= $start_at) {
-            $calendar_end_at = $start_at->add(new DateInterval('PT1M'));
-        }
+        $calendar_end_at = $end_at;
 
         $manage_url = site_url('booking/reschedule/' . $appointment['hash']);
 

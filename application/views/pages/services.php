@@ -82,6 +82,28 @@
                        disabled>
             </div>
 
+            <div class="row g-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="buffer-before">
+                        <?= lang('buffer_before') ?>
+                    </label>
+                    <input id="buffer-before" class="form-control" type="number" min="0" max="240" disabled>
+                    <div class="form-text">
+                        <?= lang('buffer_before_hint') ?>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="buffer-after">
+                        <?= lang('buffer_after') ?>
+                    </label>
+                    <input id="buffer-after" class="form-control" type="number" min="0" max="240" disabled>
+                    <div class="form-text">
+                        <?= lang('buffer_after_hint') ?>
+                    </div>
+                </div>
+            </div>
+
             <div class="mb-3">
                 <label class="form-label" for="price">
                     <?= lang('price') ?>

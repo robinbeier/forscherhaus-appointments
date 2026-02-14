@@ -39,6 +39,27 @@ In the host machine the server is accessible from `http://localhost` and the dat
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`) and Mailpit from `http://localhost:8025`.
 
+## Running Tests
+
+Use the Docker Compose PHP service as the canonical test environment:
+
+```bash
+docker compose run --rm php-fpm composer test
+```
+
+Alternative command in the same container context:
+
+```bash
+docker compose run --rm php-fpm APP_ENV=testing php vendor/bin/phpunit
+```
+
+Inside the Compose network, `DB_HOST='mysql'` resolves through Docker DNS to the `mysql` service.
+When running PHP directly on the host, MySQL is reachable via `localhost:3306`, but only if your
+`config.php` uses a host-resolvable DB host (for example `127.0.0.1` or `localhost`).
+
+Warning: Running host-side `composer test` while `DB_HOST='mysql'` is configured will fail with a
+`php_network_getaddresses: getaddrinfo for mysql failed` error.
+
 The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the environment variable `PDF_RENDERER_URL=http://localhost:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically.
 
 Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integration is available on `http://localhost:8100` (credentials are `admin` / `admin`). 
@@ -48,6 +69,48 @@ While activating CalDAV sync with the local Docker-based Baikal, you will need t
 Openldap is configured to run through `openldap` container and ports `389` and `636`. 
 
 Phpldapadmin, an admin portal for openldap is available on `http://localhost:8200` (credentials are `cn=admin,dc=example,dc=org` / `admin`).
+
+## Restoring a Server Dump Locally
+
+Use this workflow when you want your local setup to run with a database dump from production/staging.
+
+```bash
+cd /path/to/forscherhaus-appointments
+
+# Stop the current stack.
+docker compose down
+
+# Optional safety backup of the current local MySQL data directory.
+backup_tgz="/tmp/forscherhaus-mysql-$(date +%Y%m%d-%H%M%S).tgz"
+tar -czf "$backup_tgz" -C docker mysql
+
+# Clean reset local MySQL data (destructive for local DB state).
+mkdir -p docker/mysql
+find docker/mysql -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+# Start the required services.
+docker compose up -d mysql php-fpm nginx
+
+# Wait until MySQL is ready.
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+
+# Import the dump file.
+gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
+
+# Run migrations to bring schema/settings to current code level.
+docker compose exec -T php-fpm php index.php console migrate
+```
+
+Verify after import:
+
+```bash
+docker compose exec -T mysql mysql -uroot -psecret -e "
+USE easyappointments;
+SELECT version FROM ea_migrations;
+SHOW COLUMNS FROM ea_users LIKE 'class_size_default';
+SELECT name, value FROM ea_settings WHERE name='dashboard_conflict_threshold';
+"
+```
 
 **Attention:** This configuration is meant to make development easier. It is not intended to server as a production environment!
 
