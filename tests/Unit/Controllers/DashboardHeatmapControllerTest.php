@@ -5,6 +5,7 @@ namespace Tests\Unit\Controllers;
 use Dashboard;
 use Dashboard_heatmap;
 use DateTimeImmutable;
+use ReflectionClass;
 use Tests\TestCase;
 
 require_once APPPATH . 'controllers/Dashboard.php';
@@ -50,13 +51,19 @@ class DashboardHeatmapControllerTest extends TestCase
             ->expects($this->once())
             ->method('collect')
             ->with(
-                new DateTimeImmutable('2024-01-01'),
-                new DateTimeImmutable('2024-01-05'),
+                $this->callback(
+                    static fn($value) => $value instanceof DateTimeImmutable &&
+                        $value->format('Y-m-d') === '2024-01-01',
+                ),
+                $this->callback(
+                    static fn($value) => $value instanceof DateTimeImmutable &&
+                        $value->format('Y-m-d') === '2024-01-05',
+                ),
                 ['statuses' => [], 'service_id' => null, 'provider_ids' => []],
             )
             ->willReturn($expected);
 
-        $controller = new Dashboard();
+        $controller = $this->createControllerWithoutConstructor();
         $controller->dashboard_heatmap = $heatmap;
 
         $controller->heatmap();
@@ -77,7 +84,7 @@ class DashboardHeatmapControllerTest extends TestCase
             'end_date' => '2024-01-05',
         ];
 
-        $controller = new Dashboard();
+        $controller = $this->createControllerWithoutConstructor();
         $controller->dashboard_heatmap = $this->createMock(Dashboard_heatmap::class);
 
         $controller->heatmap();
@@ -86,5 +93,15 @@ class DashboardHeatmapControllerTest extends TestCase
 
         $this->assertFalse($response['success']);
         $this->assertSame(lang('filter_period_required'), $response['message']);
+    }
+
+    private function createControllerWithoutConstructor(): Dashboard
+    {
+        $reflection = new ReflectionClass(Dashboard::class);
+
+        /** @var Dashboard $controller */
+        $controller = $reflection->newInstanceWithoutConstructor();
+
+        return $controller;
     }
 }
