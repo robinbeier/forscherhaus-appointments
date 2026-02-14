@@ -120,8 +120,31 @@ class Services_model extends EA_Model
             }
         }
 
-        $buffer_before = array_key_exists('buffer_before', $service) ? (int) $service['buffer_before'] : 0;
-        $buffer_after = array_key_exists('buffer_after', $service) ? (int) $service['buffer_after'] : 0;
+        $buffer_before = 0;
+
+        if (array_key_exists('buffer_before', $service)) {
+            $raw_buffer_before = $service['buffer_before'];
+            $raw_buffer_before = $raw_buffer_before === '' || $raw_buffer_before === null ? 0 : $raw_buffer_before;
+
+            if (!is_numeric($raw_buffer_before)) {
+                throw new InvalidArgumentException(lang('buffer_limit_error'));
+            }
+
+            $buffer_before = (int) $raw_buffer_before;
+        }
+
+        $buffer_after = 0;
+
+        if (array_key_exists('buffer_after', $service)) {
+            $raw_buffer_after = $service['buffer_after'];
+            $raw_buffer_after = $raw_buffer_after === '' || $raw_buffer_after === null ? 0 : $raw_buffer_after;
+
+            if (!is_numeric($raw_buffer_after)) {
+                throw new InvalidArgumentException(lang('buffer_limit_error'));
+            }
+
+            $buffer_after = (int) $raw_buffer_after;
+        }
 
         if (
             $buffer_before < 0 ||

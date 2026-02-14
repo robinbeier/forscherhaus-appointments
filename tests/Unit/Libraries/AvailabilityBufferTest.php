@@ -73,6 +73,25 @@ class AvailabilityBufferTest extends TestCase
         $this->assertSame(['13:00', '13:15', '13:30'], $hours);
     }
 
+    public function test_flexible_availabilities_keep_quarter_hour_steps_with_buffer_before(): void
+    {
+        $service = [
+            'duration' => 25,
+            'availabilities_type' => AVAILABILITIES_TYPE_FLEXIBLE,
+            'buffer_before' => 5,
+            'buffer_after' => 0,
+        ];
+
+        $hours = $this->generateAvailableHours($service, [
+            [
+                'start' => '13:00',
+                'end' => '14:00',
+            ],
+        ]);
+
+        $this->assertSame(['13:15', '13:30'], $hours);
+    }
+
     private function generateAvailableHours(array $service, array $emptyPeriods): array
     {
         $availability_reflection = new ReflectionClass(Availability::class);

@@ -566,7 +566,10 @@ class Availability
             $period_start = new DateTimeImmutable($date . ' ' . $period['start']);
             $period_end = new DateTimeImmutable($date . ' ' . $period['end']);
 
-            $current_start = $period_start->add($buffer_before_interval);
+            $current_start =
+                $service['availabilities_type'] === AVAILABILITIES_TYPE_FIXED
+                    ? $period_start->add($buffer_before_interval)
+                    : $period_start;
             $latest_start = $period_end->sub($buffer_after_interval)->sub($duration_interval);
 
             if ($latest_start < $current_start) {

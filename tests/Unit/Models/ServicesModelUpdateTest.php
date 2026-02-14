@@ -102,6 +102,15 @@ class ServicesModelUpdateTest extends TestCase
         ]);
     }
 
+    public function test_create_with_non_numeric_buffer_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $this->createService([
+            'buffer_before' => 'abc',
+        ]);
+    }
+
     public function test_create_with_attendants_number_above_one_is_rejected(): void
     {
         $this->expectException(InvalidArgumentException::class);
