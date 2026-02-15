@@ -25,8 +25,6 @@ body{margin:0;font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,"Hel
 .header__titles{display:flex;flex-direction:column;gap:4pt;max-width:70%;}
 .header__title{margin:0;font-size:20pt;font-weight:600;}
 .header__meta{margin:0;font-size:9.6pt;color:var(--ink-muted);}
-.header__chips{display:flex;flex-wrap:wrap;gap:6pt;}
-.chip{display:inline-flex;align-items:center;gap:4pt;padding:3pt 10pt;border-radius:999px;background:var(--muted-surface);border:1px solid var(--border);font-size:8.8pt;font-weight:600;color:var(--ink-muted);}
 .header__logo{margin-left:auto;display:block;}
 .logo{width:120px;max-height:64px;object-fit:contain;}
 
@@ -58,16 +56,16 @@ body{margin:0;font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,"Hel
 .card--outreach{page-break-inside:avoid;break-inside:avoid;}
 .card h3{margin:0;font-size:11pt;font-weight:600;}
 
-table{width:100%;border-collapse:separate;border-spacing:0;font-size:9.4pt;margin-bottom:12pt;}
+table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:9.4pt;margin-bottom:8pt;}
 thead{display:table-header-group;}
 thead th{text-align:left;font-size:8.8pt;color:var(--ink-muted);font-weight:600;padding:8pt 10pt;border-bottom:1px solid var(--border);}
 tbody{display:table-row-group;}
 tbody tr{page-break-inside:avoid;break-inside:avoid;}
-tbody td{padding:9pt 10pt;border-bottom:1px solid var(--border);vertical-align:middle;}
+tbody td{padding:7pt 10pt;border-bottom:1px solid var(--border);vertical-align:middle;}
 tbody tr:last-child td{border-bottom:none;}
-.col-date{text-align:left;width:30%;}
-.col-start,.col-end{text-align:left;width:25%;}
-.col-parent{width:20%;}
+.col-date{text-align:left;width:26%;}
+.col-start,.col-end{text-align:left;width:23%;}
+.col-parent{width:28%;}
 .nowrap{white-space:nowrap;}
 .open-summary{font-size:9.2pt;color:var(--ink-muted);margin:0;}
 
@@ -93,17 +91,12 @@ tbody tr:last-child td{border-bottom:none;}
 /** @var string|null $logo_data_url */
 /** @var string|null $generated_at_text */
 /** @var string|null $period_label */
-/** @var string|null $service_label */
-/** @var string|null $status_label */
 /** @var array|null $teachers */
 $teachers = $teachers ?? [];
 $teacherCount = count($teachers);
 $schoolName = $school_name ?: 'Forscherhaus Grundschule';
 $generatedAt = $generated_at_text ?? date('d.m.Y, H:i');
 $periodLabel = $period_label ?? '';
-$serviceLabel = $service_label ?? '';
-$statusLabel = $status_label ?? '';
-$thresholdPercent = $threshold_percent ?? '90 %';
 $title = lang('dashboard_teacher_pdf_title') ?: 'Lehrkräfte-Report';
 $progressLabel = lang('dashboard_teacher_pdf_progress_title') ?: 'Fortschritt Klassenleitungssprechtage';
 $classSizeLabel = lang('dashboard_teacher_pdf_metric_class_size') ?: 'Klassengröße';
@@ -123,7 +116,6 @@ $checklistStepOne = lang('dashboard_teacher_pdf_checklist_step_one') ?: 'Erinner
 $checklistStepTwo = lang('dashboard_teacher_pdf_checklist_step_two') ?: 'Telefonversuch dokumentiert';
 $checklistStepThree = lang('dashboard_teacher_pdf_checklist_step_three') ?: 'Alternative Zeiten angeboten';
 $noDataLabel = lang('dashboard_teacher_pdf_empty') ?: 'Keine Lehrkräfte für die ausgewählten Filter vorhanden.';
-$thresholdChipLabel = lang('dashboard_threshold_chip_label') ?: 'Schwelle';
 $maxAppointmentsFirstPage = 10;
 $maxAppointmentsContinuation = 8;
 $maxAppointmentsFinalPage = 8;
@@ -191,15 +183,6 @@ if ($teacherCount > 0) {
         <?php if ($periodLabel): ?>
           <p class="header__meta">Übersicht zu den Klassenleitungssprechtagen (<?= html_escape($periodLabel) ?>)</p>
         <?php endif; ?>
-        <div class="header__chips">
-          <span class="chip"><?= html_escape($thresholdChipLabel) ?>: <?= html_escape($thresholdPercent) ?></span>
-          <?php if ($serviceLabel): ?>
-            <span class="chip"><?= html_escape($serviceLabel) ?></span>
-          <?php endif; ?>
-          <?php if ($statusLabel): ?>
-            <span class="chip"><?= html_escape($statusLabel) ?></span>
-          <?php endif; ?>
-        </div>
       </div>
       <?php if (!empty($logo_data_url)): ?>
         <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
@@ -237,15 +220,6 @@ if ($teacherCount > 0) {
           <?php if ($periodLabel): ?>
             <p class="header__meta">Übersicht zu den Klassenleitungssprechtagen (<?= html_escape($periodLabel) ?>)</p>
           <?php endif; ?>
-          <div class="header__chips">
-            <span class="chip"><?= html_escape($thresholdChipLabel) ?>: <?= html_escape($thresholdPercent) ?></span>
-            <?php if ($serviceLabel): ?>
-              <span class="chip"><?= html_escape($serviceLabel) ?></span>
-            <?php endif; ?>
-            <?php if ($statusLabel): ?>
-              <span class="chip"><?= html_escape($statusLabel) ?></span>
-            <?php endif; ?>
-          </div>
         </div>
         <?php if (!empty($logo_data_url)): ?>
           <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape(
