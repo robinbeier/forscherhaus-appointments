@@ -42,17 +42,6 @@ class Migration_Update_dashboard_conflict_threshold_default_to_090 extends EA_Mi
      */
     public function down(): void
     {
-        $query = $this->db->get_where('settings', ['name' => 'dashboard_conflict_threshold']);
-
-        if (!$query->num_rows()) {
-            return;
-        }
-
-        $row = $query->row_array();
-        $value = $row['value'] ?? null;
-
-        if (is_numeric($value) && abs((float) $value - 0.9) < 0.000001) {
-            $this->db->update('settings', ['value' => '0.75'], ['name' => 'dashboard_conflict_threshold']);
-        }
+        // Intentionally left as a no-op to avoid overwriting user-defined values on rollback.
     }
 }
