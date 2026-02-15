@@ -5,10 +5,7 @@
  * @var array $grouped_timezones
  */
 
-$no_slot_fallback_enabled = vars('no_slot_fallback_enabled', '1') === '1';
-$company_email = (string) vars('company_email', '');
-$company_link = (string) vars('company_link', '');
-?>
+$no_slot_fallback_enabled = vars('no_slot_fallback_enabled', '1') === '1'; ?>
 
 <div id="wizard-frame-2" class="wizard-frame" style="display:none;">
     <div class="frame-container">
@@ -56,25 +53,6 @@ $company_link = (string) vars('company_link', '');
                                 <h5 class="h6 mb-2"><?= lang('no_slot_fallback_title') ?></h5>
                                 <p class="mb-2"><?= lang('no_slot_fallback_body') ?></p>
 
-                                <?php if (!empty($company_email) || !empty($company_link)): ?>
-                                    <ul class="mb-2">
-                                        <?php if (!empty($company_email)): ?>
-                                            <li>
-                                                <a href="mailto:<?= e($company_email) ?>"><?= e($company_email) ?></a>
-                                            </li>
-                                        <?php endif; ?>
-                                        <?php if (!empty($company_link)): ?>
-                                            <li>
-                                                <a href="<?= e($company_link) ?>" target="_blank" rel="noopener">
-                                                    <?= e($company_link) ?>
-                                                </a>
-                                            </li>
-                                        <?php endif; ?>
-                                    </ul>
-                                <?php endif; ?>
-
-                                <p class="small text-muted mb-2"><?= lang('no_slot_fallback_hint') ?></p>
-
                                 <button type="button" id="no-slot-fallback-close" class="btn btn-link p-0">
                                     <?= lang('close') ?>
                                 </button>
@@ -83,20 +61,7 @@ $company_link = (string) vars('company_link', '');
                             <noscript>
                                 <div class="alert alert-light border mt-3 mb-0">
                                     <h5 class="h6 mb-2"><?= lang('no_slot_fallback_title') ?></h5>
-                                    <p class="mb-2"><?= lang('no_slot_fallback_body') ?></p>
-                                    <?php if (!empty($company_email)): ?>
-                                        <p class="mb-1">
-                                            <a href="mailto:<?= e($company_email) ?>"><?= e($company_email) ?></a>
-                                        </p>
-                                    <?php endif; ?>
-                                    <?php if (!empty($company_link)): ?>
-                                        <p class="mb-1">
-                                            <a href="<?= e($company_link) ?>" target="_blank" rel="noopener">
-                                                <?= e($company_link) ?>
-                                            </a>
-                                        </p>
-                                    <?php endif; ?>
-                                    <p class="small text-muted mb-0"><?= lang('no_slot_fallback_hint') ?></p>
+                                    <p class="mb-0"><?= lang('no_slot_fallback_body') ?></p>
                                 </div>
                             </noscript>
                         </div>

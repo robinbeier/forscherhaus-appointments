@@ -110,8 +110,6 @@ class Booking extends EA_Controller
         $company_name = setting('company_name');
         $company_logo = setting('company_logo');
         $company_color = setting('company_color');
-        $company_email = setting('company_email');
-        $company_link = setting('company_link');
         $disable_booking = setting('disable_booking');
         $google_analytics_code = setting('google_analytics_code');
         $matomo_analytics_url = setting('matomo_analytics_url');
@@ -270,8 +268,6 @@ class Booking extends EA_Controller
             'customer_token' => $customer_token,
             'default_language' => setting('default_language'),
             'default_timezone' => setting('default_timezone'),
-            'company_email' => $company_email,
-            'company_link' => $company_link,
             'no_slot_fallback_enabled' => $no_slot_fallback_enabled,
         ]);
 
@@ -282,8 +278,6 @@ class Booking extends EA_Controller
             'company_name' => $company_name,
             'company_logo' => $company_logo,
             'company_color' => $company_color === '#ffffff' ? '' : $company_color,
-            'company_email' => $company_email,
-            'company_link' => $company_link,
             'no_slot_fallback_enabled' => $no_slot_fallback_enabled,
             'date_format' => $date_format,
             'time_format' => $time_format,
