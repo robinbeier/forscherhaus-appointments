@@ -45,6 +45,9 @@ composer install
 cp config-sample.php config.php  # DB-Zugang & Secrets setzen
 # Verzeichnisse
 # storage/ muss schreibbar sein
+
+# Optional: Für Docker-Tests ohne manuelles Setup
+# `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls die Datei fehlt.
 ```
 
 ## Dev-/Build-/Test-Befehle (Spickzettel)
@@ -74,7 +77,7 @@ docker compose run --rm php-fpm composer test
 
 # Alternative (direkter PHPUnit-Aufruf im selben Container)
 
-docker compose run --rm php-fpm APP_ENV=testing php vendor/bin/phpunit
+docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 
 # Hinweis: DB_HOST='mysql' ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler config.php.
 
