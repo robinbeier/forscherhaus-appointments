@@ -165,6 +165,7 @@ $route['appointments/ics/(:any)'] = 'appointments/ics/$1';
 $route['dashboard/heatmap']['post'] = 'dashboard/heatmap';
 
 $route['dashboard/export/principal.pdf']['get'] = 'dashboard_export/principal_pdf';
+$route['dashboard/export/teacher.zip']['get'] = 'dashboard_export/teacher_zip';
 $route['dashboard/export/teacher.pdf']['get'] = 'dashboard_export/teacher_pdf';
 
 /* End of file routes.php */

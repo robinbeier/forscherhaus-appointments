@@ -24,6 +24,8 @@ class Dashboard_export extends EA_Controller
 
     protected Pdf_renderer $pdfRenderer;
 
+    protected CI_Zip $zipLibrary;
+
     protected Services_model $servicesModel;
 
     protected Appointments_model $appointmentsModel;
@@ -37,12 +39,14 @@ class Dashboard_export extends EA_Controller
 
         $this->load->library('dashboard_metrics');
         $this->load->library('pdf_renderer');
+        $this->load->library('zip');
         $this->load->model('services_model');
         $this->load->model('appointments_model');
         $this->load->helper('date');
 
         $this->dashboardMetrics = $this->dashboard_metrics;
         $this->pdfRenderer = $this->pdf_renderer;
+        $this->zipLibrary = $this->zip;
         $this->servicesModel = $this->services_model;
         $this->appointmentsModel = $this->appointments_model;
     }
@@ -64,7 +68,7 @@ class Dashboard_export extends EA_Controller
             $normalized_statuses = $this->normalizeStatuses($statuses);
             $normalized_service_id = $this->normalizeServiceId($service_id);
             $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
-            $threshold = (float) setting('dashboard_conflict_threshold', '0.75');
+            $threshold = $this->resolveThreshold(request('threshold'));
 
             $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
                 'statuses' => $normalized_statuses,
@@ -105,9 +109,6 @@ class Dashboard_export extends EA_Controller
         }
     }
 
-    /**
-     * Render the teacher bundle PDF for the selected filters.
-     */
     public function teacher_pdf(): void
     {
         try {
@@ -122,7 +123,7 @@ class Dashboard_export extends EA_Controller
             $normalized_statuses = $this->normalizeStatuses($statuses);
             $normalized_service_id = $this->normalizeServiceId($service_id);
             $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
-            $threshold = (float) setting('dashboard_conflict_threshold', '0.75');
+            $threshold = $this->resolveThreshold(request('threshold'));
 
             $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
                 'statuses' => $normalized_statuses,
@@ -149,6 +150,8 @@ class Dashboard_export extends EA_Controller
                 'period_label' => $this->formatPeriod($period['start'], $period['end']),
                 'service_label' => $this->resolveServiceLabel($normalized_service_id),
                 'status_label' => $this->resolveStatusLabel($normalized_statuses),
+                'threshold_percent' => $this->formatPercent($threshold, 0),
+                'threshold_ratio' => $threshold,
                 'teachers' => $teacherReports,
                 'filters' => [
                     'start' => $period['start'],
@@ -159,7 +162,7 @@ class Dashboard_export extends EA_Controller
             $this->pdfRenderer->stream_view(
                 'exports/dashboard_teacher_pdf',
                 $view_data,
-                $this->buildTeacherFilename($period['start'], $period['end']),
+                $this->buildTeacherPdfFilename($period['start'], $period['end']),
                 [
                     'attachment' => true,
                     'debug_dump_path' => APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html',
@@ -167,6 +170,65 @@ class Dashboard_export extends EA_Controller
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render teacher dashboard export: ' . $exception->getMessage());
+            abort(400, $exception->getMessage());
+        }
+    }
+
+    /**
+     * Render the teacher report bundle as ZIP (one teacher PDF per file).
+     */
+    public function teacher_zip(): void
+    {
+        try {
+            $this->assertAdmin();
+
+            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+
+            $statuses = request('statuses', []);
+            $service_id = request('service_id');
+            $provider_ids = request('provider_ids', []);
+
+            $normalized_statuses = $this->normalizeStatuses($statuses);
+            $normalized_service_id = $this->normalizeServiceId($service_id);
+            $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
+            $threshold = $this->resolveThreshold(request('threshold'));
+
+            $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
+                'statuses' => $normalized_statuses,
+                'service_id' => $normalized_service_id,
+                'provider_ids' => $normalized_provider_ids,
+                'threshold' => $threshold,
+            ]);
+
+            $mappedMetrics = $this->mapMetricsForView($metrics, $threshold);
+            $appointments = $this->loadAppointmentsByProvider(
+                $metrics,
+                $period['start'],
+                $period['end'],
+                $normalized_statuses,
+                $normalized_service_id,
+            );
+
+            $teacherReports = $this->mapTeacherReports($metrics, $mappedMetrics, $appointments);
+
+            $base_view_data = [
+                'school_name' => $this->resolveSchoolName(),
+                'logo_data_url' => $this->resolveLogoDataUrl(),
+                'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
+                'period_label' => $this->formatPeriod($period['start'], $period['end']),
+                'service_label' => $this->resolveServiceLabel($normalized_service_id),
+                'status_label' => $this->resolveStatusLabel($normalized_statuses),
+                'threshold_percent' => $this->formatPercent($threshold, 0),
+                'threshold_ratio' => $threshold,
+                'filters' => [
+                    'start' => $period['start'],
+                    'end' => $period['end'],
+                ],
+            ];
+
+            $this->streamTeacherZipDownload($teacherReports, $base_view_data, $period['start'], $period['end']);
+        } catch (Throwable $exception) {
+            log_message('error', 'Failed to render teacher dashboard ZIP export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
         }
     }
@@ -282,6 +344,66 @@ class Dashboard_export extends EA_Controller
         $ids = array_filter($ids, static fn($value) => $value > 0);
 
         return array_values(array_unique($ids));
+    }
+
+    /**
+     * Resolve and validate the utilization threshold from request/setting.
+     *
+     * @param mixed $threshold_input
+     *
+     * @return float
+     */
+    protected function resolveThreshold(mixed $threshold_input): float
+    {
+        if ($threshold_input === null || $threshold_input === '') {
+            return $this->getConfiguredThreshold();
+        }
+
+        if (is_array($threshold_input) || !is_numeric($threshold_input)) {
+            throw new InvalidArgumentException($this->getThresholdValidationMessage());
+        }
+
+        $threshold = (float) $threshold_input;
+
+        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
+            throw new InvalidArgumentException($this->getThresholdValidationMessage());
+        }
+
+        return $threshold;
+    }
+
+    /**
+     * Return the persisted dashboard threshold with a hard fallback.
+     *
+     * @return float
+     */
+    protected function getConfiguredThreshold(): float
+    {
+        $configured = setting('dashboard_conflict_threshold', '0.90');
+
+        if (!is_numeric($configured)) {
+            return 0.9;
+        }
+
+        $threshold = (float) $configured;
+
+        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
+            return 0.9;
+        }
+
+        return $threshold;
+    }
+
+    /**
+     * Resolve a localized validation message for threshold errors.
+     *
+     * @return string
+     */
+    protected function getThresholdValidationMessage(): string
+    {
+        $message = trim((string) lang('dashboard_conflict_threshold_invalid'));
+
+        return $message !== '' ? $message : 'Please provide a threshold between 0 and 1.';
     }
 
     /**
@@ -713,11 +835,55 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
-     * Build a file name for the teacher export download.
+     * Build a file name for the teacher ZIP export download.
      */
-    protected function buildTeacherFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
+    protected function buildTeacherZipFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
+    {
+        return sprintf('dashboard-lehrkraefte-%s-%s.zip', $start->format('Ymd'), $end->format('Ymd'));
+    }
+
+    /**
+     * Build a file name for the teacher PDF export download.
+     */
+    protected function buildTeacherPdfFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
     {
         return sprintf('dashboard-lehrkraefte-%s-%s.pdf', $start->format('Ymd'), $end->format('Ymd'));
+    }
+
+    /**
+     * Build a file name for an individual teacher PDF within the ZIP archive.
+     *
+     * @param array $teacher_report
+     * @param DateTimeImmutable $start
+     * @param DateTimeImmutable $end
+     *
+     * @return string
+     */
+    protected function buildTeacherPdfMemberFilename(
+        array $teacher_report,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): string {
+        $provider_id = (int) ($teacher_report['provider_id'] ?? 0);
+        $provider_name = (string) ($teacher_report['provider_name'] ?? '');
+        $provider_slug = $this->slugifyForFilename($provider_name, 'lehrkraft');
+        $id_part = $provider_id > 0 ? 'id-' . $provider_id : 'id-unbekannt';
+
+        return sprintf(
+            'dashboard-lehrkraft-%s-%s-%s-%s.pdf',
+            $id_part,
+            $provider_slug,
+            $start->format('Ymd'),
+            $end->format('Ymd'),
+        );
+    }
+
+    /**
+     * Build a placeholder filename when no teacher report rows are available.
+     */
+    protected function buildTeacherEmptyPdfFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
+    {
+        return sprintf('dashboard-lehrkraefte-leer-%s-%s.pdf', $start->format('Ymd'), $end->format('Ymd'));
     }
 
     /**
@@ -847,6 +1013,115 @@ class Dashboard_export extends EA_Controller
         }
 
         return $reports;
+    }
+
+    /**
+     * Render one-teacher PDFs and stream them as a ZIP archive.
+     *
+     * @param array $teacher_reports
+     * @param array $base_view_data
+     * @param DateTimeImmutable $start
+     * @param DateTimeImmutable $end
+     */
+    protected function streamTeacherZipDownload(
+        array $teacher_reports,
+        array $base_view_data,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): void {
+        $this->zipLibrary->clear_data();
+
+        if (empty($teacher_reports)) {
+            $empty_pdf = $this->pdfRenderer->render_view(
+                'exports/dashboard_teacher_pdf',
+                array_merge($base_view_data, ['teachers' => []]),
+            );
+
+            $this->zipLibrary->add_data($this->buildTeacherEmptyPdfFilename($start, $end), $empty_pdf);
+            $this->streamZipDownload($this->buildTeacherZipFilename($start, $end));
+
+            return;
+        }
+
+        foreach ($teacher_reports as $teacher_report) {
+            $pdf_binary = $this->pdfRenderer->render_view(
+                'exports/dashboard_teacher_pdf',
+                array_merge($base_view_data, ['teachers' => [$teacher_report]]),
+            );
+
+            $member_filename = $this->buildTeacherPdfMemberFilename($teacher_report, $start, $end);
+            $this->zipLibrary->add_data($member_filename, $pdf_binary);
+        }
+
+        $this->streamZipDownload($this->buildTeacherZipFilename($start, $end));
+    }
+
+    /**
+     * Stream the generated ZIP bytes to the browser.
+     */
+    protected function streamZipDownload(string $filename): void
+    {
+        $zip_binary = $this->zipLibrary->get_zip();
+
+        if (!is_string($zip_binary) || $zip_binary === '') {
+            throw new RuntimeException('ZIP export could not be generated.');
+        }
+
+        $safe_filename = $this->sanitizeDownloadFilename($filename, 'dashboard-export.zip');
+        $output = $this->output;
+
+        $output->set_header('Content-Type: application/zip');
+        $output->set_header(sprintf('Content-Disposition: attachment; filename="%s"', $safe_filename));
+        $output->set_header('Content-Length: ' . strlen($zip_binary));
+        $output->set_output($zip_binary);
+        $output->_display();
+
+        exit();
+    }
+
+    /**
+     * Make a readable ASCII-safe filename slug.
+     */
+    protected function slugifyForFilename(string $value, string $fallback = 'export'): string
+    {
+        $normalized = trim($value);
+
+        if ($normalized === '') {
+            return $fallback;
+        }
+
+        $normalized = strtr($normalized, [
+            'ä' => 'ae',
+            'ö' => 'oe',
+            'ü' => 'ue',
+            'Ä' => 'Ae',
+            'Ö' => 'Oe',
+            'Ü' => 'Ue',
+            'ß' => 'ss',
+        ]);
+        $normalized = preg_replace('/[^A-Za-z0-9]+/', '-', $normalized) ?? '';
+        $normalized = trim($normalized, '-');
+
+        if ($normalized === '') {
+            return $fallback;
+        }
+
+        return strtolower($normalized);
+    }
+
+    /**
+     * Ensure attachment filenames are header-safe.
+     */
+    protected function sanitizeDownloadFilename(string $filename, string $fallback): string
+    {
+        $safe = preg_replace('/[^A-Za-z0-9._-]/', '-', trim($filename)) ?? '';
+        $safe = trim($safe, '.-');
+
+        if ($safe === '') {
+            return $fallback;
+        }
+
+        return $safe;
     }
 
     /**

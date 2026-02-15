@@ -103,6 +103,7 @@ $generatedAt = $generated_at_text ?? date('d.m.Y, H:i');
 $periodLabel = $period_label ?? '';
 $serviceLabel = $service_label ?? '';
 $statusLabel = $status_label ?? '';
+$thresholdPercent = $threshold_percent ?? '90 %';
 $title = lang('dashboard_teacher_pdf_title') ?: 'Lehrkräfte-Report';
 $progressLabel = lang('dashboard_teacher_pdf_progress_title') ?: 'Fortschritt Klassenleitungssprechtage';
 $classSizeLabel = lang('dashboard_teacher_pdf_metric_class_size') ?: 'Klassengröße';
@@ -122,6 +123,7 @@ $checklistStepOne = lang('dashboard_teacher_pdf_checklist_step_one') ?: 'Erinner
 $checklistStepTwo = lang('dashboard_teacher_pdf_checklist_step_two') ?: 'Telefonversuch dokumentiert';
 $checklistStepThree = lang('dashboard_teacher_pdf_checklist_step_three') ?: 'Alternative Zeiten angeboten';
 $noDataLabel = lang('dashboard_teacher_pdf_empty') ?: 'Keine Lehrkräfte für die ausgewählten Filter vorhanden.';
+$thresholdChipLabel = lang('dashboard_threshold_chip_label') ?: 'Schwelle';
 $maxAppointmentsFirstPage = 10;
 $maxAppointmentsContinuation = 8;
 $maxAppointmentsFinalPage = 8;
@@ -189,6 +191,15 @@ if ($teacherCount > 0) {
         <?php if ($periodLabel): ?>
           <p class="header__meta">Übersicht zu den Klassenleitungssprechtagen (<?= html_escape($periodLabel) ?>)</p>
         <?php endif; ?>
+        <div class="header__chips">
+          <span class="chip"><?= html_escape($thresholdChipLabel) ?>: <?= html_escape($thresholdPercent) ?></span>
+          <?php if ($serviceLabel): ?>
+            <span class="chip"><?= html_escape($serviceLabel) ?></span>
+          <?php endif; ?>
+          <?php if ($statusLabel): ?>
+            <span class="chip"><?= html_escape($statusLabel) ?></span>
+          <?php endif; ?>
+        </div>
       </div>
       <?php if (!empty($logo_data_url)): ?>
         <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
@@ -226,6 +237,15 @@ if ($teacherCount > 0) {
           <?php if ($periodLabel): ?>
             <p class="header__meta">Übersicht zu den Klassenleitungssprechtagen (<?= html_escape($periodLabel) ?>)</p>
           <?php endif; ?>
+          <div class="header__chips">
+            <span class="chip"><?= html_escape($thresholdChipLabel) ?>: <?= html_escape($thresholdPercent) ?></span>
+            <?php if ($serviceLabel): ?>
+              <span class="chip"><?= html_escape($serviceLabel) ?></span>
+            <?php endif; ?>
+            <?php if ($statusLabel): ?>
+              <span class="chip"><?= html_escape($statusLabel) ?></span>
+            <?php endif; ?>
+          </div>
         </div>
         <?php if (!empty($logo_data_url)): ?>
           <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape(

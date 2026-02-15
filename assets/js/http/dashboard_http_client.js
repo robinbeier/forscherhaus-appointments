@@ -86,7 +86,7 @@ App.Http.Dashboard = (function () {
     }
 
     function downloadTeacherExport(filters = {}) {
-        return triggerDownload('dashboard/export/teacher.pdf', filters);
+        return triggerDownload('dashboard/export/teacher.zip', filters);
     }
 
     function downloadPrincipalExport(filters = {}) {
@@ -106,6 +106,10 @@ App.Http.Dashboard = (function () {
 
         if (filters.serviceId) {
             params.set('service_id', filters.serviceId);
+        }
+
+        if (typeof filters.threshold === 'number' && Number.isFinite(filters.threshold)) {
+            params.set('threshold', String(filters.threshold));
         }
 
         const statuses = filters.statuses;

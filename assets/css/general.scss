@@ -331,6 +331,40 @@ body .ui-datepicker .ui-datepicker-buttonpane button {
     color: inherit;
 }
 
+#dashboard-page .dashboard-export-teachers {
+    min-width: 18rem;
+}
+
+#dashboard-page .dashboard-export-teachers-list {
+    max-height: 13rem;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    background-color: #fff;
+}
+
+#dashboard-page .dashboard-export-teachers-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.55rem;
+    border-bottom: 1px solid #f1f3f5;
+    font-size: 0.85rem;
+}
+
+#dashboard-page .dashboard-export-teachers-item:last-child {
+    border-bottom: none;
+}
+
+#dashboard-page .dashboard-export-teachers-item input[type='checkbox'] {
+    margin-top: 0;
+}
+
+#dashboard-page .dashboard-export-teachers-item label {
+    margin: 0;
+    cursor: pointer;
+}
+
 #dashboard-page .dashboard-capacity-gap-badge {
     font-size: 0.7rem;
     line-height: 1.1;

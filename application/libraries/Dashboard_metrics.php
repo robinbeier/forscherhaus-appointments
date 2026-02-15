@@ -77,7 +77,7 @@ class Dashboard_metrics
         $statuses = $this->normalizeStatuses($options['statuses'] ?? []);
         $service_id = $this->normalizeServiceId($options['service_id'] ?? null);
         $provider_ids = $this->normalizeProviderIds($options['provider_ids'] ?? []);
-        $threshold = isset($options['threshold']) ? (float) $options['threshold'] : 0.75;
+        $threshold = isset($options['threshold']) ? (float) $options['threshold'] : 0.9;
 
         $providers = $this->providers_model->get_available_providers(false);
 
