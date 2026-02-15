@@ -4,7 +4,8 @@
  *
  * @var array $grouped_timezones
  */
-?>
+
+$no_slot_fallback_enabled = vars('no_slot_fallback_enabled', '1') === '1'; ?>
 
 <div id="wizard-frame-2" class="wizard-frame" style="display:none;">
     <div class="frame-container">
@@ -34,6 +35,37 @@
 
 
                     <div id="available-hours"></div>
+
+                    <?php if ($no_slot_fallback_enabled): ?>
+                        <div id="no-slot-fallback" class="no-slot-fallback mt-3">
+                            <button
+                                type="button"
+                                id="no-slot-fallback-trigger"
+                                class="btn btn-outline-secondary w-100"
+                                data-entry-point="inline"
+                                aria-expanded="false"
+                                aria-controls="no-slot-fallback-panel"
+                            >
+                                <?= lang('no_slot_fallback_trigger') ?>
+                            </button>
+
+                            <div id="no-slot-fallback-panel" class="alert alert-light border mt-3 mb-0" hidden>
+                                <h5 class="h6 mb-2"><?= lang('no_slot_fallback_title') ?></h5>
+                                <p class="mb-2"><?= lang('no_slot_fallback_body') ?></p>
+
+                                <button type="button" id="no-slot-fallback-close" class="btn btn-link p-0">
+                                    <?= lang('close') ?>
+                                </button>
+                            </div>
+
+                            <noscript>
+                                <div class="alert alert-light border mt-3 mb-0">
+                                    <h5 class="h6 mb-2"><?= lang('no_slot_fallback_title') ?></h5>
+                                    <p class="mb-0"><?= lang('no_slot_fallback_body') ?></p>
+                                </div>
+                            </noscript>
+                        </div>
+                    <?php endif; ?>
 
                     <?php slot('after_available_hours'); ?>
                 </div>
