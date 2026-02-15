@@ -92,7 +92,9 @@ tbody tr:last-child td{border-bottom:none;}
 /** @var string|null $generated_at_text */
 /** @var string|null $period_label */
 /** @var array|null $teachers */
+/** @var array|null $teacher_pages */
 $teachers = $teachers ?? [];
+$teacherPages = $teacher_pages ?? [];
 $teacherCount = count($teachers);
 $schoolName = $school_name ?: 'Forscherhaus Grundschule';
 $generatedAt = $generated_at_text ?? date('d.m.Y, H:i');
@@ -116,64 +118,10 @@ $checklistStepOne = lang('dashboard_teacher_pdf_checklist_step_one') ?: 'Erinner
 $checklistStepTwo = lang('dashboard_teacher_pdf_checklist_step_two') ?: 'Telefonversuch dokumentiert';
 $checklistStepThree = lang('dashboard_teacher_pdf_checklist_step_three') ?: 'Alternative Zeiten angeboten';
 $noDataLabel = lang('dashboard_teacher_pdf_empty') ?: 'Keine Lehrkräfte für die ausgewählten Filter vorhanden.';
-$maxAppointmentsFirstPage = 10;
-$maxAppointmentsContinuation = 8;
-$maxAppointmentsFinalPage = 8;
-$teacherPages = [];
-$pageCount = 1;
 $timeSuffixRaw = lang('pdf_export_time_suffix');
 $timeSuffixLabel = is_string($timeSuffixRaw) ? trim($timeSuffixRaw) : '';
 $timeFormatSetting = setting('time_format') ?: 'military';
 $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military';
-
-foreach ($teachers as $teacherIndex => $teacherData) {
-    $appointmentsAll = array_values($teacherData['appointments'] ?? []);
-    $hasAnyAppointments = !empty($appointmentsAll);
-
-    if ($hasAnyAppointments) {
-        $firstChunk = array_splice($appointmentsAll, 0, $maxAppointmentsFirstPage);
-        $chunks = [$firstChunk];
-
-        while (!empty($appointmentsAll)) {
-            $chunks[] = array_splice($appointmentsAll, 0, $maxAppointmentsContinuation);
-        }
-
-        while (!empty($chunks)) {
-            $lastIndex = count($chunks) - 1;
-
-            if (count($chunks[$lastIndex]) <= $maxAppointmentsFinalPage) {
-                break;
-            }
-
-            $overflow = array_splice($chunks[$lastIndex], $maxAppointmentsFinalPage);
-
-            if (empty($overflow)) {
-                break;
-            }
-
-            $chunks[] = $overflow;
-        }
-    } else {
-        $chunks = [[]];
-    }
-
-    $chunksTotal = count($chunks);
-
-    foreach ($chunks as $chunkIndex => $chunkAppointments) {
-        $teacherPages[] = [
-            'teacher' => $teacherData,
-            'teacher_index' => $teacherIndex,
-            'chunk_index' => $chunkIndex,
-            'chunks_total' => $chunksTotal,
-            'appointments' => $chunkAppointments,
-            'has_any_appointments' => $hasAnyAppointments,
-        ];
-    }
-}
-
-if ($teacherCount > 0) {
-    $pageCount = max(1, count($teacherPages));
-}
 ?>
 <?php if ($teacherCount === 0): ?>
   <div class="page">

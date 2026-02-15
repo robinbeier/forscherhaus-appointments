@@ -20,6 +20,10 @@
  */
 class Dashboard_export extends EA_Controller
 {
+    protected const TEACHER_PDF_FIRST_PAGE_APPOINTMENTS = 10;
+
+    protected const TEACHER_PDF_CONTINUATION_PAGE_APPOINTMENTS = 10;
+
     protected Dashboard_metrics $dashboardMetrics;
 
     protected Pdf_renderer $pdfRenderer;
@@ -150,6 +154,7 @@ class Dashboard_export extends EA_Controller
                 'period_label' => $this->formatPeriod($period['start'], $period['end']),
                 'threshold_ratio' => $threshold,
                 'teachers' => $teacherReports,
+                'teacher_pages' => $this->buildTeacherPages($teacherReports),
                 'filters' => [
                     'start' => $period['start'],
                     'end' => $period['end'],
@@ -1010,6 +1015,49 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
+     * Split teacher appointments into fixed-size PDF pages.
+     *
+     * @param array $teachers
+     *
+     * @return array
+     */
+    protected function buildTeacherPages(array $teachers): array
+    {
+        $teacher_pages = [];
+
+        foreach ($teachers as $teacher_index => $teacher) {
+            $appointments_all = array_values($teacher['appointments'] ?? []);
+            $has_any_appointments = !empty($appointments_all);
+
+            if (!$has_any_appointments) {
+                $chunks = [[]];
+            } else {
+                $first_chunk = array_splice($appointments_all, 0, self::TEACHER_PDF_FIRST_PAGE_APPOINTMENTS);
+                $chunks = [$first_chunk];
+
+                while (!empty($appointments_all)) {
+                    $chunks[] = array_splice($appointments_all, 0, self::TEACHER_PDF_CONTINUATION_PAGE_APPOINTMENTS);
+                }
+            }
+
+            $chunks_total = count($chunks);
+
+            foreach ($chunks as $chunk_index => $chunk_appointments) {
+                $teacher_pages[] = [
+                    'teacher' => $teacher,
+                    'teacher_index' => $teacher_index,
+                    'chunk_index' => $chunk_index,
+                    'chunks_total' => $chunks_total,
+                    'appointments' => $chunk_appointments,
+                    'has_any_appointments' => $has_any_appointments,
+                ];
+            }
+        }
+
+        return $teacher_pages;
+    }
+
+    /**
      * Render one-teacher PDFs and stream them as a ZIP archive.
      *
      * @param array $teacher_reports
@@ -1028,7 +1076,7 @@ class Dashboard_export extends EA_Controller
         if (empty($teacher_reports)) {
             $empty_pdf = $this->pdfRenderer->render_view(
                 'exports/dashboard_teacher_pdf',
-                array_merge($base_view_data, ['teachers' => []]),
+                array_merge($base_view_data, ['teachers' => [], 'teacher_pages' => []]),
             );
 
             $this->zipLibrary->add_data($this->buildTeacherEmptyPdfFilename($start, $end), $empty_pdf);
@@ -1038,9 +1086,13 @@ class Dashboard_export extends EA_Controller
         }
 
         foreach ($teacher_reports as $teacher_report) {
+            $teacher_data = [$teacher_report];
             $pdf_binary = $this->pdfRenderer->render_view(
                 'exports/dashboard_teacher_pdf',
-                array_merge($base_view_data, ['teachers' => [$teacher_report]]),
+                array_merge($base_view_data, [
+                    'teachers' => $teacher_data,
+                    'teacher_pages' => $this->buildTeacherPages($teacher_data),
+                ]),
             );
 
             $member_filename = $this->buildTeacherPdfMemberFilename($teacher_report, $start, $end);

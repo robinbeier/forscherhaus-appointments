@@ -44,6 +44,66 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame([1, 2, 4], $normalized);
     }
 
+    public function testBuildTeacherPagesCreatesSingleEmptyPageWhenNoAppointments(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $teachers = [$this->createTeacherReport(0)];
+
+        $pages = $controller->callBuildTeacherPages($teachers);
+
+        $this->assertCount(1, $pages);
+        $this->assertSame(0, $pages[0]['chunk_index']);
+        $this->assertSame(1, $pages[0]['chunks_total']);
+        $this->assertSame([], $pages[0]['appointments']);
+        $this->assertFalse($pages[0]['has_any_appointments']);
+    }
+
+    public function testBuildTeacherPagesKeepsTenAppointmentsOnOnePage(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $teachers = [$this->createTeacherReport(10)];
+
+        $pages = $controller->callBuildTeacherPages($teachers);
+
+        $this->assertCount(1, $pages);
+        $this->assertSame(0, $pages[0]['chunk_index']);
+        $this->assertSame(1, $pages[0]['chunks_total']);
+        $this->assertCount(10, $pages[0]['appointments']);
+        $this->assertTrue($pages[0]['has_any_appointments']);
+    }
+
+    public function testBuildTeacherPagesUsesTwoPagesForTwentyAppointments(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $teachers = [$this->createTeacherReport(20)];
+
+        $pages = $controller->callBuildTeacherPages($teachers);
+
+        $this->assertCount(2, $pages);
+        $this->assertCount(10, $pages[0]['appointments']);
+        $this->assertCount(10, $pages[1]['appointments']);
+        $this->assertSame(0, $pages[0]['chunk_index']);
+        $this->assertSame(1, $pages[1]['chunk_index']);
+        $this->assertSame(2, $pages[0]['chunks_total']);
+        $this->assertSame(2, $pages[1]['chunks_total']);
+    }
+
+    public function testBuildTeacherPagesUsesThreePagesForTwentyOneAppointments(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $teachers = [$this->createTeacherReport(21)];
+
+        $pages = $controller->callBuildTeacherPages($teachers);
+
+        $this->assertCount(3, $pages);
+        $this->assertCount(10, $pages[0]['appointments']);
+        $this->assertCount(10, $pages[1]['appointments']);
+        $this->assertCount(1, $pages[2]['appointments']);
+        $this->assertSame(3, $pages[0]['chunks_total']);
+        $this->assertSame(3, $pages[1]['chunks_total']);
+        $this->assertSame(3, $pages[2]['chunks_total']);
+    }
+
     private function createControllerWithThreshold(float $configuredThreshold): object
     {
         return new class ($configuredThreshold) extends Dashboard_export {
@@ -64,10 +124,40 @@ class DashboardExportControllerTest extends TestCase
                 return $this->normalizeProviderIds($providerIds);
             }
 
+            public function callBuildTeacherPages(array $teachers): array
+            {
+                return $this->buildTeacherPages($teachers);
+            }
+
             protected function getConfiguredThreshold(): float
             {
                 return $this->configuredThreshold;
             }
         };
+    }
+
+    private function createTeacherReport(int $appointmentsCount): array
+    {
+        return [
+            'provider_id' => 1,
+            'provider_name' => 'Test Teacher',
+            'appointments' => $this->createAppointments($appointmentsCount),
+        ];
+    }
+
+    private function createAppointments(int $appointmentsCount): array
+    {
+        $appointments = [];
+
+        for ($index = 0; $index < $appointmentsCount; $index++) {
+            $appointments[] = [
+                'parent_lastname' => 'Parent ' . $index,
+                'date' => '24/11/2025',
+                'start' => '09:00',
+                'end' => '09:30',
+            ];
+        }
+
+        return $appointments;
     }
 }
