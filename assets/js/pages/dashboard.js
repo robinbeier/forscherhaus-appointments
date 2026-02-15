@@ -504,6 +504,8 @@ App.Pages.Dashboard = (function () {
     const serviceOptions = vars('dashboard_service_options') || [];
     const heatmap = App.Components.DashboardHeatmap;
     const initialThreshold = parseFloat(vars('dashboard_conflict_threshold'));
+    const savedRangeStart = vars('dashboard_saved_range_start') || '';
+    const savedRangeEnd = vars('dashboard_saved_range_end') || '';
 
     let threshold = Number.isFinite(initialThreshold) ? initialThreshold : 0.9;
     let thresholdModal;
@@ -533,7 +535,7 @@ App.Pages.Dashboard = (function () {
         App.Utils.UI.initializeDatePicker($dateRange, {mode: 'range'});
         datePicker = $dateRange[0]?._flatpickr;
 
-        setDefaultRange();
+        applyInitialRange();
         updateThresholdDisplay();
 
         $filters.on('submit', onFiltersSubmit);
@@ -604,6 +606,22 @@ App.Pages.Dashboard = (function () {
         const end = moment(start).add(6, 'days');
 
         datePicker.setDate([start.toDate(), end.toDate()], true);
+    }
+
+    function applyInitialRange() {
+        if (!datePicker) {
+            return;
+        }
+
+        const savedStart = moment(savedRangeStart, 'YYYY-MM-DD', true);
+        const savedEnd = moment(savedRangeEnd, 'YYYY-MM-DD', true);
+
+        if (savedStart.isValid() && savedEnd.isValid() && !savedStart.isAfter(savedEnd)) {
+            datePicker.setDate([savedStart.toDate(), savedEnd.toDate()], true);
+            return;
+        }
+
+        setDefaultRange();
     }
 
     function onFiltersSubmit(event) {

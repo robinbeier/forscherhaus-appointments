@@ -78,6 +78,7 @@ class Dashboard extends EA_Controller
             return;
         }
 
+        $saved_range = $this->getStoredProviderDashboardRange((int) $user_id);
         $appointment_status_options = json_decode(setting('appointment_status_options', '[]'), true) ?? [];
         $threshold = $this->getDashboardThreshold();
         $default_statuses = ['Booked'];
@@ -94,6 +95,8 @@ class Dashboard extends EA_Controller
             'dashboard_conflict_threshold' => $threshold,
             'dashboard_default_statuses' => $default_statuses,
             'dashboard_service_options' => $service_options,
+            'dashboard_saved_range_start' => $saved_range['start_date'],
+            'dashboard_saved_range_end' => $saved_range['end_date'],
             'date_format' => setting('date_format'),
             'time_format' => setting('time_format'),
             'first_weekday' => setting('first_weekday'),
@@ -155,7 +158,9 @@ class Dashboard extends EA_Controller
     {
         try {
             if (session('role_slug') !== DB_SLUG_ADMIN) {
-                abort(403, 'Forbidden');
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
             }
 
             $start_date = request('start_date');
@@ -196,6 +201,8 @@ class Dashboard extends EA_Controller
                 'provider_ids' => $provider_ids ?? [],
                 'threshold' => $threshold,
             ]);
+
+            $this->persistProviderDashboardRange((int) session('user_id'), $start, $end);
 
             json_response($metrics);
         } catch (Throwable $e) {
