@@ -6,6 +6,9 @@ git config core.fileMode false
 echo "➜ Set Correct Permissions"
 chmod -R 777 storage
 
+echo "➜ Ensure Local Config"
+[[ -f config.php ]] || cp config-sample.php config.php
+
 echo "➜ Install Composer Dependencies"
 [[ -d vendor ]] || composer install
 

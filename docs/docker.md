@@ -47,10 +47,12 @@ Use the Docker Compose PHP service as the canonical test environment:
 docker compose run --rm php-fpm composer test
 ```
 
+The `composer test` script auto-creates `config.php` from `config-sample.php` when missing, so fresh checkouts can run tests without a manual copy step.
+
 Alternative command in the same container context:
 
 ```bash
-docker compose run --rm php-fpm APP_ENV=testing php vendor/bin/phpunit
+docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 ```
 
 Inside the Compose network, `DB_HOST='mysql'` resolves through Docker DNS to the `mysql` service.

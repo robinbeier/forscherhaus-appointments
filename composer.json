@@ -52,7 +52,7 @@
     },
     "scripts": {
         "pre-autoload-dump": "Google\\Task\\Composer::cleanup",
-        "test": "APP_ENV=testing php vendor/bin/phpunit"
+        "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit"
     },
     "extra": {
         "google/apiclient-services": [
