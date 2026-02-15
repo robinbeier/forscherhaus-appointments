@@ -17,7 +17,7 @@
 
 $protocol =
     (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ||
-    (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443) ||
+    (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443) ||
     (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
         ? 'https://'
         : 'http://';
@@ -26,12 +26,11 @@ $domain = $_SERVER['HTTP_HOST'] ?? 'localhost';
 
 $request_uri = dirname($_SERVER['SCRIPT_NAME'] ?? 'index.php');
 
-if ($request_uri === '.')
-{
+if ($request_uri === '.') {
     $request_uri = '';
 }
 
-$config['base_url'] = rtrim(! is_cli() ? $protocol . $domain . $request_uri : Config::BASE_URL, '/');
+$config['base_url'] = rtrim(!is_cli() ? $protocol . $domain . $request_uri : Config::BASE_URL, '/');
 
 /*
 |--------------------------------------------------------------------------
@@ -133,8 +132,7 @@ $config['language_codes'] = $languages;
 
 $config['language'] = Config::LANGUAGE;
 
-if (isset($_GET['language']) && in_array($_GET['language'], $config['available_languages'], true))
-{
+if (isset($_GET['language']) && in_array($_GET['language'], $config['available_languages'], true)) {
     $config['language'] = $_GET['language'];
 }
 
@@ -150,9 +148,7 @@ $config['language_code'] = array_search($config['language'], $languages, true) ?
 | of these languages.
 |
 */
-$config['available_languages'] = [
-    'german',
-];
+$config['available_languages'] = ['german'];
 
 /*
 |--------------------------------------------------------------------------
@@ -174,7 +170,7 @@ $config['charset'] = 'UTF-8';
 | setting this variable to TRUE (boolean).  See the user guide for details.
 |
 */
-$config['enable_hooks'] = TRUE;
+$config['enable_hooks'] = true;
 
 /*
 |--------------------------------------------------------------------------
@@ -234,8 +230,8 @@ $config['permitted_uri_chars'] = 'a-z 0-9~%.:_\-';
 | use segment based URLs.
 |
 */
-$config['allow_get_array'] = TRUE;
-$config['enable_query_strings'] = FALSE;
+$config['allow_get_array'] = true;
+$config['enable_query_strings'] = false;
 $config['controller_trigger'] = 'c';
 $config['function_trigger'] = 'm';
 $config['directory_trigger'] = 'd'; // experimental not currently in use
@@ -328,9 +324,9 @@ $config['sess_driver'] = 'files';
 $config['sess_cookie_name'] = 'ea_session';
 $config['sess_expiration'] = 7200;
 $config['sess_save_path'] = __DIR__ . '/../../storage/sessions';
-$config['sess_match_ip'] = FALSE;
+$config['sess_match_ip'] = false;
 $config['sess_time_to_update'] = 300;
-$config['sess_regenerate_destroy'] = TRUE;
+$config['sess_regenerate_destroy'] = true;
 
 /*
 |--------------------------------------------------------------------------
@@ -346,7 +342,7 @@ $config['sess_regenerate_destroy'] = TRUE;
 $config['cookie_prefix'] = '';
 $config['cookie_domain'] = '';
 $config['cookie_path'] = '/';
-$config['cookie_secure'] = strpos($config['base_url'], 'https') !== FALSE;
+$config['cookie_secure'] = strpos($config['base_url'], 'https') !== false;
 
 /*
 |--------------------------------------------------------------------------
@@ -360,7 +356,7 @@ $config['cookie_secure'] = strpos($config['base_url'], 'https') !== FALSE;
 | 'csrf_cookie_name' = The cookie name
 | 'csrf_expire' = The number in seconds the token should expire.
 */
-$config['csrf_protection'] = TRUE;
+$config['csrf_protection'] = true;
 $config['csrf_token_name'] = 'csrf_token';
 $config['csrf_cookie_name'] = 'csrf_cookie';
 $config['csrf_expire'] = 7200;
@@ -383,7 +379,7 @@ $config['csrf_exclude_uris'] = ['api/v1/.*', 'booking/.*', 'booking_cancellation
 | by the output class.  Do not 'echo' any values with compression enabled.
 |
 */
-$config['compress_output'] = FALSE;
+$config['compress_output'] = false;
 
 /*
 |--------------------------------------------------------------------------
@@ -408,7 +404,7 @@ $config['time_reference'] = 'local';
 | in your view files.  Options are TRUE or FALSE (boolean)
 |
 */
-$config['rewrite_short_tags'] = FALSE;
+$config['rewrite_short_tags'] = false;
 
 /*
 |--------------------------------------------------------------------------
@@ -432,7 +428,18 @@ $config['proxy_ips'] = '';
 | will control the number of requests a client can send to the app.
 |
 */
-$config['rate_limiting'] = TRUE;
+$config['rate_limiting'] = true;
+
+/*
+|--------------------------------------------------------------------------
+| No Slot Fallback
+|--------------------------------------------------------------------------
+|
+| Toggle the "No appointment fits" fallback route in booking step 2.
+| If disabled, the booking page will only display the default no-slot message.
+|
+*/
+$config['no_slot_fallback_enabled'] = true;
 
 /* End of file config.php */
 /* Location: ./application/config/config.php */

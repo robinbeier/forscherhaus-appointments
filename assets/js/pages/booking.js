@@ -39,6 +39,10 @@ App.Pages.Booking = (function () {
     const $customField4 = $('#custom-field-4');
     const $customField5 = $('#custom-field-5');
     const $displayBookingSelection = $('.display-booking-selection');
+    const $noSlotFallback = $('#no-slot-fallback');
+    const $noSlotFallbackTrigger = $('#no-slot-fallback-trigger');
+    const $noSlotFallbackPanel = $('#no-slot-fallback-panel');
+    const $noSlotFallbackClose = $('#no-slot-fallback-close');
     const tippy = window.tippy;
     const moment = window.moment;
 
@@ -49,6 +53,7 @@ App.Pages.Booking = (function () {
      */
     let manageMode = vars('manage_mode') || false;
     let hasScrolledToNextButton = false; // Avoid repeated auto-scrolls after time selection.
+    const noSlotFallbackShownEvents = new Set();
 
     /**
      * Detect the month step.
@@ -96,6 +101,86 @@ App.Pages.Booking = (function () {
 
     function resetTimeSelectionScroll() {
         hasScrolledToNextButton = false;
+    }
+
+    function isNoSlotFallbackEnabled() {
+        const fallbackState = vars('no_slot_fallback_enabled');
+        return fallbackState === undefined ? true : String(fallbackState) === '1';
+    }
+
+    function getNoSlotFallbackContext(entryPoint = 'inline') {
+        const selectedDateObject = App.Utils.UI.getDateTimePickerValue($selectDate);
+
+        return {
+            service_id: $selectService.val() || '',
+            provider_id: $selectProvider.val() || '',
+            selected_date: selectedDateObject ? moment(selectedDateObject).format('YYYY-MM-DD') : '',
+            entry_point: entryPoint,
+        };
+    }
+
+    function trackNoSlotFallbackEvent(eventName, payload) {
+        if (!eventName) {
+            return;
+        }
+
+        try {
+            if (typeof window.gtag === 'function') {
+                window.gtag('event', eventName, payload);
+            }
+        } catch (error) {
+            // Tracking must never block the booking flow.
+        }
+
+        try {
+            if (Array.isArray(window._paq)) {
+                window._paq.push(['trackEvent', 'Booking', eventName, JSON.stringify(payload)]);
+            }
+        } catch (error) {
+            // Tracking must never block the booking flow.
+        }
+    }
+
+    function trackNoSlotFallbackClick(entryPoint = 'inline') {
+        if (!isNoSlotFallbackEnabled()) {
+            return;
+        }
+
+        trackNoSlotFallbackEvent('booking_no_slot_fallback_click', getNoSlotFallbackContext(entryPoint));
+    }
+
+    function trackNoSlotEmptyStateShown(entryPoint = 'empty_state') {
+        if (!isNoSlotFallbackEnabled()) {
+            return;
+        }
+
+        const payload = getNoSlotFallbackContext(entryPoint);
+        const dedupeKey = `${payload.service_id}|${payload.provider_id}|${payload.selected_date}|${payload.entry_point}`;
+
+        if (noSlotFallbackShownEvents.has(dedupeKey)) {
+            return;
+        }
+
+        noSlotFallbackShownEvents.add(dedupeKey);
+        trackNoSlotFallbackEvent('booking_no_slot_empty_state_shown', payload);
+    }
+
+    function setNoSlotFallbackPanelVisibility(isVisible) {
+        if (!$noSlotFallbackPanel.length || !$noSlotFallbackTrigger.length) {
+            return;
+        }
+
+        $noSlotFallbackPanel.prop('hidden', !isVisible);
+        $noSlotFallbackTrigger.attr('aria-expanded', isVisible ? 'true' : 'false');
+    }
+
+    function setNoSlotFallbackProminent(isProminent, entryPoint = 'inline') {
+        if (!$noSlotFallback.length || !$noSlotFallbackTrigger.length || !isNoSlotFallbackEnabled()) {
+            return;
+        }
+
+        $noSlotFallback.toggleClass('is-prominent', Boolean(isProminent));
+        $noSlotFallbackTrigger.attr('data-entry-point', isProminent ? 'empty_state' : entryPoint);
     }
 
     /**
@@ -553,6 +638,27 @@ App.Pages.Booking = (function () {
                 hasScrolledToNextButton = true;
                 scrollToNextButton();
             }
+        });
+
+        $noSlotFallbackTrigger.on('click', () => {
+            const isCurrentlyHidden = $noSlotFallbackPanel.prop('hidden');
+            const entryPoint = $noSlotFallbackTrigger.attr('data-entry-point') || 'inline';
+
+            setNoSlotFallbackPanelVisibility(isCurrentlyHidden);
+
+            if (isCurrentlyHidden) {
+                trackNoSlotFallbackClick(entryPoint);
+            }
+        });
+
+        $noSlotFallbackClose.on('click', () => {
+            setNoSlotFallbackPanelVisibility(false);
+        });
+
+        $availableHours.on('click', '#no-slot-empty-state-trigger', () => {
+            setNoSlotFallbackProminent(true, 'empty_state');
+            setNoSlotFallbackPanelVisibility(true);
+            trackNoSlotFallbackClick('empty_state');
         });
 
         if (manageMode) {
@@ -1063,5 +1169,7 @@ App.Pages.Booking = (function () {
         validateCustomerForm,
         resetTimeSelectionScroll,
         scrollToFirstAvailableHour,
+        setNoSlotFallbackProminent,
+        trackNoSlotEmptyStateShown,
     };
 })();

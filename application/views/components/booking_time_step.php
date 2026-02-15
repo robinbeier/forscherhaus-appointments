@@ -4,6 +4,10 @@
  *
  * @var array $grouped_timezones
  */
+
+$no_slot_fallback_enabled = vars('no_slot_fallback_enabled', '1') === '1';
+$company_email = (string) vars('company_email', '');
+$company_link = (string) vars('company_link', '');
 ?>
 
 <div id="wizard-frame-2" class="wizard-frame" style="display:none;">
@@ -34,6 +38,69 @@
 
 
                     <div id="available-hours"></div>
+
+                    <?php if ($no_slot_fallback_enabled): ?>
+                        <div id="no-slot-fallback" class="no-slot-fallback mt-3">
+                            <button
+                                type="button"
+                                id="no-slot-fallback-trigger"
+                                class="btn btn-outline-secondary w-100"
+                                data-entry-point="inline"
+                                aria-expanded="false"
+                                aria-controls="no-slot-fallback-panel"
+                            >
+                                <?= lang('no_slot_fallback_trigger') ?>
+                            </button>
+
+                            <div id="no-slot-fallback-panel" class="alert alert-light border mt-3 mb-0" hidden>
+                                <h5 class="h6 mb-2"><?= lang('no_slot_fallback_title') ?></h5>
+                                <p class="mb-2"><?= lang('no_slot_fallback_body') ?></p>
+
+                                <?php if (!empty($company_email) || !empty($company_link)): ?>
+                                    <ul class="mb-2">
+                                        <?php if (!empty($company_email)): ?>
+                                            <li>
+                                                <a href="mailto:<?= e($company_email) ?>"><?= e($company_email) ?></a>
+                                            </li>
+                                        <?php endif; ?>
+                                        <?php if (!empty($company_link)): ?>
+                                            <li>
+                                                <a href="<?= e($company_link) ?>" target="_blank" rel="noopener">
+                                                    <?= e($company_link) ?>
+                                                </a>
+                                            </li>
+                                        <?php endif; ?>
+                                    </ul>
+                                <?php endif; ?>
+
+                                <p class="small text-muted mb-2"><?= lang('no_slot_fallback_hint') ?></p>
+
+                                <button type="button" id="no-slot-fallback-close" class="btn btn-link p-0">
+                                    <?= lang('close') ?>
+                                </button>
+                            </div>
+
+                            <noscript>
+                                <div class="alert alert-light border mt-3 mb-0">
+                                    <h5 class="h6 mb-2"><?= lang('no_slot_fallback_title') ?></h5>
+                                    <p class="mb-2"><?= lang('no_slot_fallback_body') ?></p>
+                                    <?php if (!empty($company_email)): ?>
+                                        <p class="mb-1">
+                                            <a href="mailto:<?= e($company_email) ?>"><?= e($company_email) ?></a>
+                                        </p>
+                                    <?php endif; ?>
+                                    <?php if (!empty($company_link)): ?>
+                                        <p class="mb-1">
+                                            <a href="<?= e($company_link) ?>" target="_blank" rel="noopener">
+                                                <?= e($company_link) ?>
+                                            </a>
+                                        </p>
+                                    <?php endif; ?>
+                                    <p class="small text-muted mb-0"><?= lang('no_slot_fallback_hint') ?></p>
+                                </div>
+                            </noscript>
+                        </div>
+                    <?php endif; ?>
 
                     <?php slot('after_available_hours'); ?>
                 </div>

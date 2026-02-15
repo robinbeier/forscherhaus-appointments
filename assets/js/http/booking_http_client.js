@@ -34,6 +34,51 @@ App.Http.Booking = (function () {
     let searchedMonthStart;
     let searchedMonthCounter = 0;
 
+    function isNoSlotFallbackEnabled() {
+        const fallbackState = vars('no_slot_fallback_enabled');
+        return fallbackState === undefined ? true : String(fallbackState) === '1';
+    }
+
+    function setNoSlotFallbackProminent(isProminent) {
+        if (App.Pages?.Booking?.setNoSlotFallbackProminent) {
+            App.Pages.Booking.setNoSlotFallbackProminent(isProminent, 'inline');
+        }
+    }
+
+    function trackNoSlotEmptyStateShown() {
+        if (App.Pages?.Booking?.trackNoSlotEmptyStateShown) {
+            App.Pages.Booking.trackNoSlotEmptyStateShown('empty_state');
+        }
+    }
+
+    function renderNoAvailableHoursState() {
+        if (!isNoSlotFallbackEnabled()) {
+            $availableHours.text(lang('no_available_hours'));
+            return;
+        }
+
+        const $state = $('<div/>', {
+            'id': 'no-slot-empty-state',
+            'class': 'alert alert-warning',
+            'html': [
+                $('<div/>', {
+                    'class': 'mb-2',
+                    'text': lang('no_available_hours'),
+                }),
+                $('<button/>', {
+                    'type': 'button',
+                    'id': 'no-slot-empty-state-trigger',
+                    'class': 'btn btn-dark btn-sm',
+                    'text': lang('no_slot_fallback_trigger_prominent'),
+                }),
+            ],
+        });
+
+        $availableHours.empty().append($state);
+        setNoSlotFallbackProminent(true);
+        trackNoSlotEmptyStateShown();
+    }
+
     /**
      * Get Available Hours
      *
@@ -141,12 +186,13 @@ App.Http.Booking = (function () {
                 }
 
                 App.Pages.Booking.updateConfirmFrame();
+                setNoSlotFallbackProminent(false);
             }
 
             App.Pages.Booking.scrollToFirstAvailableHour();
 
             if (!$availableHours.find('.available-hour').length) {
-                $availableHours.text(lang('no_available_hours'));
+                renderNoAvailableHoursState();
             }
         });
     }
@@ -335,7 +381,7 @@ App.Http.Booking = (function () {
 
         // If all the days are unavailable then hide the appointments hours.
         if (unavailableDates.length === numberOfDays) {
-            $availableHours.text(lang('no_available_hours'));
+            renderNoAvailableHoursState();
         }
 
         // Grey out unavailable dates.

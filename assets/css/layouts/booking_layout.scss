@@ -54,7 +54,7 @@ body {
     }
 
     .display-booking-selection {
-        color: #FFFCFC;
+        color: #fffcfc;
         border-right-color: #225d4d !important;
         font-size: 60%;
         font-weight: normal;
@@ -139,7 +139,7 @@ body {
     height: 35px;
     width: 35px;
     float: left;
-    background: #FFFCFC;
+    background: #fffcfc;
     color: #000;
     padding: 8px;
     margin-right: 12px;
@@ -166,7 +166,7 @@ body {
     height: 45px;
     width: 45px;
     float: left;
-    background: #FFFCFC;
+    background: #fffcfc;
     padding: 7px;
     margin-right: 13px;
     margin-top: 0;
@@ -201,6 +201,32 @@ body {
     background-color: #439a82;
     border-color: #439a82;
     color: white;
+}
+
+#book-appointment-wizard #no-slot-empty-state {
+    margin-bottom: 0;
+    text-align: left;
+}
+
+#book-appointment-wizard #no-slot-empty-state-trigger {
+    width: 100%;
+}
+
+#book-appointment-wizard #no-slot-fallback-trigger {
+    border-style: dashed;
+}
+
+#book-appointment-wizard #no-slot-fallback-panel {
+    border-color: #d8e2dc !important;
+    background-color: #fff;
+}
+
+#book-appointment-wizard #no-slot-fallback.is-prominent #no-slot-fallback-trigger {
+    border-style: solid;
+    border-color: #1e705a;
+    background-color: #1e705a;
+    color: #fff;
+    font-weight: 600;
 }
 
 #book-appointment-wizard .span3 {
@@ -435,8 +461,16 @@ body {
 #book-appointment-wizard #available-hours,
 #book-appointment-wizard .available-hours,
 #book-appointment-wizard .time-list,
-#book-appointment-wizard [data-ea-component="time-list"] {
+#book-appointment-wizard [data-ea-component='time-list'] {
     max-height: none !important;
     height: auto !important;
     overflow: visible !important;
+}
+
+@media (max-width: 576px) {
+    #book-appointment-wizard #no-slot-fallback-trigger,
+    #book-appointment-wizard #no-slot-empty-state-trigger {
+        font-size: 0.95rem;
+        padding: 0.65rem 0.75rem;
+    }
 }
