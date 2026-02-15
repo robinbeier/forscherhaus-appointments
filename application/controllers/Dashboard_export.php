@@ -109,12 +109,69 @@ class Dashboard_export extends EA_Controller
         }
     }
 
-    /**
-     * Backward compatible alias for the teacher ZIP export endpoint.
-     */
     public function teacher_pdf(): void
     {
-        $this->teacher_zip();
+        try {
+            $this->assertAdmin();
+
+            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+
+            $statuses = request('statuses', []);
+            $service_id = request('service_id');
+            $provider_ids = request('provider_ids', []);
+
+            $normalized_statuses = $this->normalizeStatuses($statuses);
+            $normalized_service_id = $this->normalizeServiceId($service_id);
+            $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
+            $threshold = $this->resolveThreshold(request('threshold'));
+
+            $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
+                'statuses' => $normalized_statuses,
+                'service_id' => $normalized_service_id,
+                'provider_ids' => $normalized_provider_ids,
+                'threshold' => $threshold,
+            ]);
+
+            $mappedMetrics = $this->mapMetricsForView($metrics, $threshold);
+            $appointments = $this->loadAppointmentsByProvider(
+                $metrics,
+                $period['start'],
+                $period['end'],
+                $normalized_statuses,
+                $normalized_service_id,
+            );
+
+            $teacherReports = $this->mapTeacherReports($metrics, $mappedMetrics, $appointments);
+
+            $view_data = [
+                'school_name' => $this->resolveSchoolName(),
+                'logo_data_url' => $this->resolveLogoDataUrl(),
+                'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
+                'period_label' => $this->formatPeriod($period['start'], $period['end']),
+                'service_label' => $this->resolveServiceLabel($normalized_service_id),
+                'status_label' => $this->resolveStatusLabel($normalized_statuses),
+                'threshold_percent' => $this->formatPercent($threshold, 0),
+                'threshold_ratio' => $threshold,
+                'teachers' => $teacherReports,
+                'filters' => [
+                    'start' => $period['start'],
+                    'end' => $period['end'],
+                ],
+            ];
+
+            $this->pdfRenderer->stream_view(
+                'exports/dashboard_teacher_pdf',
+                $view_data,
+                $this->buildTeacherPdfFilename($period['start'], $period['end']),
+                [
+                    'attachment' => true,
+                    'debug_dump_path' => APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html',
+                ],
+            );
+        } catch (Throwable $exception) {
+            log_message('error', 'Failed to render teacher dashboard export: ' . $exception->getMessage());
+            abort(400, $exception->getMessage());
+        }
     }
 
     /**
@@ -783,6 +840,14 @@ class Dashboard_export extends EA_Controller
     protected function buildTeacherZipFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
     {
         return sprintf('dashboard-lehrkraefte-%s-%s.zip', $start->format('Ymd'), $end->format('Ymd'));
+    }
+
+    /**
+     * Build a file name for the teacher PDF export download.
+     */
+    protected function buildTeacherPdfFilename(DateTimeImmutable $start, DateTimeImmutable $end): string
+    {
+        return sprintf('dashboard-lehrkraefte-%s-%s.pdf', $start->format('Ymd'), $end->format('Ymd'));
     }
 
     /**
