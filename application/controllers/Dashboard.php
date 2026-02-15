@@ -11,10 +11,6 @@
  * @since       v1.5.0
  * ---------------------------------------------------------------------------- */
 
-use DateTimeImmutable;
-use InvalidArgumentException;
-use Throwable;
-
 /**
  * Dashboard controller.
  *
@@ -33,9 +29,11 @@ class Dashboard extends EA_Controller
 
         $this->load->model('providers_model');
         $this->load->model('services_model');
+        $this->load->model('appointments_model');
         $this->load->library('dashboard_metrics');
         $this->load->library('dashboard_heatmap');
         $this->load->library('accounts');
+        $this->load->helper('date');
     }
 
     /**
@@ -46,13 +44,36 @@ class Dashboard extends EA_Controller
         session(['dest_url' => site_url('dashboard')]);
 
         $user_id = session('user_id');
+        $role_slug = session('role_slug');
 
-        if (session('role_slug') !== DB_SLUG_ADMIN) {
+        if (!in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER], true)) {
             if ($user_id) {
                 abort(403, 'Forbidden');
             }
 
             redirect('login');
+
+            return;
+        }
+
+        if ($role_slug === DB_SLUG_PROVIDER) {
+            $saved_range = $this->getStoredProviderDashboardRange((int) $user_id);
+
+            script_vars([
+                'dashboard_saved_range_start' => $saved_range['start_date'],
+                'dashboard_saved_range_end' => $saved_range['end_date'],
+                'date_format' => setting('date_format'),
+                'time_format' => setting('time_format'),
+                'first_weekday' => setting('first_weekday'),
+            ]);
+
+            html_vars([
+                'page_title' => lang('dashboard_teacher_dashboard_title') ?: lang('dashboard'),
+                'active_menu' => 'dashboard',
+                'user_display_name' => $this->accounts->get_user_display_name($user_id),
+            ]);
+
+            $this->load->view('pages/dashboard_teacher');
 
             return;
         }
@@ -85,6 +106,46 @@ class Dashboard extends EA_Controller
         ]);
 
         $this->load->view('pages/dashboard');
+    }
+
+    /**
+     * Provide provider dashboard metrics for the selected period.
+     */
+    public function provider_metrics(): void
+    {
+        try {
+            if (session('role_slug') !== DB_SLUG_PROVIDER) {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            $provider_id = (int) session('user_id');
+
+            if ($provider_id <= 0) {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+
+            $payload = $this->buildProviderDashboardPayload($provider_id, $period['start'], $period['end']);
+
+            $this->persistProviderDashboardRange($provider_id, $period['start'], $period['end']);
+
+            json_response($payload);
+        } catch (InvalidArgumentException $e) {
+            json_response(['success' => false, 'message' => $e->getMessage()], 422);
+        } catch (Throwable $e) {
+            json_exception($e);
+        }
     }
 
     /**
@@ -308,6 +369,380 @@ class Dashboard extends EA_Controller
             json_response(['success' => false, 'message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
             json_exception($e);
+        }
+    }
+
+    /**
+     * Validate and normalize period input.
+     *
+     * @return array{start: DateTimeImmutable, end: DateTimeImmutable}
+     */
+    protected function resolvePeriod(?string $start_input, ?string $end_input): array
+    {
+        if (!$start_input || !$end_input) {
+            throw new InvalidArgumentException(lang('filter_period_required'));
+        }
+
+        $start = DateTimeImmutable::createFromFormat('Y-m-d', $start_input);
+        $end = DateTimeImmutable::createFromFormat('Y-m-d', $end_input);
+
+        if (!$start || $start->format('Y-m-d') !== $start_input || !$end || $end->format('Y-m-d') !== $end_input) {
+            throw new InvalidArgumentException(lang('filter_period_required'));
+        }
+
+        if ($start > $end) {
+            throw new InvalidArgumentException(lang('filter_period_required'));
+        }
+
+        return [
+            'start' => $start,
+            'end' => $end,
+        ];
+    }
+
+    /**
+     * Assemble provider dashboard payload.
+     */
+    protected function buildProviderDashboardPayload(
+        int $provider_id,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): array {
+        $provider = $this->providers_model->find($provider_id);
+        $provider_name = $this->resolveProviderDisplayName($provider, $provider_id);
+
+        $metrics = $this->collectProviderMetrics($provider_id, $start, $end);
+        $metric = $metrics[0] ?? null;
+
+        $class_size = $this->resolveClassSize($metric, $provider);
+        $target = $this->resolveTarget($metric, $class_size);
+        $booked = is_array($metric) && is_numeric($metric['booked'] ?? null) ? max(0, (int) $metric['booked']) : 0;
+        $open =
+            is_array($metric) && is_numeric($metric['open'] ?? null)
+                ? max(0, (int) $metric['open'])
+                : max($target - $booked, 0);
+
+        $slots_planned = $this->normalizeMetricInt(is_array($metric) ? $metric['slots_planned'] ?? 0 : 0);
+        $slots_required = $this->normalizeMetricInt(is_array($metric) ? $metric['slots_required'] ?? $target : $target);
+        $has_capacity_gap = $slots_required > 0 && $slots_planned < $slots_required;
+
+        $progress_base = max($target, 1);
+        $booked_percent = $progress_base > 0 ? max(0, min(100, (int) round(($booked / $progress_base) * 100))) : 0;
+        $open_percent =
+            $progress_base > 0 ? max(0, min(100 - $booked_percent, (int) round(($open / $progress_base) * 100))) : 0;
+
+        $slot_info_with_target = lang('dashboard_teacher_pdf_slot_info_with_target') ?: '%s von %s Terminen gebucht';
+        $slot_info_without_target = lang('dashboard_teacher_pdf_slot_info_without_target') ?: '%s Termine gebucht';
+
+        return [
+            'provider_id' => $provider_id,
+            'provider_name' => $provider_name,
+            'period' => [
+                'start_date' => $start->format('Y-m-d'),
+                'end_date' => $end->format('Y-m-d'),
+            ],
+            'progress' => [
+                'booked_percent' => $booked_percent,
+                'open_percent' => $open_percent,
+                'slot_info_text' =>
+                    $target > 0
+                        ? sprintf($slot_info_with_target, $this->formatNumber($booked), $this->formatNumber($target))
+                        : sprintf($slot_info_without_target, $this->formatNumber($booked)),
+            ],
+            'metrics' => [
+                'class_size' => $class_size,
+                'class_size_formatted' => $class_size !== null ? $this->formatNumber($class_size) : '—',
+                'booked' => $booked,
+                'booked_formatted' => $this->formatNumber($booked),
+                'open' => $open,
+                'open_formatted' => $this->formatNumber($open),
+                'slots_planned' => $slots_planned,
+                'slots_planned_formatted' => $this->formatNumber($slots_planned),
+                'slots_required' => $slots_required,
+                'slots_required_formatted' => $this->formatNumber($slots_required),
+                'has_capacity_gap' => $has_capacity_gap,
+            ],
+            'appointments' => $this->loadProviderAppointments($provider_id, $start, $end),
+        ];
+    }
+
+    /**
+     * Collect provider metrics with fixed Booked status scope.
+     */
+    protected function collectProviderMetrics(int $provider_id, DateTimeImmutable $start, DateTimeImmutable $end): array
+    {
+        return $this->dashboard_metrics->collect($start, $end, [
+            'statuses' => ['Booked'],
+            'provider_ids' => [$provider_id],
+        ]);
+    }
+
+    /**
+     * Persist the provider dashboard range in user settings.
+     */
+    protected function persistProviderDashboardRange(
+        int $provider_id,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): void {
+        if ($provider_id <= 0 || !$this->hasProviderDashboardRangeColumns()) {
+            return;
+        }
+
+        $exists = $this->db->get_where('user_settings', ['id_users' => $provider_id])->num_rows() > 0;
+
+        if (!$exists) {
+            $this->db->insert('user_settings', ['id_users' => $provider_id]);
+        }
+
+        $saved = $this->db->update(
+            'user_settings',
+            [
+                'dashboard_range_start' => $start->format('Y-m-d'),
+                'dashboard_range_end' => $end->format('Y-m-d'),
+            ],
+            ['id_users' => $provider_id],
+        );
+
+        if (!$saved) {
+            throw new RuntimeException('Could not persist provider dashboard period.');
+        }
+    }
+
+    /**
+     * Resolve the stored provider dashboard period from user settings.
+     *
+     * @return array{start_date: ?string, end_date: ?string}
+     */
+    protected function getStoredProviderDashboardRange(int $provider_id): array
+    {
+        $empty = [
+            'start_date' => null,
+            'end_date' => null,
+        ];
+
+        if ($provider_id <= 0 || !$this->hasProviderDashboardRangeColumns()) {
+            return $empty;
+        }
+
+        $row = $this->db
+            ->select(['dashboard_range_start', 'dashboard_range_end'])
+            ->from('user_settings')
+            ->where('id_users', $provider_id)
+            ->get()
+            ->row_array();
+
+        $start_date = is_array($row) ? trim((string) ($row['dashboard_range_start'] ?? '')) : '';
+        $end_date = is_array($row) ? trim((string) ($row['dashboard_range_end'] ?? '')) : '';
+
+        if (!$this->isValidPeriodDate($start_date) || !$this->isValidPeriodDate($end_date)) {
+            return $empty;
+        }
+
+        if ($start_date > $end_date) {
+            return $empty;
+        }
+
+        return [
+            'start_date' => $start_date,
+            'end_date' => $end_date,
+        ];
+    }
+
+    /**
+     * Check whether provider dashboard range columns are available.
+     */
+    protected function hasProviderDashboardRangeColumns(): bool
+    {
+        return $this->db->field_exists('dashboard_range_start', 'user_settings') &&
+            $this->db->field_exists('dashboard_range_end', 'user_settings');
+    }
+
+    /**
+     * Determine whether a value is a valid Y-m-d date.
+     */
+    protected function isValidPeriodDate(string $value): bool
+    {
+        if ($value === '') {
+            return false;
+        }
+
+        $date = DateTimeImmutable::createFromFormat('Y-m-d', $value);
+
+        return $date !== false && $date->format('Y-m-d') === $value;
+    }
+
+    /**
+     * Resolve a provider display name with fallback.
+     */
+    protected function resolveProviderDisplayName(array $provider, int $provider_id): string
+    {
+        $name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
+
+        if ($name !== '') {
+            return $name;
+        }
+
+        $email = trim((string) ($provider['email'] ?? ''));
+
+        if ($email !== '') {
+            return $email;
+        }
+
+        return (string) $provider_id;
+    }
+
+    /**
+     * Resolve explicit class size from provider metric data.
+     */
+    protected function resolveClassSize(?array $metric, array $provider): ?int
+    {
+        $candidate = is_array($metric) ? $metric['class_size_default'] ?? null : null;
+
+        if ($candidate === null || $candidate === '') {
+            $candidate = $provider['class_size_default'] ?? null;
+        }
+
+        if ($candidate === null || $candidate === '') {
+            return null;
+        }
+
+        $class_size = (int) $candidate;
+
+        return $class_size > 0 ? $class_size : null;
+    }
+
+    /**
+     * Resolve target size from metric fallback logic.
+     */
+    protected function resolveTarget(?array $metric, ?int $class_size): int
+    {
+        if ($class_size !== null) {
+            return $class_size;
+        }
+
+        $target = is_array($metric) ? $metric['target'] ?? 0 : 0;
+
+        return max(0, (int) $target);
+    }
+
+    /**
+     * Normalize metric integer values.
+     */
+    protected function normalizeMetricInt(mixed $value): int
+    {
+        if (!is_numeric($value)) {
+            return 0;
+        }
+
+        return max(0, (int) round((float) $value));
+    }
+
+    /**
+     * Format number values for dashboard display.
+     */
+    protected function formatNumber(int $value): string
+    {
+        return (string) $value;
+    }
+
+    /**
+     * Load booked appointments for a provider and period.
+     *
+     * @return array<int, array{parent_lastname: string, date: string, start: string, end: string}>
+     */
+    protected function loadProviderAppointments(
+        int $provider_id,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): array {
+        $rows = $this->appointments_model
+            ->query()
+            ->select([
+                'appointments.start_datetime',
+                'appointments.end_datetime',
+                'customers.first_name AS customer_first_name',
+                'customers.last_name AS customer_last_name',
+                'customers.email AS customer_email',
+                'customers.phone_number AS customer_phone_number',
+            ])
+            ->join('users AS customers', 'customers.id = appointments.id_users_customer', 'left')
+            ->where('appointments.is_unavailability', false)
+            ->where('appointments.id_users_provider', $provider_id)
+            ->where('appointments.status', 'Booked')
+            ->where('appointments.start_datetime <', $end->setTime(23, 59, 59)->format('Y-m-d H:i:s'))
+            ->where('appointments.end_datetime >', $start->setTime(0, 0, 0)->format('Y-m-d H:i:s'))
+            ->order_by('appointments.start_datetime', 'ASC')
+            ->get()
+            ->result_array();
+
+        return array_map(function (array $row): array {
+            return [
+                'parent_lastname' => $this->resolveCustomerLastName($row),
+                'date' => $this->formatDateValue((string) ($row['start_datetime'] ?? '')),
+                'start' => $this->formatTimeValue((string) ($row['start_datetime'] ?? '')),
+                'end' => $this->formatTimeValue((string) ($row['end_datetime'] ?? '')),
+            ];
+        }, $rows);
+    }
+
+    /**
+     * Resolve customer name fallback for provider dashboard appointments.
+     */
+    protected function resolveCustomerLastName(array $appointment): string
+    {
+        $last_name = trim((string) ($appointment['customer_last_name'] ?? ''));
+
+        if ($last_name !== '') {
+            return $last_name;
+        }
+
+        $first_name = trim((string) ($appointment['customer_first_name'] ?? ''));
+
+        if ($first_name !== '') {
+            return $first_name;
+        }
+
+        $email = trim((string) ($appointment['customer_email'] ?? ''));
+
+        if ($email !== '') {
+            return $email;
+        }
+
+        $phone = trim((string) ($appointment['customer_phone_number'] ?? ''));
+
+        if ($phone !== '') {
+            return $phone;
+        }
+
+        return '—';
+    }
+
+    /**
+     * Format date value according to the installation setting.
+     */
+    protected function formatDateValue(string $value): string
+    {
+        try {
+            return format_date($value);
+        } catch (Throwable $e) {
+            log_message('error', 'Could not format provider dashboard appointment date: ' . $e->getMessage());
+
+            return '';
+        }
+    }
+
+    /**
+     * Format time value according to the installation setting.
+     */
+    protected function formatTimeValue(string $value): string
+    {
+        try {
+            return format_time($value);
+        } catch (Throwable $e) {
+            log_message('error', 'Could not format provider dashboard appointment time: ' . $e->getMessage());
+
+            return '';
         }
     }
 }

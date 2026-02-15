@@ -52,6 +52,26 @@ App.Http.Dashboard = (function () {
         return $.post(url, payload);
     }
 
+    /**
+     * Fetch provider dashboard metrics for the provided period filters.
+     *
+     * @param {Object} filters
+     * @param {String} filters.startDate
+     * @param {String} filters.endDate
+     *
+     * @return {jqXHR}
+     */
+    function fetchProviderMetrics(filters) {
+        const url = App.Utils.Url.siteUrl('dashboard/provider_metrics');
+        const payload = {
+            csrf_token: vars('csrf_token'),
+            start_date: filters.startDate,
+            end_date: filters.endDate,
+        };
+
+        return $.post(url, payload);
+    }
+
     function fetchHeatmap(filters) {
         const url = App.Utils.Url.siteUrl('dashboard/heatmap');
         const payload = {
@@ -162,6 +182,7 @@ App.Http.Dashboard = (function () {
 
     return {
         fetch,
+        fetchProviderMetrics,
         fetchHeatmap,
         saveThreshold,
         downloadTeacherExport,

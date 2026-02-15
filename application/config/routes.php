@@ -164,6 +164,7 @@ $route['api/v1/availabilities']['get'] = 'api/v1/availabilities_api_v1/get';
 $route['appointments/ics/(:any)'] = 'appointments/ics/$1';
 $route['dashboard/heatmap']['post'] = 'dashboard/heatmap';
 $route['dashboard/threshold']['post'] = 'dashboard/threshold';
+$route['dashboard/provider_metrics']['post'] = 'dashboard/provider_metrics';
 
 $route['dashboard/export/principal.pdf']['get'] = 'dashboard_export/principal_pdf';
 $route['dashboard/export/teacher.zip']['get'] = 'dashboard_export/teacher_zip';

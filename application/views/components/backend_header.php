@@ -21,8 +21,11 @@
 
     <div id="header-menu" class="collapse navbar-collapse flex-row-reverse px-2">
         <ul class="navbar-nav">
-            <?php $is_admin = session('role_slug') === DB_SLUG_ADMIN; ?>
-            <?php $dashboard_classes = trim(($active_menu === 'dashboard' ? 'active' : '') . ' ' . ($is_admin ? '' : 'd-none')); ?>
+            <?php $role_slug = session('role_slug'); ?>
+            <?php $can_view_dashboard = in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER], true); ?>
+            <?php $dashboard_classes = trim(
+                ($active_menu === 'dashboard' ? 'active' : '') . ' ' . ($can_view_dashboard ? '' : 'd-none'),
+            ); ?>
             <li class="nav-item <?= $dashboard_classes ?>">
                 <a href="<?= site_url('dashboard') ?>" class="nav-link"
                    data-tippy-content="<?= lang('dashboard') ?>">
