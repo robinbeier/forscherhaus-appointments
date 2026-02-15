@@ -154,7 +154,13 @@ class Dashboard extends EA_Controller
                 return;
             }
 
-            $threshold = $this->resolveThreshold(request('threshold'));
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            $threshold = $this->resolveThreshold($_POST['threshold'] ?? null);
 
             $this->persistThreshold($threshold);
 

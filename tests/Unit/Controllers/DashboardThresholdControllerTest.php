@@ -14,6 +14,8 @@ class DashboardThresholdControllerTest extends TestCase
         parent::tearDown();
 
         $_POST = [];
+        $_GET = [];
+        $_SERVER['REQUEST_METHOD'] = 'POST';
         get_instance()->output->set_output('');
         session([
             'role_slug' => null,
@@ -23,6 +25,8 @@ class DashboardThresholdControllerTest extends TestCase
 
     public function testThresholdPersistsValidValue(): void
     {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
         session([
             'role_slug' => DB_SLUG_ADMIN,
             'user_id' => 1,
@@ -43,6 +47,8 @@ class DashboardThresholdControllerTest extends TestCase
 
     public function testThresholdAcceptsBoundaryValues(): void
     {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
         session([
             'role_slug' => DB_SLUG_ADMIN,
             'user_id' => 1,
@@ -70,6 +76,8 @@ class DashboardThresholdControllerTest extends TestCase
 
     public function testThresholdRejectsInvalidValues(): void
     {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
         session([
             'role_slug' => DB_SLUG_ADMIN,
             'user_id' => 1,
@@ -96,12 +104,36 @@ class DashboardThresholdControllerTest extends TestCase
 
     public function testThresholdRejectsNonAdminAccess(): void
     {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
         session([
             'role_slug' => DB_SLUG_PROVIDER,
             'user_id' => 2,
         ]);
 
         $_POST = ['threshold' => '0.8'];
+
+        $controller = $this->createController();
+
+        $controller->threshold();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+
+        $this->assertFalse($response['success']);
+        $this->assertSame('Forbidden', $response['message']);
+        $this->assertSame([], $controller->savedThresholds);
+    }
+
+    public function testThresholdRejectsGetRequest(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+
+        session([
+            'role_slug' => DB_SLUG_ADMIN,
+            'user_id' => 1,
+        ]);
+
+        $_GET = ['threshold' => '0.2'];
 
         $controller = $this->createController();
 
