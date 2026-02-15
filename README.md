@@ -35,24 +35,24 @@
 
 ## About
 
-**Easy!Appointments** is a highly customizable web application that allows customers to book appointments with you 
-via a sophisticated web interface. Moreover, it provides the ability to sync your data with Google Calendar so you can 
-use them with other services. It is an open source project that you can download and install **even for commercial use**. 
-Easy!Appointments will run smoothly with your existing website as it can be installed in a single folder of the 
+**Easy!Appointments** is a highly customizable web application that allows customers to book appointments with you
+via a sophisticated web interface. Moreover, it provides the ability to sync your data with Google Calendar so you can
+use them with other services. It is an open source project that you can download and install **even for commercial use**.
+Easy!Appointments will run smoothly with your existing website as it can be installed in a single folder of the
 server and of course share an existing database.
 
 ## Features
 
-The application is designed to be flexible enough so that it can handle any enterprise work flow. 
+The application is designed to be flexible enough so that it can handle any enterprise work flow.
 
-* Customers and appointments management.
-* Services and providers organization.
-* Working plan and booking rules.
-* Google Calendar synchronization (including provider room information for bookings).
-* Email notifications system.
-* Self hosted installation.
-* Translated user interface.
-* User community support. 
+-   Customers and appointments management.
+-   Services and providers organization.
+-   Working plan and booking rules.
+-   Google Calendar synchronization (including provider room information for bookings).
+-   Email notifications system.
+-   Self hosted installation.
+-   Translated user interface.
+-   User community support.
 
 ## Setup
 
@@ -72,6 +72,8 @@ $ npm install && composer install
 $ npm start
 ```
 
+`npm install` also refreshes frontend vendor and theme assets via `npm run assets:refresh`.
+
 Note: If you're using Linux Bash for Windows, [see this guide](https://www.howtogeek.com/261575/how-to-run-graphical-linux-desktop-applications-from-windows-10s-bash-shell/) or use `node` from the command prompt.
 
 You can build the files by running `npm run build`. This command will bundle everything to a `build` directory.
@@ -80,12 +82,12 @@ You can build the files by running `npm run build`. This command will bundle eve
 
 You will need to perform the following steps to install the application on your server:
 
-* Make sure that your server has Apache/Nginx, PHP (8.2+) and MySQL installed.
-* Create a new database (or use an existing one).
-* Copy the "easyappointments" source folder on your server.
-* Make sure that the "storage" directory is writable.
-* Rename the "config-sample.php" file to "config.php" and update its contents based on your environment.
-* Open the browser on the Easy!Appointments URL and follow the installation guide.
+-   Make sure that your server has Apache/Nginx, PHP (8.2+) and MySQL installed.
+-   Create a new database (or use an existing one).
+-   Copy the "easyappointments" source folder on your server.
+-   Make sure that the "storage" directory is writable.
+-   Rename the "config-sample.php" file to "config.php" and update its contents based on your environment.
+-   Open the browser on the Easy!Appointments URL and follow the installation guide.
 
 That's it! You can now use Easy!Appointments at your will.
 
@@ -95,7 +97,7 @@ If you have problems installing or configuring the application visit the
 You can also report problems on the [issues page](https://github.com/alextselegidis/easyappointments/issues)
 and help the development progress.
 
-## License 
+## License
 
 Code Licensed Under [GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html) | Content Under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)
 
@@ -106,6 +108,9 @@ GitHub [alextselegidis](https://github.com/alextselegidis) &nbsp;&middot;&nbsp;
 Twitter [@alextselegidis](https://twitter.com/AlexTselegidis)
 
 ###### More Projects On Github
+
 ###### ⇾ [Plainpad &middot; Self Hosted Note Taking App](https://github.com/alextselegidis/plainpad)
+
 ###### ⇾ [Questionful &middot; Web Questionnaires Made Easy](https://github.com/alextselegidis/questionful)
+
 ###### ⇾ [Integravy &middot; Service Orchestration At Your Fingertips](https://github.com/alextselegidis/integravy)
