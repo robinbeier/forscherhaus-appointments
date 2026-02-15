@@ -1,7 +1,7 @@
 const {execSync} = require('node:child_process');
 
 const omit = (process.env.npm_config_omit || '')
-    .split(',')
+    .split(/[,\s]+/)
     .map((value) => value.trim())
     .filter(Boolean);
 
