@@ -148,9 +148,6 @@ class Dashboard_export extends EA_Controller
                 'logo_data_url' => $this->resolveLogoDataUrl(),
                 'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
                 'period_label' => $this->formatPeriod($period['start'], $period['end']),
-                'service_label' => $this->resolveServiceLabel($normalized_service_id),
-                'status_label' => $this->resolveStatusLabel($normalized_statuses),
-                'threshold_percent' => $this->formatPercent($threshold, 0),
                 'threshold_ratio' => $threshold,
                 'teachers' => $teacherReports,
                 'filters' => [
@@ -216,9 +213,6 @@ class Dashboard_export extends EA_Controller
                 'logo_data_url' => $this->resolveLogoDataUrl(),
                 'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
                 'period_label' => $this->formatPeriod($period['start'], $period['end']),
-                'service_label' => $this->resolveServiceLabel($normalized_service_id),
-                'status_label' => $this->resolveStatusLabel($normalized_statuses),
-                'threshold_percent' => $this->formatPercent($threshold, 0),
                 'threshold_ratio' => $threshold,
                 'filters' => [
                     'start' => $period['start'],
