@@ -67,6 +67,8 @@
     "scripts": {
         "start": "npx --yes gulp",
         "build": "npx gulp build",
-        "docs": "npx gulp docs"
+        "docs": "npx gulp docs",
+        "assets:refresh": "npx gulp vendor && npx gulp styles",
+        "postinstall": "npm run assets:refresh"
     }
 }
