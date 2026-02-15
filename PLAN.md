@@ -84,7 +84,6 @@
 ## Offene Fragen
 
 -   Wann bewerten wir den stabilen Betrieb des `pdf-renderer` (Monitoring, Security-Hardening, Betriebsprozesse)?
--   Benötigen wir einen Dompdf-Fallback, falls Headless-Chrome in der Produktion ausfällt?
 -   Sollen Kapazitätswarnungen (Slots < Ziel) zusätzlich in den Exporten erscheinen?
 
 ## Tests
