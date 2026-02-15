@@ -58,7 +58,7 @@ class Dashboard extends EA_Controller
         }
 
         $appointment_status_options = json_decode(setting('appointment_status_options', '[]'), true) ?? [];
-        $threshold = (float) setting('dashboard_conflict_threshold', '0.90');
+        $threshold = $this->getDashboardThreshold();
         $default_statuses = ['Booked'];
         $services = $this->services_model->get(null, null, null, 'name ASC');
         $service_options = array_map(static function (array $service): array {
@@ -127,7 +127,7 @@ class Dashboard extends EA_Controller
                 $provider_ids = [$provider_ids];
             }
 
-            $threshold = (float) setting('dashboard_conflict_threshold', '0.90');
+            $threshold = $this->getDashboardThreshold();
 
             $metrics = $this->dashboard_metrics->collect($start, $end, [
                 'statuses' => $statuses,
@@ -140,6 +140,119 @@ class Dashboard extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /**
+     * Persist the dashboard conflict threshold.
+     */
+    public function threshold(): void
+    {
+        try {
+            if (session('role_slug') !== DB_SLUG_ADMIN) {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            $threshold = $this->resolveThreshold($_POST['threshold'] ?? null);
+
+            $this->persistThreshold($threshold);
+
+            json_response([
+                'success' => true,
+                'threshold' => $threshold,
+            ]);
+        } catch (InvalidArgumentException $e) {
+            json_response(['success' => false, 'message' => $e->getMessage()], 422);
+        } catch (Throwable $e) {
+            json_exception($e);
+        }
+    }
+
+    /**
+     * Resolve and validate the dashboard threshold input.
+     */
+    protected function resolveThreshold(mixed $threshold_input): float
+    {
+        if (is_array($threshold_input) || !is_numeric($threshold_input)) {
+            throw new InvalidArgumentException($this->getThresholdValidationMessage());
+        }
+
+        $threshold = (float) $threshold_input;
+
+        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
+            throw new InvalidArgumentException($this->getThresholdValidationMessage());
+        }
+
+        return $threshold;
+    }
+
+    /**
+     * Persist a validated dashboard threshold for the current user session.
+     */
+    protected function persistThreshold(float $threshold): void
+    {
+        session(['dashboard_conflict_threshold' => (string) $threshold]);
+    }
+
+    /**
+     * Resolve the dashboard threshold from session with a configured fallback.
+     */
+    protected function getDashboardThreshold(): float
+    {
+        $session_threshold = session('dashboard_conflict_threshold');
+
+        if ($session_threshold === null || $session_threshold === '') {
+            return $this->getConfiguredThreshold();
+        }
+
+        if (is_array($session_threshold) || !is_numeric($session_threshold)) {
+            return $this->getConfiguredThreshold();
+        }
+
+        $threshold = (float) $session_threshold;
+
+        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
+            return $this->getConfiguredThreshold();
+        }
+
+        return $threshold;
+    }
+
+    /**
+     * Return the globally configured dashboard threshold with a hard fallback.
+     */
+    protected function getConfiguredThreshold(): float
+    {
+        $configured = setting('dashboard_conflict_threshold', '0.90');
+
+        if (!is_numeric($configured)) {
+            return 0.9;
+        }
+
+        $threshold = (float) $configured;
+
+        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
+            return 0.9;
+        }
+
+        return $threshold;
+    }
+
+    /**
+     * Resolve a localized validation message for threshold errors.
+     */
+    protected function getThresholdValidationMessage(): string
+    {
+        $message = trim((string) lang('dashboard_conflict_threshold_invalid'));
+
+        return $message !== '' ? $message : 'Please provide a threshold between 0 and 1.';
     }
 
     /**
