@@ -85,6 +85,24 @@ App.Http.Dashboard = (function () {
         return heatmapRequest;
     }
 
+    /**
+     * Persist the dashboard threshold.
+     *
+     * @param {Number} threshold
+     *
+     * @return {jqXHR}
+     */
+    function saveThreshold(threshold) {
+        const url = App.Utils.Url.siteUrl('dashboard/threshold');
+
+        const payload = {
+            csrf_token: vars('csrf_token'),
+            threshold,
+        };
+
+        return $.post(url, payload);
+    }
+
     function downloadTeacherExport(filters = {}) {
         return triggerDownload('dashboard/export/teacher.zip', filters);
     }
@@ -145,6 +163,7 @@ App.Http.Dashboard = (function () {
     return {
         fetch,
         fetchHeatmap,
+        saveThreshold,
         downloadTeacherExport,
         downloadPrincipalExport,
     };

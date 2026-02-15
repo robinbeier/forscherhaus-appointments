@@ -491,6 +491,7 @@ App.Pages.Dashboard = (function () {
     const $thresholdDisplay = $('#dashboard-threshold-display');
     const $thresholdForm = $('#dashboard-threshold-form');
     const $thresholdInput = $('#dashboard-threshold-input');
+    const $thresholdSubmitButton = $thresholdForm.find('button[type="submit"]');
     const $exportTeachersList = $('#dashboard-export-teachers-list');
     const $exportTeachersEmpty = $('#dashboard-export-teachers-empty');
     const $exportSelectAll = $('#dashboard-export-select-all');
@@ -698,6 +699,7 @@ App.Pages.Dashboard = (function () {
 
         $thresholdInput.val(threshold.toFixed(2));
         $thresholdInput.removeClass('is-invalid');
+        hideError();
         thresholdModal.show();
     }
 
@@ -711,15 +713,30 @@ App.Pages.Dashboard = (function () {
             return;
         }
 
-        threshold = value;
         $thresholdInput.removeClass('is-invalid');
-        updateThresholdDisplay();
-        renderChart();
-        renderTable();
+        $thresholdSubmitButton.prop('disabled', true);
 
-        if (thresholdModal) {
-            thresholdModal.hide();
-        }
+        App.Http.Dashboard.saveThreshold(value)
+            .done((response) => {
+                const savedThreshold = parseFloat(response?.threshold);
+
+                threshold = Number.isFinite(savedThreshold) ? savedThreshold : value;
+                updateThresholdDisplay();
+                renderChart();
+                renderTable();
+                hideError();
+
+                if (thresholdModal) {
+                    thresholdModal.hide();
+                }
+            })
+            .fail((jqXHR) => {
+                const message = jqXHR?.responseJSON?.message ?? lang('unexpected_issues');
+                showError(message);
+            })
+            .always(() => {
+                $thresholdSubmitButton.prop('disabled', false);
+            });
     }
 
     function loadMetrics() {

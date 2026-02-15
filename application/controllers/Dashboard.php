@@ -143,6 +143,69 @@ class Dashboard extends EA_Controller
     }
 
     /**
+     * Persist the dashboard conflict threshold.
+     */
+    public function threshold(): void
+    {
+        try {
+            if (session('role_slug') !== DB_SLUG_ADMIN) {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
+            $threshold = $this->resolveThreshold(request('threshold'));
+
+            $this->persistThreshold($threshold);
+
+            json_response([
+                'success' => true,
+                'threshold' => $threshold,
+            ]);
+        } catch (InvalidArgumentException $e) {
+            json_response(['success' => false, 'message' => $e->getMessage()], 422);
+        } catch (Throwable $e) {
+            json_exception($e);
+        }
+    }
+
+    /**
+     * Resolve and validate the dashboard threshold input.
+     */
+    protected function resolveThreshold(mixed $threshold_input): float
+    {
+        if (is_array($threshold_input) || !is_numeric($threshold_input)) {
+            throw new InvalidArgumentException($this->getThresholdValidationMessage());
+        }
+
+        $threshold = (float) $threshold_input;
+
+        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
+            throw new InvalidArgumentException($this->getThresholdValidationMessage());
+        }
+
+        return $threshold;
+    }
+
+    /**
+     * Persist a validated dashboard threshold.
+     */
+    protected function persistThreshold(float $threshold): void
+    {
+        setting(['dashboard_conflict_threshold' => (string) $threshold]);
+    }
+
+    /**
+     * Resolve a localized validation message for threshold errors.
+     */
+    protected function getThresholdValidationMessage(): string
+    {
+        $message = trim((string) lang('dashboard_conflict_threshold_invalid'));
+
+        return $message !== '' ? $message : 'Please provide a threshold between 0 and 1.';
+    }
+
+    /**
      * Provide heatmap utilization metrics for the selected filters.
      */
     public function heatmap(): void
