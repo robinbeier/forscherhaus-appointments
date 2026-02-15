@@ -20,6 +20,7 @@ class DashboardThresholdControllerTest extends TestCase
         session([
             'role_slug' => null,
             'user_id' => null,
+            'dashboard_conflict_threshold' => null,
         ]);
     }
 
@@ -72,6 +73,27 @@ class DashboardThresholdControllerTest extends TestCase
         $this->assertTrue($secondResponse['success']);
         $this->assertEquals(1.0, $secondResponse['threshold']);
         $this->assertSame([0.0, 1.0], $controller->savedThresholds);
+    }
+
+    public function testThresholdPersistsValueInSession(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
+        session([
+            'role_slug' => DB_SLUG_ADMIN,
+            'user_id' => 1,
+        ]);
+
+        $_POST = ['threshold' => '0.72'];
+
+        $controller = $this->createSessionPersistingController();
+
+        $controller->threshold();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+
+        $this->assertTrue($response['success']);
+        $this->assertSame('0.72', session('dashboard_conflict_threshold'));
     }
 
     public function testThresholdRejectsInvalidValues(): void
@@ -146,6 +168,28 @@ class DashboardThresholdControllerTest extends TestCase
         $this->assertSame([], $controller->savedThresholds);
     }
 
+    public function testDashboardThresholdUsesSessionValueWhenValid(): void
+    {
+        session(['dashboard_conflict_threshold' => '0.66']);
+
+        $controller = $this->createThresholdResolverController(0.9);
+
+        $this->assertEquals(0.66, $controller->callGetDashboardThreshold());
+    }
+
+    public function testDashboardThresholdFallsBackToConfiguredValueWhenSessionValueIsInvalid(): void
+    {
+        $invalidValues = ['invalid', '-1', '1.2', []];
+
+        foreach ($invalidValues as $invalidValue) {
+            session(['dashboard_conflict_threshold' => $invalidValue]);
+
+            $controller = $this->createThresholdResolverController(0.9);
+
+            $this->assertEquals(0.9, $controller->callGetDashboardThreshold());
+        }
+    }
+
     private function createController(): object
     {
         return new class extends Dashboard {
@@ -158,6 +202,37 @@ class DashboardThresholdControllerTest extends TestCase
             protected function persistThreshold(float $threshold): void
             {
                 $this->savedThresholds[] = $threshold;
+            }
+        };
+    }
+
+    private function createSessionPersistingController(): object
+    {
+        return new class extends Dashboard {
+            public function __construct()
+            {
+            }
+        };
+    }
+
+    private function createThresholdResolverController(float $configuredThreshold): object
+    {
+        return new class ($configuredThreshold) extends Dashboard {
+            private float $configuredThreshold;
+
+            public function __construct(float $configuredThreshold)
+            {
+                $this->configuredThreshold = $configuredThreshold;
+            }
+
+            public function callGetDashboardThreshold(): float
+            {
+                return $this->getDashboardThreshold();
+            }
+
+            protected function getConfiguredThreshold(): float
+            {
+                return $this->configuredThreshold;
             }
         };
     }
