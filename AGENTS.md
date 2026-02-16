@@ -104,6 +104,9 @@ docker compose down
 # Optional safety backup of current local MySQL data directory
 backup_tgz="/tmp/forscherhaus-mysql-$(date +%Y%m%d-%H%M%S).tgz"
 tar -czf "$backup_tgz" -C docker mysql
+# Clean reset local MySQL data (destruktiv für lokalen DB-Stand)
+mkdir -p docker/mysql
+find docker/mysql -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
