@@ -39,6 +39,10 @@ Ziel dieser Datei: **Konsistente, merge‑fähige Beiträge von ChatGPT Codex** 
 **Erstinstallation**
 
 ```bash
+# Für neue Worktrees (empfohlen vor dem ersten Commit)
+./scripts/setup-worktree.sh
+
+# Alternativ manuell:
 npm install
 composer install
 # Konfiguration
@@ -112,6 +116,13 @@ until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret 
 gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
 docker compose exec -T php-fpm php index.php console migrate
 
+## Pre-Commit Preconditions
+
+-   Der lokale `pre-commit` Hook erwartet `vendor/` und `node_modules/`.
+-   In neuen Worktrees daher einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausführen.
+-   Bei Netzwerkrestriktionen können `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
+-   Ausnahme nur für reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
+-   `--no-verify` nur als letzter Ausweg verwenden, da damit alle Hooks übersprungen werden.
 
 ## Coding Style & Konventionen
 
