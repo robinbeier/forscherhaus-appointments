@@ -104,6 +104,7 @@ php index.php console sync
 
 # Docker-Workflows (aus docs/docker.md)
 
+docker compose up
 docker compose down
 # Optional safety backup of current local MySQL data directory
 backup_tgz="/tmp/forscherhaus-mysql-$(date +%Y%m%d-%H%M%S).tgz"
@@ -115,6 +116,13 @@ docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
 docker compose exec -T php-fpm php index.php console migrate
+
+# Docker-Services (lokal)
+# App: http://localhost
+# phpMyAdmin: http://localhost:8080 (root/secret)
+# Mailpit: http://localhost:8025
+# Baikal (CalDAV): http://localhost:8100 (admin/admin)
+# phpLDAPadmin: http://localhost:8200 (cn=admin,dc=example,dc=org/admin)
 
 ## Pre-Commit Preconditions
 
