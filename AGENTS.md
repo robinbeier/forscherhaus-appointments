@@ -64,6 +64,10 @@ npm start
 
 npm run assets:refresh
 
+# Optional: Vendor-Assets für Gulp-Workflows (wird durch `./scripts/setup-worktree.sh` ausgelöst)
+
+npx gulp vendor
+
 # Produktion (minifizierte Bundles, Distributables)
 
 npm run build
