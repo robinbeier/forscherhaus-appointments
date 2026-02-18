@@ -47,7 +47,6 @@
     },
     "require-dev": {
         "roave/security-advisories": "dev-master",
-        "doctrine/instantiator": "2.0.*",
         "phpunit/phpunit": "^9.6"
     },
     "scripts": {
