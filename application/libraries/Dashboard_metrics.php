@@ -101,8 +101,19 @@ class Dashboard_metrics
         });
 
         $metrics = [];
+        $filtered_provider_ids = array_values(
+            array_map(static fn(array $provider): int => (int) ($provider['id'] ?? 0), $filtered_providers),
+        );
+        $booked_counts = $this->countBookedAppointmentsByProvider(
+            $filtered_provider_ids,
+            $start,
+            $end,
+            $statuses,
+            $service_id,
+        );
 
         foreach ($filtered_providers as $provider) {
+            $provider_id = (int) ($provider['id'] ?? 0);
             $summary = $this->provider_utilization->calculate(
                 $provider,
                 $start->format('Y-m-d'),
@@ -111,7 +122,7 @@ class Dashboard_metrics
                 $service_id,
             );
 
-            $booked_count = $this->countBookedAppointments((int) $provider['id'], $start, $end, $statuses, $service_id);
+            $booked_count = $booked_counts[$provider_id] ?? 0;
             $class_size_default = $this->extractClassSizeDefault($provider);
 
             [$target, $is_fallback] = $this->resolveTarget($provider, $summary, $class_size_default);
@@ -181,13 +192,37 @@ class Dashboard_metrics
         array $statuses,
         ?int $service_id,
     ): int {
+        $counts = $this->countBookedAppointmentsByProvider([$provider_id], $start, $end, $statuses, $service_id);
+
+        return $counts[$provider_id] ?? 0;
+    }
+
+    /**
+     * Count booked appointments per provider in a single grouped query.
+     */
+    protected function countBookedAppointmentsByProvider(
+        array $provider_ids,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        array $statuses,
+        ?int $service_id,
+    ): array {
+        $provider_ids = array_values(
+            array_filter(array_map('intval', $provider_ids), static fn(int $id): bool => $id > 0),
+        );
+
+        if (empty($provider_ids)) {
+            return [];
+        }
+
         $query = $this->appointments_model
             ->query()
-            ->select('COUNT(*) AS aggregate')
+            ->select('appointments.id_users_provider, COUNT(*) AS aggregate')
             ->where('appointments.is_unavailability', false)
-            ->where('appointments.id_users_provider', $provider_id)
+            ->where_in('appointments.id_users_provider', $provider_ids)
             ->where('appointments.start_datetime <', $end->setTime(23, 59, 59)->format('Y-m-d H:i:s'))
-            ->where('appointments.end_datetime >', $start->setTime(0, 0, 0)->format('Y-m-d H:i:s'));
+            ->where('appointments.end_datetime >', $start->setTime(0, 0, 0)->format('Y-m-d H:i:s'))
+            ->group_by('appointments.id_users_provider');
 
         if (!empty($statuses)) {
             $query->where_in('appointments.status', $statuses);
@@ -197,9 +232,20 @@ class Dashboard_metrics
             $query->where('appointments.id_services', $service_id);
         }
 
-        $result = $query->get()->row_array();
+        $results = $query->get()->result_array();
+        $counts = array_fill_keys($provider_ids, 0);
 
-        return (int) ($result['aggregate'] ?? 0);
+        foreach ($results as $row) {
+            $provider_id = (int) ($row['id_users_provider'] ?? 0);
+
+            if ($provider_id <= 0 || !array_key_exists($provider_id, $counts)) {
+                continue;
+            }
+
+            $counts[$provider_id] = (int) ($row['aggregate'] ?? 0);
+        }
+
+        return $counts;
     }
 
     protected function extractClassSizeDefault(array $provider): ?int
