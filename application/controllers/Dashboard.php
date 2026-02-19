@@ -343,6 +343,12 @@ class Dashboard extends EA_Controller
                 return;
             }
 
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+                json_response(['success' => false, 'message' => 'Forbidden'], 403);
+
+                return;
+            }
+
             $start_date = request('start_date');
             $end_date = request('end_date');
             $statuses = request('statuses', []);

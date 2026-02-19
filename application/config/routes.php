@@ -162,6 +162,7 @@ $route['api/v1/availabilities']['get'] = 'api/v1/availabilities_api_v1/get';
 */
 
 $route['appointments/ics/(:any)'] = 'appointments/ics/$1';
+$route['dashboard/metrics']['post'] = 'dashboard/metrics';
 $route['dashboard/heatmap']['post'] = 'dashboard/heatmap';
 $route['dashboard/threshold']['post'] = 'dashboard/threshold';
 $route['dashboard/provider_metrics']['post'] = 'dashboard/provider_metrics';
