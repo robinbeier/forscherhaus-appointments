@@ -236,6 +236,78 @@ class ProviderUtilizationTest extends TestCase
         $this->assertSame(18, $result['open']);
     }
 
+    public function testCalculateBucketsAppointmentsByDayBeforeBookedMinuteComputation(): void
+    {
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->method('query')->willReturn(
+            $this->createAppointmentsQueryBuilder([
+                [
+                    'start_datetime' => '2024-01-01 08:00:00',
+                    'end_datetime' => '2024-01-01 08:30:00',
+                ],
+                [
+                    'start_datetime' => '2024-01-02 08:00:00',
+                    'end_datetime' => '2024-01-02 08:30:00',
+                ],
+            ]),
+        );
+
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel->method('get')->willReturn([
+            [
+                'duration' => 30,
+                'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            ],
+        ]);
+
+        $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
+        $unavailabilitiesModel->method('get')->willReturn([]);
+
+        $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
+        $blockedPeriodsModel->method('get_for_period')->willReturn([]);
+
+        $library = new class ($appointmentsModel, $servicesModel, $unavailabilitiesModel, $blockedPeriodsModel) extends
+            Provider_utilization
+        {
+            public array $appointments_per_day_counts = [];
+
+            protected function calculateBookedMinutesForDay(array $appointments, \DateTimeImmutable $day): int
+            {
+                $this->appointments_per_day_counts[$day->format('Y-m-d')] = count($appointments);
+
+                return parent::calculateBookedMinutesForDay($appointments, $day);
+            }
+        };
+
+        $provider = [
+            'id' => 1,
+            'first_name' => 'Taylor',
+            'last_name' => 'Jordan',
+            'email' => 'taylor@example.org',
+            'services' => [1],
+            'settings' => [
+                'working_plan' => json_encode([
+                    'monday' => ['start' => '08:00', 'end' => '09:00', 'breaks' => []],
+                    'tuesday' => ['start' => '08:00', 'end' => '09:00', 'breaks' => []],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $result = $library->calculate($provider, '2024-01-01', '2024-01-02', []);
+
+        $this->assertSame(
+            [
+                '2024-01-01' => 1,
+                '2024-01-02' => 1,
+            ],
+            $library->appointments_per_day_counts,
+        );
+        $this->assertSame(4, $result['total']);
+        $this->assertSame(2, $result['booked']);
+        $this->assertSame(2, $result['open']);
+    }
+
     public function testCalculateReusesBlockedPeriodsAcrossProvidersForSameRange(): void
     {
         $appointmentsModel = $this->createMock(Appointments_model::class);
