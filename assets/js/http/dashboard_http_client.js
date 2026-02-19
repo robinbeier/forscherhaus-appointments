@@ -54,13 +54,16 @@ App.Http.Dashboard = (function () {
             metricsRequest.abort();
         }
 
-        metricsRequest = $.post(url, payload);
+        const request = $.post(url, payload);
+        metricsRequest = request;
 
-        metricsRequest.always(() => {
-            metricsRequest = null;
+        request.always(() => {
+            if (metricsRequest === request) {
+                metricsRequest = null;
+            }
         });
 
-        return metricsRequest;
+        return request;
     }
 
     /**
@@ -107,13 +110,16 @@ App.Http.Dashboard = (function () {
             heatmapRequest.abort();
         }
 
-        heatmapRequest = $.post(url, payload);
+        const request = $.post(url, payload);
+        heatmapRequest = request;
 
-        heatmapRequest.always(() => {
-            heatmapRequest = null;
+        request.always(() => {
+            if (heatmapRequest === request) {
+                heatmapRequest = null;
+            }
         });
 
-        return heatmapRequest;
+        return request;
     }
 
     /**
