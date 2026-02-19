@@ -769,7 +769,7 @@ class Appointments_model extends EA_Model
      */
     public function query(): CI_DB_query_builder
     {
-        return $this->db->from('appointments');
+        return $this->db->from('appointments AS appointments');
     }
 
     /**
