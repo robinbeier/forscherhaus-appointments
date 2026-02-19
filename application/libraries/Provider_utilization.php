@@ -373,7 +373,10 @@ class Provider_utilization
      */
     protected function loadBlockedPeriods(DateTimeImmutable $start, DateTimeImmutable $end): array
     {
-        $records = $this->blocked_periods_model->get_for_period($start->format('Y-m-d'), $end->format('Y-m-d'));
+        // get_for_period treats the end date as exclusive in one overlap branch,
+        // so query through the next day to keep the selected end day inclusive.
+        $query_end = $end->modify('+1 day');
+        $records = $this->blocked_periods_model->get_for_period($start->format('Y-m-d'), $query_end->format('Y-m-d'));
 
         return $this->normalizeEventPeriods($records);
     }

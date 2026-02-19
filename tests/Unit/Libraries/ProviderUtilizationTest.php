@@ -141,7 +141,7 @@ class ProviderUtilizationTest extends TestCase
         $blockedPeriodsModel
             ->expects($this->once())
             ->method('get_for_period')
-            ->with('2024-01-01', '2024-01-05')
+            ->with('2024-01-01', '2024-01-06')
             ->willReturn([]);
 
         $library = new Provider_utilization(
@@ -174,6 +174,66 @@ class ProviderUtilizationTest extends TestCase
         $this->assertSame(20, $result['total']);
         $this->assertSame(0, $result['booked']);
         $this->assertSame(20, $result['open']);
+    }
+
+    public function testCalculateIncludesBlockedPeriodsThatStartOnRangeEndDate(): void
+    {
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->method('query')->willReturn($this->createAppointmentsQueryBuilder([]));
+
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel->method('get')->willReturn([
+            [
+                'duration' => 30,
+                'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            ],
+        ]);
+
+        $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
+        $unavailabilitiesModel->method('get')->willReturn([]);
+
+        $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
+        $blockedPeriodsModel
+            ->expects($this->once())
+            ->method('get_for_period')
+            ->with('2024-01-01', '2024-01-06')
+            ->willReturn([
+                [
+                    'start_datetime' => '2024-01-05 09:00:00',
+                    'end_datetime' => '2024-01-05 10:00:00',
+                ],
+            ]);
+
+        $library = new Provider_utilization(
+            $appointmentsModel,
+            $servicesModel,
+            $unavailabilitiesModel,
+            $blockedPeriodsModel,
+        );
+
+        $provider = [
+            'id' => 1,
+            'first_name' => 'Taylor',
+            'last_name' => 'Jordan',
+            'email' => 'taylor@example.org',
+            'services' => [1],
+            'settings' => [
+                'working_plan' => json_encode([
+                    'monday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'tuesday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'wednesday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'thursday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'friday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $result = $library->calculate($provider, '2024-01-01', '2024-01-05', []);
+
+        $this->assertSame(18, $result['total']);
+        $this->assertSame(0, $result['booked']);
+        $this->assertSame(18, $result['open']);
     }
 
     public function testCalculateCachesServiceLookupsAcrossCalls(): void
