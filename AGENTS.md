@@ -121,6 +121,14 @@ until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret 
 gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
 docker compose exec -T php-fpm php index.php console migrate
 
+# Optional: Dump-Import verifizieren
+docker compose exec -T mysql mysql -uroot -psecret -e "
+USE easyappointments;
+SELECT version FROM ea_migrations;
+SHOW COLUMNS FROM ea_users LIKE 'class_size_default';
+SELECT name, value FROM ea_settings WHERE name='dashboard_conflict_threshold';
+"
+
 # Docker-Services (lokal)
 # App: http://localhost
 # phpMyAdmin: http://localhost:8080 (root/secret)
