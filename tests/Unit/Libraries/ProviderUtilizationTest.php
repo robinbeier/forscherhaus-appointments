@@ -113,6 +113,117 @@ class ProviderUtilizationTest extends TestCase
         $this->assertSame(1.0, $result['fill_rate']);
     }
 
+    public function testCalculateLoadsUnavailabilityAndBlockedPeriodsOncePerRange(): void
+    {
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->method('query')->willReturn($this->createAppointmentsQueryBuilder([]));
+
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel->method('get')->willReturn([
+            [
+                'duration' => 30,
+                'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            ],
+        ]);
+
+        $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
+        $unavailabilitiesModel
+            ->expects($this->once())
+            ->method('get')
+            ->with([
+                'id_users_provider' => 1,
+                'DATE(start_datetime) <=' => '2024-01-05',
+                'DATE(end_datetime) >=' => '2024-01-01',
+            ])
+            ->willReturn([]);
+
+        $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
+        $blockedPeriodsModel
+            ->expects($this->once())
+            ->method('get_for_period')
+            ->with('2024-01-01', '2024-01-05')
+            ->willReturn([]);
+
+        $library = new Provider_utilization(
+            $appointmentsModel,
+            $servicesModel,
+            $unavailabilitiesModel,
+            $blockedPeriodsModel,
+        );
+
+        $provider = [
+            'id' => 1,
+            'first_name' => 'Taylor',
+            'last_name' => 'Jordan',
+            'email' => 'taylor@example.org',
+            'services' => [1],
+            'settings' => [
+                'working_plan' => json_encode([
+                    'monday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'tuesday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'wednesday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'thursday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                    'friday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $result = $library->calculate($provider, '2024-01-01', '2024-01-05', []);
+
+        $this->assertSame(20, $result['total']);
+        $this->assertSame(0, $result['booked']);
+        $this->assertSame(20, $result['open']);
+    }
+
+    public function testCalculateCachesServiceLookupsAcrossCalls(): void
+    {
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->method('query')->willReturn($this->createAppointmentsQueryBuilder([]));
+
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel
+            ->expects($this->once())
+            ->method('get')
+            ->with(['id' => 1], 1)
+            ->willReturn([
+                [
+                    'duration' => 30,
+                    'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+                ],
+            ]);
+
+        $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
+        $unavailabilitiesModel->method('get')->willReturn([]);
+
+        $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
+        $blockedPeriodsModel->method('get_for_period')->willReturn([]);
+
+        $library = new Provider_utilization(
+            $appointmentsModel,
+            $servicesModel,
+            $unavailabilitiesModel,
+            $blockedPeriodsModel,
+        );
+
+        $provider = [
+            'id' => 1,
+            'first_name' => 'Taylor',
+            'last_name' => 'Jordan',
+            'email' => 'taylor@example.org',
+            'services' => [1],
+            'settings' => [
+                'working_plan' => json_encode([
+                    'monday' => ['start' => '08:00', 'end' => '10:00', 'breaks' => []],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $library->calculate($provider, '2024-01-01', '2024-01-01', []);
+        $library->calculate($provider, '2024-01-08', '2024-01-08', []);
+    }
+
     private function createLibrary(array $appointments, int $serviceDuration = 30): Provider_utilization
     {
         $appointmentsModel = $this->createMock(Appointments_model::class);

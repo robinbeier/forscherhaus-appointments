@@ -38,6 +38,11 @@ class Provider_utilization
     protected Blocked_periods_model $blocked_periods_model;
 
     /**
+     * @var array<int, array|null>
+     */
+    protected array $service_cache = [];
+
+    /**
      * Provider_utilization constructor.
      */
     public function __construct(
@@ -91,6 +96,7 @@ class Provider_utilization
             throw new InvalidArgumentException('Provider id is required.');
         }
 
+        $provider_id = (int) $provider['id'];
         $start = $this->createDay($start_date);
         $end = $this->createDay($end_date);
 
@@ -99,10 +105,14 @@ class Provider_utilization
         }
 
         $slot_size = $this->determineSlotSize($provider);
+        $working_plan = $this->decodeProviderPlan($provider['settings']['working_plan'] ?? null);
+        $working_plan_exceptions = $this->decodeProviderPlan($provider['settings']['working_plan_exceptions'] ?? null);
+        $unavailability_events = $this->loadUnavailabilityEvents($provider_id, $start, $end);
+        $blocked_periods = $this->loadBlockedPeriods($start, $end);
 
         $statuses = array_values(array_filter(array_map('strval', $statuses), static fn($value) => $value !== ''));
 
-        $appointments = $this->fetchAppointments((int) $provider['id'], $start, $end, $statuses, $service_id);
+        $appointments = $this->fetchAppointments($provider_id, $start, $end, $statuses, $service_id);
 
         $total_minutes = 0;
         $booked_minutes = 0;
@@ -111,7 +121,13 @@ class Provider_utilization
         $day = $start;
 
         while ($day <= $end) {
-            $daily = $this->buildDailySchedule($provider, $day);
+            $daily = $this->buildDailySchedule(
+                $day,
+                $working_plan,
+                $working_plan_exceptions,
+                $unavailability_events,
+                $blocked_periods,
+            );
 
             if ($daily['has_plan']) {
                 $has_plan = true;
@@ -218,9 +234,15 @@ class Provider_utilization
             return null;
         }
 
-        $services = $this->services_model->get(['id' => $service_id], 1);
+        if (array_key_exists($service_id, $this->service_cache)) {
+            return $this->service_cache[$service_id];
+        }
 
-        return $services[0] ?? null;
+        $services = $this->services_model->get(['id' => $service_id], 1);
+        $service = $services[0] ?? null;
+        $this->service_cache[$service_id] = $service;
+
+        return $service;
     }
 
     protected function gcd(int $a, int $b): int
@@ -279,25 +301,17 @@ class Provider_utilization
         return $appointments;
     }
 
-    protected function buildDailySchedule(array $provider, DateTimeImmutable $day): array
-    {
-        $working_plan = [];
-
-        if (!empty($provider['settings']['working_plan'])) {
-            $working_plan = json_decode($provider['settings']['working_plan'], true) ?: [];
-        }
-
-        $working_plan_exceptions = [];
-
-        if (!empty($provider['settings']['working_plan_exceptions'])) {
-            $working_plan_exceptions = json_decode($provider['settings']['working_plan_exceptions'], true) ?: [];
-        }
-
+    protected function buildDailySchedule(
+        DateTimeImmutable $day,
+        array $working_plan,
+        array $working_plan_exceptions,
+        array $unavailability_events,
+        array $blocked_periods,
+    ): array {
         $date_key = $day->format('Y-m-d');
-
         $plan = $working_plan_exceptions[$date_key] ?? ($working_plan[strtolower($day->format('l'))] ?? null);
 
-        if (!$plan || empty($plan['start']) || empty($plan['end'])) {
+        if (!$plan || !is_array($plan) || empty($plan['start']) || empty($plan['end'])) {
             return [
                 'has_plan' => false,
                 'minutes' => 0,
@@ -305,17 +319,87 @@ class Provider_utilization
         }
 
         $periods = $this->createInitialPeriods($plan, $day);
-
         $periods = $this->applyBreaks($periods, $plan['breaks'] ?? [], $day);
-
-        $periods = $this->applyUnavailability($provider, $periods, $day);
-
+        $periods = $this->applyUnavailability($periods, $day, $unavailability_events, $blocked_periods);
         $minutes = $this->calculateMinutes($periods);
 
         return [
             'has_plan' => true,
             'minutes' => $minutes,
         ];
+    }
+
+    /**
+     * Decode provider plan data into an array.
+     */
+    protected function decodeProviderPlan(mixed $plan): array
+    {
+        if (is_array($plan)) {
+            return $plan;
+        }
+
+        if (!is_string($plan) || trim($plan) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($plan, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Load provider unavailability events for the selected period.
+     */
+    protected function loadUnavailabilityEvents(
+        int $provider_id,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): array {
+        if ($provider_id <= 0) {
+            return [];
+        }
+
+        $records = $this->unavailabilities_model->get([
+            'id_users_provider' => $provider_id,
+            'DATE(start_datetime) <=' => $end->format('Y-m-d'),
+            'DATE(end_datetime) >=' => $start->format('Y-m-d'),
+        ]);
+
+        return $this->normalizeEventPeriods($records);
+    }
+
+    /**
+     * Load blocked periods for the selected range.
+     */
+    protected function loadBlockedPeriods(DateTimeImmutable $start, DateTimeImmutable $end): array
+    {
+        $records = $this->blocked_periods_model->get_for_period($start->format('Y-m-d'), $end->format('Y-m-d'));
+
+        return $this->normalizeEventPeriods($records);
+    }
+
+    /**
+     * Normalize model rows into datetime period tuples.
+     */
+    protected function normalizeEventPeriods(array $rows): array
+    {
+        $periods = [];
+
+        foreach ($rows as $row) {
+            $start = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', (string) ($row['start_datetime'] ?? ''));
+            $end = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', (string) ($row['end_datetime'] ?? ''));
+
+            if (!$start || !$end || $end <= $start) {
+                continue;
+            }
+
+            $periods[] = [
+                'start' => $start,
+                'end' => $end,
+            ];
+        }
+
+        return $periods;
     }
 
     protected function createInitialPeriods(array $plan, DateTimeImmutable $day): array
@@ -358,25 +442,29 @@ class Provider_utilization
         return $periods;
     }
 
-    protected function applyUnavailability(array $provider, array $periods, DateTimeImmutable $day): array
-    {
+    protected function applyUnavailability(
+        array $periods,
+        DateTimeImmutable $day,
+        array $unavailability_events,
+        array $blocked_periods,
+    ): array {
         if (!$periods) {
             return [];
         }
 
-        $date = $day->format('Y-m-d');
-
-        $unavailability_events = $this->unavailabilities_model->get([
-            'id_users_provider' => $provider['id'],
-            'DATE(start_datetime) <=' => $date,
-            'DATE(end_datetime) >=' => $date,
-        ]);
+        $start_of_day = $day->setTime(0, 0, 0);
+        $end_of_day = $day->setTime(23, 59, 59);
 
         foreach ($unavailability_events as $event) {
-            $start = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $event['start_datetime']);
-            $end = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $event['end_datetime']);
+            $start = $event['start'] ?? null;
+            $end = $event['end'] ?? null;
 
-            if (!$start || !$end || $end <= $start) {
+            if (
+                !$start instanceof DateTimeImmutable ||
+                !$end instanceof DateTimeImmutable ||
+                $end <= $start_of_day ||
+                $start >= $end_of_day
+            ) {
                 continue;
             }
 
@@ -387,13 +475,16 @@ class Provider_utilization
             }
         }
 
-        $blocked_periods = $this->blocked_periods_model->get_for_period($date, $date);
-
         foreach ($blocked_periods as $blocked_period) {
-            $start = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $blocked_period['start_datetime']);
-            $end = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $blocked_period['end_datetime']);
+            $start = $blocked_period['start'] ?? null;
+            $end = $blocked_period['end'] ?? null;
 
-            if (!$start || !$end || $end <= $start) {
+            if (
+                !$start instanceof DateTimeImmutable ||
+                !$end instanceof DateTimeImmutable ||
+                $end <= $start_of_day ||
+                $start >= $end_of_day
+            ) {
                 continue;
             }
 
