@@ -1,193 +1,99 @@
-# AGENTS.md — Forscherhaus Appointments × ChatGPT Codex
+# AGENTS.md - Forscherhaus Appointments x ChatGPT Codex
 
-Ziel dieser Datei: **Konsistente, merge‑fähige Beiträge von ChatGPT Codex** für unser Schul‑Terminbuchungssystem (Fork/Weiterentwicklung von Easy!Appointments). Sie definiert:
+Ziel: Merge-faehige, konsistente Beitraege fuer das Schul-Terminbuchungssystem.
 
--   Kontext & Architekturleitplanken
--   Einheitliche Befehle (Dev/Build/Test)
--   Coding‑Standards & QA
--   Domänen‑Invarianten (Schulkontext)
--   Erwartete Antwortformate von Codex (Plan → Patch → Tests → Docs → PR)
+## Projektueberblick (Kurz)
 
----
-
-## Projektüberblick (Kurz)
-
--   **Stack:** PHP (≥ 8.1; bevorzugt 8.2+), CodeIgniter (MVC), MySQL; Frontend: JavaScript/jQuery/Bootstrap/FullCalendar; Build: npm + Gulp.
--   **Ziel:** Anpassung von Easy!Appointments an unseren Schulkontext („forscherhaus‑appointments“).
-
-> **Hinweis:** `application/` enthält Business‑Logik, Controller, Views (hier neue Features bauen); `system/` sind Framework‑Interna und bleiben unangetastet. `assets/` enthält Frontend‑Quellen, die nach `build/` kompiliert werden. Zusätzliche Verzeichnisse: `docker/`, `tests/`. (Quelle: bestehende Projektleitfäden)
+-   **Stack:** PHP (>= 8.1; bevorzugt 8.2+), CodeIgniter (MVC), MySQL; Frontend: JavaScript/jQuery/Bootstrap/FullCalendar; Build: npm + Gulp.
+-   **Ziel:** Anpassung von Easy!Appointments an den Schulkontext ("forscherhaus-appointments").
 
 ## Verzeichnisstruktur & Leitplanken
 
--   `application/` — Feature‑Entwicklung, MVC‑Artefakte.
--   `system/` — **nicht ändern** (nur Upstream‑Patches).
--   `assets/` → Kompilation nach `build/`.
--   `build/` — kompilierte Artefakte (committed).
--   `docker/` — Container‑Setups.
--   `tests/` — PHPUnit‑Tests (Unit/Integration).
--   `storage/logs/` — Laufzeitlogs (vor Releases säubern).
+-   `application/` - Feature-Entwicklung, MVC-Artefakte.
+-   `system/` - nicht aendern (nur Upstream-Patches).
+-   `assets/` -> Kompilation nach `build/`.
+-   `build/` - kompilierte Artefakte (committed).
+-   `docker/` - Container-Setups.
+-   `tests/` - PHPUnit-Tests (Unit/Integration).
+-   `storage/logs/` - Laufzeitlogs (vor Releases saeubern).
 
-**Leitplanke:** _Kein_ Produktionscode außerhalb von `application/`. Keine direkten Änderungen unter `system/`.
+Leitplanke: Kein Produktionscode ausserhalb von `application/`. Keine direkten Aenderungen unter `system/`.
 
 ## Lokale Entwicklung & Prerequisites
 
--   **Option A (Host):** Apache/Nginx, PHP ≥ 8.1 (empfohlen 8.2+), MySQL, Node.js (npm), Composer.
--   **Option B (Docker):** `docker compose up` für CI‑paritätische Umgebung (inkl. PHP, MySQL, ggf. Cron/Scheduler).
+-   **Option A (Host):** Apache/Nginx, PHP >= 8.1, MySQL, Node.js (npm), Composer.
+-   **Option B (Docker):** `docker compose up` fuer CI-paritaetische Umgebung.
 -   Bei Host-PHP + Docker-`pdf-renderer`: `PDF_RENDERER_URL=http://localhost:3003` setzen.
--   TODO: `docker-compose.restore.yml` ist derzeit untracked; Restore-Workflow erst nach Tracking/Doku standardisieren.
 
-**Erstinstallation**
+## Erstinstallation
 
 ```bash
-# Für neue Worktrees (empfohlen vor dem ersten Commit)
+# Fuer neue Worktrees (empfohlen vor dem ersten Commit)
 ./scripts/setup-worktree.sh
-
-# Alternativ manuell:
-npm install
-composer install
-# Konfiguration
-cp config-sample.php config.php  # DB-Zugang & Secrets setzen
-# Verzeichnisse
-# storage/ muss schreibbar sein
-
-# Optional: Für Docker-Tests ohne manuelles Setup
-# `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls die Datei fehlt.
 ```
 
-## Dev-/Build-/Test-Befehle (Spickzettel)
+## Dev-/Build-/Test-Befehle
 
+```bash
 # Entwicklung (Assets watch & rebuild)
-
 npm start
 
-# Optional: Vendor/Theme-Assets refresh (wird auch durch `npm install` ausgelöst)
-
+# Optional: Vendor/Theme-Assets refresh
 npm run assets:refresh
 
-# Optional: Vendor-Assets für Gulp-Workflows (wird durch `./scripts/setup-worktree.sh` ausgelöst)
-
-npx gulp vendor
-
 # Produktion (minifizierte Bundles, Distributables)
-
 npm run build
 
-# Statische Docs (falls gepflegt)
-
-npm run docs
-
-# Frontend-Assets (bei DEBUG_MODE=false werden `*.min.js`/`*.min.css` geladen)
-
-# Nach Änderungen in assets/js oder assets/css: Assets neu bauen und Browser hart neu laden.
-
+# Frontend-Assets bei Aenderungen in assets/js oder assets/css neu bauen
 npx gulp scripts
 npx gulp styles
 
-# Tests (verbindlich im Docker-Compose-Netz, CI-paritär)
-
+# Tests (CI-paritaer im Docker-Compose-Netz)
 docker compose run --rm php-fpm composer test
-
-# Alternative (direkter PHPUnit-Aufruf im selben Container)
-
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
+```
 
-# Hinweis: DB_HOST='mysql' ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler config.php.
+Hinweis: `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 
-# Console-CLI (Wartung/Setup)
+## Console-CLI (Wartung/Setup)
 
+```bash
 php index.php console help
 php index.php console migrate
 php index.php console migrate up
 php index.php console migrate down
-php index.php console migrate fresh # Achtung: destruktiv (setzt Migrationsstand zurück)
-php index.php console seed # Nur für Testdaten
-php index.php console install # Nur für frische Instanzen (migrate fresh + seed)
+php index.php console seed      # nur fuer Testdaten
+php index.php console install   # nur fuer frische Instanzen
 php index.php console backup
 php index.php console backup /path/to/backup/folder
 php index.php console sync
-
-# Docker-Workflows (aus docs/docker.md)
-
-docker compose up
-docker compose down
-# Optional safety backup of current local MySQL data directory
-backup_tgz="/tmp/forscherhaus-mysql-$(date +%Y%m%d-%H%M%S).tgz"
-tar -czf "$backup_tgz" -C docker mysql
-# Clean reset local MySQL data (destruktiv für lokalen DB-Stand)
-mkdir -p docker/mysql
-find docker/mysql -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-docker compose up -d mysql php-fpm nginx
-until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
-gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
-docker compose exec -T php-fpm php index.php console migrate
-
-# Optional: Dump-Import verifizieren
-docker compose exec -T mysql mysql -uroot -psecret -e "
-USE easyappointments;
-SELECT version FROM ea_migrations;
-SHOW COLUMNS FROM ea_users LIKE 'class_size_default';
-SELECT name, value FROM ea_settings WHERE name='dashboard_conflict_threshold';
-"
-
-# Docker-Services (lokal)
-# App: http://localhost
-# phpMyAdmin: http://localhost:8080 (root/secret)
-# Mailpit: http://localhost:8025
-# Baikal (CalDAV): http://localhost:8100 (admin/admin)
-# phpLDAPadmin: http://localhost:8200 (cn=admin,dc=example,dc=org/admin)
+```
 
 ## Pre-Commit Preconditions
 
 -   Der lokale `pre-commit` Hook erwartet `vendor/` und `node_modules/`.
--   In neuen Worktrees daher einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausführen.
--   Bei Netzwerkrestriktionen können `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
--   Ausnahme nur für reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
--   `--no-verify` nur als letzter Ausweg verwenden, da damit alle Hooks übersprungen werden.
+-   In neuen Worktrees einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausfuehren.
+-   Bei Netzwerkrestriktionen koennen `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
+-   Ausnahme fuer reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
+-   `--no-verify` nur als letzter Ausweg verwenden.
 
 ## Coding Style & Konventionen
 
--   Editor/Format: .editorconfig (4‑Spaces, LF, Final Newline).
--   Prettier für PHP/JS gemäß Repo‑Konfiguration; z. B.:
-
-```bash
-npx prettier --write application/**/*.php
-```
-
--   Benennung:
--   Controller enden auf Controller, Models auf Model; Views nach Route‑Alias benennen.
--   JS: Modulnamen spiegeln Verzeichnisstruktur (assets/js/booking/book.js).
--   snake_case für Config‑Keys, camelCase in JS.
-
--   Datenbank: Änderungen immer via CodeIgniter‑Migrations umsetzen (inkl. Rollback‑Pfad).
--   Secrets: nie ins VCS; nutze config.php.
-
-## Testing-Richtlinien
-
--   Ablage: tests/Unit/ (und bei Bedarf tests/Integration/).
--   Namensschema: BookingServiceTest.php; Szenarien test_canCreateAppointment, test_failsOnOverlap.
--   Abdeckung: Erfolgs‑ und Fehlpfade (inkl. Grenzfälle: Terminüberschneidung, Zeitzonen).
--   Tests lokal im Docker-Compose-Netz ausführen und bei PRs grün halten.
+-   Editor/Format: `.editorconfig` (4 Spaces, LF, Final Newline).
+-   Prettier fuer PHP/JS gemaess Repo-Konfiguration, z. B. `npx prettier --write application/**/*.php`.
+-   Benennung: Controller enden auf `Controller`, Models auf `Model`, Views nach Route-Alias.
+-   JS: Modulnamen spiegeln Verzeichnisstruktur (z. B. `assets/js/booking/book.js`).
+-   `snake_case` fuer Config-Keys, `camelCase` in JS.
+-   Datenbankaenderungen immer via CodeIgniter-Migrations (inkl. Rollback-Pfad).
+-   Secrets nie ins VCS; nutze `config.php`.
 
 ## Commit- & PR-Richtlinien
 
--   Commits: kurz, Präsens, imperativ (z. B. Fix booking validation).
--   PR-Checkliste:
--   Tests grün (`docker compose run --rm php-fpm composer test`)
--   Migrations + Rollback vorhanden (falls DB‑Änderungen)
--   config-sample.php/Docs aktualisiert (falls nötig)
--   Screenshots/GIFs bei UI‑Änderungen
--   Verlinkung: Fixes #123
--   Reviewer: Modulverantwortliche:r
+-   Commits: kurz, praesentisch, imperativ (z. B. `Fix booking validation`).
+-   Vor PR: Tests gruen (`docker compose run --rm php-fpm composer test`), Migrations inkl. Rollback vorhanden.
+-   `config-sample.php`/Docs bei Bedarf aktualisieren; bei UI-Aenderungen Screenshots/GIFs beilegen.
 
-## Qualitätssicherung (vor Merge)
-
--   Lint/Format sauber (Prettier, Editorconfig).
--   `docker compose run --rm php-fpm composer test` grün; relevante neue Tests vorhanden.
--   Migrations laufen vorwärts und rückwärts.
--   npm run build erfolgreich; keine ungeprüften build/‑Artefakte committet.
--   Logs unter storage/logs/ bereinigt.
-
-## Domänen-Invariante (derzeit)
+## Domaenen-Invariante (derzeit)
 
 -   `services.attendants_number` ist aktuell hart auf `1` begrenzt.
--   Reviews/Fixes für `attendants_number > 1` nur umsetzen, wenn der Produktentscheid explizit auf Multi-Attendant geändert wird.
+-   Reviews/Fixes fuer `attendants_number > 1` nur umsetzen, wenn der Produktentscheid explizit auf Multi-Attendant geaendert wird.
