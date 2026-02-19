@@ -11,10 +11,6 @@
  * @since       v1.5.0
  * ---------------------------------------------------------------------------- */
 
-use DateInterval;
-use DateTimeImmutable;
-use InvalidArgumentException;
-
 /**
  * Provider utilization library.
  *
@@ -41,6 +37,11 @@ class Provider_utilization
      * @var array<int, array|null>
      */
     protected array $service_cache = [];
+
+    /**
+     * @var array<string, array<int, array{start: DateTimeImmutable, end: DateTimeImmutable}>>
+     */
+    protected array $blocked_periods_cache = [];
 
     /**
      * Provider_utilization constructor.
@@ -361,10 +362,12 @@ class Provider_utilization
             return [];
         }
 
+        $start_boundary = $start->setTime(0, 0, 0)->format('Y-m-d H:i:s');
+        $end_boundary = $end->setTime(23, 59, 59)->format('Y-m-d H:i:s');
         $records = $this->unavailabilities_model->get([
             'id_users_provider' => $provider_id,
-            'DATE(start_datetime) <=' => $end->format('Y-m-d'),
-            'DATE(end_datetime) >=' => $start->format('Y-m-d'),
+            'start_datetime <=' => $end_boundary,
+            'end_datetime >=' => $start_boundary,
         ]);
 
         return $this->normalizeEventPeriods($records);
@@ -375,12 +378,20 @@ class Provider_utilization
      */
     protected function loadBlockedPeriods(DateTimeImmutable $start, DateTimeImmutable $end): array
     {
+        $cache_key = $start->format('Y-m-d') . '|' . $end->format('Y-m-d');
+
+        if (array_key_exists($cache_key, $this->blocked_periods_cache)) {
+            return $this->blocked_periods_cache[$cache_key];
+        }
+
         // get_for_period treats the end date as exclusive in one overlap branch,
         // so query through the next day to keep the selected end day inclusive.
         $query_end = $end->modify('+1 day');
         $records = $this->blocked_periods_model->get_for_period($start->format('Y-m-d'), $query_end->format('Y-m-d'));
 
-        return $this->normalizeEventPeriods($records);
+        $this->blocked_periods_cache[$cache_key] = $this->normalizeEventPeriods($records);
+
+        return $this->blocked_periods_cache[$cache_key];
     }
 
     /**
