@@ -4,6 +4,7 @@ namespace Tests\Unit\Controllers;
 
 use Dashboard;
 use DateTimeImmutable;
+use RuntimeException;
 use Tests\TestCase;
 
 require_once APPPATH . 'controllers/Dashboard.php';
@@ -79,6 +80,57 @@ class DashboardRangePersistenceTest extends TestCase
         $this->assertSame(['id_users' => 44], $db->updateWhere);
     }
 
+    public function testPersistProviderDashboardRangeUpdatesWhenInsertRaceCreatesRow(): void
+    {
+        $db = new FakeDashboardRangeDb(null);
+        $db->insertReturn = false;
+        $db->error = [
+            'code' => 1062,
+            'message' => 'Duplicate entry',
+        ];
+        $controller = $this->createController($db);
+
+        $controller->callPersistProviderDashboardRange(
+            44,
+            new DateTimeImmutable('2026-11-24'),
+            new DateTimeImmutable('2026-11-30'),
+        );
+
+        $this->assertSame(1, $db->insertCalls);
+        $this->assertSame(1, $db->updateCalls);
+        $this->assertSame(
+            [
+                'dashboard_range_start' => '2026-11-24',
+                'dashboard_range_end' => '2026-11-30',
+            ],
+            $db->updateData,
+        );
+        $this->assertSame(['id_users' => 44], $db->updateWhere);
+    }
+
+    public function testPersistProviderDashboardRangeThrowsWhenInsertFailsForOtherReason(): void
+    {
+        $db = new FakeDashboardRangeDb(null);
+        $db->insertReturn = false;
+        $db->error = [
+            'code' => 1452,
+            'message' => 'Cannot add or update a child row',
+        ];
+        $controller = $this->createController($db);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Could not persist provider dashboard period.');
+
+        $controller->callPersistProviderDashboardRange(
+            44,
+            new DateTimeImmutable('2026-11-24'),
+            new DateTimeImmutable('2026-11-30'),
+        );
+
+        $this->assertSame(1, $db->insertCalls);
+        $this->assertSame(0, $db->updateCalls);
+    }
+
     public function testHasProviderDashboardRangeColumnsCachesFieldChecks(): void
     {
         $db = new FakeDashboardRangeDb(null);
@@ -135,6 +187,15 @@ class FakeDashboardRangeDb
 
     public array $fieldExistsCalls = [];
 
+    public bool $insertReturn = true;
+
+    public bool $updateReturn = true;
+
+    public array $error = [
+        'code' => 0,
+        'message' => '',
+    ];
+
     private ?array $row;
 
     public function __construct(?array $row)
@@ -168,7 +229,7 @@ class FakeDashboardRangeDb
         $this->insertTable = $table;
         $this->insertData = $data;
 
-        return true;
+        return $this->insertReturn;
     }
 
     public function update(string $table, array $data, array $where): bool
@@ -178,7 +239,12 @@ class FakeDashboardRangeDb
         $this->updateData = $data;
         $this->updateWhere = $where;
 
-        return true;
+        return $this->updateReturn;
+    }
+
+    public function error(): array
+    {
+        return $this->error;
     }
 
     public function field_exists(string $field_name, string $table_name): bool

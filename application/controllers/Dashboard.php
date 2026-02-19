@@ -528,10 +528,14 @@ class Dashboard extends EA_Controller
             ]);
 
             if (!$created) {
-                throw new RuntimeException('Could not persist provider dashboard period.');
-            }
+                $error = $this->db->error();
 
-            return;
+                if (!$this->isDuplicateUserSettingsInsertError($error)) {
+                    throw new RuntimeException('Could not persist provider dashboard period.');
+                }
+            } else {
+                return;
+            }
         }
 
         $saved = $this->db->update(
@@ -546,6 +550,22 @@ class Dashboard extends EA_Controller
         if (!$saved) {
             throw new RuntimeException('Could not persist provider dashboard period.');
         }
+    }
+
+    /**
+     * Check whether an insert failure is a duplicate-key race for user settings.
+     */
+    protected function isDuplicateUserSettingsInsertError(array $error): bool
+    {
+        $code = trim((string) ($error['code'] ?? ''));
+
+        if ($code === '1062' || $code === '23000') {
+            return true;
+        }
+
+        $message = strtolower(trim((string) ($error['message'] ?? '')));
+
+        return str_contains($message, 'duplicate') || str_contains($message, 'unique');
     }
 
     /**
