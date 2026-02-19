@@ -151,6 +151,35 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertFalse($controller->persistCalled);
     }
 
+    public function testMetricsRejectsGetRequestWithoutPersisting(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+
+        session([
+            'role_slug' => DB_SLUG_ADMIN,
+            'user_id' => 11,
+        ]);
+
+        $_GET = [
+            'start_date' => '2026-11-24',
+            'end_date' => '2026-11-30',
+        ];
+
+        $metricsLibrary = $this->createMock(Dashboard_metrics::class);
+        $metricsLibrary->expects($this->never())->method('collect');
+
+        $controller = $this->createController();
+        $controller->dashboard_metrics = $metricsLibrary;
+
+        $controller->metrics();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+
+        $this->assertFalse($response['success']);
+        $this->assertSame('Forbidden', $response['message']);
+        $this->assertFalse($controller->persistCalled);
+    }
+
     private function createController(): object
     {
         return new class extends Dashboard {
