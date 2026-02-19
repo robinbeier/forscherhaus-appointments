@@ -20,6 +20,8 @@
  */
 class Dashboard extends EA_Controller
 {
+    protected ?bool $provider_dashboard_range_columns_available = null;
+
     /**
      * Dashboard constructor.
      */
@@ -502,17 +504,41 @@ class Dashboard extends EA_Controller
             return;
         }
 
-        $exists = $this->db->get_where('user_settings', ['id_users' => $provider_id])->num_rows() > 0;
+        $start_date = $start->format('Y-m-d');
+        $end_date = $end->format('Y-m-d');
+        $row = $this->db
+            ->select(['dashboard_range_start', 'dashboard_range_end'])
+            ->from('user_settings')
+            ->where('id_users', $provider_id)
+            ->get()
+            ->row_array();
 
-        if (!$exists) {
-            $this->db->insert('user_settings', ['id_users' => $provider_id]);
+        $stored_start = is_array($row) ? trim((string) ($row['dashboard_range_start'] ?? '')) : '';
+        $stored_end = is_array($row) ? trim((string) ($row['dashboard_range_end'] ?? '')) : '';
+
+        if ($stored_start === $start_date && $stored_end === $end_date) {
+            return;
+        }
+
+        if (!$row) {
+            $created = $this->db->insert('user_settings', [
+                'id_users' => $provider_id,
+                'dashboard_range_start' => $start_date,
+                'dashboard_range_end' => $end_date,
+            ]);
+
+            if (!$created) {
+                throw new RuntimeException('Could not persist provider dashboard period.');
+            }
+
+            return;
         }
 
         $saved = $this->db->update(
             'user_settings',
             [
-                'dashboard_range_start' => $start->format('Y-m-d'),
-                'dashboard_range_end' => $end->format('Y-m-d'),
+                'dashboard_range_start' => $start_date,
+                'dashboard_range_end' => $end_date,
             ],
             ['id_users' => $provider_id],
         );
@@ -567,8 +593,15 @@ class Dashboard extends EA_Controller
      */
     protected function hasProviderDashboardRangeColumns(): bool
     {
-        return $this->db->field_exists('dashboard_range_start', 'user_settings') &&
+        if ($this->provider_dashboard_range_columns_available !== null) {
+            return $this->provider_dashboard_range_columns_available;
+        }
+
+        $this->provider_dashboard_range_columns_available =
+            $this->db->field_exists('dashboard_range_start', 'user_settings') &&
             $this->db->field_exists('dashboard_range_end', 'user_settings');
+
+        return $this->provider_dashboard_range_columns_available;
     }
 
     /**
