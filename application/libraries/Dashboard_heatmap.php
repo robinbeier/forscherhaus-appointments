@@ -148,30 +148,35 @@ class Dashboard_heatmap
         $max_minute_exclusive = $this->default_end_minute;
 
         if (!empty($statuses)) {
-            $appointments = $this->fetchAppointments($start, $end, $statuses, $service_id, $provider_ids);
+            $slot_counts = $this->fetchSlotCounts(
+                $start,
+                $end,
+                $statuses,
+                $service_id,
+                $provider_ids,
+                $interval_minutes,
+            );
 
-            foreach ($appointments as $appointment) {
-                $start_at = $this->parseStart($appointment['start_datetime'] ?? null);
+            foreach ($slot_counts as $slot_count) {
+                $weekday = (int) ($slot_count['weekday'] ?? 0);
+                $slot_key = (int) ($slot_count['slot_minute'] ?? -1);
+                $aggregate = (int) ($slot_count['aggregate'] ?? 0);
 
-                if (!$start_at) {
+                if (
+                    $weekday < $this->first_weekday ||
+                    $weekday > $this->last_weekday ||
+                    $slot_key < 0 ||
+                    $slot_key >= 24 * 60 ||
+                    $aggregate <= 0
+                ) {
                     continue;
                 }
 
-                $weekday = (int) $start_at->format('N');
-
-                if ($weekday < $this->first_weekday || $weekday > $this->last_weekday) {
-                    continue;
-                }
-
-                $minute_of_day = (int) $start_at->format('H') * 60 + (int) $start_at->format('i');
-                $aligned_minute = $this->alignMinute($minute_of_day, $interval_minutes);
-                $slot_key = $aligned_minute;
-
-                $counts[$weekday][$slot_key] = ($counts[$weekday][$slot_key] ?? 0) + 1;
-                $total++;
+                $counts[$weekday][$slot_key] = ($counts[$weekday][$slot_key] ?? 0) + $aggregate;
+                $total += $aggregate;
 
                 $min_minute = min($min_minute, $slot_key);
-                $slot_end = min($aligned_minute + $interval_minutes, 24 * 60);
+                $slot_end = min($slot_key + $interval_minutes, 24 * 60);
                 $max_minute_exclusive = max($max_minute_exclusive, $slot_end);
             }
         }
@@ -279,23 +284,32 @@ class Dashboard_heatmap
         return $this->default_interval;
     }
 
-    protected function fetchAppointments(
+    protected function fetchSlotCounts(
         DateTimeImmutable $start,
         DateTimeImmutable $end,
         array $statuses,
         ?int $service_id,
         array $provider_ids,
+        int $interval_minutes,
     ): array {
         $start_boundary = $start->setTime(0, 0, 0)->format('Y-m-d H:i:s');
         $end_boundary = $end->setTime(23, 59, 59)->format('Y-m-d H:i:s');
+        $weekday_expression = '(WEEKDAY(appointments.start_datetime) + 1)';
+        $slot_expression = sprintf(
+            'FLOOR(((HOUR(appointments.start_datetime) * 60) + MINUTE(appointments.start_datetime)) / %1$d) * %1$d',
+            $interval_minutes,
+        );
 
         $query = $this->appointments_model
             ->query()
-            ->select('appointments.start_datetime')
+            ->select($weekday_expression . ' AS weekday', false)
+            ->select($slot_expression . ' AS slot_minute', false)
+            ->select('COUNT(*) AS aggregate', false)
             ->where('appointments.is_unavailability', false)
             ->where('appointments.start_datetime >=', $start_boundary)
             ->where('appointments.start_datetime <=', $end_boundary)
-            ->order_by('appointments.start_datetime', 'ASC');
+            ->where($weekday_expression . ' >= ' . $this->first_weekday, null, false)
+            ->where($weekday_expression . ' <= ' . $this->last_weekday, null, false);
 
         if (!empty($statuses)) {
             $query->where_in('appointments.status', $statuses);
@@ -309,24 +323,13 @@ class Dashboard_heatmap
             $query->where_in('appointments.id_users_provider', $provider_ids);
         }
 
-        return $query->get()->result_array();
-    }
-
-    protected function parseStart(?string $value): ?DateTimeImmutable
-    {
-        if (!$value) {
-            return null;
-        }
-
-        $date = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $value, $this->timezone);
-
-        if (!$date) {
-            log_message('error', 'Dashboard heatmap: unable to parse start datetime "' . $value . '".');
-
-            return null;
-        }
-
-        return $date;
+        return $query
+            ->group_by($weekday_expression, false)
+            ->group_by($slot_expression, false)
+            ->order_by('weekday', 'ASC', false)
+            ->order_by('slot_minute', 'ASC', false)
+            ->get()
+            ->result_array();
     }
 
     protected function alignMinute(int $minute, int $interval): int
