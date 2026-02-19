@@ -151,7 +151,7 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertFalse($controller->persistCalled);
     }
 
-    public function testMetricsRejectsGetRequestWithoutPersisting(): void
+    public function testMetricsRejectsNonPostWithoutPersisting(): void
     {
         $_SERVER['REQUEST_METHOD'] = 'GET';
 
@@ -160,7 +160,7 @@ class DashboardMetricsControllerTest extends TestCase
             'user_id' => 11,
         ]);
 
-        $_GET = [
+        $_POST = [
             'start_date' => '2026-11-24',
             'end_date' => '2026-11-30',
         ];
