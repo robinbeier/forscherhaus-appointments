@@ -113,6 +113,7 @@ class Provider_utilization
         $statuses = array_values(array_filter(array_map('strval', $statuses), static fn($value) => $value !== ''));
 
         $appointments = $this->fetchAppointments($provider_id, $start, $end, $statuses, $service_id);
+        $appointments_by_day = $this->indexAppointmentsByDay($appointments, $start, $end);
 
         $total_minutes = 0;
         $booked_minutes = 0;
@@ -136,7 +137,8 @@ class Provider_utilization
             $daily_minutes = $daily['minutes'];
 
             if ($daily_minutes > 0) {
-                $daily_booked = $this->calculateBookedMinutesForDay($appointments, $day);
+                $daily_appointments = $appointments_by_day[$day->format('Y-m-d')] ?? [];
+                $daily_booked = $this->calculateBookedMinutesForDay($daily_appointments, $day);
                 $daily_booked = min($daily_booked, $daily_minutes);
 
                 $total_minutes += $daily_minutes;
@@ -556,6 +558,55 @@ class Provider_utilization
         }
 
         return $minutes;
+    }
+
+    /**
+     * Group appointments by day to avoid scanning the full list for each date in the selected period.
+     */
+    protected function indexAppointmentsByDay(
+        array $appointments,
+        DateTimeImmutable $period_start,
+        DateTimeImmutable $period_end,
+    ): array {
+        if (empty($appointments)) {
+            return [];
+        }
+
+        $indexed = [];
+        $range_start = $period_start->setTime(0, 0, 0);
+        $range_end = $period_end->setTime(23, 59, 59);
+
+        foreach ($appointments as $appointment) {
+            $start = $appointment['start'] ?? null;
+            $end = $appointment['end'] ?? null;
+
+            if (!$start instanceof DateTimeImmutable || !$end instanceof DateTimeImmutable || $end <= $start) {
+                continue;
+            }
+
+            if ($end <= $range_start || $start >= $range_end) {
+                continue;
+            }
+
+            $effective_start = $start > $range_start ? $start : $range_start;
+            $effective_end = $end < $range_end ? $end : $range_end;
+
+            if ($effective_end <= $effective_start) {
+                continue;
+            }
+
+            // Mirror calculateBookedMinutesForDay boundaries: an event ending at 00:00 contributes to the prior day only.
+            $last_overlap_second = $effective_end->sub(new DateInterval('PT1S'));
+            $day = $effective_start->setTime(0, 0, 0);
+            $last_day = $last_overlap_second->setTime(0, 0, 0);
+
+            while ($day <= $last_day) {
+                $indexed[$day->format('Y-m-d')][] = $appointment;
+                $day = $day->add(new DateInterval('P1D'));
+            }
+        }
+
+        return $indexed;
     }
 
     protected function calculateBookedMinutesForDay(array $appointments, DateTimeImmutable $day): int
