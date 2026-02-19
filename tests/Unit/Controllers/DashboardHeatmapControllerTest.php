@@ -18,11 +18,19 @@ class DashboardHeatmapControllerTest extends TestCase
         parent::tearDown();
 
         $_POST = [];
+        $_GET = [];
+        $_SERVER['REQUEST_METHOD'] = 'POST';
         get_instance()->output->set_output('');
+        session([
+            'role_slug' => null,
+            'user_id' => null,
+        ]);
     }
 
     public function testHeatmapReturnsJsonResponse(): void
     {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
         session([
             'role_slug' => DB_SLUG_ADMIN,
             'user_id' => 1,
@@ -75,6 +83,8 @@ class DashboardHeatmapControllerTest extends TestCase
 
     public function testHeatmapReturnsValidationError(): void
     {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
         session([
             'role_slug' => DB_SLUG_ADMIN,
             'user_id' => 1,
