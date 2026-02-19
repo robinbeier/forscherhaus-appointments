@@ -18,13 +18,13 @@ class DashboardHeatmapTest extends TestCase
 {
     public function testCollectAggregatesBookedAppointmentsIntoSlots(): void
     {
-        $appointments = [
-            ['start_datetime' => '2024-02-05 08:00:00'], // Monday
-            ['start_datetime' => '2024-02-06 09:30:00'], // Tuesday
-            ['start_datetime' => '2024-02-10 10:00:00'], // Saturday (ignored)
+        $slotCounts = [
+            ['weekday' => 1, 'slot_minute' => 480, 'aggregate' => 1], // Monday 08:00
+            ['weekday' => 2, 'slot_minute' => 570, 'aggregate' => 1], // Tuesday 09:30
+            ['weekday' => 6, 'slot_minute' => 600, 'aggregate' => 1], // Saturday (ignored)
         ];
 
-        $library = $this->createLibrary($appointments);
+        $library = $this->createLibrary($slotCounts);
 
         $start = new DateTimeImmutable('2024-02-05');
         $end = new DateTimeImmutable('2024-02-09');
@@ -47,7 +47,7 @@ class DashboardHeatmapTest extends TestCase
 
     public function testCollectUsesServiceDurationForInterval(): void
     {
-        $appointments = [['start_datetime' => '2024-03-04 10:15:00']];
+        $slotCounts = [['weekday' => 1, 'slot_minute' => 585, 'aggregate' => 1]];
 
         $servicesModel = $this->createMock(Services_model::class);
         $servicesModel
@@ -56,7 +56,7 @@ class DashboardHeatmapTest extends TestCase
             ->with(5)
             ->willReturn(['duration' => 45]);
 
-        $library = $this->createLibrary($appointments, $servicesModel);
+        $library = $this->createLibrary($slotCounts, $servicesModel);
 
         $start = new DateTimeImmutable('2024-03-04');
         $end = new DateTimeImmutable('2024-03-08');
@@ -72,9 +72,9 @@ class DashboardHeatmapTest extends TestCase
 
     public function testCollectKeepsEarlyMorningBookingInOriginalSlot(): void
     {
-        $appointments = [['start_datetime' => '2024-02-05 05:45:00']];
+        $slotCounts = [['weekday' => 1, 'slot_minute' => 330, 'aggregate' => 1]];
 
-        $library = $this->createLibrary($appointments);
+        $library = $this->createLibrary($slotCounts);
 
         $start = new DateTimeImmutable('2024-02-05');
         $end = new DateTimeImmutable('2024-02-09');
@@ -90,7 +90,7 @@ class DashboardHeatmapTest extends TestCase
 
     public function testCollectUsesRequestedStatusesForQuery(): void
     {
-        $appointments = [['start_datetime' => '2024-02-05 08:00:00']];
+        $slotCounts = [['weekday' => 1, 'slot_minute' => 480, 'aggregate' => 1]];
 
         /** @var CI_DB_query_builder&MockObject $builder */
         $builder = $this->createMock(CI_DB_query_builder::class);
@@ -101,8 +101,15 @@ class DashboardHeatmapTest extends TestCase
             ->method('where_in')
             ->with('appointments.status', ['Pending'])
             ->willReturnSelf();
-        $builder->method('order_by')->willReturnSelf();
-        $builder->method('get')->willReturn($this->createAppointmentsResult($appointments));
+        $builder
+            ->expects($this->exactly(2))
+            ->method('group_by')
+            ->willReturnSelf();
+        $builder
+            ->expects($this->exactly(2))
+            ->method('order_by')
+            ->willReturnSelf();
+        $builder->method('get')->willReturn($this->createAppointmentsResult($slotCounts));
 
         $appointmentsModel = $this->createMock(Appointments_model::class);
         $appointmentsModel
@@ -192,10 +199,10 @@ class DashboardHeatmapTest extends TestCase
         $this->assertSame($cached, $result);
     }
 
-    private function createLibrary(array $appointments, ?Services_model $servicesModel = null): Dashboard_heatmap
+    private function createLibrary(array $slotCounts, ?Services_model $servicesModel = null): Dashboard_heatmap
     {
         $appointmentsModel = $this->createMock(Appointments_model::class);
-        $appointmentsModel->method('query')->willReturn($this->createAppointmentsQueryBuilder($appointments));
+        $appointmentsModel->method('query')->willReturn($this->createAppointmentsQueryBuilder($slotCounts));
 
         if ($servicesModel === null) {
             $servicesModel = $this->createMock(Services_model::class);
@@ -231,7 +238,7 @@ class DashboardHeatmapTest extends TestCase
         return null;
     }
 
-    private function createAppointmentsQueryBuilder(array $appointments): CI_DB_query_builder
+    private function createAppointmentsQueryBuilder(array $slotCounts): CI_DB_query_builder
     {
         /** @var CI_DB_query_builder&MockObject $builder */
         $builder = $this->createMock(CI_DB_query_builder::class);
@@ -239,8 +246,9 @@ class DashboardHeatmapTest extends TestCase
         $builder->method('select')->willReturnSelf();
         $builder->method('where')->willReturnSelf();
         $builder->method('where_in')->willReturnSelf();
+        $builder->method('group_by')->willReturnSelf();
         $builder->method('order_by')->willReturnSelf();
-        $builder->method('get')->willReturn($this->createAppointmentsResult($appointments));
+        $builder->method('get')->willReturn($this->createAppointmentsResult($slotCounts));
 
         return $builder;
     }
