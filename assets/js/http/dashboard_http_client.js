@@ -15,6 +15,7 @@
  * This module implements the utilization dashboard related HTTP requests.
  */
 App.Http.Dashboard = (function () {
+    let metricsRequest = null;
     let heatmapRequest = null;
 
     /**
@@ -49,7 +50,17 @@ App.Http.Dashboard = (function () {
             payload.provider_ids = filters.providerIds;
         }
 
-        return $.post(url, payload);
+        if (metricsRequest && typeof metricsRequest.abort === 'function') {
+            metricsRequest.abort();
+        }
+
+        metricsRequest = $.post(url, payload);
+
+        metricsRequest.always(() => {
+            metricsRequest = null;
+        });
+
+        return metricsRequest;
     }
 
     /**

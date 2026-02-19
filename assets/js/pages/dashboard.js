@@ -777,7 +777,11 @@ App.Pages.Dashboard = (function () {
                 renderChart();
                 renderTable();
             })
-            .fail((jqXHR) => {
+            .fail((jqXHR, textStatus) => {
+                if (textStatus === 'abort' || jqXHR?.statusText === 'abort') {
+                    return;
+                }
+
                 const message = jqXHR?.responseJSON?.message ?? lang('unexpected_issues');
                 metrics = [];
                 refreshTeacherExportSelection();
