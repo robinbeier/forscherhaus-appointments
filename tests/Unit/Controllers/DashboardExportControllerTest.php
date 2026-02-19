@@ -104,6 +104,21 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(3, $pages[2]['chunks_total']);
     }
 
+    public function testBuildTeacherPagesDoesNotDuplicateTeacherAppointmentsInPagePayload(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $teachers = [$this->createTeacherReport(21)];
+
+        $pages = $controller->callBuildTeacherPages($teachers);
+
+        $this->assertNotEmpty($pages);
+
+        foreach ($pages as $page) {
+            $this->assertArrayNotHasKey('appointments', $page['teacher']);
+            $this->assertSame('Test Teacher', $page['teacher']['provider_name']);
+        }
+    }
+
     private function createControllerWithThreshold(float $configuredThreshold): object
     {
         return new class ($configuredThreshold) extends Dashboard_export {
