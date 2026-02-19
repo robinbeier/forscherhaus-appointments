@@ -1028,6 +1028,8 @@ class Dashboard_export extends EA_Controller
         foreach ($teachers as $teacher_index => $teacher) {
             $appointments_all = array_values($teacher['appointments'] ?? []);
             $has_any_appointments = !empty($appointments_all);
+            $teacher_for_page = $teacher;
+            unset($teacher_for_page['appointments']);
 
             if (!$has_any_appointments) {
                 $chunks = [[]];
@@ -1044,7 +1046,7 @@ class Dashboard_export extends EA_Controller
 
             foreach ($chunks as $chunk_index => $chunk_appointments) {
                 $teacher_pages[] = [
-                    'teacher' => $teacher,
+                    'teacher' => $teacher_for_page,
                     'teacher_index' => $teacher_index,
                     'chunk_index' => $chunk_index,
                     'chunks_total' => $chunks_total,
