@@ -342,33 +342,10 @@ class Availability
             ? json_decode($provider['settings']['working_plan_exceptions'], true)
             : [];
 
-        $escaped_provider_id = $this->CI->db->escape($provider['id']);
-
-        $escaped_date = $this->CI->db->escape($date);
-
-        $where =
-            'id_users_provider = ' .
-            $escaped_provider_id .
-            ' AND DATE(start_datetime) <= ' .
-            $escaped_date .
-            ' AND DATE(end_datetime) >= ' .
-            $escaped_date;
-
-        // Sometimes it might be necessary to exclude an appointment from the calculation (e.g. when editing an
-        // existing appointment).
-        if ($exclude_appointment_id) {
-            $escaped_exclude_appointment_id = $this->CI->db->escape($exclude_appointment_id);
-            $where .= ' AND id != ' . $escaped_exclude_appointment_id;
-            $where .=
-                ' AND (id_parent_appointment IS NULL OR id_parent_appointment != ' .
-                $escaped_exclude_appointment_id .
-                ')';
-        }
-
         $appointments = array_values(
             array_merge(
-                $this->CI->appointments_model->get($where),
-                $this->CI->unavailabilities_model->get($where),
+                $this->get_provider_appointments_for_date((int) $provider['id'], $date, $exclude_appointment_id),
+                $this->get_provider_unavailabilities_for_date((int) $provider['id'], $date, $exclude_appointment_id),
                 $this->CI->blocked_periods_model->get_for_period($date, $date),
             ),
         );
@@ -451,84 +428,279 @@ class Availability
             }
         }
 
-        // Break the empty periods with the reserved appointments.
-        foreach ($appointments as $appointment) {
-            foreach ($periods as $index => &$period) {
-                $appointment_start = new DateTime($appointment['start_datetime']);
-                $appointment_end = new DateTime($appointment['end_datetime']);
+        $day_start = new DateTimeImmutable($date . ' 00:00:00');
+        $day_end = new DateTimeImmutable($date . ' 23:59:59');
+        $period_ranges = $this->normalize_period_ranges($date, $periods);
+        $appointment_ranges = $this->normalize_appointment_ranges($appointments, $day_start, $day_end);
+        $period_ranges = $this->subtract_ranges($period_ranges, $appointment_ranges);
 
-                if ($appointment_start >= $appointment_end) {
+        return $this->format_period_ranges($period_ranges);
+    }
+
+    /**
+     * Load provider appointments that overlap a selected date.
+     *
+     * @param int $provider_id Provider ID.
+     * @param string $date Selected date (Y-m-d).
+     * @param int|null $exclude_appointment_id Appointment ID to exclude from the result set.
+     *
+     * @return array
+     */
+    protected function get_provider_appointments_for_date(
+        int $provider_id,
+        string $date,
+        ?int $exclude_appointment_id = null,
+    ): array {
+        if ($provider_id <= 0) {
+            return [];
+        }
+
+        $day_start = $date . ' 00:00:00';
+        $day_end = $date . ' 23:59:59';
+
+        $query = $this->CI->appointments_model
+            ->query()
+            ->where('appointments.is_unavailability', false)
+            ->where('appointments.id_users_provider', $provider_id)
+            ->where('appointments.start_datetime <=', $day_end)
+            ->where('appointments.end_datetime >=', $day_start);
+
+        if ($exclude_appointment_id) {
+            $parent_condition =
+                '(appointments.id_parent_appointment IS NULL OR appointments.id_parent_appointment != ' .
+                (int) $exclude_appointment_id .
+                ')';
+
+            $query->where('appointments.id !=', $exclude_appointment_id)->where($parent_condition, null, false);
+        }
+
+        $appointments = $query->get()->result_array();
+
+        foreach ($appointments as &$appointment) {
+            $this->CI->appointments_model->cast($appointment);
+        }
+
+        return $appointments;
+    }
+
+    /**
+     * Load provider unavailabilities that overlap a selected date.
+     *
+     * @param int $provider_id Provider ID.
+     * @param string $date Selected date (Y-m-d).
+     * @param int|null $exclude_appointment_id Appointment ID to exclude from the result set.
+     *
+     * @return array
+     */
+    protected function get_provider_unavailabilities_for_date(
+        int $provider_id,
+        string $date,
+        ?int $exclude_appointment_id = null,
+    ): array {
+        if ($provider_id <= 0) {
+            return [];
+        }
+
+        $day_start = $date . ' 00:00:00';
+        $day_end = $date . ' 23:59:59';
+
+        $query = $this->CI->unavailabilities_model
+            ->query()
+            ->where('is_unavailability', true)
+            ->where('id_users_provider', $provider_id)
+            ->where('start_datetime <=', $day_end)
+            ->where('end_datetime >=', $day_start);
+
+        if ($exclude_appointment_id) {
+            $parent_condition =
+                '(id_parent_appointment IS NULL OR id_parent_appointment != ' . (int) $exclude_appointment_id . ')';
+
+            $query->where('id !=', $exclude_appointment_id)->where($parent_condition, null, false);
+        }
+
+        $unavailabilities = $query->get()->result_array();
+
+        foreach ($unavailabilities as &$unavailability) {
+            $this->CI->unavailabilities_model->cast($unavailability);
+        }
+
+        return $unavailabilities;
+    }
+
+    /**
+     * Normalize period rows into sorted datetime ranges.
+     *
+     * @param string $date Selected date.
+     * @param array $periods Period entries containing H:i start/end values.
+     *
+     * @return array<int, array{start: DateTimeImmutable, end: DateTimeImmutable}>
+     */
+    protected function normalize_period_ranges(string $date, array $periods): array
+    {
+        $ranges = [];
+
+        foreach ($periods as $period) {
+            $start = DateTimeImmutable::createFromFormat('Y-m-d H:i', $date . ' ' . ($period['start'] ?? ''));
+            $end = DateTimeImmutable::createFromFormat('Y-m-d H:i', $date . ' ' . ($period['end'] ?? ''));
+
+            if (!$start || !$end || $end <= $start) {
+                continue;
+            }
+
+            $ranges[] = [
+                'start' => $start,
+                'end' => $end,
+            ];
+        }
+
+        usort(
+            $ranges,
+            static fn(array $left, array $right): int => $left['start']->getTimestamp() <=>
+                $right['start']->getTimestamp(),
+        );
+
+        return $ranges;
+    }
+
+    /**
+     * Normalize and day-clip appointment rows into sorted datetime ranges.
+     *
+     * @param array $appointments Appointment/unavailability rows with start/end datetime fields.
+     * @param DateTimeImmutable $day_start Day start boundary.
+     * @param DateTimeImmutable $day_end Day end boundary.
+     *
+     * @return array<int, array{start: DateTimeImmutable, end: DateTimeImmutable}>
+     */
+    protected function normalize_appointment_ranges(
+        array $appointments,
+        DateTimeImmutable $day_start,
+        DateTimeImmutable $day_end,
+    ): array {
+        $ranges = [];
+
+        foreach ($appointments as $appointment) {
+            $start = DateTimeImmutable::createFromFormat(
+                'Y-m-d H:i:s',
+                (string) ($appointment['start_datetime'] ?? ''),
+            );
+            $end = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', (string) ($appointment['end_datetime'] ?? ''));
+
+            if (!$start || !$end || $end <= $start) {
+                continue;
+            }
+
+            if ($start < $day_start) {
+                $start = $day_start;
+            }
+
+            if ($end > $day_end) {
+                $end = $day_end;
+            }
+
+            if ($end <= $start) {
+                continue;
+            }
+
+            $ranges[] = [
+                'start' => $start,
+                'end' => $end,
+            ];
+        }
+
+        usort(
+            $ranges,
+            static fn(array $left, array $right): int => $left['start']->getTimestamp() <=>
+                $right['start']->getTimestamp(),
+        );
+
+        return $ranges;
+    }
+
+    /**
+     * Subtract blocked ranges from available ranges.
+     *
+     * @param array<int, array{start: DateTimeImmutable, end: DateTimeImmutable}> $available_ranges
+     * @param array<int, array{start: DateTimeImmutable, end: DateTimeImmutable}> $blocked_ranges
+     *
+     * @return array<int, array{start: DateTimeImmutable, end: DateTimeImmutable}>
+     */
+    protected function subtract_ranges(array $available_ranges, array $blocked_ranges): array
+    {
+        if (empty($available_ranges) || empty($blocked_ranges)) {
+            return $available_ranges;
+        }
+
+        foreach ($blocked_ranges as $blocked_range) {
+            $updated_ranges = [];
+
+            foreach ($available_ranges as $available_range) {
+                if (
+                    $blocked_range['end'] <= $available_range['start'] ||
+                    $blocked_range['start'] >= $available_range['end']
+                ) {
+                    $updated_ranges[] = $available_range;
                     continue;
                 }
 
-                $period_start = new DateTime($date . ' ' . $period['start']);
-                $period_end = new DateTime($date . ' ' . $period['end']);
+                if ($blocked_range['start'] > $available_range['start']) {
+                    $left_end =
+                        $blocked_range['start'] < $available_range['end']
+                            ? $blocked_range['start']
+                            : $available_range['end'];
 
-                if (
-                    $appointment_start <= $period_start &&
-                    $appointment_end <= $period_end &&
-                    $appointment_end <= $period_start
-                ) {
-                    // The appointment does not belong in this time period, so we  will not change anything.
-                    continue;
-                } else {
-                    if (
-                        $appointment_start <= $period_start &&
-                        $appointment_end <= $period_end &&
-                        $appointment_end >= $period_start
-                    ) {
-                        // The appointment starts before the period and finishes somewhere inside. We will need to break
-                        // this period and leave the available part.
-                        $period['start'] = $appointment_end->format('H:i');
-                    } else {
-                        if ($appointment_start >= $period_start && $appointment_end < $period_end) {
-                            // The appointment is inside the time period, so we will split the period into two new
-                            // others.
-                            unset($periods[$index]);
+                    if ($left_end > $available_range['start']) {
+                        $updated_ranges[] = [
+                            'start' => $available_range['start'],
+                            'end' => $left_end,
+                        ];
+                    }
+                }
 
-                            $periods[] = [
-                                'start' => $period_start->format('H:i'),
-                                'end' => $appointment_start->format('H:i'),
-                            ];
+                if ($blocked_range['end'] < $available_range['end']) {
+                    $right_start =
+                        $blocked_range['end'] > $available_range['start']
+                            ? $blocked_range['end']
+                            : $available_range['start'];
 
-                            $periods[] = [
-                                'start' => $appointment_end->format('H:i'),
-                                'end' => $period_end->format('H:i'),
-                            ];
-                        } elseif ($appointment_start == $period_start && $appointment_end == $period_end) {
-                            unset($periods[$index]); // The whole period is blocked so remove it from the available periods array.
-                        } else {
-                            if (
-                                $appointment_start >= $period_start &&
-                                $appointment_end >= $period_start &&
-                                $appointment_start <= $period_end
-                            ) {
-                                // The appointment starts in the period and finishes out of it. We will need to remove
-                                // the time that is taken from the appointment.
-                                $period['end'] = $appointment_start->format('H:i');
-                            } else {
-                                if (
-                                    $appointment_start >= $period_start &&
-                                    $appointment_end >= $period_end &&
-                                    $appointment_start >= $period_end
-                                ) {
-                                    // The appointment does not belong in the period so do not change anything.
-                                    continue;
-                                } else {
-                                    if (
-                                        $appointment_start <= $period_start &&
-                                        $appointment_end >= $period_end &&
-                                        $appointment_start <= $period_end
-                                    ) {
-                                        // The appointment is bigger than the period, so this period needs to be removed.
-                                        unset($periods[$index]);
-                                    }
-                                }
-                            }
-                        }
+                    if ($available_range['end'] > $right_start) {
+                        $updated_ranges[] = [
+                            'start' => $right_start,
+                            'end' => $available_range['end'],
+                        ];
                     }
                 }
             }
+
+            $available_ranges = $updated_ranges;
+
+            if (empty($available_ranges)) {
+                break;
+            }
+        }
+
+        return $available_ranges;
+    }
+
+    /**
+     * Convert datetime ranges back to the expected H:i period shape.
+     *
+     * @param array<int, array{start: DateTimeImmutable, end: DateTimeImmutable}> $ranges
+     *
+     * @return array<int, array{start: string, end: string}>
+     */
+    protected function format_period_ranges(array $ranges): array
+    {
+        $periods = [];
+
+        foreach ($ranges as $range) {
+            if ($range['end'] <= $range['start']) {
+                continue;
+            }
+
+            $periods[] = [
+                'start' => $range['start']->format('H:i'),
+                'end' => $range['end']->format('H:i'),
+            ];
         }
 
         return array_values($periods);
