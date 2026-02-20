@@ -20,6 +20,8 @@
  */
 class Providers_model extends EA_Model
 {
+    protected ?int $provider_role_id_cache = null;
+
     /**
      * @var array
      */
@@ -234,13 +236,7 @@ class Providers_model extends EA_Model
 
         $providers = $this->db->get_where('users', ['id_roles' => $role_id], $limit, $offset)->result_array();
 
-        foreach ($providers as &$provider) {
-            $this->cast($provider);
-            $provider['settings'] = $this->get_settings($provider['id']);
-            $provider['services'] = $this->get_service_ids($provider['id']);
-        }
-
-        return $providers;
+        return $this->hydrate_providers($providers);
     }
 
     /**
@@ -250,13 +246,19 @@ class Providers_model extends EA_Model
      */
     public function get_provider_role_id(): int
     {
+        if ($this->provider_role_id_cache !== null) {
+            return $this->provider_role_id_cache;
+        }
+
         $role = $this->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
 
         if (empty($role)) {
             throw new RuntimeException('The provider role was not found in the database.');
         }
 
-        return $role['id'];
+        $this->provider_role_id_cache = (int) $role['id'];
+
+        return $this->provider_role_id_cache;
     }
 
     /**
@@ -657,13 +659,7 @@ class Providers_model extends EA_Model
             ->get()
             ->result_array();
 
-        foreach ($providers as &$provider) {
-            $this->cast($provider);
-            $provider['settings'] = $this->get_settings($provider['id']);
-            $provider['services'] = $this->get_service_ids($provider['id']);
-        }
-
-        return $providers;
+        return $this->hydrate_providers($providers);
     }
 
     /**
@@ -715,13 +711,90 @@ class Providers_model extends EA_Model
             ->get()
             ->result_array();
 
+        return $this->hydrate_providers($providers);
+    }
+
+    protected function hydrate_providers(array $providers): array
+    {
+        if (empty($providers)) {
+            return [];
+        }
+
+        $provider_ids = [];
+
         foreach ($providers as &$provider) {
             $this->cast($provider);
-            $provider['settings'] = $this->get_settings($provider['id']);
-            $provider['services'] = $this->get_service_ids($provider['id']);
+            $provider_ids[] = (int) ($provider['id'] ?? 0);
+        }
+
+        $provider_ids = array_values(
+            array_unique(array_filter($provider_ids, static fn(int $provider_id): bool => $provider_id > 0)),
+        );
+        $settings_map = $this->get_settings_map($provider_ids);
+        $service_ids_map = $this->get_service_ids_map($provider_ids);
+
+        foreach ($providers as &$provider) {
+            $provider_id = (int) ($provider['id'] ?? 0);
+            $provider['settings'] = $settings_map[$provider_id] ?? [];
+            $provider['services'] = $service_ids_map[$provider_id] ?? [];
         }
 
         return $providers;
+    }
+
+    protected function get_settings_map(array $provider_ids): array
+    {
+        if (empty($provider_ids)) {
+            return [];
+        }
+
+        $settings_rows = $this->db
+            ->from('user_settings')
+            ->where_in('id_users', $provider_ids)
+            ->get()
+            ->result_array();
+        $settings_map = [];
+
+        foreach ($settings_rows as $settings_row) {
+            $provider_id = (int) ($settings_row['id_users'] ?? 0);
+
+            if ($provider_id <= 0) {
+                continue;
+            }
+
+            unset($settings_row['id_users'], $settings_row['password'], $settings_row['salt']);
+            $settings_map[$provider_id] = $settings_row;
+        }
+
+        return $settings_map;
+    }
+
+    protected function get_service_ids_map(array $provider_ids): array
+    {
+        if (empty($provider_ids)) {
+            return [];
+        }
+
+        $connections = $this->db
+            ->select('id_users, id_services')
+            ->from('services_providers')
+            ->where_in('id_users', $provider_ids)
+            ->get()
+            ->result_array();
+
+        $service_ids_map = array_fill_keys($provider_ids, []);
+
+        foreach ($connections as $connection) {
+            $provider_id = (int) ($connection['id_users'] ?? 0);
+
+            if ($provider_id <= 0) {
+                continue;
+            }
+
+            $service_ids_map[$provider_id][] = (int) ($connection['id_services'] ?? 0);
+        }
+
+        return $service_ids_map;
     }
 
     /**
