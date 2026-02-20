@@ -32,6 +32,8 @@ Leitplanke: Kein Produktionscode ausserhalb von `application/`. Keine direkten A
 ./scripts/setup-worktree.sh
 ```
 
+Hinweis: `./scripts/setup-worktree.sh` fuehrt u. a. `composer install`, `npm ci`/`npm install` und `npx gulp vendor` aus.
+
 ## Dev-/Build-/Test-Befehle
 
 ```bash
@@ -60,6 +62,7 @@ Hinweis: `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nu
 ```bash
 php index.php console help
 php index.php console migrate
+php index.php console migrate fresh
 php index.php console migrate up
 php index.php console migrate down
 php index.php console seed      # nur fuer Testdaten
