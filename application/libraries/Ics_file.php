@@ -86,32 +86,48 @@ class Ics_file
             $event->addLocation($location);
         }
 
-        $description = [
-            '',
-            lang('provider'),
-            '',
-            lang('name') . ': ' . $provider['first_name'] . ' ' . $provider['last_name'],
-            lang('email') . ': ' . $provider['email'],
-            lang('phone_number') . ': ' . $provider['phone_number'],
-            lang('address') . ': ' . $provider['address'],
-            lang('city') . ': ' . $provider['city'],
-            lang('zip_code') . ': ' . $provider['zip_code'],
-            '',
-            lang('customer'),
-            '',
-            lang('name') . ': ' . $customer['first_name'] . ' ' . $customer['last_name'],
-            lang('email') . ': ' . $customer['email'],
-            lang('phone_number') . ': ' . ($customer['phone_number'] ?? '-'),
-            lang('address') . ': ' . $customer['address'],
-            lang('city') . ': ' . $customer['city'],
-            lang('zip_code') . ': ' . $customer['zip_code'],
-            '',
-            lang('notes'),
-            '',
-            $appointment['notes'],
-        ];
+        $manage_url = '';
 
-        $event->setDescription(implode("\\n", $description));
+        if (!empty($appointment['hash'])) {
+            $manage_url = site_url('booking/reschedule/' . $appointment['hash']);
+        }
+
+        if ($manage_url !== '') {
+            $manage_hint = lang('calendar_event_manage_hint');
+
+            if ($manage_hint === 'calendar_event_manage_hint') {
+                $manage_hint = 'Manage appointment:';
+            }
+
+            $event->setDescription(trim($manage_hint . ' ' . $manage_url));
+        } else {
+            $description = [
+                '',
+                lang('provider'),
+                '',
+                lang('name') . ': ' . $provider['first_name'] . ' ' . $provider['last_name'],
+                lang('email') . ': ' . $provider['email'],
+                lang('phone_number') . ': ' . $provider['phone_number'],
+                lang('address') . ': ' . $provider['address'],
+                lang('city') . ': ' . $provider['city'],
+                lang('zip_code') . ': ' . $provider['zip_code'],
+                '',
+                lang('customer'),
+                '',
+                lang('name') . ': ' . $customer['first_name'] . ' ' . $customer['last_name'],
+                lang('email') . ': ' . $customer['email'],
+                lang('phone_number') . ': ' . ($customer['phone_number'] ?? '-'),
+                lang('address') . ': ' . $customer['address'],
+                lang('city') . ': ' . $customer['city'],
+                lang('zip_code') . ': ' . $customer['zip_code'],
+                '',
+                lang('notes'),
+                '',
+                $appointment['notes'],
+            ];
+
+            $event->setDescription(implode("\\n", $description));
+        }
 
         $attendee = new Attendee(new Formatter());
 
