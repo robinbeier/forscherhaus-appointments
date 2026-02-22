@@ -36,6 +36,7 @@ class Config {
 ```
 
 In the host machine the server is accessible from `http://localhost` and the database from `localhost:3306`.
+The development stack pins MySQL `8.0` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`) and Mailpit from `http://localhost:8025`.
 
@@ -118,6 +119,6 @@ SELECT name, value FROM ea_settings WHERE name='dashboard_conflict_threshold';
 
 A production image of Easy!Appointments can be found at: https://github.com/alextselegidis/easyappointments-docker
 
-*This document applies to Easy!Appointments v1.5.1.*
+*This document applies to Easy!Appointments v1.5.2.*
 
 [Back](readme.md)

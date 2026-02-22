@@ -62,7 +62,7 @@ This command will create a backup of the application data in the `storage/backup
 
 
 ```
-php index.php console backup /path/to/backup/folter
+php index.php console backup /path/to/backup/folder
 ``` 
 
 You can also provide a custom directory for your backup files. 
@@ -89,6 +89,6 @@ php index.php console help
 
 This command will give more information about the console capabilities.
 
-*This document applies to Easy!Appointments v1.5.1.*
+*This document applies to Easy!Appointments v1.5.2.*
 
 [Back](readme.md)
