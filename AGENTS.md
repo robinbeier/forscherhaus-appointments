@@ -32,7 +32,7 @@ Leitplanke: Kein Produktionscode ausserhalb von `application/`. Keine direkten A
 ./scripts/setup-worktree.sh
 ```
 
-Hinweis: `./scripts/setup-worktree.sh` fuehrt u. a. `composer install`, `npm ci`/`npm install` und `npx gulp vendor` aus.
+Hinweis: `./scripts/setup-worktree.sh` fuehrt u. a. `composer install`, `npm ci`/`npm install` und `npx gulp vendor` aus. `npm install` triggert zudem `npm run assets:refresh` via `postinstall`.
 
 ## Dev-/Build-/Test-Befehle
 
@@ -46,6 +46,9 @@ npm run assets:refresh
 # Produktion (minifizierte Bundles, Distributables)
 npm run build
 
+# Docs-Generierung (lokal)
+npm run docs
+
 # Frontend-Assets bei Aenderungen in assets/js oder assets/css neu bauen
 npx gulp scripts
 npx gulp styles
@@ -55,7 +58,7 @@ docker compose run --rm php-fpm composer test
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 ```
 
-Hinweis: `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
+Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 
 ## Console-CLI (Wartung/Setup)
 
