@@ -99,6 +99,14 @@ php index.php console sync
 -   Vor PR: Tests gruen (`docker compose run --rm php-fpm composer test`), Migrations inkl. Rollback vorhanden.
 -   `config-sample.php`/Docs bei Bedarf aktualisieren; bei UI-Aenderungen Screenshots/GIFs beilegen.
 
+## Release-Fokus (naechste 9 Tage bis Deployment)
+
+-   Fokus bis zum Deployment: Stabilitaet und ggf. Performance-Verbesserungen mit geringem Risiko.
+-   Keine Major-Dependency-Upgrades in dieser Phase; diese werden in die naechste Entwicklungsphase verschoben.
+-   Nach Deployment ist ein Zeitfenster von ca. 6 Monaten bis zum naechsten Major-Update vorgesehen; dort werden Major-Upgrades geplant, getestet und gebuendelt umgesetzt.
+-   `phpmailer/phpmailer` hat aktuell die niedrigste Prioritaet:
+    In Produktion werden keine E-Mails versendet, und in der Entwicklung fehlen derzeit die benoetigten E-Mail-Testfaehigkeiten. Entsprechende Upgrades erst in der naechsten Major-Phase bewerten.
+
 ## Domaenen-Invariante (derzeit)
 
 -   `services.attendants_number` ist aktuell hart auf `1` begrenzt.
