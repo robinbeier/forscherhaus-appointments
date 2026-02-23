@@ -20,6 +20,10 @@
  */
 class Dashboard_export extends EA_Controller
 {
+    protected const PRINCIPAL_PDF_FIRST_PAGE_TEACHERS = 5;
+
+    protected const PRINCIPAL_PDF_CONTINUATION_PAGE_TEACHERS = 13;
+
     protected const TEACHER_PDF_FIRST_PAGE_APPOINTMENTS = 10;
 
     protected const TEACHER_PDF_CONTINUATION_PAGE_APPOINTMENTS = 10;
@@ -82,6 +86,8 @@ class Dashboard_export extends EA_Controller
             ]);
 
             $summary = $this->buildSummary($metrics, $threshold);
+            $mappedMetrics = $this->mapMetricsForView($metrics, $threshold);
+            $sortedPrincipalMetrics = $this->sortPrincipalMetricsForReport($mappedMetrics);
 
             $this->load->helper('donut');
 
@@ -95,7 +101,8 @@ class Dashboard_export extends EA_Controller
                 'threshold_percent' => $this->formatPercent($threshold, 0),
                 'threshold_ratio' => $threshold,
                 'summary' => $summary,
-                'metrics' => $this->mapMetricsForView($metrics, $threshold),
+                'metrics' => $sortedPrincipalMetrics,
+                'principal_pages' => $this->buildPrincipalPages($sortedPrincipalMetrics),
             ];
 
             $this->pdfRenderer->stream_view(
@@ -560,6 +567,21 @@ class Dashboard_export extends EA_Controller
 
             $threshold_target = (int) ceil($threshold * $target);
             $gap_to_threshold = max($threshold_target - $booked, 0);
+            $is_zero_target = $target === 0;
+            $is_under_target = $target > 0 && $gap_to_threshold > 0;
+
+            $status_variant = 'ok';
+            $status_label = 'Ok';
+
+            if ($is_under_target) {
+                $status_variant = 'warn';
+                $status_label = 'Unter Ziel';
+            }
+
+            if ($is_zero_target) {
+                $status_variant = 'muted';
+                $status_label = 'Kein Ziel gepflegt';
+            }
 
             return [
                 'provider_name' => (string) ($metric['provider_name'] ?? ''),
@@ -580,11 +602,14 @@ class Dashboard_export extends EA_Controller
                     : 'Klassengröße',
                 'has_plan' => !empty($metric['has_plan']),
                 'has_explicit_target' => !empty($metric['has_explicit_target']),
-                'is_zero_target' => $target === 0,
+                'is_zero_target' => $is_zero_target,
                 'threshold_percent' => $threshold * 100,
                 'threshold_absolute' => $threshold_target,
                 'gap_to_threshold' => $gap_to_threshold,
                 'gap_to_threshold_formatted' => $this->formatNumber($gap_to_threshold),
+                'fill_ratio' => $fill_rate,
+                'status_variant' => $status_variant,
+                'status_label' => $status_label,
                 'slots_planned_raw' => $slots_planned,
                 'slots_planned_formatted' => $slots_planned !== null ? $this->formatNumber($slots_planned) : null,
                 'slots_required_raw' => $slots_required,
@@ -593,6 +618,58 @@ class Dashboard_export extends EA_Controller
                 'provider_id' => (int) ($metric['provider_id'] ?? 0),
             ];
         }, $metrics);
+    }
+
+    /**
+     * Sort principal metrics by urgency (missing-to-threshold first).
+     *
+     * @param array $metrics
+     *
+     * @return array
+     */
+    protected function sortPrincipalMetricsForReport(array $metrics): array
+    {
+        $sorted_metrics = array_values($metrics);
+
+        usort($sorted_metrics, static function (array $left, array $right): int {
+            $gap_sort = ((int) ($right['gap_to_threshold'] ?? 0)) <=> ((int) ($left['gap_to_threshold'] ?? 0));
+
+            if ($gap_sort !== 0) {
+                return $gap_sort;
+            }
+
+            return ((float) ($left['fill_ratio'] ?? 0)) <=> ((float) ($right['fill_ratio'] ?? 0));
+        });
+
+        return $sorted_metrics;
+    }
+
+    /**
+     * Split principal metrics into first-page and continuation-page chunks.
+     *
+     * @param array $metrics
+     *
+     * @return array
+     */
+    protected function buildPrincipalPages(array $metrics): array
+    {
+        $metrics_all = array_values($metrics);
+
+        if (empty($metrics_all)) {
+            return [[]];
+        }
+
+        $first_page_size = max(1, self::PRINCIPAL_PDF_FIRST_PAGE_TEACHERS);
+        $continuation_page_size = max(1, self::PRINCIPAL_PDF_CONTINUATION_PAGE_TEACHERS);
+
+        $first_chunk = array_splice($metrics_all, 0, $first_page_size);
+        $pages = [$first_chunk];
+
+        while (!empty($metrics_all)) {
+            $pages[] = array_splice($metrics_all, 0, $continuation_page_size);
+        }
+
+        return $pages;
     }
 
     /**
