@@ -1457,13 +1457,9 @@ class Dashboard_export extends EA_Controller
         $query = $this->appointmentsModel
             ->query()
             ->select([
-                'appointments.id',
                 'appointments.id_users_provider',
                 'appointments.start_datetime',
                 'appointments.end_datetime',
-                'appointments.id_users_customer',
-                'appointments.notes',
-                'appointments.status',
                 'customers.first_name AS customer_first_name',
                 'customers.last_name AS customer_last_name',
                 'customers.email AS customer_email',
