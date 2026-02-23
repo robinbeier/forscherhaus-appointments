@@ -11,13 +11,6 @@
  * @since       v1.8.0
  * ---------------------------------------------------------------------------- */
 
-use DateTimeImmutable;
-use DateTimeZone;
-use Exception;
-use InvalidArgumentException;
-use RuntimeException;
-use Throwable;
-
 /**
  * Dashboard heatmap aggregation library.
  *
