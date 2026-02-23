@@ -102,10 +102,7 @@ class Dashboard_export extends EA_Controller
                 'exports/dashboard_principal_pdf',
                 $view_data,
                 $this->buildFilename($period['start'], $period['end']),
-                [
-                    'attachment' => true,
-                    'debug_dump_path' => APPPATH . '../storage/logs/dashboard_principal_pdf_dump.html',
-                ],
+                $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_principal_pdf_dump.html'),
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render principal dashboard export: ' . $exception->getMessage());
@@ -165,10 +162,7 @@ class Dashboard_export extends EA_Controller
                 'exports/dashboard_teacher_pdf',
                 $view_data,
                 $this->buildTeacherPdfFilename($period['start'], $period['end']),
-                [
-                    'attachment' => true,
-                    'debug_dump_path' => APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html',
-                ],
+                $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html'),
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render teacher dashboard export: ' . $exception->getMessage());
@@ -240,6 +234,60 @@ class Dashboard_export extends EA_Controller
         if (session('role_slug') !== DB_SLUG_ADMIN) {
             abort(403, 'Forbidden');
         }
+    }
+
+    /**
+     * Build PDF stream options with optional debug dump output.
+     */
+    protected function buildPdfStreamOptions(?string $debug_dump_path = null): array
+    {
+        $options = [
+            'attachment' => true,
+        ];
+
+        if ($debug_dump_path !== null && $debug_dump_path !== '' && $this->isPdfDebugDumpEnabled()) {
+            $options['debug_dump_path'] = $debug_dump_path;
+        }
+
+        return $options;
+    }
+
+    /**
+     * Determine whether PDF HTML debug dumps are enabled.
+     */
+    protected function isPdfDebugDumpEnabled(): bool
+    {
+        $value = $this->resolvePdfDebugDumpFlag();
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (float) $value !== 0.0;
+        }
+
+        if (is_string($value)) {
+            $normalized = trim($value);
+
+            if ($normalized === '') {
+                return false;
+            }
+
+            $parsed = filter_var($normalized, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            return $parsed ?? false;
+        }
+
+        return false;
+    }
+
+    /**
+     * Resolve the PDF debug dump flag from environment variables.
+     */
+    protected function resolvePdfDebugDumpFlag(): mixed
+    {
+        return env('PDF_RENDERER_DEBUG_DUMP', false);
     }
 
     /**
