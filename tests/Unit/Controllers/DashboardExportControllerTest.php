@@ -119,6 +119,52 @@ class DashboardExportControllerTest extends TestCase
         }
     }
 
+    public function testBuildPrincipalPagesCreatesSingleEmptyPageWhenNoMetrics(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $pages = $controller->callBuildPrincipalPages([]);
+
+        $this->assertCount(1, $pages);
+        $this->assertSame([], $pages[0]);
+    }
+
+    public function testBuildPrincipalPagesKeepsFiveMetricsOnFirstPage(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $metrics = $this->createPrincipalMetrics(5);
+
+        $pages = $controller->callBuildPrincipalPages($metrics);
+
+        $this->assertCount(1, $pages);
+        $this->assertCount(5, $pages[0]);
+    }
+
+    public function testBuildPrincipalPagesUsesTwoPagesForSixteenMetrics(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $metrics = $this->createPrincipalMetrics(16);
+
+        $pages = $controller->callBuildPrincipalPages($metrics);
+
+        $this->assertCount(2, $pages);
+        $this->assertCount(5, $pages[0]);
+        $this->assertCount(11, $pages[1]);
+    }
+
+    public function testBuildPrincipalPagesUsesThreePagesForTwentyMetrics(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $metrics = $this->createPrincipalMetrics(20);
+
+        $pages = $controller->callBuildPrincipalPages($metrics);
+
+        $this->assertCount(3, $pages);
+        $this->assertCount(5, $pages[0]);
+        $this->assertCount(13, $pages[1]);
+        $this->assertCount(2, $pages[2]);
+    }
+
     public function testBuildPdfStreamOptionsDisablesDebugDumpByDefault(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -171,6 +217,11 @@ class DashboardExportControllerTest extends TestCase
                 return $this->buildTeacherPages($teachers);
             }
 
+            public function callBuildPrincipalPages(array $metrics): array
+            {
+                return $this->buildPrincipalPages($metrics);
+            }
+
             public function callBuildPdfStreamOptions(string $debugDumpPath): array
             {
                 return $this->buildPdfStreamOptions($debugDumpPath);
@@ -211,5 +262,21 @@ class DashboardExportControllerTest extends TestCase
         }
 
         return $appointments;
+    }
+
+    private function createPrincipalMetrics(int $count): array
+    {
+        $metrics = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            $metrics[] = [
+                'provider_id' => $index + 1,
+                'provider_name' => 'Teacher ' . $index,
+                'gap_to_threshold' => 0,
+                'fill_ratio' => 1.0,
+            ];
+        }
+
+        return $metrics;
     }
 }
