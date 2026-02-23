@@ -119,14 +119,41 @@ class DashboardExportControllerTest extends TestCase
         }
     }
 
-    private function createControllerWithThreshold(float $configuredThreshold): object
+    public function testBuildPdfStreamOptionsDisablesDebugDumpByDefault(): void
     {
-        return new class ($configuredThreshold) extends Dashboard_export {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $options = $controller->callBuildPdfStreamOptions('/tmp/dashboard-debug.html');
+
+        $this->assertSame(['attachment' => true], $options);
+    }
+
+    public function testBuildPdfStreamOptionsEnablesDebugDumpWhenFlagIsTrue(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9, 'true');
+
+        $options = $controller->callBuildPdfStreamOptions('/tmp/dashboard-debug.html');
+
+        $this->assertSame(
+            [
+                'attachment' => true,
+                'debug_dump_path' => '/tmp/dashboard-debug.html',
+            ],
+            $options,
+        );
+    }
+
+    private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
+    {
+        return new class ($configuredThreshold, $pdfDebugDumpFlag) extends Dashboard_export {
             private float $configuredThreshold;
 
-            public function __construct(float $configuredThreshold)
+            private mixed $pdfDebugDumpFlag;
+
+            public function __construct(float $configuredThreshold, mixed $pdfDebugDumpFlag)
             {
                 $this->configuredThreshold = $configuredThreshold;
+                $this->pdfDebugDumpFlag = $pdfDebugDumpFlag;
             }
 
             public function callResolveThreshold(mixed $thresholdInput): float
@@ -144,9 +171,19 @@ class DashboardExportControllerTest extends TestCase
                 return $this->buildTeacherPages($teachers);
             }
 
+            public function callBuildPdfStreamOptions(string $debugDumpPath): array
+            {
+                return $this->buildPdfStreamOptions($debugDumpPath);
+            }
+
             protected function getConfiguredThreshold(): float
             {
                 return $this->configuredThreshold;
+            }
+
+            protected function resolvePdfDebugDumpFlag(): mixed
+            {
+                return $this->pdfDebugDumpFlag;
             }
         };
     }
