@@ -145,7 +145,7 @@ $formatSlotsSummary = static function (array $metric) use ($formatNumber): strin
     return str_replace(['%planned%', '%required%'], [$planned, $required], $template);
 };
 
-$prepareMetric = static function (array $metric) use ($thresholdRatio, $formatNumber): array {
+$normalizeMetric = static function (array $metric) use ($thresholdRatio, $formatNumber): array {
     $target = (int) ($metric['target_raw'] ?? ($metric['target'] ?? 0));
     $booked = (int) ($metric['booked_raw'] ?? ($metric['booked'] ?? 0));
     $open = (int) ($metric['open_raw'] ?? ($metric['open'] ?? 0));
@@ -184,9 +184,8 @@ $prepareMetric = static function (array $metric) use ($thresholdRatio, $formatNu
     ]);
 };
 
-$preparedMetrics = array_map($prepareMetric, $metrics);
-
-$principalPages = $principal_pages ?? [];
+$principalPages = is_array($principal_pages ?? null) ? $principal_pages : [];
+$preparedMetrics = [];
 $preparedPrincipalPages = [];
 
 if (!empty($principalPages)) {
@@ -195,11 +194,25 @@ if (!empty($principalPages)) {
             continue;
         }
 
-        $preparedPrincipalPages[] = array_map($prepareMetric, $pageMetrics);
+        $normalizedPageMetrics = [];
+
+        foreach ($pageMetrics as $pageMetric) {
+            if (!is_array($pageMetric)) {
+                continue;
+            }
+
+            $normalizedMetric = $normalizeMetric($pageMetric);
+            $normalizedPageMetrics[] = $normalizedMetric;
+            $preparedMetrics[] = $normalizedMetric;
+        }
+
+        $preparedPrincipalPages[] = $normalizedPageMetrics;
     }
 }
 
 if (empty($preparedPrincipalPages)) {
+    $metricRows = array_values(array_filter($metrics, static fn($metric): bool => is_array($metric)));
+    $preparedMetrics = array_map($normalizeMetric, $metricRows);
     $firstPageSize = 5;
     $continuationPageSize = 13;
     $remainingMetrics = $preparedMetrics;
@@ -217,18 +230,31 @@ if (empty($preparedPrincipalPages)) {
 
 $totalPages = max(1, count($preparedPrincipalPages));
 
-$teachersTotal = count($preparedMetrics);
-$belowCount = count(
-    array_filter($preparedMetrics, static fn(array $metric): bool => (int) ($metric['gap_to_threshold'] ?? 0) > 0),
-);
-$inTargetCount = $teachersTotal - $belowCount;
-$gapTotal = array_sum(
-    array_map(static fn(array $metric): int => (int) ($metric['gap_to_threshold'] ?? 0), $preparedMetrics),
-);
+$principalOverview = is_array($principal_overview ?? null) ? $principal_overview : [];
 
-$bookedDistinctFormatted = $summary['booked_distinct_total_formatted'] ?? ($summary['booked_total_formatted'] ?? '0');
-$targetTotalFormatted = $summary['target_total_formatted'] ?? '0';
-$fillRateValue = (float) ($summary['fill_rate'] ?? 0.0);
+$teachersTotal = isset($principalOverview['teachers_total'])
+    ? max(0, (int) $principalOverview['teachers_total'])
+    : count($preparedMetrics);
+$belowCount = isset($principalOverview['below_count'])
+    ? max(0, (int) $principalOverview['below_count'])
+    : count(
+        array_filter($preparedMetrics, static fn(array $metric): bool => (int) ($metric['gap_to_threshold'] ?? 0) > 0),
+    );
+$inTargetCount = isset($principalOverview['in_target_count'])
+    ? max(0, (int) $principalOverview['in_target_count'])
+    : max($teachersTotal - $belowCount, 0);
+$gapTotal = isset($principalOverview['gap_total'])
+    ? max(0, (int) $principalOverview['gap_total'])
+    : array_sum(array_map(static fn(array $metric): int => (int) ($metric['gap_to_threshold'] ?? 0), $preparedMetrics));
+
+$bookedDistinctFormatted =
+    (string) ($principalOverview['booked_distinct_formatted'] ??
+        ($summary['booked_distinct_total_formatted'] ?? ($summary['booked_total_formatted'] ?? '0')));
+$targetTotalFormatted =
+    (string) ($principalOverview['target_total_formatted'] ?? ($summary['target_total_formatted'] ?? '0'));
+$fillRateValue = isset($principalOverview['fill_rate_value'])
+    ? (float) $principalOverview['fill_rate_value']
+    : (float) ($summary['fill_rate'] ?? 0.0);
 $generatedAt = $generated_at_text ?? date('d.m.Y, H:i');
 
 $donutImageSize = 120;
@@ -244,19 +270,28 @@ $inTargetDonutImage = donut_image_data_url($progressInTarget, $donutImageSize, $
     'foreground' => '#16A34A',
 ]);
 
-$gapTotalFormatted = $formatNumber(max($gapTotal, 0));
+$gapTotalFormatted = (string) ($principalOverview['gap_total_formatted'] ?? $formatNumber(max($gapTotal, 0)));
 $inTargetLabel =
-    number_format($inTargetCount, 0, ',', '.') .
-    ' / ' .
-    number_format($teachersTotal, 0, ',', '.') .
-    ' Lehrkräfte über Ziel';
+    (string) ($principalOverview['in_target_label'] ??
+        number_format($inTargetCount, 0, ',', '.') .
+            ' / ' .
+            number_format($teachersTotal, 0, ',', '.') .
+            ' Lehrkräfte über Ziel');
 
-$needsAttentionMetrics = array_filter(
-    $preparedMetrics,
-    static fn(array $metric): bool => (int) ($metric['gap_to_threshold'] ?? 0) > 0,
-);
-$topAttention = array_slice($needsAttentionMetrics, 0, 5);
-$capacityGapLabel = lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke';
+if (isset($principalOverview['top_attention']) && is_array($principalOverview['top_attention'])) {
+    $topAttention = array_values(
+        array_filter($principalOverview['top_attention'], static fn($metric): bool => is_array($metric)),
+    );
+} else {
+    $needsAttentionMetrics = array_filter(
+        $preparedMetrics,
+        static fn(array $metric): bool => (int) ($metric['gap_to_threshold'] ?? 0) > 0,
+    );
+    $topAttention = array_slice($needsAttentionMetrics, 0, 5);
+}
+
+$capacityGapLabel =
+    (string) ($principalOverview['capacity_gap_label'] ?? (lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke'));
 ?>
 <?php foreach ($preparedPrincipalPages as $pageIndex => $pageMetrics):
 
