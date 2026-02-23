@@ -3,6 +3,9 @@
 namespace Tests\Unit\Controllers;
 
 use Dashboard_export;
+use DateTimeImmutable;
+use DateTimeZone;
+use IntlDateFormatter;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -205,6 +208,49 @@ class DashboardExportControllerTest extends TestCase
         $this->assertCount(2, $overview['top_attention']);
         $this->assertSame('Teacher A', $overview['top_attention'][0]['provider_name']);
         $this->assertSame('Kapazitätslücke', $overview['capacity_gap_label']);
+    }
+
+    public function testFormatDateCachesWeekdayFormatterPerLocaleAndTimezone(): void
+    {
+        if (!class_exists(IntlDateFormatter::class)) {
+            $this->markTestSkipped('IntlDateFormatter is not available in this environment.');
+        }
+
+        $controller = new class extends Dashboard_export {
+            public int $formatterFactoryCalls = 0;
+
+            public function __construct()
+            {
+            }
+
+            public function callFormatDate(DateTimeImmutable $date): string
+            {
+                return $this->formatDate($date);
+            }
+
+            protected function resolveLocale(): ?string
+            {
+                return 'de-DE';
+            }
+
+            protected function createWeekdayFormatter(string $locale, string $timezone): ?IntlDateFormatter
+            {
+                $this->formatterFactoryCalls++;
+
+                return null;
+            }
+        };
+
+        $berlinDate = new DateTimeImmutable('2026-02-20 10:00:00', new DateTimeZone('Europe/Berlin'));
+        $secondBerlinDate = new DateTimeImmutable('2026-02-21 10:00:00', new DateTimeZone('Europe/Berlin'));
+        $utcDate = new DateTimeImmutable('2026-02-22 10:00:00', new DateTimeZone('UTC'));
+
+        $controller->callFormatDate($berlinDate);
+        $controller->callFormatDate($secondBerlinDate);
+        $this->assertSame(1, $controller->formatterFactoryCalls);
+
+        $controller->callFormatDate($utcDate);
+        $this->assertSame(2, $controller->formatterFactoryCalls);
     }
 
     public function testBuildPdfStreamOptionsDisablesDebugDumpByDefault(): void

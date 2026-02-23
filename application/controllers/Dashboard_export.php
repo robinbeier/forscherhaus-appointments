@@ -39,6 +39,15 @@ class Dashboard_export extends EA_Controller
     protected Appointments_model $appointmentsModel;
 
     /**
+     * @var array<string, IntlDateFormatter|false>
+     */
+    protected array $weekdayFormatterCache = [];
+
+    protected bool $localeResolved = false;
+
+    protected ?string $cachedLocale = null;
+
+    /**
      * Dashboard_export constructor.
      */
     public function __construct()
@@ -832,10 +841,17 @@ class Dashboard_export extends EA_Controller
      */
     protected function resolveLocale(): ?string
     {
+        if ($this->localeResolved) {
+            return $this->cachedLocale;
+        }
+
         try {
             $language = (string) setting('language');
         } catch (Throwable $exception) {
             log_message('debug', 'Falling back to default locale for exports: ' . $exception->getMessage());
+
+            $this->localeResolved = true;
+            $this->cachedLocale = null;
 
             return null;
         }
@@ -843,6 +859,9 @@ class Dashboard_export extends EA_Controller
         $normalized = strtolower(str_replace(['_', ' '], ['-', '-'], trim($language)));
 
         if ($normalized === '') {
+            $this->localeResolved = true;
+            $this->cachedLocale = null;
+
             return null;
         }
 
@@ -874,7 +893,10 @@ class Dashboard_export extends EA_Controller
         ];
 
         if (array_key_exists($normalized, $localeMap)) {
-            return $localeMap[$normalized];
+            $this->localeResolved = true;
+            $this->cachedLocale = $localeMap[$normalized];
+
+            return $this->cachedLocale;
         }
 
         if (preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $normalized) === 1) {
@@ -885,10 +907,50 @@ class Dashboard_export extends EA_Controller
                 $parts[1] = strtoupper($parts[1]);
             }
 
-            return implode('-', $parts);
+            $this->localeResolved = true;
+            $this->cachedLocale = implode('-', $parts);
+
+            return $this->cachedLocale;
         }
 
+        $this->localeResolved = true;
+        $this->cachedLocale = null;
+
         return null;
+    }
+
+    /**
+     * Resolve a cached weekday formatter for the provided locale/timezone pair.
+     */
+    protected function getWeekdayFormatter(string $locale, DateTimeZone $timezone): ?IntlDateFormatter
+    {
+        $cache_key = $locale . '|' . $timezone->getName();
+
+        if (!array_key_exists($cache_key, $this->weekdayFormatterCache)) {
+            $formatter = $this->createWeekdayFormatter($locale, $timezone->getName());
+            $this->weekdayFormatterCache[$cache_key] = $formatter ?? false;
+        }
+
+        $cached_formatter = $this->weekdayFormatterCache[$cache_key];
+
+        return $cached_formatter instanceof IntlDateFormatter ? $cached_formatter : null;
+    }
+
+    /**
+     * Create a weekday formatter instance for localized day-name rendering.
+     */
+    protected function createWeekdayFormatter(string $locale, string $timezone): ?IntlDateFormatter
+    {
+        $formatter = IntlDateFormatter::create(
+            $locale,
+            IntlDateFormatter::NONE,
+            IntlDateFormatter::NONE,
+            $timezone,
+            IntlDateFormatter::GREGORIAN,
+            'EEE',
+        );
+
+        return $formatter instanceof IntlDateFormatter ? $formatter : null;
     }
 
     /**
@@ -925,14 +987,11 @@ class Dashboard_export extends EA_Controller
         }
 
         $timezone = $date->getTimezone() ?: new DateTimeZone(date_default_timezone_get());
-        $formatter = new \IntlDateFormatter(
-            $locale,
-            \IntlDateFormatter::NONE,
-            \IntlDateFormatter::NONE,
-            $timezone->getName(),
-            \IntlDateFormatter::GREGORIAN,
-            'EEE',
-        );
+        $formatter = $this->getWeekdayFormatter($locale, $timezone);
+
+        if ($formatter === null) {
+            return $formattedDate;
+        }
 
         $dayName = $formatter->format($date);
 
