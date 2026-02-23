@@ -60,6 +60,13 @@ docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 
+Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
+
+-   setzt `git config core.fileMode false` und `chmod -R 777 storage`
+-   erstellt `config.php` via `cp config-sample.php config.php`, falls fehlend
+-   installiert Abhaengigkeiten bei Bedarf: `composer install`, `npm install`
+-   baut Assets, falls `assets/vendor` fehlt: `npx gulp compile`
+
 Warnung (Worktrees): Nutze pro Worktree einen eindeutigen Compose-Projektnamen, damit sich Container/Volumes nicht ueberlagern.
 Beispiel: `docker compose -p fh-main up -d` im Haupt-Worktree und `docker compose -p fh-hotfix up -d` in einem zweiten Worktree.
 So vermeidest du gemischte Stacks (z. B. `nginx` aus Worktree A, `php-fpm`/`mysql` aus Worktree B).
@@ -87,6 +94,24 @@ gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T my
 
 # Migrationen ausfuehren
 docker compose exec -T php-fpm php index.php console migrate
+```
+
+Optional: Sicherungs-Backup vor dem Reset.
+
+```bash
+backup_tgz="/tmp/forscherhaus-mysql-$(date +%Y%m%d-%H%M%S).tgz"
+tar -czf "$backup_tgz" -C docker mysql
+```
+
+Optional: Import verifizieren.
+
+```bash
+docker compose exec -T mysql mysql -uroot -psecret -e "
+USE easyappointments;
+SELECT version FROM ea_migrations;
+SHOW COLUMNS FROM ea_users LIKE 'class_size_default';
+SELECT name, value FROM ea_settings WHERE name='dashboard_conflict_threshold';
+"
 ```
 
 ## Console-CLI (Wartung/Setup)
