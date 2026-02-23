@@ -13,8 +13,6 @@
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
-use RuntimeException;
-use Throwable;
 
 /**
  * PDF renderer library.
