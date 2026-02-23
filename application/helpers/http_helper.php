@@ -139,7 +139,24 @@ if (!function_exists('json_exception')) {
             'trace' => trace($e),
         ];
 
-        log_message('error', 'JSON exception: ' . json_encode($response));
+        $encoded_response = json_encode($response, JSON_PARTIAL_OUTPUT_ON_ERROR);
+
+        if (is_string($encoded_response)) {
+            log_message('error', 'JSON exception: ' . $encoded_response);
+        } else {
+            $safe_message = str_replace(["\r", "\n"], ' ', (string) $response['message']);
+            $safe_trace = str_replace(["\r", "\n"], ' ', (string) $response['trace']);
+
+            log_message(
+                'error',
+                'JSON exception fallback: class=' .
+                    get_class($e) .
+                    ' message=' .
+                    substr($safe_message, 0, 512) .
+                    ' trace=' .
+                    substr($safe_trace, 0, 1024),
+            );
+        }
 
         unset($response['trace']); // Do not send the trace to the browser as it might contain sensitive info
 
@@ -184,18 +201,134 @@ if (!function_exists('trace')) {
      */
     function trace(Throwable $e): string
     {
-        $trace = $e->getTrace();
+        $max_frames = 25;
+        $max_args_per_frame = 5;
+        $max_trace_length = 16000;
+        $raw_trace = $e->getTrace();
+        $frames = [];
 
-        $filtered_trace = array_map(function ($entry) {
-            return array_filter(
-                $entry,
-                function ($key) {
-                    return $key !== 'object'; // Exclude object data
-                },
-                ARRAY_FILTER_USE_KEY,
-            );
-        }, $trace);
+        $summarize_arg = static function (mixed $arg): array {
+            if (is_array($arg)) {
+                return [
+                    'type' => 'array',
+                    'count' => count($arg),
+                    'sample_keys' => array_slice(
+                        array_map(
+                            static fn($key): string => is_int($key) ? (string) $key : (string) $key,
+                            array_keys($arg),
+                        ),
+                        0,
+                        3,
+                    ),
+                ];
+            }
 
-        return var_export($filtered_trace, true);
+            if (is_object($arg)) {
+                return [
+                    'type' => 'object',
+                    'class' => get_class($arg),
+                ];
+            }
+
+            if (is_string($arg)) {
+                return [
+                    'type' => 'string',
+                    'length' => strlen($arg),
+                ];
+            }
+
+            if (is_int($arg)) {
+                return ['type' => 'int'];
+            }
+
+            if (is_float($arg)) {
+                return ['type' => 'float'];
+            }
+
+            if (is_bool($arg)) {
+                return ['type' => 'bool'];
+            }
+
+            if ($arg === null) {
+                return ['type' => 'null'];
+            }
+
+            if (is_resource($arg)) {
+                return ['type' => 'resource'];
+            }
+
+            return ['type' => gettype($arg)];
+        };
+
+        foreach (array_slice($raw_trace, 0, $max_frames) as $entry) {
+            $frame = [
+                'file' => array_key_exists('file', $entry) ? (string) $entry['file'] : null,
+                'line' => array_key_exists('line', $entry) ? (int) $entry['line'] : null,
+                'class' => array_key_exists('class', $entry) ? (string) $entry['class'] : null,
+                'type' => array_key_exists('type', $entry) ? (string) $entry['type'] : null,
+                'function' => array_key_exists('function', $entry) ? (string) $entry['function'] : null,
+                'arg_count' => 0,
+                'args' => [],
+                'args_truncated' => false,
+            ];
+
+            if (!empty($entry['args']) && is_array($entry['args'])) {
+                $frame['arg_count'] = count($entry['args']);
+                $frame['args'] = array_map($summarize_arg, array_slice($entry['args'], 0, $max_args_per_frame));
+                $frame['args_truncated'] = $frame['arg_count'] > $max_args_per_frame;
+            }
+
+            $frames[] = $frame;
+        }
+
+        $trace_summary = [
+            'exception_class' => get_class($e),
+            'exception_code' => (string) $e->getCode(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'frame_count' => count($raw_trace),
+            'frames' => $frames,
+            'truncated' => count($raw_trace) > $max_frames,
+        ];
+
+        $encode_trace = static function (array $payload): string|false {
+            return json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        };
+
+        $encoded_trace = $encode_trace($trace_summary);
+
+        if (!is_string($encoded_trace)) {
+            return sprintf('trace_unavailable:%s@%s:%d', get_class($e), $e->getFile(), $e->getLine());
+        }
+
+        if (strlen($encoded_trace) > $max_trace_length) {
+            $trace_summary['size_truncated'] = true;
+
+            while (!empty($trace_summary['frames'])) {
+                array_pop($trace_summary['frames']);
+                $encoded_trace = $encode_trace($trace_summary);
+
+                if (is_string($encoded_trace) && strlen($encoded_trace) <= $max_trace_length) {
+                    return $encoded_trace;
+                }
+            }
+
+            $encoded_trace = $encode_trace([
+                'exception_class' => get_class($e),
+                'exception_code' => (string) $e->getCode(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'frame_count' => count($raw_trace),
+                'frames' => [],
+                'truncated' => true,
+                'size_truncated' => true,
+            ]);
+
+            if (!is_string($encoded_trace)) {
+                return sprintf('trace_unavailable:%s@%s:%d', get_class($e), $e->getFile(), $e->getLine());
+            }
+        }
+
+        return $encoded_trace;
     }
 }
