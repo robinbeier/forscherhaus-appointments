@@ -39,7 +39,7 @@ State:
 -   Contract file exists and is the canonical session briefing for this work.
 -   Release-gate MVP implementation is complete and validated in CI-parity Docker tests.
 -   Full pass-path gate replay is blocked only by missing confirmed admin gate credentials.
--   Packaging for review is in progress on a new `codex/*` branch with a commit pending.
+-   Review packaging is complete on branch `codex/dashboard-release-gate-mvp` (commit `3d3a381fb12823dd109d53b96a49e236e53b1f9f`).
 
 Done:
 
@@ -76,11 +76,15 @@ Done:
 -   Decision-complete MVP scope drafted and accepted.
 -   Received explicit request to create a review branch and commit current MVP changes before credentials follow-up.
 -   Resolved pre-commit conflict for `/Users/robinbeier/Documents/forscherhaus-appointments/scripts/release-gate/dashboard_release_gate.php` (Prettier trailing newline vs `git diff --check`) by adding an explicit ignore entry in `/Users/robinbeier/Documents/forscherhaus-appointments/.prettierignore`.
+-   Created review branch and committed MVP artifacts:
+    -   Branch: `codex/dashboard-release-gate-mvp`
+    -   Commit: `3d3a381fb12823dd109d53b96a49e236e53b1f9f`
+    -   Pre-commit checks passed (Prettier, php -l, Docker PHPUnit).
 
 Now:
 
--   Create a new review branch with `codex/` prefix.
--   Commit all MVP gate artifacts for code review.
+-   Share branch + commit for code review.
+-   Prepare credential-backed full gate run once admin credentials are provided.
 
 Next:
 
