@@ -34,6 +34,18 @@ php index.php console migrate fresh
 
 This command will reset any change made by the previous migrations and start from the beginning. 
 
+```
+php index.php console migrate up
+```
+
+This command will apply the next migration step.
+
+```
+php index.php console migrate down
+```
+
+This command will roll back the latest migration step.
+
 ##### Seed
 
 ```
