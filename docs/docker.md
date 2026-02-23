@@ -4,6 +4,19 @@ Run the development containers of Easy!Appointments with Docker and Docker Compo
 
 Simply clone the project and run `docker compose up` to start the environment.
 
+If you work with multiple git worktrees of the same repository, use a unique
+Compose project name per worktree to avoid mixed stacks.
+
+Examples:
+
+```bash
+docker compose -p fh-main up -d
+docker compose -p fh-hotfix up -d
+```
+
+Without a unique project name, services can accidentally mix mounts across
+worktrees (for example `nginx` from one path and `php-fpm`/`mysql` from another).
+
 You will need modify the root `config.php` so that it matches the following example:
 
 ```php 
