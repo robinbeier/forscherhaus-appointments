@@ -304,7 +304,57 @@ class Customers_model extends EA_Model
      */
     public function delete(int $customer_id): void
     {
-        $this->db->delete('users', ['id' => $customer_id]);
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start customer delete transaction.');
+        }
+
+        try {
+            $appointment_rows = $this->db
+                ->select('id')
+                ->from('appointments')
+                ->where('id_users_customer', $customer_id)
+                ->where('is_unavailability', false)
+                ->get()
+                ->result_array();
+
+            $appointment_ids = array_values(
+                array_filter(
+                    array_map(static fn(array $appointment): int => (int) ($appointment['id'] ?? 0), $appointment_rows),
+                    static fn(int $appointment_id): bool => $appointment_id > 0,
+                ),
+            );
+
+            $this->delete_buffer_blocks_for_parent_appointments($appointment_ids);
+
+            $this->db->delete('users', ['id' => $customer_id]);
+
+            if (!$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit customer delete transaction.');
+            }
+        } catch (Throwable $exception) {
+            $this->db->trans_rollback();
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * Delete generated buffer blocks for the provided appointment IDs.
+     *
+     * @param array<int> $appointment_ids Parent appointment IDs.
+     */
+    protected function delete_buffer_blocks_for_parent_appointments(array $appointment_ids): void
+    {
+        if (empty($appointment_ids)) {
+            return;
+        }
+
+        foreach (array_chunk($appointment_ids, 500) as $appointment_id_chunk) {
+            $this->db
+                ->where('is_unavailability', true)
+                ->where_in('id_parent_appointment', $appointment_id_chunk)
+                ->delete('appointments');
+        }
     }
 
     /**
