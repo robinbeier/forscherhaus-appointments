@@ -132,6 +132,7 @@ php index.php console sync
 
 -   Fokus bis zum Deployment: Stabilitaet und ggf. Performance-Verbesserungen mit geringem Risiko.
 -   Keine Major-Dependency-Upgrades in dieser Phase; diese werden in die naechste Entwicklungsphase verschoben.
+-   Fuer Dependency-Sweeps vor dem geplanten Upstream-Merge (`easyappointments` 1.6.0): den `roave/security-advisories`-Konflikt nicht isoliert aufloesen; stattdessen nur produktionsrelevante Security-Hotfixes (z. B. `firebase/php-jwt`) umsetzen und `roave` erst nach dem Upstream-Merge neu bewerten.
 -   Nach Deployment ist ein Zeitfenster von ca. 6 Monaten bis zum naechsten Major-Update vorgesehen; dort werden Major-Upgrades geplant, getestet und gebuendelt umgesetzt.
 -   `phpmailer/phpmailer` hat aktuell die niedrigste Prioritaet:
     In Produktion werden keine E-Mails versendet, und in der Entwicklung fehlen derzeit die benoetigten E-Mail-Testfaehigkeiten. Entsprechende Upgrades erst in der naechsten Major-Phase bewerten.
