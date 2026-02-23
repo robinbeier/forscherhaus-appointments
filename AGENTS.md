@@ -60,6 +60,31 @@ docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 
+## Lokaler DB-Dump Restore (Docker)
+
+Warnung: Der Reset von `docker/mysql` loescht lokale DB-Daten.
+
+```bash
+# Stack stoppen
+docker compose down
+
+# Lokale MySQL-Daten zuruecksetzen (destruktiv)
+mkdir -p docker/mysql
+find docker/mysql -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+# Services starten
+docker compose up -d mysql php-fpm nginx
+
+# Warten bis MySQL bereit ist
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+
+# Dump importieren
+gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
+
+# Migrationen ausfuehren
+docker compose exec -T php-fpm php index.php console migrate
+```
+
 ## Console-CLI (Wartung/Setup)
 
 ```bash
