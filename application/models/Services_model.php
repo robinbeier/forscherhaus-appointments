@@ -268,22 +268,7 @@ class Services_model extends EA_Model
         }
 
         try {
-            $appointment_rows = $this->db
-                ->select('id')
-                ->from('appointments')
-                ->where('id_services', $service_id)
-                ->where('is_unavailability', false)
-                ->get()
-                ->result_array();
-
-            $appointment_ids = array_values(
-                array_filter(
-                    array_map(static fn(array $appointment): int => (int) ($appointment['id'] ?? 0), $appointment_rows),
-                    static fn(int $appointment_id): bool => $appointment_id > 0,
-                ),
-            );
-
-            $this->delete_buffer_blocks_for_parent_appointments($appointment_ids);
+            $this->delete_buffer_blocks_for_service($service_id);
 
             $this->db->delete('services', ['id' => $service_id]);
 
@@ -298,22 +283,30 @@ class Services_model extends EA_Model
     }
 
     /**
-     * Delete generated buffer blocks for the provided appointment IDs.
-     *
-     * @param array<int> $appointment_ids Parent appointment IDs.
+     * Delete generated buffer blocks whose parent appointments belong to a service.
      */
-    protected function delete_buffer_blocks_for_parent_appointments(array $appointment_ids): void
+    protected function delete_buffer_blocks_for_service(int $service_id): void
     {
-        if (empty($appointment_ids)) {
+        if ($service_id <= 0) {
             return;
         }
 
-        foreach (array_chunk($appointment_ids, 500) as $appointment_id_chunk) {
-            $this->db
-                ->where('is_unavailability', true)
-                ->where_in('id_parent_appointment', $appointment_id_chunk)
-                ->delete('appointments');
-        }
+        $appointments_table = $this->db->dbprefix('appointments');
+
+        $this->db->query(
+            'DELETE `buffer_blocks`
+            FROM `' .
+                $appointments_table .
+                '` AS `buffer_blocks`
+            INNER JOIN `' .
+                $appointments_table .
+                '` AS `parent_appointments`
+                ON `parent_appointments`.`id` = `buffer_blocks`.`id_parent_appointment`
+            WHERE `buffer_blocks`.`is_unavailability` = 1
+                AND `parent_appointments`.`is_unavailability` = 0
+                AND `parent_appointments`.`id_services` = ?',
+            [$service_id],
+        );
     }
 
     /**
