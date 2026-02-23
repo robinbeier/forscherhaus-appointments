@@ -84,6 +84,49 @@ class HttpHelperTest extends TestCase
         $this->assertArrayNotHasKey('value', $frame_with_args['args'][0]);
     }
 
+    public function testTraceSamplesOnlyFirstThreeArrayKeys(): void
+    {
+        if ((string) ini_get('zend.exception_ignore_args') === '1') {
+            $this->markTestSkipped('Runtime is configured to ignore exception args.');
+        }
+
+        $exception = $this->captureException(
+            [
+                'first' => 'value-1',
+                'second' => 'value-2',
+                'third' => 'value-3',
+                'fourth' => 'value-4',
+            ],
+            'sensitive-payload',
+        );
+        $decoded = json_decode(trace($exception), true);
+
+        $this->assertIsArray($decoded);
+
+        $sampled_array_arg = null;
+
+        foreach ($decoded['frames'] as $frame) {
+            foreach ($frame['args'] ?? [] as $arg_summary) {
+                if (($arg_summary['type'] ?? null) !== 'array') {
+                    continue;
+                }
+
+                if (($arg_summary['count'] ?? 0) !== 4) {
+                    continue;
+                }
+
+                $sampled_array_arg = $arg_summary;
+                break 2;
+            }
+        }
+
+        if ($sampled_array_arg === null) {
+            $this->markTestSkipped('No matching array arguments captured by runtime.');
+        }
+
+        $this->assertSame(['first', 'second', 'third'], $sampled_array_arg['sample_keys'] ?? []);
+    }
+
     public function testTraceRemainsValidJsonWhenSizeLimited(): void
     {
         $exception = $this->captureOversizedTraceException(40);

@@ -209,17 +209,22 @@ if (!function_exists('trace')) {
 
         $summarize_arg = static function (mixed $arg): array {
             if (is_array($arg)) {
+                $sample_keys = [];
+                $sampled_keys = 0;
+
+                foreach ($arg as $key => $_unused) {
+                    $sample_keys[] = (string) $key;
+                    $sampled_keys++;
+
+                    if ($sampled_keys >= 3) {
+                        break;
+                    }
+                }
+
                 return [
                     'type' => 'array',
                     'count' => count($arg),
-                    'sample_keys' => array_slice(
-                        array_map(
-                            static fn($key): string => is_int($key) ? (string) $key : (string) $key,
-                            array_keys($arg),
-                        ),
-                        0,
-                        3,
-                    ),
+                    'sample_keys' => $sample_keys,
                 ];
             }
 
