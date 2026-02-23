@@ -165,6 +165,48 @@ class DashboardExportControllerTest extends TestCase
         $this->assertCount(2, $pages[2]);
     }
 
+    public function testBuildPrincipalOverviewPrecomputesCountersAndTopAttention(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $metrics = [
+            [
+                'provider_name' => 'Teacher A',
+                'gap_to_threshold' => 4,
+                'has_capacity_gap' => true,
+            ],
+            [
+                'provider_name' => 'Teacher B',
+                'gap_to_threshold' => 0,
+                'has_capacity_gap' => false,
+            ],
+            [
+                'provider_name' => 'Teacher C',
+                'gap_to_threshold' => 1,
+                'has_capacity_gap' => true,
+            ],
+        ];
+        $summary = [
+            'booked_distinct_total_formatted' => '10',
+            'target_total_formatted' => '24',
+            'fill_rate' => 0.42,
+        ];
+
+        $overview = $controller->callBuildPrincipalOverview($metrics, $summary);
+
+        $this->assertSame(3, $overview['teachers_total']);
+        $this->assertSame(2, $overview['below_count']);
+        $this->assertSame(1, $overview['in_target_count']);
+        $this->assertSame(5, $overview['gap_total']);
+        $this->assertSame('5', $overview['gap_total_formatted']);
+        $this->assertSame('1 / 3 Lehrkräfte über Ziel', $overview['in_target_label']);
+        $this->assertSame('10', $overview['booked_distinct_formatted']);
+        $this->assertSame('24', $overview['target_total_formatted']);
+        $this->assertSame(0.42, $overview['fill_rate_value']);
+        $this->assertCount(2, $overview['top_attention']);
+        $this->assertSame('Teacher A', $overview['top_attention'][0]['provider_name']);
+        $this->assertSame('Kapazitätslücke', $overview['capacity_gap_label']);
+    }
+
     public function testBuildPdfStreamOptionsDisablesDebugDumpByDefault(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -225,6 +267,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildPdfStreamOptions(string $debugDumpPath): array
             {
                 return $this->buildPdfStreamOptions($debugDumpPath);
+            }
+
+            public function callBuildPrincipalOverview(array $metrics, array $summary): array
+            {
+                return $this->buildPrincipalOverview($metrics, $summary);
             }
 
             protected function getConfiguredThreshold(): float

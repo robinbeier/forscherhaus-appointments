@@ -103,6 +103,7 @@ class Dashboard_export extends EA_Controller
                 'summary' => $summary,
                 'metrics' => $sortedPrincipalMetrics,
                 'principal_pages' => $this->buildPrincipalPages($sortedPrincipalMetrics),
+                'principal_overview' => $this->buildPrincipalOverview($sortedPrincipalMetrics, $summary),
             ];
 
             $this->pdfRenderer->stream_view(
@@ -673,6 +674,59 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
+     * Build principal-report overview counters and preformatted labels.
+     *
+     * @param array $metrics
+     * @param array $summary
+     *
+     * @return array
+     */
+    protected function buildPrincipalOverview(array $metrics, array $summary): array
+    {
+        $teachers_total = count($metrics);
+        $below_count = 0;
+        $gap_total = 0;
+        $top_attention = [];
+
+        foreach ($metrics as $metric) {
+            $gap = max(0, (int) ($metric['gap_to_threshold'] ?? 0));
+
+            if ($gap <= 0) {
+                continue;
+            }
+
+            $below_count++;
+            $gap_total += $gap;
+
+            if (count($top_attention) < 5) {
+                $top_attention[] = $metric;
+            }
+        }
+
+        $in_target_count = max($teachers_total - $below_count, 0);
+
+        return [
+            'teachers_total' => $teachers_total,
+            'below_count' => $below_count,
+            'in_target_count' => $in_target_count,
+            'gap_total' => $gap_total,
+            'gap_total_formatted' => $this->formatNumber($gap_total),
+            'in_target_label' => sprintf(
+                '%s / %s Lehrkräfte über Ziel',
+                $this->formatNumber($in_target_count),
+                $this->formatNumber($teachers_total),
+            ),
+            'top_attention' => $top_attention,
+            'capacity_gap_label' => $this->resolveCapacityGapLabel(),
+            'booked_distinct_formatted' =>
+                (string) ($summary['booked_distinct_total_formatted'] ??
+                    ($summary['booked_total_formatted'] ?? $this->formatNumber(0))),
+            'target_total_formatted' => (string) ($summary['target_total_formatted'] ?? $this->formatNumber(0)),
+            'fill_rate_value' => (float) ($summary['fill_rate'] ?? 0.0),
+        ];
+    }
+
+    /**
      * Resolve the label for the selected service filter.
      *
      * @param int|null $service_id
@@ -719,6 +773,22 @@ class Dashboard_export extends EA_Controller
         }, $statuses);
 
         return implode(', ', $labels);
+    }
+
+    /**
+     * Resolve the localized capacity-gap badge label.
+     *
+     * @return string
+     */
+    protected function resolveCapacityGapLabel(): string
+    {
+        $label = lang('dashboard_slots_gap_badge');
+
+        if ($label) {
+            return (string) $label;
+        }
+
+        return 'Kapazitätslücke';
     }
 
     /**
