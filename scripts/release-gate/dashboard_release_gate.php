@@ -215,7 +215,7 @@ try {
         ];
     });
 } catch (GateAssertionException $e) {
-    $exitCode = RELEASE_GATE_EXIT_ASSERTION_FAILURE;
+    $exitCode = classifyAssertionExitCode($checks);
     $failure = [
         'message' => $e->getMessage(),
         'exception' => get_class($e),
@@ -461,6 +461,38 @@ function buildFilterPayload(array $config): array
 function buildFilterQuery(array $config): array
 {
     return buildFilterPayload($config);
+}
+
+/**
+ * Map assertion failures to either behavioral regression (1) or runtime/config (2).
+ *
+ * @param array<int, array<string, mixed>> $checks
+ */
+function classifyAssertionExitCode(array $checks): int
+{
+    $lastCheck = end($checks);
+
+    if (!is_array($lastCheck) || !isset($lastCheck['name'])) {
+        return RELEASE_GATE_EXIT_ASSERTION_FAILURE;
+    }
+
+    $checkName = (string) $lastCheck['name'];
+    if (isRuntimePreflightCheck($checkName)) {
+        return RELEASE_GATE_EXIT_RUNTIME_ERROR;
+    }
+
+    return RELEASE_GATE_EXIT_ASSERTION_FAILURE;
+}
+
+function isRuntimePreflightCheck(string $checkName): bool
+{
+    $runtimeChecks = [
+        'readiness_login_page',
+        'readiness_pdf_health',
+        'auth_login_validate',
+    ];
+
+    return in_array($checkName, $runtimeChecks, true);
 }
 
 /**
