@@ -476,12 +476,26 @@ function classifyAssertionExitCode(array $checks): int
         return RELEASE_GATE_EXIT_ASSERTION_FAILURE;
     }
 
+    if (isHttpStatusAssertionFailure($lastCheck)) {
+        return RELEASE_GATE_EXIT_RUNTIME_ERROR;
+    }
+
     $checkName = (string) $lastCheck['name'];
     if (isRuntimePreflightCheck($checkName)) {
         return RELEASE_GATE_EXIT_RUNTIME_ERROR;
     }
 
     return RELEASE_GATE_EXIT_ASSERTION_FAILURE;
+}
+
+/**
+ * @param array<string, mixed> $check
+ */
+function isHttpStatusAssertionFailure(array $check): bool
+{
+    $error = (string) ($check['error'] ?? '');
+
+    return preg_match('/expected HTTP .* got \d+\./i', $error) === 1;
 }
 
 function isRuntimePreflightCheck(string $checkName): bool
@@ -696,6 +710,7 @@ function resolveCsrfNamesFromConfig(string $configPath): array
         'csrf_token_name' => 'csrf_token',
         'csrf_cookie_name' => 'csrf_cookie',
     ];
+    $cookiePrefix = '';
 
     if (!is_file($configPath) || !is_readable($configPath)) {
         return $defaults;
@@ -706,7 +721,9 @@ function resolveCsrfNamesFromConfig(string $configPath): array
         return $defaults;
     }
 
-    foreach (array_keys($defaults) as $key) {
+    $lookupKeys = array_merge(array_keys($defaults), ['cookie_prefix']);
+
+    foreach ($lookupKeys as $key) {
         $pattern = '/^\s*\$config\[\'' . preg_quote($key, '/') . '\'\]\s*=\s*([\'"])(.*?)\1\s*;/m';
         if (preg_match($pattern, $configContent, $matches) !== 1) {
             continue;
@@ -717,7 +734,16 @@ function resolveCsrfNamesFromConfig(string $configPath): array
             continue;
         }
 
+        if ($key === 'cookie_prefix') {
+            $cookiePrefix = $resolvedValue;
+            continue;
+        }
+
         $defaults[$key] = $resolvedValue;
+    }
+
+    if ($cookiePrefix !== '') {
+        $defaults['csrf_cookie_name'] = $cookiePrefix . $defaults['csrf_cookie_name'];
     }
 
     return $defaults;
