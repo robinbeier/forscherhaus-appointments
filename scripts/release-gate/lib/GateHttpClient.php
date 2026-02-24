@@ -77,7 +77,7 @@ final class GateHttpClient
 
     public function getAbsolute(string $url, ?int $timeoutSeconds = null): GateHttpResponse
     {
-        return $this->request('GET', $url, null, $timeoutSeconds ?? $this->defaultTimeoutSeconds);
+        return $this->request('GET', $url, null, $timeoutSeconds ?? $this->defaultTimeoutSeconds, false, false);
     }
 
     public function getCookie(string $name): ?string
@@ -88,8 +88,14 @@ final class GateHttpClient
     /**
      * @param array<string, mixed>|null $form
      */
-    private function request(string $method, string $url, ?array $form, int $timeoutSeconds): GateHttpResponse
-    {
+    private function request(
+        string $method,
+        string $url,
+        ?array $form,
+        int $timeoutSeconds,
+        bool $useCookieJar = true,
+        bool $consumeResponseCookies = true,
+    ): GateHttpResponse {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('ext-curl is required for the release gate.');
         }
@@ -103,7 +109,7 @@ final class GateHttpClient
         $headers = [];
         $setCookies = [];
 
-        $headerFn = function ($ch, string $headerLine) use (&$headers, &$setCookies): int {
+        $headerFn = function ($ch, string $headerLine) use (&$headers, &$setCookies, $consumeResponseCookies): int {
             $trimmed = trim($headerLine);
 
             if ($trimmed === '') {
@@ -128,7 +134,7 @@ final class GateHttpClient
             $headers[$name] ??= [];
             $headers[$name][] = $value;
 
-            if ($name === 'set-cookie') {
+            if ($consumeResponseCookies && $name === 'set-cookie') {
                 $setCookies[] = $value;
             }
 
@@ -137,9 +143,11 @@ final class GateHttpClient
 
         $requestHeaders = ['Accept: */*'];
 
-        $cookieHeader = $this->buildCookieHeader();
-        if ($cookieHeader !== null) {
-            $requestHeaders[] = 'Cookie: ' . $cookieHeader;
+        if ($useCookieJar) {
+            $cookieHeader = $this->buildCookieHeader();
+            if ($cookieHeader !== null) {
+                $requestHeaders[] = 'Cookie: ' . $cookieHeader;
+            }
         }
 
         $timeoutSeconds = max(1, $timeoutSeconds);
@@ -175,7 +183,9 @@ final class GateHttpClient
         $statusCode = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
         $effectiveUrl = (string) curl_getinfo($curl, CURLINFO_EFFECTIVE_URL);
 
-        $this->consumeSetCookies($setCookies);
+        if ($consumeResponseCookies) {
+            $this->consumeSetCookies($setCookies);
+        }
 
         return new GateHttpResponse(
             $statusCode,
