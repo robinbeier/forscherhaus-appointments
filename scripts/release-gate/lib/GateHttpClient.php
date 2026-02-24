@@ -44,6 +44,8 @@ final class GateHttpClient
         private readonly string $indexPage = 'index.php',
         private readonly int $defaultTimeoutSeconds = 15,
         private readonly string $userAgent = 'dashboard-release-gate/1.0',
+        private readonly string $csrfCookieName = 'csrf_cookie',
+        private readonly string $csrfTokenName = 'csrf_token',
     ) {
     }
 
@@ -60,14 +62,16 @@ final class GateHttpClient
         ?int $timeoutSeconds = null,
         bool $withCsrfToken = true,
     ): GateHttpResponse {
-        if ($withCsrfToken && !array_key_exists('csrf_token', $form)) {
-            $csrfToken = $this->getCookie('csrf_cookie');
+        if ($withCsrfToken && !array_key_exists($this->csrfTokenName, $form)) {
+            $csrfToken = $this->getCookie($this->csrfCookieName);
 
             if ($csrfToken === null || $csrfToken === '') {
-                throw new RuntimeException('Missing csrf_cookie before POST request to "' . $path . '".');
+                throw new RuntimeException(
+                    'Missing ' . $this->csrfCookieName . ' before POST request to "' . $path . '".',
+                );
             }
 
-            $form['csrf_token'] = $csrfToken;
+            $form[$this->csrfTokenName] = $csrfToken;
         }
 
         $url = $this->buildAppUrl($path);

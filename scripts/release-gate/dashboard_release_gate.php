@@ -21,16 +21,24 @@ $exitCode = RELEASE_GATE_EXIT_SUCCESS;
 
 $repoRoot = dirname(__DIR__, 2);
 $defaultOutputPath = $repoRoot . '/storage/logs/release-gate/dashboard-gate-' . gmdate('Ymd\THis\Z') . '.json';
+$csrfDefaults = resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
 
 try {
-    $config = parseCliOptions($defaultOutputPath);
+    $config = parseCliOptions($defaultOutputPath, $csrfDefaults);
 
     if ($config['help'] === true) {
         printUsage();
         exit(RELEASE_GATE_EXIT_SUCCESS);
     }
 
-    $client = new GateHttpClient($config['base_url'], $config['index_page'], $config['http_timeout']);
+    $client = new GateHttpClient(
+        $config['base_url'],
+        $config['index_page'],
+        $config['http_timeout'],
+        'dashboard-release-gate/1.0',
+        $config['csrf_cookie_name'],
+        $config['csrf_token_name'],
+    );
 
     $runCheck = static function (string $name, callable $callback) use (&$checks): void {
         $started = microtime(true);
@@ -72,9 +80,11 @@ try {
         $response = $client->get('login', [], $config['http_timeout']);
         GateAssertions::assertStatus($response->statusCode, 200, 'GET /login');
 
-        $csrfCookie = $client->getCookie('csrf_cookie');
+        $csrfCookie = $client->getCookie($config['csrf_cookie_name']);
         if ($csrfCookie === null || $csrfCookie === '') {
-            throw new GateAssertionException('GET /login did not set csrf_cookie.');
+            throw new GateAssertionException(
+                'GET /login did not set cookie "' . $config['csrf_cookie_name'] . '".',
+            );
         }
 
         return [
@@ -238,6 +248,8 @@ if (isset($config) && is_array($config)) {
         'http_timeout' => $config['http_timeout'],
         'export_timeout' => $config['export_timeout'],
         'require_nonempty_metrics' => $config['require_nonempty_metrics'],
+        'csrf_token_name' => $config['csrf_token_name'],
+        'csrf_cookie_name' => $config['csrf_cookie_name'],
         'output_json' => $config['output_json'],
     ];
 }
@@ -299,10 +311,12 @@ exit($exitCode);
  *   http_timeout:int,
  *   export_timeout:int,
  *   require_nonempty_metrics:bool,
+ *   csrf_token_name:string,
+ *   csrf_cookie_name:string,
  *   output_json:string
  * }
  */
-function parseCliOptions(string $defaultOutputPath): array
+function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
 {
     $options = getopt('', [
         'help',
@@ -344,6 +358,8 @@ function parseCliOptions(string $defaultOutputPath): array
             'http_timeout' => 15,
             'export_timeout' => 60,
             'require_nonempty_metrics' => false,
+            'csrf_token_name' => $csrfDefaults['csrf_token_name'],
+            'csrf_cookie_name' => $csrfDefaults['csrf_cookie_name'],
             'output_json' => $defaultOutputPath,
         ];
     }
@@ -374,6 +390,8 @@ function parseCliOptions(string $defaultOutputPath): array
     $httpTimeout = parsePositiveInt(getOptionalOption($options, 'http-timeout', 15), 'http-timeout');
     $exportTimeout = parsePositiveInt(getOptionalOption($options, 'export-timeout', 60), 'export-timeout');
     $requireNonEmptyMetrics = parseBooleanOption(getOptionalOption($options, 'require-nonempty-metrics', null));
+    $csrfTokenName = $csrfDefaults['csrf_token_name'];
+    $csrfCookieName = $csrfDefaults['csrf_cookie_name'];
 
     $outputRaw = getOptionalOption($options, 'output-json', $defaultOutputPath);
     $outputJson = trim((string) $outputRaw);
@@ -408,6 +426,8 @@ function parseCliOptions(string $defaultOutputPath): array
         'http_timeout' => $httpTimeout,
         'export_timeout' => $exportTimeout,
         'require_nonempty_metrics' => $requireNonEmptyMetrics,
+        'csrf_token_name' => $csrfTokenName,
+        'csrf_cookie_name' => $csrfCookieName,
         'output_json' => $outputJson,
     ];
 }
@@ -634,6 +654,44 @@ function validateDate(string $value, string $optionName): void
     if ($date === false || $date->format('Y-m-d') !== $value) {
         throw new InvalidArgumentException('Option --' . $optionName . ' must use format YYYY-MM-DD.');
     }
+}
+
+/**
+ * Read CSRF token/cookie names from CodeIgniter config with safe defaults.
+ *
+ * @return array{csrf_token_name:string,csrf_cookie_name:string}
+ */
+function resolveCsrfNamesFromConfig(string $configPath): array
+{
+    $defaults = [
+        'csrf_token_name' => 'csrf_token',
+        'csrf_cookie_name' => 'csrf_cookie',
+    ];
+
+    if (!is_file($configPath) || !is_readable($configPath)) {
+        return $defaults;
+    }
+
+    $configContent = file_get_contents($configPath);
+    if (!is_string($configContent) || $configContent === '') {
+        return $defaults;
+    }
+
+    foreach (array_keys($defaults) as $key) {
+        $pattern = '/^\s*\$config\[\'' . preg_quote($key, '/') . '\'\]\s*=\s*([\'"])(.*?)\1\s*;/m';
+        if (preg_match($pattern, $configContent, $matches) !== 1) {
+            continue;
+        }
+
+        $resolvedValue = trim((string) ($matches[2] ?? ''));
+        if ($resolvedValue === '') {
+            continue;
+        }
+
+        $defaults[$key] = $resolvedValue;
+    }
+
+    return $defaults;
 }
 
 /**
