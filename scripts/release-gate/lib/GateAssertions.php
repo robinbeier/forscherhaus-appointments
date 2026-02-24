@@ -330,15 +330,20 @@ final class GateAssertions
 
     private static function toInt(mixed $value, string $context): int
     {
-        if (!is_int($value) && !is_string($value) && !is_float($value)) {
-            throw new GateAssertionException($context . ' must be numeric.');
+        if (is_int($value)) {
+            return $value;
         }
 
-        if (!is_numeric((string) $value)) {
-            throw new GateAssertionException($context . ' must be numeric.');
+        if (!is_string($value)) {
+            throw new GateAssertionException($context . ' must be an integer.');
         }
 
-        return (int) round((float) $value);
+        $normalized = trim($value);
+        if ($normalized === '' || !preg_match('/^-?\d+$/', $normalized)) {
+            throw new GateAssertionException($context . ' must be an integer.');
+        }
+
+        return (int) $normalized;
     }
 
     private static function toNonNegativeInt(mixed $value, string $context): int

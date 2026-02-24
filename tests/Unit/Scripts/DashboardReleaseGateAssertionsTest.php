@@ -82,6 +82,30 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         GateAssertions::assertMetricsPayload($payload, false);
     }
 
+    public function testAssertMetricsPayloadRejectsNonIntegerProviderId(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 33.5,
+                'provider_name' => 'Grace Hopper',
+                'target' => 20,
+                'booked' => 12,
+                'open' => 8,
+                'fill_rate' => 0.6,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 12,
+                'slots_required' => 20,
+                'has_capacity_gap' => true,
+            ],
+        ];
+
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('provider_id must be an integer');
+
+        GateAssertions::assertMetricsPayload($payload, false);
+    }
+
     public function testAssertHeatmapPayloadRejectsInvalidWeekday(): void
     {
         $payload = [
