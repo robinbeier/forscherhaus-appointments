@@ -530,11 +530,17 @@ function parseIntList(mixed $raw): array
                 throw new InvalidArgumentException('provider-ids must contain only positive integers.');
             }
 
-            $ids[] = (int) $trimmed;
+            $id = (int) $trimmed;
+
+            if ($id <= 0) {
+                throw new InvalidArgumentException('provider-ids must contain only positive integers.');
+            }
+
+            $ids[] = $id;
         }
     }
 
-    $ids = array_values(array_unique(array_filter($ids, static fn(int $id): bool => $id > 0)));
+    $ids = array_values(array_unique($ids));
 
     return $ids;
 }
