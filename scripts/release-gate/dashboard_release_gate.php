@@ -354,7 +354,11 @@ function parseCliOptions(string $defaultOutputPath): array
     $startDate = trim(getRequiredOption($options, 'start-date'));
     $endDate = trim(getRequiredOption($options, 'end-date'));
 
-    $indexPageRaw = getOptionalOption($options, 'index-page', 'index.php');
+    $indexPageRaw = getOptionalOption(
+        $options,
+        'index-page',
+        hasExplicitEmptyLongOption('index-page') ? '' : 'index.php',
+    );
     $indexPage = $indexPageRaw === null ? 'index.php' : trim((string) $indexPageRaw);
 
     $pdfHealthUrlRaw = getOptionalOption($options, 'pdf-health-url', null);
@@ -472,6 +476,29 @@ function getOptionalOption(array $options, string $key, mixed $default): mixed
     }
 
     return $options[$key];
+}
+
+function hasExplicitEmptyLongOption(string $name): bool
+{
+    $normalized = ltrim(trim($name), '-');
+    if ($normalized === '') {
+        return false;
+    }
+
+    $needle = '--' . $normalized . '=';
+    $argv = $_SERVER['argv'] ?? [];
+
+    if (!is_array($argv)) {
+        return false;
+    }
+
+    foreach ($argv as $arg) {
+        if (is_string($arg) && $arg === $needle) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
