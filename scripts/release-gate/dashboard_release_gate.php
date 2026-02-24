@@ -92,7 +92,7 @@ try {
 
             $payload = GateAssertions::decodeJson($response->body, 'GET pdf health URL');
 
-            if (!is_array($payload) || !array_key_exists('ok', $payload) || (bool) $payload['ok'] !== true) {
+            if (!is_array($payload) || !array_key_exists('ok', $payload) || $payload['ok'] !== true) {
                 throw new GateAssertionException('PDF health endpoint did not return {"ok": true}.');
             }
 
