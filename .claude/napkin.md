@@ -39,9 +39,11 @@
 
 ## User Directives
 
-1. **[2026-02-22] Follow AGENTS.md merge-ready contribution standard**
+1. **[2026-02-24] Keep `all-night-build-contract.md` canonical each turn**
+   Do instead: read and update `/Users/robinbeier/Documents/forscherhaus-appointments/all-night-build-contract.md` at turn start and whenever goal/constraints/decisions/state/progress/tool outcomes change.
+2. **[2026-02-22] Follow AGENTS.md merge-ready contribution standard**
    Do instead: keep changes minimal and consistent with repo conventions, then report validation status and blockers clearly.
-2. **[2026-02-22] Never revert unrelated dirty-worktree changes**
+3. **[2026-02-22] Never revert unrelated dirty-worktree changes**
    Do instead: isolate edits to request scope and stop to ask if unexpected modifications appear in touched files.
-3. **[2026-02-22] Keep collaboration updates concise and actionable**
+4. **[2026-02-22] Keep collaboration updates concise and actionable**
    Do instead: send short progress updates during tool work and finish with changed files and test outcomes.
