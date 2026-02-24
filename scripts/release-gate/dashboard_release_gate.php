@@ -278,10 +278,7 @@ try {
     writeJsonReport($outputPath, $report);
 } catch (Throwable $e) {
     fwrite(STDERR, '[FAIL] Could not write JSON report: ' . $e->getMessage() . PHP_EOL);
-
-    if ($exitCode === RELEASE_GATE_EXIT_SUCCESS) {
-        $exitCode = RELEASE_GATE_EXIT_RUNTIME_ERROR;
-    }
+    $exitCode = RELEASE_GATE_EXIT_RUNTIME_ERROR;
 }
 
 if ($exitCode === RELEASE_GATE_EXIT_SUCCESS) {
