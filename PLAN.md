@@ -61,6 +61,17 @@
 -   OpenAPI sowie `application/config/routes.php` dokumentieren/registrieren den Endpoint; Zugriffe nur für Admins.
 -   Dashboard-Dropdown ergänzt Heatmap-Eintrag, neue Card rendert Chart.js-Matrix-Heatmap inkl. Legende, Kontext-Badge, Fehlermeldungen & barrierefreier Tabelle.
 
+### 4. Zero-Surprise Release Gate (MVP)
+
+-   Neues CLI-Skript `scripts/release-gate/dashboard_release_gate.php` führt eine deterministische End-to-End-Prüfung aus:
+    -   Login-Handshake (`/login`, `/login/validate`) inkl. Session-/CSRF-Verifikation.
+    -   Dashboard JSON-Flows (`/dashboard/metrics`, `/dashboard/heatmap`) mit Invarianten-Checks.
+    -   Export-Flows (`/dashboard/export/principal.pdf`, `/dashboard/export/teacher.zip`, `/dashboard/export/teacher.pdf`) mit Header-/Signaturprüfungen.
+-   Exit-Codes sind strikt: `0` (pass), `1` (Assertion/Regression), `2` (Runtime/Config-Fehler).
+-   Lauf erzeugt immer einen JSON-Report unter `storage/logs/release-gate/`.
+-   Unit-Tests für Assert-Logik in `tests/Unit/Scripts/DashboardReleaseGateAssertionsTest.php`.
+-   Composer-Shortcut `release:gate:dashboard` dokumentiert und vor Deployment als Blocker ausführbar.
+
 ## Konfiguration & Settings-Verwaltung
 
 -   Keine neuen Settings erforderlich; `dashboard_conflict_threshold` bleibt Drehpunkt für Konflikt-Logik.

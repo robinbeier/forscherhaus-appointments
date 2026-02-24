@@ -51,7 +51,8 @@
     },
     "scripts": {
         "pre-autoload-dump": "Google\\Task\\Composer::cleanup",
-        "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit"
+        "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit",
+        "release:gate:dashboard": "php scripts/release-gate/dashboard_release_gate.php"
     },
     "extra": {
         "google/apiclient-services": [
