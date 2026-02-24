@@ -67,6 +67,14 @@ Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
 -   installiert Abhaengigkeiten bei Bedarf: `composer install`, `npm install`
 -   baut Assets, falls `assets/vendor` fehlt: `npx gulp compile`
 
+Docker-Services (lokal) & Debug:
+
+-   phpMyAdmin: `http://localhost:8080` (credentials `root` / `secret`)
+-   Mailpit: `http://localhost:8025`
+-   PDF-Renderer: `PDF_RENDERER_DEBUG_DUMP=true` aktiviert temporaere HTML-Debug-Dumps
+-   CalDAV (Baikal): `http://localhost:8100` (credentials `admin` / `admin`), danach `http://baikal/dav.php` mit angelegtem Nutzer verwenden
+-   OpenLDAP: `openldap` auf `389`/`636`, Admin-UI unter `http://localhost:8200` (credentials `cn=admin,dc=example,dc=org` / `admin`)
+
 Warnung (Worktrees): Nutze pro Worktree einen eindeutigen Compose-Projektnamen, damit sich Container/Volumes nicht ueberlagern.
 Beispiel: `docker compose -p fh-main up -d` im Haupt-Worktree und `docker compose -p fh-hotfix up -d` in einem zweiten Worktree.
 So vermeidest du gemischte Stacks (z. B. `nginx` aus Worktree A, `php-fpm`/`mysql` aus Worktree B).
