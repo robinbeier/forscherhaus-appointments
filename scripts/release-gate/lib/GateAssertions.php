@@ -284,7 +284,17 @@ final class GateAssertions
 
     public static function assertZipBinary(string $body, ?string $contentType, int $minBytes = 22): void
     {
-        self::assertContentTypeIncludes($contentType, ['zip', 'application/octet-stream'], 'Teacher ZIP export');
+        self::assertContentTypeMatches(
+            $contentType,
+            [
+                'application/zip',
+                'application/x-zip',
+                'application/x-zip-compressed',
+                'multipart/x-zip',
+                'application/octet-stream',
+            ],
+            'Teacher ZIP export',
+        );
 
         $bytes = strlen($body);
         if ($bytes < $minBytes) {
@@ -324,6 +334,35 @@ final class GateAssertions
                 $context,
                 $contentType,
                 implode(', ', $fragments),
+            ),
+        );
+    }
+
+    /**
+     * @param string[] $allowedTypes
+     */
+    private static function assertContentTypeMatches(?string $contentType, array $allowedTypes, string $context): void
+    {
+        if ($contentType === null || trim($contentType) === '') {
+            throw new GateAssertionException($context . ' is missing a Content-Type header.');
+        }
+
+        $type = strtolower(trim(explode(';', $contentType, 2)[0] ?? ''));
+        if ($type === '') {
+            throw new GateAssertionException($context . ' returned an empty Content-Type value.');
+        }
+
+        $allowed = array_map(static fn(string $value): string => strtolower(trim($value)), $allowedTypes);
+        if (in_array($type, $allowed, true)) {
+            return;
+        }
+
+        throw new GateAssertionException(
+            sprintf(
+                '%s returned unsupported Content-Type "%s". Expected one of: %s.',
+                $context,
+                $contentType,
+                implode(', ', $allowedTypes),
             ),
         );
     }

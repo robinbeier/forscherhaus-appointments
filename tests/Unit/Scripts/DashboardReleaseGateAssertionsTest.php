@@ -149,4 +149,12 @@ class DashboardReleaseGateAssertionsTest extends TestCase
 
         GateAssertions::assertZipBinary('NOT_A_ZIP_FILE', 'application/zip', 1);
     }
+
+    public function testAssertZipBinaryRejectsUnsupportedMimeType(): void
+    {
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('unsupported Content-Type');
+
+        GateAssertions::assertZipBinary("PK\x05\x06" . str_repeat("\x00", 18), 'application/gzip', 22);
+    }
 }
