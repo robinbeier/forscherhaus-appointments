@@ -55,6 +55,26 @@ State:
 -   PR thread fix is now pushed on branch and fresh automated review has been requested via PR comment.
 -   New Codex review cycle produced two unresolved P2 threads on PR #57; both were validated as in-scope and technically correct for this release-gate contract.
 -   Follow-up execution completed: both validated concerns were implemented, pushed, and threads resolved; new `@codex review` comment posted.
+-   New user request: restore local DB to the original main-like version identified by provider `Max @Mustermann` and class labels for all providers.
+-   User clarified current pre-migration restore is not desired and requested fallback to the PR #57 DB state (migrated schema), with manual class_size population afterward.
+-   User reran the release gate on `main` and reported pass (`exit_code=0`, `failed=0`).
+-   User asks for deployment decision with 7 days to go-live, including whether to deploy now to production (currently no traffic) and run the gate there.
+-   User requested an exact production rehearsal command checklist (copy/paste order), including rollback checkpoint and release gate command.
+-   During production rehearsal, deploy step failed with `Archiv nicht gefunden: /root/releases/<REL>.tar.gz`.
+-   Root cause identified: `deploy_ea.sh` expects a release archive `${SRC}/${REL}.tar.gz`; the DB rollback checkpoint file `predeploy-db-<REL>-<TS>.sql.gz` is a different artifact and cannot satisfy deploy archive lookup.
+-   During production preflight, `curl -fsS http://127.0.0.1:3003/healthz` failed with connection refused.
+-   Confirmed interpretation: pdf-renderer is not yet provisioned/running on production and must be installed before gate validation of PDF flows.
+-   Production pdf-renderer provisioning progressed: service now runs and `/healthz` passes; `/pdf` initially failed due missing Chrome binary, then due Chrome crashpad runtime path constraints; runtime env tuning in progress.
+-   Current PDF parity investigation: `dashboard-schulleitung-PROD.pdf` renders donut circles as fallback rings while `dashboard-schulleitung-DEV.pdf` renders filled donut arcs.
+-   Code-path finding: principal dashboard PDF uses `donut_image_data_url(...)` in `application/views/exports/dashboard_principal_pdf.php`; helper `application/helpers/donut_helper.php` returns `null` when GD function `imagecreatetruecolor` is unavailable, which triggers fallback ring UI.
+-   New rendering regression observed after GD availability improved: generated principal PDF first page contained embedded PHP warning blocks (`Severity 8192`) from `helpers/donut_helper.php` line 63 (`Implicit conversion from float ... to int loses precision`) on production PHP runtime.
+-   Hotfix prepared in repo: explicit integer cast for donut arc end angle in `application/helpers/donut_helper.php` (`$endAngle = (int) round(...)`) to prevent warning output from polluting rendered PDF pages.
+-   Production release gate executed successfully on deployed system (`exit_code=0`, `failed=0`).
+-   Uptime Kuma deep health monitor remains DOWN due HTTP 404 on `https://dasforscherhaus-leg.de/healthz.php?...` indicating monitor target file is absent in current release path (endpoint availability/config issue, not core app availability).
+-   Implemented versioned deep health endpoint in app code:
+    -   Added controller `application/controllers/Healthz.php` (token-protected via `X-Health-Token` / `HEALTHZ_TOKEN` env).
+    -   Added route `GET /healthz` in `application/config/routes.php`.
+    -   Endpoint now reports structured JSON checks for DB, GD, storage writability, and PDF renderer health.
 
 Done:
 
@@ -168,13 +188,48 @@ Done:
         -   `PRRT_kwDOPw9iS85wfu8h`
         -   `PRRT_kwDOPw9iS85wfu8k`
     -   Latest comment fetch confirms all PR #57 review threads are resolved.
+-   Checked current DB markers:
+    -   Current schema unexpectedly lacks `ea_users.class_size_default`.
+    -   Providers have non-empty `room` values for all 14 providers.
+    -   Provider `Max @Mustermann` exists.
+-   Probed backup set under `/Users/robinbeier/Backups/easyappointments/db/`:
+    -   All dated dumps (`2026-01-14`..`2026-02-19`) contain provider `Max @Mustermann`.
+    -   All dated dumps do not include `class_size_default` column (pre-migration schema), so class labels are stored in `room`.
+-   Restored latest original-main-like pre-migration dump (without running migrations):
+    -   `gunzip -c /Users/robinbeier/Backups/easyappointments/db/easyappointments_2026-02-19_021701Z.sql.gz | docker compose exec -T mysql mysql -uroot -psecret`
+-   Post-restore marker verification passed:
+    -   `providers_total=14`
+    -   `providers_with_class_room=14` (all providers have non-empty class/room labels)
+    -   `has_max=1` (`Max @Mustermann` present)
+    -   `ea_migrations.version=60` (pre-migration baseline, no `class_size_default` column)
+-   Restored requested PR #57 baseline (import + migrate):
+    -   `gunzip -c /Users/robinbeier/Backups/easyappointments/db/easyappointments_2026-02-19_021701Z.sql.gz | docker compose exec -T mysql mysql -uroot -psecret`
+    -   `docker compose exec -T php-fpm php index.php console migrate`
+-   Verified PR #57 DB markers after restore:
+   Verified PR #57 DB markers after restore:
+    -   `ea_migrations.version=68`
+    -   `ea_users.class_size_default` column exists
+    -   `providers_total=14`
+    -   `providers_with_class_size=0` (all NULL, ready for manual fill)
+    -   `has_max=1` (`Max @Mustermann` present)
+-   Confirmed branch/PR state for deployment decision:
+    -   PR `#57` is merged into `main` (`Merge pull request #57 ...` present in `git log`).
+    -   Current branch is `main`.
+    -   Latest user-reported gate run on `main` passed end-to-end.
 
 Now:
 
--   Wait for refreshed review signal after latest `@codex review` request.
+-   Provide corrective command sequence to align `REL` with an existing release `.tar.gz` (or create/upload one) and proceed with deploy rehearsal.
+-   Provide production-side pdf-renderer installation + service management steps, then resume deploy/gate sequence.
+-   Verify and, if missing, enable PHP GD extension on production (`php8.2-gd` + php-fpm restart) so dashboard donut images render instead of fallback rings.
+-   Deploy donut helper hotfix and regenerate principal PDF on production; verify first page no longer contains PHP warning cards and donut graphics render normally.
+-   Restore or recreate deep health endpoint target and align it with release packaging so future deploys do not remove Kuma monitor target.
+-   Point Uptime Kuma deep health monitor from legacy root file URL to versioned route (`/healthz`), configure `X-Health-Token` header, then retire legacy `healthz.php`.
 
 Next:
 
+-   Execute the provided checklist on production in off-peak window.
+-   Feature-freeze and monitor for 48h according to agreed P0/P1 checklist.
 -   Re-check PR threads after new review cycle and address any additional actionable comments.
 -   Merge branch `codex/dashboard-release-gate-mvp` into `main`.
 -   Re-run the same release gate once on `main` and verify `summary.exit_code=0`, `summary.failed=0`.

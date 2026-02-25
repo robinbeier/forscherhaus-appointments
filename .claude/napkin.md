@@ -21,20 +21,24 @@
 
 1. **[2026-02-22] Keep production code inside `application/`**
    Do instead: place feature/controller/model/view changes in `application/` and avoid edits in `system/` unless explicitly requested.
-2. **[2026-02-22] Preserve single-attendant invariant**
+2. **[2026-02-25] Keep health endpoints versioned in app code**
+   Do instead: implement monitoring endpoints as routes/controllers under `application/` and deploy them via release artifacts; avoid unmanaged root files like `healthz.php` that can disappear on deploy.
+3. **[2026-02-22] Preserve single-attendant invariant**
    Do instead: treat `services.attendants_number` as fixed to `1` unless product scope explicitly changes to multi-attendant.
-3. **[2026-02-22] Never commit runtime secrets or local config**
+4. **[2026-02-22] Never commit runtime secrets or local config**
    Do instead: keep sensitive values in local `config.php` and adjust `config-sample.php` only for safe defaults/documentation.
 
 ## Shell & Command Reliability
 
-1. **[2026-02-23] Use unique Compose project names per worktree**
+1. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
+   Do instead: build/upload `${REL}.tar.gz` (for example via `./build_release.sh --rel "$REL"`) before deploy; do not confuse DB rollback dumps like `predeploy-db-...sql.gz` with deploy archives.
+2. **[2026-02-23] Use unique Compose project names per worktree**
    Do instead: start Docker with `docker compose -p <unique-name> ...` in each worktree and verify mounts via `docker inspect` before smoke-tests.
-2. **[2026-02-22] Prefer `rg` for fast search**
+3. **[2026-02-22] Prefer `rg` for fast search**
    Do instead: use `rg`/`rg --files` for code and file discovery; fall back only if unavailable.
-3. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
+4. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
    Do instead: run tests via docker compose where `DB_HOST='mysql'` and container DNS match CI behavior.
-4. **[2026-02-22] Prime new worktrees before first commit**
+5. **[2026-02-22] Prime new worktrees before first commit**
    Do instead: run `./scripts/setup-worktree.sh` to install `vendor/`, `node_modules/`, and vendor/theme assets.
 
 ## User Directives
