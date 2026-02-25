@@ -56,6 +56,11 @@ npx gulp styles
 # Tests (CI-paritaer im Docker-Compose-Netz)
 docker compose run --rm php-fpm composer test
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
+
+# Optional: Dashboard Release Gate (vor Deployment / Regression-Check)
+composer release:gate:dashboard -- \
+  --base-url=http://localhost --index-page=index.php --username="$EA_GATE_USERNAME" --password="$EA_GATE_PASSWORD" \
+  --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD --statuses=Booked --pdf-health-url=http://localhost:3003/healthz
 ```
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
