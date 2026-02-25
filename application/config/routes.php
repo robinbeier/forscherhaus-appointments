@@ -170,6 +170,7 @@ $route['dashboard/provider_metrics']['post'] = 'dashboard/provider_metrics';
 $route['dashboard/export/principal.pdf']['get'] = 'dashboard_export/principal_pdf';
 $route['dashboard/export/teacher.zip']['get'] = 'dashboard_export/teacher_zip';
 $route['dashboard/export/teacher.pdf']['get'] = 'dashboard_export/teacher_pdf';
+$route['healthz']['get'] = 'healthz/index';
 
 /* End of file routes.php */
 /* Location: ./application/config/routes.php */
