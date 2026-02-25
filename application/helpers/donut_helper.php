@@ -59,7 +59,7 @@ if (!function_exists('donut_image_data_url')) {
             imagefilledellipse($image, $center, $center, $diameter, $diameter, $foregroundColor);
         } elseif ($progress > 0.0) {
             $startAngle = 270;
-            $endAngle = $startAngle + 360 * $progress;
+            $endAngle = (int) round($startAngle + 360 * $progress);
             imagefilledarc(
                 $image,
                 $center,
