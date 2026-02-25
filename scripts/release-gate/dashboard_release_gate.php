@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/lib/GateAssertions.php';
+require_once __DIR__ . '/lib/GateCliSupport.php';
 require_once __DIR__ . '/lib/GateHttpClient.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
+use ReleaseGate\GateCliSupport;
 use ReleaseGate\GateHttpClient;
 
 const RELEASE_GATE_EXIT_SUCCESS = 0;
@@ -21,7 +23,7 @@ $exitCode = RELEASE_GATE_EXIT_SUCCESS;
 
 $repoRoot = dirname(__DIR__, 2);
 $defaultOutputPath = $repoRoot . '/storage/logs/release-gate/dashboard-gate-' . gmdate('Ymd\THis\Z') . '.json';
-$csrfDefaults = resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
+$csrfDefaults = GateCliSupport::resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
 
 try {
     $config = parseCliOptions($defaultOutputPath, $csrfDefaults);
@@ -215,7 +217,7 @@ try {
         ];
     });
 } catch (GateAssertionException $e) {
-    $exitCode = classifyAssertionExitCode($checks);
+    $exitCode = GateCliSupport::classifyAssertionExitCode($checks);
     $failure = [
         'message' => $e->getMessage(),
         'exception' => get_class($e),
@@ -464,52 +466,6 @@ function buildFilterQuery(array $config): array
 }
 
 /**
- * Map assertion failures to either behavioral regression (1) or runtime/config (2).
- *
- * @param array<int, array<string, mixed>> $checks
- */
-function classifyAssertionExitCode(array $checks): int
-{
-    $lastCheck = end($checks);
-
-    if (!is_array($lastCheck) || !isset($lastCheck['name'])) {
-        return RELEASE_GATE_EXIT_ASSERTION_FAILURE;
-    }
-
-    if (isHttpStatusAssertionFailure($lastCheck)) {
-        return RELEASE_GATE_EXIT_RUNTIME_ERROR;
-    }
-
-    $checkName = (string) $lastCheck['name'];
-    if (isRuntimePreflightCheck($checkName)) {
-        return RELEASE_GATE_EXIT_RUNTIME_ERROR;
-    }
-
-    return RELEASE_GATE_EXIT_ASSERTION_FAILURE;
-}
-
-/**
- * @param array<string, mixed> $check
- */
-function isHttpStatusAssertionFailure(array $check): bool
-{
-    $error = (string) ($check['error'] ?? '');
-
-    return preg_match('/expected HTTP .* got \d+\./i', $error) === 1;
-}
-
-function isRuntimePreflightCheck(string $checkName): bool
-{
-    $runtimeChecks = [
-        'readiness_login_page',
-        'readiness_pdf_health',
-        'auth_login_validate',
-    ];
-
-    return in_array($checkName, $runtimeChecks, true);
-}
-
-/**
  * @param array<string, mixed> $options
  */
 function getRequiredOption(array $options, string $key): string
@@ -697,56 +653,6 @@ function validateDate(string $value, string $optionName): void
     if ($date === false || $date->format('Y-m-d') !== $value) {
         throw new InvalidArgumentException('Option --' . $optionName . ' must use format YYYY-MM-DD.');
     }
-}
-
-/**
- * Read CSRF token/cookie names from CodeIgniter config with safe defaults.
- *
- * @return array{csrf_token_name:string,csrf_cookie_name:string}
- */
-function resolveCsrfNamesFromConfig(string $configPath): array
-{
-    $defaults = [
-        'csrf_token_name' => 'csrf_token',
-        'csrf_cookie_name' => 'csrf_cookie',
-    ];
-    $cookiePrefix = '';
-
-    if (!is_file($configPath) || !is_readable($configPath)) {
-        return $defaults;
-    }
-
-    $configContent = file_get_contents($configPath);
-    if (!is_string($configContent) || $configContent === '') {
-        return $defaults;
-    }
-
-    $lookupKeys = array_merge(array_keys($defaults), ['cookie_prefix']);
-
-    foreach ($lookupKeys as $key) {
-        $pattern = '/^\s*\$config\[\'' . preg_quote($key, '/') . '\'\]\s*=\s*([\'"])(.*?)\1\s*;/m';
-        if (preg_match($pattern, $configContent, $matches) !== 1) {
-            continue;
-        }
-
-        $resolvedValue = trim((string) ($matches[2] ?? ''));
-        if ($resolvedValue === '') {
-            continue;
-        }
-
-        if ($key === 'cookie_prefix') {
-            $cookiePrefix = $resolvedValue;
-            continue;
-        }
-
-        $defaults[$key] = $resolvedValue;
-    }
-
-    if ($cookiePrefix !== '') {
-        $defaults['csrf_cookie_name'] = $cookiePrefix . $defaults['csrf_cookie_name'];
-    }
-
-    return $defaults;
 }
 
 /**
