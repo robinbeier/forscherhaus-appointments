@@ -55,6 +55,7 @@ State:
 -   PR thread fix is now pushed on branch and fresh automated review has been requested via PR comment.
 -   New Codex review cycle produced two unresolved P2 threads on PR #57; both were validated as in-scope and technically correct for this release-gate contract.
 -   Follow-up execution completed: both validated concerns were implemented, pushed, and threads resolved; new `@codex review` comment posted.
+-   Automation run `find-test-gaps` (2026-02-25) identified missing unit coverage for release-gate CSRF config parsing and assertion-exit classification helper logic.
 
 Done:
 
@@ -168,18 +169,25 @@ Done:
         -   `PRRT_kwDOPw9iS85wfu8h`
         -   `PRRT_kwDOPw9iS85wfu8k`
     -   Latest comment fetch confirms all PR #57 review threads are resolved.
+-   Extracted untested CLI helper logic from `scripts/release-gate/dashboard_release_gate.php` into `scripts/release-gate/lib/GateCliSupport.php`.
+-   Added targeted unit tests in `tests/Unit/Scripts/GateCliSupportTest.php` for:
+    -   runtime vs assertion exit-code classification
+    -   CSRF defaults and `cookie_prefix` handling from CodeIgniter config
+-   Validation for this run:
+    -   `php -l scripts/release-gate/lib/GateCliSupport.php`
+    -   `php -l scripts/release-gate/dashboard_release_gate.php`
+    -   `php -l tests/Unit/Scripts/GateCliSupportTest.php`
+    -   `php vendor/bin/phpunit ...` blocked locally (`vendor/bin/phpunit` missing)
+    -   `docker compose run --rm php-fpm ...` blocked in sandbox (no Docker socket access)
 
 Now:
 
--   Wait for refreshed review signal after latest `@codex review` request.
+-   Package current test-gap patch for draft PR creation once branch + remote are available.
 
 Next:
 
--   Re-check PR threads after new review cycle and address any additional actionable comments.
--   Merge branch `codex/dashboard-release-gate-mvp` into `main`.
--   Re-run the same release gate once on `main` and verify `summary.exit_code=0`, `summary.failed=0`.
--   Use this validated main run as baseline for staging/prod credential rollout and full run.
--   After dev realistic pass, proceed with staging/prod credential rollout using the same runbook.
+-   Run PHPUnit suite in CI-parity environment to confirm new test file execution.
+-   Create/push draft PR for the isolated test-gap patch from this automation run.
 
 Open questions (UNCONFIRMED if needed):
 

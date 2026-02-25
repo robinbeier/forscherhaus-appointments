@@ -10,11 +10,13 @@
 
 ## Execution & Validation (Highest Priority)
 
-1. **[2026-02-22] Run CI-parity tests through docker compose before merge-sensitive changes**
+1. **[2026-02-25] Keep release-gate branching logic in testable library files**
+   Do instead: move pure CLI helper logic from executable scripts into `scripts/release-gate/lib/*.php` and cover it with PHPUnit tests.
+2. **[2026-02-22] Run CI-parity tests through docker compose before merge-sensitive changes**
    Do instead: execute `docker compose run --rm php-fpm composer test` and report failures or environment limits in handoff.
-2. **[2026-02-22] Rebuild frontend bundles when touching `assets/js` or `assets/css`**
+3. **[2026-02-22] Rebuild frontend bundles when touching `assets/js` or `assets/css`**
    Do instead: run `npx gulp scripts` and/or `npx gulp styles`, then verify updated artifacts in `build/`.
-3. **[2026-02-22] Keep migration rollback path complete**
+4. **[2026-02-22] Keep migration rollback path complete**
    Do instead: implement database changes only via CodeIgniter migrations and verify both migrate up and down behavior.
 
 ## Repo Guardrails & Domain Behavior
