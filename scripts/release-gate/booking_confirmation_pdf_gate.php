@@ -246,11 +246,28 @@ try {
         $result = runPwcliCommand($config, $sessionId, ['network'], $repoRoot, $config['open_timeout']);
         assertProcessSucceeded($result, 'Collect network log');
 
-        writeTextFile($networkLogPath, (string) ($result['stdout'] ?? ''));
-        $lineCount = count(array_filter(explode("\n", (string) ($result['stdout'] ?? '')), 'strlen'));
+        $networkOutput = (string) ($result['stdout'] ?? '');
+        $networkSourcePath = resolvePlaywrightNetworkArtifactPath($networkOutput, $repoRoot);
+        $networkLogContent = $networkOutput;
+
+        if ($networkSourcePath !== null) {
+            ensureFileReadable($networkSourcePath, 'Playwright network artifact');
+
+            $resolvedContent = file_get_contents($networkSourcePath);
+
+            if (!is_string($resolvedContent)) {
+                throw new RuntimeException('Could not read Playwright network artifact: ' . $networkSourcePath);
+            }
+
+            $networkLogContent = $resolvedContent;
+        }
+
+        writeTextFile($networkLogPath, $networkLogContent);
+        $lineCount = count(array_filter(explode("\n", $networkLogContent), 'strlen'));
 
         return [
             'network_log_path' => $networkLogPath,
+            'source_network_log_path' => $networkSourcePath,
             'lines' => $lineCount,
         ];
     });
@@ -611,6 +628,41 @@ function extractPlaywrightErrorSection(string $output): ?string
     $message = trim((string) ($matches[1] ?? ''));
 
     return $message !== '' ? $message : 'Unknown Playwright error.';
+}
+
+function resolvePlaywrightNetworkArtifactPath(string $output, string $repoRoot): ?string
+{
+    if (trim($output) === '') {
+        return null;
+    }
+
+    $resultSection = null;
+    $sectionMatches = [];
+
+    if (preg_match('/(?:^|\R)### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $sectionMatches) === 1) {
+        $resultSection = trim((string) ($sectionMatches[1] ?? ''));
+    }
+
+    if ($resultSection === null || $resultSection === '') {
+        return null;
+    }
+
+    $linkMatches = [];
+    if (preg_match('/^\s*-\s+\[[^\]]+\]\(([^)]+)\)\s*$/m', $resultSection, $linkMatches) !== 1) {
+        return null;
+    }
+
+    $linkPath = trim((string) ($linkMatches[1] ?? ''));
+
+    if ($linkPath === '') {
+        return null;
+    }
+
+    if (preg_match('#^(?:/|[A-Za-z]:[\\\\/])#', $linkPath) === 1) {
+        return $linkPath;
+    }
+
+    return rtrim($repoRoot, '/') . '/' . ltrim($linkPath, '/');
 }
 
 /**
