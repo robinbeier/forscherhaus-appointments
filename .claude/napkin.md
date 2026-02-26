@@ -32,15 +32,17 @@
 
 ## Shell & Command Reliability
 
-1. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
+1. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
+   Do instead: check for `* 2.*`/`* 3.*` files (especially in `assets/vendor` and `vendor`) and remove/rehydrate them before `./build_release.sh`, because `rsync` can stall on FileProvider `compressed,dataless` entries.
+2. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
    Do instead: build/upload `${REL}.tar.gz` (for example via `./build_release.sh --rel "$REL"`) before deploy; do not confuse DB rollback dumps like `predeploy-db-...sql.gz` with deploy archives.
-2. **[2026-02-23] Use unique Compose project names per worktree**
+3. **[2026-02-23] Use unique Compose project names per worktree**
    Do instead: start Docker with `docker compose -p <unique-name> ...` in each worktree and verify mounts via `docker inspect` before smoke-tests.
-3. **[2026-02-22] Prefer `rg` for fast search**
+4. **[2026-02-22] Prefer `rg` for fast search**
    Do instead: use `rg`/`rg --files` for code and file discovery; fall back only if unavailable.
-4. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
+5. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
    Do instead: run tests via docker compose where `DB_HOST='mysql'` and container DNS match CI behavior.
-5. **[2026-02-22] Prime new worktrees before first commit**
+6. **[2026-02-22] Prime new worktrees before first commit**
    Do instead: run `./scripts/setup-worktree.sh` to install `vendor/`, `node_modules/`, and vendor/theme assets.
 
 ## User Directives
