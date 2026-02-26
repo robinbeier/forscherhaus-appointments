@@ -9,6 +9,7 @@
 /docker/baikal/
 /docker/openldap/
 /node_modules/
+/pdf-renderer/node_modules/
 /npm-debug.log
 /assets/js/**/*.min.js
 /assets/css/**/*.css
