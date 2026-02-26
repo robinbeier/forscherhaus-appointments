@@ -223,7 +223,8 @@ class Healthz extends EA_Controller
     {
         $candidates = [];
         $configured = trim((string) env('PDF_RENDERER_URL', ''));
-        $appEnv = strtolower(trim((string) env('APP_ENV', 'production')));
+        $runtimeEnv = defined('ENVIRONMENT') ? ENVIRONMENT : (getenv('APP_ENV') ?: 'production');
+        $appEnv = strtolower(trim((string) $runtimeEnv));
         $isLocalEnv = in_array($appEnv, ['development', 'testing', 'local'], true);
 
         if ($configured !== '') {
