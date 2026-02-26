@@ -30,3 +30,43 @@ jobs:
           TEST_NAME: Test
         with:
           configuration: phpunit.xml
+
+  integration-smoke:
+    runs-on: ubuntu-latest
+    needs: build-test
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Frontend compile
+        run: |
+          npm ci --no-audit --no-fund
+          npx gulp compile
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: Start integration services
+        run: docker compose up -d mysql php-fpm nginx
+      - name: Wait for MySQL readiness
+        run: |
+          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+      - name: Install deterministic seed instance
+        run: docker compose exec -T php-fpm php index.php console install
+      - name: Run dashboard integration smoke
+        run: >
+          docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php
+          --base-url=http://nginx --index-page=index.php
+          --username=administrator --password=administrator
+          --start-date=2026-01-01 --end-date=2026-01-31
+      - name: Cleanup integration services
+        if: always()
+        run: docker compose down -v --remove-orphans
