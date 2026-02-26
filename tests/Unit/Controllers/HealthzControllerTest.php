@@ -12,19 +12,30 @@ class HealthzControllerTest extends TestCase
 {
     public function testResolvePdfRendererEndpointsKeepsConfiguredEndpointFirstAndUnique(): void
     {
-        $_ENV['PDF_RENDERER_URL'] = ' http://localhost:3003/ ';
+        $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
+        $original = $_ENV['PDF_RENDERER_URL'] ?? null;
 
-        $controller = $this->createController();
-        $endpoints = $controller->callResolvePdfRendererEndpoints();
+        try {
+            $_ENV['PDF_RENDERER_URL'] = ' http://localhost:3003/ ';
 
-        $this->assertSame(
-            [
-                'http://localhost:3003',
-                'http://pdf-renderer:3000',
-                'http://127.0.0.1:3003',
-            ],
-            $endpoints,
-        );
+            $controller = $this->createController();
+            $endpoints = $controller->callResolvePdfRendererEndpoints();
+
+            $this->assertSame(
+                [
+                    'http://localhost:3003',
+                    'http://pdf-renderer:3000',
+                    'http://127.0.0.1:3003',
+                ],
+                $endpoints,
+            );
+        } finally {
+            if ($hadOriginal) {
+                $_ENV['PDF_RENDERER_URL'] = $original;
+            } else {
+                unset($_ENV['PDF_RENDERER_URL']);
+            }
+        }
     }
 
     public function testRunCheckReturnsSuccessPayloadWithDetails(): void
