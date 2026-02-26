@@ -83,24 +83,38 @@ class DashboardExportControllerTest extends TestCase
         $pages = $controller->callBuildTeacherPages($teachers);
 
         $this->assertCount(2, $pages);
-        $this->assertCount(10, $pages[0]['appointments']);
-        $this->assertCount(10, $pages[1]['appointments']);
+        $this->assertCount(11, $pages[0]['appointments']);
+        $this->assertCount(9, $pages[1]['appointments']);
         $this->assertSame(0, $pages[0]['chunk_index']);
         $this->assertSame(1, $pages[1]['chunk_index']);
         $this->assertSame(2, $pages[0]['chunks_total']);
         $this->assertSame(2, $pages[1]['chunks_total']);
     }
 
-    public function testBuildTeacherPagesUsesThreePagesForTwentyOneAppointments(): void
+    public function testBuildTeacherPagesUsesTwoPagesForTwentyFiveAppointments(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
-        $teachers = [$this->createTeacherReport(21)];
+        $teachers = [$this->createTeacherReport(25)];
+
+        $pages = $controller->callBuildTeacherPages($teachers);
+
+        $this->assertCount(2, $pages);
+        $this->assertCount(11, $pages[0]['appointments']);
+        $this->assertCount(14, $pages[1]['appointments']);
+        $this->assertSame(2, $pages[0]['chunks_total']);
+        $this->assertSame(2, $pages[1]['chunks_total']);
+    }
+
+    public function testBuildTeacherPagesUsesThreePagesForTwentySixAppointments(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $teachers = [$this->createTeacherReport(26)];
 
         $pages = $controller->callBuildTeacherPages($teachers);
 
         $this->assertCount(3, $pages);
-        $this->assertCount(10, $pages[0]['appointments']);
-        $this->assertCount(10, $pages[1]['appointments']);
+        $this->assertCount(11, $pages[0]['appointments']);
+        $this->assertCount(14, $pages[1]['appointments']);
         $this->assertCount(1, $pages[2]['appointments']);
         $this->assertSame(3, $pages[0]['chunks_total']);
         $this->assertSame(3, $pages[1]['chunks_total']);

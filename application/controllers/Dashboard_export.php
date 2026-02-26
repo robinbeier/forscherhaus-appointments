@@ -24,9 +24,9 @@ class Dashboard_export extends EA_Controller
 
     protected const PRINCIPAL_PDF_CONTINUATION_PAGE_TEACHERS = 13;
 
-    protected const TEACHER_PDF_FIRST_PAGE_APPOINTMENTS = 10;
+    protected const TEACHER_PDF_FIRST_PAGE_APPOINTMENTS = 11;
 
-    protected const TEACHER_PDF_CONTINUATION_PAGE_APPOINTMENTS = 10;
+    protected const TEACHER_PDF_CONTINUATION_PAGE_APPOINTMENTS = 14;
 
     protected Dashboard_metrics $dashboardMetrics;
 
