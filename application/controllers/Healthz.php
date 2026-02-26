@@ -213,9 +213,7 @@ class Healthz extends EA_Controller
             $errors[] = sprintf('%s -> status_%d', $endpoint, $statusCode);
         }
 
-        throw new RuntimeException(
-            'No healthy PDF renderer endpoint found: ' . implode('; ', $errors),
-        );
+        throw new RuntimeException('No healthy PDF renderer endpoint found: ' . implode('; ', $errors));
     }
 
     /**
@@ -233,10 +231,10 @@ class Healthz extends EA_Controller
         }
 
         $candidates[] = 'http://pdf-renderer:3000';
+        $candidates[] = 'http://localhost:3003';
 
-        // Host-only fallbacks are useful in local setup but add avoidable timeout cost in production.
+        // Extra loopback alias helps local host setups where localhost is remapped.
         if ($isLocalEnv) {
-            $candidates[] = 'http://localhost:3003';
             $candidates[] = 'http://127.0.0.1:3003';
         }
 
@@ -262,9 +260,6 @@ class Healthz extends EA_Controller
      */
     protected function cacheControlHeaders(): array
     {
-        return [
-            'Cache-Control: no-store, no-cache, must-revalidate',
-            'Pragma: no-cache',
-        ];
+        return ['Cache-Control: no-store, no-cache, must-revalidate', 'Pragma: no-cache'];
     }
 }
