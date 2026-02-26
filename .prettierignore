@@ -10,3 +10,4 @@ storage
 system
 vendor
 scripts/release-gate/dashboard_release_gate.php
+scripts/release-gate/booking_confirmation_pdf_gate.php
