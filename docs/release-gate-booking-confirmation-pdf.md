@@ -63,7 +63,7 @@ composer release:gate:booking-confirmation-pdf -- \
 The gate writes a JSON report with:
 
 - `meta`: timestamps and duration.
-- `config`: non-secret runtime options.
+- `config`: non-secret runtime options (includes only `confirmation_source`, never raw confirmation hash/URL).
 - `checks`: pass/fail records with timing and details.
 - `summary`: pass/fail counts and exit code.
 - `failure`: present on failure with exception details.

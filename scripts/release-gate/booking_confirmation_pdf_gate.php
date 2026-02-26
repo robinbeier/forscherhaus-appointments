@@ -29,6 +29,8 @@ $downloadSnippetPath = __DIR__ . '/playwright/booking_confirmation_download.js';
 
 $sessionId = null;
 $config = null;
+$confirmationUrl = null;
+$confirmationSource = null;
 
 try {
     $config = parseCliOptions($repoRoot, $defaultOutputPath, $defaultArtifactsDir, $defaultPwcliPath);
@@ -39,6 +41,7 @@ try {
     }
 
     $sessionId = buildSessionId();
+    $confirmationSource = resolveConfirmationSource($config);
     $confirmationUrl = resolveConfirmationUrl($config);
     $downloadPath = $config['artifacts_dir'] . '/booking-confirmation.pdf';
     $beforeScreenshotPath = $config['artifacts_dir'] . '/before-click.png';
@@ -114,6 +117,7 @@ try {
         $config,
         $repoRoot,
         $sessionId,
+        $confirmationSource,
         $confirmationUrl,
     ): array {
         $arguments = ['open', $confirmationUrl];
@@ -129,7 +133,7 @@ try {
         assertProcessSucceeded($snapshotResult, 'Snapshot confirmation page');
 
         return [
-            'confirmation_url' => $confirmationUrl,
+            'confirmation_source' => $confirmationSource,
             'open_duration_ms' => $openResult['duration_ms'],
             'snapshot_duration_ms' => $snapshotResult['duration_ms'],
         ];
@@ -338,8 +342,7 @@ if (is_array($config)) {
     $reportConfig = [
         'base_url' => $config['base_url'],
         'index_page' => $config['index_page'],
-        'confirmation_hash' => $config['confirmation_hash'],
-        'confirmation_url' => $config['confirmation_url'],
+        'confirmation_source' => resolveConfirmationSource($config),
         'pwcli_path' => $config['pwcli_path'],
         'open_timeout' => $config['open_timeout'],
         'download_timeout' => $config['download_timeout'],
@@ -373,6 +376,10 @@ if ($cleanupWarnings !== []) {
 
 if ($failure !== null) {
     $report['failure'] = $failure;
+}
+
+if (is_array($config)) {
+    $report = redactSensitiveValues($report, collectSensitiveValues($config, $confirmationUrl));
 }
 
 try {
@@ -523,6 +530,80 @@ function parseCliOptions(
         'headed' => $headed,
         'output_json' => $outputJson,
     ];
+}
+
+/**
+ * @param array{
+ *   base_url:string,
+ *   index_page:string,
+ *   confirmation_hash:string|null,
+ *   confirmation_url:string|null
+ * } $config
+ */
+function resolveConfirmationSource(array $config): string
+{
+    return !empty($config['confirmation_url']) ? 'confirmation_url' : 'confirmation_hash';
+}
+
+/**
+ * @param array{
+ *   confirmation_hash:string|null,
+ *   confirmation_url:string|null
+ * } $config
+ *
+ * @return array<int, string>
+ */
+function collectSensitiveValues(array $config, ?string $confirmationUrl): array
+{
+    $candidates = [$config['confirmation_hash'] ?? null, $config['confirmation_url'] ?? null, $confirmationUrl];
+    $deduplicated = [];
+
+    foreach ($candidates as $candidate) {
+        if (!is_string($candidate)) {
+            continue;
+        }
+
+        $normalized = trim($candidate);
+        if ($normalized === '') {
+            continue;
+        }
+
+        $deduplicated[$normalized] = true;
+    }
+
+    $values = array_keys($deduplicated);
+    usort($values, static fn(string $left, string $right): int => strlen($right) <=> strlen($left));
+
+    return $values;
+}
+
+function redactSensitiveValues(mixed $value, array $sensitiveValues): mixed
+{
+    if ($sensitiveValues === []) {
+        return $value;
+    }
+
+    if (is_string($value)) {
+        $sanitized = $value;
+
+        foreach ($sensitiveValues as $sensitiveValue) {
+            $sanitized = str_replace($sensitiveValue, '[redacted]', $sanitized);
+        }
+
+        return $sanitized;
+    }
+
+    if (is_array($value)) {
+        $sanitized = [];
+
+        foreach ($value as $key => $item) {
+            $sanitized[$key] = redactSensitiveValues($item, $sensitiveValues);
+        }
+
+        return $sanitized;
+    }
+
+    return $value;
 }
 
 /**
