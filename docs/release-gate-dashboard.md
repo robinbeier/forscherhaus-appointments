@@ -65,3 +65,31 @@ The gate always writes a JSON report containing:
 - `checks`: pass/fail records per check with duration and details.
 - `summary`: pass/fail counts and exit code.
 - `failure`: present on failure with message + exception class.
+
+## CI Integration Smoke (Quick Win #3)
+
+The CI pipeline also runs a deterministic integration smoke test for the auth + dashboard metrics chain.
+
+Purpose:
+
+- Catch runtime wiring regressions (session/csrf/auth/routing/db) that unit tests can miss.
+- Keep checks deterministic and low-risk close to release.
+- Avoid external dependencies such as PDF renderer.
+
+Local repro command:
+
+```bash
+docker compose up -d mysql php-fpm nginx
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+docker compose exec -T php-fpm php index.php console install
+docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
+  --base-url=http://nginx --index-page=index.php \
+  --username=administrator --password=administrator \
+  --start-date=2026-01-01 --end-date=2026-01-31
+```
+
+Smoke exit codes:
+
+- `0`: All smoke checks passed.
+- `1`: Assertion failure (behavioral regression).
+- `2`: Runtime/configuration/infrastructure error.
