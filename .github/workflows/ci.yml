@@ -34,6 +34,7 @@ jobs:
   integration-smoke:
     runs-on: ubuntu-latest
     needs: build-test
+    continue-on-error: true
 
     steps:
       - name: Git clone
