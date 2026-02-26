@@ -32,7 +32,7 @@ composer release:gate:booking-confirmation-pdf -- \
 - `--confirmation-url` (required unless `--confirmation-hash`): Absolute confirmation URL.
 - `--index-page` (optional): URL index segment. Default `index.php`. Use empty value in rewrite mode.
 - `--pwcli-path` (optional): Path to Playwright wrapper script. Default:
-  - `$CODEX_HOME/skills/playwright/scripts/playwright_cli.sh`
+  - `scripts/release-gate/playwright/playwright_cli.sh`
 - `--bootstrap-timeout` (optional): Timeout (seconds) for initial Playwright CLI warmup (`pwcli --help`). Default `90`.
 - `--open-timeout` (optional): Timeout (seconds) for open/snapshot/screenshots. Default `20`.
 - `--download-timeout` (optional): Timeout (seconds) for PDF click/download. Default `20`.

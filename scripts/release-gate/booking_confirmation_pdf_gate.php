@@ -24,7 +24,7 @@ $repoRoot = dirname(__DIR__, 2);
 $timestamp = gmdate('Ymd\THis\Z');
 $defaultOutputPath = $repoRoot . '/storage/logs/release-gate/booking-confirmation-pdf-' . $timestamp . '.json';
 $defaultArtifactsDir = $repoRoot . '/output/playwright/booking-confirmation-pdf/' . $timestamp;
-$defaultPwcliPath = resolveDefaultPwcliPath();
+$defaultPwcliPath = resolveDefaultPwcliPath($repoRoot);
 $downloadSnippetPath = __DIR__ . '/playwright/booking_confirmation_download.js';
 
 $sessionId = null;
@@ -127,10 +127,10 @@ try {
         }
 
         $openResult = runPwcliCommand($config, $sessionId, $arguments, $repoRoot, $config['open_timeout']);
-        assertProcessSucceeded($openResult, 'Open confirmation page');
+        assertProcessSucceeded($openResult, 'Open confirmation page', true);
 
         $snapshotResult = runPwcliCommand($config, $sessionId, ['snapshot'], $repoRoot, $config['open_timeout']);
-        assertProcessSucceeded($snapshotResult, 'Snapshot confirmation page');
+        assertProcessSucceeded($snapshotResult, 'Snapshot confirmation page', true);
 
         return [
             'confirmation_source' => $confirmationSource,
@@ -152,7 +152,7 @@ try {
             $repoRoot,
             $config['open_timeout'],
         );
-        assertProcessSucceeded($result, 'Capture screenshot before PDF click');
+        assertProcessSucceeded($result, 'Capture screenshot before PDF click', true);
 
         ensureFileReadable($beforeScreenshotPath, 'Before screenshot');
 
@@ -195,7 +195,7 @@ try {
             $config['download_timeout'] + 15,
             null,
         );
-        assertProcessSucceeded($runCodeResult, 'Trigger booking confirmation PDF download');
+        assertProcessSucceeded($runCodeResult, 'Trigger booking confirmation PDF download', true);
 
         $marker = parseRunCodeResult($runCodeResult);
 
@@ -236,7 +236,7 @@ try {
             $repoRoot,
             $config['open_timeout'],
         );
-        assertProcessSucceeded($result, 'Capture screenshot after PDF click');
+        assertProcessSucceeded($result, 'Capture screenshot after PDF click', true);
 
         ensureFileReadable($afterScreenshotPath, 'After screenshot');
 
@@ -248,7 +248,7 @@ try {
 
     $runCheck('collect_network_log', static function () use ($config, $repoRoot, $sessionId, $networkLogPath): array {
         $result = runPwcliCommand($config, $sessionId, ['network'], $repoRoot, $config['open_timeout']);
-        assertProcessSucceeded($result, 'Collect network log');
+        assertProcessSucceeded($result, 'Collect network log', true);
 
         $networkOutput = (string) ($result['stdout'] ?? '');
         $networkSourcePath = resolvePlaywrightNetworkArtifactPath($networkOutput, $repoRoot);
@@ -667,7 +667,7 @@ function runPwcliCommand(
 /**
  * @param array<string, mixed> $result
  */
-function assertProcessSucceeded(array $result, string $context): void
+function assertProcessSucceeded(array $result, string $context, bool $asAssertionFailure = false): void
 {
     $exitCode = (int) ($result['exit_code'] ?? 1);
     $timedOut = (bool) ($result['timed_out'] ?? false);
@@ -681,18 +681,25 @@ function assertProcessSucceeded(array $result, string $context): void
     $stderr = trim((string) ($result['stderr'] ?? ''));
     $excerpt = $stderr !== '' ? $stderr : $stdout;
     $excerpt = substr($excerpt, 0, 1200);
+    $throwProcessFailure = static function (string $message) use ($asAssertionFailure): void {
+        if ($asAssertionFailure) {
+            throw new GateAssertionException($message);
+        }
+
+        throw new RuntimeException($message);
+    };
 
     if ($playwrightError !== null) {
-        throw new RuntimeException(
+        $throwProcessFailure(
             sprintf('%s reported a Playwright error: %s', $context, substr($playwrightError, 0, 1200)),
         );
     }
 
     if ($timedOut) {
-        throw new RuntimeException($context . ' timed out. ' . $excerpt);
+        $throwProcessFailure($context . ' timed out. ' . $excerpt);
     }
 
-    throw new RuntimeException(sprintf('%s failed with exit code %d. %s', $context, $exitCode, $excerpt));
+    $throwProcessFailure(sprintf('%s failed with exit code %d. %s', $context, $exitCode, $excerpt));
 }
 
 function extractPlaywrightErrorSection(string $output): ?string
@@ -999,16 +1006,9 @@ function writeJsonReport(string $path, array $report): void
     }
 }
 
-function resolveDefaultPwcliPath(): string
+function resolveDefaultPwcliPath(string $repoRoot): string
 {
-    $codexHome = getenv('CODEX_HOME');
-
-    if (!is_string($codexHome) || trim($codexHome) === '') {
-        $home = getenv('HOME');
-        $codexHome = is_string($home) && $home !== '' ? rtrim($home, '/') . '/.codex' : '.codex';
-    }
-
-    return rtrim($codexHome, '/') . '/skills/playwright/scripts/playwright_cli.sh';
+    return rtrim($repoRoot, '/') . '/scripts/release-gate/playwright/playwright_cli.sh';
 }
 
 function buildSessionId(): string
@@ -1034,7 +1034,7 @@ function printUsage(): void
         '',
         'Optional:',
         '  --index-page=VALUE             URL index page segment (default: index.php, use empty for rewrite mode)',
-        '  --pwcli-path=PATH              Playwright wrapper path (default: $CODEX_HOME/skills/playwright/scripts/playwright_cli.sh)',
+        '  --pwcli-path=PATH              Playwright wrapper path (default: scripts/release-gate/playwright/playwright_cli.sh)',
         '  --bootstrap-timeout=SECONDS    Timeout for Playwright CLI bootstrap warmup (default: 90)',
         '  --open-timeout=SECONDS         Timeout for open/snapshot/screenshots (default: 20)',
         '  --download-timeout=SECONDS     Timeout for PDF click/download (default: 20)',
