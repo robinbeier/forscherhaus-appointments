@@ -86,7 +86,6 @@ try {
 
     $runCheck('readiness_dependencies', static function () use ($config, $downloadSnippetPath, $repoRoot): array {
         ensureFileReadable($config['pwcli_path'], 'pwcli wrapper');
-        ensureFileExecutable($config['pwcli_path'], 'pwcli wrapper');
         ensureFileReadable($downloadSnippetPath, 'Playwright download snippet');
 
         $npxProbe = GateProcessRunner::run(['bash', '-lc', 'command -v npx >/dev/null 2>&1'], $repoRoot, null, 10);
@@ -96,7 +95,7 @@ try {
         }
 
         $pwcliBootstrap = GateProcessRunner::run(
-            [$config['pwcli_path'], '--help'],
+            ['bash', $config['pwcli_path'], '--help'],
             $repoRoot,
             null,
             $config['bootstrap_timeout'],
@@ -658,7 +657,7 @@ function runPwcliCommand(
     int $timeoutSeconds,
     ?array $environment = null,
 ): array {
-    $command = [(string) $config['pwcli_path'], '--session', $sessionId, ...$arguments];
+    $command = ['bash', (string) $config['pwcli_path'], '--session', $sessionId, ...$arguments];
     $effectiveEnvironment = $environment === null ? null : array_merge(getCurrentEnvironment(), $environment);
 
     return GateProcessRunner::run($command, $repoRoot, $effectiveEnvironment, $timeoutSeconds);
@@ -967,13 +966,6 @@ function ensureFileReadable(string $path, string $label): void
 {
     if (!is_file($path) || !is_readable($path)) {
         throw new RuntimeException($label . ' is missing or not readable: ' . $path);
-    }
-}
-
-function ensureFileExecutable(string $path, string $label): void
-{
-    if (!is_executable($path)) {
-        throw new RuntimeException($label . ' is not executable: ' . $path);
     }
 }
 
