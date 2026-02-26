@@ -78,14 +78,24 @@ final class GateProcessRunner
             }
 
             if ($read !== []) {
-                $remaining = max(0.0, $timeoutSeconds - $elapsed);
-                $seconds = (int) floor($remaining);
-                $microseconds = (int) (($remaining - $seconds) * 1_000_000);
+                $seconds = 0;
+                $microseconds = 0;
+
+                if ($running) {
+                    $remaining = max(0.0, $timeoutSeconds - $elapsed);
+                    $seconds = (int) floor($remaining);
+                    $microseconds = (int) (($remaining - $seconds) * 1_000_000);
+                }
+
                 $write = null;
                 $except = null;
                 $selected = @stream_select($read, $write, $except, $seconds, $microseconds);
 
                 if ($selected === false) {
+                    break;
+                }
+
+                if ($selected === 0 && !$running) {
                     break;
                 }
 
