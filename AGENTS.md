@@ -61,9 +61,13 @@ docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 composer release:gate:dashboard -- \
   --base-url=http://localhost --index-page=index.php --username="$EA_GATE_USERNAME" --password="$EA_GATE_PASSWORD" \
   --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD --statuses=Booked --pdf-health-url=http://localhost:3003/healthz
+
+# Vollstaendige Optionen anzeigen
+composer release:gate:dashboard -- --help
 ```
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
+Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/release-gate/dashboard-gate-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
 
