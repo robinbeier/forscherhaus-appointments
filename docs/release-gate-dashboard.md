@@ -18,6 +18,12 @@ It is designed to catch runtime regressions that unit tests can miss, without ch
 - No booking create/reschedule/cancel mutations.
 - Structural and invariant assertions (not fixed snapshot counts).
 
+## Related Checks
+
+- Parent confirmation PDF (read-only synthetic, Playwright):
+  - `composer release:gate:booking-confirmation-pdf -- --help`
+  - See `docs/release-gate-booking-confirmation-pdf.md` for usage and options.
+
 ## Run
 
 ```bash
