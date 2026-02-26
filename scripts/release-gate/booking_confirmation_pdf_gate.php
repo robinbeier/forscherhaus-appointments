@@ -381,8 +381,8 @@ function parseCliOptions(
         'help',
         'base-url:',
         'index-page::',
-        'confirmation-hash::',
-        'confirmation-url::',
+        'confirmation-hash:',
+        'confirmation-url:',
         'pwcli-path::',
         'open-timeout::',
         'download-timeout::',
@@ -582,7 +582,7 @@ function parseRunCodeResult(array $runCodeResult): array
 
     $rawJson = null;
     $matches = [];
-    if (preg_match('/### Result\s*\R(.+?)(?:\R### Ran Playwright code|\z)/s', $output, $matches) === 1) {
+    if (preg_match('/### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) === 1) {
         $rawJson = trim((string) ($matches[1] ?? ''));
     }
 
