@@ -33,6 +33,29 @@
 
 ![screenshot](screenshot.png)
 
+## Forscherhaus Fork Quickstart
+
+This repository is the Forscherhaus school fork of Easy!Appointments.
+For contributor guardrails, release constraints, and command conventions, see [AGENTS.md](AGENTS.md).
+
+Important fork invariant:
+
+-   `services.attendants_number` is currently restricted to `1`.
+
+Recommended local bootstrap:
+
+```bash
+./scripts/setup-worktree.sh
+docker compose up -d
+```
+
+Fast validation commands:
+
+```bash
+docker compose run --rm php-fpm composer test
+npm run build
+```
+
 ## About
 
 **Easy!Appointments** is a highly customizable web application that allows customers to book appointments with you
