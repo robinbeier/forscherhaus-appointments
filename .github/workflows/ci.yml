@@ -2,6 +2,10 @@ name: CI
 
 on: [ push ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -33,7 +37,6 @@ jobs:
 
   integration-smoke:
     runs-on: ubuntu-latest
-    needs: build-test
     continue-on-error: true
 
     steps:
