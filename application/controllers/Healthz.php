@@ -20,6 +20,9 @@
  */
 class Healthz extends EA_Controller
 {
+    private const PDF_CONNECT_TIMEOUT_SECONDS = 1;
+    private const PDF_REQUEST_TIMEOUT_SECONDS = 2;
+
     /**
      * Return a deep health payload.
      */
@@ -185,8 +188,8 @@ class Healthz extends EA_Controller
 
             curl_setopt_array($curl, [
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => 2,
-                CURLOPT_TIMEOUT => 5,
+                CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+                CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
                 CURLOPT_FOLLOWLOCATION => false,
             ]);
 
@@ -222,14 +225,20 @@ class Healthz extends EA_Controller
     {
         $candidates = [];
         $configured = trim((string) env('PDF_RENDERER_URL', ''));
+        $appEnv = strtolower(trim((string) env('APP_ENV', 'production')));
+        $isLocalEnv = in_array($appEnv, ['development', 'testing', 'local'], true);
 
         if ($configured !== '') {
             $candidates[] = $configured;
         }
 
         $candidates[] = 'http://pdf-renderer:3000';
-        $candidates[] = 'http://localhost:3003';
-        $candidates[] = 'http://127.0.0.1:3003';
+
+        // Host-only fallbacks are useful in local setup but add avoidable timeout cost in production.
+        if ($isLocalEnv) {
+            $candidates[] = 'http://localhost:3003';
+            $candidates[] = 'http://127.0.0.1:3003';
+        }
 
         $resolved = [];
 
