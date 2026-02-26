@@ -59,8 +59,18 @@ jobs:
       - name: Wait for MySQL readiness
         run: |
           until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
       - name: Install deterministic seed instance
-        run: docker compose exec -T php-fpm php index.php console install
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose exec -T php-fpm php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
       - name: Run dashboard integration smoke
         run: >
           docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php
