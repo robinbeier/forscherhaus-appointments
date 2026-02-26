@@ -33,6 +33,7 @@ composer release:gate:booking-confirmation-pdf -- \
 - `--index-page` (optional): URL index segment. Default `index.php`. Use empty value in rewrite mode.
 - `--pwcli-path` (optional): Path to Playwright wrapper script. Default:
   - `$CODEX_HOME/skills/playwright/scripts/playwright_cli.sh`
+- `--bootstrap-timeout` (optional): Timeout (seconds) for initial Playwright CLI warmup (`pwcli --help`). Default `90`.
 - `--open-timeout` (optional): Timeout (seconds) for open/snapshot/screenshots. Default `20`.
 - `--download-timeout` (optional): Timeout (seconds) for PDF click/download. Default `20`.
 - `--min-pdf-bytes` (optional): Minimum PDF size in bytes. Default `1024`.
@@ -45,6 +46,7 @@ composer release:gate:booking-confirmation-pdf -- \
 ## Assertions
 
 - Playwright dependencies are available (`pwcli`, `npx`).
+- Playwright CLI startup is warmed up before flow checks (avoids first-run `npx` bootstrap timing out the page-open step).
 - Confirmation page opens and can be snapshotted.
 - PDF button click triggers a download event.
 - Downloaded file exists, starts with `%PDF-`, and is at least `--min-pdf-bytes`.

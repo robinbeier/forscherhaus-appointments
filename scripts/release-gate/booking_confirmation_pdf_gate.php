@@ -92,11 +92,20 @@ try {
             throw new RuntimeException('npx was not found on PATH.');
         }
 
+        $pwcliBootstrap = GateProcessRunner::run(
+            [$config['pwcli_path'], '--help'],
+            $repoRoot,
+            null,
+            $config['bootstrap_timeout'],
+        );
+        assertProcessSucceeded($pwcliBootstrap, 'Bootstrap Playwright CLI');
+
         ensureDirectory($config['artifacts_dir']);
 
         return [
             'pwcli_path' => $config['pwcli_path'],
             'download_snippet' => $downloadSnippetPath,
+            'bootstrap_duration_ms' => $pwcliBootstrap['duration_ms'],
             'artifacts_dir' => $config['artifacts_dir'],
         ];
     });
@@ -168,6 +177,7 @@ try {
             $config['download_timeout'] * 1000,
             $downloadPath,
         );
+        $snippet = normalizeRunCodeSnippet($snippet);
 
         if (is_file($downloadPath) && !unlink($downloadPath)) {
             throw new RuntimeException('Could not remove stale download file: ' . $downloadPath);
@@ -277,6 +287,18 @@ function injectSnippetPlaceholders(string $snippet, string $selector, int $timeo
     return $resolved;
 }
 
+function normalizeRunCodeSnippet(string $snippet): string
+{
+    $normalized = trim($snippet);
+    $normalized = preg_replace('/;\s*\z/', '', $normalized) ?? $normalized;
+
+    if ($normalized === '') {
+        throw new RuntimeException('Playwright download snippet is empty after normalization.');
+    }
+
+    return $normalized;
+}
+
 if ($sessionId !== null && is_array($config) && !empty($config['pwcli_path'])) {
     try {
         $closeResult = runPwcliCommand($config, $sessionId, ['close'], $repoRoot, 10);
@@ -302,7 +324,9 @@ if (is_array($config)) {
         'confirmation_hash' => $config['confirmation_hash'],
         'confirmation_url' => $config['confirmation_url'],
         'pwcli_path' => $config['pwcli_path'],
+        'open_timeout' => $config['open_timeout'],
         'download_timeout' => $config['download_timeout'],
+        'bootstrap_timeout' => $config['bootstrap_timeout'],
         'min_pdf_bytes' => $config['min_pdf_bytes'],
         'artifacts_dir' => $config['artifacts_dir'],
         'headed' => $config['headed'],
@@ -363,6 +387,7 @@ exit($exitCode);
  *   confirmation_hash:string|null,
  *   confirmation_url:string|null,
  *   pwcli_path:string,
+ *   bootstrap_timeout:int,
  *   open_timeout:int,
  *   download_timeout:int,
  *   min_pdf_bytes:int,
@@ -384,6 +409,7 @@ function parseCliOptions(
         'confirmation-hash:',
         'confirmation-url:',
         'pwcli-path::',
+        'bootstrap-timeout::',
         'open-timeout::',
         'download-timeout::',
         'min-pdf-bytes::',
@@ -406,6 +432,7 @@ function parseCliOptions(
             'confirmation_hash' => null,
             'confirmation_url' => null,
             'pwcli_path' => $defaultPwcliPath,
+            'bootstrap_timeout' => 90,
             'open_timeout' => 20,
             'download_timeout' => 20,
             'min_pdf_bytes' => 1024,
@@ -446,6 +473,7 @@ function parseCliOptions(
     }
 
     $pwcliPath = resolvePath(trim((string) getOptionalOption($options, 'pwcli-path', $defaultPwcliPath)), $repoRoot);
+    $bootstrapTimeout = parsePositiveInt(getOptionalOption($options, 'bootstrap-timeout', 90), 'bootstrap-timeout');
 
     $openTimeout = parsePositiveInt(getOptionalOption($options, 'open-timeout', 20), 'open-timeout');
     $downloadTimeout = parsePositiveInt(getOptionalOption($options, 'download-timeout', 20), 'download-timeout');
@@ -470,6 +498,7 @@ function parseCliOptions(
         'confirmation_hash' => $confirmationHash,
         'confirmation_url' => $confirmationUrl,
         'pwcli_path' => $pwcliPath,
+        'bootstrap_timeout' => $bootstrapTimeout,
         'open_timeout' => $openTimeout,
         'download_timeout' => $downloadTimeout,
         'min_pdf_bytes' => $minPdfBytes,
@@ -873,6 +902,7 @@ function printUsage(): void
         'Optional:',
         '  --index-page=VALUE             URL index page segment (default: index.php, use empty for rewrite mode)',
         '  --pwcli-path=PATH              Playwright wrapper path (default: $CODEX_HOME/skills/playwright/scripts/playwright_cli.sh)',
+        '  --bootstrap-timeout=SECONDS    Timeout for Playwright CLI bootstrap warmup (default: 90)',
         '  --open-timeout=SECONDS         Timeout for open/snapshot/screenshots (default: 20)',
         '  --download-timeout=SECONDS     Timeout for PDF click/download (default: 20)',
         '  --min-pdf-bytes=BYTES          Minimum PDF size assertion (default: 1024)',
