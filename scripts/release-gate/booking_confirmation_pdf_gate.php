@@ -544,21 +544,44 @@ function assertProcessSucceeded(array $result, string $context): void
 {
     $exitCode = (int) ($result['exit_code'] ?? 1);
     $timedOut = (bool) ($result['timed_out'] ?? false);
+    $stdout = trim((string) ($result['stdout'] ?? ''));
+    $playwrightError = extractPlaywrightErrorSection($stdout);
 
-    if ($exitCode === 0 && !$timedOut) {
+    if ($exitCode === 0 && !$timedOut && $playwrightError === null) {
         return;
     }
 
     $stderr = trim((string) ($result['stderr'] ?? ''));
-    $stdout = trim((string) ($result['stdout'] ?? ''));
     $excerpt = $stderr !== '' ? $stderr : $stdout;
     $excerpt = substr($excerpt, 0, 1200);
+
+    if ($playwrightError !== null) {
+        throw new RuntimeException(
+            sprintf('%s reported a Playwright error: %s', $context, substr($playwrightError, 0, 1200)),
+        );
+    }
 
     if ($timedOut) {
         throw new RuntimeException($context . ' timed out. ' . $excerpt);
     }
 
     throw new RuntimeException(sprintf('%s failed with exit code %d. %s', $context, $exitCode, $excerpt));
+}
+
+function extractPlaywrightErrorSection(string $output): ?string
+{
+    if (trim($output) === '') {
+        return null;
+    }
+
+    $matches = [];
+    if (preg_match('/(?:^|\R)### Error\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) !== 1) {
+        return null;
+    }
+
+    $message = trim((string) ($matches[1] ?? ''));
+
+    return $message !== '' ? $message : 'Unknown Playwright error.';
 }
 
 /**
@@ -574,10 +597,9 @@ function parseRunCodeResult(array $runCodeResult): array
         throw new GateAssertionException('Playwright run-code produced no output.');
     }
 
-    $errorMatches = [];
-    if (preg_match('/### Error\s*\R(.+?)(?:\R###|\z)/s', $output, $errorMatches) === 1) {
-        $errorText = trim((string) ($errorMatches[1] ?? 'Unknown Playwright run-code error.'));
-        throw new GateAssertionException($errorText !== '' ? $errorText : 'Unknown Playwright run-code error.');
+    $errorText = extractPlaywrightErrorSection($output);
+    if ($errorText !== null) {
+        throw new GateAssertionException($errorText);
     }
 
     $rawJson = null;
