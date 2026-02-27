@@ -183,6 +183,7 @@ class Healthz extends EA_Controller
             $curl = curl_init($healthUrl);
 
             if ($curl === false) {
+                $errors[] = sprintf('%s -> curl_init_failed', $endpoint);
                 continue;
             }
 
@@ -211,6 +212,10 @@ class Healthz extends EA_Controller
             }
 
             $errors[] = sprintf('%s -> status_%d', $endpoint, $statusCode);
+        }
+
+        if ($errors === []) {
+            $errors[] = 'no_reachable_endpoint';
         }
 
         throw new RuntimeException('No healthy PDF renderer endpoint found: ' . implode('; ', $errors));
