@@ -223,9 +223,7 @@ class Healthz extends EA_Controller
     {
         $candidates = [];
         $configured = trim((string) env('PDF_RENDERER_URL', ''));
-        $runtimeEnv = defined('ENVIRONMENT') ? ENVIRONMENT : (getenv('APP_ENV') ?: 'production');
-        $appEnv = strtolower(trim((string) $runtimeEnv));
-        $isLocalEnv = in_array($appEnv, ['development', 'testing', 'local'], true);
+        $isLocalEnv = $this->isLocalEnvironment();
 
         if ($configured !== '') {
             $candidates[] = $configured;
@@ -254,6 +252,17 @@ class Healthz extends EA_Controller
         }
 
         return $resolved;
+    }
+
+    /**
+     * Detect whether the app runs in a local-like runtime environment.
+     */
+    protected function isLocalEnvironment(): bool
+    {
+        $runtimeEnv = defined('ENVIRONMENT') ? ENVIRONMENT : (getenv('APP_ENV') ?: 'production');
+        $appEnv = strtolower(trim((string) $runtimeEnv));
+
+        return in_array($appEnv, ['development', 'testing', 'local'], true);
     }
 
     /**

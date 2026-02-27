@@ -85,11 +85,47 @@ class HealthzControllerTest extends TestCase
         );
     }
 
-    private function createController(): object
+    public function testResolvePdfRendererEndpointsSkipsLoopbackAliasOutsideLocalEnvironment(): void
     {
-        return new class extends Healthz {
-            public function __construct()
+        $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
+        $original = $_ENV['PDF_RENDERER_URL'] ?? null;
+
+        try {
+            $_ENV['PDF_RENDERER_URL'] = 'http://example.com:3000/';
+
+            $controller = $this->createController(false);
+            $endpoints = $controller->callResolvePdfRendererEndpoints();
+
+            $this->assertSame(
+                [
+                    'http://example.com:3000',
+                    'http://pdf-renderer:3000',
+                    'http://localhost:3003',
+                ],
+                $endpoints,
+            );
+        } finally {
+            if ($hadOriginal) {
+                $_ENV['PDF_RENDERER_URL'] = $original;
+            } else {
+                unset($_ENV['PDF_RENDERER_URL']);
+            }
+        }
+    }
+
+    private function createController(bool $isLocalEnvironment = true): object
+    {
+        return new class($isLocalEnvironment) extends Healthz {
+            private bool $isLocalEnvironment;
+
+            public function __construct(bool $isLocalEnvironment)
             {
+                $this->isLocalEnvironment = $isLocalEnvironment;
+            }
+
+            protected function isLocalEnvironment(): bool
+            {
+                return $this->isLocalEnvironment;
             }
 
             public function callResolvePdfRendererEndpoints(): array
