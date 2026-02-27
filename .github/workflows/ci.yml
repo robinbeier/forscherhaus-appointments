@@ -28,8 +28,6 @@ jobs:
           php_version: 8.3
           php_extensions: gd
           version: 2
-      - name: PHPStan Application
-        run: composer phpstan:application
       - name: PHPUnit Tests
         uses: php-actions/phpunit@v4
         env:

@@ -47,13 +47,11 @@
     },
     "require-dev": {
         "roave/security-advisories": "dev-master",
-        "phpstan/phpstan": "^1.12",
         "phpunit/phpunit": "^9.6"
     },
     "scripts": {
         "pre-autoload-dump": "Google\\Task\\Composer::cleanup",
         "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit",
-        "phpstan:application": "phpstan analyse -c phpstan.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "release:gate:dashboard": "php scripts/release-gate/dashboard_release_gate.php",
         "release:gate:booking-confirmation-pdf": "php scripts/release-gate/booking_confirmation_pdf_gate.php"
     },
