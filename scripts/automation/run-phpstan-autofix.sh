@@ -61,16 +61,16 @@ run_bootstrap_if_enabled() {
         return 0
     fi
 
-    if [[ ! -x "$BOOTSTRAP_SCRIPT" ]]; then
-        fail_with_report "runner-bootstrap-missing" "test -x $BOOTSTRAP_SCRIPT"
+    if [[ ! -f "$BOOTSTRAP_SCRIPT" ]]; then
+        fail_with_report "runner-bootstrap-missing" "test -f $BOOTSTRAP_SCRIPT"
     fi
 
     if ! COMPOSE_PROJECT="$COMPOSE_PROJECT" \
         COMPOSE_SERVICE="$COMPOSE_SERVICE" \
         CONTAINER_COMPOSER_CACHE="$CONTAINER_COMPOSER_CACHE" \
-        "$BOOTSTRAP_SCRIPT" >&2; then
+        bash "$BOOTSTRAP_SCRIPT" >&2; then
         fail_with_report "runner-bootstrap-failed" \
-            "COMPOSE_PROJECT=$COMPOSE_PROJECT COMPOSE_SERVICE=$COMPOSE_SERVICE $BOOTSTRAP_SCRIPT"
+            "COMPOSE_PROJECT=$COMPOSE_PROJECT COMPOSE_SERVICE=$COMPOSE_SERVICE bash $BOOTSTRAP_SCRIPT"
     fi
 }
 

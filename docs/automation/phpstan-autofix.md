@@ -32,7 +32,7 @@ Container, fuehrt `composer install` aus, prueft `vendor/bin/phpstan` und
 validiert `gh auth`.
 
 ```bash
-COMPOSE_PROJECT=fh-phpstan-auto ./scripts/automation/bootstrap-phpstan-autofix.sh
+COMPOSE_PROJECT=fh-phpstan-auto bash ./scripts/automation/bootstrap-phpstan-autofix.sh
 ```
 
 ## Runner Invocation
@@ -40,7 +40,7 @@ COMPOSE_PROJECT=fh-phpstan-auto ./scripts/automation/bootstrap-phpstan-autofix.s
 Die eigentliche Automation wird ueber das Runner-Skript gestartet:
 
 ```bash
-COMPOSE_PROJECT=fh-phpstan-auto ./scripts/automation/run-phpstan-autofix.sh
+COMPOSE_PROJECT=fh-phpstan-auto bash ./scripts/automation/run-phpstan-autofix.sh
 ```
 
 Voraussetzungen fuer den Runner:
@@ -95,7 +95,7 @@ Wenn `composer install` wegen Netzproblemen scheitert:
    `ls -la ~/Library/Caches/composer`
 4. Bootstrap erneut ausfuehren, damit der Host-Cache in den Container
    synchronisiert wird:
-   `COMPOSE_PROJECT=fh-phpstan-auto ./scripts/automation/bootstrap-phpstan-autofix.sh`
+   `COMPOSE_PROJECT=fh-phpstan-auto bash ./scripts/automation/bootstrap-phpstan-autofix.sh`
 5. Wenn weiterhin kein Netz verfuegbar und kein Cache vorhanden ist:
    Lauf korrekt als `status: report-only` mit
    `reason: composer-install-failed` beenden.
