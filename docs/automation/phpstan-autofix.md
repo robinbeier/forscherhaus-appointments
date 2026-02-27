@@ -35,6 +35,34 @@ validiert `gh auth`.
 COMPOSE_PROJECT=fh-phpstan-auto ./scripts/automation/bootstrap-phpstan-autofix.sh
 ```
 
+## Runner Invocation
+
+Die eigentliche Automation wird ueber das Runner-Skript gestartet:
+
+```bash
+COMPOSE_PROJECT=fh-phpstan-auto ./scripts/automation/run-phpstan-autofix.sh
+```
+
+Voraussetzungen fuer den Runner:
+
+- `codex` CLI installiert und eingeloggter Zugriff
+- `jq`, `docker`, `gh` verfuegbar
+
+Optional:
+
+- `RUN_BOOTSTRAP=0` deaktiviert den vorgeschalteten Bootstrap-Aufruf.
+- `CODEX_MODEL=<modellname>` erzwingt ein bestimmtes Codex-Modell.
+
+Der Runner druckt immer exakt dieses Format auf `stdout`:
+
+```text
+status: <fixed-and-pr|report-only|skipped-draft-exists>
+reason: <machine-friendly-reason>
+verification:
+  - <command-1>
+  - <command-2>
+```
+
 ## Laufzeit-Preflight (manuell / fuer Debug)
 
 ### Pflichtdateien
