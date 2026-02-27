@@ -232,7 +232,7 @@ class Healthz extends EA_Controller
         $candidates[] = 'http://pdf-renderer:3000';
         $candidates[] = 'http://localhost:3003';
 
-        // Extra loopback alias helps local host setups where localhost is remapped.
+        // Keep explicit loopback IP fallback for local host setups where localhost is remapped.
         if ($isLocalEnv) {
             $candidates[] = 'http://127.0.0.1:3003';
         }
