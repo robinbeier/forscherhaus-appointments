@@ -62,8 +62,22 @@ composer release:gate:dashboard -- \
   --base-url=http://localhost --index-page=index.php --username="$EA_GATE_USERNAME" --password="$EA_GATE_PASSWORD" \
   --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD --statuses=Booked --pdf-health-url=http://localhost:3003/healthz
 
+# Optional: Booking Confirmation PDF Gate (read-only synthetic)
+composer release:gate:booking-confirmation-pdf -- \
+  --base-url=http://localhost --index-page=index.php --confirmation-hash=REPLACE_WITH_APPOINTMENT_HASH
+
 # Vollstaendige Optionen anzeigen
 composer release:gate:dashboard -- --help
+composer release:gate:booking-confirmation-pdf -- --help
+
+# Optional: CI Dashboard Integration Smoke (lokaler Repro)
+docker compose up -d mysql php-fpm nginx
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+docker compose exec -T php-fpm php index.php console install
+docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
+  --base-url=http://nginx --index-page=index.php \
+  --username=administrator --password=administrator \
+  --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD
 ```
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
