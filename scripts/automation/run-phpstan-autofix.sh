@@ -4,12 +4,15 @@ set -euo pipefail
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-fh-phpstan-auto}"
 COMPOSE_SERVICE="${COMPOSE_SERVICE:-php-fpm}"
 CONTAINER_COMPOSER_CACHE="${CONTAINER_COMPOSER_CACHE:-/tmp/composer-cache}"
+HOST_COMPOSER_CACHE="${HOST_COMPOSER_CACHE:-$HOME/Library/Caches/composer}"
 RUN_BOOTSTRAP="${RUN_BOOTSTRAP:-1}"
+EXECUTION_MODE="${EXECUTION_MODE:-auto}"
 CODEX_BIN="${CODEX_BIN:-codex}"
 CODEX_MODEL="${CODEX_MODEL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_SCRIPT="$SCRIPT_DIR/bootstrap-phpstan-autofix.sh"
 TMP_DIR=""
+RESOLVED_EXECUTION_MODE=""
 
 readonly STATUS_FIXED_AND_PR="fixed-and-pr"
 readonly STATUS_REPORT_ONLY="report-only"
@@ -50,6 +53,10 @@ require_file() {
     [[ -f "$1" ]] || fail_with_report "missing-required-files" "test -f composer.json && test -f composer.lock && test -f phpstan.neon.dist"
 }
 
+log_info() {
+    printf '[runner] %s\n' "$*" >&2
+}
+
 cleanup() {
     if [[ -n "${TMP_DIR:-}" && -d "${TMP_DIR:-}" ]]; then
         rm -rf "$TMP_DIR"
@@ -58,6 +65,11 @@ cleanup() {
 
 run_bootstrap_if_enabled() {
     if [[ "$RUN_BOOTSTRAP" != "1" ]]; then
+        return 0
+    fi
+
+    if [[ "$RESOLVED_EXECUTION_MODE" != "docker" ]]; then
+        log_info "Skipping docker bootstrap (execution mode: $RESOLVED_EXECUTION_MODE)."
         return 0
     fi
 
@@ -72,6 +84,35 @@ run_bootstrap_if_enabled() {
         fail_with_report "runner-bootstrap-failed" \
             "COMPOSE_PROJECT=$COMPOSE_PROJECT COMPOSE_SERVICE=$COMPOSE_SERVICE bash $BOOTSTRAP_SCRIPT"
     fi
+}
+
+docker_accessible() {
+    command -v docker >/dev/null 2>&1 || return 1
+    docker version >/dev/null 2>&1 || return 1
+    docker compose version >/dev/null 2>&1 || return 1
+    docker ps >/dev/null 2>&1 || return 1
+}
+
+resolve_execution_mode() {
+    case "$EXECUTION_MODE" in
+    docker)
+        RESOLVED_EXECUTION_MODE="docker"
+        ;;
+    host)
+        RESOLVED_EXECUTION_MODE="host"
+        ;;
+    auto)
+        if docker_accessible; then
+            RESOLVED_EXECUTION_MODE="docker"
+        else
+            RESOLVED_EXECUTION_MODE="host"
+            log_info "Docker is not accessible; falling back to host execution mode."
+        fi
+        ;;
+    *)
+        fail_with_report "invalid-execution-mode" "printf '%s' \"$EXECUTION_MODE\""
+        ;;
+    esac
 }
 
 write_schema_file() {
@@ -107,26 +148,41 @@ JSON
 
 write_prompt_file() {
     local path="$1"
+    local install_cmd test_bin_cmd phpstan_cmd lint_cmd contract_line
+
+    if [[ "$RESOLVED_EXECUTION_MODE" == "docker" ]]; then
+        contract_line="- For PHP/composer/phpstan commands, execute in Docker: docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc '<command>'"
+        install_cmd="docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'COMPOSER_CACHE_DIR=${CONTAINER_COMPOSER_CACHE} composer install --no-interaction --prefer-dist --no-progress'"
+        test_bin_cmd="docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'test -x vendor/bin/phpstan'"
+        phpstan_cmd="docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'composer phpstan:application'"
+        lint_cmd="docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'php -l <changed_php_file>'"
+    else
+        contract_line="- For PHP/composer/phpstan commands, execute on the host shell."
+        install_cmd="COMPOSER_CACHE_DIR=${HOST_COMPOSER_CACHE} composer install --no-interaction --prefer-dist --no-progress"
+        test_bin_cmd="test -x vendor/bin/phpstan"
+        phpstan_cmd="composer phpstan:application"
+        lint_cmd="php -l <changed_php_file>"
+    fi
 
     cat >"$path" <<EOF
 You are the PHPStan autofix automation. Follow this deterministic flow and do not deviate.
 
 Execution environment contract:
-- For PHP/composer/phpstan commands, execute in Docker:
-  docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc '<command>'
+- Execution mode: ${RESOLVED_EXECUTION_MODE}
+${contract_line}
 - For git/gh commands, execute on the host shell.
 - Record verification commands exactly as executed, in order.
 
 1) Preflight
 - Run \`test -f composer.json && test -f composer.lock && test -f phpstan.neon.dist\`.
 - If that fails, output \`status: report-only\`, \`reason: missing-required-files\`, include \`verification:\` commands, and stop.
-- If \`vendor/bin/phpstan\` is missing, run \`docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'COMPOSER_CACHE_DIR=${CONTAINER_COMPOSER_CACHE} composer install --no-interaction --prefer-dist --no-progress'\`.
+- If \`vendor/bin/phpstan\` is missing, run \`${install_cmd}\`.
 - If install fails, output \`status: report-only\`, \`reason: composer-install-failed\`, include \`verification:\` commands, and stop.
-- Run \`docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'test -x vendor/bin/phpstan'\`.
+- Run \`${test_bin_cmd}\`.
 - If that fails, output \`status: report-only\`, \`reason: missing-phpstan-binary\`, include \`verification:\` commands, and stop.
 
 2) Initial scan and issue selection
-- Run \`docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'composer phpstan:application'\`.
+- Run \`${phpstan_cmd}\`.
 - If exit code is 0, output \`status: report-only\`, \`reason: no-actionable-issue\`, include \`verification:\` commands, and stop.
 - Select exactly one high-confidence PHPStan type issue under \`application/\` not already covered by the current baseline.
 - Edit exactly one file per run and only within \`application/\`.
@@ -135,9 +191,9 @@ Execution environment contract:
 - Apply the smallest behavior-preserving fix. If ambiguous, output \`status: report-only\`, \`reason: ambiguous-fix\`, include \`verification:\` commands, and stop.
 
 3) Verification
-- Run \`docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'php -l <changed_php_file>'\`.
+- Run \`${lint_cmd}\`.
 - If lint fails, output \`status: report-only\`, \`reason: php-lint-failed\`, include \`verification:\` commands, and stop.
-- Rerun \`docker compose -p ${COMPOSE_PROJECT} exec -T ${COMPOSE_SERVICE} sh -lc 'composer phpstan:application'\`.
+- Rerun \`${phpstan_cmd}\`.
 - If rerun fails, output \`status: report-only\`, \`reason: post-fix-phpstan-failed\`, include \`verification:\` commands, and stop.
 
 4) PR gate and creation
@@ -187,11 +243,15 @@ main() {
 
     require_cmd "$CODEX_BIN"
     require_cmd jq
-    require_cmd docker
     require_cmd gh
     require_file composer.json
     require_file composer.lock
     require_file phpstan.neon.dist
+
+    resolve_execution_mode
+    if [[ "$RESOLVED_EXECUTION_MODE" == "docker" ]]; then
+        require_cmd docker
+    fi
 
     run_bootstrap_if_enabled
 

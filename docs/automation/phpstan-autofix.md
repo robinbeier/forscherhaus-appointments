@@ -51,6 +51,10 @@ Voraussetzungen fuer den Runner:
 Optional:
 
 - `RUN_BOOTSTRAP=0` deaktiviert den vorgeschalteten Bootstrap-Aufruf.
+- `EXECUTION_MODE=auto|docker|host` steuert die Ausfuehrung der PHP-Schritte.
+  - `auto` (Default): Docker wenn erreichbar, sonst Host-Fallback.
+  - `docker`: erzwingt Docker-Ausfuehrung.
+  - `host`: erzwingt Host-Ausfuehrung ohne Docker-Bootstrap.
 - `CODEX_MODEL=<modellname>` erzwingt ein bestimmtes Codex-Modell.
 
 Der Runner druckt immer exakt dieses Format auf `stdout`:
