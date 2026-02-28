@@ -283,10 +283,10 @@ class Healthz extends EA_Controller
         }
 
         $candidates[] = 'http://pdf-renderer:3000';
-        $candidates[] = 'http://localhost:3003';
 
-        // Keep explicit loopback IP fallback for local host setups where localhost is remapped.
+        // Host loopback fallbacks are useful locally but add avoidable timeout cost in production.
         if ($isLocalEnv) {
+            $candidates[] = 'http://localhost:3003';
             $candidates[] = 'http://127.0.0.1:3003';
         }
 

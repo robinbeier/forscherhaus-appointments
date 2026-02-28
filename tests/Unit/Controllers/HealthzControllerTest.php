@@ -100,7 +100,6 @@ class HealthzControllerTest extends TestCase
                 [
                     'http://example.com:3000',
                     'http://pdf-renderer:3000',
-                    'http://localhost:3003',
                 ],
                 $endpoints,
             );
