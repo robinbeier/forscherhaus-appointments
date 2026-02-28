@@ -22,6 +22,8 @@ class Healthz extends EA_Controller
 {
     private const PDF_CONNECT_TIMEOUT_SECONDS = 1;
     private const PDF_REQUEST_TIMEOUT_SECONDS = 2;
+    private const PDF_LOOPBACK_CONNECT_TIMEOUT_MS = 250;
+    private const PDF_LOOPBACK_REQUEST_TIMEOUT_MS = 500;
 
     /**
      * Return a deep health payload.
@@ -187,7 +189,7 @@ class Healthz extends EA_Controller
                 continue;
             }
 
-            $this->configureCurl($curl);
+            $this->configureCurl($curl, $endpoint);
 
             $responseBody = $this->executeCurl($curl);
             $curlError = $this->getCurlError($curl);
@@ -227,14 +229,25 @@ class Healthz extends EA_Controller
     /**
      * Apply cURL defaults for health checks.
      */
-    protected function configureCurl(mixed $curl): void
+    protected function configureCurl(mixed $curl, ?string $endpoint = null): void
     {
-        curl_setopt_array($curl, [
+        $options = [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
-            CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
             CURLOPT_FOLLOWLOCATION => false,
-        ]);
+        ];
+
+        $timeoutOptions = $endpoint !== null
+            ? $this->resolvePdfTimeoutOptions($endpoint)
+            : [
+                CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+                CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
+            ];
+
+        foreach ($timeoutOptions as $option => $value) {
+            $options[$option] = $value;
+        }
+
+        curl_setopt_array($curl, $options);
     }
 
     /**
@@ -270,6 +283,34 @@ class Healthz extends EA_Controller
     }
 
     /**
+     * Resolve cURL timeout options for a renderer health probe.
+     */
+    protected function resolvePdfTimeoutOptions(string $endpoint): array
+    {
+        if (!$this->isLocalEnvironment() && $this->isLoopbackEndpoint($endpoint)) {
+            return [
+                CURLOPT_CONNECTTIMEOUT_MS => self::PDF_LOOPBACK_CONNECT_TIMEOUT_MS,
+                CURLOPT_TIMEOUT_MS => self::PDF_LOOPBACK_REQUEST_TIMEOUT_MS,
+            ];
+        }
+
+        return [
+            CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+            CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
+        ];
+    }
+
+    /**
+     * Determine whether an endpoint points at a local loopback host.
+     */
+    protected function isLoopbackEndpoint(string $endpoint): bool
+    {
+        $host = strtolower((string) parse_url($endpoint, PHP_URL_HOST));
+
+        return in_array($host, ['localhost', '127.0.0.1'], true);
+    }
+
+    /**
      * Resolve PDF renderer endpoint candidates.
      */
     protected function resolvePdfRendererEndpoints(): array
@@ -285,7 +326,7 @@ class Healthz extends EA_Controller
         $candidates[] = 'http://pdf-renderer:3000';
         $candidates[] = 'http://localhost:3003';
 
-        // Keep explicit loopback IP fallback for local host setups where localhost is remapped.
+        // Keep explicit loopback alias for local hosts where localhost is remapped.
         if ($isLocalEnv) {
             $candidates[] = 'http://127.0.0.1:3003';
         }
