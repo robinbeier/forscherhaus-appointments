@@ -113,19 +113,132 @@ class HealthzControllerTest extends TestCase
         }
     }
 
-    private function createController(bool $isLocalEnvironment = true): object
+    public function testCheckPdfRendererReportsCurlInitFailuresPerEndpoint(): void
     {
-        return new class($isLocalEnvironment) extends Healthz {
-            private bool $isLocalEnvironment;
+        $controller = $this->createController(
+            true,
+            ['http://first.invalid', 'http://second.invalid'],
+            [],
+            [
+                'http://first.invalid/healthz' => false,
+                'http://second.invalid/healthz' => false,
+            ],
+        );
 
-            public function __construct(bool $isLocalEnvironment)
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage(
+            'No healthy PDF renderer endpoint found: http://first.invalid -> curl_init_failed; http://second.invalid -> curl_init_failed',
+        );
+
+        $controller->callCheckPdfRenderer();
+    }
+
+    public function testCheckPdfRendererReportsNoReachableEndpointWhenListIsEmpty(): void
+    {
+        $controller = $this->createController(true, [], [], []);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('No healthy PDF renderer endpoint found: no_reachable_endpoint');
+
+        $controller->callCheckPdfRenderer();
+    }
+
+    private function createController(
+        bool $isLocalEnvironment = true,
+        ?array $resolvedEndpoints = null,
+        array $curlResponses = [],
+        array $curlInitMap = [],
+    ): object
+    {
+        return new class($isLocalEnvironment, $resolvedEndpoints, $curlResponses, $curlInitMap) extends Healthz {
+            private bool $isLocalEnvironment;
+            private ?array $resolvedEndpoints;
+            private array $curlResponses;
+            private array $curlInitMap;
+            private array $curlHandleUrls = [];
+            private int $curlHandleCounter = 0;
+
+            public function __construct(
+                bool $isLocalEnvironment,
+                ?array $resolvedEndpoints,
+                array $curlResponses,
+                array $curlInitMap,
+            )
             {
                 $this->isLocalEnvironment = $isLocalEnvironment;
+                $this->resolvedEndpoints = $resolvedEndpoints;
+                $this->curlResponses = $curlResponses;
+                $this->curlInitMap = $curlInitMap;
             }
 
             protected function isLocalEnvironment(): bool
             {
                 return $this->isLocalEnvironment;
+            }
+
+            protected function resolvePdfRendererEndpoints(): array
+            {
+                if ($this->resolvedEndpoints !== null) {
+                    return $this->resolvedEndpoints;
+                }
+
+                return parent::resolvePdfRendererEndpoints();
+            }
+
+            protected function initCurl(string $url): mixed
+            {
+                if (array_key_exists($url, $this->curlInitMap)) {
+                    return $this->curlInitMap[$url];
+                }
+
+                $handle = 'curl-handle-' . (++$this->curlHandleCounter);
+                $this->curlHandleUrls[$handle] = $url;
+
+                return $handle;
+            }
+
+            protected function configureCurl(mixed $curl): void
+            {
+            }
+
+            protected function executeCurl(mixed $curl): string|bool
+            {
+                $url = $this->curlHandleUrls[$curl] ?? '';
+                $response = $this->curlResponses[$url] ?? null;
+
+                if (is_array($response) && array_key_exists('body', $response)) {
+                    return $response['body'];
+                }
+
+                return false;
+            }
+
+            protected function getCurlError(mixed $curl): string
+            {
+                $url = $this->curlHandleUrls[$curl] ?? '';
+                $response = $this->curlResponses[$url] ?? null;
+
+                if (is_array($response) && array_key_exists('error', $response)) {
+                    return (string) $response['error'];
+                }
+
+                return '';
+            }
+
+            protected function getCurlStatusCode(mixed $curl): int
+            {
+                $url = $this->curlHandleUrls[$curl] ?? '';
+                $response = $this->curlResponses[$url] ?? null;
+
+                if (is_array($response) && array_key_exists('status', $response)) {
+                    return (int) $response['status'];
+                }
+
+                return 0;
+            }
+
+            protected function closeCurl(mixed $curl): void
+            {
             }
 
             public function callResolvePdfRendererEndpoints(): array
@@ -141,6 +254,11 @@ class HealthzControllerTest extends TestCase
             public function callCacheControlHeaders(): array
             {
                 return $this->cacheControlHeaders();
+            }
+
+            public function callCheckPdfRenderer(): array
+            {
+                return $this->checkPdfRenderer();
             }
         };
     }

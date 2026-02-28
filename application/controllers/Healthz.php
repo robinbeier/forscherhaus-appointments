@@ -180,23 +180,19 @@ class Healthz extends EA_Controller
 
         foreach ($endpoints as $endpoint) {
             $healthUrl = rtrim($endpoint, '/') . '/healthz';
-            $curl = curl_init($healthUrl);
+            $curl = $this->initCurl($healthUrl);
 
             if ($curl === false) {
+                $errors[] = sprintf('%s -> curl_init_failed', $endpoint);
                 continue;
             }
 
-            curl_setopt_array($curl, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
-                CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
-                CURLOPT_FOLLOWLOCATION => false,
-            ]);
+            $this->configureCurl($curl);
 
-            $responseBody = curl_exec($curl);
-            $curlError = curl_error($curl);
-            $statusCode = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
-            curl_close($curl);
+            $responseBody = $this->executeCurl($curl);
+            $curlError = $this->getCurlError($curl);
+            $statusCode = $this->getCurlStatusCode($curl);
+            $this->closeCurl($curl);
 
             if ($responseBody === false) {
                 $errors[] = sprintf('%s -> %s', $endpoint, $curlError !== '' ? $curlError : 'request_failed');
@@ -213,7 +209,64 @@ class Healthz extends EA_Controller
             $errors[] = sprintf('%s -> status_%d', $endpoint, $statusCode);
         }
 
+        if ($errors === []) {
+            $errors[] = 'no_reachable_endpoint';
+        }
+
         throw new RuntimeException('No healthy PDF renderer endpoint found: ' . implode('; ', $errors));
+    }
+
+    /**
+     * Initialize a cURL request.
+     */
+    protected function initCurl(string $url): mixed
+    {
+        return curl_init($url);
+    }
+
+    /**
+     * Apply cURL defaults for health checks.
+     */
+    protected function configureCurl(mixed $curl): void
+    {
+        curl_setopt_array($curl, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+            CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
+            CURLOPT_FOLLOWLOCATION => false,
+        ]);
+    }
+
+    /**
+     * Execute a cURL request.
+     */
+    protected function executeCurl(mixed $curl): string|bool
+    {
+        return curl_exec($curl);
+    }
+
+    /**
+     * Return the latest cURL error text.
+     */
+    protected function getCurlError(mixed $curl): string
+    {
+        return curl_error($curl);
+    }
+
+    /**
+     * Return the HTTP status code from the response metadata.
+     */
+    protected function getCurlStatusCode(mixed $curl): int
+    {
+        return (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    }
+
+    /**
+     * Close the cURL handle.
+     */
+    protected function closeCurl(mixed $curl): void
+    {
+        curl_close($curl);
     }
 
     /**
@@ -232,7 +285,7 @@ class Healthz extends EA_Controller
         $candidates[] = 'http://pdf-renderer:3000';
         $candidates[] = 'http://localhost:3003';
 
-        // Extra loopback alias helps local host setups where localhost is remapped.
+        // Keep explicit loopback IP fallback for local host setups where localhost is remapped.
         if ($isLocalEnv) {
             $candidates[] = 'http://127.0.0.1:3003';
         }
