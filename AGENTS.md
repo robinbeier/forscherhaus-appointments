@@ -73,11 +73,13 @@ composer release:gate:booking-confirmation-pdf -- --help
 # Optional: CI Dashboard Integration Smoke (lokaler Repro)
 docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
-docker compose exec -T php-fpm php index.php console install
+until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
+for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
 docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
   --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
   --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD
+docker compose down -v --remove-orphans
 ```
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.

@@ -18,6 +18,8 @@
    Do instead: implement database changes only via CodeIgniter migrations and verify both migrate up and down behavior.
 4. **[2026-02-26] Keep deep health checks fast under dependency outages**
    Do instead: gate local-only fallback endpoints by `APP_ENV` and keep health-check network timeouts short to avoid long blocking requests.
+5. **[2026-02-28] Match CI smoke DB readiness before dashboard checks**
+   Do instead: wait for both MySQL root ping and app-user query readiness, then retry `php index.php console install` up to 3 times before running `scripts/ci/dashboard_integration_smoke.php`.
 
 ## Repo Guardrails & Domain Behavior
 
