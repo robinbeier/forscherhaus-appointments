@@ -85,7 +85,7 @@ class HealthzControllerTest extends TestCase
         );
     }
 
-    public function testResolvePdfRendererEndpointsSkipsLoopbackAliasOutsideLocalEnvironment(): void
+    public function testResolvePdfRendererEndpointsKeepsLocalhostFallbackOutsideLocalEnvironment(): void
     {
         $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
         $original = $_ENV['PDF_RENDERER_URL'] ?? null;
@@ -100,6 +100,7 @@ class HealthzControllerTest extends TestCase
                 [
                     'http://example.com:3000',
                     'http://pdf-renderer:3000',
+                    'http://localhost:3003',
                 ],
                 $endpoints,
             );
@@ -110,6 +111,34 @@ class HealthzControllerTest extends TestCase
                 unset($_ENV['PDF_RENDERER_URL']);
             }
         }
+    }
+
+    public function testResolvePdfTimeoutOptionsUsesShorterMsTimeoutForNonLocalLoopback(): void
+    {
+        $controller = $this->createController(false);
+        $options = $controller->callResolvePdfTimeoutOptions('http://localhost:3003');
+
+        $this->assertSame(
+            [
+                CURLOPT_CONNECTTIMEOUT_MS => 250,
+                CURLOPT_TIMEOUT_MS => 500,
+            ],
+            $options,
+        );
+    }
+
+    public function testResolvePdfTimeoutOptionsUsesDefaultSecondTimeoutsForRendererService(): void
+    {
+        $controller = $this->createController(false);
+        $options = $controller->callResolvePdfTimeoutOptions('http://pdf-renderer:3000');
+
+        $this->assertSame(
+            [
+                CURLOPT_CONNECTTIMEOUT => 1,
+                CURLOPT_TIMEOUT => 2,
+            ],
+            $options,
+        );
     }
 
     public function testCheckPdfRendererReportsCurlInitFailuresPerEndpoint(): void
@@ -196,7 +225,7 @@ class HealthzControllerTest extends TestCase
                 return $handle;
             }
 
-            protected function configureCurl(mixed $curl): void
+            protected function configureCurl(mixed $curl, ?string $endpoint = null): void
             {
             }
 
@@ -248,6 +277,11 @@ class HealthzControllerTest extends TestCase
             public function callRunCheck(callable $callback): array
             {
                 return $this->runCheck($callback);
+            }
+
+            public function callResolvePdfTimeoutOptions(string $endpoint): array
+            {
+                return $this->resolvePdfTimeoutOptions($endpoint);
             }
 
             public function callCacheControlHeaders(): array
