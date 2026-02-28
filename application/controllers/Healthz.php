@@ -22,6 +22,8 @@ class Healthz extends EA_Controller
 {
     private const PDF_CONNECT_TIMEOUT_SECONDS = 1;
     private const PDF_REQUEST_TIMEOUT_SECONDS = 2;
+    private const PDF_LOOPBACK_CONNECT_TIMEOUT_MS = 250;
+    private const PDF_LOOPBACK_REQUEST_TIMEOUT_MS = 500;
 
     /**
      * Return a deep health payload.
@@ -180,24 +182,19 @@ class Healthz extends EA_Controller
 
         foreach ($endpoints as $endpoint) {
             $healthUrl = rtrim($endpoint, '/') . '/healthz';
-            $curl = curl_init($healthUrl);
+            $curl = $this->initCurl($healthUrl);
 
             if ($curl === false) {
                 $errors[] = sprintf('%s -> curl_init_failed', $endpoint);
                 continue;
             }
 
-            curl_setopt_array($curl, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
-                CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
-                CURLOPT_FOLLOWLOCATION => false,
-            ]);
+            $this->configureCurl($curl, $endpoint);
 
-            $responseBody = curl_exec($curl);
-            $curlError = curl_error($curl);
-            $statusCode = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
-            curl_close($curl);
+            $responseBody = $this->executeCurl($curl);
+            $curlError = $this->getCurlError($curl);
+            $statusCode = $this->getCurlStatusCode($curl);
+            $this->closeCurl($curl);
 
             if ($responseBody === false) {
                 $errors[] = sprintf('%s -> %s', $endpoint, $curlError !== '' ? $curlError : 'request_failed');
@@ -222,6 +219,98 @@ class Healthz extends EA_Controller
     }
 
     /**
+     * Initialize a cURL request.
+     */
+    protected function initCurl(string $url): mixed
+    {
+        return curl_init($url);
+    }
+
+    /**
+     * Apply cURL defaults for health checks.
+     */
+    protected function configureCurl(mixed $curl, ?string $endpoint = null): void
+    {
+        $options = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+        ];
+
+        $timeoutOptions = $endpoint !== null
+            ? $this->resolvePdfTimeoutOptions($endpoint)
+            : [
+                CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+                CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
+            ];
+
+        foreach ($timeoutOptions as $option => $value) {
+            $options[$option] = $value;
+        }
+
+        curl_setopt_array($curl, $options);
+    }
+
+    /**
+     * Execute a cURL request.
+     */
+    protected function executeCurl(mixed $curl): string|bool
+    {
+        return curl_exec($curl);
+    }
+
+    /**
+     * Return the latest cURL error text.
+     */
+    protected function getCurlError(mixed $curl): string
+    {
+        return curl_error($curl);
+    }
+
+    /**
+     * Return the HTTP status code from the response metadata.
+     */
+    protected function getCurlStatusCode(mixed $curl): int
+    {
+        return (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    }
+
+    /**
+     * Close the cURL handle.
+     */
+    protected function closeCurl(mixed $curl): void
+    {
+        curl_close($curl);
+    }
+
+    /**
+     * Resolve cURL timeout options for a renderer health probe.
+     */
+    protected function resolvePdfTimeoutOptions(string $endpoint): array
+    {
+        if (!$this->isLocalEnvironment() && $this->isLoopbackEndpoint($endpoint)) {
+            return [
+                CURLOPT_CONNECTTIMEOUT_MS => self::PDF_LOOPBACK_CONNECT_TIMEOUT_MS,
+                CURLOPT_TIMEOUT_MS => self::PDF_LOOPBACK_REQUEST_TIMEOUT_MS,
+            ];
+        }
+
+        return [
+            CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+            CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
+        ];
+    }
+
+    /**
+     * Determine whether an endpoint points at a local loopback host.
+     */
+    protected function isLoopbackEndpoint(string $endpoint): bool
+    {
+        $host = strtolower((string) parse_url($endpoint, PHP_URL_HOST));
+
+        return in_array($host, ['localhost', '127.0.0.1'], true);
+    }
+
+    /**
      * Resolve PDF renderer endpoint candidates.
      */
     protected function resolvePdfRendererEndpoints(): array
@@ -237,7 +326,7 @@ class Healthz extends EA_Controller
         $candidates[] = 'http://pdf-renderer:3000';
         $candidates[] = 'http://localhost:3003';
 
-        // Keep explicit loopback IP fallback for local host setups where localhost is remapped.
+        // Keep explicit loopback alias for local hosts where localhost is remapped.
         if ($isLocalEnv) {
             $candidates[] = 'http://127.0.0.1:3003';
         }
