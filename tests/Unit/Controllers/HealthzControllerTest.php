@@ -127,6 +127,34 @@ class HealthzControllerTest extends TestCase
         );
     }
 
+    public function testResolvePdfTimeoutOptionsUsesShorterMsTimeoutForNonLocalLoopbackIp(): void
+    {
+        $controller = $this->createController(false);
+        $options = $controller->callResolvePdfTimeoutOptions('http://127.0.0.1:3003');
+
+        $this->assertSame(
+            [
+                CURLOPT_CONNECTTIMEOUT_MS => 250,
+                CURLOPT_TIMEOUT_MS => 500,
+            ],
+            $options,
+        );
+    }
+
+    public function testResolvePdfTimeoutOptionsKeepsDefaultTimeoutsInLocalEnvironment(): void
+    {
+        $controller = $this->createController(true);
+        $options = $controller->callResolvePdfTimeoutOptions('http://localhost:3003');
+
+        $this->assertSame(
+            [
+                CURLOPT_CONNECTTIMEOUT => 1,
+                CURLOPT_TIMEOUT => 2,
+            ],
+            $options,
+        );
+    }
+
     public function testResolvePdfTimeoutOptionsUsesDefaultSecondTimeoutsForRendererService(): void
     {
         $controller = $this->createController(false);
