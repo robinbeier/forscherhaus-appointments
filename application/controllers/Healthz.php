@@ -201,11 +201,16 @@ class Healthz extends EA_Controller
                 continue;
             }
 
-            if ($statusCode >= 200 && $statusCode < 300) {
+            if ($this->isHealthyPdfRendererResponse((string) $responseBody, $statusCode, $endpoint)) {
                 return [
                     'endpoint' => $endpoint,
                     'status_code' => $statusCode,
                 ];
+            }
+
+            if ($statusCode >= 200 && $statusCode < 300) {
+                $errors[] = sprintf('%s -> invalid_health_payload', $endpoint);
+                continue;
             }
 
             $errors[] = sprintf('%s -> status_%d', $endpoint, $statusCode);
@@ -236,12 +241,13 @@ class Healthz extends EA_Controller
             CURLOPT_FOLLOWLOCATION => false,
         ];
 
-        $timeoutOptions = $endpoint !== null
-            ? $this->resolvePdfTimeoutOptions($endpoint)
-            : [
-                CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
-                CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
-            ];
+        $timeoutOptions =
+            $endpoint !== null
+                ? $this->resolvePdfTimeoutOptions($endpoint)
+                : [
+                    CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+                    CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
+                ];
 
         foreach ($timeoutOptions as $option => $value) {
             $options[$option] = $value;
@@ -308,6 +314,25 @@ class Healthz extends EA_Controller
         $host = strtolower((string) parse_url($endpoint, PHP_URL_HOST));
 
         return in_array($host, ['localhost', '127.0.0.1'], true);
+    }
+
+    /**
+     * Determine whether a renderer health response counts as healthy.
+     */
+    protected function isHealthyPdfRendererResponse(string $responseBody, int $statusCode, string $endpoint): bool
+    {
+        if ($statusCode < 200 || $statusCode >= 300) {
+            return false;
+        }
+
+        // In non-local runtimes, require explicit {ok:true} payload for loopback probes.
+        if (!$this->isLocalEnvironment() && $this->isLoopbackEndpoint($endpoint)) {
+            $payload = json_decode($responseBody, true);
+
+            return is_array($payload) && ($payload['ok'] ?? false) === true;
+        }
+
+        return true;
     }
 
     /**
