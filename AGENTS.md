@@ -57,6 +57,9 @@ npx gulp styles
 docker compose run --rm php-fpm composer test
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 
+# Optional: Fokuslauf fuer Healthz-Checks
+docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter HealthzControllerTest'
+
 # Optional: Dashboard Release Gate (vor Deployment / Regression-Check)
 composer release:gate:dashboard -- \
   --base-url=http://localhost --index-page=index.php --username="$EA_GATE_USERNAME" --password="$EA_GATE_PASSWORD" \
