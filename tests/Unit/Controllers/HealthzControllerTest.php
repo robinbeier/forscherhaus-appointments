@@ -22,11 +22,7 @@ class HealthzControllerTest extends TestCase
             $endpoints = $controller->callResolvePdfRendererEndpoints();
 
             $this->assertSame(
-                [
-                    'http://localhost:3003',
-                    'http://pdf-renderer:3000',
-                    'http://127.0.0.1:3003',
-                ],
+                ['http://localhost:3003', 'http://pdf-renderer:3000', 'http://127.0.0.1:3003'],
                 $endpoints,
             );
         } finally {
@@ -42,13 +38,11 @@ class HealthzControllerTest extends TestCase
     {
         $controller = $this->createController();
 
-        $result = $controller->callRunCheck(
-            static function (): array {
-                usleep(1000);
+        $result = $controller->callRunCheck(static function (): array {
+            usleep(1000);
 
-                return ['ping' => 1];
-            },
-        );
+            return ['ping' => 1];
+        });
 
         $this->assertTrue($result['ok']);
         $this->assertSame(['ping' => 1], $result['details']);
@@ -60,11 +54,9 @@ class HealthzControllerTest extends TestCase
     {
         $controller = $this->createController();
 
-        $result = $controller->callRunCheck(
-            static function (): void {
-                throw new RuntimeException('pdf endpoint down');
-            },
-        );
+        $result = $controller->callRunCheck(static function (): void {
+            throw new RuntimeException('pdf endpoint down');
+        });
 
         $this->assertFalse($result['ok']);
         $this->assertSame('pdf endpoint down', $result['message']);
@@ -77,10 +69,7 @@ class HealthzControllerTest extends TestCase
         $controller = $this->createController();
 
         $this->assertSame(
-            [
-                'Cache-Control: no-store, no-cache, must-revalidate',
-                'Pragma: no-cache',
-            ],
+            ['Cache-Control: no-store, no-cache, must-revalidate', 'Pragma: no-cache'],
             $controller->callCacheControlHeaders(),
         );
     }
@@ -97,13 +86,30 @@ class HealthzControllerTest extends TestCase
             $endpoints = $controller->callResolvePdfRendererEndpoints();
 
             $this->assertSame(
-                [
-                    'http://example.com:3000',
-                    'http://pdf-renderer:3000',
-                    'http://localhost:3003',
-                ],
+                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
                 $endpoints,
             );
+        } finally {
+            if ($hadOriginal) {
+                $_ENV['PDF_RENDERER_URL'] = $original;
+            } else {
+                unset($_ENV['PDF_RENDERER_URL']);
+            }
+        }
+    }
+
+    public function testResolvePdfRendererEndpointsKeepsExplicitLoopbackOutsideLocalEnvironment(): void
+    {
+        $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
+        $original = $_ENV['PDF_RENDERER_URL'] ?? null;
+
+        try {
+            $_ENV['PDF_RENDERER_URL'] = 'http://localhost:3003/';
+
+            $controller = $this->createController(false);
+            $endpoints = $controller->callResolvePdfRendererEndpoints();
+
+            $this->assertSame(['http://localhost:3003', 'http://pdf-renderer:3000'], $endpoints);
         } finally {
             if ($hadOriginal) {
                 $_ENV['PDF_RENDERER_URL'] = $original;
@@ -122,6 +128,34 @@ class HealthzControllerTest extends TestCase
             [
                 CURLOPT_CONNECTTIMEOUT_MS => 250,
                 CURLOPT_TIMEOUT_MS => 500,
+            ],
+            $options,
+        );
+    }
+
+    public function testResolvePdfTimeoutOptionsUsesShorterMsTimeoutForNonLocalLoopbackIp(): void
+    {
+        $controller = $this->createController(false);
+        $options = $controller->callResolvePdfTimeoutOptions('http://127.0.0.1:3003');
+
+        $this->assertSame(
+            [
+                CURLOPT_CONNECTTIMEOUT_MS => 250,
+                CURLOPT_TIMEOUT_MS => 500,
+            ],
+            $options,
+        );
+    }
+
+    public function testResolvePdfTimeoutOptionsKeepsDefaultTimeoutsInLocalEnvironment(): void
+    {
+        $controller = $this->createController(true);
+        $options = $controller->callResolvePdfTimeoutOptions('http://localhost:3003');
+
+        $this->assertSame(
+            [
+                CURLOPT_CONNECTTIMEOUT => 1,
+                CURLOPT_TIMEOUT => 2,
             ],
             $options,
         );
@@ -171,14 +205,60 @@ class HealthzControllerTest extends TestCase
         $controller->callCheckPdfRenderer();
     }
 
+    public function testCheckPdfRendererRejectsNonJsonSuccessOnNonLocalLoopback(): void
+    {
+        $controller = $this->createController(
+            false,
+            ['http://localhost:3003'],
+            [
+                'http://localhost:3003/healthz' => [
+                    'body' => 'ok',
+                    'status' => 200,
+                ],
+            ],
+            [],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage(
+            'No healthy PDF renderer endpoint found: http://localhost:3003 -> invalid_health_payload',
+        );
+
+        $controller->callCheckPdfRenderer();
+    }
+
+    public function testCheckPdfRendererAcceptsJsonSuccessOnNonLocalLoopback(): void
+    {
+        $controller = $this->createController(
+            false,
+            ['http://localhost:3003'],
+            [
+                'http://localhost:3003/healthz' => [
+                    'body' => '{"ok":true}',
+                    'status' => 200,
+                ],
+            ],
+            [],
+        );
+
+        $result = $controller->callCheckPdfRenderer();
+
+        $this->assertSame(
+            [
+                'endpoint' => 'http://localhost:3003',
+                'status_code' => 200,
+            ],
+            $result,
+        );
+    }
+
     private function createController(
         bool $isLocalEnvironment = true,
         ?array $resolvedEndpoints = null,
         array $curlResponses = [],
         array $curlInitMap = [],
-    ): object
-    {
-        return new class($isLocalEnvironment, $resolvedEndpoints, $curlResponses, $curlInitMap) extends Healthz {
+    ): object {
+        return new class ($isLocalEnvironment, $resolvedEndpoints, $curlResponses, $curlInitMap) extends Healthz {
             private bool $isLocalEnvironment;
             private ?array $resolvedEndpoints;
             private array $curlResponses;
@@ -191,8 +271,7 @@ class HealthzControllerTest extends TestCase
                 ?array $resolvedEndpoints,
                 array $curlResponses,
                 array $curlInitMap,
-            )
-            {
+            ) {
                 $this->isLocalEnvironment = $isLocalEnvironment;
                 $this->resolvedEndpoints = $resolvedEndpoints;
                 $this->curlResponses = $curlResponses;
@@ -219,7 +298,7 @@ class HealthzControllerTest extends TestCase
                     return $this->curlInitMap[$url];
                 }
 
-                $handle = 'curl-handle-' . (++$this->curlHandleCounter);
+                $handle = 'curl-handle-' . ++$this->curlHandleCounter;
                 $this->curlHandleUrls[$handle] = $url;
 
                 return $handle;
