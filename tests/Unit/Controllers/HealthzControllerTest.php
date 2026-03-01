@@ -74,7 +74,7 @@ class HealthzControllerTest extends TestCase
         );
     }
 
-    public function testResolvePdfRendererEndpointsSkipsImplicitLocalhostFallbackOutsideLocalEnvironment(): void
+    public function testResolvePdfRendererEndpointsKeepsLocalhostFallbackOutsideLocalEnvironment(): void
     {
         $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
         $original = $_ENV['PDF_RENDERER_URL'] ?? null;
@@ -85,7 +85,10 @@ class HealthzControllerTest extends TestCase
             $controller = $this->createController(false);
             $endpoints = $controller->callResolvePdfRendererEndpoints();
 
-            $this->assertSame(['http://example.com:3000', 'http://pdf-renderer:3000'], $endpoints);
+            $this->assertSame(
+                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
+                $endpoints,
+            );
         } finally {
             if ($hadOriginal) {
                 $_ENV['PDF_RENDERER_URL'] = $original;
@@ -200,6 +203,53 @@ class HealthzControllerTest extends TestCase
         $this->expectExceptionMessage('No healthy PDF renderer endpoint found: no_reachable_endpoint');
 
         $controller->callCheckPdfRenderer();
+    }
+
+    public function testCheckPdfRendererRejectsNonJsonSuccessOnNonLocalLoopback(): void
+    {
+        $controller = $this->createController(
+            false,
+            ['http://localhost:3003'],
+            [
+                'http://localhost:3003/healthz' => [
+                    'body' => 'ok',
+                    'status' => 200,
+                ],
+            ],
+            [],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage(
+            'No healthy PDF renderer endpoint found: http://localhost:3003 -> invalid_health_payload',
+        );
+
+        $controller->callCheckPdfRenderer();
+    }
+
+    public function testCheckPdfRendererAcceptsJsonSuccessOnNonLocalLoopback(): void
+    {
+        $controller = $this->createController(
+            false,
+            ['http://localhost:3003'],
+            [
+                'http://localhost:3003/healthz' => [
+                    'body' => '{"ok":true}',
+                    'status' => 200,
+                ],
+            ],
+            [],
+        );
+
+        $result = $controller->callCheckPdfRenderer();
+
+        $this->assertSame(
+            [
+                'endpoint' => 'http://localhost:3003',
+                'status_code' => 200,
+            ],
+            $result,
+        );
     }
 
     private function createController(
