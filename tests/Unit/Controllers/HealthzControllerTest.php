@@ -22,11 +22,7 @@ class HealthzControllerTest extends TestCase
             $endpoints = $controller->callResolvePdfRendererEndpoints();
 
             $this->assertSame(
-                [
-                    'http://localhost:3003',
-                    'http://pdf-renderer:3000',
-                    'http://127.0.0.1:3003',
-                ],
+                ['http://localhost:3003', 'http://pdf-renderer:3000', 'http://127.0.0.1:3003'],
                 $endpoints,
             );
         } finally {
@@ -42,13 +38,11 @@ class HealthzControllerTest extends TestCase
     {
         $controller = $this->createController();
 
-        $result = $controller->callRunCheck(
-            static function (): array {
-                usleep(1000);
+        $result = $controller->callRunCheck(static function (): array {
+            usleep(1000);
 
-                return ['ping' => 1];
-            },
-        );
+            return ['ping' => 1];
+        });
 
         $this->assertTrue($result['ok']);
         $this->assertSame(['ping' => 1], $result['details']);
@@ -60,11 +54,9 @@ class HealthzControllerTest extends TestCase
     {
         $controller = $this->createController();
 
-        $result = $controller->callRunCheck(
-            static function (): void {
-                throw new RuntimeException('pdf endpoint down');
-            },
-        );
+        $result = $controller->callRunCheck(static function (): void {
+            throw new RuntimeException('pdf endpoint down');
+        });
 
         $this->assertFalse($result['ok']);
         $this->assertSame('pdf endpoint down', $result['message']);
@@ -77,15 +69,12 @@ class HealthzControllerTest extends TestCase
         $controller = $this->createController();
 
         $this->assertSame(
-            [
-                'Cache-Control: no-store, no-cache, must-revalidate',
-                'Pragma: no-cache',
-            ],
+            ['Cache-Control: no-store, no-cache, must-revalidate', 'Pragma: no-cache'],
             $controller->callCacheControlHeaders(),
         );
     }
 
-    public function testResolvePdfRendererEndpointsKeepsLocalhostFallbackOutsideLocalEnvironment(): void
+    public function testResolvePdfRendererEndpointsSkipsImplicitLocalhostFallbackOutsideLocalEnvironment(): void
     {
         $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
         $original = $_ENV['PDF_RENDERER_URL'] ?? null;
@@ -96,14 +85,28 @@ class HealthzControllerTest extends TestCase
             $controller = $this->createController(false);
             $endpoints = $controller->callResolvePdfRendererEndpoints();
 
-            $this->assertSame(
-                [
-                    'http://example.com:3000',
-                    'http://pdf-renderer:3000',
-                    'http://localhost:3003',
-                ],
-                $endpoints,
-            );
+            $this->assertSame(['http://example.com:3000', 'http://pdf-renderer:3000'], $endpoints);
+        } finally {
+            if ($hadOriginal) {
+                $_ENV['PDF_RENDERER_URL'] = $original;
+            } else {
+                unset($_ENV['PDF_RENDERER_URL']);
+            }
+        }
+    }
+
+    public function testResolvePdfRendererEndpointsKeepsExplicitLoopbackOutsideLocalEnvironment(): void
+    {
+        $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
+        $original = $_ENV['PDF_RENDERER_URL'] ?? null;
+
+        try {
+            $_ENV['PDF_RENDERER_URL'] = 'http://localhost:3003/';
+
+            $controller = $this->createController(false);
+            $endpoints = $controller->callResolvePdfRendererEndpoints();
+
+            $this->assertSame(['http://localhost:3003', 'http://pdf-renderer:3000'], $endpoints);
         } finally {
             if ($hadOriginal) {
                 $_ENV['PDF_RENDERER_URL'] = $original;
@@ -204,9 +207,8 @@ class HealthzControllerTest extends TestCase
         ?array $resolvedEndpoints = null,
         array $curlResponses = [],
         array $curlInitMap = [],
-    ): object
-    {
-        return new class($isLocalEnvironment, $resolvedEndpoints, $curlResponses, $curlInitMap) extends Healthz {
+    ): object {
+        return new class ($isLocalEnvironment, $resolvedEndpoints, $curlResponses, $curlInitMap) extends Healthz {
             private bool $isLocalEnvironment;
             private ?array $resolvedEndpoints;
             private array $curlResponses;
@@ -219,8 +221,7 @@ class HealthzControllerTest extends TestCase
                 ?array $resolvedEndpoints,
                 array $curlResponses,
                 array $curlInitMap,
-            )
-            {
+            ) {
                 $this->isLocalEnvironment = $isLocalEnvironment;
                 $this->resolvedEndpoints = $resolvedEndpoints;
                 $this->curlResponses = $curlResponses;
@@ -247,7 +248,7 @@ class HealthzControllerTest extends TestCase
                     return $this->curlInitMap[$url];
                 }
 
-                $handle = 'curl-handle-' . (++$this->curlHandleCounter);
+                $handle = 'curl-handle-' . ++$this->curlHandleCounter;
                 $this->curlHandleUrls[$handle] = $url;
 
                 return $handle;

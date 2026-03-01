@@ -236,12 +236,13 @@ class Healthz extends EA_Controller
             CURLOPT_FOLLOWLOCATION => false,
         ];
 
-        $timeoutOptions = $endpoint !== null
-            ? $this->resolvePdfTimeoutOptions($endpoint)
-            : [
-                CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
-                CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
-            ];
+        $timeoutOptions =
+            $endpoint !== null
+                ? $this->resolvePdfTimeoutOptions($endpoint)
+                : [
+                    CURLOPT_CONNECTTIMEOUT => self::PDF_CONNECT_TIMEOUT_SECONDS,
+                    CURLOPT_TIMEOUT => self::PDF_REQUEST_TIMEOUT_SECONDS,
+                ];
 
         foreach ($timeoutOptions as $option => $value) {
             $options[$option] = $value;
@@ -324,10 +325,10 @@ class Healthz extends EA_Controller
         }
 
         $candidates[] = 'http://pdf-renderer:3000';
-        $candidates[] = 'http://localhost:3003';
 
-        // Keep explicit loopback alias for local hosts where localhost is remapped.
+        // Restrict implicit loopback fallbacks to local runtimes only.
         if ($isLocalEnv) {
+            $candidates[] = 'http://localhost:3003';
             $candidates[] = 'http://127.0.0.1:3003';
         }
 
