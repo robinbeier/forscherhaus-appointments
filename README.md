@@ -6,14 +6,14 @@ This repository prioritizes stable, low-risk delivery for school operations and 
 
 ## Scope
 
-- Fork base: Easy!Appointments (`v1.5.2` lineage)
-- Stack: PHP `>=8.1` (8.2+ recommended), CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
-- Primary goal: school-specific scheduling workflows and operational reliability
+-   Fork base: Easy!Appointments (`v1.5.2` lineage)
+-   Stack: PHP `>=8.1` (8.2+ recommended), CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
+-   Primary goal: school-specific scheduling workflows and operational reliability
 
 ## Fork Invariants
 
-- `services.attendants_number` is intentionally restricted to `1`.
-- Do not implement multi-attendant behavior unless product scope changes explicitly.
+-   `services.attendants_number` is intentionally restricted to `1`.
+-   Do not implement multi-attendant behavior unless product scope changes explicitly.
 
 ## Quickstart (Recommended)
 
@@ -57,17 +57,18 @@ composer release:gate:booking-confirmation-pdf -- --help
 ```
 
 References:
-- [Dashboard release gate](docs/release-gate-dashboard.md)
-- [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
+
+-   [Dashboard release gate](docs/release-gate-dashboard.md)
+-   [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
 
 ## Local Services (Docker)
 
-- App: `http://localhost`
-- phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
-- Mailpit: `http://localhost:8025`
-- PDF renderer: `http://localhost:3003`
-- Baikal (CalDAV): `http://localhost:8100`
-- phpLDAPadmin: `http://localhost:8200`
+-   App: `http://localhost`
+-   phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
+-   Mailpit: `http://localhost:8025`
+-   PDF renderer: `http://localhost:3003`
+-   Baikal (CalDAV): `http://localhost:8100`
+-   phpLDAPadmin: `http://localhost:8200`
 
 If you run PHP on host with Docker PDF renderer, set:
 
@@ -88,29 +89,31 @@ This prevents mixed container mounts across worktrees.
 
 ## Documentation Map
 
-- [Project runbook and contributor guardrails](AGENTS.md)
-- [Installation guide](docs/installation-guide.md)
-- [Docker guide](docs/docker.md)
-- [Console commands](docs/console.md)
-- [REST API](docs/rest-api.md)
-- [Google Calendar sync](docs/google-calendar-sync.md)
-- [CalDAV sync](docs/caldav-calendar-sync.md)
-- [LDAP](docs/ldap.md)
-- [Provider room feature](docs/feature-provider-room.md)
-- [FAQ](docs/faq.md)
+-   [Project runbook and contributor guardrails](AGENTS.md)
+-   [Installation guide](docs/installation-guide.md)
+-   [Docker guide](docs/docker.md)
+-   [Console commands](docs/console.md)
+-   [REST API](docs/rest-api.md)
+-   [Google Calendar sync](docs/google-calendar-sync.md)
+-   [CalDAV sync](docs/caldav-calendar-sync.md)
+-   [LDAP](docs/ldap.md)
+-   [Provider room feature](docs/feature-provider-room.md)
+-   [FAQ](docs/faq.md)
 
 ## Contribution Rules (Short)
 
-- Keep production code changes inside `application/`.
-- Do not modify `system/` unless applying an explicit upstream patch.
-- Use CodeIgniter migrations for all DB schema changes (with rollback path).
-- Keep `config.php` out of version control; update `config-sample.php` only with safe defaults.
+-   Keep production code changes inside `application/`.
+-   Do not modify `system/` unless applying an explicit upstream patch.
+-   Use CodeIgniter migrations for all DB schema changes (with rollback path).
+-   Keep `config.php` out of version control; update `config-sample.php` only with safe defaults.
 
 ## Testing Before PR
 
 ```bash
 docker compose run --rm php-fpm composer test
 ```
+
+CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
 
 For doc-only/meta commits in constrained environments:
 
@@ -121,7 +124,8 @@ SKIP_PRECOMMIT=1 git commit -m "Your message"
 ## Upstream
 
 This is a maintained fork of:
-- [alextselegidis/easyappointments](https://github.com/alextselegidis/easyappointments)
+
+-   [alextselegidis/easyappointments](https://github.com/alextselegidis/easyappointments)
 
 Upstream merges are done selectively and scheduled according to release risk.
 
