@@ -104,7 +104,7 @@ jobs:
         run: >
           docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php
           --base-url=http://nginx --index-page=index.php
-          --username=administrator --password=administrator
+          --username=administrator --password=invalid-smoke-validation-password
           --start-date=2026-01-01 --end-date=2026-01-31
       - name: Diagnostics (failure logs)
         if: failure()
