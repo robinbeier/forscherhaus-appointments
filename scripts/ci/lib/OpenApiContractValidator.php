@@ -341,7 +341,7 @@ final class OpenApiContractValidator
             'number' => is_int($value) || is_float($value),
             'string' => is_string($value),
             'boolean' => is_bool($value),
-            'object' => is_array($value) && !array_is_list($value),
+            'object' => is_array($value) && (!array_is_list($value) || $value === []),
             'array' => is_array($value) && array_is_list($value),
             default => false,
         };
