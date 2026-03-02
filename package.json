@@ -50,6 +50,7 @@
         "@prettier/plugin-php": "^0.21.0",
         "babel-preset-minify": "^0.5.2",
         "del": "^6.0.0",
+        "eslint": "^8.57.1",
         "fs-extra": "^11.1.0",
         "gulp": "^5.0.0",
         "gulp-babel": "^8.0.0",
@@ -68,6 +69,7 @@
         "start": "npx --yes gulp",
         "build": "npx gulp build",
         "docs": "npx gulp docs",
+        "lint:js": "eslint \"assets/js/**/*.js\" --max-warnings=0",
         "assets:refresh": "npx gulp vendor && npx gulp styles",
         "postinstall": "node scripts/postinstall-assets.js"
     }

@@ -1,0 +1,38 @@
+module.exports = {
+    root: true,
+    env: {
+        browser: true,
+        es2021: true,
+        jquery: true,
+    },
+    parserOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'script',
+    },
+    extends: ['eslint:recommended'],
+    ignorePatterns: ['assets/js/**/*.min.js', 'assets/vendor/**', 'build/**'],
+    globals: {
+        App: 'readonly',
+        vars: 'readonly',
+        lang: 'readonly',
+        moment: 'readonly',
+        Chart: 'readonly',
+        FullCalendar: 'readonly',
+        bootstrap: 'readonly',
+        cookieconsent: 'readonly',
+        grecaptcha: 'readonly',
+        flatpickr: 'readonly',
+        html2canvas: 'readonly',
+        jsPDF: 'readonly',
+        QRCode: 'readonly',
+        tippy: 'readonly',
+        Cookies: 'readonly',
+    },
+    rules: {
+        'no-case-declarations': 'off',
+        'no-extra-boolean-cast': 'off',
+        'no-prototype-builtins': 'off',
+        'no-unused-vars': 'off',
+        'no-useless-escape': 'off',
+    },
+};

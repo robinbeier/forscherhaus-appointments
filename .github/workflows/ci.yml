@@ -42,6 +42,29 @@ jobs:
         with:
           configuration: phpunit.xml
 
+  js-lint-changed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install npm dependencies
+        run: npm ci --no-audit --no-fund
+      - name: ESLint changed JS files
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: ./scripts/ci/js-lint-changed.sh
+
   phpstan-application:
     runs-on: ubuntu-latest
     timeout-minutes: 20
