@@ -349,7 +349,10 @@ class Healthz extends EA_Controller
         }
 
         $candidates[] = 'http://pdf-renderer:3000';
-        $candidates[] = 'http://localhost:3003';
+
+        if ($isLocalEnv || $this->shouldAllowNonLocalLoopbackFallback()) {
+            $candidates[] = 'http://localhost:3003';
+        }
 
         // Keep explicit loopback alias for local hosts where localhost is remapped.
         if ($isLocalEnv) {
@@ -371,6 +374,17 @@ class Healthz extends EA_Controller
         }
 
         return $resolved;
+    }
+
+    /**
+     * Allow non-local loopback fallback only when explicitly enabled.
+     */
+    protected function shouldAllowNonLocalLoopbackFallback(): bool
+    {
+        $raw = env('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', 'false');
+        $normalized = strtolower(trim((string) $raw));
+
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 
     /**
