@@ -35,7 +35,7 @@ To enable the synchronization edit your root config.php file and update the Goog
 
 #### Note that ...
 
-* Currently synchronization can only be triggered from the Easy!Appointments backend or whenever there are changes in the appointment plan.
+* Synchronization can be triggered from the Easy!Appointments backend, automatically when appointment data changes, or manually from CLI (`php index.php console sync`, e.g. via cron).
 
 * Every provider user can be synced with only one Google Calendar account.
 

@@ -31,6 +31,8 @@
    Do instead: treat `services.attendants_number` as fixed to `1` unless product scope explicitly changes to multi-attendant.
 4. **[2026-02-22] Never commit runtime secrets or local config**
    Do instead: keep sensitive values in local `config.php` and adjust `config-sample.php` only for safe defaults/documentation.
+5. **[2026-03-02] Document OAuth callback URLs with default index page behavior**
+   Do instead: use `.../index.php/google/oauth_callback` for default examples and explicitly mention rewrite-mode alternatives when `index.php` is removed.
 
 ## Shell & Command Reliability
 

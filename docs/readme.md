@@ -10,6 +10,10 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Docker](docker.md)
 - [Google Calendar Sync](google-calendar-sync.md)
 - [CalDAV Calendar Sync](caldav-calendar-sync.md)
+- [LDAP](ldap.md)
+- [Provider Room Feature](feature-provider-room.md)
+- [Dashboard Release Gate](release-gate-dashboard.md)
+- [Booking Confirmation PDF Gate](release-gate-booking-confirmation-pdf.md)
 - [FAQ](faq.md)
 
 *This document applies to Easy!Appointments v1.5.2.*
