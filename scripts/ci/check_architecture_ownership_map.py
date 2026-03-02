@@ -34,7 +34,9 @@ CHANGE_SCOPE_PREFIXES = [
     "application/libraries/",
     "application/models/",
     "application/views/pages/",
+    "application/views/components/",
     "assets/js/pages/",
+    "assets/js/components/",
     "scripts/ci/",
     "scripts/release-gate/",
 ]

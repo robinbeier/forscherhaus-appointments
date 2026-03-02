@@ -110,6 +110,8 @@ jobs:
       - name: Check generated architecture/ownership docs
         run: python3 scripts/docs/generate_architecture_ownership_docs.py --check
       - name: Validate architecture/ownership map
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: python3 scripts/ci/check_architecture_ownership_map.py
 
   integration-smoke:
