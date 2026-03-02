@@ -227,6 +227,28 @@ class HealthzControllerTest extends TestCase
         $controller->callCheckPdfRenderer();
     }
 
+    public function testCheckPdfRendererRejectsNonJsonSuccessOnNonLocalLoopbackIp(): void
+    {
+        $controller = $this->createController(
+            false,
+            ['http://127.0.0.1:3003'],
+            [
+                'http://127.0.0.1:3003/healthz' => [
+                    'body' => 'ok',
+                    'status' => 200,
+                ],
+            ],
+            [],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage(
+            'No healthy PDF renderer endpoint found: http://127.0.0.1:3003 -> invalid_health_payload',
+        );
+
+        $controller->callCheckPdfRenderer();
+    }
+
     public function testCheckPdfRendererAcceptsJsonSuccessOnNonLocalLoopback(): void
     {
         $controller = $this->createController(
