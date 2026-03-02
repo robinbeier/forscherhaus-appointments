@@ -35,6 +35,7 @@ try {
 
     $bookingPageHtml = null;
     $bookingBootstrap = null;
+    $providerServicePairs = null;
     $providerServicePair = null;
     $resolvedBooking = null;
 
@@ -140,6 +141,7 @@ try {
     $runCheck('booking_extract_bootstrap', static function () use (
         &$bookingPageHtml,
         &$bookingBootstrap,
+        &$providerServicePairs,
         &$providerServicePair,
     ): array {
         if (!is_string($bookingPageHtml) || $bookingPageHtml === '') {
@@ -149,11 +151,13 @@ try {
         $bookingBootstrap = extractScriptVarsJson($bookingPageHtml);
         $services = normalizeServices($bookingBootstrap['available_services'] ?? null);
         $providers = normalizeProviders($bookingBootstrap['available_providers'] ?? null);
-        $providerServicePair = selectProviderServicePair($services, $providers);
+        $providerServicePairs = selectProviderServicePairs($services, $providers);
+        $providerServicePair = $providerServicePairs[0];
 
         return [
             'services' => count($services),
             'providers' => count($providers),
+            'candidate_pairs' => count($providerServicePairs),
             'service_id' => $providerServicePair['service_id'],
             'provider_id' => $providerServicePair['provider_id'],
         ];
@@ -162,21 +166,23 @@ try {
     $runCheck('booking_available_hours', static function () use (
         $client,
         $config,
+        &$providerServicePairs,
         &$providerServicePair,
         &$resolvedBooking,
     ): array {
-        if (!is_array($providerServicePair)) {
-            throw new GateAssertionException('Provider/service pair was not resolved from booking bootstrap data.');
+        if (!is_array($providerServicePairs) || $providerServicePairs === []) {
+            throw new GateAssertionException('Provider/service pairs were not resolved from booking bootstrap data.');
         }
 
-        $resolvedBooking = resolveBookingDate(
-            $client,
-            $config,
-            $providerServicePair['provider_id'],
-            $providerServicePair['service_id'],
-        );
+        $resolvedBooking = resolveBookablePairAndDate($client, $config, $providerServicePairs);
+        $providerServicePair = [
+            'provider_id' => $resolvedBooking['provider_id'],
+            'service_id' => $resolvedBooking['service_id'],
+        ];
 
         return [
+            'provider_id' => $providerServicePair['provider_id'],
+            'service_id' => $providerServicePair['service_id'],
             'date' => $resolvedBooking['date'],
             'hours_count' => count($resolvedBooking['hours']),
             'search_mode' => $resolvedBooking['mode'],
@@ -640,27 +646,41 @@ function normalizeProviders(mixed $providers): array
  * @param array<int, array{id:int}> $services
  * @param array<int, array{id:int,services:array<int, int>}> $providers
  *
- * @return array{provider_id:int,service_id:int}
+ * @return array<int, array{provider_id:int,service_id:int}>
  */
-function selectProviderServicePair(array $services, array $providers): array
+function selectProviderServicePairs(array $services, array $providers): array
 {
     $serviceMap = [];
     foreach ($services as $service) {
         $serviceMap[$service['id']] = true;
     }
 
+    $pairs = [];
+    $seen = [];
+
     foreach ($providers as $provider) {
         foreach ($provider['services'] as $serviceId) {
             if (isset($serviceMap[$serviceId])) {
-                return [
+                $pairKey = $provider['id'] . ':' . $serviceId;
+
+                if (isset($seen[$pairKey])) {
+                    continue;
+                }
+
+                $pairs[] = [
                     'provider_id' => $provider['id'],
                     'service_id' => $serviceId,
                 ];
+                $seen[$pairKey] = true;
             }
         }
     }
 
-    throw new GateAssertionException('Could not resolve a provider/service pair from booking bootstrap data.');
+    if ($pairs === []) {
+        throw new GateAssertionException('Could not resolve any provider/service pair from booking bootstrap data.');
+    }
+
+    return $pairs;
 }
 
 /**
@@ -668,29 +688,50 @@ function selectProviderServicePair(array $services, array $providers): array
  *   booking_date:?string,
  *   booking_search_days:int
  * } $config
+ * @param array<int, array{provider_id:int,service_id:int}> $providerServicePairs
  *
  * @return array{
+ *   provider_id:int,
+ *   service_id:int,
  *   date:string,
  *   hours:array<int, string>,
  *   mode:string
  * }
  */
-function resolveBookingDate(GateHttpClient $client, array $config, int $providerId, int $serviceId): array
+function resolveBookablePairAndDate(GateHttpClient $client, array $config, array $providerServicePairs): array
 {
-    if (is_string($config['booking_date']) && $config['booking_date'] !== '') {
-        $hoursResult = fetchBookingAvailableHours($client, $config, $providerId, $serviceId, $config['booking_date']);
+    if ($providerServicePairs === []) {
+        throw new GateAssertionException('Provider/service pairs list is empty.');
+    }
 
-        if ($hoursResult['hours'] === []) {
-            throw new GateAssertionException(
-                'Configured booking date "' . $config['booking_date'] . '" has no available hours.',
+    if (is_string($config['booking_date']) && $config['booking_date'] !== '') {
+        foreach ($providerServicePairs as $pair) {
+            $hoursResult = fetchBookingAvailableHours(
+                $client,
+                $config,
+                $pair['provider_id'],
+                $pair['service_id'],
+                $config['booking_date'],
             );
+
+            if ($hoursResult['hours'] !== []) {
+                return [
+                    'provider_id' => $pair['provider_id'],
+                    'service_id' => $pair['service_id'],
+                    'date' => $config['booking_date'],
+                    'hours' => $hoursResult['hours'],
+                    'mode' => 'configured_date',
+                ];
+            }
         }
 
-        return [
-            'date' => $config['booking_date'],
-            'hours' => $hoursResult['hours'],
-            'mode' => 'configured_date',
-        ];
+        throw new GateAssertionException(
+            sprintf(
+                'Configured booking date "%s" has no available hours across %d provider/service pairs.',
+                $config['booking_date'],
+                count($providerServicePairs),
+            ),
+        );
     }
 
     $startDate = new DateTimeImmutable('tomorrow', new DateTimeZone('UTC'));
@@ -700,14 +741,24 @@ function resolveBookingDate(GateHttpClient $client, array $config, int $provider
         $candidateDate = $startDate->modify('+' . $offset . ' day')->format('Y-m-d');
         $attemptedDates[] = $candidateDate;
 
-        $hoursResult = fetchBookingAvailableHours($client, $config, $providerId, $serviceId, $candidateDate);
+        foreach ($providerServicePairs as $pair) {
+            $hoursResult = fetchBookingAvailableHours(
+                $client,
+                $config,
+                $pair['provider_id'],
+                $pair['service_id'],
+                $candidateDate,
+            );
 
-        if ($hoursResult['hours'] !== []) {
-            return [
-                'date' => $candidateDate,
-                'hours' => $hoursResult['hours'],
-                'mode' => 'searched_window',
-            ];
+            if ($hoursResult['hours'] !== []) {
+                return [
+                    'provider_id' => $pair['provider_id'],
+                    'service_id' => $pair['service_id'],
+                    'date' => $candidateDate,
+                    'hours' => $hoursResult['hours'],
+                    'mode' => 'searched_window',
+                ];
+            }
         }
     }
 
@@ -715,7 +766,12 @@ function resolveBookingDate(GateHttpClient $client, array $config, int $provider
     $lastDate = $attemptedDates[count($attemptedDates) - 1] ?? 'n/a';
 
     throw new GateAssertionException(
-        'No booking hours available in search window [' . $firstDate . ' .. ' . $lastDate . '].',
+        sprintf(
+            'No booking hours available across %d provider/service pairs in search window [%s .. %s].',
+            count($providerServicePairs),
+            $firstDate,
+            $lastDate,
+        ),
     );
 }
 
