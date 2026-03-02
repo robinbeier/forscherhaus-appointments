@@ -60,9 +60,18 @@ docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 # Optional: PHPStan Static Analysis (aktueller Scope: helpers/libraries/core)
 docker compose run --rm php-fpm composer phpstan:application
 
+# Optional: JavaScript Lint (ESLint; geaenderte Dateien werden in CI geprueft)
+npm run lint:js
+
 # Optional: PHPStan rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
+done
+# Erwartung fuer Blocking-Umschaltung: erste 7 Eintraege sind SUCCESS
+
+# Optional: JS lint rollout streak check (requires gh + jq)
+for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="js-lint-changed") | .conclusion'
 done
 # Erwartung fuer Blocking-Umschaltung: erste 7 Eintraege sind SUCCESS
 
@@ -97,6 +106,7 @@ docker compose down -v --remove-orphans
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/release-gate/dashboard-gate-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der CI-Job `phpstan-application` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `js-lint-changed` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
 

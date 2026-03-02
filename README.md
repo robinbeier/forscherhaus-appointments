@@ -38,6 +38,9 @@ npm start
 # full production build
 npm run build
 
+# optional frontend lint (ESLint, excludes minified assets)
+npm run lint:js
+
 # optional vendor/theme refresh
 npm run assets:refresh
 
@@ -112,10 +115,12 @@ This prevents mixed container mounts across worktrees.
 ```bash
 docker compose run --rm php-fpm composer test
 docker compose run --rm php-fpm composer phpstan:application
+npm run lint:js
 ```
 
 CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
 CI note: the `phpstan-application` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
+CI note: the `js-lint-changed` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 
 For doc-only/meta commits in constrained environments:
 
