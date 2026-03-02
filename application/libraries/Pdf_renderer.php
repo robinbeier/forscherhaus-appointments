@@ -439,7 +439,11 @@ class Pdf_renderer
             $fallbacks = [$fallbacks];
         }
 
-        $defaults = ['http://pdf-renderer:3000', 'http://localhost:3003'];
+        $defaults = ['http://pdf-renderer:3000'];
+
+        if ($this->isLocalEnvironment() || $this->shouldAllowNonLocalLoopbackFallback()) {
+            $defaults[] = 'http://localhost:3003';
+        }
 
         $candidates = array_merge($candidates, $fallbacks, $defaults);
 
@@ -466,6 +470,28 @@ class Pdf_renderer
         }
 
         return $normalized;
+    }
+
+    /**
+     * Allow non-local loopback fallback only when explicitly enabled.
+     */
+    protected function shouldAllowNonLocalLoopbackFallback(): bool
+    {
+        $raw = env('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', 'false');
+        $normalized = strtolower(trim((string) $raw));
+
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    /**
+     * Detect whether the app runs in a local-like runtime environment.
+     */
+    protected function isLocalEnvironment(): bool
+    {
+        $runtimeEnv = defined('ENVIRONMENT') ? ENVIRONMENT : (getenv('APP_ENV') ?: 'production');
+        $appEnv = strtolower(trim((string) $runtimeEnv));
+
+        return in_array($appEnv, ['development', 'testing', 'local'], true);
     }
 
     /**
