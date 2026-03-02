@@ -102,6 +102,7 @@ Docker-Services (lokal) & Debug:
 -   PDF-Renderer: `PDF_RENDERER_DEBUG_DUMP=true` aktiviert temporaere HTML-Debug-Dumps
 -   CalDAV (Baikal): `http://localhost:8100` (credentials `admin` / `admin`), danach `http://baikal/dav.php` mit angelegtem Nutzer verwenden
 -   OpenLDAP: `openldap` auf `389`/`636`, Admin-UI unter `http://localhost:8200` (credentials `cn=admin,dc=example,dc=org` / `admin`)
+-   macOS/iCloud Troubleshooting (MySQL InnoDB OS error 35 auf `./#innodb_redo/*`): `ls -lO@ docker/mysql/#innodb_redo`; bei `compressed,dataless` Dateien rehydrieren (z. B. `dd if='docker/mysql/#innodb_redo/#ib_redo6' of=/dev/null bs=512 count=1`) und Container neu starten; falls erfolglos `docker/mysql` wie im DB-Restore-Abschnitt zuruecksetzen.
 
 Warnung (Worktrees): Nutze pro Worktree einen eindeutigen Compose-Projektnamen, damit sich Container/Volumes nicht ueberlagern.
 Beispiel: `docker compose -p fh-main up -d` im Haupt-Worktree und `docker compose -p fh-hotfix up -d` in einem zweiten Worktree.
