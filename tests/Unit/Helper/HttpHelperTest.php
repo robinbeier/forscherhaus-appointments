@@ -138,6 +138,67 @@ class HttpHelperTest extends TestCase
         $this->assertLessThanOrEqual(16000, strlen($trace));
     }
 
+    public function testHttpHelperDeclaresResponseFunctionExactlyOnce(): void
+    {
+        $source = file_get_contents(APPPATH . 'helpers/http_helper.php');
+
+        $this->assertIsString($source);
+
+        $tokens = token_get_all($source);
+        $response_declarations = 0;
+        $token_count = count($tokens);
+
+        for ($index = 0; $index < $token_count; $index++) {
+            $token = $tokens[$index];
+
+            if (!is_array($token) || $token[0] !== T_FUNCTION) {
+                continue;
+            }
+
+            $name_index = $index + 1;
+
+            while ($name_index < $token_count) {
+                $candidate = $tokens[$name_index];
+
+                if (is_array($candidate) && in_array($candidate[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                    $name_index++;
+                    continue;
+                }
+
+                if ($candidate === '&' || (is_array($candidate) && trim($candidate[1]) === '&')) {
+                    $name_index++;
+                    continue;
+                }
+
+                break;
+            }
+
+            if ($name_index >= $token_count || !is_array($tokens[$name_index])) {
+                continue;
+            }
+
+            if ($tokens[$name_index][0] === T_STRING && strtolower((string) $tokens[$name_index][1]) === 'response') {
+                $response_declarations++;
+            }
+        }
+
+        $this->assertSame(1, $response_declarations);
+    }
+
+    public function testHttpHelperContainsSingleResponseGuardBlock(): void
+    {
+        $source = file_get_contents(APPPATH . 'helpers/http_helper.php');
+
+        $this->assertIsString($source);
+
+        $guard_count = preg_match_all(
+            "/if\\s*\\(\\s*!function_exists\\s*\\(\\s*['\\\"]response['\\\"]\\s*\\)\\s*\\)/",
+            $source,
+        );
+
+        $this->assertSame(1, $guard_count);
+    }
+
     private function captureException(array $payload, string $token): Throwable
     {
         try {
