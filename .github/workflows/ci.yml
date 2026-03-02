@@ -150,7 +150,7 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
-      - name: Run dashboard integration smoke
+      - name: Run dashboard+booking+api integration smoke
         run: >
           docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php
           --base-url=http://nginx --index-page=index.php
