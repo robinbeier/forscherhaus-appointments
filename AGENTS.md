@@ -91,7 +91,7 @@ composer release:gate:booking-confirmation-pdf -- \
 composer release:gate:dashboard -- --help
 composer release:gate:booking-confirmation-pdf -- --help
 
-# Optional: CI Dashboard Integration Smoke (lokaler Repro)
+# Optional: CI Dashboard+Booking+API Integration Smoke (lokaler Repro, read-only)
 docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
@@ -107,6 +107,7 @@ Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.ph
 Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/release-gate/dashboard-gate-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der CI-Job `phpstan-application` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `js-lint-changed` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
 

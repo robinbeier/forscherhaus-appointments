@@ -72,14 +72,19 @@ The gate always writes a JSON report containing:
 - `summary`: pass/fail counts and exit code.
 - `failure`: present on failure with message + exception class.
 
-## CI Integration Smoke (Quick Win #3)
+## CI Integration Smoke (Quick Win #4)
 
-The CI pipeline also runs a deterministic integration smoke test for the auth + dashboard metrics chain.
+The CI pipeline also runs a deterministic integration smoke test for three read-only chains:
+
+1. `GET /login` + `POST /login/validate` + `POST /dashboard/metrics`
+2. `GET /booking` + `POST /booking/get_available_hours` + `POST /booking/get_unavailable_dates`
+3. `GET /api/v1/appointments` (401 without auth), then authenticated `GET /api/v1/appointments` + `GET /api/v1/availabilities`
 
 Purpose:
 
 - Catch runtime wiring regressions (session/csrf/auth/routing/db) that unit tests can miss.
 - Keep checks deterministic and low-risk close to release.
+- Keep scope read-only (no booking create/reschedule/cancel mutations).
 - Avoid external dependencies such as PDF renderer.
 
 Local repro command:
