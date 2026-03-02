@@ -1,139 +1,131 @@
-<h1 align="center">
-    <br>
-    <a href="https://easyappointments.org">
-        <img src="https://raw.githubusercontent.com/alextselegidis/easyappointments/develop/logo.png" alt="Easy!Appointments" width="150">
-    </a>
-    <br>
-    Easy!Appointments
-    <br>
-</h1>
+# Forscherhaus Appointments
 
-<br>
+Forscherhaus school scheduling fork of Easy!Appointments.
 
-<h4 align="center">
-    A powerful Open Source Appointment Scheduler that can be installed on your server. 
-</h4>
+This repository prioritizes stable, low-risk delivery for school operations and keeps compatibility with the existing Easy!Appointments architecture.
 
-<p align="center">
-  <img alt="GitHub" src="https://img.shields.io/github/license/alextselegidis/easyappointments?style=for-the-badge">
-  <img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/alextselegidis/easyappointments?style=for-the-badge">
-  <img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/alextselegidis/easyappointments/total?style=for-the-badge">
-  <a href="https://discord.com/invite/UeeSkaw">
-    <img alt="Chat On Discord" src="https://img.shields.io/badge/chat-on%20discord-7289da?style=for-the-badge&logo=discord&logoColor=white">
-  </a>
-</p>
+## Scope
 
-<p align="center">
-  <a href="#about">About</a> •
-  <a href="#features">Features</a> •
-  <a href="#setup">Setup</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#license">License</a>
-</p>
+- Fork base: Easy!Appointments (`v1.5.2` lineage)
+- Stack: PHP `>=8.1` (8.2+ recommended), CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
+- Primary goal: school-specific scheduling workflows and operational reliability
 
-![screenshot](screenshot.png)
+## Fork Invariants
 
-## Forscherhaus Fork Quickstart
+- `services.attendants_number` is intentionally restricted to `1`.
+- Do not implement multi-attendant behavior unless product scope changes explicitly.
 
-This repository is the Forscherhaus school fork of Easy!Appointments.
-For contributor guardrails, release constraints, and command conventions, see [AGENTS.md](AGENTS.md).
-
-Important fork invariant:
-
--   `services.attendants_number` is currently restricted to `1`.
-
-Recommended local bootstrap:
+## Quickstart (Recommended)
 
 ```bash
 ./scripts/setup-worktree.sh
 docker compose up -d
 ```
 
-Fast validation commands:
+Smoke-check:
 
 ```bash
 docker compose run --rm php-fpm composer test
 npm run build
 ```
 
-## About
-
-**Easy!Appointments** is a highly customizable web application that allows customers to book appointments with you
-via a sophisticated web interface. Moreover, it provides the ability to sync your data with Google Calendar so you can
-use them with other services. It is an open source project that you can download and install **even for commercial use**.
-Easy!Appointments will run smoothly with your existing website as it can be installed in a single folder of the
-server and of course share an existing database.
-
-## Features
-
-The application is designed to be flexible enough so that it can handle any enterprise work flow.
-
--   Customers and appointments management.
--   Services and providers organization.
--   Working plan and booking rules.
--   Google Calendar synchronization (including provider room information for bookings).
--   Email notifications system.
--   Self hosted installation.
--   Translated user interface.
--   User community support.
-
-## Setup
-
-To clone and run this application, you'll need [Git](https://git-scm.com), [Node.js](https://nodejs.org/en/download/) (which comes with [npm](http://npmjs.com)) and [Composer](https://getcomposer.org) installed on your computer. From your command line:
+## Development Commands
 
 ```bash
-# Clone this repository
-$ git clone https://github.com/alextselegidis/easyappointments.git
+# watch assets
+npm start
 
-# Go into the repository
-$ cd easyappointments
+# full production build
+npm run build
 
-# Install dependencies
-$ npm install && composer install
+# optional vendor/theme refresh
+npm run assets:refresh
 
-# Start the file watcher
-$ npm start
+# CI-parity tests
+docker compose run --rm php-fpm composer test
+docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 ```
 
-`npm install` also refreshes frontend vendor and theme assets via `npm run assets:refresh`.
+## Release Gates (Optional, Pre-Deploy)
 
-Note: If you're using Linux Bash for Windows, [see this guide](https://www.howtogeek.com/261575/how-to-run-graphical-linux-desktop-applications-from-windows-10s-bash-shell/) or use `node` from the command prompt.
+```bash
+# Dashboard gate
+composer release:gate:dashboard -- --help
 
-You can build the files by running `npm run build`. This command will bundle everything to a `build` directory.
+# Booking confirmation PDF gate
+composer release:gate:booking-confirmation-pdf -- --help
+```
 
-## Installation
+References:
+- [Dashboard release gate](docs/release-gate-dashboard.md)
+- [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
 
-You will need to perform the following steps to install the application on your server:
+## Local Services (Docker)
 
--   Make sure that your server has Apache/Nginx, PHP (8.1+, 8.2+ recommended) and MySQL installed.
--   Create a new database (or use an existing one).
--   Copy the "easyappointments" source folder on your server.
--   Make sure that the "storage" directory is writable.
--   Rename the "config-sample.php" file to "config.php" and update its contents based on your environment.
--   Open the browser on the Easy!Appointments URL and follow the installation guide.
+- App: `http://localhost`
+- phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
+- Mailpit: `http://localhost:8025`
+- PDF renderer: `http://localhost:3003`
+- Baikal (CalDAV): `http://localhost:8100`
+- phpLDAPadmin: `http://localhost:8200`
 
-That's it! You can now use Easy!Appointments at your will.
+If you run PHP on host with Docker PDF renderer, set:
 
-You will find the latest release at [easyappointments.org](https://easyappointments.org).
-If you have problems installing or configuring the application visit the
-[official support group](https://groups.google.com/forum/#!forum/easy-appointments).
-You can also report problems on the [issues page](https://github.com/alextselegidis/easyappointments/issues)
-and help the development progress.
+```bash
+export PDF_RENDERER_URL=http://localhost:3003
+```
+
+## Worktree Safety
+
+When using multiple git worktrees, always set a unique Docker Compose project name per worktree:
+
+```bash
+docker compose -p fh-main up -d
+docker compose -p fh-hotfix up -d
+```
+
+This prevents mixed container mounts across worktrees.
+
+## Documentation Map
+
+- [Project runbook and contributor guardrails](AGENTS.md)
+- [Installation guide](docs/installation-guide.md)
+- [Docker guide](docs/docker.md)
+- [Console commands](docs/console.md)
+- [REST API](docs/rest-api.md)
+- [Google Calendar sync](docs/google-calendar-sync.md)
+- [CalDAV sync](docs/caldav-calendar-sync.md)
+- [LDAP](docs/ldap.md)
+- [Provider room feature](docs/feature-provider-room.md)
+- [FAQ](docs/faq.md)
+
+## Contribution Rules (Short)
+
+- Keep production code changes inside `application/`.
+- Do not modify `system/` unless applying an explicit upstream patch.
+- Use CodeIgniter migrations for all DB schema changes (with rollback path).
+- Keep `config.php` out of version control; update `config-sample.php` only with safe defaults.
+
+## Testing Before PR
+
+```bash
+docker compose run --rm php-fpm composer test
+```
+
+For doc-only/meta commits in constrained environments:
+
+```bash
+SKIP_PRECOMMIT=1 git commit -m "Your message"
+```
+
+## Upstream
+
+This is a maintained fork of:
+- [alextselegidis/easyappointments](https://github.com/alextselegidis/easyappointments)
+
+Upstream merges are done selectively and scheduled according to release risk.
 
 ## License
 
-Code Licensed Under [GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html) | Content Under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)
-
----
-
-Website [alextselegidis.com](https://alextselegidis.com) &nbsp;&middot;&nbsp;
-GitHub [alextselegidis](https://github.com/alextselegidis) &nbsp;&middot;&nbsp;
-Twitter [@alextselegidis](https://twitter.com/AlexTselegidis)
-
-###### More Projects On Github
-
-###### ⇾ [Plainpad &middot; Self Hosted Note Taking App](https://github.com/alextselegidis/plainpad)
-
-###### ⇾ [Questionful &middot; Web Questionnaires Made Easy](https://github.com/alextselegidis/questionful)
-
-###### ⇾ [Integravy &middot; Service Orchestration At Your Fingertips](https://github.com/alextselegidis/integravy)
+Code licensed under [GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html).  
+See [LICENSE](LICENSE) for details.
