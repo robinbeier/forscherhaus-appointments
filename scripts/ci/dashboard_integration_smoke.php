@@ -275,6 +275,17 @@ try {
         $decoded = GateAssertions::decodeJson($response['body'], 'GET /api/v1/availabilities');
         $hours = assertHoursPayload($decoded, 'GET /api/v1/availabilities');
 
+        if ($hours === []) {
+            throw new GateAssertionException(
+                sprintf(
+                    'GET /api/v1/availabilities returned no slots for provider %d, service %d on %s.',
+                    $providerServicePair['provider_id'],
+                    $providerServicePair['service_id'],
+                    $resolvedBooking['date'],
+                ),
+            );
+        }
+
         return [
             'http_status' => $response['status_code'],
             'url' => $response['url'],
