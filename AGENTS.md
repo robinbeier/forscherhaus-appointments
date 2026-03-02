@@ -68,6 +68,16 @@ python3 scripts/docs/generate_architecture_ownership_docs.py
 python3 scripts/docs/generate_architecture_ownership_docs.py --check
 python3 scripts/ci/check_architecture_ownership_map.py
 
+# Optional: API OpenAPI contract smoke (read-only, selected API v1 endpoints)
+docker compose up -d mysql php-fpm nginx
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
+for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
+docker compose exec -T php-fpm composer contract-test:api-openapi -- \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --username=administrator --password=administrator
+docker compose down -v --remove-orphans
+
 # Optional: PHPStan rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
@@ -83,6 +93,12 @@ done
 # Optional: Architecture/ownership rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 30 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="architecture-ownership-map") | .conclusion'
+done | awk '$1 != "cancelled"' | head -n 7
+# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+
+# Optional: API OpenAPI contract rollout streak check (requires gh + jq)
+for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="api-contract-openapi") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
@@ -119,6 +135,7 @@ Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/
 Hinweis: Der CI-Job `phpstan-application` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `js-lint-changed` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `architecture-ownership-map` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `api-contract-openapi` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):

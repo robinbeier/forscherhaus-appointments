@@ -47,6 +47,11 @@ npm run assets:refresh
 # CI-parity tests
 docker compose run --rm php-fpm composer test
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
+
+# optional API OpenAPI contract smoke command (requires mysql/php-fpm/nginx stack)
+docker compose exec -T php-fpm composer contract-test:api-openapi -- \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --username=administrator --password=administrator
 ```
 
 ## Release Gates (Optional, Pre-Deploy)
@@ -124,6 +129,7 @@ python3 scripts/ci/check_architecture_ownership_map.py
 
 CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
 CI note: `integration-smoke` now covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
+CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
 CI note: the `phpstan-application` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 CI note: the `js-lint-changed` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 CI note: the `architecture-ownership-map` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
