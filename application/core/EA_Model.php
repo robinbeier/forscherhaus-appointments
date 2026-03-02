@@ -38,6 +38,8 @@
  * @property EA_Session $session
  * @property EA_Upload $upload
  * @property EA_URI $uri
+ * @method array<int, array<string, mixed>> get(array|string|null $where = null, ?int $limit = null, ?int $offset = null, ?string $order_by = null)
+ * @method int save(array<string, mixed> $record)
  */
 class EA_Model extends CI_Model
 {

@@ -1,0 +1,18 @@
+parameters:
+    level: 1
+    paths:
+        - application/helpers
+        - application/libraries
+        - application/core
+    bootstrapFiles:
+        - phpstan/bootstrap.php
+    scanFiles:
+        - phpstan/stubs/codeigniter-functions.stub.php
+    scanDirectories:
+        - system
+        - application/models
+    universalObjectCratesClasses:
+        - CI_Controller
+        - EA_Controller
+        - CI_Model
+        - EA_Model

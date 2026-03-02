@@ -194,7 +194,7 @@ class Synchronization
             log_message(
                 'error',
                 'Synchronization - Could not sync cancellation details of unavailability (' .
-                    ($appointment['id'] ?? '-') .
+                    ($unavailability['id'] ?? '-') .
                     ') : ' .
                     $e->getMessage(),
             );
@@ -234,7 +234,7 @@ class Synchronization
             log_message(
                 'error',
                 'Synchronization - Could not sync cancellation details of unavailability (' .
-                    ($appointment['id'] ?? '-') .
+                    ($unavailability['id'] ?? '-') .
                     ') : ' .
                     $e->getMessage(),
             );

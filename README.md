@@ -111,9 +111,11 @@ This prevents mixed container mounts across worktrees.
 
 ```bash
 docker compose run --rm php-fpm composer test
+docker compose run --rm php-fpm composer phpstan:application
 ```
 
 CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
+CI note: the `phpstan-application` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 
 For doc-only/meta commits in constrained environments:
 
