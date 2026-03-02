@@ -93,6 +93,8 @@ This prevents mixed container mounts across worktrees.
 ## Documentation Map
 
 -   [Project runbook and contributor guardrails](AGENTS.md)
+-   [Architecture map](docs/architecture-map.md)
+-   [Ownership map](docs/ownership-map.md)
 -   [Installation guide](docs/installation-guide.md)
 -   [Docker guide](docs/docker.md)
 -   [Console commands](docs/console.md)
@@ -116,12 +118,15 @@ This prevents mixed container mounts across worktrees.
 docker compose run --rm php-fpm composer test
 docker compose run --rm php-fpm composer phpstan:application
 npm run lint:js
+python3 scripts/docs/generate_architecture_ownership_docs.py --check
+python3 scripts/ci/check_architecture_ownership_map.py
 ```
 
 CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
 CI note: `integration-smoke` now covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `phpstan-application` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 CI note: the `js-lint-changed` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
+CI note: the `architecture-ownership-map` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 
 For doc-only/meta commits in constrained environments:
 

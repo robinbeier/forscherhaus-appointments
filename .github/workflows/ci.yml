@@ -92,6 +92,26 @@ jobs:
       - name: PHPStan Application
         run: composer phpstan:application
 
+  architecture-ownership-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check generated architecture/ownership docs
+        run: python3 scripts/docs/generate_architecture_ownership_docs.py --check
+      - name: Validate architecture/ownership map
+        run: python3 scripts/ci/check_architecture_ownership_map.py
+
   integration-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30

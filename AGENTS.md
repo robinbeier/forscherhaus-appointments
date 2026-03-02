@@ -63,6 +63,11 @@ docker compose run --rm php-fpm composer phpstan:application
 # Optional: JavaScript Lint (ESLint; geaenderte Dateien werden in CI geprueft)
 npm run lint:js
 
+# Optional: Generate and verify architecture/ownership docs
+python3 scripts/docs/generate_architecture_ownership_docs.py
+python3 scripts/docs/generate_architecture_ownership_docs.py --check
+python3 scripts/ci/check_architecture_ownership_map.py
+
 # Optional: PHPStan rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
@@ -74,6 +79,12 @@ for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].d
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="js-lint-changed") | .conclusion'
 done
 # Erwartung fuer Blocking-Umschaltung: erste 7 Eintraege sind SUCCESS
+
+# Optional: Architecture/ownership rollout streak check (requires gh + jq)
+for run_id in $(gh run list --workflow CI --event pull_request --limit 30 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="architecture-ownership-map") | .conclusion'
+done | awk '$1 != "cancelled"' | head -n 7
+# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
 # Optional: Fokuslauf fuer Healthz-Checks
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter HealthzControllerTest'
@@ -107,6 +118,7 @@ Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.ph
 Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/release-gate/dashboard-gate-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der CI-Job `phpstan-application` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `js-lint-changed` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `architecture-ownership-map` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
