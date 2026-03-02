@@ -8,6 +8,8 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [REST API](rest-api.md)
 - [Console](console.md)
 - [Docker](docker.md)
+- [Architecture Map](architecture-map.md)
+- [Ownership Map](ownership-map.md)
 - [Google Calendar Sync](google-calendar-sync.md)
 - [CalDAV Calendar Sync](caldav-calendar-sync.md)
 - [LDAP](ldap.md)
