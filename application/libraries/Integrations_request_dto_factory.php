@@ -60,7 +60,7 @@ final class GoogleCalendarSelectionRequestDto
  */
 final class LdapSearchRequestDto
 {
-    public function __construct(public readonly ?string $keyword)
+    public function __construct(public readonly string $keyword)
     {
     }
 }
@@ -196,7 +196,7 @@ class Integrations_request_dto_factory
 
     public function createLdapSearchRequestDto(mixed $keyword): LdapSearchRequestDto
     {
-        return new LdapSearchRequestDto($this->request_normalizer->normalizeString($keyword, null, true));
+        return new LdapSearchRequestDto($this->request_normalizer->normalizeString($keyword, '', false) ?? '');
     }
 
     public function createWebhookCrudRequestDto(

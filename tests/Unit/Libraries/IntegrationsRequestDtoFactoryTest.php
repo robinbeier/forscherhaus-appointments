@@ -63,6 +63,13 @@ class IntegrationsRequestDtoFactoryTest extends TestCase
         $this->assertSame('Ada', $dto->keyword);
     }
 
+    public function testCreateLdapSearchRequestDtoKeepsBlankSearchAsEmptyString(): void
+    {
+        $dto = $this->factory->createLdapSearchRequestDto('   ');
+
+        $this->assertSame('', $dto->keyword);
+    }
+
     public function testCreateWebhookCrudRequestDtoNormalizesSearchPayloadAndId(): void
     {
         $dto = $this->factory->createWebhookCrudRequestDto(
