@@ -140,7 +140,7 @@ python3 scripts/ci/check_architecture_ownership_map.py
 python3 scripts/docs/generate_codeowners_from_map.py --check
 bash scripts/ci/run_deptrac_changed_gate.sh
 python3 scripts/ci/check_component_boundaries.py
-composer deptrac:analyze
+docker compose run --rm php-fpm composer deptrac:analyze
 composer check:codeowners-sync
 composer check:component-boundaries
 composer check:architecture-boundaries
@@ -161,6 +161,7 @@ CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptra
 CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
 CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
+Local note: when running Deptrac directly on newer host PHP runtimes (for example PHP 8.5), vendor-level deprecation output can appear; prefer the dockerized command above for CI-parity output.
 
 For doc-only/meta commits in constrained environments:
 

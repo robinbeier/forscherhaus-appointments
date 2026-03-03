@@ -31,12 +31,14 @@
     -   Component-Boundary-Check wertet literal Loader-Calls (`model/library/helper`) und `require(_once) APPPATH...` gegen Component-Map aus.
     -   Dynamische/non-literal Loader-Ausdruecke werden als `unresolved` berichtet, nicht als violation gewertet.
     -   Rollback-Policy fuer Delivery-Blocker: `continue-on-error: true` reaktivieren + Follow-up-Issue (<=14 Tage) zur Rueckkehr auf blocking.
+    -   Deptrac-Noise-Strategie: kein Dependency-Upgrade ad hoc; stattdessen minimaler Hardening-Schritt (klare lokale Ausfuehrung ueber Docker/CI-PHP) sofort, eigentlicher Dependency-Fix im geplanten Dependency-Sweep.
 
 -   State:
 
     -   Planungsstand fuer den Sprint ist decision-complete.
     -   Phase 0-4 fuer den Architekturgrenzen-Sprint sind lokal umgesetzt und verifiziert.
     -   Rollout-Status bleibt warn-only fuer `architecture-boundaries` (blocking switch nach 7 gruenen PR-Laeufen ausstehend).
+    -   Umsetzung ist committed auf Branch `codex/structural-architecture-boundary-gates` (Commit `800e2534`).
 
 -   Done:
 
@@ -67,11 +69,18 @@
         -   `composer check:component-boundaries` -> PASS
         -   `composer check:architecture-boundaries` -> PASS
         -   `composer deptrac:analyze -- --no-progress` -> expected non-zero wegen Legacy-Verstoessen; lokal auf Host-PHP 8.5 zusaetzlich Deprecation-Noise aus Vendor.
+    -   Commit erstellt: `800e2534` (`Add hybrid architecture boundary gates`).
+    -   Deptrac Deprecation-Check geklaert:
+        -   Unter Container-PHP 8.4 (`docker compose run --rm php-fpm ...`) keine Deprecation-Zeilen beobachtet; weiterhin erwarteter Exit 1 nur wegen Legacy-Violations.
+        -   CI-Workflow `architecture-boundaries` bleibt auf `php_version: 8.3`.
+    -   Hardening-Schritt ohne Dependency-Aenderung umgesetzt:
+        -   `README.md`: Deptrac-Lokalaufruf in Testblock auf Docker (`docker compose run --rm php-fpm composer deptrac:analyze`) umgestellt.
+        -   `README.md` + `AGENTS.md`: Hinweis ergaenzt, dass Host-PHP (z. B. 8.5) Vendor-Deprecation-Noise zeigen kann; fuer CI-paritaet Docker-Run verwenden.
 
 -   Now:
 
-    -   Commit-Erstellung ist vom User angefordert; Staging + sauberer Commit werden jetzt ausgefuehrt.
-    -   Canonical Ledger ist auf den aktuellen technischen Stand synchronisiert.
+    -   Separater Commit fuer Hardening-Aenderungen ist vom User angefordert und wird jetzt erstellt.
+    -   Canonical Ledger ist auf Commit- und Verifikationsstand synchronisiert.
 
 -   Next:
 
@@ -107,3 +116,4 @@
         -   `python3 scripts/ci/check_component_boundaries.py`
         -   `composer check:architecture-boundaries`
         -   `composer deptrac:analyze -- --no-progress`
+        -   `docker compose run --rm php-fpm sh -lc 'php -v | head -n 1; composer deptrac:analyze -- --no-progress ...'`
