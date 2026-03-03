@@ -68,11 +68,21 @@ class OpenApiContractValidatorTest extends TestCase
         );
     }
 
-    public function testAssertValueMatchesSchemaAcceptsEmptyJsonObject(): void
+    public function testAssertValueMatchesSchemaRejectsEmptyListForObjectByDefault(): void
     {
         $validator = OpenApiContractValidator::fromArray($this->specFixture());
 
+        $this->expectException(ContractAssertionException::class);
+        $this->expectExceptionMessage('expected type "object"');
+
         $validator->assertValueMatchesSchema([], ['type' => 'object'], 'empty_object');
+    }
+
+    public function testAssertValueMatchesSchemaAcceptsEmptyJsonObjectWhenExplicitlyAllowed(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+
+        $validator->assertValueMatchesSchema([], ['type' => 'object'], 'empty_object', true);
         $this->addToAssertionCount(1);
     }
 

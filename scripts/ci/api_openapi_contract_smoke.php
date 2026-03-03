@@ -194,7 +194,8 @@ function runContractCheck(array $check, array &$state, array $config, OpenApiCon
         $decodedResult = decodeJson($response['body'], $id);
         $decoded = $decodedResult['value'];
         $validator->assertRawJsonValueMatchesSchemaType($decodedResult['raw'], $schema, $id . ' response');
-        $validator->assertValueMatchesSchema($decoded, $schema, $id . ' response');
+        $allowEmptyTopLevelObject = is_object($decodedResult['raw']) && is_array($decoded) && $decoded === [];
+        $validator->assertValueMatchesSchema($decoded, $schema, $id . ' response', $allowEmptyTopLevelObject);
 
         if (isset($check['item_schema_ref'])) {
             if (!is_array($decoded) || !array_is_list($decoded)) {

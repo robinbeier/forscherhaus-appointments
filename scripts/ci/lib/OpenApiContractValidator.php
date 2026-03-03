@@ -231,8 +231,12 @@ final class OpenApiContractValidator
      * @param mixed $value
      * @param array<string, mixed> $schema
      */
-    public function assertValueMatchesSchema(mixed $value, array $schema, string $context): void
-    {
+    public function assertValueMatchesSchema(
+        mixed $value,
+        array $schema,
+        string $context,
+        bool $allowEmptyListAsObject = false,
+    ): void {
         $resolvedSchema = $this->resolveSchema($schema);
         $type = $this->resolveSchemaType($resolvedSchema);
 
@@ -240,7 +244,7 @@ final class OpenApiContractValidator
             throw new ContractAssertionException($context . ' has schema without resolvable type.');
         }
 
-        if (!$this->valueMatchesType($value, $type)) {
+        if (!$this->valueMatchesType($value, $type, $allowEmptyListAsObject)) {
             throw new ContractAssertionException(
                 sprintf('%s expected type "%s", got %s.', $context, $type, $this->describePhpType($value)),
             );
@@ -356,14 +360,14 @@ final class OpenApiContractValidator
         return null;
     }
 
-    private function valueMatchesType(mixed $value, string $type): bool
+    private function valueMatchesType(mixed $value, string $type, bool $allowEmptyListAsObject): bool
     {
         return match ($type) {
             'integer' => is_int($value),
             'number' => is_int($value) || is_float($value),
             'string' => is_string($value),
             'boolean' => is_bool($value),
-            'object' => is_array($value) && (!array_is_list($value) || $value === []),
+            'object' => is_array($value) && (!array_is_list($value) || ($allowEmptyListAsObject && $value === [])),
             'array' => is_array($value) && array_is_list($value),
             default => false,
         };
