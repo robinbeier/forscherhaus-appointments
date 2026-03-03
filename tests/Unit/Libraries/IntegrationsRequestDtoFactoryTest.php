@@ -32,7 +32,7 @@ class IntegrationsRequestDtoFactoryTest extends TestCase
         $this->assertSame(9, $dto->providerId);
         $this->assertSame('https://caldav.example.test', $dto->caldavUrl);
         $this->assertSame('teacher', $dto->caldavUsername);
-        $this->assertSame('pass', $dto->caldavPassword);
+        $this->assertSame(' pass ', $dto->caldavPassword);
     }
 
     public function testCreateGoogleDtosNormalizeProviderAndCalendarValues(): void

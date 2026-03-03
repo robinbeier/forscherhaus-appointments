@@ -170,7 +170,7 @@ class Integrations_request_dto_factory
             $this->normalizeEntityIdCompat($provider_id),
             $this->request_normalizer->normalizeString($caldav_url, null, true),
             $this->request_normalizer->normalizeString($caldav_username, null, true),
-            $this->request_normalizer->normalizeString($caldav_password, null, true),
+            $this->normalizeSensitiveStringCompat($caldav_password),
         );
     }
 
@@ -231,6 +231,15 @@ class Integrations_request_dto_factory
         }
 
         return $this->request_normalizer->normalizeString($id, null, true);
+    }
+
+    private function normalizeSensitiveStringCompat(mixed $value): ?string
+    {
+        if ($value === null || is_array($value) || is_object($value)) {
+            return null;
+        }
+
+        return (string) $value;
     }
 
     /**

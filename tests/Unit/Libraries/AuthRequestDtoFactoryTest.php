@@ -26,7 +26,7 @@ class AuthRequestDtoFactoryTest extends TestCase
         $recovery = $this->factory->createRecoveryRequestDto('  user ', ' school@example.test ');
 
         $this->assertSame('user', $login->username);
-        $this->assertSame('secret', $login->password);
+        $this->assertSame(' secret ', $login->password);
         $this->assertSame('user', $recovery->username);
         $this->assertSame('school@example.test', $recovery->email);
     }

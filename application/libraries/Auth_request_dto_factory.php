@@ -153,7 +153,7 @@ class Auth_request_dto_factory
     {
         return new LoginValidateRequestDto(
             $this->request_normalizer->normalizeString($username, null, true),
-            $this->request_normalizer->normalizeString($password, null, true),
+            $this->normalizeSensitiveStringCompat($password),
         );
     }
 
@@ -214,5 +214,14 @@ class Auth_request_dto_factory
         }
 
         return $this->request_normalizer->normalizeString($id, null, true);
+    }
+
+    private function normalizeSensitiveStringCompat(mixed $value): ?string
+    {
+        if ($value === null || is_array($value) || is_object($value)) {
+            return null;
+        }
+
+        return (string) $value;
     }
 }
