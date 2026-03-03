@@ -32,6 +32,7 @@
     -   Aktueller Fokus: Slice 1 Branch `codex/typed-request-contracts-slice1-backoffice-crud`.
     -   Slice 1 ist implementiert fuer Backoffice-/People-Service-CRUD Controller inkl. Backoffice-Webhooks.
     -   Adoption-Guard Delta: 90 -> 40 Violations.
+    -   Slice-1-Commit `19d848d5` ist auf `origin/codex/typed-request-contracts-slice1-backoffice-crud` gepusht.
 
 -   Done:
 
@@ -66,8 +67,7 @@
 
 -   Next:
 
-    -   Slice-1-Commit erstellen und pushen.
-    -   PR 2 erstellen.
+    -   PR 2 fuer Branch `codex/typed-request-contracts-slice1-backoffice-crud` erstellen.
     -   Danach Slice 2 (Settings) starten.
     -   Nach Slice-1-PR weiterhin offene Verstoesse in Slice 2+ abbauen.
     -   Temporaere Low-Risk-Green-Ausnahme spaeter wieder auf strict zurueckstellen.
