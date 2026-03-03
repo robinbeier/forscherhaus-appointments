@@ -61,6 +61,12 @@ docker compose run --rm php-fpm composer phpstan:request-dto
 docker compose run --rm php-fpm composer test:request-dto
 docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 
+# optional typed request-contracts checks (full domain-critical request/controller scope rollout)
+docker compose run --rm php-fpm composer phpstan:request-contracts:l1
+docker compose run --rm php-fpm composer test:request-contracts
+docker compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
+docker compose run --rm php-fpm composer phpstan:request-contracts:l2
+
 # optional unit coverage + coverage delta gate
 docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
@@ -147,6 +153,9 @@ composer check:architecture-boundaries
 docker compose run --rm php-fpm composer phpstan:request-dto
 docker compose run --rm php-fpm composer test:request-dto
 docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
+docker compose run --rm php-fpm composer phpstan:request-contracts:l1
+docker compose run --rm php-fpm composer test:request-contracts
+docker compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
 ```
 
 CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
@@ -154,6 +163,7 @@ CI note: `integration-smoke` now covers auth + dashboard metrics + booking read 
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
+CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
 CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.

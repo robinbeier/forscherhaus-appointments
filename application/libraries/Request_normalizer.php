@@ -232,6 +232,116 @@ class Request_normalizer
         return $value;
     }
 
+    /**
+     * Normalize JSON or array payload to an associative array.
+     *
+     * @param mixed $value
+     *
+     * @return array<string, mixed>
+     */
+    public function normalizeJsonAssocArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $this->normalizeAssocArray($value);
+        }
+
+        if (!is_string($value)) {
+            return [];
+        }
+
+        $raw = trim($value);
+
+        if ($raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        if (!is_array($decoded) || json_last_error() !== JSON_ERROR_NONE) {
+            return [];
+        }
+
+        return $this->normalizeAssocArray($decoded);
+    }
+
+    /**
+     * Normalize strict Y-m-d H:i:s date-time input.
+     *
+     * @param mixed $value
+     * @param string|null $default
+     */
+    public function normalizeDateTimeYmdHis(mixed $value, ?string $default = null): ?string
+    {
+        $candidate = $this->normalizeString($value, null, true);
+
+        if ($candidate === null) {
+            return $default;
+        }
+
+        $date_time = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $candidate);
+
+        if (!$date_time || $date_time->format('Y-m-d H:i:s') !== $candidate) {
+            return $default;
+        }
+
+        return $candidate;
+    }
+
+    /**
+     * Normalize enum-like string values.
+     *
+     * @param mixed $value
+     * @param array<int, scalar> $allowed
+     * @param string|null $default
+     */
+    public function normalizeEnumString(mixed $value, array $allowed, ?string $default = null): ?string
+    {
+        $candidate = $this->normalizeString($value, null, true);
+
+        if ($candidate === null) {
+            return $default;
+        }
+
+        $allowed_strings = array_map(static fn($item): string => (string) $item, $allowed);
+
+        if (!in_array($candidate, $allowed_strings, true)) {
+            return $default;
+        }
+
+        return $candidate;
+    }
+
+    /**
+     * Normalize float-like input.
+     *
+     * @param mixed $value
+     * @param float|null $default
+     */
+    public function normalizeFloat(mixed $value, ?float $default = null): ?float
+    {
+        if (is_float($value)) {
+            return is_finite($value) ? $value : $default;
+        }
+
+        if (is_int($value)) {
+            return (float) $value;
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+
+            if ($trimmed === '' || !is_numeric($trimmed)) {
+                return $default;
+            }
+
+            $normalized = (float) $trimmed;
+
+            return is_finite($normalized) ? $normalized : $default;
+        }
+
+        return $default;
+    }
+
     private function toInt(mixed $value): ?int
     {
         if (is_int($value)) {

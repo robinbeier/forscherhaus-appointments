@@ -82,6 +82,42 @@ final class ApiAvailabilitiesRequestDto
 }
 
 /**
+ * Typed API write payload DTO.
+ */
+final class ApiEntityWritePayloadDto
+{
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function __construct(public readonly array $payload)
+    {
+    }
+}
+
+/**
+ * Typed API date-filter DTO.
+ */
+final class ApiDateFilterDto
+{
+    public function __construct(
+        public readonly ?string $date,
+        public readonly ?string $from,
+        public readonly ?string $till,
+    ) {
+    }
+}
+
+/**
+ * Typed API settings update DTO.
+ */
+final class ApiSettingsUpdateDto
+{
+    public function __construct(public readonly mixed $value)
+    {
+    }
+}
+
+/**
  * API request DTO factory.
  *
  * @package Libraries
@@ -150,6 +186,21 @@ class Api_request_dto_factory
         return $this->createAvailabilitiesRequestDto(request('providerId'), request('serviceId'), request('date'));
     }
 
+    public function buildEntityWritePayloadDto(): ApiEntityWritePayloadDto
+    {
+        return $this->createEntityWritePayloadDto(request());
+    }
+
+    public function buildDateFilterDto(): ApiDateFilterDto
+    {
+        return $this->createDateFilterDto(request('date'), request('from'), request('till'));
+    }
+
+    public function buildSettingsUpdateDto(): ApiSettingsUpdateDto
+    {
+        return $this->createSettingsUpdateDto(request('value'));
+    }
+
     /**
      * @param array<int, string>|null $fields
      * @param array<int, string>|null $with
@@ -185,13 +236,15 @@ class Api_request_dto_factory
         mixed $provider_id,
         mixed $customer_id,
     ): ApiAppointmentsReadRequestDto {
+        $date_filter = $this->createDateFilterDto($date, $from, $till);
+
         return new ApiAppointmentsReadRequestDto(
             $query,
             $this->request_normalizer->normalizeBool($include_buffer_blocks, false),
             $aggregates !== null,
-            $this->normalizeDateCompat($date),
-            $this->normalizeDateCompat($from),
-            $this->normalizeDateCompat($till),
+            $date_filter->date,
+            $date_filter->from,
+            $date_filter->till,
             $this->normalizeCollectionFilterIdCompat($service_id),
             $this->normalizeCollectionFilterIdCompat($provider_id),
             $this->normalizeCollectionFilterIdCompat($customer_id),
@@ -214,6 +267,36 @@ class Api_request_dto_factory
             $this->request_normalizer->normalizePositiveInt($service_id, null),
             $normalized_date,
         );
+    }
+
+    public function createEntityWritePayloadDto(mixed $payload): ApiEntityWritePayloadDto
+    {
+        if (is_string($payload)) {
+            return new ApiEntityWritePayloadDto($this->request_normalizer->normalizeJsonAssocArray($payload));
+        }
+
+        if (is_object($payload)) {
+            /** @var array<string, mixed> $object_vars */
+            $object_vars = get_object_vars($payload);
+
+            return new ApiEntityWritePayloadDto($this->request_normalizer->normalizeAssocArray($object_vars));
+        }
+
+        return new ApiEntityWritePayloadDto($this->request_normalizer->normalizeAssocArray($payload));
+    }
+
+    public function createDateFilterDto(mixed $date, mixed $from, mixed $till): ApiDateFilterDto
+    {
+        return new ApiDateFilterDto(
+            $this->normalizeDateCompat($date),
+            $this->normalizeDateCompat($from),
+            $this->normalizeDateCompat($till),
+        );
+    }
+
+    public function createSettingsUpdateDto(mixed $value): ApiSettingsUpdateDto
+    {
+        return new ApiSettingsUpdateDto($value);
     }
 
     private function normalizeDateCompat(mixed $date_input): ?string

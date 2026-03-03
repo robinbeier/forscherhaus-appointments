@@ -36,7 +36,8 @@ class Consents extends EA_Controller
     public function save(): void
     {
         try {
-            $consent = request('consent');
+            $request_dto = $this->authRequestDtoFactory()->buildConsentSaveRequestDto();
+            $consent = $request_dto->consent;
 
             $consent['ip'] = $this->input->ip_address();
 
@@ -69,5 +70,29 @@ class Consents extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function authRequestDtoFactory(): Auth_request_dto_factory
+    {
+        if (
+            isset($this->auth_request_dto_factory) &&
+            $this->auth_request_dto_factory instanceof Auth_request_dto_factory
+        ) {
+            return $this->auth_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->auth_request_dto_factory) ||
+            !$CI->auth_request_dto_factory instanceof Auth_request_dto_factory
+        ) {
+            $CI->load->library('auth_request_dto_factory');
+        }
+
+        $this->auth_request_dto_factory = $CI->auth_request_dto_factory;
+
+        return $this->auth_request_dto_factory;
     }
 }

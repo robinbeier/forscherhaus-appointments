@@ -1,0 +1,57 @@
+parameters:
+    level: 2
+    paths:
+        - application/controllers/Account.php
+        - application/controllers/Login.php
+        - application/controllers/Recovery.php
+        - application/controllers/Localization.php
+        - application/controllers/Booking.php
+        - application/controllers/Booking_cancellation.php
+        - application/controllers/Appointments.php
+        - application/controllers/Blocked_periods.php
+        - application/controllers/Unavailabilities.php
+        - application/controllers/Calendar.php
+        - application/controllers/Admins.php
+        - application/controllers/Providers.php
+        - application/controllers/Customers.php
+        - application/controllers/Secretaries.php
+        - application/controllers/Services.php
+        - application/controllers/Service_categories.php
+        - application/controllers/Api_settings.php
+        - application/controllers/Booking_settings.php
+        - application/controllers/Business_settings.php
+        - application/controllers/General_settings.php
+        - application/controllers/Google_analytics_settings.php
+        - application/controllers/Matomo_analytics_settings.php
+        - application/controllers/Legal_settings.php
+        - application/controllers/Consents.php
+        - application/controllers/Privacy.php
+        - application/controllers/Ldap_settings.php
+        - application/controllers/Caldav.php
+        - application/controllers/Google.php
+        - application/controllers/Webhooks.php
+        - application/controllers/api/v1/Admins_api_v1.php
+        - application/controllers/api/v1/Appointments_api_v1.php
+        - application/controllers/api/v1/Availabilities_api_v1.php
+        - application/controllers/api/v1/Blocked_periods_api_v1.php
+        - application/controllers/api/v1/Customers_api_v1.php
+        - application/controllers/api/v1/Providers_api_v1.php
+        - application/controllers/api/v1/Secretaries_api_v1.php
+        - application/controllers/api/v1/Service_categories_api_v1.php
+        - application/controllers/api/v1/Services_api_v1.php
+        - application/controllers/api/v1/Settings_api_v1.php
+        - application/controllers/api/v1/Unavailabilities_api_v1.php
+        - application/controllers/api/v1/Webhooks_api_v1.php
+    bootstrapFiles:
+        - phpstan/bootstrap.php
+    scanFiles:
+        - phpstan/stubs/codeigniter-functions.stub.php
+        - phpstan/stubs/request-dto-api.stub.php
+    scanDirectories:
+        - system
+        - application/core
+    universalObjectCratesClasses:
+        - CI_Controller
+        - EA_Controller
+        - CI_Model
+        - EA_Model
