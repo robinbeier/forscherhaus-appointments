@@ -20,12 +20,12 @@ class ApiRequestDtoFactoryTest extends TestCase
         $this->factory = new Api_request_dto_factory(new Request_normalizer());
     }
 
-    public function testCreateCollectionQueryDtoClampsLimitPageAndOffset(): void
+    public function testCreateCollectionQueryDtoClampsPageAndOffsetButPreservesZeroLimit(): void
     {
         $dto = $this->factory->createCollectionQueryDto('search', 0, 0, -5, 'id ASC', ['id'], ['provider']);
 
         $this->assertSame('search', $dto->keyword);
-        $this->assertSame(1, $dto->limit);
+        $this->assertSame(0, $dto->limit);
         $this->assertSame(1, $dto->page);
         $this->assertSame(0, $dto->offset);
         $this->assertSame('id ASC', $dto->orderBy);

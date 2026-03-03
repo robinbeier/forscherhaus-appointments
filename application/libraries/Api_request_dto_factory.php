@@ -165,7 +165,7 @@ class Api_request_dto_factory
     ): ApiCollectionQueryDto {
         return new ApiCollectionQueryDto(
             $keyword,
-            max(1, $limit),
+            max(0, $limit),
             max(1, $page),
             max(0, $offset),
             $order_by,

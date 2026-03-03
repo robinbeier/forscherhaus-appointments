@@ -178,10 +178,13 @@ class Api
      */
     public function request_limit(): ?int
     {
-        return $this->request_normalizer->normalizePositiveInt(
-            request('length', $this->default_length),
-            $this->default_length,
-        );
+        $length = $this->request_normalizer->normalizeInt(request('length', $this->default_length), $this->default_length);
+
+        if ($length === null || $length < 0) {
+            return $this->default_length;
+        }
+
+        return $length;
     }
 
     /**
@@ -192,11 +195,11 @@ class Api
     public function request_offset(): ?int
     {
         $page = $this->request_normalizer->normalizePositiveInt(request('page', 1), 1) ?? 1;
-        $length =
-            $this->request_normalizer->normalizePositiveInt(
-                request('length', $this->default_length),
-                $this->default_length,
-            ) ?? $this->default_length;
+        $length = $this->request_limit() ?? $this->default_length;
+
+        if ($length <= 0) {
+            return 0;
+        }
 
         return ($page - 1) * $length;
     }
