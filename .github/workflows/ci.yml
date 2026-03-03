@@ -114,6 +114,82 @@ jobs:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: python3 scripts/ci/check_architecture_ownership_map.py
 
+  api-contract-openapi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Frontend compile
+        run: |
+          npm ci --no-audit --no-fund
+          npx gulp compile
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: Start API contract services
+        run: docker compose up -d mysql php-fpm nginx
+      - name: Wait for MySQL readiness
+        run: |
+          max_attempts=60
+
+          attempt=1
+          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+
+          attempt=1
+          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+      - name: Install deterministic seed instance
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose exec -T php-fpm php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
+      - name: Run API OpenAPI contract smoke
+        run: >
+          docker compose exec -T php-fpm php scripts/ci/api_openapi_contract_smoke.php
+          --base-url=http://nginx --index-page=index.php
+          --openapi-spec=/var/www/html/openapi.yml
+          --username=administrator --password=administrator
+      - name: Diagnostics (failure logs)
+        if: failure()
+        run: |
+          echo "API OpenAPI contract smoke failed; dumping docker compose diagnostics."
+          docker compose ps || true
+          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+      - name: Cleanup API contract services
+        if: always()
+        run: docker compose down -v --remove-orphans
+
   integration-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
