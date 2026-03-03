@@ -28,7 +28,11 @@
         "application/controllers/Recovery.php",
         "assets/js/pages/login.js"
       ],
-      "depends_on": []
+      "depends_on": [
+        "integrations-sync",
+        "people-services-admin",
+        "scheduling-backoffice"
+      ]
     },
     {
       "component_id": "booking-public",
@@ -219,7 +223,8 @@
         "assets/js/pages/business_settings.js"
       ],
       "depends_on": [
-        "auth-session"
+        "auth-session",
+        "people-services-admin"
       ]
     },
     {
@@ -255,6 +260,7 @@
       "depends_on": [
         "auth-session",
         "people-services-admin",
+        "scheduling-backoffice",
         "settings-compliance"
       ]
     },

@@ -18,8 +18,8 @@ final class CaldavConnectRequestDto
 {
     public function __construct(
         public readonly string|int|null $providerId,
-        public readonly ?string $caldavUrl,
-        public readonly ?string $caldavUsername,
+        public readonly string $caldavUrl,
+        public readonly string $caldavUsername,
         public readonly ?string $caldavPassword,
     ) {
     }
@@ -168,8 +168,8 @@ class Integrations_request_dto_factory
     ): CaldavConnectRequestDto {
         return new CaldavConnectRequestDto(
             $this->normalizeEntityIdCompat($provider_id),
-            $this->request_normalizer->normalizeString($caldav_url, null, true),
-            $this->request_normalizer->normalizeString($caldav_username, null, true),
+            $this->request_normalizer->normalizeString($caldav_url, '', false) ?? '',
+            $this->request_normalizer->normalizeString($caldav_username, '', false) ?? '',
             $this->normalizeSensitiveStringCompat($caldav_password),
         );
     }

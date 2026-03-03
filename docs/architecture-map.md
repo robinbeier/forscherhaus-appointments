@@ -8,14 +8,14 @@ This map defines component boundaries, path ownership scope, and dependency edge
 
 | Component | Role | Depends On | Path Prefixes | Key Files |
 |---|---|---|---:|---:|
-| `auth-session` | Access & Session | None | 13 | 3 |
+| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice | 13 | 3 |
 | `booking-public` | Public Booking | settings-compliance | 7 | 3 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | people-services-admin, settings-compliance | 17 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin | 12 | 3 |
 | `people-services-admin` | People, Providers, Services | settings-compliance | 24 | 3 |
-| `settings-compliance` | Settings & Compliance | auth-session | 23 | 3 |
-| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, settings-compliance | 17 | 3 |
+| `settings-compliance` | Settings & Compliance | auth-session, people-services-admin | 23 | 3 |
+| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 6 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | dashboard-exports, booking-public, api-v1 | 5 | 3 |
 
@@ -26,7 +26,9 @@ This map defines component boundaries, path ownership scope, and dependency edge
 Authentication, recovery and account-session flows for backend users.
 
 Dependencies:
-- None
+- `integrations-sync`
+- `people-services-admin`
+- `scheduling-backoffice`
 
 Path prefixes:
 - `application/controllers/Login.php`
@@ -191,6 +193,7 @@ Business, legal, analytics and API settings including privacy/consent controls.
 
 Dependencies:
 - `auth-session`
+- `people-services-admin`
 
 Path prefixes:
 - `application/controllers/Api_settings.php`
@@ -229,6 +232,7 @@ External sync and integration adapters (Google, CalDAV, LDAP, webhooks).
 Dependencies:
 - `auth-session`
 - `people-services-admin`
+- `scheduling-backoffice`
 - `settings-compliance`
 
 Path prefixes:

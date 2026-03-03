@@ -46,6 +46,14 @@ class AuthRequestDtoFactoryTest extends TestCase
         $this->assertSame(15, $dto->userId);
     }
 
+    public function testCreateValidateUsernameRequestDtoKeepsEmptyStringInsteadOfNull(): void
+    {
+        $dto = $this->factory->createValidateUsernameRequestDto('   ', null);
+
+        $this->assertSame('', $dto->username);
+        $this->assertNull($dto->userId);
+    }
+
     public function testCreateLocalizationPrivacyAndConsentDtosNormalizeValues(): void
     {
         $localization = $this->factory->createLocalizationRequestDto(' de ');

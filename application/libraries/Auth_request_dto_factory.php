@@ -49,7 +49,7 @@ final class AccountSaveRequestDto
  */
 final class ValidateUsernameRequestDto
 {
-    public function __construct(public readonly ?string $username, public readonly string|int|null $userId)
+    public function __construct(public readonly string $username, public readonly string|int|null $userId)
     {
     }
 }
@@ -173,7 +173,7 @@ class Auth_request_dto_factory
     public function createValidateUsernameRequestDto(mixed $username, mixed $user_id): ValidateUsernameRequestDto
     {
         return new ValidateUsernameRequestDto(
-            $this->request_normalizer->normalizeString($username, null, true),
+            $this->request_normalizer->normalizeString($username, '', false) ?? '',
             $this->normalizeEntityIdCompat($user_id),
         );
     }

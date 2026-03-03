@@ -35,6 +35,15 @@ class IntegrationsRequestDtoFactoryTest extends TestCase
         $this->assertSame(' pass ', $dto->caldavPassword);
     }
 
+    public function testCreateCaldavConnectRequestDtoKeepsUrlAndUsernameNonNull(): void
+    {
+        $dto = $this->factory->createCaldavConnectRequestDto('9', '   ', '   ', ' pass ');
+
+        $this->assertSame('', $dto->caldavUrl);
+        $this->assertSame('', $dto->caldavUsername);
+        $this->assertSame(' pass ', $dto->caldavPassword);
+    }
+
     public function testCreateGoogleDtosNormalizeProviderAndCalendarValues(): void
     {
         $oauth = $this->factory->createGoogleOAuthCallbackRequestDto(' code-123 ');
