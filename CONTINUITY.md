@@ -19,6 +19,13 @@
     -   PHPStan-Policy fuer diesen Ausbau: L1 blocking, L2 advisory (step-level warn-only).
     -   Interne Contracts via neue/erweiterte DTO-Factories und `Request_normalizer`; externe Semantik bleibt kompatibel.
     -   Delivery-Strategie (low-risk priorisiert): restliche Controller-Migration in mehreren kleinen PRs mit stabilen Domainen-Slices statt Big-Bang-PR.
+    -   Slicing-Reihenfolge bestaetigt:
+        -   Slice 1: Backoffice CRUD Controller
+        -   Slice 2: Settings-Controller Block
+        -   Slice 3: Calendar + Booking Lifecycle
+        -   Slice 4: API v1 Write-Pfade + restliche Read-Luecken
+        -   Slice 5: Finaler Cleanup (Adoption-Guard-Reste + Doku/CI-Feinschliff)
+    -   PR-Timing-Entscheidung: aktueller Foundation-Stand wird als eigener erster PR erstellt; Slice 1 folgt als separater Folge-PR.
 
 -   State:
 
@@ -52,19 +59,21 @@
 
 -   Now:
 
-    -   Fortsetzung Phase 2: Backoffice CRUD + restliche Settings/Auth-nahen Controller auf DTO-Factories umstellen.
+    -   Foundation-Stand als PR 1 erstellen (Gate/DTO-Foundation + initiale Migration).
+    -   Danach mit Slice 1 (Backoffice CRUD) als naechstem PR fortsetzen.
     -   Adoption-Guard weiter schrittweise abbauen (aktuell 90 Verstoesse).
 
 -   Next:
 
-    -   Controller-Migration starten mit Backoffice CRUD + Auth/Settings/Privacy/Consents (Phase 2), danach Calendar/Booking/Integrations (Phase 3), danach API v1 Write+rest Read (Phase 4).
+    -   PR 1 (aktueller Stand) pushen/oeffnen und CI beobachten.
+    -   Danach Slice 1 branch-basiert umsetzen und als PR 2 einreichen.
     -   Nach jeder Teilmigration Adoption-Guard erneut laufen lassen bis `violation_count=0`.
     -   PHPStan-L2 advisory findings reduzieren (aktuell viele Unknown-Class-Meldungen im erweiterten Controller-Scope).
     -   Nach Controller-Migration: `typed-request-contracts` 7 nicht-cancelled gruene PR-Laeufe sammeln und Job-Level blocking schalten.
 
 -   Open questions (UNCONFIRMED if needed):
 
-    -   UNCONFIRMED: Exakte PR-Schnittlogik fuer die restlichen Domainen-Slices (Reihenfolge + maximale Groesse pro PR).
+    -   UNCONFIRMED: Maximale Zielgroesse pro Folge-PR (Dateien/Methoden), falls wir fuer Review-Speed noch feiner schneiden muessen.
 
 -   Working set (files/ids/commands):
     -   Canonical ledger: `/Users/robinbeier/Developers/forscherhaus-appointments/CONTINUITY.md`
