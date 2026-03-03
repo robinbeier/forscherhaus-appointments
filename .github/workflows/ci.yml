@@ -172,6 +172,17 @@ jobs:
             attempt=$((attempt + 1))
             sleep 2
           done
+      - name: Install deterministic seed instance
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose run --rm php-fpm php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
       - name: Prepare coverage output directory
         run: mkdir -p storage/logs/ci
       - name: Generate unit coverage report

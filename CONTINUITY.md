@@ -33,6 +33,7 @@
 
     -   Sprint implementation completed on 2026-03-03 (local validation complete).
     -   Handoff state switched to PR lifecycle on 2026-03-03 (branch pushed, PR opened, CI babysitting started).
+    -   PR `#84` babysitting in progress; one `coverage-delta` CI failure diagnosed as missing DB install bootstrap in the job.
     -   Rollout state: CI `coverage-delta` remains warn-only until 7 consecutive green PR runs.
 
 -   Done:
@@ -82,14 +83,17 @@
     -   Pushed branch and opened ready-for-review PR:
         -   PR: `#84` `https://github.com/robinbeier/forscherhaus-appointments/pull/84`
         -   Latest commit on branch: `948125ad` (`Update continuity ledger with commit state`)
+    -   Diagnosed CI failure on PR `#84`:
+        -   Failing job: `coverage-delta`.
+        -   Root cause: `composer test:coverage:unit` ran against a fresh CI database without `php index.php console install`.
 
 -   Now:
 
-    -   Babysit PR `#84` checks and review signals via `$babysit-pr` continuous watch loop.
+    -   Apply CI workflow fix for PR `#84` (`coverage-delta` seed install step), then push and resume continuous watch.
 
 -   Next:
 
-    -   Diagnose/fix branch-related CI failures if they appear.
+    -   Verify rerun on the new SHA reaches green (or continue diagnose/retry loop).
     -   Retry likely flaky failed checks up to skill retry budget when indicated.
     -   Remove only `continue-on-error: true` after 7 non-cancelled green PR runs.
 
