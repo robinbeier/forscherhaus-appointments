@@ -10,6 +10,7 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Docker](docker.md)
 - [Architecture Map](architecture-map.md)
 - [Ownership Map](ownership-map.md)
+- [Architecture Boundary Gates (CI)](../README.md#testing-before-pr)
 - [Google Calendar Sync](google-calendar-sync.md)
 - [CalDAV Calendar Sync](caldav-calendar-sync.md)
 - [LDAP](ldap.md)

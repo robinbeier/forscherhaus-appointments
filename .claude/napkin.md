@@ -55,9 +55,11 @@
 
 ## User Directives
 
-1. **[2026-02-22] Follow AGENTS.md merge-ready contribution standard**
+1. **[2026-03-03] Keep `CONTINUITY.md` as canonical compaction-safe session briefing**
+   Do instead: at the start of each turn read/update `CONTINUITY.md`, and refresh it immediately when goal, decisions, constraints, state, or key outcomes change.
+2. **[2026-02-22] Follow AGENTS.md merge-ready contribution standard**
    Do instead: keep changes minimal and consistent with repo conventions, then report validation status and blockers clearly.
-2. **[2026-02-22] Never revert unrelated dirty-worktree changes**
+3. **[2026-02-22] Never revert unrelated dirty-worktree changes**
    Do instead: isolate edits to request scope and stop to ask if unexpected modifications appear in touched files.
-3. **[2026-02-22] Keep collaboration updates concise and actionable**
+4. **[2026-02-22] Keep collaboration updates concise and actionable**
    Do instead: send short progress updates during tool work and finish with changed files and test outcomes.

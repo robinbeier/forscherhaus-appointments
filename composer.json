@@ -47,6 +47,7 @@
     },
     "require-dev": {
         "roave/security-advisories": "dev-master",
+        "deptrac/deptrac": "^2.0",
         "phpstan/phpstan": "^1.12",
         "phpunit/phpunit": "^9.6",
         "symfony/yaml": "^6.4"
@@ -57,7 +58,15 @@
         "test:booking-controller-flows": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.booking-flows.xml",
         "test:request-dto": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.request-dto.xml",
         "test:coverage:unit": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; mkdir -p storage/logs/ci; APP_ENV=testing XDEBUG_MODE=coverage php vendor/bin/phpunit -c phpunit.coverage.xml --coverage-clover storage/logs/ci/coverage-unit-clover.xml",
+        "deptrac:analyze": "deptrac analyse --config-file=deptrac.yaml",
         "check:coverage:delta": "php scripts/ci/check_coverage_delta.php --clover=storage/logs/ci/coverage-unit-clover.xml --policy=scripts/ci/config/coverage_delta_policy.php --output-json=storage/logs/ci/coverage-delta-latest.json",
+        "check:component-boundaries": "python3 scripts/ci/check_component_boundaries.py",
+        "check:codeowners-sync": "python3 scripts/docs/generate_codeowners_from_map.py --check",
+        "check:architecture-boundaries": [
+            "@check:codeowners-sync",
+            "bash scripts/ci/run_deptrac_changed_gate.sh",
+            "@check:component-boundaries"
+        ],
         "phpstan:application": "phpstan analyse -c phpstan.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "phpstan:request-dto": "phpstan analyse -c phpstan.request-dto.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "contract-test:api-openapi": "php scripts/ci/api_openapi_contract_smoke.php",
