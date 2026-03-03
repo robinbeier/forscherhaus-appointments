@@ -105,6 +105,9 @@ done | awk '$1 != "cancelled"' | head -n 7
 # Optional: Fokuslauf fuer Healthz-Checks
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter HealthzControllerTest'
 
+# Optional: Fokuslauf fuer OpenAPI Contract Validator Unit-Tests
+docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter OpenApiContractValidatorTest'
+
 # Optional: Dashboard Release Gate (vor Deployment / Regression-Check)
 composer release:gate:dashboard -- \
   --base-url=http://localhost --index-page=index.php --username="$EA_GATE_USERNAME" --password="$EA_GATE_PASSWORD" \
@@ -136,6 +139,7 @@ Hinweis: Der CI-Job `phpstan-application` laeuft waehrend des Rollouts warn-only
 Hinweis: Der CI-Job `js-lint-changed` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `architecture-ownership-map` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `api-contract-openapi` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
