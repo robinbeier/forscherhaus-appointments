@@ -275,7 +275,7 @@ class BookingControllerFlowTest extends TestCase
                 $this->forcedProviderId = $forcedProviderId;
             }
 
-            protected function check_datetime_availability(): ?int
+            protected function check_datetime_availability(\BookingRegisterRequestDto $register_request): ?int
             {
                 return $this->forcedProviderId;
             }

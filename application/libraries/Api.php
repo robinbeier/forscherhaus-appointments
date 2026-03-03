@@ -37,6 +37,8 @@ class Api
      */
     protected EA_Model $model;
 
+    protected Request_normalizer $request_normalizer;
+
     /**
      * Api constructor.
      */
@@ -45,6 +47,9 @@ class Api
         $this->CI = &get_instance();
 
         $this->CI->load->library('accounts');
+        $this->CI->load->library('request_normalizer');
+
+        $this->request_normalizer = $this->CI->request_normalizer;
     }
 
     /**
@@ -163,7 +168,7 @@ class Api
      */
     public function request_keyword(): ?string
     {
-        return request('q');
+        return $this->request_normalizer->normalizeString(request('q'), null, true);
     }
 
     /**
@@ -173,7 +178,10 @@ class Api
      */
     public function request_limit(): ?int
     {
-        return request('length', $this->default_length);
+        return $this->request_normalizer->normalizePositiveInt(
+            request('length', $this->default_length),
+            $this->default_length,
+        );
     }
 
     /**
@@ -183,9 +191,12 @@ class Api
      */
     public function request_offset(): ?int
     {
-        $page = request('page', 1);
-
-        $length = request('length', $this->default_length);
+        $page = $this->request_normalizer->normalizePositiveInt(request('page', 1), 1) ?? 1;
+        $length =
+            $this->request_normalizer->normalizePositiveInt(
+                request('length', $this->default_length),
+                $this->default_length,
+            ) ?? $this->default_length;
 
         return ($page - 1) * $length;
     }
@@ -197,13 +208,11 @@ class Api
      */
     public function request_order_by(): ?string
     {
-        $sort = request('sort');
+        $sort_tokens = $this->normalizeCsvTokens(request('sort'));
 
-        if (!$sort) {
+        if (empty($sort_tokens)) {
             return null;
         }
-
-        $sort_tokens = array_map('trim', explode(',', $sort));
 
         $order_by = [];
 
@@ -234,13 +243,13 @@ class Api
      */
     public function request_fields(): ?array
     {
-        $fields = request('fields');
+        $fields = $this->normalizeCsvTokens(request('fields'));
 
-        if (!$fields) {
+        if (empty($fields)) {
             return null;
         }
 
-        return array_map('trim', explode(',', $fields));
+        return $fields;
     }
 
     /**
@@ -250,12 +259,38 @@ class Api
      */
     public function request_with(): ?array
     {
-        $with = request('with');
+        $with = $this->normalizeCsvTokens(request('with'));
 
-        if (!$with) {
+        if (empty($with)) {
             return null;
         }
 
-        return array_map('trim', explode(',', $with));
+        return $with;
+    }
+
+    /**
+     * Normalize CSV/query-array input to a non-empty token list.
+     *
+     * @param mixed $value
+     *
+     * @return array<int, string>
+     */
+    protected function normalizeCsvTokens(mixed $value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+
+        if (is_array($value)) {
+            return $this->request_normalizer->normalizeStringList($value);
+        }
+
+        $normalized = $this->request_normalizer->normalizeString($value, null, true);
+
+        if ($normalized === null) {
+            return [];
+        }
+
+        return $this->request_normalizer->normalizeStringList(explode(',', $normalized));
     }
 }

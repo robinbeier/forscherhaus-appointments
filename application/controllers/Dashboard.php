@@ -35,6 +35,7 @@ class Dashboard extends EA_Controller
         $this->load->library('dashboard_metrics');
         $this->load->library('dashboard_heatmap');
         $this->load->library('accounts');
+        $this->load->library('dashboard_request_dto_factory');
         $this->load->helper('date');
     }
 
@@ -139,11 +140,12 @@ class Dashboard extends EA_Controller
                 return;
             }
 
-            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+            $request_dto = $this->dashboardRequestDtoFactory()->buildProviderMetricsRequestFromGlobals();
+            $period = $request_dto->period;
 
-            $payload = $this->buildProviderDashboardPayload($provider_id, $period['start'], $period['end']);
+            $payload = $this->buildProviderDashboardPayload($provider_id, $period->start, $period->end);
 
-            $this->persistProviderDashboardRange($provider_id, $period['start'], $period['end']);
+            $this->persistProviderDashboardRange($provider_id, $period->start, $period->end);
 
             json_response($payload);
         } catch (InvalidArgumentException $e) {
@@ -171,46 +173,20 @@ class Dashboard extends EA_Controller
                 return;
             }
 
-            $start_date = request('start_date');
-            $end_date = request('end_date');
-            $statuses = request('statuses', []);
-
-            if ($statuses !== null && !is_array($statuses)) {
-                $statuses = [$statuses];
-            }
-
-            if (!$start_date || !$end_date) {
-                throw new InvalidArgumentException(lang('filter_period_required'));
-            }
-
-            $start = DateTimeImmutable::createFromFormat('Y-m-d', $start_date);
-            $end = DateTimeImmutable::createFromFormat('Y-m-d', $end_date);
-
-            if (!$start || $start->format('Y-m-d') !== $start_date || !$end || $end->format('Y-m-d') !== $end_date) {
-                throw new InvalidArgumentException(lang('filter_period_required'));
-            }
-
-            if ($start > $end) {
-                throw new InvalidArgumentException(lang('filter_period_required'));
-            }
-
-            $service_id = request('service_id');
-            $provider_ids = request('provider_ids', []);
-
-            if ($provider_ids !== null && !is_array($provider_ids)) {
-                $provider_ids = [$provider_ids];
-            }
+            $request_dto = $this->dashboardRequestDtoFactory()->buildMetricsRequestFromGlobals();
+            $period = $request_dto->period;
+            $filters = $request_dto->filters;
 
             $threshold = $this->getDashboardThreshold();
 
-            $metrics = $this->dashboard_metrics->collect($start, $end, [
-                'statuses' => $statuses,
-                'service_id' => $service_id,
-                'provider_ids' => $provider_ids ?? [],
+            $metrics = $this->dashboard_metrics->collect($period->start, $period->end, [
+                'statuses' => $filters->statuses,
+                'service_id' => $filters->serviceId,
+                'provider_ids' => $filters->providerIds,
                 'threshold' => $threshold,
             ]);
 
-            $this->persistProviderDashboardRange((int) session('user_id'), $start, $end);
+            $this->persistProviderDashboardRange((int) session('user_id'), $period->start, $period->end);
 
             json_response($metrics);
         } catch (Throwable $e) {
@@ -236,7 +212,9 @@ class Dashboard extends EA_Controller
                 return;
             }
 
-            $threshold = $this->resolveThreshold($_POST['threshold'] ?? null);
+            $threshold = $this->dashboardRequestDtoFactory()->buildThresholdRequestFromGlobals(
+                $this->getThresholdValidationMessage(),
+            )->threshold;
 
             $this->persistThreshold($threshold);
 
@@ -256,17 +234,11 @@ class Dashboard extends EA_Controller
      */
     protected function resolveThreshold(mixed $threshold_input): float
     {
-        if (is_array($threshold_input) || !is_numeric($threshold_input)) {
-            throw new InvalidArgumentException($this->getThresholdValidationMessage());
-        }
-
-        $threshold = (float) $threshold_input;
-
-        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
-            throw new InvalidArgumentException($this->getThresholdValidationMessage());
-        }
-
-        return $threshold;
+        return $this->dashboardRequestDtoFactory()->createThreshold(
+            $threshold_input,
+            null,
+            $this->getThresholdValidationMessage(),
+        )->threshold;
     }
 
     /**
@@ -349,40 +321,14 @@ class Dashboard extends EA_Controller
                 return;
             }
 
-            $start_date = request('start_date');
-            $end_date = request('end_date');
-            $statuses = request('statuses', []);
+            $request_dto = $this->dashboardRequestDtoFactory()->buildHeatmapRequestFromGlobals();
+            $period = $request_dto->period;
+            $filters = $request_dto->filters;
 
-            if ($statuses !== null && !is_array($statuses)) {
-                $statuses = [$statuses];
-            }
-
-            if (!$start_date || !$end_date) {
-                throw new InvalidArgumentException(lang('filter_period_required'));
-            }
-
-            $start = DateTimeImmutable::createFromFormat('Y-m-d', $start_date);
-            $end = DateTimeImmutable::createFromFormat('Y-m-d', $end_date);
-
-            if (!$start || $start->format('Y-m-d') !== $start_date || !$end || $end->format('Y-m-d') !== $end_date) {
-                throw new InvalidArgumentException(lang('filter_period_required'));
-            }
-
-            if ($start > $end) {
-                throw new InvalidArgumentException(lang('filter_period_required'));
-            }
-
-            $service_id = request('service_id');
-            $provider_ids = request('provider_ids', []);
-
-            if ($provider_ids !== null && !is_array($provider_ids)) {
-                $provider_ids = [$provider_ids];
-            }
-
-            $heatmap = $this->dashboard_heatmap->collect($start, $end, [
-                'statuses' => $statuses,
-                'service_id' => $service_id,
-                'provider_ids' => $provider_ids ?? [],
+            $heatmap = $this->dashboard_heatmap->collect($period->start, $period->end, [
+                'statuses' => $filters->statuses,
+                'service_id' => $filters->serviceId,
+                'provider_ids' => $filters->providerIds,
             ]);
 
             json_response($heatmap);
@@ -400,24 +346,11 @@ class Dashboard extends EA_Controller
      */
     protected function resolvePeriod(?string $start_input, ?string $end_input): array
     {
-        if (!$start_input || !$end_input) {
-            throw new InvalidArgumentException(lang('filter_period_required'));
-        }
-
-        $start = DateTimeImmutable::createFromFormat('Y-m-d', $start_input);
-        $end = DateTimeImmutable::createFromFormat('Y-m-d', $end_input);
-
-        if (!$start || $start->format('Y-m-d') !== $start_input || !$end || $end->format('Y-m-d') !== $end_input) {
-            throw new InvalidArgumentException(lang('filter_period_required'));
-        }
-
-        if ($start > $end) {
-            throw new InvalidArgumentException(lang('filter_period_required'));
-        }
+        $period = $this->dashboardRequestDtoFactory()->createPeriod($start_input, $end_input);
 
         return [
-            'start' => $start,
-            'end' => $end,
+            'start' => $period->start,
+            'end' => $period->end,
         ];
     }
 
@@ -816,5 +749,29 @@ class Dashboard extends EA_Controller
 
             return '';
         }
+    }
+
+    protected function dashboardRequestDtoFactory(): Dashboard_request_dto_factory
+    {
+        if (
+            isset($this->dashboard_request_dto_factory) &&
+            $this->dashboard_request_dto_factory instanceof Dashboard_request_dto_factory
+        ) {
+            return $this->dashboard_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->dashboard_request_dto_factory) ||
+            !$CI->dashboard_request_dto_factory instanceof Dashboard_request_dto_factory
+        ) {
+            $CI->load->library('dashboard_request_dto_factory');
+        }
+
+        $this->dashboard_request_dto_factory = $CI->dashboard_request_dto_factory;
+
+        return $this->dashboard_request_dto_factory;
     }
 }

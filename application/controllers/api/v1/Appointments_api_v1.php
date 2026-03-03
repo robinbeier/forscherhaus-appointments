@@ -33,6 +33,7 @@ class Appointments_api_v1 extends EA_Controller
         $this->load->model('unavailabilities_model');
 
         $this->load->library('api');
+        $this->load->library('api_request_dto_factory');
         $this->load->library('webhooks_client');
         $this->load->library('synchronization');
         $this->load->library('notifications');
@@ -48,25 +49,14 @@ class Appointments_api_v1 extends EA_Controller
     public function index(): void
     {
         try {
-            $include_buffer_blocks = filter_var(request('include_buffer_blocks'), FILTER_VALIDATE_BOOLEAN);
-
-            $keyword = $this->api->request_keyword();
-
-            $limit = $this->api->request_limit();
-
-            $offset = $this->api->request_offset();
-
-            $order_by = $this->api->request_order_by();
-
-            $fields = $this->api->request_fields();
-
-            $with = $this->api->request_with();
+            $request_dto = $this->apiRequestDtoFactory()->buildAppointmentsReadRequestDto($this->api);
+            $query = $request_dto->query;
 
             $where = null;
 
             // Date query param.
 
-            $date = request('date');
+            $date = $request_dto->date;
 
             if (!empty($date)) {
                 $where['DATE(start_datetime)'] = (new DateTime($date))->format('Y-m-d');
@@ -74,7 +64,7 @@ class Appointments_api_v1 extends EA_Controller
 
             // From query param.
 
-            $from = request('from');
+            $from = $request_dto->from;
 
             if (!empty($from)) {
                 $where['DATE(start_datetime) >='] = (new DateTime($from))->format('Y-m-d');
@@ -82,7 +72,7 @@ class Appointments_api_v1 extends EA_Controller
 
             // Till query param.
 
-            $till = request('till');
+            $till = $request_dto->till;
 
             if (!empty($till)) {
                 $where['DATE(end_datetime) <='] = (new DateTime($till))->format('Y-m-d');
@@ -90,7 +80,7 @@ class Appointments_api_v1 extends EA_Controller
 
             // Service ID query param.
 
-            $service_id = request('serviceId');
+            $service_id = $request_dto->serviceId;
 
             if (!empty($service_id)) {
                 $where['id_services'] = $service_id;
@@ -98,7 +88,7 @@ class Appointments_api_v1 extends EA_Controller
 
             // Provider ID query param.
 
-            $provider_id = request('providerId');
+            $provider_id = $request_dto->providerId;
 
             if (!empty($provider_id)) {
                 $where['id_users_provider'] = $provider_id;
@@ -106,32 +96,32 @@ class Appointments_api_v1 extends EA_Controller
 
             // Customer ID query param.
 
-            $customer_id = request('customerId');
+            $customer_id = $request_dto->customerId;
 
             if (!empty($customer_id)) {
                 $where['id_users_customer'] = $customer_id;
             }
 
-            $appointments = empty($keyword)
-                ? $this->appointments_model->get($where, $limit, $offset, $order_by)
-                : $this->appointments_model->search($keyword, $limit, $offset, $order_by);
+            $appointments = empty($query->keyword)
+                ? $this->appointments_model->get($where, $query->limit, $query->offset, $query->orderBy)
+                : $this->appointments_model->search($query->keyword, $query->limit, $query->offset, $query->orderBy);
 
             foreach ($appointments as &$appointment) {
                 $appointment_id = (int) $appointment['id'];
 
                 $this->appointments_model->api_encode($appointment);
 
-                $this->aggregates($appointment);
+                $this->aggregates($appointment, $request_dto->aggregates);
 
-                if (!empty($fields)) {
-                    $this->appointments_model->only($appointment, $fields);
+                if (!empty($query->fields)) {
+                    $this->appointments_model->only($appointment, $query->fields);
                 }
 
-                if (!empty($with)) {
-                    $this->appointments_model->load($appointment, $with);
+                if (!empty($query->with)) {
+                    $this->appointments_model->load($appointment, $query->with);
                 }
 
-                $this->append_buffer_blocks($appointment, $include_buffer_blocks, $appointment_id);
+                $this->append_buffer_blocks($appointment, $request_dto->includeBufferBlocks, $appointment_id);
             }
 
             json_response($appointments);
@@ -151,10 +141,8 @@ class Appointments_api_v1 extends EA_Controller
      *
      * @deprecated Since 1.5
      */
-    private function aggregates(array &$appointment): void
+    private function aggregates(array &$appointment, bool $aggregates): void
     {
-        $aggregates = request('aggregates') !== null;
-
         if ($aggregates) {
             $appointment['service'] = $this->services_model->find(
                 $appointment['id_services'] ?? ($appointment['serviceId'] ?? null),
@@ -199,7 +187,7 @@ class Appointments_api_v1 extends EA_Controller
     public function show(?int $id = null): void
     {
         try {
-            $include_buffer_blocks = filter_var(request('include_buffer_blocks'), FILTER_VALIDATE_BOOLEAN);
+            $request_dto = $this->apiRequestDtoFactory()->buildAppointmentsShowRequestDto($this->api);
 
             $occurrences = $this->appointments_model->get(['id' => $id]);
 
@@ -209,24 +197,20 @@ class Appointments_api_v1 extends EA_Controller
                 return;
             }
 
-            $fields = $this->api->request_fields();
-
-            $with = $this->api->request_with();
-
             $appointment = $this->appointments_model->find($id);
             $appointment_id = (int) $appointment['id'];
 
             $this->appointments_model->api_encode($appointment);
 
-            if (!empty($fields)) {
-                $this->appointments_model->only($appointment, $fields);
+            if (!empty($request_dto->fields)) {
+                $this->appointments_model->only($appointment, $request_dto->fields);
             }
 
-            if (!empty($with)) {
-                $this->appointments_model->load($appointment, $with);
+            if (!empty($request_dto->with)) {
+                $this->appointments_model->load($appointment, $request_dto->with);
             }
 
-            $this->append_buffer_blocks($appointment, $include_buffer_blocks, $appointment_id);
+            $this->append_buffer_blocks($appointment, $request_dto->includeBufferBlocks, $appointment_id);
 
             json_response($appointment);
         } catch (Throwable $e) {
@@ -398,5 +382,26 @@ class Appointments_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function apiRequestDtoFactory(): Api_request_dto_factory
+    {
+        if (
+            isset($this->api_request_dto_factory) &&
+            $this->api_request_dto_factory instanceof Api_request_dto_factory
+        ) {
+            return $this->api_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->api_request_dto_factory) || !$CI->api_request_dto_factory instanceof Api_request_dto_factory) {
+            $CI->load->library('api_request_dto_factory');
+        }
+
+        $this->api_request_dto_factory = $CI->api_request_dto_factory;
+
+        return $this->api_request_dto_factory;
     }
 }

@@ -55,6 +55,7 @@ class Dashboard_export extends EA_Controller
         parent::__construct();
 
         $this->load->library('dashboard_metrics');
+        $this->load->library('dashboard_request_dto_factory');
         $this->load->library('pdf_renderer');
         $this->load->library('zip');
         $this->load->model('services_model');
@@ -76,18 +77,17 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertAdmin();
 
-            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+            $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
+                $this->getConfiguredThreshold(),
+                $this->getThresholdValidationMessage(),
+            );
+            $period = $request_dto->period;
+            $normalized_statuses = $request_dto->filters->statuses;
+            $normalized_service_id = $request_dto->filters->serviceId;
+            $normalized_provider_ids = $request_dto->filters->providerIds;
+            $threshold = $request_dto->threshold->threshold;
 
-            $statuses = request('statuses', []);
-            $service_id = request('service_id');
-            $provider_ids = request('provider_ids', []);
-
-            $normalized_statuses = $this->normalizeStatuses($statuses);
-            $normalized_service_id = $this->normalizeServiceId($service_id);
-            $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
-            $threshold = $this->resolveThreshold(request('threshold'));
-
-            $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
+            $metrics = $this->dashboardMetrics->collect($period->start, $period->end, [
                 'statuses' => $normalized_statuses,
                 'service_id' => $normalized_service_id,
                 'provider_ids' => $normalized_provider_ids,
@@ -104,7 +104,7 @@ class Dashboard_export extends EA_Controller
                 'school_name' => $this->resolveSchoolName(),
                 'logo_data_url' => $this->resolveLogoDataUrl(),
                 'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
-                'period_label' => $this->formatPeriod($period['start'], $period['end']),
+                'period_label' => $this->formatPeriod($period->start, $period->end),
                 'service_label' => $this->resolveServiceLabel($normalized_service_id),
                 'status_label' => $this->resolveStatusLabel($normalized_statuses),
                 'threshold_percent' => $this->formatPercent($threshold, 0),
@@ -118,7 +118,7 @@ class Dashboard_export extends EA_Controller
             $this->pdfRenderer->stream_view(
                 'exports/dashboard_principal_pdf',
                 $view_data,
-                $this->buildFilename($period['start'], $period['end']),
+                $this->buildFilename($period->start, $period->end),
                 $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_principal_pdf_dump.html'),
             );
         } catch (Throwable $exception) {
@@ -132,18 +132,17 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertAdmin();
 
-            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+            $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
+                $this->getConfiguredThreshold(),
+                $this->getThresholdValidationMessage(),
+            );
+            $period = $request_dto->period;
+            $normalized_statuses = $request_dto->filters->statuses;
+            $normalized_service_id = $request_dto->filters->serviceId;
+            $normalized_provider_ids = $request_dto->filters->providerIds;
+            $threshold = $request_dto->threshold->threshold;
 
-            $statuses = request('statuses', []);
-            $service_id = request('service_id');
-            $provider_ids = request('provider_ids', []);
-
-            $normalized_statuses = $this->normalizeStatuses($statuses);
-            $normalized_service_id = $this->normalizeServiceId($service_id);
-            $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
-            $threshold = $this->resolveThreshold(request('threshold'));
-
-            $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
+            $metrics = $this->dashboardMetrics->collect($period->start, $period->end, [
                 'statuses' => $normalized_statuses,
                 'service_id' => $normalized_service_id,
                 'provider_ids' => $normalized_provider_ids,
@@ -153,8 +152,8 @@ class Dashboard_export extends EA_Controller
             $mappedMetrics = $this->mapMetricsForView($metrics, $threshold);
             $appointments = $this->loadAppointmentsByProvider(
                 $metrics,
-                $period['start'],
-                $period['end'],
+                $period->start,
+                $period->end,
                 $normalized_statuses,
                 $normalized_service_id,
             );
@@ -165,20 +164,20 @@ class Dashboard_export extends EA_Controller
                 'school_name' => $this->resolveSchoolName(),
                 'logo_data_url' => $this->resolveLogoDataUrl(),
                 'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
-                'period_label' => $this->formatPeriod($period['start'], $period['end']),
+                'period_label' => $this->formatPeriod($period->start, $period->end),
                 'threshold_ratio' => $threshold,
                 'teachers' => $teacherReports,
                 'teacher_pages' => $this->buildTeacherPages($teacherReports),
                 'filters' => [
-                    'start' => $period['start'],
-                    'end' => $period['end'],
+                    'start' => $period->start,
+                    'end' => $period->end,
                 ],
             ];
 
             $this->pdfRenderer->stream_view(
                 'exports/dashboard_teacher_pdf',
                 $view_data,
-                $this->buildTeacherPdfFilename($period['start'], $period['end']),
+                $this->buildTeacherPdfFilename($period->start, $period->end),
                 $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html'),
             );
         } catch (Throwable $exception) {
@@ -195,18 +194,17 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertAdmin();
 
-            $period = $this->resolvePeriod((string) request('start_date'), (string) request('end_date'));
+            $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
+                $this->getConfiguredThreshold(),
+                $this->getThresholdValidationMessage(),
+            );
+            $period = $request_dto->period;
+            $normalized_statuses = $request_dto->filters->statuses;
+            $normalized_service_id = $request_dto->filters->serviceId;
+            $normalized_provider_ids = $request_dto->filters->providerIds;
+            $threshold = $request_dto->threshold->threshold;
 
-            $statuses = request('statuses', []);
-            $service_id = request('service_id');
-            $provider_ids = request('provider_ids', []);
-
-            $normalized_statuses = $this->normalizeStatuses($statuses);
-            $normalized_service_id = $this->normalizeServiceId($service_id);
-            $normalized_provider_ids = $this->normalizeProviderIds($provider_ids);
-            $threshold = $this->resolveThreshold(request('threshold'));
-
-            $metrics = $this->dashboardMetrics->collect($period['start'], $period['end'], [
+            $metrics = $this->dashboardMetrics->collect($period->start, $period->end, [
                 'statuses' => $normalized_statuses,
                 'service_id' => $normalized_service_id,
                 'provider_ids' => $normalized_provider_ids,
@@ -216,8 +214,8 @@ class Dashboard_export extends EA_Controller
             $mappedMetrics = $this->mapMetricsForView($metrics, $threshold);
             $appointments = $this->loadAppointmentsByProvider(
                 $metrics,
-                $period['start'],
-                $period['end'],
+                $period->start,
+                $period->end,
                 $normalized_statuses,
                 $normalized_service_id,
             );
@@ -228,15 +226,15 @@ class Dashboard_export extends EA_Controller
                 'school_name' => $this->resolveSchoolName(),
                 'logo_data_url' => $this->resolveLogoDataUrl(),
                 'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
-                'period_label' => $this->formatPeriod($period['start'], $period['end']),
+                'period_label' => $this->formatPeriod($period->start, $period->end),
                 'threshold_ratio' => $threshold,
                 'filters' => [
-                    'start' => $period['start'],
-                    'end' => $period['end'],
+                    'start' => $period->start,
+                    'end' => $period->end,
                 ],
             ];
 
-            $this->streamTeacherZipDownload($teacherReports, $base_view_data, $period['start'], $period['end']);
+            $this->streamTeacherZipDownload($teacherReports, $base_view_data, $period->start, $period->end);
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render teacher dashboard ZIP export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
@@ -317,28 +315,11 @@ class Dashboard_export extends EA_Controller
      */
     protected function resolvePeriod(?string $start_input, ?string $end_input): array
     {
-        if (!$start_input || !$end_input) {
-            throw new InvalidArgumentException(lang('filter_period_required'));
-        }
-
-        $start = DateTimeImmutable::createFromFormat('Y-m-d', $start_input);
-        $end = DateTimeImmutable::createFromFormat('Y-m-d', $end_input);
-
-        if (!$start || $start->format('Y-m-d') !== $start_input) {
-            throw new InvalidArgumentException(lang('filter_period_required'));
-        }
-
-        if (!$end || $end->format('Y-m-d') !== $end_input) {
-            throw new InvalidArgumentException(lang('filter_period_required'));
-        }
-
-        if ($start > $end) {
-            throw new InvalidArgumentException(lang('filter_period_required'));
-        }
+        $period = $this->dashboardRequestDtoFactory()->createPeriod($start_input, $end_input);
 
         return [
-            'start' => $start,
-            'end' => $end,
+            'start' => $period->start,
+            'end' => $period->end,
         ];
     }
 
@@ -351,22 +332,7 @@ class Dashboard_export extends EA_Controller
      */
     protected function normalizeStatuses(mixed $statuses): array
     {
-        if ($statuses === null) {
-            $statuses = [];
-        }
-
-        if (!is_array($statuses)) {
-            $statuses = [$statuses];
-        }
-
-        $normalized = array_map(static fn($value) => trim((string) $value), $statuses);
-        $normalized = array_filter($normalized, static fn($value) => $value !== '');
-
-        if (empty($normalized)) {
-            return ['Booked'];
-        }
-
-        return array_values(array_unique($normalized));
+        return $this->dashboardRequestDtoFactory()->createFilter($statuses, null, [], ['Booked'])->statuses;
     }
 
     /**
@@ -378,13 +344,7 @@ class Dashboard_export extends EA_Controller
      */
     protected function normalizeServiceId(mixed $service_id): ?int
     {
-        if ($service_id === null || $service_id === '') {
-            return null;
-        }
-
-        $value = (int) $service_id;
-
-        return $value > 0 ? $value : null;
+        return $this->dashboardRequestDtoFactory()->createFilter([], $service_id, [], [])->serviceId;
     }
 
     /**
@@ -396,18 +356,7 @@ class Dashboard_export extends EA_Controller
      */
     protected function normalizeProviderIds(mixed $provider_ids): array
     {
-        if ($provider_ids === null) {
-            return [];
-        }
-
-        if (!is_array($provider_ids)) {
-            $provider_ids = [$provider_ids];
-        }
-
-        $ids = array_map(static fn($value) => (int) $value, $provider_ids);
-        $ids = array_filter($ids, static fn($value) => $value > 0);
-
-        return array_values(array_unique($ids));
+        return $this->dashboardRequestDtoFactory()->createFilter([], null, $provider_ids, [])->providerIds;
     }
 
     /**
@@ -419,21 +368,11 @@ class Dashboard_export extends EA_Controller
      */
     protected function resolveThreshold(mixed $threshold_input): float
     {
-        if ($threshold_input === null || $threshold_input === '') {
-            return $this->getConfiguredThreshold();
-        }
-
-        if (is_array($threshold_input) || !is_numeric($threshold_input)) {
-            throw new InvalidArgumentException($this->getThresholdValidationMessage());
-        }
-
-        $threshold = (float) $threshold_input;
-
-        if (!is_finite($threshold) || $threshold < 0 || $threshold > 1) {
-            throw new InvalidArgumentException($this->getThresholdValidationMessage());
-        }
-
-        return $threshold;
+        return $this->dashboardRequestDtoFactory()->createThreshold(
+            $threshold_input,
+            $this->getConfiguredThreshold(),
+            $this->getThresholdValidationMessage(),
+        )->threshold;
     }
 
     /**
@@ -1558,5 +1497,29 @@ class Dashboard_export extends EA_Controller
         }
 
         return $date->format($format);
+    }
+
+    protected function dashboardRequestDtoFactory(): Dashboard_request_dto_factory
+    {
+        if (
+            isset($this->dashboard_request_dto_factory) &&
+            $this->dashboard_request_dto_factory instanceof Dashboard_request_dto_factory
+        ) {
+            return $this->dashboard_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->dashboard_request_dto_factory) ||
+            !$CI->dashboard_request_dto_factory instanceof Dashboard_request_dto_factory
+        ) {
+            $CI->load->library('dashboard_request_dto_factory');
+        }
+
+        $this->dashboard_request_dto_factory = $CI->dashboard_request_dto_factory;
+
+        return $this->dashboard_request_dto_factory;
     }
 }

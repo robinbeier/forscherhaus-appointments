@@ -26,6 +26,7 @@ class Providers_api_v1 extends EA_Controller
         parent::__construct();
 
         $this->load->library('api');
+        $this->load->library('api_request_dto_factory');
         $this->load->library('webhooks_client');
 
         $this->api->auth();
@@ -39,31 +40,21 @@ class Providers_api_v1 extends EA_Controller
     public function index(): void
     {
         try {
-            $keyword = $this->api->request_keyword();
+            $query = $this->apiRequestDtoFactory()->buildCollectionQueryDto($this->api);
 
-            $limit = $this->api->request_limit();
-
-            $offset = $this->api->request_offset();
-
-            $order_by = $this->api->request_order_by();
-
-            $fields = $this->api->request_fields();
-
-            $with = $this->api->request_with();
-
-            $providers = empty($keyword)
-                ? $this->providers_model->get(null, $limit, $offset, $order_by)
-                : $this->providers_model->search($keyword, $limit, $offset, $order_by);
+            $providers = empty($query->keyword)
+                ? $this->providers_model->get(null, $query->limit, $query->offset, $query->orderBy)
+                : $this->providers_model->search($query->keyword, $query->limit, $query->offset, $query->orderBy);
 
             foreach ($providers as &$provider) {
                 $this->providers_model->api_encode($provider);
 
-                if (!empty($fields)) {
-                    $this->providers_model->only($provider, $fields);
+                if (!empty($query->fields)) {
+                    $this->providers_model->only($provider, $query->fields);
                 }
 
-                if (!empty($with)) {
-                    $this->providers_model->load($provider, $with);
+                if (!empty($query->with)) {
+                    $this->providers_model->load($provider, $query->with);
                 }
             }
 
@@ -217,5 +208,26 @@ class Providers_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function apiRequestDtoFactory(): Api_request_dto_factory
+    {
+        if (
+            isset($this->api_request_dto_factory) &&
+            $this->api_request_dto_factory instanceof Api_request_dto_factory
+        ) {
+            return $this->api_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->api_request_dto_factory) || !$CI->api_request_dto_factory instanceof Api_request_dto_factory) {
+            $CI->load->library('api_request_dto_factory');
+        }
+
+        $this->api_request_dto_factory = $CI->api_request_dto_factory;
+
+        return $this->api_request_dto_factory;
     }
 }
