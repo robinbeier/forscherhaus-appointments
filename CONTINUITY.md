@@ -33,6 +33,7 @@
     -   Controller-Migration auf DTO-Verbrauch (Phase 2-4) gestartet; erste Scope-Gruppe migriert.
     -   CI-Zielbild inkl. Step-Reihenfolge, Artefakte, Diagnostics und Rollback-Regel ist festgelegt.
     -   Neuer Job `typed-request-contracts` ist warn-only integriert; L2 bleibt advisory auf Step-Level.
+    -   PR 1 ist offen: `https://github.com/robinbeier/forscherhaus-appointments/pull/90` (ready for review).
 
 -   Done:
 
@@ -56,16 +57,18 @@
     -   Adoption-Guard Verletzungen reduziert von 106 auf 90.
     -   Branch erstellt: `codex/structural-typed-contracts-full-request-path`.
     -   Commit erstellt: `b94381f1` (`Add request-contracts foundation and initial migration`).
+    -   Commit erstellt: `9fc42dc9` (`Update continuity ledger for PR slicing decision`).
+    -   PR 1 erstellt: `#90` (`PR1: typed request-contracts foundation + initial migration`).
 
 -   Now:
 
-    -   Foundation-Stand als PR 1 erstellen (Gate/DTO-Foundation + initiale Migration).
+    -   PR #90 aktiv babysitten (CI/mergeability/review comments) bis Ready-to-Merge oder Benutzerhilfe erforderlich.
     -   Danach mit Slice 1 (Backoffice CRUD) als naechstem PR fortsetzen.
     -   Adoption-Guard weiter schrittweise abbauen (aktuell 90 Verstoesse).
 
 -   Next:
 
-    -   PR 1 (aktueller Stand) pushen/oeffnen und CI beobachten.
+    -   CI-/Review-Feedback fuer PR #90 verarbeiten (fix/retry je nach Watcher-Aktion).
     -   Danach Slice 1 branch-basiert umsetzen und als PR 2 einreichen.
     -   Nach jeder Teilmigration Adoption-Guard erneut laufen lassen bis `violation_count=0`.
     -   PHPStan-L2 advisory findings reduzieren (aktuell viele Unknown-Class-Meldungen im erweiterten Controller-Scope).
@@ -74,6 +77,7 @@
 -   Open questions (UNCONFIRMED if needed):
 
     -   UNCONFIRMED: Maximale Zielgroesse pro Folge-PR (Dateien/Methoden), falls wir fuer Review-Speed noch feiner schneiden muessen.
+    -   UNCONFIRMED: Ob wir fuer PR #90 vor Slice 2 noch einen separaten Cleanup fuer Advisory-L2-Rauschen einschieben.
 
 -   Working set (files/ids/commands):
     -   Canonical ledger: `/Users/robinbeier/Developers/forscherhaus-appointments/CONTINUITY.md`
