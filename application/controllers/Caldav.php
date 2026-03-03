@@ -45,7 +45,8 @@ class Caldav extends EA_Controller
     public function connect_to_server(): void
     {
         try {
-            $provider_id = request('provider_id');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildCaldavConnectRequestDto();
+            $provider_id = $request_dto->providerId;
 
             $user_id = session('user_id');
 
@@ -53,9 +54,9 @@ class Caldav extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $caldav_url = request('caldav_url');
-            $caldav_username = request('caldav_username');
-            $caldav_password = request('caldav_password');
+            $caldav_url = $request_dto->caldavUrl;
+            $caldav_username = $request_dto->caldavUsername;
+            $caldav_password = $request_dto->caldavPassword;
 
             $this->caldav_sync->test_connection($caldav_url, $caldav_username, $caldav_password);
 
@@ -304,7 +305,8 @@ class Caldav extends EA_Controller
     public function disable_provider_sync(): void
     {
         try {
-            $provider_id = request('provider_id');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildProviderRequestDto();
+            $provider_id = $request_dto->providerId;
 
             if (!$provider_id) {
                 throw new Exception('Provider id not specified.');
@@ -333,5 +335,29 @@ class Caldav extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function integrationsRequestDtoFactory(): Integrations_request_dto_factory
+    {
+        if (
+            isset($this->integrations_request_dto_factory) &&
+            $this->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            return $this->integrations_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->integrations_request_dto_factory) ||
+            !$CI->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            $CI->load->library('integrations_request_dto_factory');
+        }
+
+        $this->integrations_request_dto_factory = $CI->integrations_request_dto_factory;
+
+        return $this->integrations_request_dto_factory;
     }
 }

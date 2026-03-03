@@ -1,0 +1,24 @@
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="./vendor/phpunit/phpunit/phpunit.xsd"
+    bootstrap="./tests/bootstrap_request_contracts.php"
+    colors="true"
+    cacheResult="false"
+>
+    <testsuites>
+        <testsuite name="RequestContracts">
+            <file>./tests/Unit/Libraries/RequestNormalizerTest.php</file>
+            <file>./tests/Unit/Libraries/BookingRequestDtoFactoryTest.php</file>
+            <file>./tests/Unit/Libraries/DashboardRequestDtoFactoryTest.php</file>
+            <file>./tests/Unit/Libraries/ApiRequestDtoFactoryTest.php</file>
+            <file>./tests/Unit/Libraries/AuthRequestDtoFactoryTest.php</file>
+            <file>./tests/Unit/Libraries/BackofficeRequestDtoFactoryTest.php</file>
+            <file>./tests/Unit/Libraries/CalendarRequestDtoFactoryTest.php</file>
+            <file>./tests/Unit/Libraries/IntegrationsRequestDtoFactoryTest.php</file>
+            <file>./tests/Unit/Libraries/ApiRequestDtoFactoryWriteTest.php</file>
+        </testsuite>
+    </testsuites>
+    <php>
+        <server name="APP_ENV" value="testing"/>
+    </php>
+</phpunit>

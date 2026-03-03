@@ -117,6 +117,57 @@ jobs:
       - name: Request DTO Adoption Check
         run: php scripts/ci/check_request_dto_adoption.php
 
+  typed-request-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install npm dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Frontend compile
+        run: npx gulp compile
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: PHPStan Request Contracts L1
+        run: composer phpstan:request-contracts:l1
+      - name: Request Contracts Unit Tests
+        run: composer test:request-contracts
+      # Temporary rollout mode for PR1/Slice rollout: keep adoption signal visible but non-blocking.
+      # Revert to strict (remove continue-on-error) before final rollout completion/blocking switch.
+      - name: Request Contract Adoption Check
+        continue-on-error: true
+        run: php scripts/ci/check_request_contract_adoption.php
+      - name: PHPStan Request Contracts L2 (advisory)
+        if: always()
+        continue-on-error: true
+        run: composer phpstan:request-contracts:l2
+      - name: Upload request-contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: request-contracts-artifacts
+          path: |
+            storage/logs/ci/request-contract-adoption-latest.json
+            storage/logs/ci/phpstan-request-contracts-l2.raw
+          if-no-files-found: warn
+      - name: Diagnostics (request-contract reports)
+        if: failure()
+        run: |
+          cat storage/logs/ci/request-contract-adoption-latest.json || true
+          cat storage/logs/ci/phpstan-request-contracts-l2.raw || true
+
   coverage-delta:
     runs-on: ubuntu-latest
     timeout-minutes: 20

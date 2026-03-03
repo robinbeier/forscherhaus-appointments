@@ -57,9 +57,16 @@
         "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit",
         "test:booking-controller-flows": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.booking-flows.xml",
         "test:request-dto": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.request-dto.xml",
+        "test:request-contracts": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.request-contracts.xml",
         "test:coverage:unit": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; mkdir -p storage/logs/ci; APP_ENV=testing XDEBUG_MODE=coverage php vendor/bin/phpunit -c phpunit.coverage.xml --coverage-clover storage/logs/ci/coverage-unit-clover.xml",
         "deptrac:analyze": "deptrac analyse --config-file=deptrac.yaml",
         "check:coverage:delta": "php scripts/ci/check_coverage_delta.php --clover=storage/logs/ci/coverage-unit-clover.xml --policy=scripts/ci/config/coverage_delta_policy.php --output-json=storage/logs/ci/coverage-delta-latest.json",
+        "check:request-contract-adoption": "php scripts/ci/check_request_contract_adoption.php",
+        "check:typed-request-contracts": [
+            "@phpstan:request-contracts:l1",
+            "@test:request-contracts",
+            "@check:request-contract-adoption"
+        ],
         "check:component-boundaries": "python3 scripts/ci/check_component_boundaries.py",
         "check:codeowners-sync": "python3 scripts/docs/generate_codeowners_from_map.py --check",
         "check:architecture-boundaries": [
@@ -69,6 +76,8 @@
         ],
         "phpstan:application": "phpstan analyse -c phpstan.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "phpstan:request-dto": "phpstan analyse -c phpstan.request-dto.neon.dist --memory-limit=1G --no-progress --error-format=raw",
+        "phpstan:request-contracts:l1": "phpstan analyse -c phpstan.request-contracts.l1.neon.dist --memory-limit=1G --no-progress --error-format=raw",
+        "phpstan:request-contracts:l2": "mkdir -p storage/logs/ci; phpstan analyse -c phpstan.request-contracts.l2.neon.dist --memory-limit=1G --no-progress --error-format=raw > storage/logs/ci/phpstan-request-contracts-l2.raw 2>&1",
         "contract-test:api-openapi": "php scripts/ci/api_openapi_contract_smoke.php",
         "release:gate:dashboard": "php scripts/release-gate/dashboard_release_gate.php",
         "release:gate:booking-confirmation-pdf": "php scripts/release-gate/booking_confirmation_pdf_gate.php"

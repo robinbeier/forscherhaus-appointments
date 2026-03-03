@@ -82,7 +82,8 @@ class Ldap_settings extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $settings = request('ldap_settings', []);
+            $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('ldap_settings');
+            $settings = $settings_request->settings;
 
             foreach ($settings as $setting) {
                 $existing_setting = $this->settings_model
@@ -120,7 +121,8 @@ class Ldap_settings extends EA_Controller
                 throw new RuntimeException('The LDAP extension is not loaded.');
             }
 
-            $keyword = request('keyword');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildLdapSearchRequestDto();
+            $keyword = $request_dto->keyword;
 
             $entries = $this->ldap_client->search($keyword);
 
@@ -128,5 +130,53 @@ class Ldap_settings extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
+    }
+
+    private function integrationsRequestDtoFactory(): Integrations_request_dto_factory
+    {
+        if (
+            isset($this->integrations_request_dto_factory) &&
+            $this->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            return $this->integrations_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->integrations_request_dto_factory) ||
+            !$CI->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            $CI->load->library('integrations_request_dto_factory');
+        }
+
+        $this->integrations_request_dto_factory = $CI->integrations_request_dto_factory;
+
+        return $this->integrations_request_dto_factory;
     }
 }

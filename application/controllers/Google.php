@@ -308,7 +308,8 @@ class Google extends EA_Controller
             abort(403, 'Forbidden');
         }
 
-        $code = request('code');
+        $request_dto = $this->integrationsRequestDtoFactory()->buildGoogleOAuthCallbackRequestDto();
+        $code = $request_dto->code;
 
         if (empty($code)) {
             response('Code authorization failed.');
@@ -345,7 +346,8 @@ class Google extends EA_Controller
     public function get_google_calendars(): void
     {
         try {
-            $provider_id = (int) request('provider_id');
+            $provider_request = $this->integrationsRequestDtoFactory()->buildProviderRequestDto();
+            $provider_id = (int) $provider_request->providerId;
 
             if (empty($provider_id)) {
                 throw new Exception('Provider id is required in order to fetch the google calendars.');
@@ -382,7 +384,8 @@ class Google extends EA_Controller
     public function select_google_calendar(): void
     {
         try {
-            $provider_id = request('provider_id');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildGoogleCalendarSelectionRequestDto();
+            $provider_id = $request_dto->providerId;
 
             $user_id = session('user_id');
 
@@ -390,7 +393,7 @@ class Google extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $calendar_id = request('calendar_id');
+            $calendar_id = $request_dto->calendarId;
 
             $this->providers_model->set_setting($provider_id, 'google_calendar', $calendar_id);
 
@@ -412,7 +415,8 @@ class Google extends EA_Controller
     public function disable_provider_sync(): void
     {
         try {
-            $provider_id = request('provider_id');
+            $provider_request = $this->integrationsRequestDtoFactory()->buildProviderRequestDto();
+            $provider_id = $provider_request->providerId;
 
             if (!$provider_id) {
                 throw new Exception('Provider id not specified.');
@@ -436,5 +440,29 @@ class Google extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function integrationsRequestDtoFactory(): Integrations_request_dto_factory
+    {
+        if (
+            isset($this->integrations_request_dto_factory) &&
+            $this->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            return $this->integrations_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->integrations_request_dto_factory) ||
+            !$CI->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            $CI->load->library('integrations_request_dto_factory');
+        }
+
+        $this->integrations_request_dto_factory = $CI->integrations_request_dto_factory;
+
+        return $this->integrations_request_dto_factory;
     }
 }

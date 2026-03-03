@@ -30,16 +30,13 @@ class Localization extends EA_Controller
     public function change_language(): void
     {
         try {
+            $request_dto = $this->authRequestDtoFactory()->buildLocalizationRequestDto();
+            $language = $request_dto->language;
+
             // Check if language exists in the available languages.
-            $language = request('language');
-
             if (!in_array($language, config('available_languages'))) {
-                throw new RuntimeException(
-                    'Translations for the given language does not exist (' . request('language') . ').',
-                );
+                throw new RuntimeException('Translations for the given language does not exist (' . $language . ').');
             }
-
-            $language = request('language');
 
             session(['language' => $language]);
 
@@ -51,5 +48,29 @@ class Localization extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function authRequestDtoFactory(): Auth_request_dto_factory
+    {
+        if (
+            isset($this->auth_request_dto_factory) &&
+            $this->auth_request_dto_factory instanceof Auth_request_dto_factory
+        ) {
+            return $this->auth_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->auth_request_dto_factory) ||
+            !$CI->auth_request_dto_factory instanceof Auth_request_dto_factory
+        ) {
+            $CI->load->library('auth_request_dto_factory');
+        }
+
+        $this->auth_request_dto_factory = $CI->auth_request_dto_factory;
+
+        return $this->auth_request_dto_factory;
     }
 }

@@ -66,4 +66,37 @@ class RequestNormalizerTest extends TestCase
         $this->assertSame([], $this->normalizer->normalizeAssocArray(['value']));
         $this->assertSame([], $this->normalizer->normalizeAssocArray('not-an-array'));
     }
+
+    public function testNormalizeJsonAssocArrayParsesValidJsonObjectsOnly(): void
+    {
+        $this->assertSame(['id' => 5], $this->normalizer->normalizeJsonAssocArray('{"id":5}'));
+        $this->assertSame([], $this->normalizer->normalizeJsonAssocArray('[1,2,3]'));
+        $this->assertSame([], $this->normalizer->normalizeJsonAssocArray('{invalid-json}'));
+    }
+
+    public function testNormalizeDateTimeYmdHisValidatesStrictFormat(): void
+    {
+        $this->assertSame(
+            '2026-03-10 11:22:33',
+            $this->normalizer->normalizeDateTimeYmdHis('2026-03-10 11:22:33', null),
+        );
+        $this->assertSame('fallback', $this->normalizer->normalizeDateTimeYmdHis('2026-03-10', 'fallback'));
+        $this->assertNull($this->normalizer->normalizeDateTimeYmdHis(null, null));
+    }
+
+    public function testNormalizeEnumStringAcceptsOnlyAllowedValues(): void
+    {
+        $this->assertSame('Booked', $this->normalizer->normalizeEnumString('Booked', ['Booked', 'Cancelled'], null));
+        $this->assertSame(
+            'Booked',
+            $this->normalizer->normalizeEnumString('Unknown', ['Booked', 'Cancelled'], 'Booked'),
+        );
+    }
+
+    public function testNormalizeFloatHandlesNumericScalarsAndDefaults(): void
+    {
+        $this->assertSame(1.5, $this->normalizer->normalizeFloat('1.5', null));
+        $this->assertSame(2.0, $this->normalizer->normalizeFloat(2, null));
+        $this->assertSame(0.25, $this->normalizer->normalizeFloat('invalid', 0.25));
+    }
 }

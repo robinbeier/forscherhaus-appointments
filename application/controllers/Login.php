@@ -62,13 +62,14 @@ class Login extends EA_Controller
     public function validate(): void
     {
         try {
-            $username = request('username');
+            $request_dto = $this->authRequestDtoFactory()->buildLoginValidateRequestDto();
+            $username = $request_dto->username;
 
             if (empty($username)) {
                 throw new InvalidArgumentException('No username value provided.');
             }
 
-            $password = request('password');
+            $password = $request_dto->password;
 
             if (empty($password)) {
                 throw new InvalidArgumentException('No password value provided.');
@@ -94,5 +95,29 @@ class Login extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function authRequestDtoFactory(): Auth_request_dto_factory
+    {
+        if (
+            isset($this->auth_request_dto_factory) &&
+            $this->auth_request_dto_factory instanceof Auth_request_dto_factory
+        ) {
+            return $this->auth_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->auth_request_dto_factory) ||
+            !$CI->auth_request_dto_factory instanceof Auth_request_dto_factory
+        ) {
+            $CI->load->library('auth_request_dto_factory');
+        }
+
+        $this->auth_request_dto_factory = $CI->auth_request_dto_factory;
+
+        return $this->auth_request_dto_factory;
     }
 }
