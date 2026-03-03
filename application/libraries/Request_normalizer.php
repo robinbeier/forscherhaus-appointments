@@ -196,6 +196,7 @@ class Request_normalizer
         }
 
         $normalized = [];
+        $seen = [];
 
         foreach ($value as $item) {
             $candidate = $this->normalizePositiveInt($item, null);
@@ -204,9 +205,12 @@ class Request_normalizer
                 continue;
             }
 
-            if (!in_array($candidate, $normalized, true)) {
-                $normalized[] = $candidate;
+            if (isset($seen[$candidate])) {
+                continue;
             }
+
+            $seen[$candidate] = true;
+            $normalized[] = $candidate;
         }
 
         return $normalized;
