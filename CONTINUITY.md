@@ -76,14 +76,16 @@
     -   Verified generated artifacts:
         -   `storage/logs/ci/coverage-unit-clover.xml`
         -   `storage/logs/ci/coverage-delta-latest.json`
+    -   Created implementation branch and commit:
+        -   Branch: `codex/coverage-delta-sprint`
+        -   Commit: `f0ad4210` (`Add coverage delta reporting and CI gate`)
 
 -   Now:
 
-    -   Create a new `codex/*` branch and commit all implemented coverage-delta sprint changes.
+    -   Keep continuity ledger aligned with post-commit VCS state.
 
 -   Next:
 
-    -   Capture branch name + commit hash in this ledger after commit.
     -   Observe first PR runs with `coverage-delta` and collect streak results.
     -   Remove only `continue-on-error: true` after 7 non-cancelled green PR runs.
 
