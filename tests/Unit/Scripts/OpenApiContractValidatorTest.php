@@ -119,6 +119,41 @@ class OpenApiContractValidatorTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    public function testAssertValueMatchesSchemaAcceptsNestedNumericKeyObjectWhenRawItemsAreObjects(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+
+        $validator->assertValueMatchesSchema(
+            [[0 => 'a']],
+            [
+                'type' => 'array',
+                'items' => ['type' => 'object'],
+            ],
+            'nested_numeric_key_object',
+            false,
+            [(object) ['0' => 'a']],
+        );
+        $this->addToAssertionCount(1);
+    }
+
+    public function testAssertObjectFieldsMatchSchemaAcceptsNumericKeyObjectWhenRawPayloadFieldIsObject(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+
+        $validator->assertObjectFieldsMatchSchema(
+            [
+                'metadata' => [0 => 'a'],
+            ],
+            '#/components/schemas/AppointmentRecord',
+            ['metadata'],
+            'appointment',
+            (object) [
+                'metadata' => (object) ['0' => 'a'],
+            ],
+        );
+        $this->addToAssertionCount(1);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -158,6 +193,7 @@ class OpenApiContractValidatorTest extends TestCase
                         'properties' => [
                             'id' => ['type' => 'integer'],
                             'status' => ['type' => 'string'],
+                            'metadata' => ['type' => 'object'],
                         ],
                     ],
                 ],
