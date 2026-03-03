@@ -147,6 +147,7 @@ jobs:
       - name: Request Contract Adoption Check
         run: php scripts/ci/check_request_contract_adoption.php
       - name: PHPStan Request Contracts L2 (advisory)
+        if: always()
         continue-on-error: true
         run: composer phpstan:request-contracts:l2
       - name: Upload request-contract artifacts

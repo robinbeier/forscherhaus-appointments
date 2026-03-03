@@ -56,16 +56,23 @@ class IntegrationsRequestDtoFactoryTest extends TestCase
         $this->assertSame('primary', $selection->calendarId);
     }
 
-    public function testCreateLdapSearchRequestDtoNormalizesKeyword(): void
+    public function testCreateLdapSearchRequestDtoPreservesKeywordWhitespaceCompat(): void
     {
         $dto = $this->factory->createLdapSearchRequestDto('  Ada  ');
 
-        $this->assertSame('Ada', $dto->keyword);
+        $this->assertSame('  Ada  ', $dto->keyword);
     }
 
-    public function testCreateLdapSearchRequestDtoKeepsBlankSearchAsEmptyString(): void
+    public function testCreateLdapSearchRequestDtoPreservesWhitespaceOnlySearchTerm(): void
     {
         $dto = $this->factory->createLdapSearchRequestDto('   ');
+
+        $this->assertSame('   ', $dto->keyword);
+    }
+
+    public function testCreateLdapSearchRequestDtoConvertsNullToEmptyString(): void
+    {
+        $dto = $this->factory->createLdapSearchRequestDto(null);
 
         $this->assertSame('', $dto->keyword);
     }

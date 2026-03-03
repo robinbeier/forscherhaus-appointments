@@ -196,7 +196,7 @@ class Integrations_request_dto_factory
 
     public function createLdapSearchRequestDto(mixed $keyword): LdapSearchRequestDto
     {
-        return new LdapSearchRequestDto($this->request_normalizer->normalizeString($keyword, '', false) ?? '');
+        return new LdapSearchRequestDto($this->normalizeRawStringNonNullCompat($keyword));
     }
 
     public function createWebhookCrudRequestDto(
@@ -240,6 +240,11 @@ class Integrations_request_dto_factory
         }
 
         return (string) $value;
+    }
+
+    private function normalizeRawStringNonNullCompat(mixed $value): string
+    {
+        return $this->normalizeSensitiveStringCompat($value) ?? '';
     }
 
     /**

@@ -20,14 +20,14 @@ class AuthRequestDtoFactoryTest extends TestCase
         $this->factory = new Auth_request_dto_factory(new Request_normalizer());
     }
 
-    public function testCreateLoginAndRecoveryDtosTrimCredentials(): void
+    public function testCreateLoginAndRecoveryDtosPreserveUsernameWhitespaceCompat(): void
     {
         $login = $this->factory->createLoginValidateRequestDto('  user ', ' secret ');
         $recovery = $this->factory->createRecoveryRequestDto('  user ', ' school@example.test ');
 
-        $this->assertSame('user', $login->username);
+        $this->assertSame('  user ', $login->username);
         $this->assertSame(' secret ', $login->password);
-        $this->assertSame('user', $recovery->username);
+        $this->assertSame('  user ', $recovery->username);
         $this->assertSame('school@example.test', $recovery->email);
     }
 
@@ -42,13 +42,13 @@ class AuthRequestDtoFactoryTest extends TestCase
     {
         $dto = $this->factory->createValidateUsernameRequestDto('  robin ', '15');
 
-        $this->assertSame('robin', $dto->username);
+        $this->assertSame('  robin ', $dto->username);
         $this->assertSame(15, $dto->userId);
     }
 
     public function testCreateValidateUsernameRequestDtoKeepsEmptyStringInsteadOfNull(): void
     {
-        $dto = $this->factory->createValidateUsernameRequestDto('   ', null);
+        $dto = $this->factory->createValidateUsernameRequestDto('', null);
 
         $this->assertSame('', $dto->username);
         $this->assertNull($dto->userId);

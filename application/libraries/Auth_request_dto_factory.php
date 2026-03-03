@@ -152,7 +152,7 @@ class Auth_request_dto_factory
     public function createLoginValidateRequestDto(mixed $username, mixed $password): LoginValidateRequestDto
     {
         return new LoginValidateRequestDto(
-            $this->request_normalizer->normalizeString($username, null, true),
+            $this->normalizeRawStringCompat($username),
             $this->normalizeSensitiveStringCompat($password),
         );
     }
@@ -160,7 +160,7 @@ class Auth_request_dto_factory
     public function createRecoveryRequestDto(mixed $username, mixed $email): RecoveryRequestDto
     {
         return new RecoveryRequestDto(
-            $this->request_normalizer->normalizeString($username, null, true),
+            $this->normalizeRawStringCompat($username),
             $this->request_normalizer->normalizeString($email, null, true),
         );
     }
@@ -173,7 +173,7 @@ class Auth_request_dto_factory
     public function createValidateUsernameRequestDto(mixed $username, mixed $user_id): ValidateUsernameRequestDto
     {
         return new ValidateUsernameRequestDto(
-            $this->request_normalizer->normalizeString($username, '', false) ?? '',
+            $this->normalizeRawStringNonNullCompat($username),
             $this->normalizeEntityIdCompat($user_id),
         );
     }
@@ -218,10 +218,20 @@ class Auth_request_dto_factory
 
     private function normalizeSensitiveStringCompat(mixed $value): ?string
     {
+        return $this->normalizeRawStringCompat($value);
+    }
+
+    private function normalizeRawStringCompat(mixed $value): ?string
+    {
         if ($value === null || is_array($value) || is_object($value)) {
             return null;
         }
 
         return (string) $value;
+    }
+
+    private function normalizeRawStringNonNullCompat(mixed $value): string
+    {
+        return $this->normalizeRawStringCompat($value) ?? '';
     }
 }
