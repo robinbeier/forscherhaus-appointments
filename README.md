@@ -60,6 +60,10 @@ docker compose exec -T php-fpm composer test:booking-controller-flows
 docker compose run --rm php-fpm composer phpstan:request-dto
 docker compose run --rm php-fpm composer test:request-dto
 docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
+
+# optional unit coverage + coverage delta gate
+docker compose run --rm php-fpm composer test:coverage:unit
+docker compose run --rm php-fpm composer check:coverage:delta
 ```
 
 ## Release Gates (Optional, Pre-Deploy)
@@ -146,6 +150,8 @@ CI note: the `typed-request-dto` check validates scoped DTO normalization adopti
 CI note: the `phpstan-application` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 CI note: the `js-lint-changed` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 CI note: the `architecture-ownership-map` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
+CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
+CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
 
 For doc-only/meta commits in constrained environments:
 

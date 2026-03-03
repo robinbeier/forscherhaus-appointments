@@ -91,6 +91,10 @@ docker compose run --rm php-fpm composer phpstan:request-dto
 docker compose run --rm php-fpm composer test:request-dto
 docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 
+# Optional: Unit coverage + coverage delta gate
+docker compose run --rm php-fpm composer test:coverage:unit
+docker compose run --rm php-fpm composer check:coverage:delta
+
 # Optional: PHPStan rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
@@ -124,6 +128,12 @@ done | awk '$1 != "cancelled"' | head -n 7
 # Optional: typed-request-dto rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="typed-request-dto") | .conclusion'
+done | awk '$1 != "cancelled"' | head -n 7
+# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+
+# Optional: coverage-delta rollout streak check (requires gh + jq)
+for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="coverage-delta") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
@@ -166,8 +176,11 @@ Hinweis: Der CI-Job `architecture-ownership-map` laeuft waehrend des Rollouts wa
 Hinweis: Der CI-Job `api-contract-openapi` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `booking-controller-flows` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `typed-request-dto` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `coverage-delta` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
+Hinweis: Der Unit Coverage Report schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
+Hinweis: Falls `coverage-delta` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
 

@@ -123,6 +123,92 @@ jobs:
       - name: Request DTO Adoption Check
         run: php scripts/ci/check_request_dto_adoption.php
 
+  coverage-delta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install npm dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Frontend compile
+        run: npx gulp compile
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: Start coverage test database
+        run: docker compose up -d mysql
+      - name: Wait for MySQL readiness
+        run: |
+          max_attempts=60
+
+          attempt=1
+          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+
+          attempt=1
+          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+      - name: Install deterministic seed instance
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose run --rm php-fpm sh -lc 'if [ ! -f config.php ]; then cp config-sample.php config.php; fi; php index.php console install'; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
+      - name: Prepare coverage output directory
+        run: mkdir -p storage/logs/ci
+      - name: Generate unit coverage report
+        run: docker compose run --rm php-fpm composer test:coverage:unit
+      - name: Evaluate coverage delta policy
+        run: >
+          php scripts/ci/check_coverage_delta.php
+          --clover=storage/logs/ci/coverage-unit-clover.xml
+          --policy=scripts/ci/config/coverage_delta_policy.php
+          --output-json=storage/logs/ci/coverage-delta-latest.json
+      - name: Upload coverage delta artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-delta-artifacts
+          path: |
+            storage/logs/ci/coverage-unit-clover.xml
+            storage/logs/ci/coverage-delta-latest.json
+          if-no-files-found: error
+      - name: Diagnostics (coverage delta report)
+        if: failure()
+        run: cat storage/logs/ci/coverage-delta-latest.json || true
+      - name: Cleanup coverage services
+        if: always()
+        run: docker compose down -v --remove-orphans
+
   architecture-ownership-map:
     runs-on: ubuntu-latest
     timeout-minutes: 10
