@@ -19,7 +19,7 @@ DEFAULT_SCOPE_CONFIG = ROOT / "scripts/ci/config/component_boundary_scope.php"
 DEFAULT_OUTPUT_JSON = ROOT / "storage/logs/ci/component-boundary-latest.json"
 
 LOADER_LITERAL_RE = re.compile(
-    r"\bload->(?P<kind>model|library|helper)\s*\(\s*(?P<quote>['\"])(?P<value>[^'\"]+)(?P=quote)",
+    r"\bload->(?P<kind>model|library|helper)\s*\(\s*(?P<quote>['\"])(?P<value>[^'\"]+)(?P=quote)(?=\s*(?:,|\)))",
     re.IGNORECASE,
 )
 
