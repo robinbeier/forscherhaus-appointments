@@ -734,7 +734,7 @@ function resolveBookablePairAndDate(GateHttpClient $client, array $config, array
         );
     }
 
-    $startDate = new DateTimeImmutable('tomorrow', new DateTimeZone('UTC'));
+    $startDate = new DateTimeImmutable('tomorrow', new DateTimeZone(date_default_timezone_get()));
     $attemptedDates = [];
 
     for ($offset = 0; $offset < $config['booking_search_days']; $offset++) {
