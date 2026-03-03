@@ -38,6 +38,12 @@ REQUIRE_CALL_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+BLOCKING_UNRESOLVED_REASONS = {
+    "source_file_missing",
+    "target_file_not_found",
+    "target_component_not_unique",
+}
+
 
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=ROOT, check=check, text=True, capture_output=True)
@@ -485,15 +491,13 @@ def main() -> int:
                     continue
 
                 target_component = target_components[0]
-                allowed_source_components = [
+                disallowed_source_components = [
                     component
                     for component in source_components
-                    if target_component == component or target_component in dependency_map.get(component, set())
+                    if target_component != component and target_component not in dependency_map.get(component, set())
                 ]
 
-                is_allowed = bool(allowed_source_components)
-
-                if is_allowed:
+                if not disallowed_source_components:
                     allowed_dependency_count += 1
                     continue
 
@@ -506,28 +510,36 @@ def main() -> int:
                         "line": dependency["line"],
                         "kind": dependency["kind"],
                         "expression": dependency["expression"],
-                        "rule": f"{', '.join(source_components)} may not depend on {target_component}",
+                        "disallowed_source_components": disallowed_source_components,
+                        "rule": f"{', '.join(disallowed_source_components)} may not depend on {target_component}",
                     }
                 )
+
+        blocking_unresolved = [
+            entry for entry in unresolved if str(entry.get("reason", "")) in BLOCKING_UNRESOLVED_REASONS
+        ]
 
         report["checked_dependency_count"] = checked_dependency_count
         report["allowed_dependency_count"] = allowed_dependency_count
         report["source_mapping_error_count"] = len(source_mapping_errors)
         report["violation_count"] = len(violations)
         report["unresolved_count"] = len(unresolved)
+        report["blocking_unresolved_count"] = len(blocking_unresolved)
         report["violations"] = violations
         report["unresolved"] = unresolved
+        report["blocking_unresolved"] = blocking_unresolved
 
-        if violations or source_mapping_errors:
+        if violations or source_mapping_errors or blocking_unresolved:
             report["status"] = "failed"
 
         output_json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-        if violations or source_mapping_errors:
+        if violations or source_mapping_errors or blocking_unresolved:
             print(
                 "Component boundary check failed with "
                 f"{len(violations)} violation(s) and "
-                f"{len(source_mapping_errors)} source-mapping error(s)."
+                f"{len(source_mapping_errors)} source-mapping error(s) and "
+                f"{len(blocking_unresolved)} blocking unresolved edge(s)."
             )
             return 1
 
