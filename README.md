@@ -55,6 +55,11 @@ docker compose exec -T php-fpm composer contract-test:api-openapi -- \
 
 # optional booking controller flow tests (register/reschedule/cancel; mutation-safe in ephemeral DB)
 docker compose exec -T php-fpm composer test:booking-controller-flows
+
+# optional typed request-dto checks (phpstan + focused unit suite + adoption guard)
+docker compose run --rm php-fpm composer phpstan:request-dto
+docker compose run --rm php-fpm composer test:request-dto
+docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 ```
 
 ## Release Gates (Optional, Pre-Deploy)
@@ -128,12 +133,16 @@ docker compose run --rm php-fpm composer phpstan:application
 npm run lint:js
 python3 scripts/docs/generate_architecture_ownership_docs.py --check
 python3 scripts/ci/check_architecture_ownership_map.py
+docker compose run --rm php-fpm composer phpstan:request-dto
+docker compose run --rm php-fpm composer test:request-dto
+docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 ```
 
 CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
 CI note: `integration-smoke` now covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
+CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
 CI note: the `phpstan-application` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 CI note: the `js-lint-changed` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
 CI note: the `architecture-ownership-map` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.

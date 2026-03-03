@@ -58,6 +58,8 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/views/components/booking_`
   - `assets/js/pages/booking.js`
   - `application/libraries/Availability.php`
+  - `application/libraries/Booking_request_dto_factory.php`
+  - `application/libraries/Request_normalizer.php`
 
 ### `booking-lifecycle`
 
@@ -117,6 +119,8 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/libraries/Dashboard_metrics.php`
   - `application/libraries/Dashboard_heatmap.php`
   - `application/libraries/Provider_utilization.php`
+  - `application/libraries/Dashboard_request_dto_factory.php`
+  - `application/libraries/Request_normalizer.php`
   - `application/views/pages/dashboard.php`
   - `application/views/pages/dashboard_teacher.php`
   - `assets/js/pages/dashboard.js`
@@ -229,6 +233,9 @@ Ownership model: Role + Handles (primary/secondary).
   - `openapi.yml`
 - Path prefixes:
   - `application/controllers/api/v1/`
+  - `application/libraries/Api.php`
+  - `application/libraries/Api_request_dto_factory.php`
+  - `application/libraries/Request_normalizer.php`
   - `openapi.yml`
   - `docs/rest-api.md`
 

@@ -92,6 +92,37 @@ jobs:
       - name: PHPStan Application
         run: composer phpstan:application
 
+  typed-request-dto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Frontend compile
+        run: |
+          npm ci --no-audit --no-fund
+          npx gulp compile
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: PHPStan Request DTO
+        run: composer phpstan:request-dto
+      - name: Request DTO Unit Tests
+        run: composer test:request-dto
+      - name: Request DTO Adoption Check
+        run: php scripts/ci/check_request_dto_adoption.php
+
   architecture-ownership-map:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -1,0 +1,20 @@
+parameters:
+    level: 1
+    paths:
+        - application/libraries/Request_normalizer.php
+        - application/libraries/Booking_request_dto_factory.php
+        - application/libraries/Dashboard_request_dto_factory.php
+        - application/libraries/Api_request_dto_factory.php
+    bootstrapFiles:
+        - phpstan/bootstrap.php
+    scanFiles:
+        - phpstan/stubs/codeigniter-functions.stub.php
+        - phpstan/stubs/request-dto-api.stub.php
+    scanDirectories:
+        - system
+        - application/core
+    universalObjectCratesClasses:
+        - CI_Controller
+        - EA_Controller
+        - CI_Model
+        - EA_Model

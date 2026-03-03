@@ -78,6 +78,7 @@ class Booking extends EA_Controller
         $this->load->library('notifications');
         $this->load->library('availability');
         $this->load->library('webhooks_client');
+        $this->load->library('booking_request_dto_factory');
     }
 
     /**
@@ -333,34 +334,14 @@ class Booking extends EA_Controller
                 abort(403);
             }
 
-            $post_data = request('post_data');
-            $captcha = request('captcha');
-            $appointment = $post_data['appointment'];
-            $customer = $post_data['customer'];
-            $manage_mode = filter_var($post_data['manage_mode'], FILTER_VALIDATE_BOOLEAN);
-
-            if (!array_key_exists('address', $customer)) {
-                $customer['address'] = '';
-            }
-
-            if (!array_key_exists('city', $customer)) {
-                $customer['city'] = '';
-            }
-
-            if (!array_key_exists('zip_code', $customer)) {
-                $customer['zip_code'] = '';
-            }
-
-            if (!array_key_exists('notes', $customer)) {
-                $customer['notes'] = '';
-            }
-
-            if (!array_key_exists('phone_number', $customer)) {
-                $customer['phone_number'] = '';
-            }
+            $request_dto = $this->bookingRequestDtoFactory()->buildRegisterRequest();
+            $appointment = $request_dto->appointment;
+            $customer = $request_dto->customer;
+            $manage_mode = $request_dto->manageMode;
+            $captcha = $request_dto->captcha;
 
             // Check appointment availability before registering it to the database.
-            $appointment['id_users_provider'] = $this->check_datetime_availability();
+            $appointment['id_users_provider'] = $this->check_datetime_availability($request_dto);
 
             if (!$appointment['id_users_provider']) {
                 throw new RuntimeException(lang('requested_hour_is_unavailable'));
@@ -376,7 +357,7 @@ class Booking extends EA_Controller
 
             // Validate the CAPTCHA string.
 
-            if ($require_captcha && strtoupper($captcha_phrase) !== strtoupper($captcha)) {
+            if ($require_captcha && strtoupper((string) $captcha_phrase) !== strtoupper((string) $captcha)) {
                 json_response([
                     'captcha_verification' => false,
                 ]);
@@ -501,11 +482,9 @@ class Booking extends EA_Controller
      *
      * @throws Exception
      */
-    protected function check_datetime_availability(): ?int
+    protected function check_datetime_availability(BookingRegisterRequestDto $register_request): ?int
     {
-        $post_data = request('post_data');
-
-        $appointment = $post_data['appointment'];
+        $appointment = $register_request->appointment;
 
         $appointment_start = new DateTime($appointment['start_datetime']);
 
@@ -514,7 +493,11 @@ class Booking extends EA_Controller
         $hour = $appointment_start->format('H:i');
 
         if ($appointment['id_users_provider'] === ANY_PROVIDER) {
-            $appointment['id_users_provider'] = $this->search_any_provider($appointment['id_services'], $date, $hour);
+            $appointment['id_users_provider'] = $this->search_any_provider(
+                (int) $appointment['id_services'],
+                $date,
+                $hour,
+            );
 
             return $appointment['id_users_provider'];
         }
@@ -605,9 +588,10 @@ class Booking extends EA_Controller
                 abort(403);
             }
 
-            $provider_id = request('provider_id');
-            $service_id = request('service_id');
-            $selected_date = request('selected_date');
+            $request_dto = $this->bookingRequestDtoFactory()->buildAvailableHoursRequest();
+            $provider_id = $request_dto->providerId;
+            $service_id = $request_dto->serviceId;
+            $selected_date = $request_dto->selectedDate;
 
             // Do not continue if there was no provider selected (more likely there is no provider in the system).
 
@@ -620,7 +604,7 @@ class Booking extends EA_Controller
             // If manage mode is TRUE then the following we should not consider the selected appointment when
             // calculating the available time periods of the provider.
 
-            $exclude_appointment_id = request('manage_mode') ? request('appointment_id') : null;
+            $exclude_appointment_id = $request_dto->manageMode ? $request_dto->appointmentId : null;
 
             // If the user has selected the "any-provider" option then we will need to search for an available provider
             // that will provide the requested service.
@@ -687,11 +671,12 @@ class Booking extends EA_Controller
                 abort(403);
             }
 
-            $provider_id = request('provider_id');
-            $service_id = request('service_id');
-            $appointment_id = request('appointment_id');
-            $manage_mode = filter_var(request('manage_mode'), FILTER_VALIDATE_BOOLEAN);
-            $selected_date_string = request('selected_date');
+            $request_dto = $this->bookingRequestDtoFactory()->buildUnavailableDatesRequest();
+            $provider_id = $request_dto->providerId;
+            $service_id = $request_dto->serviceId;
+            $appointment_id = $request_dto->appointmentId;
+            $manage_mode = $request_dto->manageMode;
+            $selected_date_string = $request_dto->selectedDate;
             $selected_date = new DateTime($selected_date_string);
             $number_of_days_in_month = (int) $selected_date->format('t');
             $unavailable_dates = [];
@@ -773,5 +758,29 @@ class Booking extends EA_Controller
         }
 
         return $provider_list;
+    }
+
+    protected function bookingRequestDtoFactory(): Booking_request_dto_factory
+    {
+        if (
+            isset($this->booking_request_dto_factory) &&
+            $this->booking_request_dto_factory instanceof Booking_request_dto_factory
+        ) {
+            return $this->booking_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->booking_request_dto_factory) ||
+            !$CI->booking_request_dto_factory instanceof Booking_request_dto_factory
+        ) {
+            $CI->load->library('booking_request_dto_factory');
+        }
+
+        $this->booking_request_dto_factory = $CI->booking_request_dto_factory;
+
+        return $this->booking_request_dto_factory;
     }
 }

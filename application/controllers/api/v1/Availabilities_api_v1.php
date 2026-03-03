@@ -26,6 +26,7 @@ class Availabilities_api_v1 extends EA_Controller
         parent::__construct();
 
         $this->load->library('api');
+        $this->load->library('api_request_dto_factory');
 
         $this->api->auth();
 
@@ -57,15 +58,10 @@ class Availabilities_api_v1 extends EA_Controller
     public function get(): void
     {
         try {
-            $provider_id = request('providerId');
-
-            $service_id = request('serviceId');
-
-            $date = request('date');
-
-            if (!$date) {
-                $date = date('Y-m-d');
-            }
+            $request_dto = $this->apiRequestDtoFactory()->buildAvailabilitiesRequestDto();
+            $provider_id = $request_dto->providerId;
+            $service_id = $request_dto->serviceId;
+            $date = $request_dto->date;
 
             $provider = $this->providers_model->find($provider_id);
 
@@ -77,5 +73,26 @@ class Availabilities_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function apiRequestDtoFactory(): Api_request_dto_factory
+    {
+        if (
+            isset($this->api_request_dto_factory) &&
+            $this->api_request_dto_factory instanceof Api_request_dto_factory
+        ) {
+            return $this->api_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->api_request_dto_factory) || !$CI->api_request_dto_factory instanceof Api_request_dto_factory) {
+            $CI->load->library('api_request_dto_factory');
+        }
+
+        $this->api_request_dto_factory = $CI->api_request_dto_factory;
+
+        return $this->api_request_dto_factory;
     }
 }

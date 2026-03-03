@@ -55,7 +55,9 @@
         "pre-autoload-dump": "Google\\Task\\Composer::cleanup",
         "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit",
         "test:booking-controller-flows": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.booking-flows.xml",
+        "test:request-dto": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.request-dto.xml",
         "phpstan:application": "phpstan analyse -c phpstan.neon.dist --memory-limit=1G --no-progress --error-format=raw",
+        "phpstan:request-dto": "phpstan analyse -c phpstan.request-dto.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "contract-test:api-openapi": "php scripts/ci/api_openapi_contract_smoke.php",
         "release:gate:dashboard": "php scripts/release-gate/dashboard_release_gate.php",
         "release:gate:booking-confirmation-pdf": "php scripts/release-gate/booking_confirmation_pdf_gate.php"
