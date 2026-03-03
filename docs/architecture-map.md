@@ -8,14 +8,14 @@ This map defines component boundaries, path ownership scope, and dependency edge
 
 | Component | Role | Depends On | Path Prefixes | Key Files |
 |---|---|---|---:|---:|
-| `auth-session` | Access & Session | None | 11 | 3 |
+| `auth-session` | Access & Session | None | 13 | 3 |
 | `booking-public` | Public Booking | settings-compliance | 7 | 3 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | people-services-admin, settings-compliance | 15 | 3 |
+| `scheduling-backoffice` | Calendar & Scheduling | people-services-admin, settings-compliance | 17 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin | 12 | 3 |
 | `people-services-admin` | People, Providers, Services | settings-compliance | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session | 23 | 3 |
-| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, settings-compliance | 16 | 3 |
+| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, settings-compliance | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 6 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | dashboard-exports, booking-public, api-v1 | 5 | 3 |
 
@@ -33,6 +33,8 @@ Path prefixes:
 - `application/controllers/Logout.php`
 - `application/controllers/Recovery.php`
 - `application/controllers/Account.php`
+- `application/controllers/Localization.php`
+- `application/libraries/Auth_request_dto_factory.php`
 - `application/views/pages/login.php`
 - `application/views/pages/logout.php`
 - `application/views/pages/recovery.php`
@@ -101,6 +103,8 @@ Path prefixes:
 - `application/controllers/Unavailabilities.php`
 - `application/controllers/Backend.php`
 - `application/controllers/Backend_api.php`
+- `application/libraries/Backoffice_request_dto_factory.php`
+- `application/libraries/Calendar_request_dto_factory.php`
 - `application/models/Appointments_model.php`
 - `application/models/Blocked_periods_model.php`
 - `application/models/Unavailabilities_model.php`
@@ -238,6 +242,7 @@ Path prefixes:
 - `application/libraries/Synchronization.php`
 - `application/libraries/Webhooks_client.php`
 - `application/libraries/Ldap_client.php`
+- `application/libraries/Integrations_request_dto_factory.php`
 - `application/models/Webhooks_model.php`
 - `application/views/pages/integrations.php`
 - `application/views/pages/webhooks.php`

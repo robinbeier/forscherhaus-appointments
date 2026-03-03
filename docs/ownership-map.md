@@ -35,6 +35,8 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/controllers/Logout.php`
   - `application/controllers/Recovery.php`
   - `application/controllers/Account.php`
+  - `application/controllers/Localization.php`
+  - `application/libraries/Auth_request_dto_factory.php`
   - `application/views/pages/login.php`
   - `application/views/pages/logout.php`
   - `application/views/pages/recovery.php`
@@ -93,6 +95,8 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/controllers/Unavailabilities.php`
   - `application/controllers/Backend.php`
   - `application/controllers/Backend_api.php`
+  - `application/libraries/Backoffice_request_dto_factory.php`
+  - `application/libraries/Calendar_request_dto_factory.php`
   - `application/models/Appointments_model.php`
   - `application/models/Blocked_periods_model.php`
   - `application/models/Unavailabilities_model.php`
@@ -215,6 +219,7 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/libraries/Synchronization.php`
   - `application/libraries/Webhooks_client.php`
   - `application/libraries/Ldap_client.php`
+  - `application/libraries/Integrations_request_dto_factory.php`
   - `application/models/Webhooks_model.php`
   - `application/views/pages/integrations.php`
   - `application/views/pages/webhooks.php`
