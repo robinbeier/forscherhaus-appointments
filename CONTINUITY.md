@@ -18,6 +18,7 @@
     -   Neuer Gate `typed-request-contracts` mit Rollout: Job zuerst warn-only, danach blocking nach 7 nicht-cancelled PR-Erfolgen.
     -   PHPStan-Policy fuer diesen Ausbau: L1 blocking, L2 advisory (step-level warn-only).
     -   Interne Contracts via neue/erweiterte DTO-Factories und `Request_normalizer`; externe Semantik bleibt kompatibel.
+    -   Delivery-Strategie (low-risk priorisiert): restliche Controller-Migration in mehreren kleinen PRs mit stabilen Domainen-Slices statt Big-Bang-PR.
 
 -   State:
 
@@ -46,6 +47,8 @@
         -   Privacy/Consent: `Privacy::delete_personal_information`, `Consents::save`
         -   Integrations/LDAP/API-Settings: `Caldav::{connect_to_server,disable_provider_sync}`, `Google::{oauth_callback,get_google_calendars,select_google_calendar,disable_provider_sync}`, `Ldap_settings::{save,search}`, `Settings_api_v1::update`
     -   Adoption-Guard Verletzungen reduziert von 106 auf 90.
+    -   Branch erstellt: `codex/structural-typed-contracts-full-request-path`.
+    -   Commit erstellt: `b94381f1` (`Add request-contracts foundation and initial migration`).
 
 -   Now:
 
@@ -61,8 +64,7 @@
 
 -   Open questions (UNCONFIRMED if needed):
 
-    -   UNCONFIRMED: Branch `codex/structural-typed-contracts-full-request-path` bereits erstellt oder noch offen.
-    -   UNCONFIRMED: Ob Controller-Migration in einem grossen oder mehreren PR-Inkrementen erfolgen soll.
+    -   UNCONFIRMED: Exakte PR-Schnittlogik fuer die restlichen Domainen-Slices (Reihenfolge + maximale Groesse pro PR).
 
 -   Working set (files/ids/commands):
     -   Canonical ledger: `/Users/robinbeier/Developers/forscherhaus-appointments/CONTINUITY.md`
