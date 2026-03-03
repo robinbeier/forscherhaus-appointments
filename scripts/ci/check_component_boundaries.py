@@ -418,21 +418,19 @@ def main() -> int:
 
         for source_file in scoped_php_files:
             source_components = match_components(source_file, components)
-            if len(source_components) != 1:
+            if not source_components:
                 source_mapping_error = {
                     "file": source_file,
                     "line": 1,
                     "kind": "source",
                     "expression": source_file,
-                    "reason": "source_component_not_unique",
+                    "reason": "source_component_not_mapped",
                     "matched_components": source_components,
                 }
                 source_mapping_errors.append(source_mapping_error)
                 unresolved.append(source_mapping_error)
                 continue
 
-            source_component = source_components[0]
-            depends_on = dependency_map.get(source_component, set())
             file_path = ROOT / source_file
 
             if not file_path.exists():
@@ -485,7 +483,13 @@ def main() -> int:
                     continue
 
                 target_component = target_components[0]
-                is_allowed = target_component == source_component or target_component in depends_on
+                allowed_source_components = [
+                    component
+                    for component in source_components
+                    if target_component == component or target_component in dependency_map.get(component, set())
+                ]
+
+                is_allowed = bool(allowed_source_components)
 
                 if is_allowed:
                     allowed_dependency_count += 1
@@ -494,13 +498,13 @@ def main() -> int:
                 violations.append(
                     {
                         "source_file": source_file,
-                        "source_component": source_component,
+                        "source_components": source_components,
                         "target_file": canonical_target_path,
                         "target_component": target_component,
                         "line": dependency["line"],
                         "kind": dependency["kind"],
                         "expression": dependency["expression"],
-                        "rule": f"{source_component} may not depend on {target_component}",
+                        "rule": f"{', '.join(source_components)} may not depend on {target_component}",
                     }
                 )
 
