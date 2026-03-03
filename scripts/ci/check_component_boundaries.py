@@ -54,6 +54,22 @@ def line_number(content: str, index: int) -> int:
     return content.count("\n", 0, index) + 1
 
 
+def build_casefold_index(paths: set[str]) -> dict[str, str]:
+    index: dict[str, str] = {}
+
+    for path in sorted(paths):
+        key = path.casefold()
+        existing = index.get(key)
+        if existing is not None and existing != path:
+            raise ValueError(
+                "Case-insensitive path collision detected: "
+                f"{existing} and {path} map to the same key."
+            )
+        index[key] = path
+
+    return index
+
+
 def load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
@@ -371,6 +387,7 @@ def main() -> int:
             for line in run(["git", "ls-files"]).stdout.splitlines()
             if line.strip()
         }
+        tracked_files_casefold = build_casefold_index(tracked_files)
 
         report: dict[str, Any] = {
             "tool": "component-boundary-check",
@@ -436,8 +453,9 @@ def main() -> int:
             for dependency in resolved_dependencies:
                 checked_dependency_count += 1
                 target_path = str(dependency["target_path"])
+                canonical_target_path = tracked_files_casefold.get(target_path.casefold(), target_path)
 
-                if target_path not in tracked_files:
+                if canonical_target_path not in tracked_files:
                     unresolved.append(
                         {
                             "file": source_file,
@@ -450,7 +468,7 @@ def main() -> int:
                     )
                     continue
 
-                target_components = match_components(target_path, components)
+                target_components = match_components(canonical_target_path, components)
                 if len(target_components) != 1:
                     unresolved.append(
                         {
@@ -459,7 +477,7 @@ def main() -> int:
                             "kind": dependency["kind"],
                             "expression": dependency["expression"],
                             "reason": "target_component_not_unique",
-                            "target_path": target_path,
+                            "target_path": canonical_target_path,
                             "matched_components": target_components,
                         }
                     )
@@ -476,7 +494,7 @@ def main() -> int:
                     {
                         "source_file": source_file,
                         "source_component": source_component,
-                        "target_file": target_path,
+                        "target_file": canonical_target_path,
                         "target_component": target_component,
                         "line": dependency["line"],
                         "kind": dependency["kind"],
