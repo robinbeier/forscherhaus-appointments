@@ -74,12 +74,32 @@ is_in_scope() {
 DIFF_RANGE="$(detect_diff_range)"
 changed_scope_files=()
 
+set +e
+changed_files_output="$(git diff --name-only --diff-filter=ACMR "$DIFF_RANGE" 2>/dev/null)"
+git_diff_exit=$?
+set -e
+
+if [[ "$git_diff_exit" -ne 0 ]]; then
+  cat > "$CHANGED_GATE_REPORT" <<JSON
+{
+  "tool": "deptrac-changed-gate",
+  "status": "error",
+  "reason": "Failed to compute changed files for diff range.",
+  "diff_range": "$DIFF_RANGE",
+  "changed_scope_files": []
+}
+JSON
+  : > "$GITHUB_ACTIONS_LOG"
+  echo "::error::git diff failed for range '$DIFF_RANGE'."
+  exit 1
+fi
+
 while IFS= read -r file; do
   [[ -z "$file" ]] && continue
   if is_in_scope "$file"; then
     changed_scope_files+=("$file")
   fi
-done < <(git diff --name-only --diff-filter=ACMR "$DIFF_RANGE" 2>/dev/null || true)
+done <<< "$changed_files_output"
 
 if [[ "${#changed_scope_files[@]}" -eq 0 ]]; then
   cat > "$CHANGED_GATE_REPORT" <<JSON

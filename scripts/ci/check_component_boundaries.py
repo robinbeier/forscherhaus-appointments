@@ -203,7 +203,9 @@ def detect_diff_range(explicit: str | None, env_var_name: str) -> str:
 def get_changed_files(diff_range: str) -> list[str]:
     proc = run(["git", "diff", "--name-only", "--diff-filter=ACMR", diff_range], check=False)
     if proc.returncode != 0:
-        return []
+        stderr = proc.stderr.strip()
+        details = stderr or "unknown git diff error"
+        raise RuntimeError(f"Failed to compute changed files for diff range '{diff_range}': {details}")
 
     return [normalize_path(line) for line in proc.stdout.splitlines() if line.strip()]
 
