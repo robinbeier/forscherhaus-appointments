@@ -411,6 +411,7 @@ def main() -> int:
             return 0
 
         violations: list[dict[str, Any]] = []
+        source_mapping_errors: list[dict[str, Any]] = []
         unresolved: list[dict[str, Any]] = []
         checked_dependency_count = 0
         allowed_dependency_count = 0
@@ -418,16 +419,16 @@ def main() -> int:
         for source_file in scoped_php_files:
             source_components = match_components(source_file, components)
             if len(source_components) != 1:
-                unresolved.append(
-                    {
-                        "file": source_file,
-                        "line": 1,
-                        "kind": "source",
-                        "expression": source_file,
-                        "reason": "source_component_not_unique",
-                        "matched_components": source_components,
-                    }
-                )
+                source_mapping_error = {
+                    "file": source_file,
+                    "line": 1,
+                    "kind": "source",
+                    "expression": source_file,
+                    "reason": "source_component_not_unique",
+                    "matched_components": source_components,
+                }
+                source_mapping_errors.append(source_mapping_error)
+                unresolved.append(source_mapping_error)
                 continue
 
             source_component = source_components[0]
@@ -505,18 +506,23 @@ def main() -> int:
 
         report["checked_dependency_count"] = checked_dependency_count
         report["allowed_dependency_count"] = allowed_dependency_count
+        report["source_mapping_error_count"] = len(source_mapping_errors)
         report["violation_count"] = len(violations)
         report["unresolved_count"] = len(unresolved)
         report["violations"] = violations
         report["unresolved"] = unresolved
 
-        if violations:
+        if violations or source_mapping_errors:
             report["status"] = "failed"
 
         output_json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-        if violations:
-            print(f"Component boundary check failed with {len(violations)} violation(s).")
+        if violations or source_mapping_errors:
+            print(
+                "Component boundary check failed with "
+                f"{len(violations)} violation(s) and "
+                f"{len(source_mapping_errors)} source-mapping error(s)."
+            )
             return 1
 
         print(
