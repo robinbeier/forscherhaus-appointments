@@ -39,6 +39,7 @@ REQUIRE_CALL_RE = re.compile(
 )
 
 BLOCKING_UNRESOLVED_REASONS = {
+    "loader_non_literal_expression",
     "source_file_missing",
     "target_file_not_found",
 }
