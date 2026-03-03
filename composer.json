@@ -56,6 +56,8 @@
         "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit",
         "test:booking-controller-flows": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.booking-flows.xml",
         "test:request-dto": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.request-dto.xml",
+        "test:coverage:unit": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; mkdir -p storage/logs/ci; APP_ENV=testing XDEBUG_MODE=coverage php vendor/bin/phpunit -c phpunit.coverage.xml --coverage-clover storage/logs/ci/coverage-unit-clover.xml",
+        "check:coverage:delta": "php scripts/ci/check_coverage_delta.php --clover=storage/logs/ci/coverage-unit-clover.xml --policy=scripts/ci/config/coverage_delta_policy.php --output-json=storage/logs/ci/coverage-delta-latest.json",
         "phpstan:application": "phpstan analyse -c phpstan.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "phpstan:request-dto": "phpstan analyse -c phpstan.request-dto.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "contract-test:api-openapi": "php scripts/ci/api_openapi_contract_smoke.php",
