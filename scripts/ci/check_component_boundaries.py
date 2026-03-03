@@ -246,6 +246,16 @@ def parse_require_target(path_literal: str) -> str | None:
     return target
 
 
+def classify_missing_target_reason(kind: str) -> str:
+    normalized_kind = kind.strip().lower()
+
+    # Framework-provided loaders (for example `zip`) do not exist under APPPATH.
+    if normalized_kind in {"library", "helper"}:
+        return "target_file_not_found_framework_or_external"
+
+    return "target_file_not_found"
+
+
 def parse_file_dependencies(
     file_path: str,
     content: str,
@@ -462,13 +472,14 @@ def main() -> int:
                 canonical_target_path = tracked_files_casefold.get(target_path.casefold(), target_path)
 
                 if canonical_target_path not in tracked_files:
+                    reason = classify_missing_target_reason(str(dependency["kind"]))
                     unresolved.append(
                         {
                             "file": source_file,
                             "line": dependency["line"],
                             "kind": dependency["kind"],
                             "expression": dependency["expression"],
-                            "reason": "target_file_not_found",
+                            "reason": reason,
                             "target_path": target_path,
                         }
                     )
