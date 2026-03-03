@@ -141,8 +141,8 @@ jobs:
           php_version: 8.3
           php_extensions: gd
           version: 2
-      - name: Start coverage test database
-        run: docker compose up -d mysql
+      - name: Start coverage services
+        run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: |
           max_attempts=60
@@ -169,7 +169,7 @@ jobs:
       - name: Install deterministic seed instance
         run: |
           for attempt in 1 2 3; do
-            if docker compose run --rm php-fpm sh -lc 'if [ ! -f config.php ]; then cp config-sample.php config.php; fi; php index.php console install'; then
+            if docker compose exec -T php-fpm php index.php console install; then
               exit 0
             fi
             echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
@@ -177,16 +177,10 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
-      - name: Prepare coverage output directory
-        run: mkdir -p storage/logs/ci
       - name: Generate unit coverage report
-        run: docker compose run --rm php-fpm composer test:coverage:unit
+        run: docker compose exec -T php-fpm composer test:coverage:unit
       - name: Evaluate coverage delta policy
-        run: >
-          php scripts/ci/check_coverage_delta.php
-          --clover=storage/logs/ci/coverage-unit-clover.xml
-          --policy=scripts/ci/config/coverage_delta_policy.php
-          --output-json=storage/logs/ci/coverage-delta-latest.json
+        run: docker compose exec -T php-fpm composer check:coverage:delta
       - name: Upload coverage delta artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -195,10 +189,13 @@ jobs:
           path: |
             storage/logs/ci/coverage-unit-clover.xml
             storage/logs/ci/coverage-delta-latest.json
-          if-no-files-found: error
+          if-no-files-found: warn
       - name: Diagnostics (coverage delta report)
         if: failure()
-        run: cat storage/logs/ci/coverage-delta-latest.json || true
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --timestamps mysql php-fpm || true
+          cat storage/logs/ci/coverage-delta-latest.json || true
       - name: Cleanup coverage services
         if: always()
         run: docker compose down -v --remove-orphans
