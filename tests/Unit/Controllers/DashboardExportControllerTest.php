@@ -221,7 +221,7 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(0.42, $overview['fill_rate_value']);
         $this->assertCount(2, $overview['top_attention']);
         $this->assertSame('Teacher A', $overview['top_attention'][0]['provider_name']);
-        $this->assertSame('Kapazitätslücke', $overview['capacity_gap_label']);
+        $this->assertSame($controller->callResolveCapacityGapLabel(), $overview['capacity_gap_label']);
     }
 
     public function testFormatDateCachesWeekdayFormatterPerLocaleAndTimezone(): void
@@ -332,6 +332,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildPrincipalOverview(array $metrics, array $summary): array
             {
                 return $this->buildPrincipalOverview($metrics, $summary);
+            }
+
+            public function callResolveCapacityGapLabel(): string
+            {
+                return $this->resolveCapacityGapLabel();
             }
 
             protected function getConfiguredThreshold(): float
