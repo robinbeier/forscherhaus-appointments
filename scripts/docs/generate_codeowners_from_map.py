@@ -14,6 +14,13 @@ MAP_PATH = ROOT / "docs/maps/component_ownership_map.json"
 CODEOWNERS_PATH = ROOT / ".github/CODEOWNERS"
 
 
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def normalize_prefix(prefix: str) -> str:
     normalized = prefix.replace("\\", "/").strip()
     if normalized.startswith("./"):
@@ -98,11 +105,11 @@ def render_codeowners(payload: dict[str, Any]) -> str:
 
 def run_check(path: Path, expected: str) -> tuple[bool, str]:
     if not path.exists():
-        return False, f"Missing generated file: {path.relative_to(ROOT)}"
+        return False, f"Missing generated file: {display_path(path)}"
 
     actual = path.read_text(encoding="utf-8")
     if actual != expected:
-        return False, f"Out-of-date generated file: {path.relative_to(ROOT)}"
+        return False, f"Out-of-date generated file: {display_path(path)}"
 
     return True, ""
 
@@ -136,7 +143,7 @@ def main() -> int:
     if current != rendered:
         output_path.write_text(rendered, encoding="utf-8")
 
-    print(f"Generated {output_path.relative_to(ROOT)}")
+    print(f"Generated {display_path(output_path)}")
     return 0
 
 
