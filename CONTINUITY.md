@@ -32,7 +32,7 @@
 -   State:
 
     -   Sprint implementation completed on 2026-03-03 (local validation complete).
-    -   Handoff state switched to VCS packaging on 2026-03-03 (new branch + commit requested).
+    -   Handoff state switched to PR lifecycle on 2026-03-03 (branch pushed, PR opened, CI babysitting started).
     -   Rollout state: CI `coverage-delta` remains warn-only until 7 consecutive green PR runs.
 
 -   Done:
@@ -79,14 +79,18 @@
     -   Created implementation branch and commit:
         -   Branch: `codex/coverage-delta-sprint`
         -   Commit: `f0ad4210` (`Add coverage delta reporting and CI gate`)
+    -   Pushed branch and opened ready-for-review PR:
+        -   PR: `#84` `https://github.com/robinbeier/forscherhaus-appointments/pull/84`
+        -   Latest commit on branch: `948125ad` (`Update continuity ledger with commit state`)
 
 -   Now:
 
-    -   Keep continuity ledger aligned with post-commit VCS state.
+    -   Babysit PR `#84` checks and review signals via `$babysit-pr` continuous watch loop.
 
 -   Next:
 
-    -   Observe first PR runs with `coverage-delta` and collect streak results.
+    -   Diagnose/fix branch-related CI failures if they appear.
+    -   Retry likely flaky failed checks up to skill retry budget when indicated.
     -   Remove only `continue-on-error: true` after 7 non-cancelled green PR runs.
 
 -   Open questions (UNCONFIRMED if needed):
