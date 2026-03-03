@@ -34,6 +34,7 @@
     -   Adoption-Guard Delta: 90 -> 40 Violations.
     -   Slice-1-Commit `19d848d5` ist auf `origin/codex/typed-request-contracts-slice1-backoffice-crud` gepusht.
     -   PR 2 ist offen: `https://github.com/robinbeier/forscherhaus-appointments/pull/91` (ready for review).
+    -   Aktueller CI-Lauf auf PR #91: `22642974401` (SHA `906856a2`), einziges rotes Job-Signal: `architecture-boundaries` (`component boundary check`, 17 violations).
 
 -   Done:
 
@@ -64,6 +65,7 @@
 -   Now:
 
     -   PR 2 wird aktiv babysittet (`$babysit-pr`) bis ready-to-merge/closed oder user-help-needed.
+    -   Branch-Fix fuer `architecture-boundaries` wird vorbereitet (Architektur-Map-Dependencies auf reale Controller-Load-Pfade ausrichten), danach Push und erneutes Watchen.
     -   Restliche Violations liegen nach Slice 1 in Booking/Calendar/Settings/API-v1-Write.
 
 -   Next:
@@ -81,6 +83,9 @@
 
     -   Ledger: `/Users/robinbeier/Developers/forscherhaus-appointments/CONTINUITY.md`
     -   CI workflow: `/Users/robinbeier/Developers/forscherhaus-appointments/.github/workflows/ci.yml`
+    -   CI run/job: `22642974401` / `65623661583`
+    -   Boundary map: `/Users/robinbeier/Developers/forscherhaus-appointments/docs/maps/component_ownership_map.json`
+    -   Boundary checker: `/Users/robinbeier/Developers/forscherhaus-appointments/scripts/ci/check_component_boundaries.py`
     -   Scope config: `/Users/robinbeier/Developers/forscherhaus-appointments/scripts/ci/config/request_contract_adoption_scope.php`
     -   Adoption check: `/Users/robinbeier/Developers/forscherhaus-appointments/scripts/ci/check_request_contract_adoption.php`
     -   Slice-1-Controller:

@@ -111,6 +111,7 @@
         "assets/js/pages/calendar.js"
       ],
       "depends_on": [
+        "integrations-sync",
         "people-services-admin",
         "settings-compliance"
       ]
@@ -183,6 +184,8 @@
         "assets/js/pages/services.js"
       ],
       "depends_on": [
+        "integrations-sync",
+        "scheduling-backoffice",
         "settings-compliance"
       ]
     },
