@@ -39,7 +39,9 @@
         "application/views/pages/booking.php",
         "application/views/components/booking_",
         "assets/js/pages/booking.js",
-        "application/libraries/Availability.php"
+        "application/libraries/Availability.php",
+        "application/libraries/Booking_request_dto_factory.php",
+        "application/libraries/Request_normalizer.php"
       ],
       "key_files": [
         "application/controllers/Booking.php",
@@ -118,6 +120,8 @@
         "application/libraries/Dashboard_metrics.php",
         "application/libraries/Dashboard_heatmap.php",
         "application/libraries/Provider_utilization.php",
+        "application/libraries/Dashboard_request_dto_factory.php",
+        "application/libraries/Request_normalizer.php",
         "application/views/pages/dashboard.php",
         "application/views/pages/dashboard_teacher.php",
         "assets/js/pages/dashboard.js",
@@ -257,6 +261,9 @@
       "secondary_handle": "@robinbeier",
       "folder_prefixes": [
         "application/controllers/api/v1/",
+        "application/libraries/Api.php",
+        "application/libraries/Api_request_dto_factory.php",
+        "application/libraries/Request_normalizer.php",
         "openapi.yml",
         "docs/rest-api.md"
       ],

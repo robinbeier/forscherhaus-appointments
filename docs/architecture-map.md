@@ -9,14 +9,14 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | Component | Role | Depends On | Path Prefixes | Key Files |
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | None | 11 | 3 |
-| `booking-public` | Public Booking | settings-compliance | 5 | 3 |
+| `booking-public` | Public Booking | settings-compliance | 7 | 3 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | people-services-admin, settings-compliance | 15 | 3 |
-| `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin | 10 | 3 |
+| `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin | 12 | 3 |
 | `people-services-admin` | People, Providers, Services | settings-compliance | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session | 23 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, settings-compliance | 16 | 3 |
-| `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 3 | 3 |
+| `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 6 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | dashboard-exports, booking-public, api-v1 | 5 | 3 |
 
 ## Component Details
@@ -59,6 +59,8 @@ Path prefixes:
 - `application/views/components/booking_`
 - `assets/js/pages/booking.js`
 - `application/libraries/Availability.php`
+- `application/libraries/Booking_request_dto_factory.php`
+- `application/libraries/Request_normalizer.php`
 
 Key files:
 - `application/controllers/Booking.php`
@@ -129,6 +131,8 @@ Path prefixes:
 - `application/libraries/Dashboard_metrics.php`
 - `application/libraries/Dashboard_heatmap.php`
 - `application/libraries/Provider_utilization.php`
+- `application/libraries/Dashboard_request_dto_factory.php`
+- `application/libraries/Request_normalizer.php`
 - `application/views/pages/dashboard.php`
 - `application/views/pages/dashboard_teacher.php`
 - `assets/js/pages/dashboard.js`
@@ -258,6 +262,9 @@ Dependencies:
 
 Path prefixes:
 - `application/controllers/api/v1/`
+- `application/libraries/Api.php`
+- `application/libraries/Api_request_dto_factory.php`
+- `application/libraries/Request_normalizer.php`
 - `openapi.yml`
 - `docs/rest-api.md`
 
