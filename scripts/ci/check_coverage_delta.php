@@ -15,13 +15,7 @@ if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
  */
 function runCoverageDeltaCli(array $argv): int
 {
-    $config = parseCoverageDeltaCliOptions($argv);
-
-    if ($config['help'] === true) {
-        fwrite(STDOUT, coverageDeltaUsage());
-
-        return COVERAGE_DELTA_EXIT_SUCCESS;
-    }
+    $config = coverageDeltaDefaultConfig();
 
     $report = [
         'status' => 'error',
@@ -32,6 +26,17 @@ function runCoverageDeltaCli(array $argv): int
     $exitCode = COVERAGE_DELTA_EXIT_RUNTIME_ERROR;
 
     try {
+        parseCoverageDeltaCliOptions($argv, $config);
+
+        if ($config['help'] === true) {
+            fwrite(STDOUT, coverageDeltaUsage());
+
+            return COVERAGE_DELTA_EXIT_SUCCESS;
+        }
+
+        $report['clover_file'] = $config['clover'];
+        $report['policy_file'] = $config['policy'];
+
         $policy = loadCoverageDeltaPolicy($config['policy']);
         $metrics = readCloverCoverageMetrics($config['clover']);
         $evaluation = evaluateCoverageDelta($metrics, $policy);
@@ -104,19 +109,26 @@ function coverageDeltaUsage(): string
 }
 
 /**
- * @param array<int, string> $argv
  * @return array{clover:string,policy:string,output_json:string,help:bool}
  */
-function parseCoverageDeltaCliOptions(array $argv): array
+function coverageDeltaDefaultConfig(): array
 {
     $root = dirname(__DIR__, 2);
-    $config = [
+
+    return [
         'clover' => $root . '/storage/logs/ci/coverage-unit-clover.xml',
         'policy' => $root . '/scripts/ci/config/coverage_delta_policy.php',
         'output_json' => $root . '/storage/logs/ci/coverage-delta-latest.json',
         'help' => false,
     ];
+}
 
+/**
+ * @param array<int, string> $argv
+ * @param array{clover:string,policy:string,output_json:string,help:bool} $config
+ */
+function parseCoverageDeltaCliOptions(array $argv, array &$config): void
+{
     foreach (array_slice($argv, 1) as $arg) {
         if ($arg === '--help') {
             $config['help'] = true;
@@ -152,8 +164,6 @@ function parseCoverageDeltaCliOptions(array $argv): array
 
         throw new RuntimeException('Unknown CLI option: ' . $arg);
     }
-
-    return $config;
 }
 
 /**

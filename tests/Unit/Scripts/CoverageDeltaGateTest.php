@@ -143,6 +143,23 @@ class CoverageDeltaGateTest extends TestCase
         self::assertStringContainsString('Failed to parse Clover XML', (string) $report['error']['message']);
     }
 
+    public function testRunCoverageDeltaCliFailsForInvalidCliOption(): void
+    {
+        $outputFile = $this->tmpDir . '/coverage-invalid-option.json';
+
+        $exitCode = runCoverageDeltaCli([
+            'check_coverage_delta.php',
+            '--output-json=' . $outputFile,
+            '--invalid-option',
+        ]);
+
+        $report = $this->readReport($outputFile);
+
+        self::assertSame(COVERAGE_DELTA_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertSame('error', $report['status']);
+        self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
+    }
+
     private function fixturePath(string $filename): string
     {
         return __DIR__ . '/fixtures/coverage/' . $filename;
