@@ -78,6 +78,14 @@ docker compose exec -T php-fpm composer contract-test:api-openapi -- \
   --username=administrator --password=administrator
 docker compose down -v --remove-orphans
 
+# Optional: Booking controller flow tests (register/reschedule/cancel)
+docker compose up -d mysql php-fpm nginx
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
+for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
+docker compose exec -T php-fpm composer test:booking-controller-flows
+docker compose down -v --remove-orphans
+
 # Optional: PHPStan rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
@@ -102,8 +110,17 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
+# Optional: Booking controller flow rollout streak check (requires gh + jq)
+for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="booking-controller-flows") | .conclusion'
+done | awk '$1 != "cancelled"' | head -n 7
+# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+
 # Optional: Fokuslauf fuer Healthz-Checks
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter HealthzControllerTest'
+
+# Optional: Fokuslauf fuer OpenAPI Contract Validator Unit-Tests
+docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter OpenApiContractValidatorTest'
 
 # Optional: Dashboard Release Gate (vor Deployment / Regression-Check)
 composer release:gate:dashboard -- \
@@ -136,6 +153,8 @@ Hinweis: Der CI-Job `phpstan-application` laeuft waehrend des Rollouts warn-only
 Hinweis: Der CI-Job `js-lint-changed` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `architecture-ownership-map` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `api-contract-openapi` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `booking-controller-flows` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
