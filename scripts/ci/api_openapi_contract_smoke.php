@@ -195,7 +195,13 @@ function runContractCheck(array $check, array &$state, array $config, OpenApiCon
         $decoded = $decodedResult['value'];
         $validator->assertRawJsonValueMatchesSchemaType($decodedResult['raw'], $schema, $id . ' response');
         $allowEmptyTopLevelObject = is_object($decodedResult['raw']) && is_array($decoded) && $decoded === [];
-        $validator->assertValueMatchesSchema($decoded, $schema, $id . ' response', $allowEmptyTopLevelObject);
+        $validator->assertValueMatchesSchema(
+            $decoded,
+            $schema,
+            $id . ' response',
+            $allowEmptyTopLevelObject,
+            $decodedResult['raw'],
+        );
 
         if (isset($check['item_schema_ref'])) {
             if (!is_array($decoded) || !array_is_list($decoded)) {
@@ -218,11 +224,17 @@ function runContractCheck(array $check, array &$state, array $config, OpenApiCon
             }
 
             $requiredFields = array_values(array_filter($check['required_fields'] ?? [], 'is_string'));
+            $rawFirstItem = null;
+            if (is_array($decodedResult['raw']) && array_key_exists(0, $decodedResult['raw'])) {
+                $rawFirstItem = $decodedResult['raw'][0];
+            }
+
             $validator->assertObjectFieldsMatchSchema(
                 $firstItem,
                 (string) $check['item_schema_ref'],
                 $requiredFields,
                 $id . '.items[0]',
+                $rawFirstItem,
             );
 
             $details['items'] = count($decoded);
@@ -253,6 +265,7 @@ function runContractCheck(array $check, array &$state, array $config, OpenApiCon
                 (string) $check['object_schema_ref'],
                 $requiredFields,
                 $id . '.object',
+                $decodedResult['raw'],
             );
         }
 

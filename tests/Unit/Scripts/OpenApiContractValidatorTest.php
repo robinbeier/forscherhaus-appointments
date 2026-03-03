@@ -105,6 +105,20 @@ class OpenApiContractValidatorTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    public function testAssertValueMatchesSchemaAcceptsNumericKeyObjectWhenRawValueIsObject(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+
+        $validator->assertValueMatchesSchema(
+            [0 => 'a'],
+            ['type' => 'object'],
+            'numeric_key_object',
+            false,
+            (object) ['0' => 'a'],
+        );
+        $this->addToAssertionCount(1);
+    }
+
     /**
      * @return array<string, mixed>
      */

@@ -236,6 +236,7 @@ final class OpenApiContractValidator
         array $schema,
         string $context,
         bool $allowEmptyListAsObject = false,
+        mixed $rawValue = null,
     ): void {
         $resolvedSchema = $this->resolveSchema($schema);
         $type = $this->resolveSchemaType($resolvedSchema);
@@ -244,7 +245,7 @@ final class OpenApiContractValidator
             throw new ContractAssertionException($context . ' has schema without resolvable type.');
         }
 
-        if (!$this->valueMatchesType($value, $type, $allowEmptyListAsObject)) {
+        if (!$this->valueMatchesType($value, $type, $allowEmptyListAsObject, $rawValue)) {
             throw new ContractAssertionException(
                 sprintf('%s expected type "%s", got %s.', $context, $type, $this->describePhpType($value)),
             );
@@ -257,7 +258,12 @@ final class OpenApiContractValidator
             }
 
             foreach ($value as $index => $item) {
-                $this->assertValueMatchesSchema($item, $itemsSchema, $context . '[' . $index . ']');
+                $rawItem = null;
+                if (is_array($rawValue) && array_key_exists($index, $rawValue)) {
+                    $rawItem = $rawValue[$index];
+                }
+
+                $this->assertValueMatchesSchema($item, $itemsSchema, $context . '[' . $index . ']', false, $rawItem);
             }
         }
     }
@@ -271,6 +277,7 @@ final class OpenApiContractValidator
         string $schemaRef,
         array $fields,
         string $context,
+        mixed $rawPayload = null,
     ): void {
         $schema = $this->resolveSchemaByRef($schemaRef);
         $properties = $schema['properties'] ?? null;
@@ -294,7 +301,14 @@ final class OpenApiContractValidator
                 );
             }
 
-            $this->assertValueMatchesSchema($payload[$field], $fieldSchema, $context . '.' . $field);
+            $rawField = null;
+            if (is_object($rawPayload) && property_exists($rawPayload, $field)) {
+                $rawField = $rawPayload->{$field};
+            } elseif (is_array($rawPayload) && array_key_exists($field, $rawPayload)) {
+                $rawField = $rawPayload[$field];
+            }
+
+            $this->assertValueMatchesSchema($payload[$field], $fieldSchema, $context . '.' . $field, false, $rawField);
         }
     }
 
@@ -360,8 +374,32 @@ final class OpenApiContractValidator
         return null;
     }
 
-    private function valueMatchesType(mixed $value, string $type, bool $allowEmptyListAsObject): bool
-    {
+    private function valueMatchesType(
+        mixed $value,
+        string $type,
+        bool $allowEmptyListAsObject,
+        mixed $rawValue = null,
+    ): bool {
+        if ($rawValue !== null && in_array($type, ['object', 'array'], true)) {
+            $rawType = $this->detectRawDecodedJsonType($rawValue);
+
+            if ($type === 'object') {
+                if ($rawType === 'object') {
+                    return true;
+                }
+
+                if ($allowEmptyListAsObject && $rawType === 'object' && is_array($value) && $value === []) {
+                    return true;
+                }
+
+                return false;
+            }
+
+            if ($type === 'array') {
+                return $rawType === 'array';
+            }
+        }
+
         return match ($type) {
             'integer' => is_int($value),
             'number' => is_int($value) || is_float($value),
