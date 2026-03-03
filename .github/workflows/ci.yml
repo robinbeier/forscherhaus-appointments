@@ -175,7 +175,7 @@ jobs:
       - name: Install deterministic seed instance
         run: |
           for attempt in 1 2 3; do
-            if docker compose run --rm php-fpm php index.php console install; then
+            if docker compose run --rm php-fpm sh -lc 'if [ ! -f config.php ]; then cp config-sample.php config.php; fi; php index.php console install'; then
               exit 0
             fi
             echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2

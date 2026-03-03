@@ -86,10 +86,13 @@
     -   Diagnosed CI failure on PR `#84`:
         -   Failing job: `coverage-delta`.
         -   Root cause: `composer test:coverage:unit` ran against a fresh CI database without `php index.php console install`.
+    -   Diagnosed follow-up CI failure on PR `#84` after first fix:
+        -   `coverage-delta` seed step invoked `console install` without `config.php`.
+        -   Fix required running install via `sh -lc` with `cp config-sample.php config.php` bootstrap.
 
 -   Now:
 
-    -   Apply CI workflow fix for PR `#84` (`coverage-delta` seed install step), then push and resume continuous watch.
+    -   Apply second CI workflow fix for PR `#84` (`coverage-delta` seed install bootstraps `config.php`), then push and resume continuous watch.
 
 -   Next:
 
