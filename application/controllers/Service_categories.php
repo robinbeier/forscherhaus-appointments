@@ -89,15 +89,14 @@ class Service_categories extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $keyword = request('keyword', '');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
 
-            $order_by = request('order_by', 'update_datetime DESC');
-
-            $limit = request('limit', 1000);
-
-            $offset = (int) request('offset', '0');
-
-            $service_categories = $this->service_categories_model->search($keyword, $limit, $offset, $order_by);
+            $service_categories = $this->service_categories_model->search(
+                $request_dto->keyword,
+                $request_dto->limit,
+                $request_dto->offset,
+                $request_dto->orderBy,
+            );
 
             json_response($service_categories);
         } catch (Throwable $e) {
@@ -115,7 +114,8 @@ class Service_categories extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $service_category = request('service_category');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('service_category');
+            $service_category = $request_dto->payload;
 
             $this->service_categories_model->only($service_category, $this->allowed_service_category_fields);
 
@@ -146,7 +146,8 @@ class Service_categories extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $service_category_id = request('service_category_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('service_category_id');
+            $service_category_id = $request_dto->id;
 
             $service_category = $this->service_categories_model->find($service_category_id);
 
@@ -166,7 +167,8 @@ class Service_categories extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $service_category = request('service_category');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('service_category');
+            $service_category = $request_dto->payload;
 
             $this->service_categories_model->only($service_category, $this->allowed_service_category_fields);
 
@@ -197,7 +199,8 @@ class Service_categories extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $service_category_id = request('service_category_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('service_category_id');
+            $service_category_id = $request_dto->id;
 
             $service_category = $this->service_categories_model->find($service_category_id);
 
@@ -211,5 +214,29 @@ class Service_categories extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
     }
 }

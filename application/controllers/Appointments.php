@@ -78,15 +78,14 @@ class Appointments extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $keyword = request('keyword', '');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
 
-            $order_by = request('order_by', 'update_datetime DESC');
-
-            $limit = request('limit', 1000);
-
-            $offset = (int) request('offset', '0');
-
-            $appointments = $this->appointments_model->search($keyword, $limit, $offset, $order_by);
+            $appointments = $this->appointments_model->search(
+                $request_dto->keyword,
+                $request_dto->limit,
+                $request_dto->offset,
+                $request_dto->orderBy,
+            );
 
             $user_id = session('user_id');
             $role_slug = session('role_slug');
@@ -131,7 +130,8 @@ class Appointments extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $appointment = json_decode(request('appointment'), true);
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('appointment');
+            $appointment = $request_dto->payload;
 
             $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
 
@@ -162,7 +162,8 @@ class Appointments extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $appointment_id = request('appointment_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('appointment_id');
+            $appointment_id = $request_dto->id;
 
             $appointment = $this->appointments_model->find($appointment_id);
 
@@ -182,7 +183,8 @@ class Appointments extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $appointment = json_decode(request('appointment'), true);
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('appointment');
+            $appointment = $request_dto->payload;
 
             $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
 
@@ -209,7 +211,8 @@ class Appointments extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $appointment_id = request('appointment_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('appointment_id');
+            $appointment_id = $request_dto->id;
 
             $appointment = $this->appointments_model->find($appointment_id);
 
@@ -283,5 +286,29 @@ class Appointments extends EA_Controller
             ->set_header('Content-Disposition: attachment; filename="' . $filename . '"')
             ->set_header('Cache-Control: no-store')
             ->set_output($ics_stream);
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
     }
 }

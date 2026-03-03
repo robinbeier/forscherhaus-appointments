@@ -94,15 +94,14 @@ class Blocked_periods extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $keyword = request('keyword', '');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
 
-            $order_by = request('order_by', 'update_datetime DESC');
-
-            $limit = request('limit', 1000);
-
-            $offset = (int) request('offset', '0');
-
-            $blocked_periods = $this->blocked_periods_model->search($keyword, $limit, $offset, $order_by);
+            $blocked_periods = $this->blocked_periods_model->search(
+                $request_dto->keyword,
+                $request_dto->limit,
+                $request_dto->offset,
+                $request_dto->orderBy,
+            );
 
             json_response($blocked_periods);
         } catch (Throwable $e) {
@@ -120,7 +119,8 @@ class Blocked_periods extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $blocked_period = request('blocked_period');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('blocked_period');
+            $blocked_period = $request_dto->payload;
 
             $this->blocked_periods_model->only($blocked_period, $this->allowed_blocked_period_fields);
 
@@ -151,7 +151,8 @@ class Blocked_periods extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $blocked_period_id = request('blocked_period_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('blocked_period_id');
+            $blocked_period_id = $request_dto->id;
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
@@ -171,7 +172,8 @@ class Blocked_periods extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $blocked_period = request('blocked_period');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('blocked_period');
+            $blocked_period = $request_dto->payload;
 
             $this->blocked_periods_model->only($blocked_period, $this->allowed_blocked_period_fields);
 
@@ -202,7 +204,8 @@ class Blocked_periods extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $blocked_period_id = request('blocked_period_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('blocked_period_id');
+            $blocked_period_id = $request_dto->id;
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
@@ -216,5 +219,29 @@ class Blocked_periods extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
     }
 }

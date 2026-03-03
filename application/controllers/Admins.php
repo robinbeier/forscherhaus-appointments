@@ -117,15 +117,14 @@ class Admins extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $keyword = request('keyword', '');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
 
-            $order_by = request('order_by', 'update_datetime DESC');
-
-            $limit = request('limit', 1000);
-
-            $offset = (int) request('offset', '0');
-
-            $admins = $this->admins_model->search($keyword, $limit, $offset, $order_by);
+            $admins = $this->admins_model->search(
+                $request_dto->keyword,
+                $request_dto->limit,
+                $request_dto->offset,
+                $request_dto->orderBy,
+            );
 
             json_response($admins);
         } catch (Throwable $e) {
@@ -143,7 +142,8 @@ class Admins extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $admin = request('admin');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('admin');
+            $admin = $request_dto->payload;
 
             $this->admins_model->only($admin, $this->allowed_admin_fields);
 
@@ -178,7 +178,8 @@ class Admins extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $admin_id = request('admin_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('admin_id');
+            $admin_id = $request_dto->id;
 
             $admin = $this->admins_model->find($admin_id);
 
@@ -198,7 +199,8 @@ class Admins extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $admin = request('admin');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('admin');
+            $admin = $request_dto->payload;
 
             $this->admins_model->only($admin, $this->allowed_admin_fields);
 
@@ -233,7 +235,8 @@ class Admins extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $admin_id = request('admin_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('admin_id');
+            $admin_id = $request_dto->id;
 
             $admin = $this->admins_model->find($admin_id);
 
@@ -247,5 +250,29 @@ class Admins extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
     }
 }
