@@ -62,8 +62,8 @@
 
 -   Now:
 
-    -   Slice-1-Aenderungen reviewen und als PR 2 vorbereiten.
-    -   Restliche Violations liegen jetzt in Booking/Calendar/Settings/API-v1-Write.
+    -   PR 2 jetzt direkt als ready-for-review erstellen und babysitten (`$babysit-pr`).
+    -   Restliche Violations liegen nach Slice 1 in Booking/Calendar/Settings/API-v1-Write.
 
 -   Next:
 
