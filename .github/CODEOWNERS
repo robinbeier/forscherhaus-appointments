@@ -27,6 +27,7 @@
 /application/controllers/Integrations.php @robinbeier
 /application/controllers/Ldap_settings.php @robinbeier
 /application/controllers/Legal_settings.php @robinbeier
+/application/controllers/Localization.php @robinbeier
 /application/controllers/Login.php @robinbeier
 /application/controllers/Logout.php @robinbeier
 /application/controllers/Matomo_analytics_settings.php @robinbeier
@@ -41,13 +42,17 @@
 /application/controllers/api/v1/** @robinbeier
 /application/libraries/Api.php @robinbeier
 /application/libraries/Api_request_dto_factory.php @robinbeier
+/application/libraries/Auth_request_dto_factory.php @robinbeier
 /application/libraries/Availability.php @robinbeier
+/application/libraries/Backoffice_request_dto_factory.php @robinbeier
 /application/libraries/Booking_request_dto_factory.php @robinbeier
 /application/libraries/Caldav_sync.php @robinbeier
+/application/libraries/Calendar_request_dto_factory.php @robinbeier
 /application/libraries/Dashboard_heatmap.php @robinbeier
 /application/libraries/Dashboard_metrics.php @robinbeier
 /application/libraries/Dashboard_request_dto_factory.php @robinbeier
 /application/libraries/Google_sync.php @robinbeier
+/application/libraries/Integrations_request_dto_factory.php @robinbeier
 /application/libraries/Ldap_client.php @robinbeier
 /application/libraries/Provider_utilization.php @robinbeier
 /application/libraries/Request_normalizer.php @robinbeier
