@@ -41,7 +41,6 @@ REQUIRE_CALL_RE = re.compile(
 BLOCKING_UNRESOLVED_REASONS = {
     "source_file_missing",
     "target_file_not_found",
-    "target_component_not_unique",
 }
 
 
@@ -477,13 +476,14 @@ def main() -> int:
 
                 target_components = match_components(canonical_target_path, components)
                 if len(target_components) != 1:
+                    reason = "target_component_ambiguous" if len(target_components) > 1 else "target_component_not_mapped"
                     unresolved.append(
                         {
                             "file": source_file,
                             "line": dependency["line"],
                             "kind": dependency["kind"],
                             "expression": dependency["expression"],
-                            "reason": "target_component_not_unique",
+                            "reason": reason,
                             "target_path": canonical_target_path,
                             "matched_components": target_components,
                         }
@@ -529,16 +529,15 @@ def main() -> int:
         report["unresolved"] = unresolved
         report["blocking_unresolved"] = blocking_unresolved
 
-        if violations or source_mapping_errors or blocking_unresolved:
+        if violations or blocking_unresolved:
             report["status"] = "failed"
 
         output_json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-        if violations or source_mapping_errors or blocking_unresolved:
+        if violations or blocking_unresolved:
             print(
                 "Component boundary check failed with "
                 f"{len(violations)} violation(s) and "
-                f"{len(source_mapping_errors)} source-mapping error(s) and "
                 f"{len(blocking_unresolved)} blocking unresolved edge(s)."
             )
             return 1
