@@ -209,6 +209,28 @@ final class OpenApiContractValidator
      * @param mixed $value
      * @param array<string, mixed> $schema
      */
+    public function assertRawJsonValueMatchesSchemaType(mixed $value, array $schema, string $context): void
+    {
+        $resolvedSchema = $this->resolveSchema($schema);
+        $expectedType = $this->resolveSchemaType($resolvedSchema);
+
+        if ($expectedType === null) {
+            throw new ContractAssertionException($context . ' has schema without resolvable type.');
+        }
+
+        $actualType = $this->detectRawDecodedJsonType($value);
+
+        if (!$this->isRawTypeCompatible($actualType, $expectedType)) {
+            throw new ContractAssertionException(
+                sprintf('%s expected JSON type "%s", got "%s".', $context, $expectedType, $actualType),
+            );
+        }
+    }
+
+    /**
+     * @param mixed $value
+     * @param array<string, mixed> $schema
+     */
     public function assertValueMatchesSchema(mixed $value, array $schema, string $context): void
     {
         $resolvedSchema = $this->resolveSchema($schema);
@@ -345,6 +367,29 @@ final class OpenApiContractValidator
             'array' => is_array($value) && array_is_list($value),
             default => false,
         };
+    }
+
+    private function detectRawDecodedJsonType(mixed $value): string
+    {
+        return match (true) {
+            is_object($value) => 'object',
+            is_array($value) => 'array',
+            is_int($value) => 'integer',
+            is_float($value) => 'number',
+            is_string($value) => 'string',
+            is_bool($value) => 'boolean',
+            $value === null => 'null',
+            default => gettype($value),
+        };
+    }
+
+    private function isRawTypeCompatible(string $actualType, string $expectedType): bool
+    {
+        if ($expectedType === 'number') {
+            return in_array($actualType, ['number', 'integer'], true);
+        }
+
+        return $actualType === $expectedType;
     }
 
     private function describePhpType(mixed $value): string

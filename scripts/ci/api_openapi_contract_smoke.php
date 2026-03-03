@@ -191,7 +191,9 @@ function runContractCheck(array $check, array &$state, array $config, OpenApiCon
 
     if ($expectedStatus >= 200 && $expectedStatus < 300) {
         $schema = $validator->getResponseSchema($method, $openapiPath, $expectedStatus);
-        $decoded = decodeJson($response['body'], $id);
+        $decodedResult = decodeJson($response['body'], $id);
+        $decoded = $decodedResult['value'];
+        $validator->assertRawJsonValueMatchesSchemaType($decodedResult['raw'], $schema, $id . ' response');
         $validator->assertValueMatchesSchema($decoded, $schema, $id . ' response');
 
         if (isset($check['item_schema_ref'])) {
@@ -517,12 +519,18 @@ function buildAppUrl(string $baseUrl, string $indexPage, string $path, array $qu
 }
 
 /**
- * @return mixed
+ * @return array{raw:mixed,value:mixed}
  */
-function decodeJson(string $body, string $context): mixed
+function decodeJson(string $body, string $context): array
 {
     try {
-        return json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        $raw = json_decode($body, false, 512, JSON_THROW_ON_ERROR);
+        $value = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+
+        return [
+            'raw' => $raw,
+            'value' => $value,
+        ];
     } catch (JsonException $e) {
         throw new ContractAssertionException($context . ' returned invalid JSON: ' . $e->getMessage(), 0, $e);
     }

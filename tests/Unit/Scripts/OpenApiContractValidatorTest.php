@@ -76,6 +76,25 @@ class OpenApiContractValidatorTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    public function testAssertRawJsonValueMatchesSchemaTypeRejectsObjectForArraySchema(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+        $schema = $validator->getResponseSchema('GET', '/appointments', 200);
+
+        $this->expectException(ContractAssertionException::class);
+        $this->expectExceptionMessage('expected JSON type "array", got "object"');
+
+        $validator->assertRawJsonValueMatchesSchemaType((object) [], $schema, 'appointments_index');
+    }
+
+    public function testAssertRawJsonValueMatchesSchemaTypeAcceptsEmptyObject(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+
+        $validator->assertRawJsonValueMatchesSchemaType((object) [], ['type' => 'object'], 'empty_object');
+        $this->addToAssertionCount(1);
+    }
+
     /**
      * @return array<string, mixed>
      */
