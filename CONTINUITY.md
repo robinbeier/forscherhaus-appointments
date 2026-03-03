@@ -33,6 +33,7 @@
     -   Slice 1 ist implementiert fuer Backoffice-/People-Service-CRUD Controller inkl. Backoffice-Webhooks.
     -   Adoption-Guard Delta: 90 -> 40 Violations.
     -   Slice-1-Commit `19d848d5` ist auf `origin/codex/typed-request-contracts-slice1-backoffice-crud` gepusht.
+    -   PR 2 ist offen: `https://github.com/robinbeier/forscherhaus-appointments/pull/91` (ready for review).
 
 -   Done:
 
@@ -62,12 +63,12 @@
 
 -   Now:
 
-    -   PR 2 jetzt direkt als ready-for-review erstellen und babysitten (`$babysit-pr`).
+    -   PR 2 wird aktiv babysittet (`$babysit-pr`) bis ready-to-merge/closed oder user-help-needed.
     -   Restliche Violations liegen nach Slice 1 in Booking/Calendar/Settings/API-v1-Write.
 
 -   Next:
 
-    -   PR 2 fuer Branch `codex/typed-request-contracts-slice1-backoffice-crud` erstellen.
+    -   CI-/Review-Feedback auf PR #91 verarbeiten.
     -   Danach Slice 2 (Settings) starten.
     -   Nach Slice-1-PR weiterhin offene Verstoesse in Slice 2+ abbauen.
     -   Temporaere Low-Risk-Green-Ausnahme spaeter wieder auf strict zurueckstellen.
