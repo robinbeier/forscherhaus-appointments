@@ -117,6 +117,8 @@ JSON
   exit 0
 fi
 
+rm -f "$RAW_REPORT"
+
 set +e
 ./vendor/bin/deptrac analyse --config-file=deptrac.yaml --formatter=json --output="$RAW_REPORT" --no-progress >/dev/null 2>&1
 deptrac_json_exit=$?
