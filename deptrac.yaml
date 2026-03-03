@@ -1,0 +1,50 @@
+deptrac:
+    paths:
+        - ./application/controllers
+        - ./application/libraries
+        - ./application/models
+        - ./application/helpers
+        - ./application/core
+    exclude_files: []
+    layers:
+        - name: Controllers
+          collectors:
+              - type: directory
+                value: ./application/controllers/.*
+        - name: Libraries
+          collectors:
+              - type: directory
+                value: ./application/libraries/.*
+        - name: Models
+          collectors:
+              - type: directory
+                value: ./application/models/.*
+        - name: Helpers
+          collectors:
+              - type: directory
+                value: ./application/helpers/.*
+        - name: Core
+          collectors:
+              - type: directory
+                value: ./application/core/.*
+    ruleset:
+        Controllers:
+            - Libraries
+            - Models
+            - Helpers
+            - Core
+        Libraries:
+            - Libraries
+            - Models
+            - Helpers
+            - Core
+        Models:
+            - Models
+            - Helpers
+            - Core
+        Helpers:
+            - Helpers
+            - Core
+        Core:
+            - Core
+            - Helpers

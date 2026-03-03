@@ -137,6 +137,13 @@ docker compose run --rm php-fpm composer phpstan:application
 npm run lint:js
 python3 scripts/docs/generate_architecture_ownership_docs.py --check
 python3 scripts/ci/check_architecture_ownership_map.py
+python3 scripts/docs/generate_codeowners_from_map.py --check
+bash scripts/ci/run_deptrac_changed_gate.sh
+python3 scripts/ci/check_component_boundaries.py
+docker compose run --rm php-fpm composer deptrac:analyze
+composer check:codeowners-sync
+composer check:component-boundaries
+composer check:architecture-boundaries
 docker compose run --rm php-fpm composer phpstan:request-dto
 docker compose run --rm php-fpm composer test:request-dto
 docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
@@ -150,8 +157,11 @@ CI note: the `typed-request-dto` check validates scoped DTO normalization adopti
 CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.
+CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
 CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
 CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
+CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
+Local note: when running Deptrac directly on newer host PHP runtimes (for example PHP 8.5), vendor-level deprecation output can appear; prefer the dockerized command above for CI-parity output.
 
 For doc-only/meta commits in constrained environments:
 

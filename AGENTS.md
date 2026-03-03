@@ -68,6 +68,16 @@ python3 scripts/docs/generate_architecture_ownership_docs.py
 python3 scripts/docs/generate_architecture_ownership_docs.py --check
 python3 scripts/ci/check_architecture_ownership_map.py
 
+# Optional: Architecture boundaries gate (CODEOWNERS drift + Deptrac + component boundaries)
+python3 scripts/docs/generate_codeowners_from_map.py
+python3 scripts/docs/generate_codeowners_from_map.py --check
+docker compose run --rm php-fpm composer deptrac:analyze
+bash scripts/ci/run_deptrac_changed_gate.sh
+python3 scripts/ci/check_component_boundaries.py
+composer check:codeowners-sync
+composer check:component-boundaries
+composer check:architecture-boundaries
+
 # Optional: API OpenAPI contract smoke (read-only, selected API v1 endpoints)
 docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
@@ -112,6 +122,12 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 30 --json
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="architecture-ownership-map") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung: ausgegebene Eintraege sind SUCCESS
+
+# Optional: architecture-boundaries rollout streak check (warn-only -> blocking)
+for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="architecture-boundaries") | .conclusion'
+done | awk '$1 != "cancelled"' | head -n 7
+# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
 # Optional: API OpenAPI contract status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
@@ -169,17 +185,21 @@ docker compose down -v --remove-orphans
 ```
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
+Hinweis: `composer deptrac:analyze` kann auf neueren Host-PHP-Versionen (z. B. 8.5) zusaetzliche Vendor-Deprecation-Ausgaben zeigen; fuer CI-paritaer rauschfreie Ausgaben den Docker-Run `docker compose run --rm php-fpm composer deptrac:analyze` verwenden.
 Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/release-gate/dashboard-gate-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der CI-Job `phpstan-application` ist blocking.
 Hinweis: Der CI-Job `js-lint-changed` ist blocking.
 Hinweis: Der CI-Job `architecture-ownership-map` ist blocking.
+Hinweis: Der CI-Job `architecture-boundaries` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der CI-Job `api-contract-openapi` ist blocking.
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `coverage-delta` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der Unit Coverage Report schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
+Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `coverage-delta` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):

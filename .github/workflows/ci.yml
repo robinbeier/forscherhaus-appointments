@@ -220,6 +220,53 @@ jobs:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: python3 scripts/ci/check_architecture_ownership_map.py
 
+  architecture-boundaries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: Check generated CODEOWNERS
+        run: python3 scripts/docs/generate_codeowners_from_map.py --check
+      - name: Run Deptrac changed-file gate
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: bash scripts/ci/run_deptrac_changed_gate.sh
+      - name: Run component boundary check
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: python3 scripts/ci/check_component_boundaries.py
+      - name: Upload architecture boundary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-boundaries-artifacts
+          path: |
+            storage/logs/ci/deptrac-changed-gate.json
+            storage/logs/ci/deptrac-github-actions.log
+            storage/logs/ci/component-boundary-latest.json
+          if-no-files-found: warn
+      - name: Diagnostics (failure reports)
+        if: failure()
+        run: |
+          cat storage/logs/ci/deptrac-changed-gate.json || true
+          cat storage/logs/ci/component-boundary-latest.json || true
+
   api-contract-openapi:
     runs-on: ubuntu-latest
     timeout-minutes: 30

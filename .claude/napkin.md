@@ -36,28 +36,32 @@
 
 ## Shell & Command Reliability
 
-1. **[2026-03-02] When moving the repo root path, repair git + automation path dependencies**
+1. **[2026-03-03] Run Deptrac via Docker for stable local output**
+   Do instead: use `docker compose run --rm php-fpm composer deptrac:analyze` because newer host PHP runtimes can emit vendor-level deprecation noise.
+2. **[2026-03-02] When moving the repo root path, repair git + automation path dependencies**
    Do instead: stop compose, move repo, keep temporary symlink at old path, run `git worktree repair && git worktree prune`, then replace old path in `/Users/robinbeier/.codex/automations/*/automation.toml` `cwds`.
-2. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
+3. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
    Do instead: check for `* 2.*`/`* 3.*` files (especially in `assets/vendor` and `vendor`) and remove/rehydrate them before `./build_release.sh`, because `rsync` can stall on FileProvider `compressed,dataless` entries.
-3. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
+4. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
    Do instead: when logs show OS error 35 on `./#innodb_redo/*`, inspect `docker/mysql` with `ls -lO@`; rehydrate `compressed,dataless` files (for example `dd if='<file>' of=/dev/null bs=512 count=1`) and restart MySQL, or reset `docker/mysql` if recovery fails.
-4. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
+5. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
    Do instead: build/upload `${REL}.tar.gz` (for example via `./build_release.sh --rel "$REL"`) before deploy; do not confuse DB rollback dumps like `predeploy-db-...sql.gz` with deploy archives.
-5. **[2026-02-23] Use unique Compose project names per worktree**
+6. **[2026-02-23] Use unique Compose project names per worktree**
    Do instead: start Docker with `docker compose -p <unique-name> ...` in each worktree and verify mounts via `docker inspect` before smoke-tests.
-6. **[2026-02-22] Prefer `rg` for fast search**
+7. **[2026-02-22] Prefer `rg` for fast search**
    Do instead: use `rg`/`rg --files` for code and file discovery; fall back only if unavailable.
-7. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
+8. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
    Do instead: run tests via docker compose where `DB_HOST='mysql'` and container DNS match CI behavior.
-8. **[2026-02-22] Prime new worktrees before first commit**
+9. **[2026-02-22] Prime new worktrees before first commit**
    Do instead: run `./scripts/setup-worktree.sh` to install `vendor/`, `node_modules/`, and vendor/theme assets.
 
 ## User Directives
 
-1. **[2026-02-22] Follow AGENTS.md merge-ready contribution standard**
+1. **[2026-03-03] Keep `CONTINUITY.md` as canonical compaction-safe session briefing**
+   Do instead: at the start of each turn read/update `CONTINUITY.md`, and refresh it immediately when goal, decisions, constraints, state, or key outcomes change.
+2. **[2026-02-22] Follow AGENTS.md merge-ready contribution standard**
    Do instead: keep changes minimal and consistent with repo conventions, then report validation status and blockers clearly.
-2. **[2026-02-22] Never revert unrelated dirty-worktree changes**
+3. **[2026-02-22] Never revert unrelated dirty-worktree changes**
    Do instead: isolate edits to request scope and stop to ask if unexpected modifications appear in touched files.
-3. **[2026-02-22] Keep collaboration updates concise and actionable**
+4. **[2026-02-22] Keep collaboration updates concise and actionable**
    Do instead: send short progress updates during tool work and finish with changed files and test outcomes.
