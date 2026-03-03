@@ -95,41 +95,41 @@ docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
 
-# Optional: PHPStan rollout streak check (requires gh + jq)
+# Optional: PHPStan status check (blocking)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
 done
-# Erwartung fuer Blocking-Umschaltung: erste 7 Eintraege sind SUCCESS
+# Erwartung: aktuelle Eintraege sind SUCCESS
 
-# Optional: JS lint rollout streak check (requires gh + jq)
+# Optional: JS lint status check (blocking)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="js-lint-changed") | .conclusion'
 done
-# Erwartung fuer Blocking-Umschaltung: erste 7 Eintraege sind SUCCESS
+# Erwartung: aktuelle Eintraege sind SUCCESS
 
-# Optional: Architecture/ownership rollout streak check (requires gh + jq)
+# Optional: Architecture/ownership status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 30 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="architecture-ownership-map") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+# Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: API OpenAPI contract rollout streak check (requires gh + jq)
+# Optional: API OpenAPI contract status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="api-contract-openapi") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+# Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: Booking controller flow rollout streak check (requires gh + jq)
+# Optional: Booking controller flow status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="booking-controller-flows") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+# Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: typed-request-dto rollout streak check (requires gh + jq)
+# Optional: typed-request-dto status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="typed-request-dto") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+# Erwartung: ausgegebene Eintraege sind SUCCESS
 
 # Optional: coverage-delta rollout streak check (requires gh + jq)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
@@ -170,12 +170,12 @@ docker compose down -v --remove-orphans
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/release-gate/dashboard-gate-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
-Hinweis: Der CI-Job `phpstan-application` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `js-lint-changed` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `architecture-ownership-map` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `api-contract-openapi` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `booking-controller-flows` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `typed-request-dto` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `phpstan-application` ist blocking.
+Hinweis: Der CI-Job `js-lint-changed` ist blocking.
+Hinweis: Der CI-Job `architecture-ownership-map` ist blocking.
+Hinweis: Der CI-Job `api-contract-openapi` ist blocking.
+Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
+Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `coverage-delta` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der Unit Coverage Report schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.

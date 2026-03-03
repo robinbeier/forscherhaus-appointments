@@ -144,12 +144,12 @@ docker compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 
 CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
 CI note: `integration-smoke` now covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
-CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
-CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
-CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
-CI note: the `phpstan-application` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
-CI note: the `js-lint-changed` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
-CI note: the `architecture-ownership-map` check is currently warn-only during rollout and is planned to become blocking after 7 consecutive green PR runs.
+CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
+CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
+CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
+CI note: the `phpstan-application` check is blocking.
+CI note: the `js-lint-changed` check is blocking.
+CI note: the `architecture-ownership-map` check is blocking.
 CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
 CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
 
