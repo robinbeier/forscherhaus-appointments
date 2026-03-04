@@ -45,6 +45,6 @@ fi
 npx gulp vendor
 
 # Install managed git hooks for pre-push CI preflight checks.
-./scripts/install-git-hooks.sh
+bash ./scripts/install-git-hooks.sh
 
 echo "[setup] Worktree setup completed."

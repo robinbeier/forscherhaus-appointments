@@ -102,7 +102,7 @@ require_cmd python3
 git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
 
 echo_section "Run quick pre-PR gate"
-PRE_PR_BASE_REF="$BASE_REF" ./scripts/ci/pre_pr_quick.sh
+PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
 
 echo_section "Typed request-contracts gate"
 run_compose run --rm php-fpm composer phpstan:request-contracts:l1

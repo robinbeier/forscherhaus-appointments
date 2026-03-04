@@ -11,7 +11,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 if [[ "${PRE_PUSH_FULL:-0}" == "1" ]]; then
-    PRE_PR_BASE_REF="${PRE_PR_BASE_REF:-main}" ./scripts/ci/pre_pr_full.sh
+    PRE_PR_BASE_REF="${PRE_PR_BASE_REF:-main}" bash ./scripts/ci/pre_pr_full.sh
 else
-    PRE_PR_BASE_REF="${PRE_PR_BASE_REF:-main}" ./scripts/ci/pre_pr_quick.sh
+    PRE_PR_BASE_REF="${PRE_PR_BASE_REF:-main}" bash ./scripts/ci/pre_pr_quick.sh
 fi

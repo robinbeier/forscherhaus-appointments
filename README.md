@@ -162,13 +162,13 @@ Recommended local pre-PR gates:
 
 ```bash
 # fast gate (used by managed pre-push hook)
-./scripts/ci/pre_pr_quick.sh
+bash ./scripts/ci/pre_pr_quick.sh
 
 # full CI-parity gate before "Ready for review"
-./scripts/ci/pre_pr_full.sh
+bash ./scripts/ci/pre_pr_full.sh
 
 # optional full gate + coverage delta
-PRE_PR_RUN_COVERAGE=1 ./scripts/ci/pre_pr_full.sh
+PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
 
 Hook note: `./scripts/setup-worktree.sh` installs a managed `.git/hooks/pre-push` hook that runs `pre_pr_quick.sh`.
