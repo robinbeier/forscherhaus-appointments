@@ -26,6 +26,7 @@ class Blocked_periods_api_v1 extends EA_Controller
         parent::__construct();
 
         $this->load->library('api');
+        $this->load->library('api_request_dto_factory');
         $this->load->library('webhooks_client');
 
         $this->api->auth();
@@ -51,11 +52,13 @@ class Blocked_periods_api_v1 extends EA_Controller
 
             $with = $this->api->request_with();
 
+            $date_filter = $this->apiRequestDtoFactory()->buildDateFilterDto();
+
             $where = null;
 
             // Date query param.
 
-            $date = request('date');
+            $date = $date_filter->date;
 
             if (!empty($date)) {
                 $where['DATE(start_datetime)'] = (new DateTime($date))->format('Y-m-d');
@@ -63,7 +66,7 @@ class Blocked_periods_api_v1 extends EA_Controller
 
             // From query param.
 
-            $from = request('from');
+            $from = $date_filter->from;
 
             if (!empty($from)) {
                 $where['DATE(start_datetime) >='] = (new DateTime($from))->format('Y-m-d');
@@ -71,7 +74,7 @@ class Blocked_periods_api_v1 extends EA_Controller
 
             // Till query param.
 
-            $till = request('till');
+            $till = $date_filter->till;
 
             if (!empty($till)) {
                 $where['DATE(end_datetime) <='] = (new DateTime($till))->format('Y-m-d');
@@ -143,7 +146,7 @@ class Blocked_periods_api_v1 extends EA_Controller
     public function store(): void
     {
         try {
-            $blocked_period = request();
+            $blocked_period = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->blocked_periods_model->api_decode($blocked_period);
 
@@ -183,7 +186,7 @@ class Blocked_periods_api_v1 extends EA_Controller
 
             $original_blocked_period = $occurrences[0];
 
-            $blocked_period = request();
+            $blocked_period = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->blocked_periods_model->api_decode($blocked_period, $original_blocked_period);
 
@@ -227,5 +230,26 @@ class Blocked_periods_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function apiRequestDtoFactory(): Api_request_dto_factory
+    {
+        if (
+            isset($this->api_request_dto_factory) &&
+            $this->api_request_dto_factory instanceof Api_request_dto_factory
+        ) {
+            return $this->api_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->api_request_dto_factory) || !$CI->api_request_dto_factory instanceof Api_request_dto_factory) {
+            $CI->load->library('api_request_dto_factory');
+        }
+
+        $this->api_request_dto_factory = $CI->api_request_dto_factory;
+
+        return $this->api_request_dto_factory;
     }
 }

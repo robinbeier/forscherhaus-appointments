@@ -26,6 +26,7 @@ class Unavailabilities_api_v1 extends EA_Controller
         parent::__construct();
 
         $this->load->library('api');
+        $this->load->library('api_request_dto_factory');
         $this->load->library('webhooks_client');
 
         $this->api->auth();
@@ -117,7 +118,7 @@ class Unavailabilities_api_v1 extends EA_Controller
     public function store(): void
     {
         try {
-            $unavailability = request();
+            $unavailability = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->unavailabilities_model->api_decode($unavailability);
 
@@ -157,7 +158,7 @@ class Unavailabilities_api_v1 extends EA_Controller
 
             $original_unavailability = $occurrences[0];
 
-            $unavailability = request();
+            $unavailability = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->unavailabilities_model->api_decode($unavailability, $original_unavailability);
 
@@ -201,5 +202,26 @@ class Unavailabilities_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function apiRequestDtoFactory(): Api_request_dto_factory
+    {
+        if (
+            isset($this->api_request_dto_factory) &&
+            $this->api_request_dto_factory instanceof Api_request_dto_factory
+        ) {
+            return $this->api_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->api_request_dto_factory) || !$CI->api_request_dto_factory instanceof Api_request_dto_factory) {
+            $CI->load->library('api_request_dto_factory');
+        }
+
+        $this->api_request_dto_factory = $CI->api_request_dto_factory;
+
+        return $this->api_request_dto_factory;
     }
 }

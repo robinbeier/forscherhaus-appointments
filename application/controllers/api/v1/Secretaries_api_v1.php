@@ -26,6 +26,7 @@ class Secretaries_api_v1 extends EA_Controller
         parent::__construct();
 
         $this->load->library('api');
+        $this->load->library('api_request_dto_factory');
         $this->load->library('webhooks_client');
 
         $this->api->auth();
@@ -111,7 +112,7 @@ class Secretaries_api_v1 extends EA_Controller
     public function store(): void
     {
         try {
-            $secretary = request();
+            $secretary = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->secretaries_model->api_decode($secretary);
 
@@ -159,7 +160,7 @@ class Secretaries_api_v1 extends EA_Controller
 
             $original_secretary = $occurrences[0];
 
-            $secretary = request();
+            $secretary = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->secretaries_model->api_decode($secretary, $original_secretary);
 
@@ -203,5 +204,26 @@ class Secretaries_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function apiRequestDtoFactory(): Api_request_dto_factory
+    {
+        if (
+            isset($this->api_request_dto_factory) &&
+            $this->api_request_dto_factory instanceof Api_request_dto_factory
+        ) {
+            return $this->api_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->api_request_dto_factory) || !$CI->api_request_dto_factory instanceof Api_request_dto_factory) {
+            $CI->load->library('api_request_dto_factory');
+        }
+
+        $this->api_request_dto_factory = $CI->api_request_dto_factory;
+
+        return $this->api_request_dto_factory;
     }
 }
