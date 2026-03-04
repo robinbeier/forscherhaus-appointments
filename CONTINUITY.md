@@ -43,7 +43,7 @@
     -   Validation update (2026-03-04): full `bash ./scripts/ci/pre_pr_full.sh` attempted twice on request; both runs exited non-zero before completion.
     -   Update (2026-03-04): `pre_pr_full.sh` now treats `phpstan:request-contracts:l2` as warn-only by default (parity with CI advisory rollout), with opt-in strict mode.
     -   Validation update (2026-03-04): full `bash ./scripts/ci/pre_pr_full.sh` re-run completed successfully (exit 0) with advisory L2 warning, and all downstream gates executed/passed.
-    -   Release prep update (2026-03-04): changes staged/committed on review branch `codex/sprint3-write-path-contracts-review` at `0dcf659d8a0a27e3f349f4873dc77a4b64da0448`.
+    -   Release prep update (2026-03-04): changes committed on review branch `codex/sprint3-write-path-contracts-review` (`0dcf659d8a0a27e3f349f4873dc77a4b64da0448`, `430b3a1d2f8ec95d0f1cd2626d4d947680ad7588`).
     -   Rollout mode target: Phase 1 warn-only (`continue-on-error: true`) for both new CI jobs.
 
 -   Done:
@@ -93,6 +93,7 @@
     -   Review packaging:
         -   Created branch `codex/sprint3-write-path-contracts-review`.
         -   Committed sprint changes for review: `0dcf659d8a0a27e3f349f4873dc77a4b64da0448` (`Build write-path contract CI platform`).
+        -   Committed continuity handoff update: `430b3a1d2f8ec95d0f1cd2626d4d947680ad7588` (`Update continuity review handoff state`).
 
 -   Now:
 
