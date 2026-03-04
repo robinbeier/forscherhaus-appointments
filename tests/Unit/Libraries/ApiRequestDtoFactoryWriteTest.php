@@ -31,6 +31,14 @@ class ApiRequestDtoFactoryWriteTest extends TestCase
         $this->assertSame([], $from_list->payload);
     }
 
+    public function testCreateEntityWritePayloadDtoSupportsObjectPayloads(): void
+    {
+        $payload = (object) ['name' => 'Service C', 'is_private' => false];
+        $dto = $this->factory->createEntityWritePayloadDto($payload);
+
+        $this->assertSame(['name' => 'Service C', 'is_private' => false], $dto->payload);
+    }
+
     public function testCreateDateFilterDtoNormalizesDateAndCompatFallbackValues(): void
     {
         $dto = $this->factory->createDateFilterDto('2026-03-20', 'next week', null);
