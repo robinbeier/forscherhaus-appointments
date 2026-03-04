@@ -906,7 +906,15 @@ function toPositiveInt(mixed $value, string $context): int
 
 function isContractMismatch(Throwable $error): bool
 {
-    return $error instanceof ContractAssertionException || $error instanceof GateAssertionException;
+    if ($error instanceof ContractAssertionException) {
+        return true;
+    }
+
+    if (!$error instanceof GateAssertionException) {
+        return false;
+    }
+
+    return !FlakeRetry::isTransientRuntimeError($error->getMessage());
 }
 
 /**

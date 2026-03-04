@@ -99,6 +99,8 @@ jobs:
             write_contract_booking:
               - 'application/controllers/Booking*.php'
               - 'application/views/pages/booking*.php'
+              - 'application/models/**'
+              - 'application/libraries/**'
               - 'application/libraries/Booking_request_dto_factory.php'
               - 'scripts/ci/booking_write_contract_smoke.php'
               - 'scripts/ci/lib/DeterministicFixtureFactory.php'
@@ -112,6 +114,8 @@ jobs:
               - '.github/workflows/ci.yml'
             write_contract_api:
               - 'application/controllers/api/**'
+              - 'application/models/**'
+              - 'application/libraries/**'
               - 'application/libraries/Api.php'
               - 'application/libraries/Api_request_dto_factory.php'
               - 'scripts/ci/api_openapi_write_contract_smoke.php'
