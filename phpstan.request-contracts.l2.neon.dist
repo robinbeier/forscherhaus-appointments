@@ -46,10 +46,12 @@ parameters:
         - phpstan/bootstrap.php
     scanFiles:
         - phpstan/stubs/codeigniter-functions.stub.php
-        - phpstan/stubs/request-dto-api.stub.php
+        - application/helpers/installation_helper.php
     scanDirectories:
         - system
         - application/core
+        - application/models
+        - application/libraries
     universalObjectCratesClasses:
         - CI_Controller
         - EA_Controller
