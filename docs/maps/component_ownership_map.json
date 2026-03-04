@@ -31,7 +31,8 @@
       "depends_on": [
         "integrations-sync",
         "people-services-admin",
-        "scheduling-backoffice"
+        "scheduling-backoffice",
+        "shared-core"
       ]
     },
     {
@@ -46,8 +47,7 @@
         "application/views/components/booking_",
         "assets/js/pages/booking.js",
         "application/libraries/Availability.php",
-        "application/libraries/Booking_request_dto_factory.php",
-        "application/libraries/Request_normalizer.php"
+        "application/libraries/Booking_request_dto_factory.php"
       ],
       "key_files": [
         "application/controllers/Booking.php",
@@ -55,7 +55,11 @@
         "assets/js/pages/booking.js"
       ],
       "depends_on": [
-        "settings-compliance"
+        "integrations-sync",
+        "people-services-admin",
+        "scheduling-backoffice",
+        "settings-compliance",
+        "shared-core"
       ]
     },
     {
@@ -77,7 +81,11 @@
         "application/views/pages/booking_confirmation.php"
       ],
       "depends_on": [
-        "booking-public"
+        "booking-public",
+        "integrations-sync",
+        "people-services-admin",
+        "scheduling-backoffice",
+        "shared-core"
       ]
     },
     {
@@ -113,7 +121,8 @@
       "depends_on": [
         "integrations-sync",
         "people-services-admin",
-        "settings-compliance"
+        "settings-compliance",
+        "shared-core"
       ]
     },
     {
@@ -130,7 +139,6 @@
         "application/libraries/Dashboard_heatmap.php",
         "application/libraries/Provider_utilization.php",
         "application/libraries/Dashboard_request_dto_factory.php",
-        "application/libraries/Request_normalizer.php",
         "application/views/pages/dashboard.php",
         "application/views/pages/dashboard_teacher.php",
         "assets/js/pages/dashboard.js",
@@ -143,7 +151,8 @@
       ],
       "depends_on": [
         "scheduling-backoffice",
-        "people-services-admin"
+        "people-services-admin",
+        "shared-core"
       ]
     },
     {
@@ -205,6 +214,8 @@
         "application/controllers/Legal_settings.php",
         "application/controllers/Consents.php",
         "application/controllers/Privacy.php",
+        "application/models/Settings_model.php",
+        "application/models/Consents_model.php",
         "application/views/pages/api_settings.php",
         "application/views/pages/booking_settings.php",
         "application/views/pages/business_settings.php",
@@ -266,7 +277,8 @@
         "auth-session",
         "people-services-admin",
         "scheduling-backoffice",
-        "settings-compliance"
+        "settings-compliance",
+        "shared-core"
       ]
     },
     {
@@ -279,7 +291,6 @@
         "application/controllers/api/v1/",
         "application/libraries/Api.php",
         "application/libraries/Api_request_dto_factory.php",
-        "application/libraries/Request_normalizer.php",
         "openapi.yml",
         "docs/rest-api.md"
       ],
@@ -292,8 +303,29 @@
         "auth-session",
         "people-services-admin",
         "scheduling-backoffice",
-        "settings-compliance"
+        "settings-compliance",
+        "shared-core"
       ]
+    },
+    {
+      "component_id": "shared-core",
+      "role": "Shared Core",
+      "summary": "Cross-cutting reusable libraries/models consumed by multiple business components.",
+      "primary_handle": "@robinbeier",
+      "secondary_handle": "@robinbeier",
+      "folder_prefixes": [
+        "application/libraries/Accounts.php",
+        "application/libraries/Notifications.php",
+        "application/libraries/Request_normalizer.php",
+        "application/libraries/Timezones.php",
+        "application/models/Roles_model.php"
+      ],
+      "key_files": [
+        "application/libraries/Request_normalizer.php",
+        "application/libraries/Accounts.php",
+        "application/libraries/Notifications.php"
+      ],
+      "depends_on": []
     },
     {
       "component_id": "platform-quality-tooling",

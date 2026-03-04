@@ -59,4 +59,18 @@ class CalendarRequestDtoFactoryTest extends TestCase
         $this->assertSame('appointments', $dto->filterType);
         $this->assertTrue($dto->isAll);
     }
+
+    public function testCreateViewRequestDtoFallsBackToDefaultView(): void
+    {
+        $dto = $this->factory->createViewRequestDto('', 'week');
+
+        $this->assertSame('week', $dto->calendarView);
+    }
+
+    public function testCreateEntityIdRequestDtoNormalizesPositiveInteger(): void
+    {
+        $dto = $this->factory->createEntityIdRequestDto('13');
+
+        $this->assertSame(13, $dto->id);
+    }
 }

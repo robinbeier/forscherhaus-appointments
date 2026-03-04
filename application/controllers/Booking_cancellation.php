@@ -55,7 +55,8 @@ class Booking_cancellation extends EA_Controller
                 abort(403);
             }
 
-            $cancellation_reason = request('cancellation_reason');
+            $request_dto = $this->bookingRequestDtoFactory()->buildCancellationRequest();
+            $cancellation_reason = $request_dto->cancellationReason;
 
             if ($this->input->method() !== 'post' || empty($cancellation_reason)) {
                 abort(403, 'Forbidden');
@@ -127,5 +128,29 @@ class Booking_cancellation extends EA_Controller
         ]);
 
         $this->load->view('pages/booking_cancellation');
+    }
+
+    protected function bookingRequestDtoFactory(): Booking_request_dto_factory
+    {
+        if (
+            isset($this->booking_request_dto_factory) &&
+            $this->booking_request_dto_factory instanceof Booking_request_dto_factory
+        ) {
+            return $this->booking_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->booking_request_dto_factory) ||
+            !$CI->booking_request_dto_factory instanceof Booking_request_dto_factory
+        ) {
+            $CI->load->library('booking_request_dto_factory');
+        }
+
+        $this->booking_request_dto_factory = $CI->booking_request_dto_factory;
+
+        return $this->booking_request_dto_factory;
     }
 }
