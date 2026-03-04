@@ -95,7 +95,8 @@ class Business_settings extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $settings = request('business_settings', []);
+            $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('business_settings');
+            $settings = $settings_request->settings;
 
             foreach ($settings as $setting) {
                 $existing_setting = $this->settings_model
@@ -131,7 +132,16 @@ class Business_settings extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $working_plan = request('working_plan');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('working_plan');
+            $working_plan_payload = $request_dto->payload;
+
+            krsort($working_plan_payload);
+
+            $working_plan = json_encode(empty($working_plan_payload) ? new stdClass() : $working_plan_payload);
+
+            if (!is_string($working_plan)) {
+                throw new RuntimeException('Could not encode global working plan.');
+            }
 
             $providers = $this->providers_model->get();
 
@@ -143,5 +153,29 @@ class Business_settings extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
     }
 }
