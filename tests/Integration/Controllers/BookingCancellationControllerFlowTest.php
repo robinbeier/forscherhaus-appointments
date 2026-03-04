@@ -9,6 +9,12 @@ use Tests\TestCase;
 
 require_once APPPATH . 'controllers/Booking_cancellation.php';
 
+/**
+ * Isolate controller integration tests from Unit test global state during coverage runs.
+ *
+ * @runTestsInSeparateProcesses
+ * @preserveGlobalState disabled
+ */
 class BookingCancellationControllerFlowTest extends TestCase
 {
     private BookingFlowFixtures $fixtures;
