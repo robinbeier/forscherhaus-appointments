@@ -287,7 +287,10 @@ function runApiWriteContractCheck(
     $validator->getOperation($method, $openapiPath);
     $validator->assertOperationHasResponse($method, $openapiPath, $expectedStatus);
 
-    if ($authMode === 'basic') {
+    $requiresAuthContract =
+        $authMode === 'basic' || ($check['require_www_authenticate'] ?? false) === true || $expectedStatus === 401;
+
+    if ($requiresAuthContract) {
         $validator->assertOperationSupportsKnownAuth($method, $openapiPath);
     }
 

@@ -40,6 +40,8 @@
 -   State:
 
     -   Status: Sprint-Plan #3 implementation completed in working tree; local validation completed (unit + both write-smoke runs).
+    -   Review-fix update (2026-03-04): API write-contract runner now enforces OpenAPI auth-contract assertion not only for `auth=basic`, but also for unauthorized-guard checks (`require_www_authenticate=true` or `expected_status=401`).
+    -   Validation update (2026-03-04): `php -l scripts/ci/api_openapi_write_contract_smoke.php`, `docker compose run --rm -e APP_ENV=testing php-fpm php vendor/bin/phpunit tests/Unit/Scripts`, and `docker compose exec -T php-fpm php scripts/ci/api_openapi_write_contract_smoke.php ...` passed after the auth-contract fix.
     -   Validation update (2026-03-04): full `bash ./scripts/ci/pre_pr_full.sh` attempted twice on request; both runs exited non-zero before completion.
     -   Update (2026-03-04): `pre_pr_full.sh` now treats `phpstan:request-contracts:l2` as warn-only by default (parity with CI advisory rollout), with opt-in strict mode.
     -   Validation update (2026-03-04): full `bash ./scripts/ci/pre_pr_full.sh` re-run completed successfully (exit 0) with advisory L2 warning, and all downstream gates executed/passed.
@@ -90,6 +92,9 @@
         -   `docker compose up -d mysql` then `bash ./scripts/ci/pre_pr_full.sh` attempt 2 passed quick gate + request-dto + request-contract tests, then failed at `composer phpstan:request-contracts:l2` (raw log: `storage/logs/ci/phpstan-request-contracts-l2.raw`, many unknown-class findings across legacy controllers).
         -   Post-change verification: `bash -n scripts/ci/pre_pr_full.sh` passed.
         -   Post-change full run: `bash ./scripts/ci/pre_pr_full.sh` continued after advisory `phpstan:request-contracts:l2` warning and passed all remaining gates (architecture boundaries + integration stack + API read smoke + booking write smoke + API write smoke + booking controller flows + dashboard integration smoke).
+        -   Review-fix verification: `php -l scripts/ci/api_openapi_write_contract_smoke.php` passed.
+        -   Review-fix verification: `docker compose run --rm -e APP_ENV=testing php-fpm php vendor/bin/phpunit tests/Unit/Scripts` passed (`44 tests`, `133 assertions`).
+        -   Review-fix verification: `docker compose exec -T php-fpm php scripts/ci/api_openapi_write_contract_smoke.php --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml --username=administrator --password=administrator --retry-count=1 --booking-search-days=14` passed (`6/6` checks).
     -   Review packaging:
         -   Created branch `codex/sprint3-write-path-contracts-review`.
         -   Committed sprint changes for review: `0dcf659d8a0a27e3f349f4873dc77a4b64da0448` (`Build write-path contract CI platform`).
