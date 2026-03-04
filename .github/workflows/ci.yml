@@ -234,10 +234,7 @@ jobs:
         run: composer phpstan:request-contracts:l1
       - name: Request Contracts Unit Tests
         run: composer test:request-contracts
-      # Temporary rollout mode for PR1/Slice rollout: keep adoption signal visible but non-blocking.
-      # Revert to strict (remove continue-on-error) before final rollout completion/blocking switch.
       - name: Request Contract Adoption Check
-        continue-on-error: true
         run: php scripts/ci/check_request_contract_adoption.php
       - name: PHPStan Request Contracts L2 (advisory)
         if: always()
