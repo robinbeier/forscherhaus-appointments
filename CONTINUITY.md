@@ -40,6 +40,9 @@
         -   `php scripts/ci/check_request_contract_adoption.php` => PASS
         -   `composer phpstan:request-contracts:l1` => PASS
         -   `composer test:request-contracts` => PASS (52 Tests, 143 Assertions)
+    -   PR #94 ist offen (`https://github.com/robinbeier/forscherhaus-appointments/pull/94`, head `7011becd`), Branch wurde auf einen einzelnen Slice-4-Commit bereinigt (unbeabsichtigter Zusatz-Commit entfernt per Rebase + force-with-lease).
+    -   CI auf PR #94: `architecture-boundaries` failte wegen bestehender `api-v1 -> integrations-sync` Abhaengigkeiten in beruehrten API-v1-Controllern.
+    -   Lokaler Fix vorbereitet: `docs/maps/component_ownership_map.json` ergaenzt `api-v1` `depends_on` um `integrations-sync`; lokaler Check `python3 scripts/ci/check_component_boundaries.py --diff-range "$(git merge-base HEAD origin/main)...HEAD"` ist danach PASS.
 
 -   Done:
 
@@ -53,14 +56,14 @@
         -   API v1 `store`/`update`-Methoden im Scope konsumieren `ApiEntityWritePayloadDto` statt direktem `request()`.
         -   `Blocked_periods_api_v1::index` nutzt `ApiDateFilterDto` fuer `date/from/till`.
         -   Fehlende `api_request_dto_factory`-Wiring + `apiRequestDtoFactory()`-Helper in betroffenen API-v1-Controllern ergaenzt.
+    -   Slice-4-PR erstellt: #94 (ready for review) und Watch/Babysitting gestartet.
 
 -   Now:
 
-    -   Slice-4-Aenderungen (ohne `.claude/napkin.md`) committen/pushen und Ready-for-Review-PR oeffnen.
+    -   Boundary-Fix committen/pushen und PR #94 weiter babysitten.
 
 -   Next:
 
-    -   Slice-4-PR ready-for-review oeffnen.
     -   PR via `$babysit-pr` bis Mergeability beobachten.
 
 -   Open questions (UNCONFIRMED if needed):
