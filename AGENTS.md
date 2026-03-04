@@ -149,11 +149,11 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 30 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: architecture-boundaries rollout streak check (warn-only -> blocking)
+# Optional: architecture-boundaries status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="architecture-boundaries") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+# Erwartung: ausgegebene Eintraege sind SUCCESS
 
 # Optional: API OpenAPI contract status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
