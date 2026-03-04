@@ -78,7 +78,10 @@ class Google_analytics_settings extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $settings = request('google_analytics_settings', []);
+            $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto(
+                'google_analytics_settings',
+            );
+            $settings = $settings_request->settings;
 
             foreach ($settings as $setting) {
                 $existing_setting = $this->settings_model
@@ -98,5 +101,29 @@ class Google_analytics_settings extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
     }
 }

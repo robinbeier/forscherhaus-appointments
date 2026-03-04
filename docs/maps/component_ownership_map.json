@@ -227,7 +227,9 @@
       ],
       "depends_on": [
         "auth-session",
-        "people-services-admin"
+        "integrations-sync",
+        "people-services-admin",
+        "scheduling-backoffice"
       ]
     },
     {

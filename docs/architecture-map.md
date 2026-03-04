@@ -14,7 +14,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance | 17 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin | 12 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance | 24 | 3 |
-| `settings-compliance` | Settings & Compliance | auth-session, people-services-admin | 23 | 3 |
+| `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice | 23 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 6 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | dashboard-exports, booking-public, api-v1 | 5 | 3 |
@@ -196,7 +196,9 @@ Business, legal, analytics and API settings including privacy/consent controls.
 
 Dependencies:
 - `auth-session`
+- `integrations-sync`
 - `people-services-admin`
+- `scheduling-backoffice`
 
 Path prefixes:
 - `application/controllers/Api_settings.php`
