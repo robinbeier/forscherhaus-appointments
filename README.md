@@ -158,8 +158,24 @@ docker compose run --rm php-fpm composer test:request-contracts
 docker compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
 ```
 
-CI note: pull requests to `main` run both `build-test` and `integration-smoke`, and the integration smoke check is blocking.
-CI note: `integration-smoke` now covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
+Recommended local pre-PR gates:
+
+```bash
+# fast gate (used by managed pre-push hook)
+./scripts/ci/pre_pr_quick.sh
+
+# full CI-parity gate before "Ready for review"
+./scripts/ci/pre_pr_full.sh
+
+# optional full gate + coverage delta
+PRE_PR_RUN_COVERAGE=1 ./scripts/ci/pre_pr_full.sh
+```
+
+Hook note: `./scripts/setup-worktree.sh` installs a managed `.git/hooks/pre-push` hook that runs `pre_pr_quick.sh`.
+Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push ...` to run the full gate at push time.
+
+CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
+CI note: `integration-smoke` covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
@@ -168,7 +184,7 @@ CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.
 CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
-CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
+CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs). On pull requests it runs only when the `ci/full` label is present.
 CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
 Local note: when running Deptrac directly on newer host PHP runtimes (for example PHP 8.5), vendor-level deprecation output can appear; prefer the dockerized command above for CI-parity output.
@@ -189,5 +205,6 @@ Upstream merges are done selectively and scheduled according to release risk.
 
 ## License
 
-Code licensed under [GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html).  
-See [LICENSE](LICENSE) for details.
+Code licensed under [GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html).
+Upstream project content is published under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/); keep attribution notices when redistributing modified content/docs.
+See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.

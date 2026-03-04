@@ -7,12 +7,94 @@ on:
   pull_request:
     branches:
       - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+      - labeled
+      - unlabeled
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      deep_required: ${{ steps.filter.outputs.deep_required }}
+      api_contract: ${{ steps.filter.outputs.api_contract }}
+      booking_flows: ${{ steps.filter.outputs.booking_flows }}
+      integration_smoke: ${{ steps.filter.outputs.integration_smoke }}
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect relevant file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            deep_required:
+              - 'application/**'
+              - 'config/**'
+              - 'database/**'
+              - 'docker/**'
+              - 'scripts/ci/**'
+              - 'scripts/release-gate/**'
+              - 'tests/**'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'phpunit*.xml'
+              - 'index.php'
+              - 'openapi.yml'
+              - '.github/workflows/ci.yml'
+            api_contract:
+              - 'application/controllers/api/**'
+              - 'application/libraries/Api.php'
+              - 'application/models/**'
+              - 'config/**'
+              - 'docker/**'
+              - 'scripts/ci/api_openapi_contract_smoke.php'
+              - 'scripts/ci/config/api_openapi_contract_matrix.php'
+              - 'openapi.yml'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'index.php'
+              - '.github/workflows/ci.yml'
+            booking_flows:
+              - 'application/controllers/Booking*.php'
+              - 'application/controllers/Appointments.php'
+              - 'application/controllers/Calendar.php'
+              - 'application/controllers/Customers.php'
+              - 'application/models/**'
+              - 'application/libraries/**'
+              - 'application/helpers/**'
+              - 'application/config/**'
+              - 'database/**'
+              - 'scripts/ci/**'
+              - 'tests/Integration/Controllers/Booking*'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'index.php'
+              - '.github/workflows/ci.yml'
+            integration_smoke:
+              - 'application/**'
+              - 'config/**'
+              - 'database/**'
+              - 'docker/**'
+              - 'scripts/ci/dashboard_integration_smoke.php'
+              - 'scripts/release-gate/**'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'index.php'
+              - 'openapi.yml'
+              - '.github/workflows/ci.yml'
+
   build-test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -118,6 +200,14 @@ jobs:
         run: php scripts/ci/check_request_dto_adoption.php
 
   typed-request-contracts:
+    needs:
+      - changes
+    if: >
+      needs.changes.outputs.deep_required == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 25
     continue-on-error: true
@@ -169,6 +259,19 @@ jobs:
           cat storage/logs/ci/phpstan-request-contracts-l2.raw || true
 
   coverage-delta:
+    needs:
+      - changes
+    # Keep push/main signal, but only run on PR when explicitly requested with label `ci/full`.
+    if: >
+      needs.changes.outputs.deep_required == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.draft == false &&
+          contains(github.event.pull_request.labels.*.name, 'ci/full')
+        )
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
@@ -319,6 +422,14 @@ jobs:
           cat storage/logs/ci/component-boundary-latest.json || true
 
   api-contract-openapi:
+    needs:
+      - changes
+    if: >
+      needs.changes.outputs.api_contract == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -393,6 +504,14 @@ jobs:
         run: docker compose down -v --remove-orphans
 
   booking-controller-flows:
+    needs:
+      - changes
+    if: >
+      needs.changes.outputs.booking_flows == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
@@ -463,6 +582,14 @@ jobs:
         run: docker compose down -v --remove-orphans
 
   integration-smoke:
+    needs:
+      - changes
+    if: >
+      needs.changes.outputs.integration_smoke == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

@@ -44,4 +44,7 @@ fi
 # Populate assets/vendor from node_modules (needed by gulp workflows).
 npx gulp vendor
 
+# Install managed git hooks for pre-push CI preflight checks.
+./scripts/install-git-hooks.sh
+
 echo "[setup] Worktree setup completed."

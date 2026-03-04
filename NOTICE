@@ -1,0 +1,13 @@
+Forscherhaus Appointments is a maintained fork of Easy!Appointments.
+
+Upstream project:
+- https://github.com/alextselegidis/easyappointments
+
+Licensing summary:
+- Source code in this repository is distributed under GPL-3.0.
+- Upstream project content/documentation is distributed under CC BY 3.0.
+
+Attribution and redistribution notes:
+- Keep existing copyright/license headers in source files.
+- Keep a copy of GPL-3.0 (see LICENSE) when redistributing.
+- Keep attribution for upstream content/docs under CC BY 3.0 when redistributing modified content.
