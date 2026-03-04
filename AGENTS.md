@@ -149,11 +149,11 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 30 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: architecture-boundaries rollout streak check (warn-only -> blocking)
+# Optional: architecture-boundaries status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="architecture-boundaries") | .conclusion'
 done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+# Erwartung: ausgegebene Eintraege sind SUCCESS
 
 # Optional: API OpenAPI contract status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
@@ -161,16 +161,16 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: write-contract-booking rollout streak check (warn-only -> blocking)
+# Optional: write-contract-booking rollout streak check (warn-only -> blocking; executed-only)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="write-contract-booking") | .conclusion'
-done | awk '$1 != "cancelled"' | head -n 7
+done | grep -E '^(success|failure)$' | head -n 7
 # Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
-# Optional: write-contract-api rollout streak check (warn-only -> blocking)
+# Optional: write-contract-api rollout streak check (warn-only -> blocking; executed-only)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="write-contract-api") | .conclusion'
-done | awk '$1 != "cancelled"' | head -n 7
+done | grep -E '^(success|failure)$' | head -n 7
 # Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
 # Optional: Booking controller flow status check (blocking)
@@ -191,11 +191,11 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
-# Optional: coverage-delta rollout streak check (requires gh + jq)
+# Optional: coverage-delta status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="coverage-delta") | .conclusion'
-done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+done | grep -E '^(success|failure)$' | head -n 10
+# Erwartung: bei relevanten PR-Aenderungen sind aktuelle ausgefuehrte Eintraege SUCCESS
 
 # Optional: Fokuslauf fuer Healthz-Checks
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter HealthzControllerTest'
@@ -234,20 +234,20 @@ Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/
 Hinweis: Der CI-Job `phpstan-application` ist blocking.
 Hinweis: Der CI-Job `js-lint-changed` ist blocking.
 Hinweis: Der CI-Job `architecture-ownership-map` ist blocking.
-Hinweis: Der CI-Job `architecture-boundaries` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `architecture-boundaries` ist blocking.
 Hinweis: Der CI-Job `api-contract-openapi` ist blocking.
-Hinweis: Der CI-Job `write-contract-booking` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `write-contract-api` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `write-contract-booking` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden ausgefuehrten grueneren PR-Laeufen auf blocking umgestellt (nur `success|failure` zaehlt).
+Hinweis: Der CI-Job `write-contract-api` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden ausgefuehrten grueneren PR-Laeufen auf blocking umgestellt (nur `success|failure` zaehlt).
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `coverage-delta` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `coverage-delta` ist blocking und laeuft auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
 Hinweis: Das Request Contracts Gate schreibt standardmaessig nach `storage/logs/ci/request-contract-adoption-latest.json` und `storage/logs/ci/phpstan-request-contracts-l2.raw`.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der Booking Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/booking-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der API OpenAPI Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
-Hinweis: Der Unit Coverage Report schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
+Hinweis: Der Coverage Report (`composer test:coverage:unit`, inkl. Unit + Booking-Flow-Integration) schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `write-contract-booking` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.

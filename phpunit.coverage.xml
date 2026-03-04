@@ -6,13 +6,19 @@
     cacheResult="false"
 >
     <testsuites>
-        <testsuite name="Unit">
+        <testsuite name="Coverage">
             <directory suffix="Test.php">./tests/Unit</directory>
+            <file>./tests/Integration/Controllers/BookingControllerFlowTest.php</file>
+            <file>./tests/Integration/Controllers/BookingCancellationControllerFlowTest.php</file>
         </testsuite>
     </testsuites>
     <coverage processUncoveredFiles="false">
         <include>
-            <directory suffix=".php">./application</directory>
+            <directory suffix=".php">./application/controllers</directory>
+            <directory suffix=".php">./application/libraries</directory>
+            <directory suffix=".php">./application/models</directory>
+            <directory suffix=".php">./application/helpers</directory>
+            <directory suffix=".php">./application/core</directory>
         </include>
     </coverage>
     <php>

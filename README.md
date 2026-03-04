@@ -196,16 +196,16 @@ Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push .
 CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
 CI note: `integration-smoke` covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
-CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
-CI note: the `write-contract-api` check validates API write-path OpenAPI contracts and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
+CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is currently warn-only during rollout (planned blocking switch after 7 executed green PR runs, counting only `success|failure` conclusions).
+CI note: the `write-contract-api` check validates API write-path OpenAPI contracts and is currently warn-only during rollout (planned blocking switch after 7 executed green PR runs, counting only `success|failure` conclusions).
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
 CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
 CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.
-CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs).
-CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs). On pull requests it runs only when the `ci/full` label is present.
+CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is blocking.
+CI note: the `coverage-delta` check validates Clover line coverage against the in-repo baseline/delta policy and is blocking. The coverage suite includes Unit tests plus booking flow integration tests. It runs on pushes to `main` and non-draft PRs when deep checks are relevant.
 CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
 CI note: `write-contract-booking` artifacts are written to `storage/logs/ci/booking-write-contract-<UTC>.json`.
