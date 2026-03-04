@@ -8,15 +8,16 @@ This map defines component boundaries, path ownership scope, and dependency edge
 
 | Component | Role | Depends On | Path Prefixes | Key Files |
 |---|---|---|---:|---:|
-| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice | 13 | 3 |
-| `booking-public` | Public Booking | settings-compliance | 7 | 3 |
-| `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance | 17 | 3 |
-| `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin | 12 | 3 |
+| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
+| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 3 |
+| `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
+| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 17 | 3 |
+| `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance | 24 | 3 |
-| `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice | 23 | 3 |
-| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 17 | 3 |
-| `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 6 | 3 |
+| `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice | 25 | 3 |
+| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
+| `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
+| `shared-core` | Shared Core | None | 5 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | dashboard-exports, booking-public, api-v1 | 5 | 3 |
 
 ## Component Details
@@ -29,6 +30,7 @@ Dependencies:
 - `integrations-sync`
 - `people-services-admin`
 - `scheduling-backoffice`
+- `shared-core`
 
 Path prefixes:
 - `application/controllers/Login.php`
@@ -55,7 +57,11 @@ Key files:
 Public booking wizard read/write path up to booking completion handoff.
 
 Dependencies:
+- `integrations-sync`
+- `people-services-admin`
+- `scheduling-backoffice`
 - `settings-compliance`
+- `shared-core`
 
 Path prefixes:
 - `application/controllers/Booking.php`
@@ -64,7 +70,6 @@ Path prefixes:
 - `assets/js/pages/booking.js`
 - `application/libraries/Availability.php`
 - `application/libraries/Booking_request_dto_factory.php`
-- `application/libraries/Request_normalizer.php`
 
 Key files:
 - `application/controllers/Booking.php`
@@ -77,6 +82,10 @@ Post-booking confirmation and cancellation customer flows.
 
 Dependencies:
 - `booking-public`
+- `integrations-sync`
+- `people-services-admin`
+- `scheduling-backoffice`
+- `shared-core`
 
 Path prefixes:
 - `application/controllers/Booking_confirmation.php`
@@ -98,6 +107,7 @@ Dependencies:
 - `integrations-sync`
 - `people-services-admin`
 - `settings-compliance`
+- `shared-core`
 
 Path prefixes:
 - `application/controllers/Calendar.php`
@@ -130,6 +140,7 @@ Operational dashboards, metrics aggregation and export/report output paths.
 Dependencies:
 - `scheduling-backoffice`
 - `people-services-admin`
+- `shared-core`
 
 Path prefixes:
 - `application/controllers/Dashboard.php`
@@ -139,7 +150,6 @@ Path prefixes:
 - `application/libraries/Dashboard_heatmap.php`
 - `application/libraries/Provider_utilization.php`
 - `application/libraries/Dashboard_request_dto_factory.php`
-- `application/libraries/Request_normalizer.php`
 - `application/views/pages/dashboard.php`
 - `application/views/pages/dashboard_teacher.php`
 - `assets/js/pages/dashboard.js`
@@ -210,6 +220,8 @@ Path prefixes:
 - `application/controllers/Legal_settings.php`
 - `application/controllers/Consents.php`
 - `application/controllers/Privacy.php`
+- `application/models/Settings_model.php`
+- `application/models/Consents_model.php`
 - `application/views/pages/api_settings.php`
 - `application/views/pages/booking_settings.php`
 - `application/views/pages/business_settings.php`
@@ -239,6 +251,7 @@ Dependencies:
 - `people-services-admin`
 - `scheduling-backoffice`
 - `settings-compliance`
+- `shared-core`
 
 Path prefixes:
 - `application/controllers/Google.php`
@@ -273,12 +286,12 @@ Dependencies:
 - `people-services-admin`
 - `scheduling-backoffice`
 - `settings-compliance`
+- `shared-core`
 
 Path prefixes:
 - `application/controllers/api/v1/`
 - `application/libraries/Api.php`
 - `application/libraries/Api_request_dto_factory.php`
-- `application/libraries/Request_normalizer.php`
 - `openapi.yml`
 - `docs/rest-api.md`
 
@@ -286,6 +299,25 @@ Key files:
 - `application/controllers/api/v1/Appointments_api_v1.php`
 - `application/controllers/api/v1/Availabilities_api_v1.php`
 - `openapi.yml`
+
+### `shared-core` - Shared Core
+
+Cross-cutting reusable libraries/models consumed by multiple business components.
+
+Dependencies:
+- None
+
+Path prefixes:
+- `application/libraries/Accounts.php`
+- `application/libraries/Notifications.php`
+- `application/libraries/Request_normalizer.php`
+- `application/libraries/Timezones.php`
+- `application/models/Roles_model.php`
+
+Key files:
+- `application/libraries/Request_normalizer.php`
+- `application/libraries/Accounts.php`
+- `application/libraries/Notifications.php`
 
 ### `platform-quality-tooling` - Platform, CI, Release Gates
 

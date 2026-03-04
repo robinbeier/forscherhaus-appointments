@@ -17,6 +17,7 @@ Ownership model: Role + Handles (primary/secondary).
 | `settings-compliance` | Settings & Compliance | @robinbeier | @robinbeier |
 | `integrations-sync` | Integrations & Sync | @robinbeier | @robinbeier |
 | `api-v1` | REST API v1 | @robinbeier | @robinbeier |
+| `shared-core` | Shared Core | @robinbeier | @robinbeier |
 | `platform-quality-tooling` | Platform, CI, Release Gates | @robinbeier | @robinbeier |
 
 ## Ownership Scope by Component
@@ -61,7 +62,6 @@ Ownership model: Role + Handles (primary/secondary).
   - `assets/js/pages/booking.js`
   - `application/libraries/Availability.php`
   - `application/libraries/Booking_request_dto_factory.php`
-  - `application/libraries/Request_normalizer.php`
 
 ### `booking-lifecycle`
 
@@ -124,7 +124,6 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/libraries/Dashboard_heatmap.php`
   - `application/libraries/Provider_utilization.php`
   - `application/libraries/Dashboard_request_dto_factory.php`
-  - `application/libraries/Request_normalizer.php`
   - `application/views/pages/dashboard.php`
   - `application/views/pages/dashboard_teacher.php`
   - `assets/js/pages/dashboard.js`
@@ -184,6 +183,8 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/controllers/Legal_settings.php`
   - `application/controllers/Consents.php`
   - `application/controllers/Privacy.php`
+  - `application/models/Settings_model.php`
+  - `application/models/Consents_model.php`
   - `application/views/pages/api_settings.php`
   - `application/views/pages/booking_settings.php`
   - `application/views/pages/business_settings.php`
@@ -240,9 +241,24 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/controllers/api/v1/`
   - `application/libraries/Api.php`
   - `application/libraries/Api_request_dto_factory.php`
-  - `application/libraries/Request_normalizer.php`
   - `openapi.yml`
   - `docs/rest-api.md`
+
+### `shared-core`
+
+- Role: Shared Core
+- Primary: @robinbeier
+- Secondary: @robinbeier
+- Key files:
+  - `application/libraries/Request_normalizer.php`
+  - `application/libraries/Accounts.php`
+  - `application/libraries/Notifications.php`
+- Path prefixes:
+  - `application/libraries/Accounts.php`
+  - `application/libraries/Notifications.php`
+  - `application/libraries/Request_normalizer.php`
+  - `application/libraries/Timezones.php`
+  - `application/models/Roles_model.php`
 
 ### `platform-quality-tooling`
 

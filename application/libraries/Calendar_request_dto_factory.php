@@ -89,6 +89,26 @@ final class CalendarFilterRequestDto
 }
 
 /**
+ * Typed calendar view selection request DTO.
+ */
+final class CalendarViewRequestDto
+{
+    public function __construct(public readonly ?string $calendarView)
+    {
+    }
+}
+
+/**
+ * Typed calendar entity id request DTO.
+ */
+final class CalendarEntityIdRequestDto
+{
+    public function __construct(public readonly ?int $id)
+    {
+    }
+}
+
+/**
  * Calendar request DTO factory.
  *
  * @package Libraries
@@ -155,6 +175,16 @@ class Calendar_request_dto_factory
         return $this->createFilterRequestDto(request($record_id_key), request($filter_type_key), request($is_all_key));
     }
 
+    public function buildViewRequestDto(?string $default_view = null): CalendarViewRequestDto
+    {
+        return $this->createViewRequestDto(request('view', $default_view), $default_view);
+    }
+
+    public function buildEntityIdRequestDto(string $key): CalendarEntityIdRequestDto
+    {
+        return $this->createEntityIdRequestDto(request($key));
+    }
+
     public function createSaveAppointmentRequestDto(
         mixed $customer_data,
         mixed $appointment_data,
@@ -218,6 +248,18 @@ class Calendar_request_dto_factory
             $this->request_normalizer->normalizeString($filter_type, null, true),
             $this->request_normalizer->normalizeBool($is_all, false),
         );
+    }
+
+    public function createViewRequestDto(mixed $calendar_view, ?string $default_view = null): CalendarViewRequestDto
+    {
+        return new CalendarViewRequestDto(
+            $this->request_normalizer->normalizeString($calendar_view, $default_view, false),
+        );
+    }
+
+    public function createEntityIdRequestDto(mixed $id): CalendarEntityIdRequestDto
+    {
+        return new CalendarEntityIdRequestDto($this->request_normalizer->normalizePositiveInt($id, null));
     }
 
     /**

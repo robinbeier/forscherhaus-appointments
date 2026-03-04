@@ -174,7 +174,9 @@ class Booking extends EA_Controller
         $display_login_button = setting('display_login_button');
         $display_delete_personal_information = setting('display_delete_personal_information');
         $book_advance_timeout = setting('book_advance_timeout');
-        $theme = request('theme', setting('theme', 'default'));
+        $default_theme = setting('theme', 'default');
+        $theme_request = $this->bookingRequestDtoFactory()->buildThemeRequest($default_theme);
+        $theme = $theme_request->theme;
 
         if (empty($theme) || !file_exists(__DIR__ . '/../../assets/css/themes/' . $theme . '.min.css')) {
             $theme = 'default';

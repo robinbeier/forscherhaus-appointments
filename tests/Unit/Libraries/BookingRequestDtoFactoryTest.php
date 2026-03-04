@@ -70,4 +70,18 @@ class BookingRequestDtoFactoryTest extends TestCase
         $this->assertFalse($dto->manageMode);
         $this->assertSame('next friday', $dto->selectedDate);
     }
+
+    public function testThemeDtoUsesFallbackWhenThemeIsEmpty(): void
+    {
+        $dto = $this->factory->fromThemePayload('   ', 'default');
+
+        $this->assertSame('default', $dto->theme);
+    }
+
+    public function testCancellationDtoPreservesRawCompatibilityValue(): void
+    {
+        $dto = $this->factory->fromCancellationPayload('  keep spaces  ');
+
+        $this->assertSame('  keep spaces  ', $dto->cancellationReason);
+    }
 }

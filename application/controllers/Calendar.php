@@ -170,7 +170,10 @@ class Calendar extends EA_Controller
 
         $available_services = $this->services_model->get_available_services();
 
-        $calendar_view = request('view', $user['settings']['calendar_view']);
+        $calendar_view_request = $this->calendarRequestDtoFactory()->buildViewRequestDto(
+            $user['settings']['calendar_view'],
+        );
+        $calendar_view = $calendar_view_request->calendarView;
 
         $appointment_status_options = setting('appointment_status_options');
 
@@ -226,9 +229,9 @@ class Calendar extends EA_Controller
     public function save_appointment(): void
     {
         try {
-            $customer_data = request('customer_data');
-
-            $appointment_data = request('appointment_data');
+            $request_dto = $this->calendarRequestDtoFactory()->buildSaveAppointmentRequestDto();
+            $customer_data = $request_dto->customerData;
+            $appointment_data = $request_dto->appointmentData;
 
             $this->check_event_permissions((int) $appointment_data['id_users_provider']);
 
@@ -355,8 +358,9 @@ class Calendar extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $appointment_id = request('appointment_id');
-            $cancellation_reason = (string) request('cancellation_reason');
+            $request_dto = $this->calendarRequestDtoFactory()->buildDeleteAppointmentRequestDto();
+            $appointment_id = $request_dto->appointmentId;
+            $cancellation_reason = (string) ($request_dto->cancellationReason ?? '');
 
             if (empty($appointment_id)) {
                 throw new InvalidArgumentException('No appointment id provided.');
@@ -414,7 +418,8 @@ class Calendar extends EA_Controller
     {
         try {
             // Check privileges
-            $unavailability = request('unavailability');
+            $request_dto = $this->calendarRequestDtoFactory()->buildUnavailabilityRequestDto();
+            $unavailability = $request_dto->unavailability;
 
             $required_permissions = !isset($unavailability['id'])
                 ? can('add', PRIV_APPOINTMENTS)
@@ -457,7 +462,8 @@ class Calendar extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $unavailability_id = request('unavailability_id');
+            $request_dto = $this->calendarRequestDtoFactory()->buildEntityIdRequestDto('unavailability_id');
+            $unavailability_id = $request_dto->id;
 
             $unavailability = $this->unavailabilities_model->find($unavailability_id);
 
@@ -489,17 +495,16 @@ class Calendar extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $date = request('date');
-
-            $original_date = request('original_date');
-
-            $working_plan_exception = request('working_plan_exception');
+            $request_dto = $this->calendarRequestDtoFactory()->buildWorkingPlanExceptionRequestDto();
+            $date = $request_dto->date;
+            $original_date = $request_dto->originalDate;
+            $working_plan_exception = $request_dto->workingPlanException;
 
             if (!$working_plan_exception) {
                 $working_plan_exception = null;
             }
 
-            $provider_id = request('provider_id');
+            $provider_id = $request_dto->providerId;
 
             $this->providers_model->save_working_plan_exception($provider_id, $date, $working_plan_exception);
 
@@ -527,9 +532,9 @@ class Calendar extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $date = request('date');
-
-            $provider_id = request('provider_id');
+            $request_dto = $this->calendarRequestDtoFactory()->buildWorkingPlanExceptionRequestDto();
+            $date = $request_dto->date;
+            $provider_id = $request_dto->providerId;
 
             $this->providers_model->delete_working_plan_exception($provider_id, $date);
 
@@ -555,9 +560,11 @@ class Calendar extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $start_date = request('start_date') . ' 00:00:00';
-
-            $end_date = request('end_date') . ' 23:59:59';
+            $range_request = $this->calendarRequestDtoFactory()->buildRangeRequestDto();
+            $range_start_date = (string) $range_request->startDate;
+            $range_end_date = (string) $range_request->endDate;
+            $start_date = $range_start_date . ' 00:00:00';
+            $end_date = $range_end_date . ' 23:59:59';
 
             $response = [
                 'appointments' => $this->appointments_model->get([
@@ -629,9 +636,10 @@ class Calendar extends EA_Controller
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $start_date = request('start_date');
-            $end_date = request('end_date');
-            $response['blocked_periods'] = $this->blocked_periods_model->get_for_period($start_date, $end_date);
+            $response['blocked_periods'] = $this->blocked_periods_model->get_for_period(
+                $range_start_date,
+                $range_end_date,
+            );
 
             json_response($response);
         } catch (Throwable $e) {
@@ -652,11 +660,10 @@ class Calendar extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
-            $record_id = request('record_id');
-
-            $is_all = request('record_id') === FILTER_TYPE_ALL;
-
-            $filter_type = request('filter_type');
+            $filter_request = $this->calendarRequestDtoFactory()->buildFilterRequestDto();
+            $record_id = $filter_request->recordId;
+            $is_all = $record_id === FILTER_TYPE_ALL;
+            $filter_type = $filter_request->filterType;
 
             if (!$filter_type && !$is_all) {
                 json_response([
@@ -678,8 +685,11 @@ class Calendar extends EA_Controller
             }
 
             // Get appointments
-            $start_date = $this->db->escape(request('start_date'));
-            $end_date = $this->db->escape(date('Y-m-d', strtotime(request('end_date') . ' +1 day')));
+            $range_request = $this->calendarRequestDtoFactory()->buildRangeRequestDto();
+            $range_start_date = (string) $range_request->startDate;
+            $range_end_date = (string) $range_request->endDate;
+            $start_date = $this->db->escape($range_start_date);
+            $end_date = $this->db->escape(date('Y-m-d', strtotime($range_end_date . ' +1 day')));
 
             $where_clause =
                 $where_id .
@@ -797,13 +807,38 @@ class Calendar extends EA_Controller
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $start_date = request('start_date');
-            $end_date = request('end_date');
-            $response['blocked_periods'] = $this->blocked_periods_model->get_for_period($start_date, $end_date);
+            $response['blocked_periods'] = $this->blocked_periods_model->get_for_period(
+                $range_start_date,
+                $range_end_date,
+            );
 
             json_response($response);
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function calendarRequestDtoFactory(): Calendar_request_dto_factory
+    {
+        if (
+            isset($this->calendar_request_dto_factory) &&
+            $this->calendar_request_dto_factory instanceof Calendar_request_dto_factory
+        ) {
+            return $this->calendar_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->calendar_request_dto_factory) ||
+            !$CI->calendar_request_dto_factory instanceof Calendar_request_dto_factory
+        ) {
+            $CI->load->library('calendar_request_dto_factory');
+        }
+
+        $this->calendar_request_dto_factory = $CI->calendar_request_dto_factory;
+
+        return $this->calendar_request_dto_factory;
     }
 }
