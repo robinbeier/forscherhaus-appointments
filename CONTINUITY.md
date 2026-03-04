@@ -43,7 +43,7 @@
     -   Validation update (2026-03-04): full `bash ./scripts/ci/pre_pr_full.sh` attempted twice on request; both runs exited non-zero before completion.
     -   Update (2026-03-04): `pre_pr_full.sh` now treats `phpstan:request-contracts:l2` as warn-only by default (parity with CI advisory rollout), with opt-in strict mode.
     -   Validation update (2026-03-04): full `bash ./scripts/ci/pre_pr_full.sh` re-run completed successfully (exit 0) with advisory L2 warning, and all downstream gates executed/passed.
-    -   Release prep in progress (2026-03-04): stage + commit current sprint changes on a new `codex/*` branch for code review.
+    -   Release prep update (2026-03-04): changes staged/committed on review branch `codex/sprint3-write-path-contracts-review` at `0dcf659d8a0a27e3f349f4873dc77a4b64da0448`.
     -   Rollout mode target: Phase 1 warn-only (`continue-on-error: true`) for both new CI jobs.
 
 -   Done:
@@ -90,14 +90,17 @@
         -   `docker compose up -d mysql` then `bash ./scripts/ci/pre_pr_full.sh` attempt 2 passed quick gate + request-dto + request-contract tests, then failed at `composer phpstan:request-contracts:l2` (raw log: `storage/logs/ci/phpstan-request-contracts-l2.raw`, many unknown-class findings across legacy controllers).
         -   Post-change verification: `bash -n scripts/ci/pre_pr_full.sh` passed.
         -   Post-change full run: `bash ./scripts/ci/pre_pr_full.sh` continued after advisory `phpstan:request-contracts:l2` warning and passed all remaining gates (architecture boundaries + integration stack + API read smoke + booking write smoke + API write smoke + booking controller flows + dashboard integration smoke).
+    -   Review packaging:
+        -   Created branch `codex/sprint3-write-path-contracts-review`.
+        -   Committed sprint changes for review: `0dcf659d8a0a27e3f349f4873dc77a4b64da0448` (`Build write-path contract CI platform`).
 
 -   Now:
 
-    -   Create new branch, stage current changes, and commit for review handoff.
+    -   Provide branch/commit handoff for code review.
 
 -   Next:
 
-    -   Provide branch/commit details for review and optional PR creation.
+    -   Optional: push `codex/sprint3-write-path-contracts-review` and open a PR for review.
     -   Optional: use `PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=1` once rollout criteria are met and CI also flips to strict mode.
     -   Optional: monitor first PR rollout streak for `write-contract-booking` / `write-contract-api` and switch to blocking after 7 green non-cancelled PR runs.
 
