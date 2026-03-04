@@ -11,9 +11,9 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice | 13 | 3 |
 | `booking-public` | Public Booking | settings-compliance | 7 | 3 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | people-services-admin, settings-compliance | 17 | 3 |
+| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance | 17 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin | 12 | 3 |
-| `people-services-admin` | People, Providers, Services | settings-compliance | 24 | 3 |
+| `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, people-services-admin | 23 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance | 6 | 3 |
@@ -95,6 +95,7 @@ Key files:
 Backoffice scheduling operations, calendar interactions and appointment orchestration.
 
 Dependencies:
+- `integrations-sync`
 - `people-services-admin`
 - `settings-compliance`
 
@@ -154,6 +155,8 @@ Key files:
 Admin CRUD surfaces for providers, customers, services and service categories.
 
 Dependencies:
+- `integrations-sync`
+- `scheduling-backoffice`
 - `settings-compliance`
 
 Path prefixes:

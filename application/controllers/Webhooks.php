@@ -119,15 +119,14 @@ class Webhooks extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $keyword = request('keyword', '');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildWebhookCrudRequestDto();
 
-            $order_by = request('order_by', 'update_datetime DESC');
-
-            $limit = request('limit', 1000);
-
-            $offset = (int) request('offset', '0');
-
-            $webhooks = $this->webhooks_model->search($keyword, $limit, $offset, $order_by);
+            $webhooks = $this->webhooks_model->search(
+                $request_dto->keyword,
+                $request_dto->limit,
+                $request_dto->offset,
+                $request_dto->orderBy,
+            );
 
             json_response($webhooks);
         } catch (Throwable $e) {
@@ -145,7 +144,8 @@ class Webhooks extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $webhook = request('webhook');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildWebhookCrudRequestDto();
+            $webhook = $request_dto->webhook;
 
             $this->webhooks_model->only($webhook, $this->allowed_webhook_fields);
 
@@ -172,7 +172,8 @@ class Webhooks extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $webhook = request('webhook');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildWebhookCrudRequestDto();
+            $webhook = $request_dto->webhook;
 
             $this->webhooks_model->only($webhook, $this->allowed_webhook_fields);
 
@@ -199,7 +200,8 @@ class Webhooks extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $webhook_id = request('webhook_id');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildWebhookCrudRequestDto();
+            $webhook_id = $request_dto->webhookId;
 
             $this->webhooks_model->delete($webhook_id);
 
@@ -221,7 +223,8 @@ class Webhooks extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $webhook_id = request('webhook_id');
+            $request_dto = $this->integrationsRequestDtoFactory()->buildWebhookCrudRequestDto();
+            $webhook_id = $request_dto->webhookId;
 
             $webhook = $this->webhooks_model->find($webhook_id);
 
@@ -229,5 +232,29 @@ class Webhooks extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function integrationsRequestDtoFactory(): Integrations_request_dto_factory
+    {
+        if (
+            isset($this->integrations_request_dto_factory) &&
+            $this->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            return $this->integrations_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->integrations_request_dto_factory) ||
+            !$CI->integrations_request_dto_factory instanceof Integrations_request_dto_factory
+        ) {
+            $CI->load->library('integrations_request_dto_factory');
+        }
+
+        $this->integrations_request_dto_factory = $CI->integrations_request_dto_factory;
+
+        return $this->integrations_request_dto_factory;
     }
 }

@@ -59,15 +59,14 @@ class Unavailabilities extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $keyword = request('keyword', '');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
 
-            $order_by = request('order_by', 'update_datetime DESC');
-
-            $limit = request('limit', 1000);
-
-            $offset = (int) request('offset', '0');
-
-            $unavailabilities = $this->unavailabilities_model->search($keyword, $limit, $offset, $order_by);
+            $unavailabilities = $this->unavailabilities_model->search(
+                $request_dto->keyword,
+                $request_dto->limit,
+                $request_dto->offset,
+                $request_dto->orderBy,
+            );
 
             $user_id = session('user_id');
             $role_slug = session('role_slug');
@@ -112,7 +111,8 @@ class Unavailabilities extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $unavailability = request('unavailability');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('unavailability');
+            $unavailability = $request_dto->payload;
 
             $this->unavailabilities_model->only($unavailability, $this->allowed_unavailability_fields);
 
@@ -147,7 +147,8 @@ class Unavailabilities extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $unavailability_id = request('unavailability_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('unavailability_id');
+            $unavailability_id = $request_dto->id;
 
             $unavailability = $this->unavailabilities_model->find($unavailability_id);
 
@@ -167,7 +168,8 @@ class Unavailabilities extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $unavailability = request('unavailability');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('unavailability');
+            $unavailability = $request_dto->payload;
 
             $this->unavailabilities_model->only($unavailability, $this->allowed_unavailability_fields);
 
@@ -202,7 +204,8 @@ class Unavailabilities extends EA_Controller
                 abort(403, 'Forbidden');
             }
 
-            $unavailability_id = request('unavailability_id');
+            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('unavailability_id');
+            $unavailability_id = $request_dto->id;
 
             $unavailability = $this->unavailabilities_model->find($unavailability_id);
 
@@ -216,5 +219,29 @@ class Unavailabilities extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
+    {
+        if (
+            isset($this->backoffice_request_dto_factory) &&
+            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            return $this->backoffice_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (
+            !isset($CI->backoffice_request_dto_factory) ||
+            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
+        ) {
+            $CI->load->library('backoffice_request_dto_factory');
+        }
+
+        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
+
+        return $this->backoffice_request_dto_factory;
     }
 }

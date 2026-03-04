@@ -3,92 +3,106 @@
 -   Goal (incl. success criteria):
 
     -   Sprint-Plan #2 umsetzen: Typed Contracts auf dem vollstaendigen domaenenkritischen Request-/Controller-Pfad ausrollen und PHPStan schrittweise erhoehen.
-    -   Erfolgskriterien: Alle Scope-Methoden ohne direkte `request()`/`$_GET`/`$_POST`-Zugriffe, `check_request_contract_adoption.php` gruen, `phpstan:request-contracts:l1` gruen (blocking), `phpstan:request-contracts:l2` advisory, `test:request-contracts` gruen, neuer CI-Job `typed-request-contracts` aktiv (warn-only -> blocking nach 7 gruennen PR-Laeufen), keine Route-/OpenAPI-Aenderungen.
+    -   Erfolgskriterien: Alle Scope-Methoden ohne direkte `request()`/`$_GET`/`$_POST`-Zugriffe, `check_request_contract_adoption.php` gruen, `phpstan:request-contracts:l1` gruen (blocking), `phpstan:request-contracts:l2` advisory, `test:request-contracts` gruen, `typed-request-contracts` im CI aktiv, keine externen API-/Route-Aenderungen.
 
 -   Constraints/Assumptions:
 
-    -   `compat-first` bleibt verbindlich: keine harte Validierungsverschaerfung und keine externen API-/Route-Aenderungen.
+    -   `compat-first` bleibt verbindlich: keine harte Validierungsverschaerfung, keine Route-/OpenAPI-Aenderungen.
     -   Technische Controller (`Console`, `Update`, `Test`, `Installation`) bleiben ausserhalb des Scopes.
-    -   `typed-request-dto` bleibt waehrend Ueberlappung unveraendert blocking.
-    -   Sprint-Fokus: stabilitaetsorientiert, geringes Risiko, keine Major-Dependency-Upgrades.
+    -   `typed-request-dto` bleibt waehrend der Ueberlappung blocking.
+    -   Low-risk slicing ist priorisiert (mehrere kleinere PRs statt Big-Bang).
 
 -   Key decisions:
 
-    -   Scope ist domaenenkritisch komplett (Auth, Booking/Lifecycle, Scheduling/Backoffice, People/Services Admin, Settings/Compliance, Integrations, API v1 Read+Write).
-    -   Neuer Gate `typed-request-contracts` mit Rollout: Job zuerst warn-only, danach blocking nach 7 nicht-cancelled PR-Erfolgen.
-    -   PHPStan-Policy fuer diesen Ausbau: L1 blocking, L2 advisory (step-level warn-only).
-    -   Interne Contracts via neue/erweiterte DTO-Factories und `Request_normalizer`; externe Semantik bleibt kompatibel.
-    -   Delivery-Strategie (low-risk priorisiert): restliche Controller-Migration in mehreren kleinen PRs mit stabilen Domainen-Slices statt Big-Bang-PR.
-    -   Slicing-Reihenfolge bestaetigt:
+    -   Delivery in Slices:
         -   Slice 1: Backoffice CRUD Controller
         -   Slice 2: Settings-Controller Block
         -   Slice 3: Calendar + Booking Lifecycle
-        -   Slice 4: API v1 Write-Pfade + restliche Read-Luecken
-        -   Slice 5: Finaler Cleanup (Adoption-Guard-Reste + Doku/CI-Feinschliff)
-    -   PR-Timing-Entscheidung: aktueller Foundation-Stand wird als eigener erster PR erstellt; Slice 1 folgt als separater Folge-PR.
+        -   Slice 4: API v1 Write + Read-Luecken
+        -   Slice 5: Final Cleanup
+    -   PR #90 (Foundation + initial migration) wurde zuerst separat gemerged; Slice 1 folgt als naechster PR.
+    -   Low-Risk-Green-Variante aktiv (temporaer): im Job `typed-request-contracts` ist der Step `Request Contract Adoption Check` advisory (`continue-on-error: true`) fuer gruene PR-Checks waehrend Rollout.
+    -   Rueckstellung ist verbindlich: die temporaere Step-Ausnahme wird vor finalem Rollout-Abschluss/Blocking-Switch wieder entfernt.
 
 -   State:
 
-    -   Phase: Phase 0 (Scope/Gate/CI-Foundation) und Phase 1 (DTO/Normalizer-Foundation) umgesetzt.
-    -   Controller-Migration auf DTO-Verbrauch (Phase 2-4) gestartet; erste Scope-Gruppe migriert.
-    -   CI-Zielbild inkl. Step-Reihenfolge, Artefakte, Diagnostics und Rollback-Regel ist festgelegt.
-    -   Neuer Job `typed-request-contracts` ist warn-only integriert; L2 bleibt advisory auf Step-Level.
-    -   PR 1 ist offen: `https://github.com/robinbeier/forscherhaus-appointments/pull/90` (ready for review).
+    -   PR #90 ist gemerged in `main` (Merge-Commit `7bafd5e4`).
+    -   Foundation steht: DTO/Normalizer-Erweiterungen, neue Factories, CI wiring, PHPStan L1/L2 configs, Request-Contract-Tests.
+    -   Initial migrierte Controller aus PR #90: Auth/Session, Privacy/Consents, Teile Integrations/LDAP, `Settings_api_v1::update`.
+    -   Aktueller Fokus: Slice 1 Branch `codex/typed-request-contracts-slice1-backoffice-crud`.
+    -   Slice 1 ist implementiert fuer Backoffice-/People-Service-CRUD Controller inkl. Backoffice-Webhooks.
+    -   Adoption-Guard Delta: 90 -> 40 Violations.
+    -   Slice-1-Commit `19d848d5` ist auf `origin/codex/typed-request-contracts-slice1-backoffice-crud` gepusht.
+    -   PR 2 ist offen: `https://github.com/robinbeier/forscherhaus-appointments/pull/91` (ready for review).
+    -   CI-Lauf `22642974401` auf SHA `906856a2` hatte ein rotes Job-Signal: `architecture-boundaries` (`component boundary check`, 17 violations).
+    -   Fix auf PR #91 gepusht: Commit `16ba19fb` passt Component-Dependencies in der Architektur-Map an; lokaler `check_component_boundaries` gegen `origin/main...HEAD` ist gruen.
 
 -   Done:
 
-    -   Sprint-Plan #2, Scope, CI-Policy, DTO/Normalizer-Contracts und Akzeptanzkriterien als canonical continuity briefing verdichtet.
-    -   `CONTINUITY.md` als compaction-safe kanonische Arbeitsbasis erstellt.
-    -   Ist-Check abgeschlossen: vorhandene Basis ist aktuell auf `typed-request-dto` (Booking/Dashboard/API-Read) begrenzt.
-    -   `scripts/ci/config/request_contract_adoption_scope.php` mit vollem domaenenkritischen Scope erstellt.
-    -   `scripts/ci/check_request_contract_adoption.php` erstellt (inkl. JSON-Report nach `storage/logs/ci/request-contract-adoption-latest.json`).
-    -   Composer-Skripte angelegt: `phpstan:request-contracts:l1`, `phpstan:request-contracts:l2`, `test:request-contracts`, `check:request-contract-adoption`, `check:typed-request-contracts`.
-    -   PHPStan-Configs `phpstan.request-contracts.l1.neon.dist` und `phpstan.request-contracts.l2.neon.dist` angelegt.
-    -   PHPUnit-Config/Bootstrap fuer Request Contracts angelegt (`phpunit.request-contracts.xml`, `tests/bootstrap_request_contracts.php`).
-    -   Neue DTO-Factories implementiert: `Auth_request_dto_factory`, `Backoffice_request_dto_factory`, `Calendar_request_dto_factory`, `Integrations_request_dto_factory`.
-    -   `Request_normalizer` um `normalizeJsonAssocArray`, `normalizeDateTimeYmdHis`, `normalizeEnumString`, `normalizeFloat` erweitert.
-    -   `Api_request_dto_factory` um Write-/Date-/Settings-DTOs erweitert (`ApiEntityWritePayloadDto`, `ApiDateFilterDto`, `ApiSettingsUpdateDto`).
-    -   Neue Unit-Tests hinzugefuegt und gruen: Auth/Backoffice/Calendar/Integrations/API-Write + erweiterte RequestNormalizer-Tests.
-    -   Dokumentation aktualisiert (`README.md`, `AGENTS.md`) inkl. Commands/Status-Tracking fuer `typed-request-contracts`.
-    -   Erste Scope-Controller auf DTO-Verbrauch umgestellt:
-        -   Auth/Session: `Account::{save,validate_username}`, `Login::validate`, `Recovery::perform`, `Localization::change_language`
-        -   Privacy/Consent: `Privacy::delete_personal_information`, `Consents::save`
-        -   Integrations/LDAP/API-Settings: `Caldav::{connect_to_server,disable_provider_sync}`, `Google::{oauth_callback,get_google_calendars,select_google_calendar,disable_provider_sync}`, `Ldap_settings::{save,search}`, `Settings_api_v1::update`
-    -   Adoption-Guard Verletzungen reduziert von 106 auf 90.
-    -   Branch erstellt: `codex/structural-typed-contracts-full-request-path`.
-    -   Commit erstellt: `b94381f1` (`Add request-contracts foundation and initial migration`).
-    -   Commit erstellt: `9fc42dc9` (`Update continuity ledger for PR slicing decision`).
-    -   PR 1 erstellt: `#90` (`PR1: typed request-contracts foundation + initial migration`).
+    -   `request_contract_adoption_scope.php` und `check_request_contract_adoption.php` eingefuehrt.
+    -   Neue Factories: `Auth_request_dto_factory`, `Backoffice_request_dto_factory`, `Calendar_request_dto_factory`, `Integrations_request_dto_factory`.
+    -   `Request_normalizer` erweitert (`normalizeJsonAssocArray`, `normalizeDateTimeYmdHis`, `normalizeEnumString`, `normalizeFloat`).
+    -   `Api_request_dto_factory` fuer Write-/Filter-/Settings-DTOs erweitert.
+    -   CI-Job `typed-request-contracts` eingefuehrt; L2 advisory-step ist mit `if: always()` abgesichert.
+    -   Review-Fixrunden fuer PR #90 abgeschlossen (Auth/Caldav/Ldap compat fixes, architecture-boundary fixes).
+    -   Low-Risk-Green-Variante fuer `typed-request-contracts` gepusht in Commit `b6967130`.
+    -   PR #90 erreichte vor Merge `11/11` gruen.
+    -   Slice-1-Migration umgesetzt:
+        -   `Appointments::{search,store,find,update,destroy}`
+        -   `Blocked_periods::{search,store,find,update,destroy}`
+        -   `Unavailabilities::{search,store,find,update,destroy}`
+        -   `Admins::{search,store,find,update,destroy}`
+        -   `Providers::{search,store,find,update,destroy}`
+        -   `Customers::{find,search,store,update,destroy}`
+        -   `Secretaries::{search,store,find,update,destroy}`
+        -   `Services::{search,store,find,update,destroy}`
+        -   `Service_categories::{search,store,find,update,destroy}`
+        -   `Webhooks::{search,store,update,destroy,find}`
+    -   Lokale Verifikation nach Slice-1-Migration:
+        -   `composer test:request-contracts`: PASS (48 tests, 139 assertions)
+        -   `composer phpstan:request-contracts:l1`: PASS
+        -   `php scripts/ci/check_request_contract_adoption.php`: FAIL erwartet, aber reduziert auf `violation_count=40`
+    -   PR-2-CI-Fix: `architecture-boundaries`-Failure durch aktualisierte `depends_on`-Kanten in `docs/maps/component_ownership_map.json` adressiert und `docs/architecture-map.md` regeneriert.
 
 -   Now:
 
-    -   PR #90 aktiv babysitten (CI/mergeability/review comments) bis Ready-to-Merge oder Benutzerhilfe erforderlich.
-    -   Danach mit Slice 1 (Backoffice CRUD) als naechstem PR fortsetzen.
-    -   Adoption-Guard weiter schrittweise abbauen (aktuell 90 Verstoesse).
+    -   PR 2 wird aktiv babysittet (`$babysit-pr`) bis ready-to-merge/closed oder user-help-needed.
+    -   Watch-Loop laeuft auf neuem PR-SHA `16ba19fb`; Ziel: alle Checks gruen + keine neuen Review-Blocker.
+    -   Restliche Violations liegen nach Slice 1 in Booking/Calendar/Settings/API-v1-Write.
 
 -   Next:
 
-    -   CI-/Review-Feedback fuer PR #90 verarbeiten (fix/retry je nach Watcher-Aktion).
-    -   Danach Slice 1 branch-basiert umsetzen und als PR 2 einreichen.
-    -   Nach jeder Teilmigration Adoption-Guard erneut laufen lassen bis `violation_count=0`.
-    -   PHPStan-L2 advisory findings reduzieren (aktuell viele Unknown-Class-Meldungen im erweiterten Controller-Scope).
-    -   Nach Controller-Migration: `typed-request-contracts` 7 nicht-cancelled gruene PR-Laeufe sammeln und Job-Level blocking schalten.
+    -   CI-/Review-Feedback auf PR #91 verarbeiten.
+    -   Danach Slice 2 (Settings) starten.
+    -   Nach Slice-1-PR weiterhin offene Verstoesse in Slice 2+ abbauen.
+    -   Temporaere Low-Risk-Green-Ausnahme spaeter wieder auf strict zurueckstellen.
 
 -   Open questions (UNCONFIRMED if needed):
 
-    -   UNCONFIRMED: Maximale Zielgroesse pro Folge-PR (Dateien/Methoden), falls wir fuer Review-Speed noch feiner schneiden muessen.
-    -   UNCONFIRMED: Ob wir fuer PR #90 vor Slice 2 noch einen separaten Cleanup fuer Advisory-L2-Rauschen einschieben.
+    -   UNCONFIRMED: Exakter Rueckstell-Zeitpunkt fuer die temporaere advisory-Ausnahme (spaetestens vor Blocking-Switch).
 
 -   Working set (files/ids/commands):
-    -   Canonical ledger: `/Users/robinbeier/Developers/forscherhaus-appointments/CONTINUITY.md`
-    -   Referenzplan: User-Vorgabe "Sprint-Plan #2: Typed Contracts auf gesamten Request-/Controller-Pfad + PHPStan schrittweise erhoehen"
-    -   Kernbefehle:
+
+    -   Ledger: `/Users/robinbeier/Developers/forscherhaus-appointments/CONTINUITY.md`
+    -   CI workflow: `/Users/robinbeier/Developers/forscherhaus-appointments/.github/workflows/ci.yml`
+    -   CI run/job (vor Fix): `22642974401` / `65623661583`
+    -   Boundary map: `/Users/robinbeier/Developers/forscherhaus-appointments/docs/maps/component_ownership_map.json`
+    -   Boundary checker: `/Users/robinbeier/Developers/forscherhaus-appointments/scripts/ci/check_component_boundaries.py`
+    -   Scope config: `/Users/robinbeier/Developers/forscherhaus-appointments/scripts/ci/config/request_contract_adoption_scope.php`
+    -   Adoption check: `/Users/robinbeier/Developers/forscherhaus-appointments/scripts/ci/check_request_contract_adoption.php`
+    -   Slice-1-Controller:
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Appointments.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Blocked_periods.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Unavailabilities.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Admins.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Providers.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Customers.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Secretaries.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Services.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Service_categories.php`
+        -   `/Users/robinbeier/Developers/forscherhaus-appointments/application/controllers/Webhooks.php`
+    -   Core commands:
         -   `composer phpstan:request-contracts:l1`
         -   `composer phpstan:request-contracts:l2`
         -   `composer test:request-contracts`
         -   `php scripts/ci/check_request_contract_adoption.php`
-    -   Wichtige Outcomes:
-        -   `composer phpstan:request-contracts:l1`: PASS.
-        -   `composer test:request-contracts`: PASS (44 Tests, 132 Assertions).
-        -   `php scripts/ci/check_request_contract_adoption.php`: FAIL (zuletzt 90 Violations, Report geschrieben).
-        -   `composer phpstan:request-contracts:l2`: advisory FAIL erwartet; Report geschrieben nach `storage/logs/ci/phpstan-request-contracts-l2.raw` (807 Zeilen).
