@@ -79,6 +79,12 @@
         "phpstan:request-contracts:l1": "phpstan analyse -c phpstan.request-contracts.l1.neon.dist --memory-limit=1G --no-progress --error-format=raw",
         "phpstan:request-contracts:l2": "mkdir -p storage/logs/ci; phpstan analyse -c phpstan.request-contracts.l2.neon.dist --memory-limit=1G --no-progress --error-format=raw > storage/logs/ci/phpstan-request-contracts-l2.raw 2>&1",
         "contract-test:api-openapi": "php scripts/ci/api_openapi_contract_smoke.php",
+        "contract-test:booking-write": "php scripts/ci/booking_write_contract_smoke.php",
+        "contract-test:api-openapi-write": "php scripts/ci/api_openapi_write_contract_smoke.php",
+        "contract-test:write-path": [
+            "@contract-test:booking-write",
+            "@contract-test:api-openapi-write"
+        ],
         "release:gate:dashboard": "php scripts/release-gate/dashboard_release_gate.php",
         "release:gate:booking-confirmation-pdf": "php scripts/release-gate/booking_confirmation_pdf_gate.php"
     },

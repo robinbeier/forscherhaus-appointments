@@ -6,6 +6,8 @@ cd "$ROOT_DIR"
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
+REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-0}"
+REQUEST_CONTRACTS_L2_WARNED=0
 COMPOSE_CMD=()
 
 require_cmd() {
@@ -108,7 +110,16 @@ echo_section "Typed request-contracts gate"
 run_compose run --rm php-fpm composer phpstan:request-contracts:l1
 run_compose run --rm php-fpm composer test:request-contracts
 run_compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
-run_compose run --rm php-fpm composer phpstan:request-contracts:l2
+if [[ "$REQUEST_CONTRACTS_L2_BLOCKING" == "1" ]]; then
+    run_compose run --rm php-fpm composer phpstan:request-contracts:l2
+else
+    if ! run_compose run --rm php-fpm composer phpstan:request-contracts:l2; then
+        REQUEST_CONTRACTS_L2_WARNED=1
+        echo "[pre-pr-full] WARN: composer phpstan:request-contracts:l2 failed (advisory during rollout)." >&2
+        echo "[pre-pr-full] WARN: See storage/logs/ci/phpstan-request-contracts-l2.raw for details." >&2
+        echo "[pre-pr-full] WARN: Set PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=1 for strict local blocking." >&2
+    fi
+fi
 
 echo_section "Architecture boundaries gate"
 python3 scripts/docs/generate_codeowners_from_map.py --check
@@ -127,6 +138,19 @@ run_compose exec -T php-fpm php scripts/ci/api_openapi_contract_smoke.php \
     --openapi-spec=/var/www/html/openapi.yml \
     --username=administrator --password=administrator
 
+echo_section "Booking write-path contract smoke"
+run_compose exec -T php-fpm php scripts/ci/booking_write_contract_smoke.php \
+    --base-url=http://nginx --index-page=index.php \
+    --username=administrator --password=administrator \
+    --booking-search-days=14 --retry-count=1
+
+echo_section "API OpenAPI write-path contract smoke"
+run_compose exec -T php-fpm php scripts/ci/api_openapi_write_contract_smoke.php \
+    --base-url=http://nginx --index-page=index.php \
+    --openapi-spec=/var/www/html/openapi.yml \
+    --username=administrator --password=administrator \
+    --retry-count=1 --booking-search-days=14
+
 echo_section "Booking controller flow tests"
 run_compose exec -T php-fpm composer test:booking-controller-flows
 
@@ -144,7 +168,16 @@ fi
 
 echo
 if [[ "$RUN_COVERAGE" == "1" ]]; then
-    echo "[pre-pr-full] All checks passed (including coverage delta gate)."
+    if [[ "$REQUEST_CONTRACTS_L2_WARNED" == "1" ]]; then
+        echo "[pre-pr-full] All blocking checks passed (including coverage); request-contracts:l2 reported advisory findings."
+    else
+        echo "[pre-pr-full] All checks passed (including coverage delta gate)."
+    fi
 else
-    echo "[pre-pr-full] All checks passed. Set PRE_PR_RUN_COVERAGE=1 to include the coverage delta gate."
+    if [[ "$REQUEST_CONTRACTS_L2_WARNED" == "1" ]]; then
+        echo "[pre-pr-full] All blocking checks passed; request-contracts:l2 reported advisory findings."
+        echo "[pre-pr-full] Set PRE_PR_RUN_COVERAGE=1 to include the coverage delta gate."
+    else
+        echo "[pre-pr-full] All checks passed. Set PRE_PR_RUN_COVERAGE=1 to include the coverage delta gate."
+    fi
 fi

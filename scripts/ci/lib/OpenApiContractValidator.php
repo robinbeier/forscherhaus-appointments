@@ -144,7 +144,48 @@ final class OpenApiContractValidator
     /**
      * @return array<string, mixed>
      */
-    public function getResponseSchema(string $method, string $path, int $statusCode): array
+    public function getRequestSchema(string $method, string $path): array
+    {
+        $operation = $this->getOperation($method, $path);
+        $requestBody = $operation['requestBody'] ?? null;
+        if (!is_array($requestBody)) {
+            throw new ContractAssertionException(
+                sprintf('OpenAPI operation "%s %s" has no "requestBody" section.', strtoupper($method), $path),
+            );
+        }
+
+        $content = $requestBody['content'] ?? null;
+        if (!is_array($content)) {
+            throw new ContractAssertionException(
+                sprintf('OpenAPI operation "%s %s" requestBody has no "content" section.', strtoupper($method), $path),
+            );
+        }
+
+        $jsonContent = $content['application/json'] ?? null;
+        if (!is_array($jsonContent)) {
+            throw new ContractAssertionException(
+                sprintf(
+                    'OpenAPI operation "%s %s" requestBody does not define "application/json".',
+                    strtoupper($method),
+                    $path,
+                ),
+            );
+        }
+
+        $schema = $jsonContent['schema'] ?? null;
+        if (!is_array($schema)) {
+            throw new ContractAssertionException(
+                sprintf('OpenAPI operation "%s %s" requestBody has no schema object.', strtoupper($method), $path),
+            );
+        }
+
+        return $schema;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function getResponseSchemaOrNull(string $method, string $path, int $statusCode): ?array
     {
         $operation = $this->getOperation($method, $path);
         $responses = $operation['responses'] ?? null;
@@ -167,10 +208,14 @@ final class OpenApiContractValidator
         }
 
         $content = $response['content'] ?? null;
+        if ($content === null) {
+            return null;
+        }
+
         if (!is_array($content)) {
             throw new ContractAssertionException(
                 sprintf(
-                    'OpenAPI operation "%s %s" response %d has no JSON content schema.',
+                    'OpenAPI operation "%s %s" response %d has invalid "content" section.',
                     strtoupper($method),
                     $path,
                     $statusCode,
@@ -179,10 +224,14 @@ final class OpenApiContractValidator
         }
 
         $jsonContent = $content['application/json'] ?? null;
+        if ($jsonContent === null) {
+            return null;
+        }
+
         if (!is_array($jsonContent)) {
             throw new ContractAssertionException(
                 sprintf(
-                    'OpenAPI operation "%s %s" response %d does not define "application/json".',
+                    'OpenAPI operation "%s %s" response %d has invalid "application/json" definition.',
                     strtoupper($method),
                     $path,
                     $statusCode,
@@ -191,6 +240,10 @@ final class OpenApiContractValidator
         }
 
         $schema = $jsonContent['schema'] ?? null;
+        if ($schema === null) {
+            return null;
+        }
+
         if (!is_array($schema)) {
             throw new ContractAssertionException(
                 sprintf(
@@ -203,6 +256,27 @@ final class OpenApiContractValidator
         }
 
         return $schema;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getResponseSchema(string $method, string $path, int $statusCode): array
+    {
+        $schema = $this->getResponseSchemaOrNull($method, $path, $statusCode);
+
+        if (is_array($schema)) {
+            return $schema;
+        }
+
+        throw new ContractAssertionException(
+            sprintf(
+                'OpenAPI operation "%s %s" response %d has no JSON content schema.',
+                strtoupper($method),
+                $path,
+                $statusCode,
+            ),
+        );
     }
 
     /**

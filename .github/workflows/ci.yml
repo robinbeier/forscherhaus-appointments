@@ -28,6 +28,8 @@ jobs:
       api_contract: ${{ steps.filter.outputs.api_contract }}
       booking_flows: ${{ steps.filter.outputs.booking_flows }}
       integration_smoke: ${{ steps.filter.outputs.integration_smoke }}
+      write_contract_booking: ${{ steps.filter.outputs.write_contract_booking }}
+      write_contract_api: ${{ steps.filter.outputs.write_contract_api }}
 
     steps:
       - name: Git clone
@@ -93,6 +95,35 @@ jobs:
               - 'composer.lock'
               - 'index.php'
               - 'openapi.yml'
+              - '.github/workflows/ci.yml'
+            write_contract_booking:
+              - 'application/controllers/Booking*.php'
+              - 'application/views/pages/booking*.php'
+              - 'application/libraries/Booking_request_dto_factory.php'
+              - 'scripts/ci/booking_write_contract_smoke.php'
+              - 'scripts/ci/lib/DeterministicFixtureFactory.php'
+              - 'scripts/ci/lib/WriteContractCleanupRegistry.php'
+              - 'scripts/ci/lib/FlakeRetry.php'
+              - 'scripts/ci/lib/OpenApiContractValidator.php'
+              - 'scripts/ci/config/api_openapi_write_contract_matrix.php'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'index.php'
+              - '.github/workflows/ci.yml'
+            write_contract_api:
+              - 'application/controllers/api/**'
+              - 'application/libraries/Api.php'
+              - 'application/libraries/Api_request_dto_factory.php'
+              - 'scripts/ci/api_openapi_write_contract_smoke.php'
+              - 'scripts/ci/config/api_openapi_write_contract_matrix.php'
+              - 'scripts/ci/lib/OpenApiContractValidator.php'
+              - 'scripts/ci/lib/DeterministicFixtureFactory.php'
+              - 'scripts/ci/lib/WriteContractCleanupRegistry.php'
+              - 'scripts/ci/lib/FlakeRetry.php'
+              - 'openapi.yml'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'index.php'
               - '.github/workflows/ci.yml'
 
   build-test:
@@ -496,6 +527,191 @@ jobs:
           docker compose ps || true
           docker compose logs --no-color --timestamps mysql php-fpm nginx || true
       - name: Cleanup API contract services
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  write-contract-booking:
+    needs:
+      - changes
+    if: >
+      needs.changes.outputs.write_contract_booking == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Frontend compile
+        run: |
+          npm ci --no-audit --no-fund
+          npx gulp compile
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: Start booking write-contract services
+        run: docker compose up -d mysql php-fpm nginx
+      - name: Wait for MySQL readiness
+        run: |
+          max_attempts=60
+
+          attempt=1
+          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+
+          attempt=1
+          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+      - name: Install deterministic seed instance
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose exec -T php-fpm php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
+      - name: Run booking write-path contract smoke
+        run: >
+          docker compose exec -T php-fpm composer contract-test:booking-write --
+          --base-url=http://nginx --index-page=index.php
+          --username=administrator --password=administrator
+          --booking-search-days=14 --retry-count=1
+      - name: Upload booking write-contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-write-contract-artifacts
+          path: storage/logs/ci/booking-write-contract-*.json
+          if-no-files-found: warn
+      - name: Diagnostics (failure logs)
+        if: failure()
+        run: |
+          echo "Booking write contract smoke failed; dumping diagnostics."
+          docker compose ps || true
+          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          ls -t storage/logs/ci/booking-write-contract-*.json 2>/dev/null | head -n 1 | xargs -I{} cat "{}" || true
+      - name: Cleanup booking write-contract services
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  write-contract-api:
+    needs:
+      - changes
+    if: >
+      needs.changes.outputs.write_contract_api == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
+    continue-on-error: true
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Frontend compile
+        run: |
+          npm ci --no-audit --no-fund
+          npx gulp compile
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.3
+          php_extensions: gd
+          version: 2
+      - name: Start API write-contract services
+        run: docker compose up -d mysql php-fpm nginx
+      - name: Wait for MySQL readiness
+        run: |
+          max_attempts=60
+
+          attempt=1
+          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+
+          attempt=1
+          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+      - name: Install deterministic seed instance
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose exec -T php-fpm php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
+      - name: Run API OpenAPI write-path contract smoke
+        run: >
+          docker compose exec -T php-fpm composer contract-test:api-openapi-write --
+          --base-url=http://nginx --index-page=index.php
+          --openapi-spec=/var/www/html/openapi.yml
+          --username=administrator --password=administrator
+          --retry-count=1 --booking-search-days=14
+      - name: Upload API write-contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-write-contract-artifacts
+          path: storage/logs/ci/api-openapi-write-contract-*.json
+          if-no-files-found: warn
+      - name: Diagnostics (failure logs)
+        if: failure()
+        run: |
+          echo "API OpenAPI write contract smoke failed; dumping diagnostics."
+          docker compose ps || true
+          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          ls -t storage/logs/ci/api-openapi-write-contract-*.json 2>/dev/null | head -n 1 | xargs -I{} cat "{}" || true
+      - name: Cleanup API write-contract services
         if: always()
         run: docker compose down -v --remove-orphans
 
