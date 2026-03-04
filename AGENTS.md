@@ -126,6 +126,11 @@ docker compose run --rm php-fpm composer phpstan:request-contracts:l2
 docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
 
+# Optional: Lokale Pre-PR Gates (schnell/voll)
+bash ./scripts/ci/pre_pr_quick.sh
+bash ./scripts/ci/pre_pr_full.sh
+PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
+
 # Optional: PHPStan status check (blocking)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
@@ -333,6 +338,8 @@ php index.php console sync
 -   In neuen Worktrees einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausfuehren.
 -   Bei Netzwerkrestriktionen koennen `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
 -   Ausnahme fuer reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
+-   `./scripts/setup-worktree.sh` installiert einen managed `.git/hooks/pre-push` Hook (`pre_pr_quick.sh`).
+-   Fuer einmaliges Bypassen: `SKIP_PREPUSH=1 git push ...`; fuer Full-Gate beim Push: `PRE_PUSH_FULL=1 git push ...`.
 -   `--no-verify` nur als letzter Ausweg verwenden.
 
 ## Coding Style & Konventionen

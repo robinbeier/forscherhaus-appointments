@@ -94,6 +94,26 @@ class ApiRequestDtoFactoryTest extends TestCase
         $this->assertSame('000', $dto->customerId);
     }
 
+    public function testCreateAppointmentsReadRequestDtoNormalizesFloatAndCompositeIdFilters(): void
+    {
+        $query = $this->factory->createCollectionQueryDto(null, 20, 1, 0, null, null, null);
+        $dto = $this->factory->createAppointmentsReadRequestDto(
+            $query,
+            false,
+            null,
+            null,
+            null,
+            null,
+            5.0,
+            2.5,
+            ['invalid'],
+        );
+
+        $this->assertSame(5, $dto->serviceId);
+        $this->assertSame('2.5', $dto->providerId);
+        $this->assertNull($dto->customerId);
+    }
+
     public function testCreateAvailabilitiesRequestDtoFallsBackToTodayWhenDateMissing(): void
     {
         $dto = $this->factory->createAvailabilitiesRequestDto('4', '9', null);
