@@ -53,6 +53,24 @@ docker compose exec -T php-fpm composer contract-test:api-openapi -- \
   --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator
 
+# optional booking write-path contract smoke command (mutation contract, deterministic fixtures)
+docker compose exec -T php-fpm composer contract-test:booking-write -- \
+  --base-url=http://nginx --index-page=index.php \
+  --username=administrator --password=administrator \
+  --booking-search-days=14 --retry-count=1
+
+# optional API OpenAPI write-path contract smoke command (customer+appointment lifecycle)
+docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --username=administrator --password=administrator \
+  --retry-count=1 --booking-search-days=14
+
+# optional combined write-path contract command
+docker compose exec -T php-fpm composer contract-test:write-path -- \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --username=administrator --password=administrator \
+  --retry-count=1 --booking-search-days=14
+
 # optional booking controller flow tests (register/reschedule/cancel; mutation-safe in ephemeral DB)
 docker compose exec -T php-fpm composer test:booking-controller-flows
 
@@ -116,6 +134,7 @@ This prevents mixed container mounts across worktrees.
 ## Documentation Map
 
 -   [Project runbook and contributor guardrails](AGENTS.md)
+-   [Write-path CI contracts](docs/ci-write-contracts.md)
 -   [Architecture map](docs/architecture-map.md)
 -   [Ownership map](docs/ownership-map.md)
 -   [Installation guide](docs/installation-guide.md)
@@ -177,6 +196,8 @@ Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push .
 CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
 CI note: `integration-smoke` covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
+CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
+CI note: the `write-contract-api` check validates API write-path OpenAPI contracts and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
 CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
@@ -187,6 +208,8 @@ CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptra
 CI note: the `coverage-delta` check validates Unit-suite Clover line coverage against the in-repo baseline/delta policy and is currently warn-only during rollout (planned blocking switch after 7 consecutive green PR runs). On pull requests it runs only when the `ci/full` label is present.
 CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
+CI note: `write-contract-booking` artifacts are written to `storage/logs/ci/booking-write-contract-<UTC>.json`.
+CI note: `write-contract-api` artifacts are written to `storage/logs/ci/api-openapi-write-contract-<UTC>.json`.
 Local note: when running Deptrac directly on newer host PHP runtimes (for example PHP 8.5), vendor-level deprecation output can appear; prefer the dockerized command above for CI-parity output.
 
 For doc-only/meta commits in constrained environments:

@@ -39,6 +39,23 @@ class OpenApiContractValidatorTest extends TestCase
         $validator->assertOperationHasResponse('GET', '/appointments', 500);
     }
 
+    public function testGetRequestSchemaReturnsConfiguredSchema(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+        $schema = $validator->getRequestSchema('POST', '/appointments');
+
+        $this->assertArrayHasKey('$ref', $schema);
+        $this->assertSame('#/components/schemas/AppointmentPayload', $schema['$ref']);
+    }
+
+    public function testGetResponseSchemaOrNullReturnsNullForNoContentResponses(): void
+    {
+        $validator = OpenApiContractValidator::fromArray($this->specFixture());
+        $schema = $validator->getResponseSchemaOrNull('DELETE', '/appointments/{appointmentId}', 204);
+
+        $this->assertNull($schema);
+    }
+
     public function testAssertValueMatchesSchemaFailsWhenTopLevelTypeMismatches(): void
     {
         $validator = OpenApiContractValidator::fromArray($this->specFixture());
@@ -184,6 +201,41 @@ class OpenApiContractValidatorTest extends TestCase
                             ],
                         ],
                     ],
+                    'post' => [
+                        'security' => [['BasicAuth' => []]],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        '$ref' => '#/components/schemas/AppointmentPayload',
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '201' => [
+                                'description' => 'Created',
+                                'content' => [
+                                    'application/json' => [
+                                        'schema' => [
+                                            '$ref' => '#/components/schemas/AppointmentRecord',
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                '/appointments/{appointmentId}' => [
+                    'delete' => [
+                        'security' => [['BasicAuth' => []]],
+                        'responses' => [
+                            '204' => [
+                                'description' => 'No Content',
+                            ],
+                        ],
+                    ],
                 ],
             ],
             'components' => [
@@ -194,6 +246,16 @@ class OpenApiContractValidatorTest extends TestCase
                             'id' => ['type' => 'integer'],
                             'status' => ['type' => 'string'],
                             'metadata' => ['type' => 'object'],
+                        ],
+                    ],
+                    'AppointmentPayload' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'start' => ['type' => 'string'],
+                            'end' => ['type' => 'string'],
+                            'customerId' => ['type' => 'integer'],
+                            'providerId' => ['type' => 'integer'],
+                            'serviceId' => ['type' => 'integer'],
                         ],
                     ],
                 ],
