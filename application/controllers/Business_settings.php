@@ -133,7 +133,15 @@ class Business_settings extends EA_Controller
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('working_plan');
-            $working_plan = $request_dto->payload;
+            $working_plan_payload = $request_dto->payload;
+
+            krsort($working_plan_payload);
+
+            $working_plan = json_encode(empty($working_plan_payload) ? new stdClass() : $working_plan_payload);
+
+            if (!is_string($working_plan)) {
+                throw new RuntimeException('Could not encode global working plan.');
+            }
 
             $providers = $this->providers_model->get();
 
