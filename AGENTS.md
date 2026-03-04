@@ -191,11 +191,11 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
 
-# Optional: coverage-delta status check (blocking, PR requires label ci/full)
+# Optional: coverage-delta status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="coverage-delta") | .conclusion'
 done | awk 'NF' | head -n 10
-# Erwartung: bei PRs mit Label ci/full sind aktuelle ausgefuehrte Eintraege SUCCESS
+# Erwartung: bei relevanten PR-Aenderungen sind aktuelle ausgefuehrte Eintraege SUCCESS
 
 # Optional: Fokuslauf fuer Healthz-Checks
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter HealthzControllerTest'
@@ -241,7 +241,7 @@ Hinweis: Der CI-Job `write-contract-api` laeuft waehrend des Rollouts warn-only 
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
-Hinweis: Der CI-Job `coverage-delta` ist blocking und laeuft auf PRs nur mit Label `ci/full`.
+Hinweis: Der CI-Job `coverage-delta` ist blocking und laeuft auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
 Hinweis: Das Request Contracts Gate schreibt standardmaessig nach `storage/logs/ci/request-contract-adoption-latest.json` und `storage/logs/ci/phpstan-request-contracts-l2.raw`.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.

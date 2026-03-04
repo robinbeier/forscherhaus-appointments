@@ -300,16 +300,12 @@ jobs:
   coverage-delta:
     needs:
       - changes
-    # Keep push/main signal, but only run on PR when explicitly requested with label `ci/full`.
+    # Keep push/main signal and run on non-draft PRs when deep checks are relevant.
     if: >
       needs.changes.outputs.deep_required == 'true' &&
       (
         github.event_name == 'push' ||
-        (
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.draft == false &&
-          contains(github.event.pull_request.labels.*.name, 'ci/full')
-        )
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -368,7 +364,7 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
-      - name: Generate unit coverage report
+      - name: Generate coverage report (unit + booking flow integration)
         run: docker compose exec -T php-fpm composer test:coverage:unit
       - name: Evaluate coverage delta policy
         run: docker compose exec -T php-fpm composer check:coverage:delta
