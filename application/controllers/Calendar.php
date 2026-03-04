@@ -417,6 +417,8 @@ class Calendar extends EA_Controller
     public function save_unavailability(): void
     {
         try {
+            $warnings = [];
+
             // Check privileges
             $request_dto = $this->calendarRequestDtoFactory()->buildUnavailabilityRequestDto();
             $unavailability = $request_dto->unavailability;
@@ -445,7 +447,7 @@ class Calendar extends EA_Controller
 
             json_response([
                 'success' => true,
-                'warnings' => $warnings ?? [],
+                'warnings' => $warnings,
             ]);
         } catch (Throwable $e) {
             json_exception($e);
