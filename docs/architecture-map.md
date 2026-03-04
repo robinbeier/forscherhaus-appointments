@@ -16,7 +16,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice | 25 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
-| `api-v1` | REST API v1 | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
+| `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 5 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | dashboard-exports, booking-public, api-v1 | 5 | 3 |
 
@@ -283,6 +283,7 @@ External API surface for appointment-domain entities with auth and schema ties.
 
 Dependencies:
 - `auth-session`
+- `integrations-sync`
 - `people-services-admin`
 - `scheduling-backoffice`
 - `settings-compliance`

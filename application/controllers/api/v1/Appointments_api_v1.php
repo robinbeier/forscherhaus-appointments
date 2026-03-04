@@ -224,7 +224,7 @@ class Appointments_api_v1 extends EA_Controller
     public function store(): void
     {
         try {
-            $appointment = request();
+            $appointment = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->appointments_model->api_decode($appointment);
 
@@ -310,7 +310,7 @@ class Appointments_api_v1 extends EA_Controller
 
             $original_appointment = $occurrences[0];
 
-            $appointment = request();
+            $appointment = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->appointments_model->api_decode($appointment, $original_appointment);
 

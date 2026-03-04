@@ -108,7 +108,7 @@ class Providers_api_v1 extends EA_Controller
     public function store(): void
     {
         try {
-            $provider = request();
+            $provider = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->providers_model->api_decode($provider);
 
@@ -164,7 +164,7 @@ class Providers_api_v1 extends EA_Controller
 
             $original_provider = $occurrences[0];
 
-            $provider = request();
+            $provider = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->providers_model->api_decode($provider, $original_provider);
 

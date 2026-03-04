@@ -109,7 +109,7 @@ class Services_api_v1 extends EA_Controller
     public function store(): void
     {
         try {
-            $service = request();
+            $service = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->services_model->api_decode($service);
 
@@ -149,7 +149,7 @@ class Services_api_v1 extends EA_Controller
 
             $original_service = $occurrences[0];
 
-            $service = request();
+            $service = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->services_model->api_decode($service, $original_service);
 

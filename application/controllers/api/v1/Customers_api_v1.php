@@ -26,6 +26,7 @@ class Customers_api_v1 extends EA_Controller
         parent::__construct();
 
         $this->load->library('api');
+        $this->load->library('api_request_dto_factory');
         $this->load->library('webhooks_client');
 
         $this->api->auth();
@@ -111,7 +112,7 @@ class Customers_api_v1 extends EA_Controller
     public function store(): void
     {
         try {
-            $customer = request();
+            $customer = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->customers_model->api_decode($customer);
 
@@ -151,7 +152,7 @@ class Customers_api_v1 extends EA_Controller
 
             $original_customer = $occurrences[0];
 
-            $customer = request();
+            $customer = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
             $this->customers_model->api_decode($customer, $original_customer);
 
@@ -195,5 +196,26 @@ class Customers_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function apiRequestDtoFactory(): Api_request_dto_factory
+    {
+        if (
+            isset($this->api_request_dto_factory) &&
+            $this->api_request_dto_factory instanceof Api_request_dto_factory
+        ) {
+            return $this->api_request_dto_factory;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->api_request_dto_factory) || !$CI->api_request_dto_factory instanceof Api_request_dto_factory) {
+            $CI->load->library('api_request_dto_factory');
+        }
+
+        $this->api_request_dto_factory = $CI->api_request_dto_factory;
+
+        return $this->api_request_dto_factory;
     }
 }
