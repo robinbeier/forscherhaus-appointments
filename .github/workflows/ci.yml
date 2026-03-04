@@ -99,6 +99,7 @@ jobs:
             write_contract_booking:
               - 'application/controllers/Booking*.php'
               - 'application/views/pages/booking*.php'
+              - 'application/views/components/booking*.php'
               - 'application/models/**'
               - 'application/libraries/**'
               - 'application/libraries/Booking_request_dto_factory.php'
@@ -115,6 +116,7 @@ jobs:
               - '.github/workflows/ci.yml'
             write_contract_api:
               - 'application/controllers/api/**'
+              - 'application/config/**'
               - 'application/models/**'
               - 'application/libraries/**'
               - 'application/libraries/Api.php'
