@@ -549,12 +549,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: coverage-shard-unit-artifacts
-          path: .
+          path: storage/logs/ci
       - name: Download coverage shard integration artifacts
         uses: actions/download-artifact@v4
         with:
           name: coverage-shard-integration-artifacts
-          path: .
+          path: storage/logs/ci
       - name: Merge shard coverage reports
         run: |
           test -f storage/logs/ci/coverage-shard-unit.phpcov
