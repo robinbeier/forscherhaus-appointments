@@ -29,7 +29,8 @@ Key decisions:
 State:
 
 -   PR-D1 merged to `main` via PR #113 and met its post-merge compute target.
--   PR-D2 implementation is locally complete on branch `codex/pr-d2-deep-seed-snapshot` and ready for commit/PR.
+-   PR-D2 merged to `main` via PR #114 at head `ccf55894`; post-merge push run `22735481203` for merge commit `fa9d2f6d` is in progress.
+-   PR-D3 is the current active implementation slice on branch `codex/pr-d3-coverage-unit-runner-php`.
 -   `CONTINUITY.md` created because it was previously missing.
 -   Current optimization backlog after D1:
     -   deep Docker jobs still repeat seeded DB creation unless D2 lands
@@ -67,15 +68,23 @@ Done:
 -   Reviewer A on D2 found no open bugs/regression/security/edge-case issues after diff review plus helper-script and compose validation.
 -   Reviewer B on D2 found no open architecture/readability/test-gap/maintainability issues after the same pass.
 -   D2 full local validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green, including deep smokes and `coverage-delta` (`25.7585%` current line coverage).
+-   PR #114 reached `18/18` green checks, `MERGEABLE`, `mergeStateStatus=CLEAN`, and was merged.
+-   D3 discovery: `phpunit.coverage.unit.xml` was not a pure-unit slice; it contained many `Tests\TestCase` files that hard-require CodeIgniter + MySQL.
+-   D3 solution direction is validated locally: pure PHPUnit tests run green with `tests/bootstrap.coverage-unit.php`, and the expanded dockerized coverage integration shard passes with the DB-backed unit tests folded into it.
+-   Reviewer A on D3 found no open bugs/regression/security/edge-case issues after the shard split, bootstrap review, and targeted validations.
+-   Reviewer B on D3 found no open architecture/readability/test-gap/maintainability issues after the same pass.
+-   D3 full local validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green with split coverage shards and `coverage-delta` at `25.5506%`.
+-   D3 PR #115 surfaced one real CI regression after the first push: `coverage-delta` failed because the shard merge double-counted identical repo files under runner and container absolute paths.
+-   D3 coverage merge fix is committed locally at `fd85c176`; it is not pushed yet in this snapshot.
 
 Now:
 
--   Commit, push, open PR for D2, babysit to merge, then record the first post-merge compute run.
+-   Push commit `fd85c176` to PR #115, babysit the fresh CI run to green/mergeable, and keep polling the first post-merge push run for D2 in parallel when useful.
 
 Next:
 
--   After D2 merge, measure the first clean full-fanout push run on `main` against the D2 target `<=23m30s`.
--   Start PR-D3 to decouple `coverage-shard-unit` from Docker/MySQL/seed.
+-   Measure the first clean full-fanout push run on `main` against the D2 target `<=23m30s`.
+-   After D3 merge, measure the first clean full-fanout push run on `main` against the D3 target `<=22m00s`.
 -   After each merged PR, update this ledger with run IDs, compute totals, go/no-go for the next PR, and whether PR-D4 is still needed.
 -   PR-specific target ladder:
     -   PR-D1 target: `<=26m45s`

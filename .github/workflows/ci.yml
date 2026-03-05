@@ -405,7 +405,6 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
-      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.deep_required == 'true' &&
       (
@@ -413,37 +412,29 @@ jobs:
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     steps:
       - name: Git clone
         uses: actions/checkout@v2
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          coverage: xdebug
+          extensions: gd
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v4
         with:
           name: deep-check-deps
-          path: .ci-artifacts
-      - name: Download deterministic seed snapshot artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: deep-check-seed-snapshot
           path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
           test -f vendor/autoload.php
-      - name: Start coverage shard services
-        env:
-          EA_SKIP_NPM_BOOTSTRAP: "1"
-          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm
-      - name: Wait for MySQL readiness
-        run: bash scripts/ci/wait_for_mysql_readiness.sh
-      - name: Import deterministic seed snapshot
-        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Run coverage shard (unit)
-        run: docker compose exec -T php-fpm composer test:coverage:unit-shard
+        run: composer test:coverage:unit-shard
       - name: Upload coverage shard unit artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -456,11 +447,8 @@ jobs:
       - name: Diagnostics (failure logs)
         if: failure()
         run: |
-          docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm || true
-      - name: Cleanup coverage shard services
-        if: always()
-        run: docker compose down -v --remove-orphans
+          php -v || true
+          ls -la storage/logs/ci || true
 
   coverage-shard-integration:
     needs:
