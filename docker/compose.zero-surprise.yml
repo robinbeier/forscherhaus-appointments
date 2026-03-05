@@ -1,0 +1,14 @@
+services:
+  mysql:
+    volumes:
+      - zero_surprise_mysql_data:/var/lib/mysql
+    ports: []
+
+  nginx:
+    ports: []
+
+  pdf-renderer:
+    ports: []
+
+volumes:
+  zero_surprise_mysql_data:

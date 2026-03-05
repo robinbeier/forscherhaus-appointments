@@ -93,6 +93,9 @@ docker compose run --rm php-fpm composer check:coverage:delta
 ## Release Gates (Optional, Pre-Deploy)
 
 ```bash
+# Zero-surprise restore-dump replay (manual mandatory pre-deploy runbook step)
+composer release:gate:zero-surprise -- --help
+
 # Dashboard gate
 composer release:gate:dashboard -- --help
 
@@ -102,6 +105,7 @@ composer release:gate:booking-confirmation-pdf -- --help
 
 References:
 
+-   [Zero-surprise restore-dump replay](docs/release-gate-zero-surprise.md)
 -   [Dashboard release gate](docs/release-gate-dashboard.md)
 -   [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
 

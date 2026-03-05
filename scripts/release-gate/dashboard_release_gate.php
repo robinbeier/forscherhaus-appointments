@@ -178,12 +178,18 @@ try {
 
         GateAssertions::assertStatus($response->statusCode, 200, 'GET /dashboard/export/principal.pdf');
         GateAssertions::assertPdfBinary($response->body, $response->header('content-type'));
+        assertPdfExportDurationWithinLimit(
+            $response->durationMs,
+            $config['max_pdf_duration_ms'],
+            'GET /dashboard/export/principal.pdf',
+        );
 
         return [
             'http_status' => $response->statusCode,
             'url' => $response->url,
             'content_type' => $response->header('content-type'),
             'bytes' => strlen($response->body),
+            'duration_ms' => $response->durationMs,
         ];
     });
 
@@ -208,12 +214,18 @@ try {
 
         GateAssertions::assertStatus($response->statusCode, 200, 'GET /dashboard/export/teacher.pdf');
         GateAssertions::assertPdfBinary($response->body, $response->header('content-type'));
+        assertPdfExportDurationWithinLimit(
+            $response->durationMs,
+            $config['max_pdf_duration_ms'],
+            'GET /dashboard/export/teacher.pdf',
+        );
 
         return [
             'http_status' => $response->statusCode,
             'url' => $response->url,
             'content_type' => $response->header('content-type'),
             'bytes' => strlen($response->body),
+            'duration_ms' => $response->durationMs,
         ];
     });
 } catch (GateAssertionException $e) {
@@ -249,6 +261,7 @@ if (isset($config) && is_array($config)) {
         'pdf_health_url' => $config['pdf_health_url'],
         'http_timeout' => $config['http_timeout'],
         'export_timeout' => $config['export_timeout'],
+        'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
         'require_nonempty_metrics' => $config['require_nonempty_metrics'],
         'csrf_token_name' => $config['csrf_token_name'],
         'csrf_cookie_name' => $config['csrf_cookie_name'],
@@ -309,6 +322,7 @@ exit($exitCode);
  *   pdf_health_url:string|null,
  *   http_timeout:int,
  *   export_timeout:int,
+ *   max_pdf_duration_ms:int,
  *   require_nonempty_metrics:bool,
  *   csrf_token_name:string,
  *   csrf_cookie_name:string,
@@ -331,6 +345,7 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
         'pdf-health-url::',
         'http-timeout::',
         'export-timeout::',
+        'max-pdf-duration-ms::',
         'require-nonempty-metrics::',
         'output-json::',
     ]);
@@ -356,6 +371,7 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
             'pdf_health_url' => null,
             'http_timeout' => 15,
             'export_timeout' => 60,
+            'max_pdf_duration_ms' => 30000,
             'require_nonempty_metrics' => false,
             'csrf_token_name' => $csrfDefaults['csrf_token_name'],
             'csrf_cookie_name' => $csrfDefaults['csrf_cookie_name'],
@@ -388,6 +404,10 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
 
     $httpTimeout = parsePositiveInt(getOptionalOption($options, 'http-timeout', 15), 'http-timeout');
     $exportTimeout = parsePositiveInt(getOptionalOption($options, 'export-timeout', 60), 'export-timeout');
+    $maxPdfDurationMs = parsePositiveInt(
+        getOptionalOption($options, 'max-pdf-duration-ms', 30000),
+        'max-pdf-duration-ms',
+    );
     $requireNonEmptyMetrics = parseBooleanOption(getOptionalOption($options, 'require-nonempty-metrics', null));
     $csrfTokenName = $csrfDefaults['csrf_token_name'];
     $csrfCookieName = $csrfDefaults['csrf_cookie_name'];
@@ -424,6 +444,7 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
         'pdf_health_url' => $pdfHealthUrl,
         'http_timeout' => $httpTimeout,
         'export_timeout' => $exportTimeout,
+        'max_pdf_duration_ms' => $maxPdfDurationMs,
         'require_nonempty_metrics' => $requireNonEmptyMetrics,
         'csrf_token_name' => $csrfTokenName,
         'csrf_cookie_name' => $csrfCookieName,
@@ -655,6 +676,22 @@ function validateDate(string $value, string $optionName): void
     }
 }
 
+function assertPdfExportDurationWithinLimit(float $durationMs, int $maxPdfDurationMs, string $context): void
+{
+    if ($durationMs <= (float) $maxPdfDurationMs) {
+        return;
+    }
+
+    throw new GateAssertionException(
+        sprintf(
+            '%s exceeded PDF duration limit: got %.2fms, max %dms.',
+            $context,
+            $durationMs,
+            $maxPdfDurationMs,
+        ),
+    );
+}
+
 /**
  * @param array<string, mixed> $report
  */
@@ -700,6 +737,7 @@ function printUsage(): void
         '  --pdf-health-url=URL           Optional PDF renderer health URL',
         '  --http-timeout=SECONDS         HTTP timeout for JSON checks (default: 15)',
         '  --export-timeout=SECONDS       HTTP timeout for exports (default: 60)',
+        '  --max-pdf-duration-ms=MS       Max duration per PDF export (default: 30000)',
         '  --require-nonempty-metrics     Fail if metrics payload is empty',
         '  --require-nonempty-metrics=0|1 Explicitly set non-empty requirement',
         '  --output-json=PATH             JSON report output path',
