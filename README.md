@@ -85,7 +85,10 @@ docker compose run --rm php-fpm composer test:request-contracts
 docker compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
 docker compose run --rm php-fpm composer phpstan:request-contracts:l2
 
-# optional unit coverage + coverage delta gate
+# optional coverage shards + merge + coverage delta gate
+docker compose run --rm php-fpm composer test:coverage:unit-shard
+docker compose run --rm php-fpm composer test:coverage:integration-shard
+docker compose run --rm php-fpm composer test:coverage:merge-shards
 docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
 ```
@@ -218,8 +221,9 @@ CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.
 CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is blocking.
-CI note: the `coverage-delta` check validates Clover line coverage against the in-repo baseline/delta policy and is blocking. Current policy thresholds are baseline `22.45%`, absolute minimum `22.25%`, max drop `0.20pp`, epsilon `0.02pp`. The coverage suite includes Unit tests plus booking flow and API read integration tests. It runs on pushes to `main` and non-draft PRs when deep checks are relevant.
-CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
+CI note: coverage now runs in two blocking deep-check shards (`coverage-shard-unit`, `coverage-shard-integration`) and feeds an aggregating blocking `coverage-delta` gate. The gate validates merged Clover line coverage against the in-repo baseline/delta policy.
+CI note: `coverage-delta` current policy thresholds are baseline `22.45%`, absolute minimum `22.25%`, max drop `0.20pp`, epsilon `0.02pp`. Coverage runs on pushes to `main` and non-draft PRs when deep checks are relevant.
+CI note: coverage artifacts are written to `storage/logs/ci/coverage-shard-unit.phpcov`, `storage/logs/ci/coverage-shard-integration.phpcov`, `storage/logs/ci/coverage-unit-clover.xml`, `storage/logs/ci/coverage-merge-latest.json`, and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
 CI note: `write-contract-booking` artifacts are written to `storage/logs/ci/booking-write-contract-<UTC>.json`.
 CI note: `write-contract-api` artifacts are written to `storage/logs/ci/api-openapi-write-contract-<UTC>.json`.
