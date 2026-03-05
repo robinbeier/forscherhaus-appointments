@@ -635,8 +635,7 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    # Rollout phase: keep non-blocking until 7 consecutive green PR runs.
-    continue-on-error: true
+    # Blocking phase: rollout precondition satisfied (7 executed green PR runs).
 
     steps:
       - name: Git clone
