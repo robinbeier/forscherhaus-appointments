@@ -214,6 +214,7 @@ Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push .
 
 CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
 CI note: `deep-check-bootstrap` now ships a vendor-only dependency artifact. Deep docker-compose jobs restore `vendor/` from that artifact and set CI-only bootstrap flags so `php-fpm` does not rerun `npm install` or asset compilation when `node_modules/` is absent.
+CI note: dockerized deep jobs now restore a deterministic `deep-check-seed-snapshot` artifact instead of rerunning `php index.php console install` per job.
 CI note: `integration-smoke` covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
 CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is blocking.
