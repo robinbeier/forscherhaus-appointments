@@ -160,9 +160,26 @@ class CoverageDeltaGateTest extends TestCase
         self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
     }
 
+    public function testLoadCoverageDeltaPolicyUsesRepositoryDefaults(): void
+    {
+        $policy = loadCoverageDeltaPolicy($this->repoPolicyPath());
+
+        self::assertSame(22.3, $policy['baseline_line_coverage_pct']);
+        self::assertSame(0.2, $policy['max_drop_pct_points']);
+        self::assertSame(22.1, $policy['absolute_min_line_coverage_pct']);
+        self::assertSame(0.02, $policy['epsilon_pct_points']);
+        self::assertGreaterThan($policy['absolute_min_line_coverage_pct'], $policy['max_drop_pct_points']);
+        self::assertGreaterThanOrEqual($policy['baseline_line_coverage_pct'], $policy['absolute_min_line_coverage_pct']);
+    }
+
     private function fixturePath(string $filename): string
     {
         return __DIR__ . '/fixtures/coverage/' . $filename;
+    }
+
+    private function repoPolicyPath(): string
+    {
+        return __DIR__ . '/../../../scripts/ci/config/coverage_delta_policy.php';
     }
 
     /**
