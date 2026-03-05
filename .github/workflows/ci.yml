@@ -689,29 +689,17 @@ jobs:
         env:
           EA_SKIP_NPM_BOOTSTRAP: "1"
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm nginx
+        run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Import deterministic seed snapshot
         run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
-      - name: Wait for application HTTP readiness
-        run: |
-          max_attempts=45
-
-          attempt=1
-          until docker compose exec -T php-fpm php -r '$ch=curl_init("http://nginx/index.php/login");curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);curl_setopt($ch,CURLOPT_TIMEOUT,5);curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);curl_close($ch);exit($code===200?0:1);'; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::Application HTTP readiness timed out after ${max_attempts} attempts." >&2
-              docker compose logs --no-color --timestamps php-fpm nginx || true
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
+      - name: Start in-container PHP HTTP server
+        run: bash scripts/ci/start_php_http_server.sh
       - name: Run API OpenAPI contract smoke
         run: >
           docker compose exec -T php-fpm php scripts/ci/api_openapi_contract_smoke.php
-          --base-url=http://nginx --index-page=index.php
+          --base-url=http://127.0.0.1:8080 --index-page=index.php
           --openapi-spec=/var/www/html/openapi.yml
           --username=administrator --password=administrator
       - name: Diagnostics (failure logs)
@@ -719,7 +707,7 @@ jobs:
         run: |
           echo "API OpenAPI contract smoke failed; dumping docker compose diagnostics."
           docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          docker compose logs --no-color --timestamps mysql php-fpm || true
       - name: Cleanup API contract services
         if: always()
         run: docker compose down -v --remove-orphans
@@ -761,29 +749,17 @@ jobs:
         env:
           EA_SKIP_NPM_BOOTSTRAP: "1"
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm nginx
+        run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Import deterministic seed snapshot
         run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
-      - name: Wait for application HTTP readiness
-        run: |
-          max_attempts=45
-
-          attempt=1
-          until docker compose exec -T php-fpm php -r '$ch=curl_init("http://nginx/index.php/login");curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);curl_setopt($ch,CURLOPT_TIMEOUT,5);curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);curl_close($ch);exit($code===200?0:1);'; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::Application HTTP readiness timed out after ${max_attempts} attempts." >&2
-              docker compose logs --no-color --timestamps php-fpm nginx || true
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
+      - name: Start in-container PHP HTTP server
+        run: bash scripts/ci/start_php_http_server.sh
       - name: Run booking write-path contract smoke
         run: >
           docker compose exec -T php-fpm composer contract-test:booking-write --
-          --base-url=http://nginx --index-page=index.php
+          --base-url=http://127.0.0.1:8080 --index-page=index.php
           --username=administrator --password=administrator
           --booking-search-days=14 --retry-count=1
           --checks=booking_register_success_contract,booking_register_manage_update_contract,booking_register_unavailable_contract,booking_reschedule_manage_mode_contract,booking_cancel_success_contract,booking_cancel_unknown_hash_contract
@@ -799,7 +775,7 @@ jobs:
         run: |
           echo "Booking write contract smoke failed; dumping diagnostics."
           docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          docker compose logs --no-color --timestamps mysql php-fpm || true
           ls -t storage/logs/ci/booking-write-contract-*.json 2>/dev/null | head -n 1 | xargs -I{} cat "{}" || true
       - name: Cleanup booking write-contract services
         if: always()
@@ -842,29 +818,17 @@ jobs:
         env:
           EA_SKIP_NPM_BOOTSTRAP: "1"
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm nginx
+        run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Import deterministic seed snapshot
         run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
-      - name: Wait for application HTTP readiness
-        run: |
-          max_attempts=45
-
-          attempt=1
-          until docker compose exec -T php-fpm php -r '$ch=curl_init("http://nginx/index.php/login");curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);curl_setopt($ch,CURLOPT_TIMEOUT,5);curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);curl_close($ch);exit($code===200?0:1);'; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::Application HTTP readiness timed out after ${max_attempts} attempts." >&2
-              docker compose logs --no-color --timestamps php-fpm nginx || true
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
+      - name: Start in-container PHP HTTP server
+        run: bash scripts/ci/start_php_http_server.sh
       - name: Run API OpenAPI write-path contract smoke
         run: >
           docker compose exec -T php-fpm composer contract-test:api-openapi-write --
-          --base-url=http://nginx --index-page=index.php
+          --base-url=http://127.0.0.1:8080 --index-page=index.php
           --openapi-spec=/var/www/html/openapi.yml
           --username=administrator --password=administrator
           --retry-count=1 --booking-search-days=14
@@ -881,7 +845,7 @@ jobs:
         run: |
           echo "API OpenAPI write contract smoke failed; dumping diagnostics."
           docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          docker compose logs --no-color --timestamps mysql php-fpm || true
           ls -t storage/logs/ci/api-openapi-write-contract-*.json 2>/dev/null | head -n 1 | xargs -I{} cat "{}" || true
       - name: Cleanup API write-contract services
         if: always()
@@ -923,7 +887,7 @@ jobs:
         env:
           EA_SKIP_NPM_BOOTSTRAP: "1"
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm nginx
+        run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Import deterministic seed snapshot
@@ -935,7 +899,7 @@ jobs:
         run: |
           echo "Booking controller flow tests failed; dumping docker compose diagnostics."
           docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          docker compose logs --no-color --timestamps mysql php-fpm || true
       - name: Cleanup booking flow test services
         if: always()
         run: docker compose down -v --remove-orphans
@@ -976,29 +940,17 @@ jobs:
         env:
           EA_SKIP_NPM_BOOTSTRAP: "1"
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm nginx
+        run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Import deterministic seed snapshot
         run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
-      - name: Wait for application HTTP readiness
-        run: |
-          max_attempts=45
-
-          attempt=1
-          until docker compose exec -T php-fpm php -r '$ch=curl_init("http://nginx/index.php/login");curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);curl_setopt($ch,CURLOPT_TIMEOUT,5);curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);curl_close($ch);exit($code===200?0:1);'; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::Application HTTP readiness timed out after ${max_attempts} attempts." >&2
-              docker compose logs --no-color --timestamps php-fpm nginx || true
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
+      - name: Start in-container PHP HTTP server
+        run: bash scripts/ci/start_php_http_server.sh
       - name: Run dashboard+booking+api integration smoke
         run: >
           docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php
-          --base-url=http://nginx --index-page=index.php
+          --base-url=http://127.0.0.1:8080 --index-page=index.php
           --username=administrator --password=administrator
           --start-date=2026-01-01 --end-date=2026-01-31
           --checks=readiness_login_page,auth_login_validate,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities
@@ -1007,7 +959,7 @@ jobs:
         run: |
           echo "Integration smoke failed; dumping docker compose diagnostics."
           docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          docker compose logs --no-color --timestamps mysql php-fpm || true
       - name: Cleanup integration services
         if: always()
         run: docker compose down -v --remove-orphans

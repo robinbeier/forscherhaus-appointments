@@ -48,21 +48,24 @@ npm run assets:refresh
 docker compose run --rm php-fpm composer test
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 
-# optional API OpenAPI contract smoke command (requires mysql/php-fpm/nginx stack)
+# optional API OpenAPI contract smoke command (CI-parity stack: mysql/php-fpm + local PHP HTTP server)
+bash scripts/ci/start_php_http_server.sh
 docker compose exec -T php-fpm composer contract-test:api-openapi -- \
-  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --base-url=http://127.0.0.1:8080 --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator
 
 # optional booking write-path contract smoke command (mutation contract, deterministic fixtures)
+bash scripts/ci/start_php_http_server.sh
 docker compose exec -T php-fpm composer contract-test:booking-write -- \
-  --base-url=http://nginx --index-page=index.php \
+  --base-url=http://127.0.0.1:8080 --index-page=index.php \
   --username=administrator --password=administrator \
   --booking-search-days=14 --retry-count=1 \
   --checks=booking_register_success_contract,booking_register_manage_update_contract,booking_register_unavailable_contract,booking_reschedule_manage_mode_contract,booking_cancel_success_contract,booking_cancel_unknown_hash_contract
 
 # optional API OpenAPI write-path contract smoke command (customer+appointment lifecycle)
+bash scripts/ci/start_php_http_server.sh
 docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
-  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --base-url=http://127.0.0.1:8080 --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator \
   --retry-count=1 --booking-search-days=14 \
   --checks=appointments_write_unauthorized_guard,customers_store_contract,appointments_store_contract,appointments_update_contract,appointments_destroy_contract,customers_destroy_contract
@@ -71,8 +74,9 @@ docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
 # prerequisites are auto-expanded transitively and execution still follows the script's fixed registry order.
 
 # optional combined write-path contract command
+bash scripts/ci/start_php_http_server.sh
 docker compose exec -T php-fpm composer contract-test:write-path -- \
-  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --base-url=http://127.0.0.1:8080 --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator \
   --retry-count=1 --booking-search-days=14
 
@@ -215,6 +219,7 @@ Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push .
 CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
 CI note: `deep-check-bootstrap` now ships a vendor-only dependency artifact. Deep docker-compose jobs restore `vendor/` from that artifact and set CI-only bootstrap flags so `php-fpm` does not rerun `npm install` or asset compilation when `node_modules/` is absent.
 CI note: dockerized deep jobs now restore a deterministic `deep-check-seed-snapshot` artifact instead of rerunning `php index.php console install` per job.
+CI note: the HTTP deep jobs (`api-contract-openapi`, `write-contract-booking`, `write-contract-api`, `integration-smoke`) now boot only `mysql + php-fpm` and start a temporary in-container PHP HTTP server via `scripts/ci/start_php_http_server.sh` instead of a separate `nginx` service; `booking-controller-flows` also runs without `nginx`.
 CI note: `integration-smoke` covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
 CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is blocking.
