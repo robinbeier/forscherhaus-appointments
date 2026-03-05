@@ -710,6 +710,8 @@ function countBookedAppointmentsForSlot(
     $length = 100;
     $page = 1;
     $count = 0;
+    $fromDate = substr($startDateTime, 0, 10);
+    $tillDate = substr($endDateTime, 0, 10);
 
     while (true) {
         if ($page > 50) {
@@ -726,6 +728,8 @@ function countBookedAppointmentsForSlot(
             [
                 'providerId' => $providerId,
                 'serviceId' => $serviceId,
+                'from' => $fromDate,
+                'till' => $tillDate,
                 'length' => $length,
                 'page' => $page,
             ],

@@ -24,6 +24,12 @@ $config = [];
 
 try {
     $config = parseCliOptions($defaultOutputPath, $defaultTimezone);
+
+    if (($config['help'] ?? false) === true) {
+        printUsage();
+        exit(ZERO_SURPRISE_EXIT_SUCCESS);
+    }
+
     $composeProject = buildComposeProjectName($config['release_id']);
 
     $bookingReportPath = 'storage/logs/release-gate/zero-surprise-booking-' . $timestamp . '.json';
@@ -214,6 +220,7 @@ exit($exitCode);
 function parseCliOptions(string $defaultOutputPath, string $defaultTimezone): array
 {
     $options = getopt('', [
+        'help',
         'release-id:',
         'dump-file:',
         'base-url:',
@@ -231,6 +238,13 @@ function parseCliOptions(string $defaultOutputPath, string $defaultTimezone): ar
 
     if (!is_array($options)) {
         throw new InvalidArgumentException('Failed to parse CLI options.');
+    }
+
+    if (array_key_exists('help', $options)) {
+        return [
+            'help' => true,
+            'output_json' => $defaultOutputPath,
+        ];
     }
 
     $releaseId = trim(getRequiredOption($options, 'release-id'));
@@ -291,6 +305,7 @@ function parseCliOptions(string $defaultOutputPath, string $defaultTimezone): ar
     }
 
     return [
+        'help' => false,
         'release_id' => $releaseId,
         'dump_file' => $dumpFile,
         'base_url' => $baseUrl,
@@ -966,4 +981,40 @@ function redactCommandSecrets(string $command): string
     $redacted = preg_replace('/--password=[^\\s]+/i', '--password=[redacted]', $command);
 
     return is_string($redacted) ? $redacted : $command;
+}
+
+function printUsage(): void
+{
+    $lines = [
+        'Zero-Surprise Restore-Dump Replay (Shadow Gate)',
+        '',
+        'Usage:',
+        '  php scripts/release-gate/zero_surprise_replay.php [options]',
+        '',
+        'Required:',
+        '  --release-id=VALUE             Release identifier (safe chars: letters, digits, ._-)',
+        '  --dump-file=PATH               Absolute/relative path to .sql or .sql.gz dump file',
+        '  --base-url=URL                 App base URL for in-stack checks (example: http://nginx)',
+        '  --index-page=VALUE             URL index page segment (use --index-page= for rewrite mode)',
+        '  --username=NAME                Admin username',
+        '  --password=PASS                Admin password',
+        '  --start-date=YYYY-MM-DD        Dashboard filter start date (inclusive)',
+        '  --end-date=YYYY-MM-DD          Dashboard filter end date (inclusive)',
+        '',
+        'Optional:',
+        '  --booking-search-days=N        Booking slot search window (default: 14)',
+        '  --retry-count=N                Retry count for flaky write checks (default: 1)',
+        '  --max-pdf-duration-ms=N        Max allowed PDF export duration (default: 30000)',
+        '  --timezone=TZID                Time zone for deterministic fixtures (default: Europe/Berlin)',
+        '  --output-json=PATH             Consolidated report path',
+        '                                (default: storage/logs/release-gate/zero-surprise-<UTC>.json)',
+        '  --help                         Show this help',
+        '',
+        'Exit codes:',
+        '  0  Success',
+        '  1  Assertion/invariant failure',
+        '  2  Runtime/configuration failure',
+    ];
+
+    fwrite(STDOUT, implode(PHP_EOL, $lines) . PHP_EOL);
 }
