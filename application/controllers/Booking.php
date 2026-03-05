@@ -346,7 +346,15 @@ class Booking extends EA_Controller
             $appointment['id_users_provider'] = $this->check_datetime_availability($request_dto);
 
             if (!$appointment['id_users_provider']) {
-                throw new RuntimeException(lang('requested_hour_is_unavailable'));
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
+
+                return;
             }
 
             $provider = $this->providers_model->find($appointment['id_users_provider']);

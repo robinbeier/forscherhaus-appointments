@@ -710,7 +710,7 @@ function collectInvariants(?array $bookingReport, ?array $dashboardReport): arra
  */
 function evaluateUnexpected5xxInvariant(?array $bookingReport, ?array $dashboardReport): array
 {
-    $allowlistedChecks = ['booking_register_unavailable_contract'];
+    $allowlistedChecks = [];
     $occurrences = [];
 
     foreach (

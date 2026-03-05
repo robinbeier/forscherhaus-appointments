@@ -24,6 +24,9 @@ ZERO_SURPRISE_REPORT=""
 ZERO_SURPRISE_MAX_AGE_MINUTES=240
 REQUIRE_ZERO_SURPRISE=1
 ZERO_SURPRISE_EXPECTED_MODE="predeploy"
+ZERO_SURPRISE_CANARY_ENABLED=1
+ZERO_SURPRISE_CANARY_TIMEOUT=300
+ZERO_SURPRISE_CANARY_CREDENTIALS_FILE=""
 
 RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
@@ -58,6 +61,12 @@ Renderer / health gate options:
   --zero-surprise-max-age-minutes N
                                 Max age for report in minutes      [default: 240]
   --require-zero-surprise 0|1   Enforce zero-surprise hard-fail    [default: 1]
+  --zero-surprise-canary-enabled 0|1
+                                Run post-switch live canary        [default: 1]
+  --zero-surprise-canary-timeout N
+                                Live canary timeout in seconds      [default: 300]
+  --zero-surprise-canary-credentials-file PATH
+                                INI file for live canary creds      [required when canary is enabled]
 
 Exit codes:
   0   Success
@@ -349,6 +358,46 @@ PHP
   return 0
 }
 
+run_zero_surprise_live_canary() {
+  local canary_script
+  local canary_report
+
+  if [[ "$ZERO_SURPRISE_CANARY_ENABLED" -ne 1 ]]; then
+    echo "[i] Zero-surprise post-deploy canary disabled (--zero-surprise-canary-enabled=0)."
+    return 0
+  fi
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] run zero-surprise live canary with credentials '$ZERO_SURPRISE_CANARY_CREDENTIALS_FILE' (timeout=${ZERO_SURPRISE_CANARY_TIMEOUT}s)"
+    return 0
+  fi
+
+  canary_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/release-gate/zero_surprise_live_canary.php"
+  [[ -r "$canary_script" ]] || {
+    echo "[!] Zero-surprise live canary script missing or unreadable: $canary_script"
+    return 1
+  }
+
+  canary_report="$APP/storage/logs/release-gate/zero-surprise-live-canary-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json"
+
+  echo "[i] Running zero-surprise post-deploy canary"
+  echo "    Credentials file : $ZERO_SURPRISE_CANARY_CREDENTIALS_FILE"
+  echo "    Timeout (seconds): $ZERO_SURPRISE_CANARY_TIMEOUT"
+  echo "    Report           : $canary_report"
+
+  if ! php "$canary_script" \
+    --release-id="$REL" \
+    --credentials-file="$ZERO_SURPRISE_CANARY_CREDENTIALS_FILE" \
+    --timeout-seconds="$ZERO_SURPRISE_CANARY_TIMEOUT" \
+    --output-json="$canary_report"; then
+    echo "[!] Zero-surprise post-deploy canary failed."
+    return 1
+  fi
+
+  echo "[OK] Zero-surprise post-deploy canary passed."
+  return 0
+}
+
 rollback_after_failure() {
   local reason="$1"
   local failed_base="${APP}_failed_${REL}"
@@ -449,6 +498,9 @@ while [[ $# -gt 0 ]]; do
     --zero-surprise-report) ZERO_SURPRISE_REPORT="$2"; shift 2;;
     --zero-surprise-max-age-minutes) ZERO_SURPRISE_MAX_AGE_MINUTES="$2"; shift 2;;
     --require-zero-surprise) REQUIRE_ZERO_SURPRISE="$2"; shift 2;;
+    --zero-surprise-canary-enabled) ZERO_SURPRISE_CANARY_ENABLED="$2"; shift 2;;
+    --zero-surprise-canary-timeout) ZERO_SURPRISE_CANARY_TIMEOUT="$2"; shift 2;;
+    --zero-surprise-canary-credentials-file) ZERO_SURPRISE_CANARY_CREDENTIALS_FILE="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) die "[!] Unknown option: $1";;
   esac
@@ -457,14 +509,26 @@ done
 [[ -n "$REL" ]] || die "[!] --rel is required."
 [[ "$REQUIRE_ZERO_SURPRISE" == "0" || "$REQUIRE_ZERO_SURPRISE" == "1" ]] \
   || die "[!] --require-zero-surprise must be 0 or 1."
+[[ "$ZERO_SURPRISE_CANARY_ENABLED" == "0" || "$ZERO_SURPRISE_CANARY_ENABLED" == "1" ]] \
+  || die "[!] --zero-surprise-canary-enabled must be 0 or 1."
 is_positive_integer "$ZERO_SURPRISE_MAX_AGE_MINUTES" \
   || die "[!] --zero-surprise-max-age-minutes must be a positive integer."
+is_positive_integer "$ZERO_SURPRISE_CANARY_TIMEOUT" \
+  || die "[!] --zero-surprise-canary-timeout must be a positive integer."
 if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
   [[ -n "$ZERO_SURPRISE_REPORT" ]] || die "[!] --zero-surprise-report is required when --require-zero-surprise=1."
+fi
+if [[ "$ZERO_SURPRISE_CANARY_ENABLED" -eq 1 ]]; then
+  [[ -n "$ZERO_SURPRISE_CANARY_CREDENTIALS_FILE" ]] \
+    || die "[!] --zero-surprise-canary-credentials-file is required when --zero-surprise-canary-enabled=1."
 fi
 if [[ "$DRYRUN" -eq 0 ]]; then
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
   [[ -r "$HEALTHZ_TOKEN_FILE" ]] || die "[!] Token file is not readable: $HEALTHZ_TOKEN_FILE"
+  if [[ "$ZERO_SURPRISE_CANARY_ENABLED" -eq 1 ]]; then
+    [[ -r "$ZERO_SURPRISE_CANARY_CREDENTIALS_FILE" ]] \
+      || die "[!] Canary credentials file is not readable: $ZERO_SURPRISE_CANARY_CREDENTIALS_FILE"
+  fi
 fi
 
 ARCHIVE="${SRC}/${REL}.tar.gz"
@@ -491,6 +555,9 @@ echo "    Token file           : ${HEALTHZ_TOKEN_FILE:-<not-set-dry-run>}"
 echo "    Zero-surprise gate   : $REQUIRE_ZERO_SURPRISE"
 echo "    Zero-surprise report : ${ZERO_SURPRISE_REPORT:-<not-set>}"
 echo "    Zero-surprise max age: ${ZERO_SURPRISE_MAX_AGE_MINUTES}m"
+echo "    Canary enabled       : $ZERO_SURPRISE_CANARY_ENABLED"
+echo "    Canary timeout       : ${ZERO_SURPRISE_CANARY_TIMEOUT}s"
+echo "    Canary credentials   : ${ZERO_SURPRISE_CANARY_CREDENTIALS_FILE:-<not-set>}"
 echo "    Logfile              : $LOG"
 
 [[ -f "$ARCHIVE" ]] || die "[!] Archive not found: $ARCHIVE"
@@ -568,6 +635,10 @@ fi
 
 if ! probe_deep_health_contract; then
   rollback_after_failure "deep health contract failed ($DEEP_HEALTH_URL)"
+fi
+
+if ! run_zero_surprise_live_canary; then
+  rollback_after_failure "zero-surprise canary failed"
 fi
 
 if [[ "$MARK_RELEASE" -eq 1 ]]; then

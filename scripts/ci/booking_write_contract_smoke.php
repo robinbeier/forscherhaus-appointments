@@ -356,7 +356,7 @@ function runBookingContractsAttempt(
                     true,
                 );
 
-                GateAssertions::assertStatus($response->statusCode, 500, 'POST /booking/register (unavailable)');
+                GateAssertions::assertStatus($response->statusCode, 409, 'POST /booking/register (unavailable)');
                 $decoded = decodeJsonArray($response->body, 'POST /booking/register (unavailable)');
 
                 if (($decoded['success'] ?? null) !== false) {
