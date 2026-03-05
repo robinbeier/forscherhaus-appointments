@@ -5,11 +5,6 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
-use SebastianBergmann\CodeCoverage\CodeCoverage;
-use SebastianBergmann\CodeCoverage\Driver\Driver;
-use SebastianBergmann\CodeCoverage\Filter;
-use SebastianBergmann\CodeCoverage\ProcessedCodeCoverageData;
-use SebastianBergmann\CodeCoverage\RawCodeCoverageData;
 
 require_once __DIR__ . '/../../../scripts/ci/merge_coverage_shards.php';
 
@@ -37,13 +32,19 @@ class CoverageShardMergeTest extends TestCase
 
     public function testRunCoverageShardMergeCliMergesInputsAndWritesOutputs(): void
     {
-        $inputA = $this->tmpDir . '/shard-a.phpcov';
-        $inputB = $this->tmpDir . '/shard-b.phpcov';
+        $inputA = $this->tmpDir . '/shard-a-clover.xml';
+        $inputB = $this->tmpDir . '/shard-b-clover.xml';
         $outputClover = $this->tmpDir . '/coverage-merged.xml';
         $outputJson = $this->tmpDir . '/coverage-merge.json';
 
-        $this->writeCoverageShard($inputA, '/tmp/shard-a.php', [10 => ['test-a'], 11 => []]);
-        $this->writeCoverageShard($inputB, '/tmp/shard-b.php', [20 => ['test-b'], 21 => null]);
+        $this->writeCloverShard($inputA, [
+            '/tmp/shard-a.php' => [10 => 1, 11 => 0],
+            '/tmp/shard-b.php' => [20 => 1],
+        ]);
+        $this->writeCloverShard($inputB, [
+            '/tmp/shard-a.php' => [11 => 1, 12 => 0],
+            '/tmp/shard-c.php' => [30 => 0],
+        ]);
 
         $exitCode = runCoverageShardMergeCli([
             'merge_coverage_shards.php',
@@ -61,12 +62,16 @@ class CoverageShardMergeTest extends TestCase
         self::assertSame('pass', $report['status']);
         self::assertSame(2, $report['files_merged']);
         self::assertSame([$inputA, $inputB], $report['inputs']);
+
+        $metrics = $this->readCloverProjectMetrics($outputClover);
+        self::assertSame(5, $metrics['statements']);
+        self::assertSame(3, $metrics['coveredstatements']);
     }
 
     public function testRunCoverageShardMergeCliFailsWhenLessThanTwoInputsProvided(): void
     {
-        $inputA = $this->tmpDir . '/shard-a.phpcov';
-        $this->writeCoverageShard($inputA, '/tmp/shard-a.php', [10 => ['test-a']]);
+        $inputA = $this->tmpDir . '/shard-a-clover.xml';
+        $this->writeCloverShard($inputA, ['/tmp/shard-a.php' => [10 => 1]]);
 
         $exitCode = runCoverageShardMergeCli([
             'merge_coverage_shards.php',
@@ -94,17 +99,44 @@ class CoverageShardMergeTest extends TestCase
     }
 
     /**
-     * @param array<int, array<int, string>|null> $lineCoverage
+     * @param array<string, array<int, int>> $lineCoverageByFile
      */
-    private function writeCoverageShard(string $path, string $file, array $lineCoverage): void
+    private function writeCloverShard(string $path, array $lineCoverageByFile): void
     {
-        $data = new ProcessedCodeCoverageData();
-        $data->setLineCoverage([$file => $lineCoverage]);
+        $metrics = $this->calculateMetrics($lineCoverageByFile);
 
-        $coverage = new CodeCoverage(new DummyCoverageDriver(), new Filter());
-        $coverage->setData($data);
+        $lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<coverage generated="1">', '  <project timestamp="1">'];
 
-        file_put_contents($path, serialize($coverage));
+        foreach ($lineCoverageByFile as $file => $lineCoverage) {
+            $lines[] = sprintf('    <file name="%s">', htmlspecialchars($file, ENT_XML1));
+
+            foreach ($lineCoverage as $lineNumber => $count) {
+                $lines[] = sprintf('      <line num="%d" type="stmt" count="%d"/>', $lineNumber, $count);
+            }
+
+            $fileMetrics = $this->calculateMetrics([$file => $lineCoverage]);
+            $lines[] = sprintf(
+                '      <metrics files="1" loc="0" ncloc="0" classes="0" methods="0" coveredmethods="0" conditionals="0" coveredconditionals="0" statements="%d" coveredstatements="%d" elements="%d" coveredelements="%d"/>',
+                $fileMetrics['statements'],
+                $fileMetrics['coveredstatements'],
+                $fileMetrics['statements'],
+                $fileMetrics['coveredstatements'],
+            );
+            $lines[] = '    </file>';
+        }
+
+        $lines[] = sprintf(
+            '    <metrics files="%d" loc="0" ncloc="0" classes="0" methods="0" coveredmethods="0" conditionals="0" coveredconditionals="0" statements="%d" coveredstatements="%d" elements="%d" coveredelements="%d"/>',
+            $metrics['files'],
+            $metrics['statements'],
+            $metrics['coveredstatements'],
+            $metrics['statements'],
+            $metrics['coveredstatements'],
+        );
+        $lines[] = '  </project>';
+        $lines[] = '</coverage>';
+
+        file_put_contents($path, implode(PHP_EOL, $lines) . PHP_EOL);
     }
 
     /**
@@ -119,6 +151,56 @@ class CoverageShardMergeTest extends TestCase
         self::assertIsArray($decoded);
 
         return $decoded;
+    }
+
+    /**
+     * @param array<string, array<int, int>> $lineCoverageByFile
+     * @return array{files:int,statements:int,coveredstatements:int}
+     */
+    private function calculateMetrics(array $lineCoverageByFile): array
+    {
+        $statements = 0;
+        $coveredStatements = 0;
+
+        foreach ($lineCoverageByFile as $lineCoverage) {
+            $statements += count($lineCoverage);
+
+            foreach ($lineCoverage as $count) {
+                if ($count > 0) {
+                    $coveredStatements++;
+                }
+            }
+        }
+
+        return [
+            'files' => count($lineCoverageByFile),
+            'statements' => $statements,
+            'coveredstatements' => $coveredStatements,
+        ];
+    }
+
+    /**
+     * @return array{statements:int,coveredstatements:int}
+     */
+    private function readCloverProjectMetrics(string $path): array
+    {
+        $xmlContent = file_get_contents($path);
+        self::assertNotFalse($xmlContent);
+
+        $xml = simplexml_load_string($xmlContent);
+        self::assertNotFalse($xml);
+
+        $metrics = $xml->xpath('/coverage/project/metrics');
+        self::assertIsArray($metrics);
+        self::assertNotEmpty($metrics);
+
+        $node = $metrics[0];
+        self::assertInstanceOf(\SimpleXMLElement::class, $node);
+
+        return [
+            'statements' => (int) ($node['statements'] ?? 0),
+            'coveredstatements' => (int) ($node['coveredstatements'] ?? 0),
+        ];
     }
 
     private function removeDirectory(string $directory): void
@@ -148,22 +230,5 @@ class CoverageShardMergeTest extends TestCase
         }
 
         rmdir($directory);
-    }
-}
-
-class DummyCoverageDriver extends Driver
-{
-    public function nameAndVersion(): string
-    {
-        return 'dummy-driver';
-    }
-
-    public function start(): void
-    {
-    }
-
-    public function stop(): RawCodeCoverageData
-    {
-        return RawCodeCoverageData::fromXdebugWithoutPathCoverage([]);
     }
 }

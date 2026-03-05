@@ -557,11 +557,11 @@ jobs:
           path: storage/logs/ci
       - name: Merge shard coverage reports
         run: |
-          test -f storage/logs/ci/coverage-shard-unit.phpcov
-          test -f storage/logs/ci/coverage-shard-integration.phpcov
+          test -f storage/logs/ci/coverage-shard-unit-clover.xml
+          test -f storage/logs/ci/coverage-shard-integration-clover.xml
           php scripts/ci/merge_coverage_shards.php \
-            --input=storage/logs/ci/coverage-shard-unit.phpcov \
-            --input=storage/logs/ci/coverage-shard-integration.phpcov \
+            --input=storage/logs/ci/coverage-shard-unit-clover.xml \
+            --input=storage/logs/ci/coverage-shard-integration-clover.xml \
             --output-clover=storage/logs/ci/coverage-unit-clover.xml \
             --output-json=storage/logs/ci/coverage-merge-latest.json
       - name: Evaluate coverage delta policy

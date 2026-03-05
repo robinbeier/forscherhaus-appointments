@@ -2,9 +2,6 @@
 
 declare(strict_types=1);
 
-use SebastianBergmann\CodeCoverage\CodeCoverage;
-use SebastianBergmann\CodeCoverage\Report\Clover;
-
 const COVERAGE_SHARD_MERGE_EXIT_SUCCESS = 0;
 const COVERAGE_SHARD_MERGE_EXIT_RUNTIME_ERROR = 1;
 
@@ -35,35 +32,25 @@ function runCoverageShardMergeCli(array $argv): int
             return COVERAGE_SHARD_MERGE_EXIT_SUCCESS;
         }
 
-        if (!is_file($config['autoload'])) {
-            throw new RuntimeException('Missing Composer autoload file: ' . $config['autoload']);
-        }
-
-        require_once $config['autoload'];
-
         if (count($config['inputs']) < 2) {
             throw new RuntimeException('At least two --input=PATH options are required for coverage merge.');
         }
 
-        $mergedCoverage = null;
+        $mergedLineCoverage = [];
 
         foreach ($config['inputs'] as $input) {
-            $coverage = loadCoverageShardObject($input);
-
-            if ($mergedCoverage === null) {
-                $mergedCoverage = $coverage;
-                continue;
-            }
-
-            $mergedCoverage->merge($coverage);
+            $lineCoverage = loadCoverageShardLineCoverage($input);
+            mergeLineCoverage($mergedLineCoverage, $lineCoverage);
         }
 
-        if (!$mergedCoverage instanceof CodeCoverage) {
-            throw new RuntimeException('Failed to initialize merged coverage object.');
+        $metrics = calculateMergedMetrics($mergedLineCoverage);
+
+        if ($metrics['statements'] <= 0) {
+            throw new RuntimeException('Merged coverage does not contain any executable statements.');
         }
 
         ensureParentDirectoryExists($config['output_clover']);
-        (new Clover())->process($mergedCoverage, $config['output_clover']);
+        writeMergedCloverFile($config['output_clover'], $mergedLineCoverage, $metrics);
 
         $report = [
             'status' => 'pass',
@@ -118,7 +105,7 @@ function coverageShardMergeUsage(): string
         'Usage: php scripts/ci/merge_coverage_shards.php [options]',
         '',
         'Options:',
-        '  --input=PATH          Coverage shard .phpcov input file (repeatable, min 2).',
+        '  --input=PATH          Coverage shard Clover XML input file (repeatable, min 2).',
         '  --output-clover=PATH  Output Clover XML file path.',
         '  --output-json=PATH    Optional JSON report path.',
         '  --help                Show this help text.',
@@ -131,7 +118,6 @@ function coverageShardMergeUsage(): string
  *     inputs:array<int, string>,
  *     output_clover:string,
  *     output_json:string,
- *     autoload:string,
  *     help:bool
  * }
  */
@@ -143,7 +129,6 @@ function coverageShardMergeDefaultConfig(): array
         'inputs' => [],
         'output_clover' => $root . '/storage/logs/ci/coverage-unit-clover.xml',
         'output_json' => $root . '/storage/logs/ci/coverage-merge-latest.json',
-        'autoload' => $root . '/vendor/autoload.php',
         'help' => false,
     ];
 }
@@ -154,7 +139,6 @@ function coverageShardMergeDefaultConfig(): array
  *     inputs:array<int, string>,
  *     output_clover:string,
  *     output_json:string,
- *     autoload:string,
  *     help:bool
  * } $config
  */
@@ -197,46 +181,213 @@ function parseCoverageShardMergeCliOptions(array $argv, array &$config): void
     }
 }
 
-function loadCoverageShardObject(string $path): CodeCoverage
+/**
+ * @return array<string, array<int, int>>
+ */
+function loadCoverageShardLineCoverage(string $path): array
 {
     if (!is_file($path)) {
-        throw new RuntimeException('Missing coverage shard file: ' . $path);
+        throw new RuntimeException('Missing coverage shard input file: ' . $path);
     }
 
-    $payload = file_get_contents($path);
+    $content = file_get_contents($path);
 
-    if ($payload === false || $payload === '') {
-        throw new RuntimeException('Failed to read coverage shard file: ' . $path);
+    if ($content === false || $content === '') {
+        throw new RuntimeException('Failed to read coverage shard input file: ' . $path);
     }
 
-    if (str_starts_with(ltrim($payload), '<?php')) {
-        $serialized = extractSerializedCoveragePayload($payload, $path);
-        $coverage = @unserialize($serialized, ['allowed_classes' => true]);
-    } else {
-        $coverage = @unserialize($payload, ['allowed_classes' => true]);
+    $xml = parseCloverXml($content, $path);
+    $lineCoverage = [];
+
+    $fileNodes = $xml->xpath('//file');
+    if (!is_array($fileNodes)) {
+        throw new RuntimeException('Clover input does not expose file nodes: ' . $path);
     }
 
-    if (!$coverage instanceof CodeCoverage) {
-        throw new RuntimeException('Invalid coverage shard payload: ' . $path);
+    foreach ($fileNodes as $fileNode) {
+        if (!$fileNode instanceof SimpleXMLElement) {
+            continue;
+        }
+
+        $filePath = trim((string) ($fileNode['name'] ?? ''));
+        if ($filePath === '') {
+            continue;
+        }
+
+        $lineNodes = $fileNode->xpath('./line');
+        if (!is_array($lineNodes)) {
+            continue;
+        }
+
+        foreach ($lineNodes as $lineNode) {
+            if (!$lineNode instanceof SimpleXMLElement) {
+                continue;
+            }
+
+            $type = (string) ($lineNode['type'] ?? '');
+            if ($type !== 'stmt') {
+                continue;
+            }
+
+            $lineNumberRaw = (string) ($lineNode['num'] ?? '');
+            if (!ctype_digit($lineNumberRaw)) {
+                continue;
+            }
+
+            $lineNumber = (int) $lineNumberRaw;
+
+            if ($lineNumber <= 0) {
+                continue;
+            }
+
+            $countRaw = (string) ($lineNode['count'] ?? '0');
+            $executionCount = is_numeric($countRaw) ? (int) $countRaw : 0;
+            $covered = $executionCount > 0 ? 1 : 0;
+
+            $existing = $lineCoverage[$filePath][$lineNumber] ?? 0;
+            $lineCoverage[$filePath][$lineNumber] = max($existing, $covered);
+        }
     }
 
-    return $coverage;
+    if ($lineCoverage === []) {
+        throw new RuntimeException('Clover input does not contain statement coverage lines: ' . $path);
+    }
+
+    return $lineCoverage;
 }
 
-function extractSerializedCoveragePayload(string $payload, string $path): string
+function parseCloverXml(string $content, string $path): SimpleXMLElement
 {
-    $matches = [];
-    $matched = preg_match(
-        "/^<\\?php\\s+return\\s+\\\\?unserialize\\(<<<'END_OF_COVERAGE_SERIALIZATION'\\R(.*)\\REND_OF_COVERAGE_SERIALIZATION\\R\\);\\s*$/s",
-        $payload,
-        $matches,
-    );
+    $useInternalErrorsBefore = libxml_use_internal_errors(true);
+    libxml_clear_errors();
+    $xml = simplexml_load_string($content);
+    $errors = libxml_get_errors();
+    libxml_clear_errors();
+    libxml_use_internal_errors($useInternalErrorsBefore);
 
-    if ($matched !== 1 || !isset($matches[1]) || $matches[1] === '') {
-        throw new RuntimeException('Unsupported PHP coverage shard format: ' . $path);
+    if ($xml === false) {
+        $messages = array_map(static fn(LibXMLError $error): string => trim($error->message), $errors);
+        $detail = $messages === [] ? 'unknown XML parser error' : implode('; ', $messages);
+        throw new RuntimeException('Failed to parse Clover XML input "' . $path . '": ' . $detail);
     }
 
-    return $matches[1];
+    return $xml;
+}
+
+/**
+ * @param array<string, array<int, int>> $target
+ * @param array<string, array<int, int>> $source
+ */
+function mergeLineCoverage(array &$target, array $source): void
+{
+    foreach ($source as $file => $lines) {
+        foreach ($lines as $lineNumber => $covered) {
+            $existing = $target[$file][$lineNumber] ?? 0;
+            $target[$file][$lineNumber] = max($existing, $covered);
+        }
+    }
+}
+
+/**
+ * @param array<string, array<int, int>> $lineCoverage
+ * @return array{files:int,statements:int,covered_statements:int}
+ */
+function calculateMergedMetrics(array $lineCoverage): array
+{
+    $statementCount = 0;
+    $coveredStatementCount = 0;
+
+    foreach ($lineCoverage as $lines) {
+        $statementCount += count($lines);
+
+        foreach ($lines as $covered) {
+            if ($covered > 0) {
+                $coveredStatementCount++;
+            }
+        }
+    }
+
+    return [
+        'files' => count($lineCoverage),
+        'statements' => $statementCount,
+        'covered_statements' => $coveredStatementCount,
+    ];
+}
+
+/**
+ * @param array<string, array<int, int>> $lineCoverage
+ * @param array{files:int,statements:int,covered_statements:int} $metrics
+ */
+function writeMergedCloverFile(string $path, array $lineCoverage, array $metrics): void
+{
+    $timestamp = (string) time();
+
+    $dom = new DOMDocument('1.0', 'UTF-8');
+    $dom->formatOutput = true;
+
+    $coverage = $dom->createElement('coverage');
+    $coverage->setAttribute('generated', $timestamp);
+
+    $project = $dom->createElement('project');
+    $project->setAttribute('timestamp', $timestamp);
+
+    ksort($lineCoverage);
+
+    foreach ($lineCoverage as $filePath => $lines) {
+        ksort($lines);
+
+        $fileElement = $dom->createElement('file');
+        $fileElement->setAttribute('name', $filePath);
+
+        $fileStatementCount = count($lines);
+        $fileCoveredStatementCount = 0;
+
+        foreach ($lines as $lineNumber => $covered) {
+            if ($covered > 0) {
+                $fileCoveredStatementCount++;
+            }
+
+            $lineElement = $dom->createElement('line');
+            $lineElement->setAttribute('num', (string) $lineNumber);
+            $lineElement->setAttribute('type', 'stmt');
+            $lineElement->setAttribute('count', (string) ($covered > 0 ? 1 : 0));
+
+            $fileElement->appendChild($lineElement);
+        }
+
+        $fileMetrics = $dom->createElement('metrics');
+        applyMetricsAttributes($fileMetrics, 1, $fileStatementCount, $fileCoveredStatementCount);
+        $fileElement->appendChild($fileMetrics);
+
+        $project->appendChild($fileElement);
+    }
+
+    $projectMetrics = $dom->createElement('metrics');
+    applyMetricsAttributes($projectMetrics, $metrics['files'], $metrics['statements'], $metrics['covered_statements']);
+    $project->appendChild($projectMetrics);
+
+    $coverage->appendChild($project);
+    $dom->appendChild($coverage);
+
+    if ($dom->save($path) === false) {
+        throw new RuntimeException('Failed to write merged Clover XML: ' . $path);
+    }
+}
+
+function applyMetricsAttributes(DOMElement $metrics, int $files, int $statements, int $coveredStatements): void
+{
+    $metrics->setAttribute('files', (string) $files);
+    $metrics->setAttribute('loc', '0');
+    $metrics->setAttribute('ncloc', '0');
+    $metrics->setAttribute('classes', '0');
+    $metrics->setAttribute('methods', '0');
+    $metrics->setAttribute('coveredmethods', '0');
+    $metrics->setAttribute('conditionals', '0');
+    $metrics->setAttribute('coveredconditionals', '0');
+    $metrics->setAttribute('statements', (string) $statements);
+    $metrics->setAttribute('coveredstatements', (string) $coveredStatements);
+    $metrics->setAttribute('elements', (string) $statements);
+    $metrics->setAttribute('coveredelements', (string) $coveredStatements);
 }
 
 function ensureParentDirectoryExists(string $filePath): void
