@@ -7,6 +7,17 @@
 >
     <testsuites>
         <testsuite name="CoverageIntegrationShard">
+            <directory suffix="Test.php">./tests/Unit/Controllers</directory>
+            <directory suffix="Test.php">./tests/Unit/Helper</directory>
+            <directory suffix="Test.php">./tests/Unit/Migrations</directory>
+            <directory suffix="Test.php">./tests/Unit/Models</directory>
+            <directory suffix="Test.php">./tests/Unit/Views</directory>
+            <file>./tests/Unit/Libraries/AvailabilityBufferTest.php</file>
+            <file>./tests/Unit/Libraries/DashboardHeatmapTest.php</file>
+            <file>./tests/Unit/Libraries/DashboardMetricsTest.php</file>
+            <file>./tests/Unit/Libraries/IcsFileTest.php</file>
+            <file>./tests/Unit/Libraries/PdfRendererTest.php</file>
+            <file>./tests/Unit/Libraries/ProviderUtilizationTest.php</file>
             <file>./tests/Integration/Controllers/BookingControllerFlowTest.php</file>
             <file>./tests/Integration/Controllers/BookingCancellationControllerFlowTest.php</file>
             <file>./tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php</file>

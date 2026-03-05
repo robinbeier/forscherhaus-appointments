@@ -228,7 +228,7 @@ CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.
 CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is blocking.
-CI note: coverage now runs in two blocking deep-check shards (`coverage-shard-unit`, `coverage-shard-integration`) and feeds an aggregating blocking `coverage-delta` gate. The gate validates merged Clover line coverage against the in-repo baseline/delta policy.
+CI note: coverage now runs in two blocking deep-check shards (`coverage-shard-unit`, `coverage-shard-integration`) and feeds an aggregating blocking `coverage-delta` gate. `coverage-shard-unit` runs the pure PHPUnit-only subset on the GitHub runner without Docker/MySQL/seed, while `coverage-shard-integration` carries the DB-backed unit tests plus integration controllers in the dockerized deep stack.
 CI note: `coverage-delta` current policy thresholds are baseline `22.45%`, absolute minimum `22.25%`, max drop `0.20pp`, epsilon `0.02pp`. Coverage runs on pushes to `main` and non-draft PRs when deep checks are relevant.
 CI note: coverage artifacts are written to `storage/logs/ci/coverage-shard-unit.phpcov`, `storage/logs/ci/coverage-shard-integration.phpcov`, `storage/logs/ci/coverage-unit-clover.xml`, `storage/logs/ci/coverage-merge-latest.json`, and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
