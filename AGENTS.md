@@ -338,6 +338,8 @@ php index.php console sync
 
 -   Der lokale `pre-commit` Hook erwartet `vendor/` und `node_modules/`.
 -   In neuen Worktrees einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausfuehren.
+-   `scripts/ci/pre_pr_quick.sh` und `scripts/ci/pre_pr_full.sh` bootstrappen fehlende `vendor/`/`node_modules/` automatisch (via `composer install` + `npm ci`/`npm install`).
+-   Bei diesem Auto-Bootstrap ist Netzwerkzugriff auf Package-Registries erforderlich; ohne Netz bleiben die Gates weiterhin blockiert.
 -   Bei Netzwerkrestriktionen koennen `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
 -   Ausnahme fuer reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
 -   `./scripts/setup-worktree.sh` installiert einen managed `.git/hooks/pre-push` Hook (`pre_pr_quick.sh`).
