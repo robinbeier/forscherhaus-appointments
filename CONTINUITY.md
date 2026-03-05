@@ -29,8 +29,8 @@ Key decisions:
 State:
 
 -   PR-D1 merged to `main` via PR #113 and met its post-merge compute target.
--   PR-D2 merged to `main` via PR #114 at head `ccf55894`; post-merge push run `22735481203` for merge commit `fa9d2f6d` is in progress.
--   PR-D3 is the current active implementation slice on branch `codex/pr-d3-coverage-unit-runner-php`.
+-   PR-D2 merged to `main` via PR #114 at head `ccf55894`; post-merge push run `22735481203` completed green.
+-   PR-D3 merged to `main` via PR #115 at head `307d97f8`; post-merge push run `22736924781` for merge commit `50aa32d7` is queued/running.
 -   `CONTINUITY.md` created because it was previously missing.
 -   Current optimization backlog after D1:
     -   deep Docker jobs still repeat seeded DB creation unless D2 lands
@@ -44,6 +44,9 @@ State:
 -   Current gap to goal from latest state: `6m08s`
 -   PR-D1 merge commit on `main`: `44ac379e`.
 -   First post-merge push run for PR-D1: `22734510434` = all green, deep-check compute `26m19s`.
+-   First post-merge push run for PR-D2: `22735481203` = all green, deep-check compute `30m21s` (target missed).
+-   First post-merge push run for PR-D3: `22736924781` = all green, deep-check compute `26m48s` (target missed).
+-   PR-D4 is now required because the first clean post-D3 full-fanout run stayed above `22m00s`; active branch is `codex/pr-d4-deep-http-without-nginx`.
 
 Done:
 
@@ -69,35 +72,42 @@ Done:
 -   Reviewer B on D2 found no open architecture/readability/test-gap/maintainability issues after the same pass.
 -   D2 full local validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green, including deep smokes and `coverage-delta` (`25.7585%` current line coverage).
 -   PR #114 reached `18/18` green checks, `MERGEABLE`, `mergeStateStatus=CLEAN`, and was merged.
+-   D2 first post-merge push run `22735481203` completed green on `main`.
+-   D2 post-merge compute recalculated from run `22735481203`: `30m21s`, so the D2 target `<=23m30s` was missed.
 -   D3 discovery: `phpunit.coverage.unit.xml` was not a pure-unit slice; it contained many `Tests\TestCase` files that hard-require CodeIgniter + MySQL.
 -   D3 solution direction is validated locally: pure PHPUnit tests run green with `tests/bootstrap.coverage-unit.php`, and the expanded dockerized coverage integration shard passes with the DB-backed unit tests folded into it.
 -   Reviewer A on D3 found no open bugs/regression/security/edge-case issues after the shard split, bootstrap review, and targeted validations.
 -   Reviewer B on D3 found no open architecture/readability/test-gap/maintainability issues after the same pass.
 -   D3 full local validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green with split coverage shards and `coverage-delta` at `25.5506%`.
 -   D3 PR #115 surfaced one real CI regression after the first push: `coverage-delta` failed because the shard merge double-counted identical repo files under runner and container absolute paths.
--   D3 coverage merge fix is committed locally at `fd85c176`; it is not pushed yet in this snapshot.
+-   D3 coverage merge fix landed in PR #115; it normalizes shard file paths across runner and container environments before coverage aggregation.
+-   PR #115 reached `18/18` green checks, `MERGEABLE`, `mergeStateStatus=CLEAN`, and was merged.
+-   D3 first post-merge push run `22736924781` completed green on `main` at `26m48s`, improving materially versus D2 but still missing the D3 target `<=22m00s`.
+-   D4 scope is the largest remaining low-risk CI-only trim: remove `nginx` from the HTTP deep jobs by serving requests from a temporary in-container PHP HTTP server inside `php-fpm`, and remove `nginx` entirely from `booking-controller-flows`.
+-   D4 proof passed locally before full-gate validation: `dashboard_integration_smoke`, `api_openapi_contract_smoke`, `booking_write_contract_smoke`, `api_openapi_write_contract_smoke`, and `booking-controller-flows` all ran green against `http://127.0.0.1:8080` with only `mysql + php-fpm`.
+-   D4 local full-gate validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green after the HTTP-stack change.
 
 Now:
 
--   Push commit `fd85c176` to PR #115, babysit the fresh CI run to green/mergeable, and keep polling the first post-merge push run for D2 in parallel when useful.
+-   Commit and push PR-D4 from `codex/pr-d4-deep-http-without-nginx`, babysit to merge, then re-measure `main`.
 
 Next:
 
--   Measure the first clean full-fanout push run on `main` against the D2 target `<=23m30s`.
--   After D3 merge, measure the first clean full-fanout push run on `main` against the D3 target `<=22m00s`.
+-   Run the full local pre-PR gate for D4, then push and babysit the PR to merge.
+-   After D4 merge, measure the first clean full-fanout push run on `main` and re-evaluate the remaining gap to `<=22m00s`.
 -   After each merged PR, update this ledger with run IDs, compute totals, go/no-go for the next PR, and whether PR-D4 is still needed.
 -   PR-specific target ladder:
     -   PR-D1 target: `<=26m45s`
     -   PR-D2 target: `<=23m30s`
     -   PR-D3 target: `<=22m00s`
-    -   PR-D4: only if first clean post-D3 full-fanout run is still `>22m00s`
+    -   PR-D4: required; first clean post-D3 full-fanout run was `26m48s`
 -   Post-D3 success proof:
     -   one clean full-fanout run at `<=22m00s`
     -   then 10 executed full-fanout PR runs without stability regression versus baseline
 
 Open questions (UNCONFIRMED if needed):
 
--   UNCONFIRMED: exact post-D3 compute gain until measured on executed full-fanout PR runs.
+-   UNCONFIRMED: exact post-D4 compute gain until measured on executed full-fanout PR runs.
 
 Working set (files/ids/commands):
 

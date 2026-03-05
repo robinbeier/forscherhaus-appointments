@@ -121,26 +121,27 @@ GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/ch
 
 echo_section "Start integration stack"
 trap cleanup_stack EXIT
-run_compose up -d mysql php-fpm nginx
+run_compose up -d mysql php-fpm
 wait_for_mysql_readiness
 install_seed_instance
+bash scripts/ci/start_php_http_server.sh
 
 echo_section "API OpenAPI contract smoke"
 run_compose exec -T php-fpm php scripts/ci/api_openapi_contract_smoke.php \
-    --base-url=http://nginx --index-page=index.php \
+    --base-url=http://127.0.0.1:8080 --index-page=index.php \
     --openapi-spec=/var/www/html/openapi.yml \
     --username=administrator --password=administrator
 
 echo_section "Booking write-path contract smoke"
 run_compose exec -T php-fpm php scripts/ci/booking_write_contract_smoke.php \
-    --base-url=http://nginx --index-page=index.php \
+    --base-url=http://127.0.0.1:8080 --index-page=index.php \
     --username=administrator --password=administrator \
     --booking-search-days=14 --retry-count=1 \
     --checks=booking_register_success_contract,booking_register_manage_update_contract,booking_register_unavailable_contract,booking_reschedule_manage_mode_contract,booking_cancel_success_contract,booking_cancel_unknown_hash_contract
 
 echo_section "API OpenAPI write-path contract smoke"
 run_compose exec -T php-fpm php scripts/ci/api_openapi_write_contract_smoke.php \
-    --base-url=http://nginx --index-page=index.php \
+    --base-url=http://127.0.0.1:8080 --index-page=index.php \
     --openapi-spec=/var/www/html/openapi.yml \
     --username=administrator --password=administrator \
     --retry-count=1 --booking-search-days=14 \
@@ -151,7 +152,7 @@ run_compose exec -T php-fpm composer test:booking-controller-flows
 
 echo_section "Dashboard+booking+api integration smoke"
 run_compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
-    --base-url=http://nginx --index-page=index.php \
+    --base-url=http://127.0.0.1:8080 --index-page=index.php \
     --username=administrator --password=administrator \
     --start-date=2026-01-01 --end-date=2026-01-31 \
     --checks=readiness_login_page,auth_login_validate,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities
