@@ -336,6 +336,7 @@ jobs:
       - name: Archive deep-check dependencies
         run: |
           mkdir -p .ci-artifacts
+          mkdir -p build
           tar -czf .ci-artifacts/deep-check-deps.tar.gz vendor node_modules build
       - name: Upload deep-check dependencies artifact
         uses: actions/upload-artifact@v4
