@@ -5,11 +5,13 @@ declare(strict_types=1);
 require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
+require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/OpenApiContractValidator.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
+use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
 use CiContract\DeterministicFixtureFactory;
 use CiContract\FlakeRetry;
@@ -47,7 +49,13 @@ try {
         throw new ContractAssertionException('Write contract matrix must contain a non-empty "checks" array.');
     }
 
+    $selection = resolveMatrixCheckSelection($matrix['checks'], $config['raw_checks'] ?? null);
+    $config['requested_checks'] = $selection['requested_checks'];
+    $config['effective_checks'] = $selection['effective_checks'];
+    $config['selection_reason_by_check'] = $selection['selection_reason_by_check'];
+
     $retryMetadata['max_retries'] = $config['retry_count'];
+    $selectedMatrixChecks = filterMatrixChecksBySelection($matrix['checks'], $selection['effective_checks']);
 
     for ($attempt = 1; ; $attempt++) {
         $retryMetadata['attempts'] = $attempt;
@@ -64,7 +72,7 @@ try {
             runApiWriteContractsAttempt(
                 $config,
                 $validator,
-                $matrix['checks'],
+                $selectedMatrixChecks,
                 $attempt,
                 $attemptChecks,
                 $attemptState,
@@ -229,6 +237,7 @@ function runApiWriteContractsAttempt(
                     return runApiWriteContractCheck($check, $config, $validator, $factory, $state, $cleanup, $slot);
                 },
                 $checks,
+                selectionReasonForConfiguredCheck($config, requiredString($check, 'id')),
             );
         }
     } finally {
@@ -523,7 +532,7 @@ function resolveDynamicValue(mixed $value, array $state): mixed
 /**
  * @param array<int, array<string, mixed>> $checks
  */
-function runCheck(string $name, callable $callback, array &$checks): void
+function runCheck(string $name, callable $callback, array &$checks, string $selectionReason = 'requested'): void
 {
     $startedAt = microtime(true);
 
@@ -537,6 +546,7 @@ function runCheck(string $name, callable $callback, array &$checks): void
             [
                 'name' => $name,
                 'status' => 'pass',
+                'selection_reason' => $selectionReason,
                 'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
             ],
             $details,
@@ -547,6 +557,7 @@ function runCheck(string $name, callable $callback, array &$checks): void
         $checks[] = [
             'name' => $name,
             'status' => 'fail',
+            'selection_reason' => $selectionReason,
             'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
             'error' => $e->getMessage(),
             'exception' => get_class($e),
@@ -952,6 +963,7 @@ function parseCliOptions(): array
         'timezone::',
         'csrf-cookie-name::',
         'csrf-token-name::',
+        'checks::',
         'help::',
     ]);
 
@@ -994,6 +1006,7 @@ function parseCliOptions(): array
         'timezone' => (string) ($options['timezone'] ?? (date_default_timezone_get() ?: 'UTC')),
         'csrf_cookie_name' => (string) ($options['csrf-cookie-name'] ?? 'csrf_cookie'),
         'csrf_token_name' => (string) ($options['csrf-token-name'] ?? 'csrf_token'),
+        'raw_checks' => array_key_exists('checks', $options) ? $options['checks'] : null,
     ];
 }
 
@@ -1027,6 +1040,8 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
         'run_id' => $state['run_id'] ?? null,
         'openapi_spec' => $config['openapi_spec'] ?? null,
         'base_url' => $config['base_url'] ?? null,
+        'requested_checks' => $config['requested_checks'] ?? [],
+        'effective_checks' => $config['effective_checks'] ?? [],
         'summary' => [
             'total' => count($checks),
             'passed' => $passed,
@@ -1066,8 +1081,95 @@ function printHelpAndExit(): void
       --timezone=Europe/Berlin
       --csrf-cookie-name=csrf_cookie
       --csrf-token-name=csrf_token
+      --checks=id1,id2
     TXT;
 
     fwrite(STDOUT, $help . PHP_EOL);
     exit(API_OPENAPI_WRITE_CONTRACT_EXIT_SUCCESS);
+}
+
+/**
+ * @param array<int, array<string, mixed>> $matrixChecks
+ * @return array{
+ *   requested_checks:array<int, string>,
+ *   effective_checks:array<int, string>,
+ *   selection_reason_by_check:array<string, string>
+ * }
+ */
+function resolveMatrixCheckSelection(array $matrixChecks, mixed $rawChecks): array
+{
+    return CheckSelection::resolve($rawChecks, matrixCheckIds($matrixChecks), matrixCheckDependencies($matrixChecks));
+}
+
+/**
+ * @param array<int, array<string, mixed>> $matrixChecks
+ * @return array<int, string>
+ */
+function matrixCheckIds(array $matrixChecks): array
+{
+    $ids = [];
+
+    foreach ($matrixChecks as $check) {
+        if (!is_array($check)) {
+            throw new ContractAssertionException('Each write contract check definition must be an object.');
+        }
+
+        $ids[] = requiredString($check, 'id');
+    }
+
+    return $ids;
+}
+
+/**
+ * @param array<int, array<string, mixed>> $matrixChecks
+ * @return array<string, array<int, string>>
+ */
+function matrixCheckDependencies(array $matrixChecks): array
+{
+    $dependencies = [];
+
+    foreach ($matrixChecks as $check) {
+        if (!is_array($check)) {
+            throw new ContractAssertionException('Each write contract check definition must be an object.');
+        }
+
+        $checkId = requiredString($check, 'id');
+        $dependencies[$checkId] = array_values(array_filter($check['depends_on'] ?? [], 'is_string'));
+    }
+
+    return $dependencies;
+}
+
+/**
+ * @param array<int, array<string, mixed>> $matrixChecks
+ * @param array<int, string> $effectiveChecks
+ * @return array<int, array<string, mixed>>
+ */
+function filterMatrixChecksBySelection(array $matrixChecks, array $effectiveChecks): array
+{
+    $effectiveLookup = array_fill_keys($effectiveChecks, true);
+    $selected = [];
+
+    foreach ($matrixChecks as $check) {
+        if (!is_array($check)) {
+            throw new ContractAssertionException('Each write contract check definition must be an object.');
+        }
+
+        $checkId = requiredString($check, 'id');
+        if (!isset($effectiveLookup[$checkId])) {
+            continue;
+        }
+
+        $selected[] = $check;
+    }
+
+    return $selected;
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function selectionReasonForConfiguredCheck(array $config, string $checkId): string
+{
+    return (string) ($config['selection_reason_by_check'][$checkId] ?? 'requested');
 }

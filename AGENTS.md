@@ -96,11 +96,13 @@ for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console in
 docker compose exec -T php-fpm composer contract-test:booking-write -- \
   --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
-  --booking-search-days=14 --retry-count=1
+  --booking-search-days=14 --retry-count=1 \
+  --checks=booking_register_success_contract,booking_register_manage_update_contract,booking_register_unavailable_contract,booking_reschedule_manage_mode_contract,booking_cancel_success_contract,booking_cancel_unknown_hash_contract
 docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
   --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator \
-  --retry-count=1 --booking-search-days=14
+  --retry-count=1 --booking-search-days=14 \
+  --checks=appointments_write_unauthorized_guard,customers_store_contract,appointments_store_contract,appointments_update_contract,appointments_destroy_contract,customers_destroy_contract
 docker compose down -v --remove-orphans
 
 # Optional: Booking controller flow tests (register/reschedule/cancel)
@@ -241,9 +243,12 @@ for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console in
 docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
   --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
-  --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD
+  --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD \
+  --checks=readiness_login_page,auth_login_validate,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities
 docker compose down -v --remove-orphans
 ```
+
+Hinweis: `dashboard_integration_smoke.php`, `booking_write_contract_smoke.php` und `api_openapi_write_contract_smoke.php` akzeptieren optional `--checks=id1,id2`; Vorbedingungen werden automatisch transitiv ergänzt, die Ausführung bleibt aber in fester Registry-/Matrix-Reihenfolge.
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 Hinweis: `composer deptrac:analyze` kann auf neueren Host-PHP-Versionen (z. B. 8.5) zusaetzliche Vendor-Deprecation-Ausgaben zeigen; fuer CI-paritaer rauschfreie Ausgaben den Docker-Run `docker compose run --rm php-fpm composer deptrac:analyze` verwenden.
@@ -265,6 +270,7 @@ Hinweis: Das Request Contracts Gate schreibt standardmaessig nach `storage/logs/
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der Booking Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/booking-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der API OpenAPI Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
+Hinweis: Der Integration Smoke schreibt standardmaessig nach `storage/logs/ci/dashboard-integration-smoke-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Die Coverage-Shard-Reports schreiben standardmaessig nach `storage/logs/ci/coverage-shard-unit.phpcov` und `storage/logs/ci/coverage-shard-integration.phpcov`; der gemergte Clover nach `storage/logs/ci/coverage-unit-clover.xml`, der Merge-Report nach `storage/logs/ci/coverage-merge-latest.json` und der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.

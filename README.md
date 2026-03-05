@@ -57,13 +57,18 @@ docker compose exec -T php-fpm composer contract-test:api-openapi -- \
 docker compose exec -T php-fpm composer contract-test:booking-write -- \
   --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
-  --booking-search-days=14 --retry-count=1
+  --booking-search-days=14 --retry-count=1 \
+  --checks=booking_register_success_contract,booking_register_manage_update_contract,booking_register_unavailable_contract,booking_reschedule_manage_mode_contract,booking_cancel_success_contract,booking_cancel_unknown_hash_contract
 
 # optional API OpenAPI write-path contract smoke command (customer+appointment lifecycle)
 docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
   --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator \
-  --retry-count=1 --booking-search-days=14
+  --retry-count=1 --booking-search-days=14 \
+  --checks=appointments_write_unauthorized_guard,customers_store_contract,appointments_store_contract,appointments_update_contract,appointments_destroy_contract,customers_destroy_contract
+
+# optional: each smoke/write script also accepts --checks=id1,id2.
+# prerequisites are auto-expanded transitively and execution still follows the script's fixed registry order.
 
 # optional combined write-path contract command
 docker compose exec -T php-fpm composer contract-test:write-path -- \

@@ -4,7 +4,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateCliSupport.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
+require_once __DIR__ . '/lib/CheckSelection.php';
 
+use CiContract\CheckSelection;
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateCliSupport;
@@ -17,6 +19,7 @@ const INTEGRATION_SMOKE_EXIT_RUNTIME_ERROR = 2;
 $checks = [];
 $failure = null;
 $exitCode = INTEGRATION_SMOKE_EXIT_SUCCESS;
+$reportPath = null;
 
 $repoRoot = dirname(__DIR__, 2);
 $csrfDefaults = GateCliSupport::resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
@@ -39,7 +42,7 @@ try {
     $providerServicePair = null;
     $resolvedBooking = null;
 
-    $runCheck = static function (string $name, callable $callback) use (&$checks): void {
+    $runCheck = static function (string $name, callable $callback) use (&$checks, $config): void {
         try {
             $details = $callback();
 
@@ -51,6 +54,7 @@ try {
                 [
                     'name' => $name,
                     'status' => 'pass',
+                    'selection_reason' => selectionReasonForConfiguredCheck($config, $name),
                 ],
                 $details,
             );
@@ -60,6 +64,7 @@ try {
             $checks[] = [
                 'name' => $name,
                 'status' => 'fail',
+                'selection_reason' => selectionReasonForConfiguredCheck($config, $name),
                 'error' => $e->getMessage(),
                 'exception' => get_class($e),
             ];
@@ -69,235 +74,265 @@ try {
         }
     };
 
-    $runCheck('readiness_login_page', static function () use ($client, $config): array {
-        $response = $client->get('login', [], $config['http_timeout']);
-        GateAssertions::assertStatus($response->statusCode, 200, 'GET /login');
+    if (shouldRunConfiguredCheck($config, 'readiness_login_page')) {
+        $runCheck('readiness_login_page', static function () use ($client, $config): array {
+            $response = $client->get('login', [], $config['http_timeout']);
+            GateAssertions::assertStatus($response->statusCode, 200, 'GET /login');
 
-        $csrfCookie = $client->getCookie($config['csrf_cookie_name']);
-        if ($csrfCookie === null || $csrfCookie === '') {
-            throw new GateAssertionException('GET /login did not set cookie "' . $config['csrf_cookie_name'] . '".');
-        }
+            $csrfCookie = $client->getCookie($config['csrf_cookie_name']);
+            if ($csrfCookie === null || $csrfCookie === '') {
+                throw new GateAssertionException(
+                    'GET /login did not set cookie "' . $config['csrf_cookie_name'] . '".',
+                );
+            }
 
-        return [
-            'http_status' => $response->statusCode,
-            'url' => $response->url,
-            'csrf_cookie_present' => true,
-        ];
-    });
-
-    $runCheck('auth_login_validate', static function () use ($client, $config): array {
-        $response = $client->post(
-            'login/validate',
-            [
-                'username' => $config['username'],
-                'password' => $config['password'],
-            ],
-            $config['http_timeout'],
-            true,
-        );
-
-        GateAssertions::assertStatus($response->statusCode, 200, 'POST /login/validate');
-        $payload = GateAssertions::decodeJson($response->body, 'POST /login/validate');
-        GateAssertions::assertLoginPayload($payload);
-
-        return [
-            'http_status' => $response->statusCode,
-            'url' => $response->url,
-        ];
-    });
-
-    $runCheck('dashboard_metrics', static function () use ($client, $config): array {
-        $response = $client->post('dashboard/metrics', buildMetricsPayload($config), $config['http_timeout'], true);
-
-        GateAssertions::assertStatus($response->statusCode, 200, 'POST /dashboard/metrics');
-        $decoded = GateAssertions::decodeJson($response->body, 'POST /dashboard/metrics');
-        $summary = GateAssertions::assertMetricsPayload($decoded, true);
-
-        return [
-            'http_status' => $response->statusCode,
-            'url' => $response->url,
-            'providers' => $summary['providers'],
-            'booked_total' => $summary['booked_total'],
-        ];
-    });
-
-    $runCheck('booking_page_readiness', static function () use ($client, $config, &$bookingPageHtml): array {
-        $response = $client->get('booking', [], $config['http_timeout']);
-        GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking');
-
-        if (trim($response->body) === '') {
-            throw new GateAssertionException('GET /booking returned an empty response body.');
-        }
-
-        $bookingPageHtml = $response->body;
-
-        return [
-            'http_status' => $response->statusCode,
-            'url' => $response->url,
-            'bytes' => strlen($response->body),
-        ];
-    });
-
-    $runCheck('booking_extract_bootstrap', static function () use (
-        &$bookingPageHtml,
-        &$bookingBootstrap,
-        &$providerServicePairs,
-        &$providerServicePair,
-    ): array {
-        if (!is_string($bookingPageHtml) || $bookingPageHtml === '') {
-            throw new GateAssertionException('Booking page markup is missing for bootstrap extraction.');
-        }
-
-        $bookingBootstrap = extractScriptVarsJson($bookingPageHtml);
-        $services = normalizeServices($bookingBootstrap['available_services'] ?? null);
-        $providers = normalizeProviders($bookingBootstrap['available_providers'] ?? null);
-        $providerServicePairs = selectProviderServicePairs($services, $providers);
-        $providerServicePair = $providerServicePairs[0];
-
-        return [
-            'services' => count($services),
-            'providers' => count($providers),
-            'candidate_pairs' => count($providerServicePairs),
-            'service_id' => $providerServicePair['service_id'],
-            'provider_id' => $providerServicePair['provider_id'],
-        ];
-    });
-
-    $runCheck('booking_available_hours', static function () use (
-        $client,
-        $config,
-        &$providerServicePairs,
-        &$providerServicePair,
-        &$resolvedBooking,
-    ): array {
-        if (!is_array($providerServicePairs) || $providerServicePairs === []) {
-            throw new GateAssertionException('Provider/service pairs were not resolved from booking bootstrap data.');
-        }
-
-        $resolvedBooking = resolveBookablePairAndDate($client, $config, $providerServicePairs);
-        $providerServicePair = [
-            'provider_id' => $resolvedBooking['provider_id'],
-            'service_id' => $resolvedBooking['service_id'],
-        ];
-
-        return [
-            'provider_id' => $providerServicePair['provider_id'],
-            'service_id' => $providerServicePair['service_id'],
-            'date' => $resolvedBooking['date'],
-            'hours_count' => count($resolvedBooking['hours']),
-            'search_mode' => $resolvedBooking['mode'],
-        ];
-    });
-
-    $runCheck('booking_unavailable_dates', static function () use (
-        $client,
-        $config,
-        &$providerServicePair,
-        &$resolvedBooking,
-    ): array {
-        if (!is_array($providerServicePair) || !is_array($resolvedBooking)) {
-            throw new GateAssertionException(
-                'booking_unavailable_dates requires a resolved provider/service pair and booking date.',
-            );
-        }
-
-        $response = $client->post(
-            'booking/get_unavailable_dates',
-            [
-                'provider_id' => $providerServicePair['provider_id'],
-                'service_id' => $providerServicePair['service_id'],
-                'selected_date' => $resolvedBooking['date'],
-                'manage_mode' => 0,
-            ],
-            $config['http_timeout'],
-            true,
-        );
-
-        GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking/get_unavailable_dates');
-        $decoded = GateAssertions::decodeJson($response->body, 'POST /booking/get_unavailable_dates');
-        $summary = assertUnavailableDatesPayload($decoded);
-
-        return array_merge(
-            [
+            return [
                 'http_status' => $response->statusCode,
                 'url' => $response->url,
-            ],
-            $summary,
-        );
-    });
+                'csrf_cookie_present' => true,
+            ];
+        });
+    }
 
-    $runCheck('api_unauthorized_guard', static function () use ($config): array {
-        $response = apiGetWithBasicAuth($config, 'api/v1/appointments', ['length' => 1], null, null);
-
-        GateAssertions::assertStatus($response['status_code'], 401, 'GET /api/v1/appointments (without auth)');
-
-        return [
-            'http_status' => $response['status_code'],
-            'url' => $response['url'],
-        ];
-    });
-
-    $runCheck('api_appointments_index', static function () use ($config): array {
-        $response = apiGetWithBasicAuth(
-            $config,
-            'api/v1/appointments',
-            ['length' => 1, 'page' => 1],
-            $config['api_username'],
-            $config['api_password'],
-        );
-
-        GateAssertions::assertStatus($response['status_code'], 200, 'GET /api/v1/appointments');
-        $decoded = GateAssertions::decodeJson($response['body'], 'GET /api/v1/appointments');
-
-        if (!is_array($decoded) || !array_is_list($decoded)) {
-            throw new GateAssertionException('GET /api/v1/appointments payload must be a JSON array.');
-        }
-
-        return [
-            'http_status' => $response['status_code'],
-            'url' => $response['url'],
-            'items' => count($decoded),
-        ];
-    });
-
-    $runCheck('api_availabilities', static function () use ($config, &$providerServicePair, &$resolvedBooking): array {
-        if (!is_array($providerServicePair) || !is_array($resolvedBooking)) {
-            throw new GateAssertionException('api_availabilities requires resolved provider/service and booking date.');
-        }
-
-        $response = apiGetWithBasicAuth(
-            $config,
-            'api/v1/availabilities',
-            [
-                'providerId' => $providerServicePair['provider_id'],
-                'serviceId' => $providerServicePair['service_id'],
-                'date' => $resolvedBooking['date'],
-            ],
-            $config['api_username'],
-            $config['api_password'],
-        );
-
-        GateAssertions::assertStatus($response['status_code'], 200, 'GET /api/v1/availabilities');
-        $decoded = GateAssertions::decodeJson($response['body'], 'GET /api/v1/availabilities');
-        $hours = assertHoursPayload($decoded, 'GET /api/v1/availabilities');
-
-        if ($hours === []) {
-            throw new GateAssertionException(
-                sprintf(
-                    'GET /api/v1/availabilities returned no slots for provider %d, service %d on %s.',
-                    $providerServicePair['provider_id'],
-                    $providerServicePair['service_id'],
-                    $resolvedBooking['date'],
-                ),
+    if (shouldRunConfiguredCheck($config, 'auth_login_validate')) {
+        $runCheck('auth_login_validate', static function () use ($client, $config): array {
+            $response = $client->post(
+                'login/validate',
+                [
+                    'username' => $config['username'],
+                    'password' => $config['password'],
+                ],
+                $config['http_timeout'],
+                true,
             );
-        }
 
-        return [
-            'http_status' => $response['status_code'],
-            'url' => $response['url'],
-            'hours_count' => count($hours),
-        ];
-    });
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /login/validate');
+            $payload = GateAssertions::decodeJson($response->body, 'POST /login/validate');
+            GateAssertions::assertLoginPayload($payload);
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'dashboard_metrics')) {
+        $runCheck('dashboard_metrics', static function () use ($client, $config): array {
+            $response = $client->post('dashboard/metrics', buildMetricsPayload($config), $config['http_timeout'], true);
+
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /dashboard/metrics');
+            $decoded = GateAssertions::decodeJson($response->body, 'POST /dashboard/metrics');
+            $summary = GateAssertions::assertMetricsPayload($decoded, true);
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'providers' => $summary['providers'],
+                'booked_total' => $summary['booked_total'],
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'booking_page_readiness')) {
+        $runCheck('booking_page_readiness', static function () use ($client, $config, &$bookingPageHtml): array {
+            $response = $client->get('booking', [], $config['http_timeout']);
+            GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking');
+
+            if (trim($response->body) === '') {
+                throw new GateAssertionException('GET /booking returned an empty response body.');
+            }
+
+            $bookingPageHtml = $response->body;
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'bytes' => strlen($response->body),
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'booking_extract_bootstrap')) {
+        $runCheck('booking_extract_bootstrap', static function () use (
+            &$bookingPageHtml,
+            &$bookingBootstrap,
+            &$providerServicePairs,
+            &$providerServicePair,
+        ): array {
+            if (!is_string($bookingPageHtml) || $bookingPageHtml === '') {
+                throw new GateAssertionException('Booking page markup is missing for bootstrap extraction.');
+            }
+
+            $bookingBootstrap = extractScriptVarsJson($bookingPageHtml);
+            $services = normalizeServices($bookingBootstrap['available_services'] ?? null);
+            $providers = normalizeProviders($bookingBootstrap['available_providers'] ?? null);
+            $providerServicePairs = selectProviderServicePairs($services, $providers);
+            $providerServicePair = $providerServicePairs[0];
+
+            return [
+                'services' => count($services),
+                'providers' => count($providers),
+                'candidate_pairs' => count($providerServicePairs),
+                'service_id' => $providerServicePair['service_id'],
+                'provider_id' => $providerServicePair['provider_id'],
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'booking_available_hours')) {
+        $runCheck('booking_available_hours', static function () use (
+            $client,
+            $config,
+            &$providerServicePairs,
+            &$providerServicePair,
+            &$resolvedBooking,
+        ): array {
+            if (!is_array($providerServicePairs) || $providerServicePairs === []) {
+                throw new GateAssertionException(
+                    'Provider/service pairs were not resolved from booking bootstrap data.',
+                );
+            }
+
+            $resolvedBooking = resolveBookablePairAndDate($client, $config, $providerServicePairs);
+            $providerServicePair = [
+                'provider_id' => $resolvedBooking['provider_id'],
+                'service_id' => $resolvedBooking['service_id'],
+            ];
+
+            return [
+                'provider_id' => $providerServicePair['provider_id'],
+                'service_id' => $providerServicePair['service_id'],
+                'date' => $resolvedBooking['date'],
+                'hours_count' => count($resolvedBooking['hours']),
+                'search_mode' => $resolvedBooking['mode'],
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'booking_unavailable_dates')) {
+        $runCheck('booking_unavailable_dates', static function () use (
+            $client,
+            $config,
+            &$providerServicePair,
+            &$resolvedBooking,
+        ): array {
+            if (!is_array($providerServicePair) || !is_array($resolvedBooking)) {
+                throw new GateAssertionException(
+                    'booking_unavailable_dates requires a resolved provider/service pair and booking date.',
+                );
+            }
+
+            $response = $client->post(
+                'booking/get_unavailable_dates',
+                [
+                    'provider_id' => $providerServicePair['provider_id'],
+                    'service_id' => $providerServicePair['service_id'],
+                    'selected_date' => $resolvedBooking['date'],
+                    'manage_mode' => 0,
+                ],
+                $config['http_timeout'],
+                true,
+            );
+
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking/get_unavailable_dates');
+            $decoded = GateAssertions::decodeJson($response->body, 'POST /booking/get_unavailable_dates');
+            $summary = assertUnavailableDatesPayload($decoded);
+
+            return array_merge(
+                [
+                    'http_status' => $response->statusCode,
+                    'url' => $response->url,
+                ],
+                $summary,
+            );
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'api_unauthorized_guard')) {
+        $runCheck('api_unauthorized_guard', static function () use ($config): array {
+            $response = apiGetWithBasicAuth($config, 'api/v1/appointments', ['length' => 1], null, null);
+
+            GateAssertions::assertStatus($response['status_code'], 401, 'GET /api/v1/appointments (without auth)');
+
+            return [
+                'http_status' => $response['status_code'],
+                'url' => $response['url'],
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'api_appointments_index')) {
+        $runCheck('api_appointments_index', static function () use ($config): array {
+            $response = apiGetWithBasicAuth(
+                $config,
+                'api/v1/appointments',
+                ['length' => 1, 'page' => 1],
+                $config['api_username'],
+                $config['api_password'],
+            );
+
+            GateAssertions::assertStatus($response['status_code'], 200, 'GET /api/v1/appointments');
+            $decoded = GateAssertions::decodeJson($response['body'], 'GET /api/v1/appointments');
+
+            if (!is_array($decoded) || !array_is_list($decoded)) {
+                throw new GateAssertionException('GET /api/v1/appointments payload must be a JSON array.');
+            }
+
+            return [
+                'http_status' => $response['status_code'],
+                'url' => $response['url'],
+                'items' => count($decoded),
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'api_availabilities')) {
+        $runCheck('api_availabilities', static function () use (
+            $config,
+            &$providerServicePair,
+            &$resolvedBooking,
+        ): array {
+            if (!is_array($providerServicePair) || !is_array($resolvedBooking)) {
+                throw new GateAssertionException(
+                    'api_availabilities requires resolved provider/service and booking date.',
+                );
+            }
+
+            $response = apiGetWithBasicAuth(
+                $config,
+                'api/v1/availabilities',
+                [
+                    'providerId' => $providerServicePair['provider_id'],
+                    'serviceId' => $providerServicePair['service_id'],
+                    'date' => $resolvedBooking['date'],
+                ],
+                $config['api_username'],
+                $config['api_password'],
+            );
+
+            GateAssertions::assertStatus($response['status_code'], 200, 'GET /api/v1/availabilities');
+            $decoded = GateAssertions::decodeJson($response['body'], 'GET /api/v1/availabilities');
+            $hours = assertHoursPayload($decoded, 'GET /api/v1/availabilities');
+
+            if ($hours === []) {
+                throw new GateAssertionException(
+                    sprintf(
+                        'GET /api/v1/availabilities returned no slots for provider %d, service %d on %s.',
+                        $providerServicePair['provider_id'],
+                        $providerServicePair['service_id'],
+                        $resolvedBooking['date'],
+                    ),
+                );
+            }
+
+            return [
+                'http_status' => $response['status_code'],
+                'url' => $response['url'],
+                'hours_count' => count($hours),
+            ];
+        });
+    }
 } catch (GateAssertionException $e) {
     $exitCode = GateCliSupport::classifyAssertionExitCode($checks);
     $failure = [
@@ -312,13 +347,24 @@ try {
     ];
 }
 
+try {
+    $reportPath = writeReport($config ?? [], $checks, $failure);
+} catch (Throwable $e) {
+    fwrite(STDERR, '[WARN] Failed to write integration smoke report: ' . $e->getMessage() . PHP_EOL);
+}
+
 $passedChecks = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? null) === 'pass'));
+$totalChecks = count($checks);
 
 if ($exitCode === INTEGRATION_SMOKE_EXIT_SUCCESS) {
-    fwrite(STDOUT, sprintf('[PASS] Integration smoke passed (%d checks).%s', $passedChecks, PHP_EOL));
+    fwrite(STDOUT, sprintf('[PASS] Integration smoke passed (%d/%d checks).%s', $passedChecks, $totalChecks, PHP_EOL));
 } else {
     $message = $failure['message'] ?? 'unknown failure';
     fwrite(STDERR, sprintf('[FAIL] Integration smoke failed (exit %d): %s%s', $exitCode, $message, PHP_EOL));
+}
+
+if ($reportPath !== null) {
+    fwrite(STDOUT, '[INFO] Report: ' . $reportPath . PHP_EOL);
 }
 
 exit($exitCode);
@@ -337,7 +383,12 @@ exit($exitCode);
  *   booking_search_days:int,
  *   http_timeout:int,
  *   csrf_token_name:string,
- *   csrf_cookie_name:string
+ *   csrf_cookie_name:string,
+ *   output_json:string,
+ *   requested_checks:array<int, string>,
+ *   effective_checks:array<int, string>,
+ *   selection_reason_by_check:array<string, string>,
+ *   effective_check_lookup:array<string, bool>
  * }
  */
 function parseCliOptions(array $csrfDefaults): array
@@ -354,10 +405,17 @@ function parseCliOptions(array $csrfDefaults): array
         'booking-date::',
         'booking-search-days::',
         'http-timeout::',
+        'output-json::',
+        'checks::',
+        'help::',
     ]);
 
     if (!is_array($options)) {
         throw new InvalidArgumentException('Failed to parse CLI options.');
+    }
+
+    if (array_key_exists('help', $options)) {
+        printHelpAndExit();
     }
 
     $baseUrl = trim(getRequiredOption($options, 'base-url'));
@@ -399,6 +457,12 @@ function parseCliOptions(array $csrfDefaults): array
     $apiPasswordRaw = getOptionalOption($options, 'api-password', $password);
     $apiPassword = is_string($apiPasswordRaw) && $apiPasswordRaw !== '' ? $apiPasswordRaw : $password;
 
+    $selection = CheckSelection::resolve(
+        array_key_exists('checks', $options) ? $options['checks'] : null,
+        integrationSmokeSupportedCheckIds(),
+        integrationSmokeCheckDependencies(),
+    );
+
     return [
         'base_url' => $baseUrl,
         'index_page' => $indexPage,
@@ -413,7 +477,136 @@ function parseCliOptions(array $csrfDefaults): array
         'http_timeout' => $httpTimeout,
         'csrf_token_name' => $csrfDefaults['csrf_token_name'],
         'csrf_cookie_name' => $csrfDefaults['csrf_cookie_name'],
+        'output_json' => (string) getOptionalOption($options, 'output-json', ''),
+        'requested_checks' => $selection['requested_checks'],
+        'effective_checks' => $selection['effective_checks'],
+        'selection_reason_by_check' => $selection['selection_reason_by_check'],
+        'effective_check_lookup' => array_fill_keys($selection['effective_checks'], true),
     ];
+}
+
+function printHelpAndExit(): void
+{
+    $supportedChecks = implode(', ', integrationSmokeSupportedCheckIds());
+    $help = <<<'TXT'
+    Usage:
+      php scripts/ci/dashboard_integration_smoke.php \
+        --base-url=http://nginx \
+        --index-page=index.php \
+        --username=administrator \
+        --password=administrator \
+        --start-date=2026-01-01 \
+        --end-date=2026-01-31
+
+    Optional:
+      --api-username=administrator
+      --api-password=administrator
+      --booking-date=2026-01-15
+      --booking-search-days=14
+      --http-timeout=15
+      --output-json=PATH
+      --checks=id1,id2
+    TXT;
+
+    fwrite(STDOUT, $help . PHP_EOL . '    Supported check IDs: ' . $supportedChecks . PHP_EOL);
+    exit(INTEGRATION_SMOKE_EXIT_SUCCESS);
+}
+
+/**
+ * @param array<string, mixed> $config
+ * @param array<int, array<string, mixed>> $checks
+ * @param array<string, mixed>|null $failure
+ */
+function writeReport(array $config, array $checks, ?array $failure): string
+{
+    $outputPath = trim((string) ($config['output_json'] ?? ''));
+    if ($outputPath === '') {
+        $timestamp = gmdate('Ymd\THis\Z');
+        $outputPath = dirname(__DIR__, 2) . '/storage/logs/ci/dashboard-integration-smoke-' . $timestamp . '.json';
+    }
+
+    $directory = dirname($outputPath);
+    if (!is_dir($directory)) {
+        if (!mkdir($directory, 0777, true) && !is_dir($directory)) {
+            throw new RuntimeException('Failed to create report directory: ' . $directory);
+        }
+    }
+
+    $passed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? null) === 'pass'));
+    $failed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? null) === 'fail'));
+
+    $report = [
+        'generated_at_utc' => gmdate('c'),
+        'base_url' => $config['base_url'] ?? null,
+        'requested_checks' => $config['requested_checks'] ?? [],
+        'effective_checks' => $config['effective_checks'] ?? [],
+        'summary' => [
+            'total' => count($checks),
+            'passed' => $passed,
+            'failed' => $failed,
+        ],
+        'checks' => $checks,
+        'failure' => $failure,
+    ];
+
+    $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    file_put_contents($outputPath, $json . PHP_EOL);
+
+    return $outputPath;
+}
+
+/**
+ * @return array<int, string>
+ */
+function integrationSmokeSupportedCheckIds(): array
+{
+    return [
+        'readiness_login_page',
+        'auth_login_validate',
+        'dashboard_metrics',
+        'booking_page_readiness',
+        'booking_extract_bootstrap',
+        'booking_available_hours',
+        'booking_unavailable_dates',
+        'api_unauthorized_guard',
+        'api_appointments_index',
+        'api_availabilities',
+    ];
+}
+
+/**
+ * @return array<string, array<int, string>>
+ */
+function integrationSmokeCheckDependencies(): array
+{
+    return [
+        'readiness_login_page' => [],
+        'auth_login_validate' => ['readiness_login_page'],
+        'dashboard_metrics' => ['auth_login_validate'],
+        'booking_page_readiness' => [],
+        'booking_extract_bootstrap' => ['booking_page_readiness'],
+        'booking_available_hours' => ['booking_extract_bootstrap'],
+        'booking_unavailable_dates' => ['booking_available_hours'],
+        'api_unauthorized_guard' => [],
+        'api_appointments_index' => [],
+        'api_availabilities' => ['booking_available_hours'],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function shouldRunConfiguredCheck(array $config, string $checkId): bool
+{
+    return isset($config['effective_check_lookup'][$checkId]);
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function selectionReasonForConfiguredCheck(array $config, string $checkId): string
+{
+    return (string) ($config['selection_reason_by_check'][$checkId] ?? 'requested');
 }
 
 /**

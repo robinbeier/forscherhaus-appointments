@@ -6,10 +6,12 @@ require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
 require_once __DIR__ . '/lib/OpenApiContractValidator.php';
+require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
+use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
 use CiContract\DeterministicFixtureFactory;
 use CiContract\FlakeRetry;
@@ -185,378 +187,416 @@ function runBookingContractsAttempt(
         $state['slot_start'] = $slot['start_datetime'];
         $state['slot_end'] = $slot['end_datetime'];
 
-        runCheck(
-            'booking_register_success_contract',
-            static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
-                $customerPayload = $factory->createBookingCustomerPayload();
-                $appointmentPayload = $factory->createBookingAppointmentPayload(
-                    $slot['provider_id'],
-                    $slot['service_id'],
-                    $slot['start_datetime'],
-                    $slot['end_datetime'],
-                    [
-                        'notes' => 'run:' . $state['run_id'] . ':register-success',
-                    ],
-                );
-
-                $response = $client->post(
-                    'booking/register',
-                    [
-                        'post_data' => [
-                            'appointment' => $appointmentPayload,
-                            'customer' => $customerPayload,
-                            'manage_mode' => false,
+        if (shouldRunConfiguredCheck($config, 'booking_register_success_contract')) {
+            runCheck(
+                'booking_register_success_contract',
+                static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
+                    $customerPayload = $factory->createBookingCustomerPayload();
+                    $appointmentPayload = $factory->createBookingAppointmentPayload(
+                        $slot['provider_id'],
+                        $slot['service_id'],
+                        $slot['start_datetime'],
+                        $slot['end_datetime'],
+                        [
+                            'notes' => 'run:' . $state['run_id'] . ':register-success',
                         ],
-                    ],
-                    $config['http_timeout'],
-                    true,
-                );
-
-                GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking/register (success)');
-                $decoded = decodeJsonArray($response->body, 'POST /booking/register (success)');
-
-                $appointmentId = toPositiveInt($decoded['appointment_id'] ?? null, 'register_success.appointment_id');
-                $appointmentHash = trim((string) ($decoded['appointment_hash'] ?? ''));
-                if ($appointmentHash === '') {
-                    throw new ContractAssertionException(
-                        'register_success.appointment_hash must be a non-empty string.',
                     );
-                }
 
-                $appointment = apiGetById($config, 'appointments', $appointmentId, [200]);
-                $customerId = toPositiveInt($appointment['customerId'] ?? null, 'register_success.customer_id');
+                    $response = $client->post(
+                        'booking/register',
+                        [
+                            'post_data' => [
+                                'appointment' => $appointmentPayload,
+                                'customer' => $customerPayload,
+                                'manage_mode' => false,
+                            ],
+                        ],
+                        $config['http_timeout'],
+                        true,
+                    );
 
-                $cleanup->register(
-                    'appointments',
-                    $appointmentId,
-                    static fn(int|string $id): bool => apiDeleteById($config, 'appointments', (int) $id, [204, 404]),
-                );
-                $cleanup->register(
-                    'customers',
-                    $customerId,
-                    static fn(int|string $id): bool => apiDeleteById($config, 'customers', (int) $id, [204, 404]),
-                );
+                    GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking/register (success)');
+                    $decoded = decodeJsonArray($response->body, 'POST /booking/register (success)');
 
-                $state['primary_appointment_id'] = $appointmentId;
-                $state['primary_appointment_hash'] = $appointmentHash;
-                $state['primary_customer_id'] = $customerId;
-                $state['primary_customer'] = $customerPayload;
+                    $appointmentId = toPositiveInt(
+                        $decoded['appointment_id'] ?? null,
+                        'register_success.appointment_id',
+                    );
+                    $appointmentHash = trim((string) ($decoded['appointment_hash'] ?? ''));
+                    if ($appointmentHash === '') {
+                        throw new ContractAssertionException(
+                            'register_success.appointment_hash must be a non-empty string.',
+                        );
+                    }
 
-                return [
-                    'http_status' => $response->statusCode,
-                    'url' => $response->url,
-                    'appointment_id' => $appointmentId,
-                    'appointment_hash' => $appointmentHash,
-                    'customer_id' => $customerId,
-                ];
-            },
-            $checks,
-        );
+                    $appointment = apiGetById($config, 'appointments', $appointmentId, [200]);
+                    $customerId = toPositiveInt($appointment['customerId'] ?? null, 'register_success.customer_id');
 
-        runCheck(
-            'booking_register_manage_update_contract',
-            static function () use ($client, $config, $factory, &$state, $slot): array {
-                $appointmentId = toPositiveInt(
-                    $state['primary_appointment_id'] ?? null,
-                    'manage_update.appointment_id',
-                );
-                $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
-                if ($appointmentHash === '') {
-                    throw new ContractAssertionException('manage_update requires primary appointment hash.');
-                }
+                    $cleanup->register(
+                        'appointments',
+                        $appointmentId,
+                        static fn(int|string $id): bool => apiDeleteById($config, 'appointments', (int) $id, [
+                            204,
+                            404,
+                        ]),
+                    );
+                    $cleanup->register(
+                        'customers',
+                        $customerId,
+                        static fn(int|string $id): bool => apiDeleteById($config, 'customers', (int) $id, [204, 404]),
+                    );
 
-                $customerPayload = $state['primary_customer'] ?? null;
-                if (!is_array($customerPayload)) {
-                    throw new ContractAssertionException('manage_update requires primary customer payload state.');
-                }
+                    $state['primary_appointment_id'] = $appointmentId;
+                    $state['primary_appointment_hash'] = $appointmentHash;
+                    $state['primary_customer_id'] = $customerId;
+                    $state['primary_customer'] = $customerPayload;
 
-                $updatedNotes = 'run:' . $state['run_id'] . ':manage-update';
-                $appointmentPayload = $factory->createBookingAppointmentPayload(
-                    $slot['provider_id'],
-                    $slot['service_id'],
-                    $slot['start_datetime'],
-                    $slot['end_datetime'],
-                    [
-                        'id' => $appointmentId,
+                    return [
+                        'http_status' => $response->statusCode,
+                        'url' => $response->url,
+                        'appointment_id' => $appointmentId,
+                        'appointment_hash' => $appointmentHash,
+                        'customer_id' => $customerId,
+                    ];
+                },
+                $checks,
+                selectionReasonForCheck($config, 'booking_register_success_contract'),
+            );
+        }
+
+        if (shouldRunConfiguredCheck($config, 'booking_register_manage_update_contract')) {
+            runCheck(
+                'booking_register_manage_update_contract',
+                static function () use ($client, $config, $factory, &$state, $slot): array {
+                    $appointmentId = toPositiveInt(
+                        $state['primary_appointment_id'] ?? null,
+                        'manage_update.appointment_id',
+                    );
+                    $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
+                    if ($appointmentHash === '') {
+                        throw new ContractAssertionException('manage_update requires primary appointment hash.');
+                    }
+
+                    $customerPayload = $state['primary_customer'] ?? null;
+                    if (!is_array($customerPayload)) {
+                        throw new ContractAssertionException('manage_update requires primary customer payload state.');
+                    }
+
+                    $updatedNotes = 'run:' . $state['run_id'] . ':manage-update';
+                    $appointmentPayload = $factory->createBookingAppointmentPayload(
+                        $slot['provider_id'],
+                        $slot['service_id'],
+                        $slot['start_datetime'],
+                        $slot['end_datetime'],
+                        [
+                            'id' => $appointmentId,
+                            'notes' => $updatedNotes,
+                        ],
+                    );
+
+                    $response = $client->post(
+                        'booking/register',
+                        [
+                            'post_data' => [
+                                'appointment' => $appointmentPayload,
+                                'customer' => $customerPayload,
+                                'manage_mode' => true,
+                            ],
+                        ],
+                        $config['http_timeout'],
+                        true,
+                    );
+
+                    GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking/register (manage_mode)');
+                    $decoded = decodeJsonArray($response->body, 'POST /booking/register (manage_mode)');
+                    $returnedId = toPositiveInt(
+                        $decoded['appointment_id'] ?? null,
+                        'manage_update.response.appointment_id',
+                    );
+
+                    if ($returnedId !== $appointmentId) {
+                        throw new ContractAssertionException(
+                            sprintf('manage_update must keep appointment id %d, got %d.', $appointmentId, $returnedId),
+                        );
+                    }
+
+                    $updatedAppointment = apiGetById($config, 'appointments', $appointmentId, [200]);
+                    $updatedHash = trim((string) ($updatedAppointment['hash'] ?? ''));
+
+                    if ($updatedHash !== $appointmentHash) {
+                        throw new ContractAssertionException('manage_update changed appointment hash unexpectedly.');
+                    }
+
+                    if (trim((string) ($updatedAppointment['notes'] ?? '')) !== $updatedNotes) {
+                        throw new ContractAssertionException('manage_update did not persist updated notes.');
+                    }
+
+                    return [
+                        'http_status' => $response->statusCode,
+                        'url' => $response->url,
+                        'appointment_id' => $appointmentId,
                         'notes' => $updatedNotes,
-                    ],
-                );
+                    ];
+                },
+                $checks,
+                selectionReasonForCheck($config, 'booking_register_manage_update_contract'),
+            );
+        }
 
-                $response = $client->post(
-                    'booking/register',
-                    [
-                        'post_data' => [
-                            'appointment' => $appointmentPayload,
-                            'customer' => $customerPayload,
-                            'manage_mode' => true,
+        if (shouldRunConfiguredCheck($config, 'booking_register_unavailable_contract')) {
+            runCheck(
+                'booking_register_unavailable_contract',
+                static function () use ($client, $config, $factory, &$state, $slot): array {
+                    $customerPayload = $factory->createBookingCustomerPayload();
+                    $appointmentPayload = $factory->createBookingAppointmentPayload(
+                        $slot['provider_id'],
+                        $slot['service_id'],
+                        $slot['start_datetime'],
+                        $slot['end_datetime'],
+                        [
+                            'notes' => 'run:' . $state['run_id'] . ':unavailable',
                         ],
-                    ],
-                    $config['http_timeout'],
-                    true,
-                );
-
-                GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking/register (manage_mode)');
-                $decoded = decodeJsonArray($response->body, 'POST /booking/register (manage_mode)');
-                $returnedId = toPositiveInt(
-                    $decoded['appointment_id'] ?? null,
-                    'manage_update.response.appointment_id',
-                );
-
-                if ($returnedId !== $appointmentId) {
-                    throw new ContractAssertionException(
-                        sprintf('manage_update must keep appointment id %d, got %d.', $appointmentId, $returnedId),
                     );
-                }
 
-                $updatedAppointment = apiGetById($config, 'appointments', $appointmentId, [200]);
-                $updatedHash = trim((string) ($updatedAppointment['hash'] ?? ''));
-
-                if ($updatedHash !== $appointmentHash) {
-                    throw new ContractAssertionException('manage_update changed appointment hash unexpectedly.');
-                }
-
-                if (trim((string) ($updatedAppointment['notes'] ?? '')) !== $updatedNotes) {
-                    throw new ContractAssertionException('manage_update did not persist updated notes.');
-                }
-
-                return [
-                    'http_status' => $response->statusCode,
-                    'url' => $response->url,
-                    'appointment_id' => $appointmentId,
-                    'notes' => $updatedNotes,
-                ];
-            },
-            $checks,
-        );
-
-        runCheck(
-            'booking_register_unavailable_contract',
-            static function () use ($client, $config, $factory, &$state, $slot): array {
-                $customerPayload = $factory->createBookingCustomerPayload();
-                $appointmentPayload = $factory->createBookingAppointmentPayload(
-                    $slot['provider_id'],
-                    $slot['service_id'],
-                    $slot['start_datetime'],
-                    $slot['end_datetime'],
-                    [
-                        'notes' => 'run:' . $state['run_id'] . ':unavailable',
-                    ],
-                );
-
-                $response = $client->post(
-                    'booking/register',
-                    [
-                        'post_data' => [
-                            'appointment' => $appointmentPayload,
-                            'customer' => $customerPayload,
-                            'manage_mode' => false,
+                    $response = $client->post(
+                        'booking/register',
+                        [
+                            'post_data' => [
+                                'appointment' => $appointmentPayload,
+                                'customer' => $customerPayload,
+                                'manage_mode' => false,
+                            ],
                         ],
-                    ],
-                    $config['http_timeout'],
-                    true,
-                );
-
-                GateAssertions::assertStatus($response->statusCode, 409, 'POST /booking/register (unavailable)');
-                $decoded = decodeJsonArray($response->body, 'POST /booking/register (unavailable)');
-
-                if (($decoded['success'] ?? null) !== false) {
-                    throw new ContractAssertionException('unavailable register path must return {"success": false}.');
-                }
-
-                $message = trim((string) ($decoded['message'] ?? ''));
-                if ($message === '') {
-                    throw new ContractAssertionException(
-                        'unavailable register path must return a non-empty "message".',
+                        $config['http_timeout'],
+                        true,
                     );
-                }
 
-                $slotAppointmentsCount = countBookedAppointmentsForSlot(
-                    $config,
-                    (int) $slot['provider_id'],
-                    (int) $slot['service_id'],
-                    (string) $slot['start_datetime'],
-                    (string) $slot['end_datetime'],
-                );
+                    GateAssertions::assertStatus($response->statusCode, 409, 'POST /booking/register (unavailable)');
+                    $decoded = decodeJsonArray($response->body, 'POST /booking/register (unavailable)');
 
-                if ($slotAppointmentsCount !== 1) {
-                    throw new ContractAssertionException(
-                        sprintf(
-                            'overbooking invariant failed: expected exactly 1 appointment for slot, got %d.',
-                            $slotAppointmentsCount,
-                        ),
+                    if (($decoded['success'] ?? null) !== false) {
+                        throw new ContractAssertionException(
+                            'unavailable register path must return {"success": false}.',
+                        );
+                    }
+
+                    $message = trim((string) ($decoded['message'] ?? ''));
+                    if ($message === '') {
+                        throw new ContractAssertionException(
+                            'unavailable register path must return a non-empty "message".',
+                        );
+                    }
+
+                    $slotAppointmentsCount = countBookedAppointmentsForSlot(
+                        $config,
+                        (int) $slot['provider_id'],
+                        (int) $slot['service_id'],
+                        (string) $slot['start_datetime'],
+                        (string) $slot['end_datetime'],
                     );
-                }
 
-                return [
-                    'http_status' => $response->statusCode,
-                    'url' => $response->url,
-                    'message' => $message,
-                    'slot_appointments_count' => $slotAppointmentsCount,
-                    'slot_provider_id' => (int) $slot['provider_id'],
-                    'slot_service_id' => (int) $slot['service_id'],
-                    'slot_start' => (string) $slot['start_datetime'],
-                    'slot_end' => (string) $slot['end_datetime'],
-                ];
-            },
-            $checks,
-        );
+                    if ($slotAppointmentsCount !== 1) {
+                        throw new ContractAssertionException(
+                            sprintf(
+                                'overbooking invariant failed: expected exactly 1 appointment for slot, got %d.',
+                                $slotAppointmentsCount,
+                            ),
+                        );
+                    }
 
-        runCheck(
-            'booking_reschedule_manage_mode_contract',
-            static function () use ($client, $config, $factory, &$state): array {
-                $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
-                if ($appointmentHash === '') {
-                    throw new ContractAssertionException('reschedule_manage_mode requires primary appointment hash.');
-                }
+                    return [
+                        'http_status' => $response->statusCode,
+                        'url' => $response->url,
+                        'message' => $message,
+                        'slot_appointments_count' => $slotAppointmentsCount,
+                        'slot_provider_id' => (int) $slot['provider_id'],
+                        'slot_service_id' => (int) $slot['service_id'],
+                        'slot_start' => (string) $slot['start_datetime'],
+                        'slot_end' => (string) $slot['end_datetime'],
+                    ];
+                },
+                $checks,
+                selectionReasonForCheck($config, 'booking_register_unavailable_contract'),
+            );
+        }
 
-                $response = $client->get(
-                    'booking/reschedule/' . rawurlencode($appointmentHash),
-                    [],
-                    $config['http_timeout'],
-                );
-                GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking/reschedule/{hash}');
+        if (shouldRunConfiguredCheck($config, 'booking_reschedule_manage_mode_contract')) {
+            runCheck(
+                'booking_reschedule_manage_mode_contract',
+                static function () use ($client, $config, $factory, &$state): array {
+                    $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
+                    if ($appointmentHash === '') {
+                        throw new ContractAssertionException(
+                            'reschedule_manage_mode requires primary appointment hash.',
+                        );
+                    }
 
-                $bootstrap = $factory->extractBookingBootstrap($response->body);
-                $manageMode = $bootstrap['manage_mode'] ?? null;
-
-                if ($manageMode !== true) {
-                    throw new ContractAssertionException('reschedule view must expose manage_mode=true.');
-                }
-
-                $appointmentData = $bootstrap['appointment_data'] ?? null;
-                if (!is_array($appointmentData)) {
-                    throw new ContractAssertionException('reschedule view must include appointment_data object.');
-                }
-
-                $appointmentId = toPositiveInt(
-                    $state['primary_appointment_id'] ?? null,
-                    'reschedule.primary_appointment_id',
-                );
-                $resolvedId = toPositiveInt($appointmentData['id'] ?? null, 'reschedule.appointment_data.id');
-                if ($resolvedId !== $appointmentId) {
-                    throw new ContractAssertionException(
-                        sprintf(
-                            'reschedule appointment id mismatch: expected %d, got %d.',
-                            $appointmentId,
-                            $resolvedId,
-                        ),
+                    $response = $client->get(
+                        'booking/reschedule/' . rawurlencode($appointmentHash),
+                        [],
+                        $config['http_timeout'],
                     );
-                }
+                    GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking/reschedule/{hash}');
 
-                return [
-                    'http_status' => $response->statusCode,
-                    'url' => $response->url,
-                    'appointment_id' => $resolvedId,
-                    'manage_mode' => true,
-                ];
-            },
-            $checks,
-        );
+                    $bootstrap = $factory->extractBookingBootstrap($response->body);
+                    $manageMode = $bootstrap['manage_mode'] ?? null;
 
-        runCheck(
-            'booking_cancel_success_contract',
-            static function () use ($client, $config, &$state): array {
-                $appointmentId = toPositiveInt(
-                    $state['primary_appointment_id'] ?? null,
-                    'cancel_success.appointment_id',
-                );
-                $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
-                if ($appointmentHash === '') {
-                    throw new ContractAssertionException('cancel_success requires primary appointment hash.');
-                }
+                    if ($manageMode !== true) {
+                        throw new ContractAssertionException('reschedule view must expose manage_mode=true.');
+                    }
 
-                $response = $client->post(
-                    'booking_cancellation/of/' . rawurlencode($appointmentHash),
-                    ['cancellation_reason' => 'run:' . $state['run_id'] . ':cancel-success'],
-                    $config['http_timeout'],
-                    true,
-                );
+                    $appointmentData = $bootstrap['appointment_data'] ?? null;
+                    if (!is_array($appointmentData)) {
+                        throw new ContractAssertionException('reschedule view must include appointment_data object.');
+                    }
 
-                GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking_cancellation/of/{hash}');
-
-                $afterDelete = apiGetById($config, 'appointments', $appointmentId, [404]);
-                if ($afterDelete !== null) {
-                    throw new ContractAssertionException('cancel_success must delete the appointment record.');
-                }
-
-                return [
-                    'http_status' => $response->statusCode,
-                    'url' => $response->url,
-                    'appointment_id' => $appointmentId,
-                    'deleted' => true,
-                ];
-            },
-            $checks,
-        );
-
-        runCheck(
-            'booking_cancel_unknown_hash_contract',
-            static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
-                $customerId = toPositiveInt($state['primary_customer_id'] ?? null, 'cancel_unknown.customer_id');
-
-                $protectPayload = $factory->createApiAppointmentPayload(
-                    $customerId,
-                    (int) $slot['provider_id'],
-                    (int) $slot['service_id'],
-                    $slot['start_datetime'],
-                    $slot['end_datetime'],
-                    [
-                        'notes' => 'run:' . $state['run_id'] . ':unknown-hash-protection',
-                    ],
-                );
-
-                $protectedAppointment = apiJsonRequest('POST', $config, 'api/v1/appointments', $protectPayload, true, [
-                    201,
-                ]);
-
-                $protectedBody = decodeJsonArray(
-                    $protectedAppointment['body'],
-                    'POST /api/v1/appointments (unknown hash protection)',
-                );
-                $protectedAppointmentId = toPositiveInt(
-                    $protectedBody['id'] ?? null,
-                    'cancel_unknown.protected_appointment_id',
-                );
-
-                $cleanup->register(
-                    'appointments',
-                    $protectedAppointmentId,
-                    static fn(int|string $id): bool => apiDeleteById($config, 'appointments', (int) $id, [204, 404]),
-                );
-
-                $unknownHash = 'missing-' . $state['run_id'];
-                $response = $client->post(
-                    'booking_cancellation/of/' . rawurlencode($unknownHash),
-                    ['cancellation_reason' => 'run:' . $state['run_id'] . ':cancel-unknown'],
-                    $config['http_timeout'],
-                    true,
-                );
-
-                GateAssertions::assertStatus(
-                    $response->statusCode,
-                    200,
-                    'POST /booking_cancellation/of/{unknown_hash}',
-                );
-
-                $existing = apiGetById($config, 'appointments', $protectedAppointmentId, [200]);
-                if (!is_array($existing)) {
-                    throw new ContractAssertionException('cancel_unknown_hash path deleted unrelated appointments.');
-                }
-
-                if (trim($response->body) === '') {
-                    throw new ContractAssertionException(
-                        'cancel_unknown_hash response must render a non-empty HTML page.',
+                    $appointmentId = toPositiveInt(
+                        $state['primary_appointment_id'] ?? null,
+                        'reschedule.primary_appointment_id',
                     );
-                }
+                    $resolvedId = toPositiveInt($appointmentData['id'] ?? null, 'reschedule.appointment_data.id');
+                    if ($resolvedId !== $appointmentId) {
+                        throw new ContractAssertionException(
+                            sprintf(
+                                'reschedule appointment id mismatch: expected %d, got %d.',
+                                $appointmentId,
+                                $resolvedId,
+                            ),
+                        );
+                    }
 
-                return [
-                    'http_status' => $response->statusCode,
-                    'url' => $response->url,
-                    'protected_appointment_id' => $protectedAppointmentId,
-                ];
-            },
-            $checks,
-        );
+                    return [
+                        'http_status' => $response->statusCode,
+                        'url' => $response->url,
+                        'appointment_id' => $resolvedId,
+                        'manage_mode' => true,
+                    ];
+                },
+                $checks,
+                selectionReasonForCheck($config, 'booking_reschedule_manage_mode_contract'),
+            );
+        }
+
+        if (shouldRunConfiguredCheck($config, 'booking_cancel_success_contract')) {
+            runCheck(
+                'booking_cancel_success_contract',
+                static function () use ($client, $config, &$state): array {
+                    $appointmentId = toPositiveInt(
+                        $state['primary_appointment_id'] ?? null,
+                        'cancel_success.appointment_id',
+                    );
+                    $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
+                    if ($appointmentHash === '') {
+                        throw new ContractAssertionException('cancel_success requires primary appointment hash.');
+                    }
+
+                    $response = $client->post(
+                        'booking_cancellation/of/' . rawurlencode($appointmentHash),
+                        ['cancellation_reason' => 'run:' . $state['run_id'] . ':cancel-success'],
+                        $config['http_timeout'],
+                        true,
+                    );
+
+                    GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking_cancellation/of/{hash}');
+
+                    $afterDelete = apiGetById($config, 'appointments', $appointmentId, [404]);
+                    if ($afterDelete !== null) {
+                        throw new ContractAssertionException('cancel_success must delete the appointment record.');
+                    }
+
+                    return [
+                        'http_status' => $response->statusCode,
+                        'url' => $response->url,
+                        'appointment_id' => $appointmentId,
+                        'deleted' => true,
+                    ];
+                },
+                $checks,
+                selectionReasonForCheck($config, 'booking_cancel_success_contract'),
+            );
+        }
+
+        if (shouldRunConfiguredCheck($config, 'booking_cancel_unknown_hash_contract')) {
+            runCheck(
+                'booking_cancel_unknown_hash_contract',
+                static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
+                    $customerId = toPositiveInt($state['primary_customer_id'] ?? null, 'cancel_unknown.customer_id');
+
+                    $protectPayload = $factory->createApiAppointmentPayload(
+                        $customerId,
+                        (int) $slot['provider_id'],
+                        (int) $slot['service_id'],
+                        $slot['start_datetime'],
+                        $slot['end_datetime'],
+                        [
+                            'notes' => 'run:' . $state['run_id'] . ':unknown-hash-protection',
+                        ],
+                    );
+
+                    $protectedAppointment = apiJsonRequest(
+                        'POST',
+                        $config,
+                        'api/v1/appointments',
+                        $protectPayload,
+                        true,
+                        [201],
+                    );
+
+                    $protectedBody = decodeJsonArray(
+                        $protectedAppointment['body'],
+                        'POST /api/v1/appointments (unknown hash protection)',
+                    );
+                    $protectedAppointmentId = toPositiveInt(
+                        $protectedBody['id'] ?? null,
+                        'cancel_unknown.protected_appointment_id',
+                    );
+
+                    $cleanup->register(
+                        'appointments',
+                        $protectedAppointmentId,
+                        static fn(int|string $id): bool => apiDeleteById($config, 'appointments', (int) $id, [
+                            204,
+                            404,
+                        ]),
+                    );
+
+                    $unknownHash = 'missing-' . $state['run_id'];
+                    $response = $client->post(
+                        'booking_cancellation/of/' . rawurlencode($unknownHash),
+                        ['cancellation_reason' => 'run:' . $state['run_id'] . ':cancel-unknown'],
+                        $config['http_timeout'],
+                        true,
+                    );
+
+                    GateAssertions::assertStatus(
+                        $response->statusCode,
+                        200,
+                        'POST /booking_cancellation/of/{unknown_hash}',
+                    );
+
+                    $existing = apiGetById($config, 'appointments', $protectedAppointmentId, [200]);
+                    if (!is_array($existing)) {
+                        throw new ContractAssertionException(
+                            'cancel_unknown_hash path deleted unrelated appointments.',
+                        );
+                    }
+
+                    if (trim($response->body) === '') {
+                        throw new ContractAssertionException(
+                            'cancel_unknown_hash response must render a non-empty HTML page.',
+                        );
+                    }
+
+                    return [
+                        'http_status' => $response->statusCode,
+                        'url' => $response->url,
+                        'protected_appointment_id' => $protectedAppointmentId,
+                    ];
+                },
+                $checks,
+                selectionReasonForCheck($config, 'booking_cancel_unknown_hash_contract'),
+            );
+        }
     } finally {
         $cleanupSummary = $cleanup->cleanup();
         $state['cleanup'] = $cleanupSummary;
@@ -566,7 +606,7 @@ function runBookingContractsAttempt(
 /**
  * @param array<int, array<string, mixed>> $checks
  */
-function runCheck(string $name, callable $callback, array &$checks): void
+function runCheck(string $name, callable $callback, array &$checks, string $selectionReason = 'requested'): void
 {
     $startedAt = microtime(true);
 
@@ -580,6 +620,7 @@ function runCheck(string $name, callable $callback, array &$checks): void
             [
                 'name' => $name,
                 'status' => 'pass',
+                'selection_reason' => $selectionReason,
                 'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
             ],
             $details,
@@ -590,6 +631,7 @@ function runCheck(string $name, callable $callback, array &$checks): void
         $checks[] = [
             'name' => $name,
             'status' => 'fail',
+            'selection_reason' => $selectionReason,
             'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
             'error' => $e->getMessage(),
             'exception' => get_class($e),
@@ -1066,6 +1108,7 @@ function parseCliOptions(): array
         'timezone::',
         'csrf-cookie-name::',
         'csrf-token-name::',
+        'checks::',
         'help::',
     ]);
 
@@ -1090,6 +1133,12 @@ function parseCliOptions(): array
         $runId = DeterministicFixtureFactory::generateRunId();
     }
 
+    $selection = CheckSelection::resolve(
+        array_key_exists('checks', $options) ? $options['checks'] : null,
+        bookingWriteSupportedCheckIds(),
+        bookingWriteCheckDependencies(),
+    );
+
     return [
         'base_url' => $baseUrl,
         'index_page' => (string) ($options['index-page'] ?? 'index.php'),
@@ -1103,6 +1152,10 @@ function parseCliOptions(): array
         'timezone' => (string) ($options['timezone'] ?? (date_default_timezone_get() ?: 'UTC')),
         'csrf_cookie_name' => (string) ($options['csrf-cookie-name'] ?? 'csrf_cookie'),
         'csrf_token_name' => (string) ($options['csrf-token-name'] ?? 'csrf_token'),
+        'requested_checks' => $selection['requested_checks'],
+        'effective_checks' => $selection['effective_checks'],
+        'selection_reason_by_check' => $selection['selection_reason_by_check'],
+        'effective_check_lookup' => array_fill_keys($selection['effective_checks'], true),
     ];
 }
 
@@ -1135,6 +1188,8 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
         'generated_at_utc' => gmdate('c'),
         'run_id' => $state['run_id'] ?? null,
         'base_url' => $config['base_url'] ?? null,
+        'requested_checks' => $config['requested_checks'] ?? [],
+        'effective_checks' => $config['effective_checks'] ?? [],
         'summary' => [
             'total' => count($checks),
             'passed' => $passed,
@@ -1155,6 +1210,8 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
 
 function printHelpAndExit(): void
 {
+    $supportedChecks = implode(', ', bookingWriteSupportedCheckIds());
+
     $help = <<<'TXT'
     Usage:
       php scripts/ci/booking_write_contract_smoke.php \
@@ -1172,8 +1229,55 @@ function printHelpAndExit(): void
       --timezone=Europe/Berlin
       --csrf-cookie-name=csrf_cookie
       --csrf-token-name=csrf_token
+      --checks=id1,id2
     TXT;
 
-    fwrite(STDOUT, $help . PHP_EOL);
+    fwrite(STDOUT, $help . PHP_EOL . '    Supported check IDs: ' . $supportedChecks . PHP_EOL);
     exit(BOOKING_WRITE_CONTRACT_EXIT_SUCCESS);
+}
+
+/**
+ * @return array<int, string>
+ */
+function bookingWriteSupportedCheckIds(): array
+{
+    return [
+        'booking_register_success_contract',
+        'booking_register_manage_update_contract',
+        'booking_register_unavailable_contract',
+        'booking_reschedule_manage_mode_contract',
+        'booking_cancel_success_contract',
+        'booking_cancel_unknown_hash_contract',
+    ];
+}
+
+/**
+ * @return array<string, array<int, string>>
+ */
+function bookingWriteCheckDependencies(): array
+{
+    return [
+        'booking_register_success_contract' => [],
+        'booking_register_manage_update_contract' => ['booking_register_success_contract'],
+        'booking_register_unavailable_contract' => ['booking_register_success_contract'],
+        'booking_reschedule_manage_mode_contract' => ['booking_register_success_contract'],
+        'booking_cancel_success_contract' => ['booking_register_success_contract'],
+        'booking_cancel_unknown_hash_contract' => ['booking_register_success_contract'],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function shouldRunConfiguredCheck(array $config, string $checkId): bool
+{
+    return isset($config['effective_check_lookup'][$checkId]);
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function selectionReasonForCheck(array $config, string $checkId): string
+{
+    return (string) ($config['selection_reason_by_check'][$checkId] ?? 'requested');
 }

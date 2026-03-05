@@ -7,6 +7,7 @@ return [
     'checks' => [
         [
             'id' => 'appointments_write_unauthorized_guard',
+            'depends_on' => [],
             'method' => 'POST',
             'openapi_path' => '/appointments',
             'request_path' => 'api/v1/appointments',
@@ -16,6 +17,7 @@ return [
         ],
         [
             'id' => 'customers_store_contract',
+            'depends_on' => [],
             'method' => 'POST',
             'openapi_path' => '/customers',
             'request_path' => 'api/v1/customers',
@@ -30,6 +32,7 @@ return [
         ],
         [
             'id' => 'appointments_store_contract',
+            'depends_on' => ['customers_store_contract'],
             'method' => 'POST',
             'openapi_path' => '/appointments',
             'request_path' => 'api/v1/appointments',
@@ -44,6 +47,7 @@ return [
         ],
         [
             'id' => 'appointments_update_contract',
+            'depends_on' => ['appointments_store_contract'],
             'method' => 'PUT',
             'openapi_path' => '/appointments/{appointmentId}',
             'request_path_template' => 'api/v1/appointments/{appointmentId}',
@@ -61,6 +65,7 @@ return [
         ],
         [
             'id' => 'appointments_destroy_contract',
+            'depends_on' => ['appointments_store_contract'],
             'method' => 'DELETE',
             'openapi_path' => '/appointments/{appointmentId}',
             'request_path_template' => 'api/v1/appointments/{appointmentId}',
@@ -74,6 +79,7 @@ return [
         ],
         [
             'id' => 'customers_destroy_contract',
+            'depends_on' => ['appointments_destroy_contract'],
             'method' => 'DELETE',
             'openapi_path' => '/customers/{customerId}',
             'request_path_template' => 'api/v1/customers/{customerId}',
