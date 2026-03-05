@@ -56,8 +56,8 @@
    Do instead: use `rg`/`rg --files` for code and file discovery; fall back only if unavailable.
 9. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
    Do instead: run tests via docker compose where `DB_HOST='mysql'` and container DNS match CI behavior.
-10. **[2026-02-22] Prime new worktrees before first commit**
-    Do instead: run `./scripts/setup-worktree.sh` to install `vendor/`, `node_modules/`, and vendor/theme assets.
+10. **[2026-03-05] Let pre-PR gates self-bootstrap missing dependencies**
+    Do instead: rely on `pre_pr_quick.sh` / `pre_pr_full.sh` auto-bootstrap for missing `vendor/` and `node_modules`, but still run `./scripts/setup-worktree.sh` once per new worktree to install hooks and baseline config.
 
 ## User Directives
 

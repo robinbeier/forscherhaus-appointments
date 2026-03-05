@@ -34,12 +34,7 @@ mkdir -p storage/{backups,cache,logs,sessions,uploads}
 chmod -R a+rwX storage
 
 # Install backend/frontend dependencies.
-composer install --no-interaction --prefer-dist
-if [[ -f package-lock.json ]]; then
-    npm ci --no-audit --no-fund
-else
-    npm install --no-audit --no-fund
-fi
+bash ./scripts/ci/ensure_local_deps.sh --force
 
 # Populate assets/vendor from node_modules (needed by gulp workflows).
 npx gulp vendor
