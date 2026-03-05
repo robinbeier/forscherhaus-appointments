@@ -209,7 +209,7 @@ function loadCoverageShardLineCoverage(string $path): array
             continue;
         }
 
-        $filePath = trim((string) ($fileNode['name'] ?? ''));
+        $filePath = normalizeCoverageFilePath(trim((string) ($fileNode['name'] ?? '')));
         if ($filePath === '') {
             continue;
         }
@@ -254,6 +254,27 @@ function loadCoverageShardLineCoverage(string $path): array
     }
 
     return $lineCoverage;
+}
+
+function normalizeCoverageFilePath(string $filePath): string
+{
+    $normalizedPath = str_replace('\\', '/', trim($filePath));
+
+    if ($normalizedPath === '') {
+        return '';
+    }
+
+    foreach (['/application/', '/scripts/', '/tests/', '/system/'] as $marker) {
+        $markerPosition = strpos($normalizedPath, $marker);
+
+        if ($markerPosition === false) {
+            continue;
+        }
+
+        return ltrim(substr($normalizedPath, $markerPosition + 1), '/');
+    }
+
+    return $normalizedPath;
 }
 
 function parseCloverXml(string $content, string $path): SimpleXMLElement

@@ -98,6 +98,43 @@ class CoverageShardMergeTest extends TestCase
         self::assertSame('error', $this->readJsonFile($outputJson)['status']);
     }
 
+    public function testRunCoverageShardMergeCliNormalizesEquivalentRepoPathsAcrossEnvironments(): void
+    {
+        $inputA = $this->tmpDir . '/shard-a-clover.xml';
+        $inputB = $this->tmpDir . '/shard-b-clover.xml';
+        $outputClover = $this->tmpDir . '/coverage-merged.xml';
+
+        $this->writeCloverShard($inputA, [
+            '/Users/runner/work/forscherhaus-appointments/application/libraries/Request_normalizer.php' => [
+                10 => 1,
+                11 => 0,
+            ],
+        ]);
+        $this->writeCloverShard($inputB, [
+            '/var/www/html/application/libraries/Request_normalizer.php' => [
+                11 => 1,
+                12 => 0,
+            ],
+        ]);
+
+        $exitCode = runCoverageShardMergeCli([
+            'merge_coverage_shards.php',
+            '--input=' . $inputA,
+            '--input=' . $inputB,
+            '--output-clover=' . $outputClover,
+        ]);
+
+        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_SUCCESS, $exitCode);
+
+        $metrics = $this->readCloverProjectMetrics($outputClover);
+        self::assertSame(3, $metrics['statements']);
+        self::assertSame(2, $metrics['coveredstatements']);
+
+        $xmlContent = file_get_contents($outputClover);
+        self::assertNotFalse($xmlContent);
+        self::assertStringContainsString('application/libraries/Request_normalizer.php', $xmlContent);
+    }
+
     /**
      * @param array<string, array<int, int>> $lineCoverageByFile
      */

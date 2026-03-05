@@ -30,7 +30,7 @@ State:
 
 -   PR-D1 merged to `main` via PR #113 and met its post-merge compute target.
 -   PR-D2 merged to `main` via PR #114 at head `ccf55894`; post-merge push run `22735481203` for merge commit `fa9d2f6d` is in progress.
--   PR-D3 is the next active implementation slice.
+-   PR-D3 is the current active implementation slice on branch `codex/pr-d3-coverage-unit-runner-php`.
 -   `CONTINUITY.md` created because it was previously missing.
 -   Current optimization backlog after D1:
     -   deep Docker jobs still repeat seeded DB creation unless D2 lands
@@ -74,10 +74,12 @@ Done:
 -   Reviewer A on D3 found no open bugs/regression/security/edge-case issues after the shard split, bootstrap review, and targeted validations.
 -   Reviewer B on D3 found no open architecture/readability/test-gap/maintainability issues after the same pass.
 -   D3 full local validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green with split coverage shards and `coverage-delta` at `25.5506%`.
+-   D3 PR #115 surfaced one real CI regression after the first push: `coverage-delta` failed because the shard merge double-counted identical repo files under runner and container absolute paths.
+-   D3 coverage merge fix is committed locally at `fd85c176`; it is not pushed yet in this snapshot.
 
 Now:
 
--   Commit, push, open PR for D3, babysit to merge, and in parallel keep polling the first post-merge push run for D2.
+-   Push commit `fd85c176` to PR #115, babysit the fresh CI run to green/mergeable, and keep polling the first post-merge push run for D2 in parallel when useful.
 
 Next:
 
