@@ -264,6 +264,7 @@ Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` ist blocking; der L2-Check ist in CI nicht mehr advisory.
 Hinweis: `deep-check-bootstrap` liefert fuer Deep-Jobs nur noch ein `vendor/`-Artifact; die dockerisierten Deep-Jobs setzen CI-only Bootstrap-Flags, damit `php-fpm` in CI bei fehlendem `node_modules/` kein `npm install` und keinen Asset-Rebuild startet.
+Hinweis: Die dockerisierten Deep-Jobs importieren in CI einen gemeinsamen `deep-check-seed-snapshot` statt pro Job `php index.php console install` auszufuehren.
 Hinweis: Die CI-Jobs `coverage-shard-unit` und `coverage-shard-integration` sind blocking und laufen auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes.
 Hinweis: Der CI-Job `coverage-delta` ist blocking, aggregiert die beiden Coverage-Shards und prueft die gemergte Clover gegen die Repo-Policy; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.

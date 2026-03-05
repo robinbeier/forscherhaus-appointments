@@ -339,10 +339,73 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  deep-check-seed-snapshot:
+    needs:
+      - changes
+      - deep-check-bootstrap
+    if: >
+      needs.changes.outputs.deep_required == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Download deep-check dependencies artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-deps
+          path: .ci-artifacts
+      - name: Restore deep-check dependencies
+        run: |
+          tar -xzf .ci-artifacts/deep-check-deps.tar.gz
+          test -d vendor
+          test -f vendor/autoload.php
+      - name: Start seed snapshot services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
+        run: docker compose up -d mysql php-fpm
+      - name: Wait for MySQL readiness
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Install deterministic seed instance
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose exec -T php-fpm php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
+      - name: Export deterministic seed snapshot
+        run: bash scripts/ci/export_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
+      - name: Upload deterministic seed snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts/deep-check-seed.sql.gz
+          if-no-files-found: error
+          retention-days: 1
+      - name: Diagnostics (failure logs)
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --timestamps mysql php-fpm || true
+      - name: Cleanup seed snapshot services
+        if: always()
+        run: docker compose down -v --remove-orphans
+
   coverage-shard-unit:
     needs:
       - changes
       - deep-check-bootstrap
+      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.deep_required == 'true' &&
       (
@@ -360,6 +423,11 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
+      - name: Download deterministic seed snapshot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -371,39 +439,9 @@ jobs:
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
-        run: |
-          max_attempts=60
-
-          attempt=1
-          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-
-          attempt=1
-          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Import deterministic seed snapshot
+        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Run coverage shard (unit)
         run: docker compose exec -T php-fpm composer test:coverage:unit-shard
       - name: Upload coverage shard unit artifacts
@@ -428,6 +466,7 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
+      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.deep_required == 'true' &&
       (
@@ -445,6 +484,11 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
+      - name: Download deterministic seed snapshot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -456,39 +500,9 @@ jobs:
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
-        run: |
-          max_attempts=60
-
-          attempt=1
-          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-
-          attempt=1
-          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Import deterministic seed snapshot
+        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Run coverage shard (integration)
         run: docker compose exec -T php-fpm composer test:coverage:integration-shard
       - name: Upload coverage shard integration artifacts
@@ -655,6 +669,7 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
+      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.api_contract == 'true' &&
       (
@@ -672,6 +687,11 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
+      - name: Download deterministic seed snapshot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -683,39 +703,9 @@ jobs:
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
-        run: |
-          max_attempts=60
-
-          attempt=1
-          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-
-          attempt=1
-          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Import deterministic seed snapshot
+        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Wait for application HTTP readiness
         run: |
           max_attempts=45
@@ -750,6 +740,7 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
+      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.write_contract_booking == 'true' &&
       (
@@ -768,6 +759,11 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
+      - name: Download deterministic seed snapshot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -779,39 +775,9 @@ jobs:
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
-        run: |
-          max_attempts=60
-
-          attempt=1
-          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-
-          attempt=1
-          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Import deterministic seed snapshot
+        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Wait for application HTTP readiness
         run: |
           max_attempts=45
@@ -855,6 +821,7 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
+      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.write_contract_api == 'true' &&
       (
@@ -873,6 +840,11 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
+      - name: Download deterministic seed snapshot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -884,39 +856,9 @@ jobs:
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
-        run: |
-          max_attempts=60
-
-          attempt=1
-          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-
-          attempt=1
-          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Import deterministic seed snapshot
+        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Wait for application HTTP readiness
         run: |
           max_attempts=45
@@ -961,6 +903,7 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
+      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.booking_flows == 'true' &&
       (
@@ -978,6 +921,11 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
+      - name: Download deterministic seed snapshot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -989,39 +937,9 @@ jobs:
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
-        run: |
-          max_attempts=60
-
-          attempt=1
-          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-
-          attempt=1
-          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Import deterministic seed snapshot
+        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Run booking controller flow tests
         run: docker compose exec -T php-fpm composer test:booking-controller-flows
       - name: Diagnostics (failure logs)
@@ -1038,6 +956,7 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
+      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.integration_smoke == 'true' &&
       (
@@ -1055,6 +974,11 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
+      - name: Download deterministic seed snapshot artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-check-seed-snapshot
+          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -1066,39 +990,9 @@ jobs:
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
-        run: |
-          max_attempts=60
-
-          attempt=1
-          until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL root readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-
-          attempt=1
-          until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 2
-          done
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Import deterministic seed snapshot
+        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Wait for application HTTP readiness
         run: |
           max_attempts=45

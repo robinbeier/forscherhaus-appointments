@@ -6,7 +6,7 @@ Goal (incl. success criteria):
 
 Constraints/Assumptions:
 
--   Repository is on `main` and worktree is currently clean.
+-   Repository is on a `codex/` working branch during active implementation; expect a dirty worktree until the current PR is committed.
 -   No product-runtime changes in `application/`; optimization scope is CI, test topology, and supporting scripts/config.
 -   Hard success metrics remain:
     -   deep-check compute minutes <=22m
@@ -28,11 +28,11 @@ Key decisions:
 
 State:
 
--   PR-D1 implementation is in progress on branch `codex/pr-d1-deep-bootstrap-vendor-only`.
+-   PR-D1 merged to `main` via PR #113 and met its post-merge compute target.
+-   PR-D2 implementation is locally complete on branch `codex/pr-d2-deep-seed-snapshot` and ready for commit/PR.
 -   `CONTINUITY.md` created because it was previously missing.
--   Current CI inspection confirms:
-    -   `deep-check-bootstrap` still archives `vendor node_modules build`
-    -   deep Docker jobs still repeat MySQL readiness + `console install`
+-   Current optimization backlog after D1:
+    -   deep Docker jobs still repeat seeded DB creation unless D2 lands
     -   `coverage-shard-unit` still starts Docker/MySQL and seeds despite only running `tests/Unit`
     -   code inspection indicates `booking-controller-flows` does not need `nginx`; tests instantiate controllers directly and do not issue HTTP requests
 -   Baseline and current measured deep-check compute:
@@ -41,7 +41,8 @@ State:
     -   post-PR-B run `22730859252` = `28m51s`
     -   post-PR-C run `22732335696` = `28m08s`
 -   Current gap to goal from latest state: `6m08s`
--   PR-D1 is pushed as PR #113 at commit `e5528b33`.
+-   PR-D1 merge commit on `main`: `44ac379e`.
+-   First post-merge push run for PR-D1: `22734510434` = all green, deep-check compute `26m19s`.
 
 Done:
 
@@ -59,14 +60,22 @@ Done:
 -   Verified `php-fpm` CI skip flags by starting the container with `EA_SKIP_NPM_BOOTSTRAP=1` and `EA_SKIP_ASSET_BUILD_BOOTSTRAP=1`; logs showed both skip branches active.
 -   Fixed a latent local gate issue in `scripts/ci/pre_pr_quick.sh`: it now starts `mysql` and waits for readiness before DB-backed PHPUnit steps.
 -   PR-D1 local validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green, including deep smokes and `coverage-delta` (`25.7585%` current line coverage).
+-   PR #113 reached `16/16` green checks, `MERGEABLE`, `mergeStateStatus=CLEAN`, and was merged.
+-   D1 post-merge target check passed: `26m19s <= 26m45s`.
+-   D2 static checks passed for the new seed snapshot helpers and current Compose config.
+-   D2 targeted snapshot smoke passed: export to `/tmp/deep-check-seed.sql.gz`, import into the local test DB, and post-import validation on `ea_settings`.
+-   Reviewer A on D2 found no open bugs/regression/security/edge-case issues after diff review plus helper-script and compose validation.
+-   Reviewer B on D2 found no open architecture/readability/test-gap/maintainability issues after the same pass.
+-   D2 full local validation passed: `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` completed green, including deep smokes and `coverage-delta` (`25.7585%` current line coverage).
 
 Now:
 
--   Babysit PR #113 to merge, then capture the first post-merge full-fanout result and continue to PR-D2.
+-   Commit, push, open PR for D2, babysit to merge, then record the first post-merge compute run.
 
 Next:
 
--   Record the first post-merge full-fanout run for PR-D1 and compare it against the D1 target `<=26m45s`.
+-   After D2 merge, measure the first clean full-fanout push run on `main` against the D2 target `<=23m30s`.
+-   Start PR-D3 to decouple `coverage-shard-unit` from Docker/MySQL/seed.
 -   After each merged PR, update this ledger with run IDs, compute totals, go/no-go for the next PR, and whether PR-D4 is still needed.
 -   PR-specific target ladder:
     -   PR-D1 target: `<=26m45s`
@@ -108,6 +117,7 @@ Working set (files/ids/commands):
     -   PR #111 run `22730859252`
     -   PR #112 run `22732335696`
     -   PR #113 head `e5528b33`
+    -   D1 post-merge push run `22734510434`
     -   pre-PR-A baseline run `22722137309`
 -   Commands:
     -   `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
