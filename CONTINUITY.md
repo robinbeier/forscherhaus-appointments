@@ -41,6 +41,7 @@ State:
     -   post-PR-B run `22730859252` = `28m51s`
     -   post-PR-C run `22732335696` = `28m08s`
 -   Current gap to goal from latest state: `6m08s`
+-   PR-D1 is pushed as PR #113 at commit `e5528b33`.
 
 Done:
 
@@ -61,11 +62,11 @@ Done:
 
 Now:
 
--   Commit, push, open the ready-for-review PR for PR-D1, babysit it to merge, then continue to PR-D2.
+-   Babysit PR #113 to merge, then capture the first post-merge full-fanout result and continue to PR-D2.
 
 Next:
 
--   Open the PR-D1 ready-for-review PR, babysit it to merge, and record the first post-merge full-fanout run.
+-   Record the first post-merge full-fanout run for PR-D1 and compare it against the D1 target `<=26m45s`.
 -   After each merged PR, update this ledger with run IDs, compute totals, go/no-go for the next PR, and whether PR-D4 is still needed.
 -   PR-specific target ladder:
     -   PR-D1 target: `<=26m45s`
@@ -106,6 +107,7 @@ Working set (files/ids/commands):
     -   PR #110 run `22726163633`
     -   PR #111 run `22730859252`
     -   PR #112 run `22732335696`
+    -   PR #113 head `e5528b33`
     -   pre-PR-A baseline run `22722137309`
 -   Commands:
     -   `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
