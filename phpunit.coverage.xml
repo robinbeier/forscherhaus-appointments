@@ -10,6 +10,8 @@
             <directory suffix="Test.php">./tests/Unit</directory>
             <file>./tests/Integration/Controllers/BookingControllerFlowTest.php</file>
             <file>./tests/Integration/Controllers/BookingCancellationControllerFlowTest.php</file>
+            <file>./tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php</file>
+            <file>./tests/Integration/Controllers/ApiReadControllerFlowTest.php</file>
         </testsuite>
     </testsuites>
     <coverage processUncoveredFiles="false">
