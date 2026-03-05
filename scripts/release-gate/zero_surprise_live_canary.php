@@ -322,12 +322,16 @@ function loadCredentialsConfig(string $credentialsFile): array
         throw new InvalidArgumentException('Could not parse INI credentials file: ' . $credentialsFile);
     }
 
-    $requiredKeys = ['base_url', 'index_page', 'username', 'password'];
+    $requiredNonEmptyKeys = ['base_url', 'username', 'password'];
 
-    foreach ($requiredKeys as $key) {
+    foreach ($requiredNonEmptyKeys as $key) {
         if (!array_key_exists($key, $parsed) || trim((string) $parsed[$key]) === '') {
             throw new InvalidArgumentException('Credentials file is missing required key: ' . $key);
         }
+    }
+
+    if (!array_key_exists('index_page', $parsed)) {
+        throw new InvalidArgumentException('Credentials file is missing required key: index_page');
     }
 
     $timezone = trim((string) ($parsed['timezone'] ?? 'Europe/Berlin'));
@@ -359,7 +363,7 @@ function loadCredentialsConfig(string $credentialsFile): array
 
     return [
         'base_url' => trim((string) $parsed['base_url']),
-        'index_page' => (string) $parsed['index_page'],
+        'index_page' => (string) $parsed['index_page'], // Empty value is valid for rewrite-mode deployments.
         'username' => trim((string) $parsed['username']),
         'password' => (string) $parsed['password'],
         'start_date' => $startDate,

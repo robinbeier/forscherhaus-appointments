@@ -75,7 +75,7 @@ Deploy options:
 Required keys:
 
 - `base_url`
-- `index_page`
+- `index_page` (use an empty value for rewrite-mode, e.g. `index_page =`)
 - `username`
 - `password`
 
