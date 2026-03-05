@@ -163,11 +163,11 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: write-contract-booking rollout streak check (warn-only -> blocking; executed-only)
+# Optional: write-contract-booking status check (blocking; executed-only)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="write-contract-booking") | .conclusion'
 done | grep -E '^(success|failure)$' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+# Erwartung: ausgefuehrte aktuelle Eintraege sind SUCCESS
 
 # Optional: write-contract-api rollout streak check (warn-only -> blocking; executed-only)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
@@ -238,7 +238,7 @@ Hinweis: Der CI-Job `js-lint-changed` ist blocking.
 Hinweis: Der CI-Job `architecture-ownership-map` ist blocking.
 Hinweis: Der CI-Job `architecture-boundaries` ist blocking.
 Hinweis: Der CI-Job `api-contract-openapi` ist blocking.
-Hinweis: Der CI-Job `write-contract-booking` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden ausgefuehrten grueneren PR-Laeufen auf blocking umgestellt (nur `success|failure` zaehlt).
+Hinweis: Der CI-Job `write-contract-booking` ist blocking.
 Hinweis: Der CI-Job `write-contract-api` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden ausgefuehrten grueneren PR-Laeufen auf blocking umgestellt (nur `success|failure` zaehlt).
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.

@@ -207,7 +207,8 @@ Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push .
 CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
 CI note: `integration-smoke` covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
-CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is currently warn-only during rollout (planned blocking switch after 7 executed green PR runs, counting only `success|failure` conclusions).
+CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is blocking.
+CI note: rollback policy for `write-contract-booking`: if false positives block delivery, restore warn-only (`continue-on-error: true`) in one commit and create a follow-up issue with max 14-day expiry.
 CI note: the `write-contract-api` check validates API write-path OpenAPI contracts and is currently warn-only during rollout (planned blocking switch after 7 executed green PR runs, counting only `success|failure` conclusions).
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
