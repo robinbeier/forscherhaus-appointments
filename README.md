@@ -188,6 +188,9 @@ bash ./scripts/ci/pre_pr_full.sh
 
 # optional full gate + coverage delta
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
+
+# optional advisory override for request-contracts L2 (default is strict/blocking)
+PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 bash ./scripts/ci/pre_pr_full.sh
 ```
 
 Hook note: `./scripts/setup-worktree.sh` installs a managed `.git/hooks/pre-push` hook that runs `pre_pr_quick.sh`.
@@ -200,7 +203,7 @@ CI note: the `write-contract-booking` check validates booking write-path HTTP co
 CI note: the `write-contract-api` check validates API write-path OpenAPI contracts and is currently warn-only during rollout (planned blocking switch after 7 executed green PR runs, counting only `success|failure` conclusions).
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
-CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is currently warn-only during rollout (planned blocking switch after 7 non-cancelled green PR runs).
+CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is blocking (L1 + adoption + L2).
 CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.

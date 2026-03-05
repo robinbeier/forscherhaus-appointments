@@ -131,7 +131,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 bash ./scripts/ci/pre_pr_full.sh
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 PRE_PR_BASE_REF=origin/release-branch bash ./scripts/ci/pre_pr_quick.sh
-PRE_PR_BASE_REF=origin/release-branch PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=1 bash ./scripts/ci/pre_pr_full.sh
+PRE_PR_BASE_REF=origin/release-branch PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 bash ./scripts/ci/pre_pr_full.sh
 
 # Optional: PHPStan status check (blocking)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
@@ -187,11 +187,11 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json
 done | awk '$1 != "cancelled"' | head -n 7
 # Erwartung: ausgegebene Eintraege sind SUCCESS
 
-# Optional: typed-request-contracts rollout streak check (warn-only -> blocking)
+# Optional: typed-request-contracts status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="typed-request-contracts") | .conclusion'
-done | awk '$1 != "cancelled"' | head -n 7
-# Erwartung fuer Blocking-Umschaltung: alle 7 ausgegebenen Eintraege sind SUCCESS
+done | grep -E '^(success|failure)$' | head -n 7
+# Erwartung: bei relevanten PR-Aenderungen sind aktuelle ausgefuehrte Eintraege SUCCESS
 
 # Optional: coverage-delta status check (blocking)
 for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
@@ -242,7 +242,7 @@ Hinweis: Der CI-Job `write-contract-booking` laeuft waehrend des Rollouts warn-o
 Hinweis: Der CI-Job `write-contract-api` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden ausgefuehrten grueneren PR-Laeufen auf blocking umgestellt (nur `success|failure` zaehlt).
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
-Hinweis: Der CI-Job `typed-request-contracts` laeuft waehrend des Rollouts warn-only (`continue-on-error`) und wird nach 7 aufeinanderfolgenden grueneren PR-Laeufen auf blocking umgestellt.
+Hinweis: Der CI-Job `typed-request-contracts` ist blocking; der L2-Check ist in CI nicht mehr advisory.
 Hinweis: Der CI-Job `coverage-delta` ist blocking und laeuft auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
 Hinweis: Das Request Contracts Gate schreibt standardmaessig nach `storage/logs/ci/request-contract-adoption-latest.json` und `storage/logs/ci/phpstan-request-contracts-l2.raw`.
@@ -252,6 +252,7 @@ Hinweis: Der API OpenAPI Write Contract Smoke schreibt standardmaessig nach `sto
 Hinweis: Der Coverage Report (`composer test:coverage:unit`, inkl. Unit + Booking-Flow-Integration) schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
+Hinweis: Falls `typed-request-contracts` durch False-Positives Releases blockiert, den L2-Step in `ci.yml` temporaer auf advisory (`continue-on-error: true`) zurueckstellen und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `write-contract-booking` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `write-contract-api` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `coverage-delta` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
