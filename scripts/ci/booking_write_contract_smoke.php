@@ -370,10 +370,32 @@ function runBookingContractsAttempt(
                     );
                 }
 
+                $slotAppointmentsCount = countBookedAppointmentsForSlot(
+                    $config,
+                    (int) $slot['provider_id'],
+                    (int) $slot['service_id'],
+                    (string) $slot['start_datetime'],
+                    (string) $slot['end_datetime'],
+                );
+
+                if ($slotAppointmentsCount !== 1) {
+                    throw new ContractAssertionException(
+                        sprintf(
+                            'overbooking invariant failed: expected exactly 1 appointment for slot, got %d.',
+                            $slotAppointmentsCount,
+                        ),
+                    );
+                }
+
                 return [
                     'http_status' => $response->statusCode,
                     'url' => $response->url,
                     'message' => $message,
+                    'slot_appointments_count' => $slotAppointmentsCount,
+                    'slot_provider_id' => (int) $slot['provider_id'],
+                    'slot_service_id' => (int) $slot['service_id'],
+                    'slot_start' => (string) $slot['start_datetime'],
+                    'slot_end' => (string) $slot['end_datetime'],
                 ];
             },
             $checks,
@@ -673,6 +695,115 @@ function apiListAppointmentsByCustomerId(array $config, int $customerId): array
     }
 
     return array_values(array_filter($decoded, 'is_array'));
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function countBookedAppointmentsForSlot(
+    array $config,
+    int $providerId,
+    int $serviceId,
+    string $startDateTime,
+    string $endDateTime,
+): int {
+    $length = 100;
+    $page = 1;
+    $count = 0;
+    $fromDate = substr($startDateTime, 0, 10);
+    $tillDate = substr($endDateTime, 0, 10);
+
+    while (true) {
+        if ($page > 50) {
+            throw new ContractAssertionException('slot appointment lookup exceeded paging safety limit.');
+        }
+
+        $response = apiJsonRequest(
+            'GET',
+            $config,
+            'api/v1/appointments',
+            null,
+            true,
+            [200],
+            [
+                'providerId' => $providerId,
+                'serviceId' => $serviceId,
+                'from' => $fromDate,
+                'till' => $tillDate,
+                'length' => $length,
+                'page' => $page,
+            ],
+        );
+
+        $decoded = decodeJsonArray($response['body'], 'GET /api/v1/appointments (slot scan)');
+        if (!array_is_list($decoded) || $decoded === []) {
+            break;
+        }
+
+        foreach ($decoded as $appointment) {
+            if (!is_array($appointment)) {
+                continue;
+            }
+
+            $start = trim((string) ($appointment['start'] ?? ''));
+            $end = trim((string) ($appointment['end'] ?? ''));
+            $status = trim((string) ($appointment['status'] ?? ''));
+            $appointmentProviderId = resolveOptionalPositiveInt(
+                $appointment['providerId'] ?? ($appointment['id_users_provider'] ?? null),
+            );
+            $appointmentServiceId = resolveOptionalPositiveInt(
+                $appointment['serviceId'] ?? ($appointment['id_services'] ?? null),
+            );
+            $isUnavailabilityRaw = $appointment['isUnavailability'] ?? false;
+            $isUnavailability = $isUnavailabilityRaw === true || (int) $isUnavailabilityRaw === 1;
+
+            if ($start !== $startDateTime || $end !== $endDateTime) {
+                continue;
+            }
+
+            if ($appointmentProviderId !== $providerId || $appointmentServiceId !== $serviceId) {
+                continue;
+            }
+
+            if ($status !== 'Booked') {
+                continue;
+            }
+
+            if ($isUnavailability) {
+                continue;
+            }
+
+            $count++;
+        }
+
+        if (count($decoded) < $length) {
+            break;
+        }
+
+        $page++;
+    }
+
+    return $count;
+}
+
+function resolveOptionalPositiveInt(mixed $value): ?int
+{
+    if (is_int($value)) {
+        return $value > 0 ? $value : null;
+    }
+
+    if (!is_string($value)) {
+        return null;
+    }
+
+    $normalized = trim($value);
+    if ($normalized === '' || preg_match('/^\\d+$/', $normalized) !== 1) {
+        return null;
+    }
+
+    $parsed = (int) $normalized;
+
+    return $parsed > 0 ? $parsed : null;
 }
 
 /**

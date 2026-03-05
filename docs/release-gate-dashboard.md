@@ -52,6 +52,7 @@ composer release:gate:dashboard -- \
 - `--pdf-health-url` (optional): Renderer health endpoint.
 - `--http-timeout` (optional): JSON-check timeout seconds, default `15`.
 - `--export-timeout` (optional): Export timeout seconds, default `60`.
+- `--max-pdf-duration-ms` (optional): Maximum allowed duration per PDF export request, default `30000`.
 - `--require-nonempty-metrics` (optional flag/bool): Fail if metrics payload is empty.
 - `--output-json` (optional): Report path. Default:
   - `storage/logs/release-gate/dashboard-gate-<UTC>.json`
