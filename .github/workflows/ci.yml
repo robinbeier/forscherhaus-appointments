@@ -314,11 +314,6 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v2
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
       - name: Cache Composer downloads
         uses: actions/cache@v4
         with:
@@ -326,10 +321,6 @@ jobs:
           key: composer-cache-${{ runner.os }}-${{ hashFiles('composer.lock') }}
           restore-keys: |
             composer-cache-${{ runner.os }}-
-      - name: Frontend compile
-        run: |
-          npm ci --no-audit --no-fund
-          npx gulp compile
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
@@ -339,8 +330,7 @@ jobs:
       - name: Archive deep-check dependencies
         run: |
           mkdir -p .ci-artifacts
-          mkdir -p build
-          tar -czf .ci-artifacts/deep-check-deps.tar.gz vendor node_modules build
+          tar -czf .ci-artifacts/deep-check-deps.tar.gz vendor
       - name: Upload deep-check dependencies artifact
         uses: actions/upload-artifact@v4
         with:
@@ -374,9 +364,11 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
-          test -d node_modules
-          test -d build
+          test -f vendor/autoload.php
       - name: Start coverage shard services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: |
@@ -457,9 +449,11 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
-          test -d node_modules
-          test -d build
+          test -f vendor/autoload.php
       - name: Start coverage shard services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: |
@@ -543,6 +537,7 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
+          test -f vendor/autoload.php
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -681,9 +676,11 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
-          test -d node_modules
-          test -d build
+          test -f vendor/autoload.php
       - name: Start API contract services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
         run: |
@@ -775,9 +772,11 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
-          test -d node_modules
-          test -d build
+          test -f vendor/autoload.php
       - name: Start booking write-contract services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
         run: |
@@ -878,9 +877,11 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
-          test -d node_modules
-          test -d build
+          test -f vendor/autoload.php
       - name: Start API write-contract services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
         run: |
@@ -981,9 +982,11 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
-          test -d node_modules
-          test -d build
+          test -f vendor/autoload.php
       - name: Start booking flow test services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
         run: |
@@ -1056,9 +1059,11 @@ jobs:
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
-          test -d node_modules
-          test -d build
+          test -f vendor/autoload.php
       - name: Start integration services
+        env:
+          EA_SKIP_NPM_BOOTSTRAP: "1"
+          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: docker compose up -d mysql php-fpm nginx
       - name: Wait for MySQL readiness
         run: |

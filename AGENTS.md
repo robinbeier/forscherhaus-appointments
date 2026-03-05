@@ -263,6 +263,7 @@ Hinweis: Der CI-Job `write-contract-api` ist blocking.
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` ist blocking; der L2-Check ist in CI nicht mehr advisory.
+Hinweis: `deep-check-bootstrap` liefert fuer Deep-Jobs nur noch ein `vendor/`-Artifact; die dockerisierten Deep-Jobs setzen CI-only Bootstrap-Flags, damit `php-fpm` in CI bei fehlendem `node_modules/` kein `npm install` und keinen Asset-Rebuild startet.
 Hinweis: Die CI-Jobs `coverage-shard-unit` und `coverage-shard-integration` sind blocking und laufen auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes.
 Hinweis: Der CI-Job `coverage-delta` ist blocking, aggregiert die beiden Coverage-Shards und prueft die gemergte Clover gegen die Repo-Policy; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
@@ -285,6 +286,7 @@ Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
 -   erstellt `config.php` via `cp config-sample.php config.php`, falls fehlend
 -   installiert Abhaengigkeiten bei Bedarf: `composer install`, `npm install`
 -   baut Assets, falls `assets/vendor` fehlt: `npx gulp compile`
+-   respektiert in CI optional `EA_SKIP_NPM_BOOTSTRAP=1` und `EA_SKIP_ASSET_BUILD_BOOTSTRAP=1`, um Deep-Jobs ohne redundantes Node-/Asset-Bootstrap zu starten
 
 Docker-Services (lokal) & Debug:
 
