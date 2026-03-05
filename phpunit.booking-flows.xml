@@ -7,7 +7,9 @@
 >
     <testsuites>
         <testsuite name="BookingControllerFlows">
-            <directory suffix="Test.php">./tests/Integration</directory>
+            <file>./tests/Integration/Controllers/BookingControllerFlowTest.php</file>
+            <file>./tests/Integration/Controllers/BookingCancellationControllerFlowTest.php</file>
+            <file>./tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php</file>
         </testsuite>
     </testsuites>
     <php>
