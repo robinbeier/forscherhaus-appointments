@@ -209,7 +209,8 @@ CI note: `integration-smoke` covers auth + dashboard metrics + booking read endp
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
 CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is blocking.
 CI note: rollback policy for `write-contract-booking`: if false positives block delivery, restore warn-only (`continue-on-error: true`) in one commit and create a follow-up issue with max 14-day expiry.
-CI note: the `write-contract-api` check validates API write-path OpenAPI contracts and is currently warn-only during rollout (planned blocking switch after 7 executed green PR runs, counting only `success|failure` conclusions).
+CI note: the `write-contract-api` check validates API write-path OpenAPI contracts and is blocking.
+CI note: rollback policy for `write-contract-api`: if false positives block delivery, restore warn-only (`continue-on-error: true`) in one commit and create a follow-up issue with max 14-day expiry.
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
 CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is blocking (L1 + adoption + L2).
