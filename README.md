@@ -208,7 +208,7 @@ CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.
 CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is blocking.
-CI note: the `coverage-delta` check validates Clover line coverage against the in-repo baseline/delta policy and is blocking. The coverage suite includes Unit tests plus booking flow integration tests. It runs on pushes to `main` and non-draft PRs when deep checks are relevant.
+CI note: the `coverage-delta` check validates Clover line coverage against the in-repo baseline/delta policy and is blocking. Current policy thresholds are baseline `22.45%`, absolute minimum `22.25%`, max drop `0.20pp`, epsilon `0.02pp`. The coverage suite includes Unit tests plus booking flow and API read integration tests. It runs on pushes to `main` and non-draft PRs when deep checks are relevant.
 CI note: `coverage-delta` artifacts are written to `storage/logs/ci/coverage-unit-clover.xml` and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
 CI note: `write-contract-booking` artifacts are written to `storage/logs/ci/booking-write-contract-<UTC>.json`.

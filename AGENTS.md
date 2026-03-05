@@ -243,13 +243,13 @@ Hinweis: Der CI-Job `write-contract-api` laeuft waehrend des Rollouts warn-only 
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` ist blocking; der L2-Check ist in CI nicht mehr advisory.
-Hinweis: Der CI-Job `coverage-delta` ist blocking und laeuft auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes.
+Hinweis: Der CI-Job `coverage-delta` ist blocking und laeuft auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
 Hinweis: Das Request Contracts Gate schreibt standardmaessig nach `storage/logs/ci/request-contract-adoption-latest.json` und `storage/logs/ci/phpstan-request-contracts-l2.raw`.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der Booking Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/booking-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der API OpenAPI Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
-Hinweis: Der Coverage Report (`composer test:coverage:unit`, inkl. Unit + Booking-Flow-Integration) schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
+Hinweis: Der Coverage Report (`composer test:coverage:unit`, inkl. Unit + Booking-Flow- und API-Read-Integration) schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `typed-request-contracts` durch False-Positives Releases blockiert, den L2-Step in `ci.yml` temporaer auf advisory (`continue-on-error: true`) zurueckstellen und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
