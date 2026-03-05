@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
-REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-0}"
+REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-1}"
 REQUEST_CONTRACTS_L2_WARNED=0
 COMPOSE_CMD=()
 
@@ -108,9 +108,9 @@ if [[ "$REQUEST_CONTRACTS_L2_BLOCKING" == "1" ]]; then
 else
     if ! run_compose run --rm php-fpm composer phpstan:request-contracts:l2; then
         REQUEST_CONTRACTS_L2_WARNED=1
-        echo "[pre-pr-full] WARN: composer phpstan:request-contracts:l2 failed (advisory during rollout)." >&2
+        echo "[pre-pr-full] WARN: composer phpstan:request-contracts:l2 failed (advisory override mode)." >&2
         echo "[pre-pr-full] WARN: See storage/logs/ci/phpstan-request-contracts-l2.raw for details." >&2
-        echo "[pre-pr-full] WARN: Set PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=1 for strict local blocking." >&2
+        echo "[pre-pr-full] WARN: Remove PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 to restore strict local blocking." >&2
     fi
 fi
 
