@@ -168,10 +168,10 @@ class CoverageDeltaGateTest extends TestCase
         self::assertSame(0.2, $policy['max_drop_pct_points']);
         self::assertSame(22.1, $policy['absolute_min_line_coverage_pct']);
         self::assertSame(0.02, $policy['epsilon_pct_points']);
-        self::assertGreaterThanOrEqual($policy['baseline_line_coverage_pct'], $policy['absolute_min_line_coverage_pct']);
+        self::assertGreaterThanOrEqual($policy['absolute_min_line_coverage_pct'], $policy['baseline_line_coverage_pct']);
         self::assertLessThanOrEqual(
-            $policy['baseline_line_coverage_pct'],
             $policy['absolute_min_line_coverage_pct'] + $policy['max_drop_pct_points'] + $policy['epsilon_pct_points'],
+            $policy['baseline_line_coverage_pct'],
         );
     }
 
