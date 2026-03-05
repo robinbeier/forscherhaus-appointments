@@ -41,6 +41,36 @@ echo_section() {
     echo "== $*"
 }
 
+wait_for_mysql_readiness() {
+    local max_attempts=60
+    local attempt=1
+
+    until run_compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            echo "[pre-pr-quick] MySQL root readiness timed out after ${max_attempts} attempts." >&2
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    attempt=1
+    until run_compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            echo "[pre-pr-quick] MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    return 0
+}
+
+cleanup_stack() {
+    run_compose down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
 if [[ "${SKIP_LOCAL_DEPS_BOOTSTRAP:-0}" != "1" ]]; then
     bash ./scripts/ci/ensure_local_deps.sh
 fi
@@ -53,6 +83,11 @@ git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
+
+echo_section "Start quick gate database service"
+trap cleanup_stack EXIT
+run_compose up -d mysql
+wait_for_mysql_readiness
 
 echo_section "PHPUnit"
 run_compose run --rm php-fpm composer test
@@ -68,6 +103,9 @@ run_compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 echo_section "Architecture ownership gate"
 python3 scripts/docs/generate_architecture_ownership_docs.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_architecture_ownership_map.py
+
+cleanup_stack
+trap - EXIT
 
 echo
 echo "[pre-pr-quick] All checks passed."

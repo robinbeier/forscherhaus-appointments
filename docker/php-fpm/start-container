@@ -12,11 +12,19 @@ echo "➜ Ensure Local Config"
 echo "➜ Install Composer Dependencies"
 [[ -d vendor ]] || composer install
 
-echo "➜ Install NPM Dependencies"
-[[ -d node_modules ]] || npm install
+if [[ "${EA_SKIP_NPM_BOOTSTRAP:-0}" == "1" ]]; then
+    echo "➜ Skip NPM Dependency Bootstrap"
+else
+    echo "➜ Install NPM Dependencies"
+    [[ -d node_modules ]] || npm install
+fi
 
-echo "➜ Build Project Assets"
-[[ -d assets/vendor ]] || npx gulp compile
+if [[ "${EA_SKIP_ASSET_BUILD_BOOTSTRAP:-0}" == "1" ]]; then
+    echo "➜ Skip Asset Build Bootstrap"
+else
+    echo "➜ Build Project Assets"
+    [[ -d assets/vendor ]] || npx gulp compile
+fi
 
 echo "➜ Listen To Incoming Requests"
 php-fpm

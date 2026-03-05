@@ -2,6 +2,9 @@ services:
     php-fpm:
         build: docker/php-fpm
         working_dir: /var/www/html
+        environment:
+            - EA_SKIP_NPM_BOOTSTRAP=${EA_SKIP_NPM_BOOTSTRAP:-0}
+            - EA_SKIP_ASSET_BUILD_BOOTSTRAP=${EA_SKIP_ASSET_BUILD_BOOTSTRAP:-0}
         extra_hosts:
             - host.docker.internal:host-gateway
         volumes:
