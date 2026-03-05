@@ -88,14 +88,7 @@ cleanup_stack() {
     run_compose down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
-[[ -d vendor ]] || {
-    echo "[pre-pr-full] Missing vendor/. Run composer install first." >&2
-    exit 1
-}
-[[ -d node_modules ]] || {
-    echo "[pre-pr-full] Missing node_modules/. Run npm install first." >&2
-    exit 1
-}
+bash ./scripts/ci/ensure_local_deps.sh
 
 require_cmd git
 require_cmd python3
@@ -104,7 +97,7 @@ require_cmd python3
 git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
 
 echo_section "Run quick pre-PR gate"
-PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
+SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
 
 echo_section "Typed request-contracts gate"
 run_compose run --rm php-fpm composer phpstan:request-contracts:l1

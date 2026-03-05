@@ -41,14 +41,9 @@ echo_section() {
     echo "== $*"
 }
 
-[[ -d vendor ]] || {
-    echo "[pre-pr-quick] Missing vendor/. Run composer install first." >&2
-    exit 1
-}
-[[ -d node_modules ]] || {
-    echo "[pre-pr-quick] Missing node_modules/. Run npm install first." >&2
-    exit 1
-}
+if [[ "${SKIP_LOCAL_DEPS_BOOTSTRAP:-0}" != "1" ]]; then
+    bash ./scripts/ci/ensure_local_deps.sh
+fi
 
 require_cmd git
 require_cmd python3
