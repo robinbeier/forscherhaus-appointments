@@ -58,7 +58,14 @@
         "test:booking-controller-flows": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.booking-flows.xml",
         "test:request-dto": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.request-dto.xml",
         "test:request-contracts": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php vendor/bin/phpunit -c phpunit.request-contracts.xml",
-        "test:coverage:unit": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; mkdir -p storage/logs/ci; APP_ENV=testing XDEBUG_MODE=coverage php vendor/bin/phpunit -c phpunit.coverage.xml --coverage-clover storage/logs/ci/coverage-unit-clover.xml",
+        "test:coverage:unit": [
+            "@test:coverage:unit-shard",
+            "@test:coverage:integration-shard",
+            "@test:coverage:merge-shards"
+        ],
+        "test:coverage:unit-shard": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; mkdir -p storage/logs/ci; APP_ENV=testing XDEBUG_MODE=coverage php vendor/bin/phpunit -c phpunit.coverage.unit.xml --coverage-php storage/logs/ci/coverage-shard-unit.phpcov --coverage-clover storage/logs/ci/coverage-shard-unit-clover.xml",
+        "test:coverage:integration-shard": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; mkdir -p storage/logs/ci; APP_ENV=testing XDEBUG_MODE=coverage php vendor/bin/phpunit -c phpunit.coverage.integration.xml --coverage-php storage/logs/ci/coverage-shard-integration.phpcov --coverage-clover storage/logs/ci/coverage-shard-integration-clover.xml",
+        "test:coverage:merge-shards": "php scripts/ci/merge_coverage_shards.php --input=storage/logs/ci/coverage-shard-unit.phpcov --input=storage/logs/ci/coverage-shard-integration.phpcov --output-clover=storage/logs/ci/coverage-unit-clover.xml --output-json=storage/logs/ci/coverage-merge-latest.json",
         "deptrac:analyze": "deptrac analyse --config-file=deptrac.yaml",
         "check:coverage:delta": "php scripts/ci/check_coverage_delta.php --clover=storage/logs/ci/coverage-unit-clover.xml --policy=scripts/ci/config/coverage_delta_policy.php --output-json=storage/logs/ci/coverage-delta-latest.json",
         "check:request-contract-adoption": "php scripts/ci/check_request_contract_adoption.php",

@@ -122,7 +122,10 @@ docker compose run --rm php-fpm composer test:request-contracts
 docker compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
 docker compose run --rm php-fpm composer phpstan:request-contracts:l2
 
-# Optional: Unit coverage + coverage delta gate
+# Optional: Coverage shards + merge + coverage delta gate
+docker compose run --rm php-fpm composer test:coverage:unit-shard
+docker compose run --rm php-fpm composer test:coverage:integration-shard
+docker compose run --rm php-fpm composer test:coverage:merge-shards
 docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
 
@@ -199,6 +202,18 @@ for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json
 done | grep -E '^(success|failure)$' | head -n 10
 # Erwartung: bei relevanten PR-Aenderungen sind aktuelle ausgefuehrte Eintraege SUCCESS
 
+# Optional: coverage-shard-unit status check (blocking)
+for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="coverage-shard-unit") | .conclusion'
+done | grep -E '^(success|failure)$' | head -n 10
+# Erwartung: bei relevanten PR-Aenderungen sind aktuelle ausgefuehrte Eintraege SUCCESS
+
+# Optional: coverage-shard-integration status check (blocking)
+for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
+  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="coverage-shard-integration") | .conclusion'
+done | grep -E '^(success|failure)$' | head -n 10
+# Erwartung: bei relevanten PR-Aenderungen sind aktuelle ausgefuehrte Eintraege SUCCESS
+
 # Optional: Fokuslauf fuer Healthz-Checks
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit --filter HealthzControllerTest'
 
@@ -243,13 +258,14 @@ Hinweis: Der CI-Job `write-contract-api` ist blocking.
 Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` ist blocking; der L2-Check ist in CI nicht mehr advisory.
-Hinweis: Der CI-Job `coverage-delta` ist blocking und laeuft auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
+Hinweis: Die CI-Jobs `coverage-shard-unit` und `coverage-shard-integration` sind blocking und laufen auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes.
+Hinweis: Der CI-Job `coverage-delta` ist blocking, aggregiert die beiden Coverage-Shards und prueft die gemergte Clover gegen die Repo-Policy; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
 Hinweis: Das Request Contracts Gate schreibt standardmaessig nach `storage/logs/ci/request-contract-adoption-latest.json` und `storage/logs/ci/phpstan-request-contracts-l2.raw`.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der Booking Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/booking-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der API OpenAPI Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
-Hinweis: Der Coverage Report (`composer test:coverage:unit`, inkl. Unit + Booking-Flow- und API-Read-Integration) schreibt standardmaessig nach `storage/logs/ci/coverage-unit-clover.xml`; der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
+Hinweis: Die Coverage-Shard-Reports schreiben standardmaessig nach `storage/logs/ci/coverage-shard-unit.phpcov` und `storage/logs/ci/coverage-shard-integration.phpcov`; der gemergte Clover nach `storage/logs/ci/coverage-unit-clover.xml`, der Merge-Report nach `storage/logs/ci/coverage-merge-latest.json` und der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `typed-request-contracts` durch False-Positives Releases blockiert, den L2-Step in `ci.yml` temporaer auf advisory (`continue-on-error: true`) zurueckstellen und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
