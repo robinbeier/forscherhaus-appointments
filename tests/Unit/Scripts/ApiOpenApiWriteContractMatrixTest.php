@@ -67,4 +67,44 @@ final class ApiOpenApiWriteContractMatrixTest extends TestCase
         self::assertSame(401, $guard['expected_status']);
         self::assertTrue($guard['require_www_authenticate']);
     }
+
+    public function testDependencyGraphReferencesKnownChecks(): void
+    {
+        $matrix = $this->matrix();
+        $knownChecks = array_fill_keys(
+            array_map(static fn(array $check): string => (string) ($check['id'] ?? ''), $matrix['checks']),
+            true,
+        );
+
+        $dependenciesByCheck = [];
+
+        foreach ($matrix['checks'] as $check) {
+            $checkId = (string) ($check['id'] ?? '');
+            $dependsOn = $check['depends_on'] ?? [];
+
+            self::assertIsArray($dependsOn, $checkId . ' depends_on must be an array.');
+            $dependenciesByCheck[$checkId] = $dependsOn;
+
+            foreach ($dependsOn as $dependencyId) {
+                self::assertIsString($dependencyId);
+                self::assertArrayHasKey(
+                    $dependencyId,
+                    $knownChecks,
+                    $checkId . ' depends_on references an unknown check ID.',
+                );
+            }
+        }
+
+        self::assertSame(
+            [
+                'appointments_write_unauthorized_guard' => [],
+                'customers_store_contract' => [],
+                'appointments_store_contract' => ['customers_store_contract'],
+                'appointments_update_contract' => ['appointments_store_contract'],
+                'appointments_destroy_contract' => ['appointments_store_contract'],
+                'customers_destroy_contract' => ['appointments_destroy_contract'],
+            ],
+            $dependenciesByCheck,
+        );
+    }
 }
