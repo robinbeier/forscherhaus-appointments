@@ -1,6 +1,20 @@
-# Zero-Surprise Restore-Dump Replay (Shadow Gate)
+# Zero-Surprise Release Gate (Pre-Deploy Replay + Post-Deploy Canary)
 
-This gate replays the critical release path against a restored database dump in an isolated Docker Compose stack.
+Zero-Surprise protects deployments with two gates:
+
+1. Pre-deploy restore-dump replay (`mode=predeploy`)
+2. Post-deploy live canary (`mode=postdeploy_canary`)
+
+Both gates produce JSON reports with shared invariants:
+
+- `unexpected_5xx`
+- `overbooking`
+- `fill_rate_math`
+- `pdf_exports`
+
+`unexpected_5xx` has no allowlist in phase 3. Every unexpected HTTP 5xx is an invariant failure.
+
+## Pre-Deploy Restore-Dump Replay
 
 Execution order is fixed:
 
@@ -8,13 +22,7 @@ Execution order is fixed:
 2. Booking write replay (`scripts/ci/booking_write_contract_smoke.php`)
 3. Dashboard replay (`scripts/release-gate/dashboard_release_gate.php`)
 
-The gate writes a consolidated report and child reports.
-
-As of phase 2, `deploy_ea.sh` enforces a hard pre-deploy validation before atomic switch.
-
-## Mandatory Manual Runbook Step (Pre-Deploy)
-
-Run this command before every deployment. It is intentionally manual in phase 1.
+Run before every deploy:
 
 ```bash
 composer release:gate:zero-surprise -- \
@@ -30,96 +38,111 @@ composer release:gate:zero-surprise -- \
 
 ## Deploy Hard-Fail Integration (Phase 2)
 
-Before `perform_atomic_switch`, `deploy_ea.sh` validates the zero-surprise report.
+Before `perform_atomic_switch`, `deploy_ea.sh` validates the pre-deploy report.
 
-Deployment is aborted when the report:
-
-- is missing or unreadable
-- is too old
-- has mismatched `release_id` or `mode`
-- has `summary.exit_code != 0`
-- has missing/failed invariants
-
-New deploy options:
+Deploy options:
 
 - `--zero-surprise-report PATH`
 - `--zero-surprise-max-age-minutes N` (default `240`)
 - `--require-zero-surprise 0|1` (default `1`)
 
+Validation fails when report is missing/stale/invalid or any required invariant is not `pass`.
+
+## Post-Deploy Live Canary Integration (Phase 3)
+
+After switch and post-switch health checks, deploy runs a live canary.
+
+Order in `deploy_ea.sh`:
+
+1. `perform_atomic_switch`
+2. `restart_renderer_service`
+3. `probe_renderer_health`
+4. `probe_deep_health_contract`
+5. `run_zero_surprise_live_canary`
+
+Canary failure path is hard-wired to:
+
+- `rollback_after_failure "zero-surprise canary failed"`
+
+Deploy options:
+
+- `--zero-surprise-canary-enabled 0|1` (default `1`)
+- `--zero-surprise-canary-timeout N` (seconds, default `300`)
+- `--zero-surprise-canary-credentials-file PATH` (required when canary enabled)
+
+### Canary credentials file format (INI)
+
+Required keys:
+
+- `base_url`
+- `index_page` (use an empty value for rewrite-mode, e.g. `index_page =`)
+- `username`
+- `password`
+
+Optional keys:
+
+- `start_date` (default: today minus 30 days in configured timezone)
+- `end_date` (default: today in configured timezone)
+- `booking_search_days` (default `14`)
+- `retry_count` (default `1`)
+- `max_pdf_duration_ms` (default `30000`)
+- `timezone` (default `Europe/Berlin`)
+- `pdf_health_url` (optional)
+
 Example:
 
-```bash
-/root/deploy_ea.sh \
-  --rel ea_20260312_1200 \
-  --healthz-token-file /etc/fh/healthz.token \
-  --zero-surprise-report /var/log/fh/zero-surprise-ea_20260312_1200.json \
-  --zero-surprise-max-age-minutes 240 \
-  --require-zero-surprise 1
+```ini
+base_url = http://localhost
+index_page = index.php
+username = administrator
+password = administrator
+start_date = 2026-01-01
+end_date = 2026-01-31
+booking_search_days = 14
+retry_count = 1
+max_pdf_duration_ms = 30000
+timezone = Europe/Berlin
+pdf_health_url = http://127.0.0.1:3003/healthz
 ```
 
-## Required Options
+Canary CLI:
 
-- `--release-id`
-- `--dump-file`
-- `--base-url`
-- `--index-page` (use `--index-page=` for rewrite mode)
-- `--username`
-- `--password`
-- `--start-date` (`YYYY-MM-DD`)
-- `--end-date` (`YYYY-MM-DD`)
+```bash
+php scripts/release-gate/zero_surprise_live_canary.php \
+  --release-id=ea_YYYYMMDD_HHMM \
+  --credentials-file=/etc/fh/zero-surprise-canary.ini \
+  --timeout-seconds=300
+```
 
-## Optional Options
+## Booking conflict contract (Phase 3)
 
-- `--booking-search-days` (default `14`)
-- `--retry-count` (default `1`)
-- `--max-pdf-duration-ms` (default `30000`)
-- `--timezone` (default `Europe/Berlin`)
-- `--output-json` (default `storage/logs/release-gate/zero-surprise-<UTC>.json`)
+`POST /booking/register` now returns `409 Conflict` for slot collisions.
 
-## Isolation Rules
+Response shape stays:
 
-The orchestrator always uses:
+```json
+{"success": false, "message": "..."}
+```
 
-- `docker-compose.yml`
-- `docker/compose.zero-surprise.yml`
+This removes the known 500 conflict-path exception and keeps `5xx => fail` strict.
 
-and a unique compose project name (`-p`) with this pattern:
+## Outputs
 
-- `zs-<sanitized_release_id>-<UTCstamp>-<rand4>`
-
-The override ensures:
-
-- MySQL data uses a dedicated named volume (not `./docker/mysql`)
-- no host port bindings for `mysql`, `nginx`, `pdf-renderer`
-
-## Output
-
-### Consolidated report
+Pre-deploy reports:
 
 - `storage/logs/release-gate/zero-surprise-<UTC>.json`
-
-The report includes:
-
-- `meta.release_id`
-- `meta.mode` (always `predeploy` for this gate)
-- `summary.exit_code`
-- `invariants.*.status`
-
-### Child reports
-
 - `storage/logs/release-gate/zero-surprise-booking-<UTC>.json`
 - `storage/logs/release-gate/zero-surprise-dashboard-<UTC>.json`
 
-### Invariants
+Post-deploy canary reports:
 
-The consolidated report contains these invariant results:
+- `storage/logs/release-gate/zero-surprise-live-canary-<UTC>.json`
+- `storage/logs/release-gate/zero-surprise-live-canary-booking-<UTC>.json`
+- `storage/logs/release-gate/zero-surprise-live-canary-dashboard-<UTC>.json`
 
-- `unexpected_5xx`
-- `overbooking`
-- `fill_rate_math`
-- `pdf_exports`
+## Exit codes
 
-## Exit Codes
+For replay and live canary:
 
 - `0`: all steps and invariants passed
 - `1`: assertion/invariant failure

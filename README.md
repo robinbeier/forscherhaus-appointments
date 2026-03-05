@@ -96,6 +96,9 @@ docker compose run --rm php-fpm composer check:coverage:delta
 # Zero-surprise restore-dump replay (manual mandatory pre-deploy runbook step)
 composer release:gate:zero-surprise -- --help
 
+# Zero-surprise post-deploy live canary (used by deploy_ea.sh)
+php scripts/release-gate/zero_surprise_live_canary.php --help
+
 # Dashboard gate
 composer release:gate:dashboard -- --help
 
@@ -106,6 +109,7 @@ composer release:gate:booking-confirmation-pdf -- --help
 References:
 
 -   [Zero-surprise restore-dump replay](docs/release-gate-zero-surprise.md)
+-   [Zero-surprise post-deploy live canary + rollback trigger](docs/release-gate-zero-surprise.md)
 -   [Dashboard release gate](docs/release-gate-dashboard.md)
 -   [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
 

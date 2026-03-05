@@ -212,6 +212,7 @@ class BookingControllerFlowTest extends TestCase
         $this->assertIsArray($response);
         $this->assertFalse($response['success'] ?? true);
         $this->assertSame(lang('requested_hour_is_unavailable'), $response['message'] ?? null);
+        $this->assertArrayNotHasKey('trace', $response);
         $this->assertFalse($this->fixtures->customerExistsByEmail($customerEmail));
     }
 
@@ -350,5 +351,6 @@ class BookingControllerFlowTest extends TestCase
         ]);
 
         get_instance()->output->set_output('');
+        http_response_code(200);
     }
 }
