@@ -357,12 +357,16 @@ php index.php console sync
 -   `snake_case` fuer Config-Keys, `camelCase` in JS.
 -   Datenbankaenderungen immer via CodeIgniter-Migrations (inkl. Rollback-Pfad).
 -   Secrets nie ins VCS; nutze `config.php`.
+-   Bugs: Bei Bugfixes einen passenden Regressionstest ergaenzen, wenn sinnvoll.
 
 ## Commit- & PR-Richtlinien
 
 -   Commits: kurz, praesentisch, imperativ (z. B. `Fix booking validation`).
 -   Vor PR: Tests gruen (`docker compose run --rm php-fpm composer test`), Migrations inkl. Rollback vorhanden.
 -   `config-sample.php`/Docs bei Bedarf aktualisieren; bei UI-Aenderungen Screenshots/GIFs beilegen.
+-   Jeder PR-Implementierungsplan enthaelt einen Review-Loop: Reviewer A prueft Bugs/Regressionen/Security/Edge-Cases, Reviewer B prueft Architektur/Lesbarkeit/Testluecken/Wartbarkeit; Findings fixen und wiederholen bis keine Issues mehr offen sind.
+-   Vor `ready for review` den vollen Pre-PR-Gate inklusive Coverage Delta ausfuehren (`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`).
+-   Wenn alle Gates gruen sind: `ready for review` pushen und danach mit `$Babysit PR` weiter monitoren.
 
 ## Release-Fokus (naechste 9 Tage bis Deployment)
 
