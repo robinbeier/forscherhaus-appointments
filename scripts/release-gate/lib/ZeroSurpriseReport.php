@@ -38,6 +38,7 @@ final class ZeroSurpriseReport
         private readonly string $composeProject,
         private readonly array $config,
         private readonly string $outputPath,
+        private readonly string $mode = 'predeploy',
     ) {
         $this->startedAt = microtime(true);
         $this->startedAtUtc = gmdate('c');
@@ -155,6 +156,7 @@ final class ZeroSurpriseReport
         $report = [
             'meta' => [
                 'release_id' => $this->releaseId,
+                'mode' => $this->mode,
                 'compose_project' => $this->composeProject,
                 'started_at_utc' => $this->startedAtUtc,
                 'finished_at_utc' => $finishedAtUtc,

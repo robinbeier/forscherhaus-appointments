@@ -91,6 +91,7 @@ class ZeroSurpriseReportTest extends TestCase
         $decoded = json_decode($raw, true);
         $this->assertIsArray($decoded);
         $this->assertSame('ea_20260305_1200', $decoded['meta']['release_id']);
+        $this->assertSame('predeploy', $decoded['meta']['mode']);
         $this->assertSame('pass', $decoded['invariants']['fill_rate_math']['status']);
 
         @unlink($outputPath);

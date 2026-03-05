@@ -8,7 +8,9 @@ Execution order is fixed:
 2. Booking write replay (`scripts/ci/booking_write_contract_smoke.php`)
 3. Dashboard replay (`scripts/release-gate/dashboard_release_gate.php`)
 
-The gate writes a consolidated report and child reports without touching the live deployment script.
+The gate writes a consolidated report and child reports.
+
+As of phase 2, `deploy_ea.sh` enforces a hard pre-deploy validation before atomic switch.
 
 ## Mandatory Manual Runbook Step (Pre-Deploy)
 
@@ -24,6 +26,35 @@ composer release:gate:zero-surprise -- \
   --password=administrator \
   --start-date=2026-01-01 \
   --end-date=2026-01-31
+```
+
+## Deploy Hard-Fail Integration (Phase 2)
+
+Before `perform_atomic_switch`, `deploy_ea.sh` validates the zero-surprise report.
+
+Deployment is aborted when the report:
+
+- is missing or unreadable
+- is too old
+- has mismatched `release_id` or `mode`
+- has `summary.exit_code != 0`
+- has missing/failed invariants
+
+New deploy options:
+
+- `--zero-surprise-report PATH`
+- `--zero-surprise-max-age-minutes N` (default `240`)
+- `--require-zero-surprise 0|1` (default `1`)
+
+Example:
+
+```bash
+/root/deploy_ea.sh \
+  --rel ea_20260312_1200 \
+  --healthz-token-file /etc/fh/healthz.token \
+  --zero-surprise-report /var/log/fh/zero-surprise-ea_20260312_1200.json \
+  --zero-surprise-max-age-minutes 240 \
+  --require-zero-surprise 1
 ```
 
 ## Required Options
@@ -66,6 +97,13 @@ The override ensures:
 ### Consolidated report
 
 - `storage/logs/release-gate/zero-surprise-<UTC>.json`
+
+The report includes:
+
+- `meta.release_id`
+- `meta.mode` (always `predeploy` for this gate)
+- `summary.exit_code`
+- `invariants.*.status`
 
 ### Child reports
 

@@ -20,6 +20,10 @@ RENDERER_HEALTH_URL="http://127.0.0.1:3003/healthz"
 RENDERER_STATE_DIR="/var/lib/fh-pdf-renderer"
 DEEP_HEALTH_URL="http://localhost/index.php/healthz"
 HEALTHZ_TOKEN_FILE=""
+ZERO_SURPRISE_REPORT=""
+ZERO_SURPRISE_MAX_AGE_MINUTES=240
+REQUIRE_ZERO_SURPRISE=1
+ZERO_SURPRISE_EXPECTED_MODE="predeploy"
 
 RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
@@ -50,6 +54,10 @@ Renderer / health gate options:
   --renderer-state-dir PATH    Persistent renderer state dir      [default: /var/lib/fh-pdf-renderer]
   --deep-health-url URL         App deep health endpoint           [default: http://localhost/index.php/healthz]
   --healthz-token-file PATH     File containing deep-health token  [required for non-dry deploy]
+  --zero-surprise-report PATH   Path to zero-surprise report JSON  [required when gate is enabled]
+  --zero-surprise-max-age-minutes N
+                                Max age for report in minutes      [default: 240]
+  --require-zero-surprise 0|1   Enforce zero-surprise hard-fail    [default: 1]
 
 Exit codes:
   0   Success
@@ -274,6 +282,73 @@ perform_atomic_switch() {
   mv "$STAGE_ROOT" "$APP"
 }
 
+is_positive_integer() {
+  [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+validate_zero_surprise_report() {
+  local validator_file
+  local validator_runtime_code
+
+  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+    echo "[i] Zero-surprise hard-fail gate disabled (--require-zero-surprise=0)."
+    return 0
+  fi
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] validate zero-surprise report '$ZERO_SURPRISE_REPORT' for release '$REL' (mode=$ZERO_SURPRISE_EXPECTED_MODE, max-age=${ZERO_SURPRISE_MAX_AGE_MINUTES}m)"
+    return 0
+  fi
+
+  validator_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/release-gate/lib/ZeroSurpriseReportValidator.php"
+  [[ -r "$validator_file" ]] || {
+    echo "[!] Zero-surprise validator missing or unreadable: $validator_file"
+    return 1
+  }
+
+  read -r -d '' validator_runtime_code <<'PHP' || true
+require_once $argv[1];
+
+$validator = new \ReleaseGate\ZeroSurpriseReportValidator();
+$result = $validator->validateFile(
+    (string) ($argv[2] ?? ''),
+    (string) ($argv[3] ?? ''),
+    (string) ($argv[4] ?? ''),
+    (int) ($argv[5] ?? 0),
+);
+
+if (($result['ok'] ?? false) === true) {
+    exit(0);
+}
+
+$errors = $result['errors'] ?? [];
+if (!is_array($errors) || $errors === []) {
+    fwrite(STDERR, "    - Zero-surprise report validation failed with unknown errors." . PHP_EOL);
+    exit(1);
+}
+
+foreach ($errors as $error) {
+    fwrite(STDERR, "    - " . (string) $error . PHP_EOL);
+}
+
+exit(1);
+PHP
+
+  echo "[i] Validating zero-surprise report: $ZERO_SURPRISE_REPORT"
+  if ! php -r "$validator_runtime_code" \
+    "$validator_file" \
+    "$ZERO_SURPRISE_REPORT" \
+    "$REL" \
+    "$ZERO_SURPRISE_EXPECTED_MODE" \
+    "$ZERO_SURPRISE_MAX_AGE_MINUTES"; then
+    echo "[!] Zero-surprise report validation failed."
+    return 1
+  fi
+
+  echo "[OK] Zero-surprise report validation passed."
+  return 0
+}
+
 rollback_after_failure() {
   local reason="$1"
   local failed_base="${APP}_failed_${REL}"
@@ -371,12 +446,22 @@ while [[ $# -gt 0 ]]; do
     --renderer-state-dir) RENDERER_STATE_DIR="$2"; shift 2;;
     --deep-health-url) DEEP_HEALTH_URL="$2"; shift 2;;
     --healthz-token-file) HEALTHZ_TOKEN_FILE="$2"; shift 2;;
+    --zero-surprise-report) ZERO_SURPRISE_REPORT="$2"; shift 2;;
+    --zero-surprise-max-age-minutes) ZERO_SURPRISE_MAX_AGE_MINUTES="$2"; shift 2;;
+    --require-zero-surprise) REQUIRE_ZERO_SURPRISE="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) die "[!] Unknown option: $1";;
   esac
 done
 
 [[ -n "$REL" ]] || die "[!] --rel is required."
+[[ "$REQUIRE_ZERO_SURPRISE" == "0" || "$REQUIRE_ZERO_SURPRISE" == "1" ]] \
+  || die "[!] --require-zero-surprise must be 0 or 1."
+is_positive_integer "$ZERO_SURPRISE_MAX_AGE_MINUTES" \
+  || die "[!] --zero-surprise-max-age-minutes must be a positive integer."
+if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
+  [[ -n "$ZERO_SURPRISE_REPORT" ]] || die "[!] --zero-surprise-report is required when --require-zero-surprise=1."
+fi
 if [[ "$DRYRUN" -eq 0 ]]; then
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
   [[ -r "$HEALTHZ_TOKEN_FILE" ]] || die "[!] Token file is not readable: $HEALTHZ_TOKEN_FILE"
@@ -403,6 +488,9 @@ echo "    Renderer health URL  : $RENDERER_HEALTH_URL"
 echo "    Renderer state dir   : $RENDERER_STATE_DIR"
 echo "    Deep health URL      : $DEEP_HEALTH_URL"
 echo "    Token file           : ${HEALTHZ_TOKEN_FILE:-<not-set-dry-run>}"
+echo "    Zero-surprise gate   : $REQUIRE_ZERO_SURPRISE"
+echo "    Zero-surprise report : ${ZERO_SURPRISE_REPORT:-<not-set>}"
+echo "    Zero-surprise max age: ${ZERO_SURPRISE_MAX_AGE_MINUTES}m"
 echo "    Logfile              : $LOG"
 
 [[ -f "$ARCHIVE" ]] || die "[!] Archive not found: $ARCHIVE"
@@ -465,6 +553,8 @@ install_renderer_dependencies
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
 run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} \\;"
 run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} \\;"
+
+validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
 
 perform_atomic_switch
 
