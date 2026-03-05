@@ -372,7 +372,7 @@ run_zero_surprise_live_canary() {
     return 0
   fi
 
-  canary_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/release-gate/zero_surprise_live_canary.php"
+  canary_script="$APP/scripts/release-gate/zero_surprise_live_canary.php"
   [[ -r "$canary_script" ]] || {
     echo "[!] Zero-surprise live canary script missing or unreadable: $canary_script"
     return 1
