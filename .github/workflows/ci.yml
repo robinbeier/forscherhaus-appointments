@@ -369,7 +369,7 @@ jobs:
           path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
-          tar -xzf .ci-artifacts/deep-check-deps.tar.gz vendor
+          tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
           test -d node_modules
           test -d build
