@@ -1,19 +1,20 @@
 import type {Logger} from './logger.js';
+import type {WorkflowConfigStore} from './workflow.js';
 
 interface SymphonyServiceArgs {
     logger: Logger;
-    workflowPath: string;
+    workflowConfigStore: WorkflowConfigStore;
 }
 
 export class SymphonyService {
     private readonly logger: Logger;
-    private readonly workflowPath: string;
+    private readonly workflowConfigStore: WorkflowConfigStore;
     private running = false;
     private heartbeatTimer?: NodeJS.Timeout;
 
     public constructor(args: SymphonyServiceArgs) {
         this.logger = args.logger;
-        this.workflowPath = args.workflowPath;
+        this.workflowConfigStore = args.workflowConfigStore;
     }
 
     public async start(): Promise<void> {
@@ -21,15 +22,19 @@ export class SymphonyService {
             return;
         }
 
+        const currentConfig = this.workflowConfigStore.getCurrentConfig();
+
         this.running = true;
         this.logger.info('Symphony service started', {
-            workflowPath: this.workflowPath,
+            workflowPath: currentConfig.workflowPath,
             pid: process.pid,
         });
 
         this.heartbeatTimer = setInterval(() => {
+            void this.workflowConfigStore.reloadIfChanged();
+
             this.logger.info('Symphony service heartbeat', {
-                workflowPath: this.workflowPath,
+                workflowPath: currentConfig.workflowPath,
             });
         }, 30000);
     }
