@@ -3,7 +3,7 @@ import {fileURLToPath} from 'node:url';
 import {createLogger} from './logger.js';
 import {parseCliOptions} from './options.js';
 import {SymphonyService} from './service.js';
-import {readWorkflowFile, resolveWorkflowPath} from './workflow.js';
+import {resolveWorkflowPath, WorkflowConfigStore} from './workflow.js';
 
 async function run(argv: string[]): Promise<void> {
     const logger = createLogger();
@@ -16,18 +16,35 @@ async function run(argv: string[]): Promise<void> {
         moduleDir,
     });
 
-    const workflowContents = await readWorkflowFile(workflowPath);
-
-    logger.info('Workflow loaded', {
+    const workflowConfigStore = new WorkflowConfigStore({
         workflowPath,
-        source: options.workflowPath ? 'cli' : 'default',
-        bytes: Buffer.byteLength(workflowContents, 'utf8'),
+        logger,
     });
 
-    const service = new SymphonyService({logger, workflowPath});
+    const loadedConfig = await workflowConfigStore.initialize();
+    workflowConfigStore.validateCurrentPreflight();
+
+    logger.info('Workflow loaded', {
+        workflowPath: loadedConfig.workflowPath,
+        source: options.workflowPath ? 'cli' : 'default',
+        bytes: Buffer.byteLength(loadedConfig.promptTemplate, 'utf8'),
+        trackerProvider: loadedConfig.tracker.provider,
+        pollingIntervalMs: loadedConfig.polling.intervalMs,
+    });
+
+    const service = new SymphonyService({logger, workflowConfigStore});
     await service.start();
 
     if (options.checkOnly) {
+        await workflowConfigStore.buildDispatchPrompt({
+            issue: {
+                identifier: 'CHECK-ISSUE',
+                title: 'Symphony check mode',
+                state: 'In Progress',
+            },
+            attempt: 1,
+        });
+
         logger.info('Check mode complete');
         await service.stop('check-only');
         return;

@@ -1,3 +1,33 @@
+---
+tracker:
+    provider: linear
+    api_key: $SYMPHONY_LINEAR_API_KEY
+    project_slug: $SYMPHONY_LINEAR_PROJECT_SLUG
+    active_states:
+        - In Progress
+polling:
+    interval_ms: 60000
+    max_candidates: 20
+workspace:
+    root: ~/.symphony/workspaces
+    keep_terminal_workspaces: false
+hooks:
+    timeout_ms: 30000
+    after_create: []
+    before_run: []
+    after_run: []
+    before_remove: []
+agent:
+    max_concurrent: 1
+    max_attempts: 2
+codex:
+    command: $SYMPHONY_CODEX_COMMAND
+    response_timeout_ms: 120000
+    turn_timeout_ms: 900000
+---
+
+Issue {{issue.identifier}} is being processed in attempt {{attempt}}.
+
 # Workflow
 
 This document defines the operational delivery workflow for
