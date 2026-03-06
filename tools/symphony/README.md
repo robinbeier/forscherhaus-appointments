@@ -131,8 +131,8 @@ Key behavior:
     session scope (`acceptForSession`) so pilot turns can continue unattended
 -   repo-specific pilots can prepare per-issue git worktrees via `before_run`
     hooks and remove registrations via `before_remove` hooks
--   completed turns count as success only when the workspace state changed
-    (new commit or dirty diff) after the run; empty-output runs are retried
+-   completed turns count as success only when the issue-branch `HEAD` changed
+    after the run; dirty worktrees without a commit are retried
 -   hook entries are executed as shell commands; for repo scripts prefer
     `bash /absolute/path/to/script.sh` so the workflow does not depend on the
     executable bit being preserved

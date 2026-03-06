@@ -85,7 +85,7 @@ interface RunningEntry {
     sessionId?: string;
 }
 
-type OrchestratorGuardrailErrorClass = 'workspace_no_persisted_output';
+type OrchestratorGuardrailErrorClass = 'workspace_no_committed_output';
 
 class OrchestratorGuardrailError extends Error {
     public readonly errorClass: OrchestratorGuardrailErrorClass;
@@ -195,8 +195,8 @@ function issueLogFields(issue: TrackedIssue, sessionId?: string): Record<string,
     };
 }
 
-function didWorkspaceStateChange(before: WorkspaceStateSnapshot, after: WorkspaceStateSnapshot): boolean {
-    return before.headSha !== after.headSha || before.statusText !== after.statusText;
+function didWorkspaceHeadAdvance(before: WorkspaceStateSnapshot, after: WorkspaceStateSnapshot): boolean {
+    return before.headSha !== after.headSha;
 }
 
 export class SymphonyOrchestrator {
@@ -579,7 +579,7 @@ export class SymphonyOrchestrator {
 
             if (!turnResult) {
                 throw new OrchestratorGuardrailError(
-                    'workspace_no_persisted_output',
+                    'workspace_no_committed_output',
                     'Issue turn finished without a turn result.',
                 );
             }
@@ -590,13 +590,15 @@ export class SymphonyOrchestrator {
                 if (workspaceClient && workspacePath && baselineWorkspaceState) {
                     const finalWorkspaceState = await workspaceClient.captureWorkspaceState(workspacePath);
 
-                    if (!didWorkspaceStateChange(baselineWorkspaceState, finalWorkspaceState)) {
+                    if (!didWorkspaceHeadAdvance(baselineWorkspaceState, finalWorkspaceState)) {
                         throw new OrchestratorGuardrailError(
-                            'workspace_no_persisted_output',
-                            'Completed turn produced no persisted workspace changes.',
+                            'workspace_no_committed_output',
+                            'Completed turn produced no committed workspace changes.',
                             {
                                 workspacePath,
                                 headSha: finalWorkspaceState.headSha,
+                                dirtyStateChanged: baselineWorkspaceState.statusText !== finalWorkspaceState.statusText,
+                                hasDirtyWorkspace: finalWorkspaceState.statusText.length > 0,
                             },
                         );
                     }

@@ -265,7 +265,7 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
     assert.equal(workspace.cleanedPaths.length, 1);
 });
 
-test('completed run without persisted workspace changes is retried and not counted as success', async () => {
+test('completed run without committed workspace changes is retried and not counted as success', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
         id: 'empty-output-1',
@@ -279,7 +279,7 @@ test('completed run without persisted workspace changes is retried and not count
     const workspace = new WorkspaceStub();
     workspace.stateSnapshots = [
         {headSha: 'same-head', statusText: ''},
-        {headSha: 'same-head', statusText: ''},
+        {headSha: 'same-head', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
     ];
 
     const orchestrator = new SymphonyOrchestrator({
@@ -305,7 +305,7 @@ test('completed run without persisted workspace changes is retried and not count
     assert.equal(snapshot.codex_totals.completed, 0);
     assert.equal(snapshot.codex_totals.failed, 1);
     assert.equal(snapshot.retrying.length, 1);
-    assert.equal(snapshot.retrying[0].errorClass, 'workspace_no_persisted_output');
+    assert.equal(snapshot.retrying[0].errorClass, 'workspace_no_committed_output');
     assert.equal(workspace.cleanedPaths.length, 1);
 });
 
