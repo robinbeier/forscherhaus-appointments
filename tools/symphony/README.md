@@ -53,6 +53,11 @@ bash ./scripts/symphony/start_pilot.sh
 
 # Optional: Stack getrennt stoppen
 bash ./scripts/symphony/stop_pilot.sh
+
+# Optional: Soak gate against state API (24h default in runbook)
+python3 ./scripts/symphony/run_soak_gate.py \
+  --state-url http://127.0.0.1:8787/api/v1/state \
+  --duration-seconds 86400 --poll-seconds 60
 ```
 
 Pilot guardrails im Startskript:

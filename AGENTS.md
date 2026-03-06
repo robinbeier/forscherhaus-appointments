@@ -170,6 +170,9 @@ cp .env.symphony.pilot.example .env.symphony.pilot
 bash ./scripts/symphony/start_pilot.sh
 bash ./scripts/symphony/stop_pilot.sh
 
+# Optional: Symphony Soak Gate (staging/local state API)
+python3 ./scripts/symphony/run_soak_gate.py --state-url http://127.0.0.1:8787/api/v1/state --duration-seconds 86400 --poll-seconds 60
+
 # Optional: PHPStan status check (blocking)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
