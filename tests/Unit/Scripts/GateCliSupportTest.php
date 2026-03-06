@@ -47,6 +47,60 @@ class GateCliSupportTest extends TestCase
         $this->assertStringContainsString('--zero-surprise-incident-webhook-file PATH', $result['stdout']);
     }
 
+    public function testDeployDryRunNormalizesRelativeZeroSurprisePathsBeforeStageReplay(): void
+    {
+        $repoRoot = dirname(__DIR__, 3);
+        $workspace = sys_get_temp_dir() . '/deploy-ea-dryrun-' . bin2hex(random_bytes(4));
+        $appPath = $workspace . '/app';
+        $srcPath = $workspace . '/src';
+        $archiveRoot = $workspace . '/archive-root';
+        $cwd = $workspace . '/cwd';
+        $archivePath = $srcPath . '/ea_20260320_1200.tar.gz';
+
+        mkdir($appPath, 0777, true);
+        mkdir($srcPath, 0777, true);
+        mkdir($archiveRoot . '/application/config', 0777, true);
+        mkdir($cwd, 0777, true);
+
+        file_put_contents($appPath . '/config.php', "<?php\n");
+        file_put_contents($archiveRoot . '/application/config/config.php', "<?php\n");
+
+        try {
+            $tarResult = $this->runCommand(['tar', '-czf', $archivePath, '-C', $archiveRoot, '.']);
+            $this->assertSame(0, $tarResult['exit_code'], $tarResult['stderr']);
+
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    $repoRoot . '/deploy_ea.sh',
+                    '--dry-run',
+                    '--rel',
+                    'ea_20260320_1200',
+                    '--app',
+                    $appPath,
+                    '--src',
+                    $srcPath,
+                    '--zero-surprise-dump-file',
+                    'fixtures/dump.sql.gz',
+                    '--zero-surprise-predeploy-credentials-file',
+                    'fixtures/predeploy.ini',
+                    '--zero-surprise-canary-credentials-file',
+                    'fixtures/canary.ini',
+                    '--zero-surprise-report',
+                    'reports/predeploy.json',
+                ],
+                $cwd,
+            );
+
+            $this->assertSame(0, $result['exit_code'], $result['stderr']);
+            $this->assertStringContainsString("dump '{$cwd}/fixtures/dump.sql.gz'", $result['stdout']);
+            $this->assertStringContainsString("credentials '{$cwd}/fixtures/predeploy.ini'", $result['stdout']);
+            $this->assertStringContainsString("report '{$cwd}/reports/predeploy.json'", $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testClassifyAssertionExitCodeReturnsRuntimeForPreflightChecks(): void
     {
         $checks = [
@@ -147,7 +201,7 @@ class GateCliSupportTest extends TestCase
      * @param list<string> $command
      * @return array{exit_code:int,stdout:string,stderr:string}
      */
-    private function runCommand(array $command): array
+    private function runCommand(array $command, ?string $cwd = null): array
     {
         $descriptorSpec = [
             0 => ['pipe', 'r'],
@@ -155,7 +209,7 @@ class GateCliSupportTest extends TestCase
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3));
+        $process = proc_open($command, $descriptorSpec, $pipes, $cwd ?? dirname(__DIR__, 3));
         $this->assertIsResource($process);
 
         fclose($pipes[0]);
@@ -171,5 +225,28 @@ class GateCliSupportTest extends TestCase
             'stdout' => is_string($stdout) ? $stdout : '',
             'stderr' => is_string($stderr) ? $stderr : '',
         ];
+    }
+
+    private function removeDirectory(string $path): void
+    {
+        if (!is_dir($path)) {
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                rmdir($item->getPathname());
+                continue;
+            }
+
+            unlink($item->getPathname());
+        }
+
+        rmdir($path);
     }
 }

@@ -8,6 +8,7 @@ set -Eeuo pipefail
 umask 022
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_CWD="$(pwd -P)"
 
 REL=""
 APP="/var/www/html/easyappointments"
@@ -131,6 +132,33 @@ require_docker_compose() {
   fi
 
   docker compose version >/dev/null 2>&1 || die "[!] Required command missing: docker compose"
+}
+
+absolutize_path() {
+  local value="$1"
+
+  case "$value" in
+    "~")
+      value="$HOME"
+      ;;
+    "~/"*)
+      value="$HOME/${value#~/}"
+      ;;
+  esac
+
+  if [[ "$value" != /* ]]; then
+    value="${DEPLOY_CWD}/${value}"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+absolutize_path_var() {
+  local var_name="$1"
+  local value="${!var_name:-}"
+
+  [[ -n "$value" ]] || return 0
+  printf -v "$var_name" '%s' "$(absolutize_path "$value")"
 }
 
 ensure_renderer_restart_permissions() {
@@ -822,6 +850,15 @@ fi
 if [[ -z "$ZERO_SURPRISE_PROFILE" ]]; then
   die "[!] --zero-surprise-profile must not be empty."
 fi
+
+absolutize_path_var HEALTHZ_TOKEN_FILE
+absolutize_path_var ZERO_SURPRISE_REPORT
+absolutize_path_var ZERO_SURPRISE_DUMP_FILE
+absolutize_path_var ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE
+absolutize_path_var ZERO_SURPRISE_BREAKGLASS_FILE
+absolutize_path_var ZERO_SURPRISE_CANARY_CREDENTIALS_FILE
+absolutize_path_var ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE
+
 if [[ "$DRYRUN" -eq 0 ]]; then
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
   [[ -r "$HEALTHZ_TOKEN_FILE" ]] || die "[!] Token file is not readable: $HEALTHZ_TOKEN_FILE"
