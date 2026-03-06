@@ -79,29 +79,27 @@ composer check:component-boundaries
 composer check:architecture-boundaries
 
 # Optional: API OpenAPI contract smoke (read-only, selected API v1 endpoints)
-docker compose up -d mysql php-fpm
+docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
 for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
-bash scripts/ci/start_php_http_server.sh
 docker compose exec -T php-fpm composer contract-test:api-openapi -- \
-  --base-url=http://127.0.0.1:8080 --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator
 docker compose down -v --remove-orphans
 
 # Optional: Write-path contract smokes (booking + API, deterministic fixtures)
-docker compose up -d mysql php-fpm
+docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
 for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
-bash scripts/ci/start_php_http_server.sh
 docker compose exec -T php-fpm composer contract-test:booking-write -- \
-  --base-url=http://127.0.0.1:8080 --index-page=index.php \
+  --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
   --booking-search-days=14 --retry-count=1 \
   --checks=booking_register_success_contract,booking_register_manage_update_contract,booking_register_unavailable_contract,booking_reschedule_manage_mode_contract,booking_cancel_success_contract,booking_cancel_unknown_hash_contract
 docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
-  --base-url=http://127.0.0.1:8080 --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
   --username=administrator --password=administrator \
   --retry-count=1 --booking-search-days=14 \
   --checks=appointments_write_unauthorized_guard,customers_store_contract,appointments_store_contract,appointments_update_contract,appointments_destroy_contract,customers_destroy_contract
@@ -238,13 +236,12 @@ composer release:gate:dashboard -- --help
 composer release:gate:booking-confirmation-pdf -- --help
 
 # Optional: CI Dashboard+Booking+API Integration Smoke (lokaler Repro, read-only)
-docker compose up -d mysql php-fpm
+docker compose up -d mysql php-fpm nginx
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
 for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
-bash scripts/ci/start_php_http_server.sh
 docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
-  --base-url=http://127.0.0.1:8080 --index-page=index.php \
+  --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
   --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD \
   --checks=readiness_login_page,auth_login_validate,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities
@@ -267,7 +264,7 @@ Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` ist blocking; der L2-Check ist in CI nicht mehr advisory.
 Hinweis: `deep-check-bootstrap` liefert fuer Deep-Jobs nur noch ein `vendor/`-Artifact; die dockerisierten Deep-Jobs setzen CI-only Bootstrap-Flags, damit `php-fpm` in CI bei fehlendem `node_modules/` kein `npm install` und keinen Asset-Rebuild startet.
-Hinweis: Die HTTP-Deep-Jobs (`api-contract-openapi`, `write-contract-booking`, `write-contract-api`, `integration-smoke`) starten in CI und `pre_pr_full.sh` nur noch `mysql + php-fpm`; `scripts/ci/start_php_http_server.sh` startet darin einen temporaeren lokalen PHP-HTTP-Server auf `127.0.0.1:8080`. `booking-controller-flows` braucht keinen `nginx`-Service mehr.
+Hinweis: Die HTTP-Deep-Jobs (`api-contract-openapi`, `write-contract-booking`, `write-contract-api`, `integration-smoke`) nutzen in CI und `pre_pr_full.sh` den CI-paritaeren Stack `mysql + php-fpm + nginx`; `booking-controller-flows` bleibt bei `mysql + php-fpm`.
 Hinweis: Die dockerisierten Deep-Jobs importieren in CI einen gemeinsamen `deep-check-seed-snapshot` statt pro Job `php index.php console install` auszufuehren.
 Hinweis: Die CI-Jobs `coverage-shard-unit` und `coverage-shard-integration` sind blocking und laufen auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes; `coverage-shard-unit` deckt nur den pure-PHPUnit-Slice ohne Docker/MySQL/Seed ab, waehrend `coverage-shard-integration` die DB-gebundenen Unit-Tests plus Integrations-Controller im dockerisierten Stack ausfuehrt.
 Hinweis: Der CI-Job `coverage-delta` ist blocking, aggregiert die beiden Coverage-Shards und prueft die gemergte Clover gegen die Repo-Policy; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
