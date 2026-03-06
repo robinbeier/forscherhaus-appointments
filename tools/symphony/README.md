@@ -37,6 +37,31 @@ npm test
 npm run test:conformance
 ```
 
+## Pilot Start/Stop (Repo Root)
+
+```bash
+# 1) Env file anlegen (keine Secrets committen)
+cp .env.symphony.pilot.example .env.symphony.pilot
+
+# 2) Werte setzen:
+#    - SYMPHONY_LINEAR_API_KEY
+#    - SYMPHONY_LINEAR_PROJECT_SLUG
+#    - SYMPHONY_CODEX_COMMAND
+
+# 3) Pilot starten (foreground, Ctrl+C beendet und raeumt Stack auf)
+bash ./scripts/symphony/start_pilot.sh
+
+# Optional: Stack getrennt stoppen
+bash ./scripts/symphony/stop_pilot.sh
+```
+
+Pilot guardrails im Startskript:
+
+-   `SYMPHONY_PILOT_APPROVAL_POLICY` default: `on-request`
+-   `SYMPHONY_PILOT_SANDBOX_MODE` default: `workspace-write`
+-   `approval_policy=never` oder `sandbox_mode=danger-full-access` werden fuer
+    den Pilot abgelehnt.
+
 ## CLI options
 
 -   `--workflow <path>` or `--workflow=<path>`: custom workflow file path.
