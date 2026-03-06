@@ -103,6 +103,10 @@ docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
   --username=administrator --password=administrator \
   --retry-count=1 --booking-search-days=14 \
   --checks=appointments_write_unauthorized_guard,customers_store_contract,appointments_store_contract,appointments_update_contract,appointments_destroy_contract,customers_destroy_contract
+# Optional: Combined wrapper (runs booking-write + api-openapi-write sequentially)
+docker compose exec -T php-fpm composer contract-test:write-path -- \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --username=administrator --password=administrator --retry-count=1 --booking-search-days=14
 docker compose down -v --remove-orphans
 
 # Optional: Deep runtime suite producer + verdicts (shared CI topology for deep runtime gates)
@@ -250,9 +254,15 @@ composer release:gate:dashboard -- \
 composer release:gate:booking-confirmation-pdf -- \
   --base-url=http://localhost --index-page=index.php --confirmation-hash=REPLACE_WITH_APPOINTMENT_HASH
 
+# Optional: Zero-surprise restore-dump replay gate (pre-deploy shadow)
+composer release:gate:zero-surprise -- \
+  --release-id=REL-YYYYMMDD-HHMM --dump-file=/path/to/predeploy.sql.gz \
+  --credentials-file=/path/to/zero-surprise-predeploy.ini
+
 # Vollstaendige Optionen anzeigen
 composer release:gate:dashboard -- --help
 composer release:gate:booking-confirmation-pdf -- --help
+composer release:gate:zero-surprise -- --help
 
 # Optional: CI Dashboard+Booking+API Integration Smoke (lokaler Repro, read-only)
 docker compose up -d mysql php-fpm nginx
@@ -272,6 +282,7 @@ Hinweis: `dashboard_integration_smoke.php`, `booking_write_contract_smoke.php` u
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 Hinweis: `composer deptrac:analyze` kann auf neueren Host-PHP-Versionen (z. B. 8.5) zusaetzliche Vendor-Deprecation-Ausgaben zeigen; fuer CI-paritaer rauschfreie Ausgaben den Docker-Run `docker compose run --rm php-fpm composer deptrac:analyze` verwenden.
 Hinweis: Das Dashboard Release Gate schreibt standardmaessig nach `storage/logs/release-gate/dashboard-gate-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
+Hinweis: Das Zero-surprise Replay Gate schreibt standardmaessig nach `storage/logs/release-gate/zero-surprise-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der CI-Job `phpstan-application` ist blocking.
 Hinweis: Der CI-Job `js-lint-changed` ist blocking.
 Hinweis: Der CI-Job `architecture-ownership-map` ist blocking.
@@ -413,6 +424,7 @@ php index.php console sync
 -   Jeder PR-Implementierungsplan enthaelt einen Review-Loop: Reviewer A prueft Bugs/Regressionen/Security/Edge-Cases, Reviewer B prueft Architektur/Lesbarkeit/Testluecken/Wartbarkeit; Findings fixen und wiederholen bis keine Issues mehr offen sind.
 -   Vor `ready for review` den vollen Pre-PR-Gate inklusive Coverage Delta ausfuehren (`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`).
 -   Wenn alle Gates gruen sind: `ready for review` pushen und danach mit `$Babysit PR` weiter monitoren.
+-   Wenn ein Umsetzungsplan mehrere PRs umfasst, gilt das sequentielle Standardvorgehen: jeden PR `ready for review` pushen, mit [$babysit-pr](/Users/robinbeier/Developers/forscherhaus-appointments/.codex/skills/babysit-pr/SKILL.md) bis zu komplett gruener CI, fehlenden offenen Review-Items und `mergeable`-Status beobachten, dann den PR mergen und erst danach mit dem naechsten PR im Plan weitermachen.
 
 ## Release-Fokus (naechste 9 Tage bis Deployment)
 

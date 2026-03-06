@@ -67,3 +67,5 @@
    Do instead: isolate edits to request scope and stop to ask if unexpected modifications appear in touched files.
 3. **[2026-02-22] Keep collaboration updates concise and actionable**
    Do instead: send short progress updates during tool work and finish with changed files and test outcomes.
+4. **[2026-03-06] Execute multi-PR plans strictly one PR at a time**
+   Do instead: for a plan with multiple PRs, push one PR, monitor it with [$babysit-pr](/Users/robinbeier/Developers/forscherhaus-appointments/.codex/skills/babysit-pr/SKILL.md) until CI is green, review-clean, and mergeable, merge it, then start the next PR.
