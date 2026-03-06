@@ -9,6 +9,44 @@ require_once __DIR__ . '/../../../scripts/release-gate/lib/GateCliSupport.php';
 
 class GateCliSupportTest extends TestCase
 {
+    public function testZeroSurpriseReplayHelpIncludesProfileAndCredentialsOptions(): void
+    {
+        $result = $this->runCommand(['php', 'scripts/release-gate/zero_surprise_replay.php', '--help']);
+
+        $this->assertSame(0, $result['exit_code']);
+        $this->assertStringContainsString('--profile=NAME', $result['stdout']);
+        $this->assertStringContainsString('--credentials-file=PATH', $result['stdout']);
+    }
+
+    public function testZeroSurpriseLiveCanaryHelpIncludesProfileOption(): void
+    {
+        $result = $this->runCommand(['php', 'scripts/release-gate/zero_surprise_live_canary.php', '--help']);
+
+        $this->assertSame(0, $result['exit_code']);
+        $this->assertStringContainsString('--profile', $result['stdout']);
+        $this->assertStringContainsString('--credentials-file', $result['stdout']);
+    }
+
+    public function testZeroSurpriseIncidentNotifyHelpIncludesWebhookAndEventOptions(): void
+    {
+        $result = $this->runCommand(['php', 'scripts/release-gate/zero_surprise_incident_notify.php', '--help']);
+
+        $this->assertSame(0, $result['exit_code']);
+        $this->assertStringContainsString('--webhook-file=PATH', $result['stdout']);
+        $this->assertStringContainsString('--event=VALUE', $result['stdout']);
+        $this->assertStringContainsString('--severity=VALUE', $result['stdout']);
+    }
+
+    public function testDeployHelpIncludesPhaseFourZeroSurpriseFlags(): void
+    {
+        $result = $this->runCommand(['bash', 'deploy_ea.sh', '--help']);
+
+        $this->assertSame(0, $result['exit_code']);
+        $this->assertStringContainsString('--zero-surprise-dump-file PATH', $result['stdout']);
+        $this->assertStringContainsString('--zero-surprise-breakglass-file PATH', $result['stdout']);
+        $this->assertStringContainsString('--zero-surprise-incident-webhook-file PATH', $result['stdout']);
+    }
+
     public function testClassifyAssertionExitCodeReturnsRuntimeForPreflightChecks(): void
     {
         $checks = [
@@ -81,11 +119,11 @@ class GateCliSupportTest extends TestCase
 
         try {
             $configContent = <<<'PHP'
-<?php
-$config['cookie_prefix'] = 'fh_';
-$config['csrf_token_name'] = 'my_csrf_token';
-$config['csrf_cookie_name'] = 'my_csrf_cookie';
-PHP;
+            <?php
+            $config['cookie_prefix'] = 'fh_';
+            $config['csrf_token_name'] = 'my_csrf_token';
+            $config['csrf_cookie_name'] = 'my_csrf_cookie';
+            PHP;
 
             file_put_contents($configPath, $configContent);
 
@@ -103,5 +141,35 @@ PHP;
                 unlink($configPath);
             }
         }
+    }
+
+    /**
+     * @param list<string> $command
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runCommand(array $command): array
+    {
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3));
+        $this->assertIsResource($process);
+
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        $exitCode = proc_close($process);
+
+        return [
+            'exit_code' => $exitCode,
+            'stdout' => is_string($stdout) ? $stdout : '',
+            'stderr' => is_string($stderr) ? $stderr : '',
+        ];
     }
 }

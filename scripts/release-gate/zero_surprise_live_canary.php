@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/lib/GateProcessRunner.php';
 require_once __DIR__ . '/lib/ZeroSurpriseReport.php';
+require_once __DIR__ . '/lib/ZeroSurpriseCredentials.php';
 
 use ReleaseGate\GateProcessRunner;
+use ReleaseGate\ZeroSurpriseCredentials;
 use ReleaseGate\ZeroSurpriseReport;
 
 const ZERO_SURPRISE_CANARY_EXIT_SUCCESS = 0;
@@ -15,20 +17,21 @@ const ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR = 2;
 $repoRoot = dirname(__DIR__, 2);
 $timestamp = gmdate('Ymd\\THis\\Z');
 $defaultOutputPath = $repoRoot . '/storage/logs/release-gate/zero-surprise-live-canary-' . $timestamp . '.json';
+$defaultProfile = 'school-day-default';
 
 $report = null;
 $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
 $config = [];
 
 try {
-    $config = parseCliOptions($defaultOutputPath);
+    $config = parseCliOptions($defaultOutputPath, $defaultProfile);
 
     if (($config['help'] ?? false) === true) {
         printUsage();
         exit(ZERO_SURPRISE_CANARY_EXIT_SUCCESS);
     }
 
-    $credentials = loadCredentialsConfig($config['credentials_file']);
+    $credentials = ZeroSurpriseCredentials::resolve($config['credentials_file'], $config['profile_name']);
 
     $bookingReportPath = 'storage/logs/release-gate/zero-surprise-live-canary-booking-' . $timestamp . '.json';
     $dashboardReportPath = 'storage/logs/release-gate/zero-surprise-live-canary-dashboard-' . $timestamp . '.json';
@@ -38,6 +41,8 @@ try {
         'live-canary',
         [
             'credentials_file' => $config['credentials_file'],
+            'profile_name' => $credentials['profile_name'],
+            'profile_window' => $credentials['profile_window'],
             'base_url' => $credentials['base_url'],
             'index_page' => $credentials['index_page'],
             'start_date' => $credentials['start_date'],
@@ -194,9 +199,16 @@ exit($exitCode);
 /**
  * @return array<string, mixed>
  */
-function parseCliOptions(string $defaultOutputPath): array
+function parseCliOptions(string $defaultOutputPath, string $defaultProfile): array
 {
-    $options = getopt('', ['help', 'release-id:', 'credentials-file:', 'timeout-seconds:', 'output-json::']);
+    $options = getopt('', [
+        'help',
+        'release-id:',
+        'credentials-file:',
+        'profile::',
+        'timeout-seconds:',
+        'output-json::',
+    ]);
 
     if (!is_array($options)) {
         throw new InvalidArgumentException('Failed to parse CLI options.');
@@ -211,6 +223,7 @@ function parseCliOptions(string $defaultOutputPath): array
 
     $releaseId = trim(getRequiredOption($options, 'release-id'));
     $credentialsFile = trim(getRequiredOption($options, 'credentials-file'));
+    $profileName = trim((string) getOptionalOption($options, 'profile', $defaultProfile));
     $timeoutSeconds = parsePositiveInt(getRequiredOption($options, 'timeout-seconds'), 'timeout-seconds');
     $outputJson = trim((string) getOptionalOption($options, 'output-json', $defaultOutputPath));
 
@@ -222,6 +235,10 @@ function parseCliOptions(string $defaultOutputPath): array
         throw new InvalidArgumentException('Option --credentials-file is not readable: ' . $credentialsFile);
     }
 
+    if ($profileName === '') {
+        throw new InvalidArgumentException('Option --profile must not be empty.');
+    }
+
     if ($outputJson === '') {
         throw new InvalidArgumentException('Option --output-json must not be empty.');
     }
@@ -230,6 +247,7 @@ function parseCliOptions(string $defaultOutputPath): array
         'help' => false,
         'release_id' => $releaseId,
         'credentials_file' => $credentialsFile,
+        'profile_name' => $profileName,
         'timeout_seconds' => $timeoutSeconds,
         'output_json' => $outputJson,
     ];
@@ -309,71 +327,6 @@ function validateDate(string $value, string $name): void
     if ($date === false || $date->format('Y-m-d') !== $value) {
         throw new InvalidArgumentException($name . ' must use format YYYY-MM-DD.');
     }
-}
-
-/**
- * @return array<string, mixed>
- */
-function loadCredentialsConfig(string $credentialsFile): array
-{
-    $parsed = parse_ini_file($credentialsFile, false, INI_SCANNER_RAW);
-
-    if ($parsed === false || !is_array($parsed)) {
-        throw new InvalidArgumentException('Could not parse INI credentials file: ' . $credentialsFile);
-    }
-
-    $requiredNonEmptyKeys = ['base_url', 'username', 'password'];
-
-    foreach ($requiredNonEmptyKeys as $key) {
-        if (!array_key_exists($key, $parsed) || trim((string) $parsed[$key]) === '') {
-            throw new InvalidArgumentException('Credentials file is missing required key: ' . $key);
-        }
-    }
-
-    if (!array_key_exists('index_page', $parsed)) {
-        throw new InvalidArgumentException('Credentials file is missing required key: index_page');
-    }
-
-    $timezone = trim((string) ($parsed['timezone'] ?? 'Europe/Berlin'));
-
-    try {
-        $timezoneObject = new DateTimeZone($timezone);
-    } catch (Throwable $exception) {
-        throw new InvalidArgumentException('Credentials key "timezone" is invalid: ' . $timezone, 0, $exception);
-    }
-
-    $today = new DateTimeImmutable('now', $timezoneObject);
-
-    $endDate = trim((string) ($parsed['end_date'] ?? $today->format('Y-m-d')));
-    $startDate = trim((string) ($parsed['start_date'] ?? $today->sub(new DateInterval('P30D'))->format('Y-m-d')));
-
-    validateDate($startDate, 'start_date');
-    validateDate($endDate, 'end_date');
-
-    if ($startDate > $endDate) {
-        throw new InvalidArgumentException('Credentials dates are invalid: start_date must be <= end_date.');
-    }
-
-    $bookingSearchDays = parsePositiveInt($parsed['booking_search_days'] ?? 14, 'booking_search_days');
-    $retryCount = parseNonNegativeInt($parsed['retry_count'] ?? 1, 'retry_count');
-    $maxPdfDurationMs = parsePositiveInt($parsed['max_pdf_duration_ms'] ?? 30000, 'max_pdf_duration_ms');
-
-    $pdfHealthUrlRaw = trim((string) ($parsed['pdf_health_url'] ?? ''));
-    $pdfHealthUrl = $pdfHealthUrlRaw !== '' ? $pdfHealthUrlRaw : null;
-
-    return [
-        'base_url' => trim((string) $parsed['base_url']),
-        'index_page' => (string) $parsed['index_page'], // Empty value is valid for rewrite-mode deployments.
-        'username' => trim((string) $parsed['username']),
-        'password' => (string) $parsed['password'],
-        'start_date' => $startDate,
-        'end_date' => $endDate,
-        'booking_search_days' => $bookingSearchDays,
-        'retry_count' => $retryCount,
-        'max_pdf_duration_ms' => $maxPdfDurationMs,
-        'timezone' => $timezone,
-        'pdf_health_url' => $pdfHealthUrl,
-    ];
 }
 
 /**
@@ -713,7 +666,7 @@ function printUsage(): void
       php scripts/release-gate/zero_surprise_live_canary.php \
         --release-id=ea_YYYYMMDD_HHMM \
         --credentials-file=/absolute/path/zero-surprise-canary.ini \
-        --timeout-seconds=300 [--output-json=/absolute/path/report.json]
+        --timeout-seconds=300 [--profile=school-day-default] [--output-json=/absolute/path/report.json]
 
     Required:
       --release-id                 Release identifier used for correlation
@@ -721,9 +674,11 @@ function printUsage(): void
       --timeout-seconds            Global timeout budget in seconds (>0)
 
     Optional:
+      --profile                    Named digital-twin profile (default: school-day-default)
       --output-json                Report output path
       --help                       Show this usage text
     TXT;
 
     fwrite(STDOUT, $usage . PHP_EOL);
 }
+
