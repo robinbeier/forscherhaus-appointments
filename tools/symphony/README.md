@@ -89,9 +89,11 @@ tools/symphony/
     logger.ts     # Structured log output
     options.ts    # CLI option parsing
     service.ts    # Start/stop lifecycle
+    linear-tracker.ts  # Linear GraphQL adapter (read-only)
     workflow.ts   # Workflow loader + typed config + reload
     template.ts   # Strict prompt template rendering
     options.test.ts
+    linear-tracker.test.ts
     template.test.ts
     workflow-config.test.ts
   package.json
