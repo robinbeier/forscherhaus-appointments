@@ -61,6 +61,9 @@ Pilot guardrails im Startskript:
 -   `SYMPHONY_PILOT_SANDBOX_MODE` default: `workspace-write`
 -   `approval_policy=never` oder `sandbox_mode=danger-full-access` werden fuer
     den Pilot abgelehnt.
+-   Beim Start wird `SYMPHONY_CODEX_COMMAND` mit
+    `CODEX_APPROVAL_POLICY`/`CODEX_SANDBOX_MODE` aus den Pilot-Policies
+    gepraefixt, damit Guardrails im realen Launch-Command anliegen.
 
 ## CLI options
 

@@ -102,6 +102,9 @@ if [[ "$SYMPHONY_PILOT_SANDBOX_MODE" == "danger-full-access" ]]; then
     exit 1
 fi
 
+SYMPHONY_CODEX_COMMAND="CODEX_APPROVAL_POLICY=${SYMPHONY_PILOT_APPROVAL_POLICY} CODEX_SANDBOX_MODE=${SYMPHONY_PILOT_SANDBOX_MODE} ${SYMPHONY_CODEX_COMMAND}"
+export SYMPHONY_CODEX_COMMAND
+
 cleanup() {
     if [[ "$SKIP_COMPOSE" -eq 0 && "$KEEP_STACK" -eq 0 ]]; then
         docker compose down --remove-orphans >/dev/null 2>&1 || true
