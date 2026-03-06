@@ -10,6 +10,8 @@
 
 ## Execution & Validation (Highest Priority)
 
+1. **[2026-03-06] Treat empty Symphony turns as failures, not success**
+   Do instead: require a workspace state change after each completed pilot turn and retry/log `workspace_no_persisted_output` when the issue branch/worktree is unchanged.
 1. **[2026-03-06] Keep Symphony Linear GraphQL queries aligned with current schema**
    Do instead: use `project.slugId` (not `project.slug`) and relation-based issue links (`relations`/`inverseRelations`) instead of removed fields like `blockedByIssues`; include response-body details for non-2xx tracker errors to speed up diagnosis.
 1. **[2026-03-06] Validate dependency changes against the CI runtime, not just the host toolchain**

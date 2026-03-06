@@ -2,7 +2,12 @@ import {AppServerClientError, CodexAppServerClient, type OrchestratorEvent} from
 import {LinearTrackerAdapter, LinearTrackerError, type TrackedIssue} from './linear-tracker.js';
 import type {Logger} from './logger.js';
 import {type LoadedWorkflowConfig, type WorkflowConfigStore, WorkflowConfigError} from './workflow.js';
-import {WorkspaceManager, WorkspaceManagerError, type WorkspaceHandle} from './workspace-manager.js';
+import {
+    WorkspaceManager,
+    WorkspaceManagerError,
+    type WorkspaceHandle,
+    type WorkspaceStateSnapshot,
+} from './workspace-manager.js';
 
 type WorkflowConfigStoreLike = Pick<
     WorkflowConfigStore,
@@ -20,6 +25,7 @@ export interface WorkspaceClient {
     runBeforeRunHooks(workspacePath: string): Promise<void>;
     runAfterRunHooks(workspacePath: string): Promise<void>;
     cleanupTerminalWorkspace(workspacePath: string): Promise<void>;
+    captureWorkspaceState(workspacePath: string): Promise<WorkspaceStateSnapshot>;
 }
 
 export interface AppServerClient {
@@ -77,6 +83,24 @@ interface RunningEntry {
     suppressRetry: boolean;
     stallLogged: boolean;
     sessionId?: string;
+}
+
+type OrchestratorGuardrailErrorClass = 'workspace_no_persisted_output';
+
+class OrchestratorGuardrailError extends Error {
+    public readonly errorClass: OrchestratorGuardrailErrorClass;
+    public readonly details: Record<string, unknown>;
+
+    public constructor(
+        errorClass: OrchestratorGuardrailErrorClass,
+        message: string,
+        details: Record<string, unknown> = {},
+    ) {
+        super(message);
+        this.name = 'OrchestratorGuardrailError';
+        this.errorClass = errorClass;
+        this.details = details;
+    }
 }
 
 export interface OrchestratorSnapshot {
@@ -169,6 +193,10 @@ function issueLogFields(issue: TrackedIssue, sessionId?: string): Record<string,
         issue_identifier: issue.identifier,
         session_id: sessionId ?? null,
     };
+}
+
+function didWorkspaceStateChange(before: WorkspaceStateSnapshot, after: WorkspaceStateSnapshot): boolean {
+    return before.headSha !== after.headSha || before.statusText !== after.statusText;
 }
 
 export class SymphonyOrchestrator {
@@ -487,6 +515,17 @@ export class SymphonyOrchestrator {
         let workspacePath: string | undefined;
         let effectiveConfig = config;
         let beforeRunCompleted = false;
+        let baselineWorkspaceState: WorkspaceStateSnapshot | undefined;
+        let turnResult:
+            | {
+                  status: 'completed' | 'input_required';
+                  outputText: string;
+                  threadId: string;
+                  turnId: string;
+                  sessionId: string;
+              }
+            | undefined;
+        let dispatchError: unknown;
 
         try {
             workspaceClient = this.workspaceFactory(config);
@@ -495,6 +534,7 @@ export class SymphonyOrchestrator {
 
             await workspaceClient.runBeforeRunHooks(workspacePath);
             beforeRunCompleted = true;
+            baselineWorkspaceState = await workspaceClient.captureWorkspaceState(workspacePath);
 
             const dispatch = await this.workflowConfigStore.buildDispatchPrompt({
                 issue: toIssueTemplatePayload(runningEntry.issue),
@@ -508,18 +548,62 @@ export class SymphonyOrchestrator {
                 emitEvent: (event) => this.handleOrchestratorEvent(event, runningEntry),
             });
 
-            const turnResult = await appServer.runTurn({
+            turnResult = await appServer.runTurn({
                 prompt: dispatch.prompt,
                 issueIdentifier: runningEntry.issue.identifier,
                 attempt: runningEntry.attempt,
                 responseTimeoutMs: effectiveConfig.codex.responseTimeoutMs,
                 turnTimeoutMs: effectiveConfig.codex.turnTimeoutMs,
             });
+        } catch (error) {
+            dispatchError = error;
+        }
+
+        try {
+            if (beforeRunCompleted && workspaceClient && workspacePath) {
+                try {
+                    await workspaceClient.runAfterRunHooks(workspacePath);
+                } catch (error) {
+                    const classified = this.classifyError(error);
+                    this.logger.error('after_run hooks failed', {
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                        errorClass: classified.errorClass,
+                        error: classified.message,
+                    });
+                }
+            }
+
+            if (dispatchError) {
+                throw dispatchError;
+            }
+
+            if (!turnResult) {
+                throw new OrchestratorGuardrailError(
+                    'workspace_no_persisted_output',
+                    'Issue turn finished without a turn result.',
+                );
+            }
 
             if (turnResult.status === 'completed') {
+                runningEntry.sessionId = turnResult.sessionId;
+
+                if (workspaceClient && workspacePath && baselineWorkspaceState) {
+                    const finalWorkspaceState = await workspaceClient.captureWorkspaceState(workspacePath);
+
+                    if (!didWorkspaceStateChange(baselineWorkspaceState, finalWorkspaceState)) {
+                        throw new OrchestratorGuardrailError(
+                            'workspace_no_persisted_output',
+                            'Completed turn produced no persisted workspace changes.',
+                            {
+                                workspacePath,
+                                headSha: finalWorkspaceState.headSha,
+                            },
+                        );
+                    }
+                }
+
                 this.codexTotals.completed += 1;
                 this.retryByIssueId.delete(runningEntry.issue.id);
-                runningEntry.sessionId = turnResult.sessionId;
                 this.logger.info('Issue turn completed', {
                     ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                     attempt: runningEntry.attempt,
@@ -580,19 +664,6 @@ export class SymphonyOrchestrator {
             }
         } finally {
             if (workspaceClient && workspacePath) {
-                if (beforeRunCompleted) {
-                    try {
-                        await workspaceClient.runAfterRunHooks(workspacePath);
-                    } catch (error) {
-                        const classified = this.classifyError(error);
-                        this.logger.error('after_run hooks failed', {
-                            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
-                            errorClass: classified.errorClass,
-                            error: classified.message,
-                        });
-                    }
-                }
-
                 if (!effectiveConfig.workspace.keepTerminalWorkspaces) {
                     try {
                         await workspaceClient.cleanupTerminalWorkspace(workspacePath);
@@ -687,6 +758,10 @@ export class SymphonyOrchestrator {
     }
 
     private isRetryableError(error: unknown): boolean {
+        if (error instanceof OrchestratorGuardrailError) {
+            return true;
+        }
+
         if (error instanceof AppServerClientError) {
             return true;
         }
@@ -699,6 +774,13 @@ export class SymphonyOrchestrator {
     }
 
     private classifyError(error: unknown): {errorClass: string; message: string} {
+        if (error instanceof OrchestratorGuardrailError) {
+            return {
+                errorClass: error.errorClass,
+                message: error.message,
+            };
+        }
+
         if (error instanceof AppServerClientError) {
             return {
                 errorClass: error.errorClass,

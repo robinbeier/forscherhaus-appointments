@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import {execFile as execFileCallback} from 'node:child_process';
 import {access, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {promisify} from 'node:util';
 import type {Logger} from './logger.js';
 import {
     ensurePathWithinRoot,
@@ -10,6 +12,8 @@ import {
     WorkspaceManager,
     WorkspaceManagerError,
 } from './workspace-manager.js';
+
+const execFile = promisify(execFileCallback);
 
 function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
     return {
@@ -165,4 +169,40 @@ test('cleanupTerminalWorkspace runs before_remove and deletes workspace', async 
     await assert.rejects(() => access(handle.path));
     const marker = await readFile(path.join(temporaryRoot, 'before-remove-marker.txt'), 'utf8');
     assert.equal(marker.trim(), 'cleanup');
+});
+
+test('captureWorkspaceState returns head sha and tracked status changes', async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-state-'));
+    const workspacePath = path.join(temporaryRoot, 'ROB-11-state');
+    await writeFile(path.join(temporaryRoot, 'README.md'), 'root\n', 'utf8');
+
+    await execFile('git', ['init'], {cwd: temporaryRoot});
+    await execFile('git', ['checkout', '-b', 'main'], {cwd: temporaryRoot});
+    await execFile('git', ['add', 'README.md'], {cwd: temporaryRoot});
+    await execFile('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], {
+        cwd: temporaryRoot,
+    });
+    await execFile('git', ['worktree', 'add', '-b', 'codex/symphony-rob-11-state', workspacePath, 'HEAD'], {
+        cwd: temporaryRoot,
+    });
+    await writeFile(path.join(workspacePath, 'README.md'), 'changed\n', 'utf8');
+
+    const manager = new WorkspaceManager({
+        logger: createLoggerStub([]),
+        config: {
+            root: temporaryRoot,
+            hooks: {
+                timeoutMs: 5000,
+                afterCreate: [],
+                beforeRun: [],
+                afterRun: [],
+                beforeRemove: [],
+            },
+        },
+    });
+
+    const snapshot = await manager.captureWorkspaceState(workspacePath);
+
+    assert.match(snapshot.headSha, /^[0-9a-f]{40}$/);
+    assert.match(snapshot.statusText, /^ M README\.md$/m);
 });

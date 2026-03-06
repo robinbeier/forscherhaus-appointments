@@ -113,16 +113,28 @@ class WorkflowStoreStub {
 }
 
 function createNoopWorkspaceFactory() {
-    return () => ({
-        prepareWorkspace: async (rawKey: string) => ({
-            key: rawKey,
-            path: `/tmp/symphony-workspaces/${rawKey}`,
-            created: true,
-        }),
-        runBeforeRunHooks: async (_workspacePath: string) => undefined,
-        runAfterRunHooks: async (_workspacePath: string) => undefined,
-        cleanupTerminalWorkspace: async (_workspacePath: string) => undefined,
-    });
+    return () => {
+        let stateCaptureCount = 0;
+
+        return {
+            prepareWorkspace: async (rawKey: string) => ({
+                key: rawKey,
+                path: `/tmp/symphony-workspaces/${rawKey}`,
+                created: true,
+            }),
+            runBeforeRunHooks: async (_workspacePath: string) => undefined,
+            runAfterRunHooks: async (_workspacePath: string) => undefined,
+            cleanupTerminalWorkspace: async (_workspacePath: string) => undefined,
+            captureWorkspaceState: async (_workspacePath: string) => {
+                const snapshot =
+                    stateCaptureCount === 0
+                        ? {headSha: 'head-before', statusText: ''}
+                        : {headSha: 'head-after', statusText: ''};
+                stateCaptureCount += 1;
+                return snapshot;
+            },
+        };
+    };
 }
 
 async function runTickAndDrain(orchestrator: SymphonyOrchestrator): Promise<void> {

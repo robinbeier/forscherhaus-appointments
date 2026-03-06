@@ -5,7 +5,7 @@ import {type TrackerClient, SymphonyOrchestrator, type WorkspaceClient} from './
 import type {TrackedIssue} from './linear-tracker.js';
 import type {Logger} from './logger.js';
 import type {LoadedWorkflowConfig} from './workflow.js';
-import {WorkspaceManagerError} from './workspace-manager.js';
+import {WorkspaceManagerError, type WorkspaceStateSnapshot} from './workspace-manager.js';
 
 function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
     return {
@@ -141,6 +141,11 @@ class TrackerStub implements TrackerClient {
 
 class WorkspaceStub implements WorkspaceClient {
     public cleanedPaths: string[] = [];
+    public stateSnapshots: WorkspaceStateSnapshot[] = [
+        {headSha: 'head-before', statusText: ''},
+        {headSha: 'head-after', statusText: ''},
+    ];
+    private stateCaptureCount = 0;
 
     public async prepareWorkspace(rawKey: string): Promise<{key: string; path: string; created: boolean}> {
         return {
@@ -160,6 +165,12 @@ class WorkspaceStub implements WorkspaceClient {
 
     public async cleanupTerminalWorkspace(workspacePath: string): Promise<void> {
         this.cleanedPaths.push(workspacePath);
+    }
+
+    public async captureWorkspaceState(_workspacePath: string): Promise<WorkspaceStateSnapshot> {
+        const index = Math.min(this.stateCaptureCount, this.stateSnapshots.length - 1);
+        this.stateCaptureCount += 1;
+        return this.stateSnapshots[index];
     }
 }
 
@@ -251,6 +262,50 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
 
     assert.deepEqual(dispatchRequests, [{issueIdentifier: 'ROB-13-C', attempt: 1}]);
     assert.equal(orchestrator.getSnapshot().retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 1);
+});
+
+test('completed run without persisted workspace changes is retried and not counted as success', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'empty-output-1',
+        identifier: 'ROB-13-EMPTY',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'same-head', statusText: ''},
+        {headSha: 'same-head', statusText: ''},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => ({
+                status: 'completed',
+                outputText: 'ok',
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                sessionId: 'thread-1-turn-1',
+            }),
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.completed, 0);
+    assert.equal(snapshot.codex_totals.failed, 1);
+    assert.equal(snapshot.retrying.length, 1);
+    assert.equal(snapshot.retrying[0].errorClass, 'workspace_no_persisted_output');
     assert.equal(workspace.cleanedPaths.length, 1);
 });
 
@@ -473,6 +528,7 @@ test('workspace_path_escape failures are not retried', async () => {
             runBeforeRunHooks: async () => undefined,
             runAfterRunHooks: async () => undefined,
             cleanupTerminalWorkspace: async () => undefined,
+            captureWorkspaceState: async () => ({headSha: 'head', statusText: ''}),
         }),
         appServerFactory: () => ({
             runTurn: async () => {
