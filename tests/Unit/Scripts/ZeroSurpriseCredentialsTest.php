@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use DateTimeImmutable;
+use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\ZeroSurpriseCredentials;
 
@@ -116,6 +117,64 @@ class ZeroSurpriseCredentialsTest extends TestCase
         $this->assertSame('  keep-spaces  ', $resolved['password']);
         $this->assertSame('2026-02-18', $resolved['start_date']);
         $this->assertSame('2026-03-20', $resolved['end_date']);
+    }
+
+    public function testResolveFailsForInvalidTimezoneOverride(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Resolved timezone is invalid');
+
+        ZeroSurpriseCredentials::resolve(
+            null,
+            'school-day-default',
+            [
+                'base_url' => 'http://cli-only.example',
+                'index_page' => '',
+                'username' => 'administrator',
+                'password' => 'administrator',
+                'timezone' => 'Not/A-Timezone',
+            ],
+            new DateTimeImmutable('2026-03-20T08:00:00Z'),
+        );
+    }
+
+    public function testResolveFailsWhenResolvedDateWindowIsInverted(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('start_date must be <= end_date');
+
+        ZeroSurpriseCredentials::resolve(
+            null,
+            'school-day-default',
+            [
+                'base_url' => 'http://cli-only.example',
+                'index_page' => '',
+                'username' => 'administrator',
+                'password' => 'administrator',
+                'start_date' => '2026-03-21',
+                'end_date' => '2026-03-20',
+            ],
+            new DateTimeImmutable('2026-03-20T08:00:00Z'),
+        );
+    }
+
+    public function testResolveFailsWhenBookingSearchDaysIsNotPositiveInt(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('booking_search_days');
+
+        ZeroSurpriseCredentials::resolve(
+            null,
+            'school-day-default',
+            [
+                'base_url' => 'http://cli-only.example',
+                'index_page' => '',
+                'username' => 'administrator',
+                'password' => 'administrator',
+                'booking_search_days' => '0',
+            ],
+            new DateTimeImmutable('2026-03-20T08:00:00Z'),
+        );
     }
 
     private function writeTempIni(string $contents): string
