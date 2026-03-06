@@ -105,6 +105,25 @@ docker compose exec -T php-fpm composer contract-test:api-openapi-write -- \
   --checks=appointments_write_unauthorized_guard,customers_store_contract,appointments_store_contract,appointments_update_contract,appointments_destroy_contract,customers_destroy_contract
 docker compose down -v --remove-orphans
 
+# Optional: Deep runtime suite producer + verdicts (shared CI topology for deep runtime gates)
+docker compose up -d mysql php-fpm nginx
+until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
+until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
+for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
+docker compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
+  --suites=api-contract-openapi,write-contract-booking,write-contract-api,booking-controller-flows,integration-smoke \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --username=administrator --password=administrator \
+  --booking-search-days=14 --retry-count=1 \
+  --start-date=2026-01-01 --end-date=2026-01-31 \
+  --report-dir=storage/logs/ci/deep-runtime-suite
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=api-contract-openapi
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-booking
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-api
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=booking-controller-flows
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=integration-smoke
+docker compose down -v --remove-orphans
+
 # Optional: Booking controller flow tests (register/reschedule/cancel)
 docker compose up -d mysql php-fpm
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
@@ -264,8 +283,9 @@ Hinweis: Der CI-Job `booking-controller-flows` ist blocking.
 Hinweis: Der CI-Job `typed-request-dto` ist blocking.
 Hinweis: Der CI-Job `typed-request-contracts` ist blocking; der L2-Check ist in CI nicht mehr advisory.
 Hinweis: `deep-check-bootstrap` liefert fuer Deep-Jobs nur noch ein `vendor/`-Artifact; die dockerisierten Deep-Jobs setzen CI-only Bootstrap-Flags, damit `php-fpm` in CI bei fehlendem `node_modules/` kein `npm install` und keinen Asset-Rebuild startet.
-Hinweis: Die HTTP-Deep-Jobs (`api-contract-openapi`, `write-contract-booking`, `write-contract-api`, `integration-smoke`) nutzen in CI und `pre_pr_full.sh` den CI-paritaeren Stack `mysql + php-fpm + nginx`; `booking-controller-flows` bleibt bei `mysql + php-fpm`.
-Hinweis: Die dockerisierten Deep-Jobs importieren in CI einen gemeinsamen `deep-check-seed-snapshot` statt pro Job `php index.php console install` auszufuehren.
+Hinweis: `deep-runtime-suite` ist der gemeinsame Producer fuer `api-contract-openapi`, `write-contract-booking`, `write-contract-api`, `booking-controller-flows` und `integration-smoke`; er startet `mysql + php-fpm + nginx` genau einmal, seeded genau einmal und schreibt `storage/logs/ci/deep-runtime-suite/manifest.json`.
+Hinweis: Die bestehenden Blocking-Gates fuer diese fuenf Checks bleiben als leichte Verdict-Jobs bestehen und validieren nur ihren jeweiligen Suite-Eintrag aus Manifest + Artifact.
+Hinweis: `coverage-shard-integration` importiert in CI weiterhin den gemeinsamen `deep-check-seed-snapshot`; die Runtime-Deep-Suites seeden dagegen einmal zentral in `deep-runtime-suite`.
 Hinweis: Die CI-Jobs `coverage-shard-unit` und `coverage-shard-integration` sind blocking und laufen auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes; `coverage-shard-unit` deckt nur den pure-PHPUnit-Slice ohne Docker/MySQL/Seed ab, waehrend `coverage-shard-integration` die DB-gebundenen Unit-Tests plus Integrations-Controller im dockerisierten Stack ausfuehrt.
 Hinweis: Der CI-Job `coverage-delta` ist blocking, aggregiert die beiden Coverage-Shards und prueft die gemergte Clover gegen die Repo-Policy; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.

@@ -76,6 +76,20 @@ docker compose exec -T php-fpm composer contract-test:write-path -- \
   --username=administrator --password=administrator \
   --retry-count=1 --booking-search-days=14
 
+# optional deep runtime suite producer + verdict flow (same topology as CI)
+docker compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
+  --suites=api-contract-openapi,write-contract-booking,write-contract-api,booking-controller-flows,integration-smoke \
+  --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \
+  --username=administrator --password=administrator \
+  --booking-search-days=14 --retry-count=1 \
+  --start-date=2026-01-01 --end-date=2026-01-31 \
+  --report-dir=storage/logs/ci/deep-runtime-suite
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=api-contract-openapi
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-booking
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-api
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=booking-controller-flows
+docker compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=integration-smoke
+
 # optional booking controller flow tests (register/reschedule/cancel; mutation-safe in ephemeral DB)
 docker compose exec -T php-fpm composer test:booking-controller-flows
 
@@ -214,8 +228,9 @@ Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push .
 
 CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
 CI note: `deep-check-bootstrap` now ships a vendor-only dependency artifact. Deep docker-compose jobs restore `vendor/` from that artifact and set CI-only bootstrap flags so `php-fpm` does not rerun `npm install` or asset compilation when `node_modules/` is absent.
-CI note: dockerized deep jobs now restore a deterministic `deep-check-seed-snapshot` artifact instead of rerunning `php index.php console install` per job.
-CI note: the HTTP deep jobs (`api-contract-openapi`, `write-contract-booking`, `write-contract-api`, `integration-smoke`) use the CI-parity `mysql + php-fpm + nginx` stack; `booking-controller-flows` continues to run with `mysql + php-fpm` only.
+CI note: `coverage-shard-integration` currently restores the deterministic `deep-check-seed-snapshot` artifact; the runtime deep suites now seed once inside `deep-runtime-suite` instead of importing that snapshot per gate.
+CI note: `deep-runtime-suite` is the shared producer for `api-contract-openapi`, `write-contract-booking`, `write-contract-api`, `booking-controller-flows`, and `integration-smoke`; it boots `mysql + php-fpm + nginx` once, seeds once, and writes `storage/logs/ci/deep-runtime-suite/manifest.json`.
+CI note: the existing blocking gate names remain in place as light verdict jobs that only assert their own suite result from the producer manifest and artifacts.
 CI note: `integration-smoke` covers auth + dashboard metrics + booking read endpoints + API auth/read endpoints (read-only).
 CI note: the `api-contract-openapi` check validates selected API v1 endpoints against `openapi.yml` and is blocking.
 CI note: the `write-contract-booking` check validates booking write-path HTTP contracts and is blocking.
