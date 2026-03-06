@@ -161,6 +161,10 @@ PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 PRE_PR_BASE_REF=origin/release-branch bash ./scripts/ci/pre_pr_quick.sh
 PRE_PR_BASE_REF=origin/release-branch PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 bash ./scripts/ci/pre_pr_full.sh
 
+# Optional: Symphony-Pilot Basischecks (deterministisch)
+bash ./scripts/ci/run_symphony_pilot_checks.sh
+bash ./scripts/ci/run_symphony_pilot_checks.sh --with-full-gate
+
 # Optional: PHPStan status check (blocking)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
