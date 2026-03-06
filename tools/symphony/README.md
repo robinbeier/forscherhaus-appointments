@@ -90,10 +90,12 @@ tools/symphony/
     options.ts    # CLI option parsing
     service.ts    # Start/stop lifecycle
     linear-tracker.ts  # Linear GraphQL adapter (read-only)
+    workspace-manager.ts  # Workspace safety + hook lifecycle
     workflow.ts   # Workflow loader + typed config + reload
     template.ts   # Strict prompt template rendering
     options.test.ts
     linear-tracker.test.ts
+    workspace-manager.test.ts
     template.test.ts
     workflow-config.test.ts
   package.json
