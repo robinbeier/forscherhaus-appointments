@@ -10,17 +10,19 @@
 
 ## Execution & Validation (Highest Priority)
 
+1. **[2026-03-06] Validate dependency changes against the CI runtime, not just the host toolchain**
+   Do instead: when changing `composer.json`, `composer.lock`, `package.json`, or `package-lock.json`, run the relevant Docker/CI-parity gates because host PHP/Node versions may be newer than the blocking CI versions.
 1. **[2026-03-04] Treat OpenAPI error responses as schema-optional in contract smokes**
    Do instead: for 4xx/5xx checks (for example unauthorized guards), assert status/header contracts first and only enforce JSON schema when the spec actually defines one.
-2. **[2026-02-22] Run CI-parity tests through docker compose before merge-sensitive changes**
+1. **[2026-02-22] Run CI-parity tests through docker compose before merge-sensitive changes**
    Do instead: execute `docker compose run --rm php-fpm composer test` and report failures or environment limits in handoff.
-3. **[2026-02-22] Rebuild frontend bundles when touching `assets/js` or `assets/css`**
+1. **[2026-02-22] Rebuild frontend bundles when touching `assets/js` or `assets/css`**
    Do instead: run `npx gulp scripts` and/or `npx gulp styles`, then verify updated artifacts in `build/`.
-4. **[2026-02-22] Keep migration rollback path complete**
+1. **[2026-02-22] Keep migration rollback path complete**
    Do instead: implement database changes only via CodeIgniter migrations and verify both migrate up and down behavior.
-5. **[2026-02-26] Keep deep health checks fast under dependency outages**
+1. **[2026-02-26] Keep deep health checks fast under dependency outages**
    Do instead: gate local-only fallback endpoints by `APP_ENV` and keep health-check network timeouts short to avoid long blocking requests.
-6. **[2026-02-28] Match CI smoke DB readiness before dashboard checks**
+1. **[2026-02-28] Match CI smoke DB readiness before dashboard checks**
    Do instead: wait for both MySQL root ping and app-user query readiness, then retry `php index.php console install` up to 3 times before running `scripts/ci/dashboard_integration_smoke.php`.
 
 ## Repo Guardrails & Domain Behavior
