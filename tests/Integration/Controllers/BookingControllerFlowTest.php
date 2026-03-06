@@ -210,8 +210,12 @@ class BookingControllerFlowTest extends TestCase
         $response = json_decode(get_instance()->output->get_output(), true);
 
         $this->assertIsArray($response);
+        $this->assertArrayHasKey('success', $response);
+        $this->assertArrayHasKey('message', $response);
         $this->assertFalse($response['success'] ?? true);
-        $this->assertSame(lang('requested_hour_is_unavailable'), $response['message'] ?? null);
+        $this->assertIsString($response['message']);
+        $this->assertNotSame('', trim($response['message']));
+        $this->assertSame(lang('requested_hour_is_unavailable'), $response['message']);
         $this->assertArrayNotHasKey('trace', $response);
         $this->assertFalse($this->fixtures->customerExistsByEmail($customerEmail));
     }
