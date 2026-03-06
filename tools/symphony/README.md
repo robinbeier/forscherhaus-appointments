@@ -32,6 +32,9 @@ npm run start
 
 # Tests
 npm test
+
+# Core conformance matrix (SPEC 17.1 - 17.5)
+npm run test:conformance
 ```
 
 ## CLI options
@@ -95,15 +98,18 @@ tools/symphony/
     linear-tracker.ts  # Linear GraphQL adapter (read-only)
     workspace-manager.ts  # Workspace safety + hook lifecycle
     app-server-client.ts  # Codex app-server launch/stream client
+    test-profiles.ts  # Deterministic fake Linear/Codex profiles for tests
     workflow.ts   # Workflow loader + typed config + reload
     template.ts   # Strict prompt template rendering
     options.test.ts
     orchestrator.test.ts
     app-server-client.test.ts
+    test-profiles.test.ts
     linear-tracker.test.ts
     workspace-manager.test.ts
     template.test.ts
     workflow-config.test.ts
   package.json
   tsconfig.json
+  CONFORMANCE_MATRIX.md
 ```
