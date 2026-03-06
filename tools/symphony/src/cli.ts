@@ -32,9 +32,6 @@ async function run(argv: string[]): Promise<void> {
         pollingIntervalMs: loadedConfig.polling.intervalMs,
     });
 
-    const service = new SymphonyService({logger, workflowConfigStore});
-    await service.start();
-
     if (options.checkOnly) {
         await workflowConfigStore.buildDispatchPrompt({
             issue: {
@@ -46,9 +43,11 @@ async function run(argv: string[]): Promise<void> {
         });
 
         logger.info('Check mode complete');
-        await service.stop('check-only');
         return;
     }
+
+    const service = new SymphonyService({logger, workflowConfigStore});
+    await service.start();
 
     logger.info('Symphony service is running. Press Ctrl+C to stop.');
 
