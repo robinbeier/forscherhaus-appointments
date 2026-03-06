@@ -75,7 +75,7 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
             maxAttempts: 3,
         },
         codex: {
-            command: 'codex --app-server',
+            command: 'codex app-server',
             responseTimeoutMs: 2000,
             turnTimeoutMs: 5000,
         },

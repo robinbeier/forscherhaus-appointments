@@ -39,13 +39,13 @@ Issue {{issue.identifier}} (attempt {{attempt}})
         contents,
         env: {
             LINEAR_API_KEY: 'secret-token',
-            SYMPHONY_CODEX_COMMAND: 'codex --app-server',
+            SYMPHONY_CODEX_COMMAND: 'codex app-server',
         },
         homeDir: '/home/robin',
     });
 
     assert.equal(config.tracker.apiKey, 'secret-token');
-    assert.equal(config.codex.command, 'codex --app-server');
+    assert.equal(config.codex.command, 'codex app-server');
     assert.equal(config.workspace.root, '/home/robin/pilot/workspaces');
 });
 
@@ -55,7 +55,7 @@ test('validateDispatchPreflight classifies missing required fields', () => {
 tracker:
   project_slug: school-appointments
 codex:
-  command: codex --app-server
+  command: codex app-server
 ---
 Issue {{issue.identifier}}
 `;

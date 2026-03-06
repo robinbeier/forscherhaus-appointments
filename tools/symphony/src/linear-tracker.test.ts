@@ -40,8 +40,25 @@ test('fetchCandidateIssues uses configured project/state filters and normalizes 
                                 priority: null,
                                 state: {id: 'state-id-1', name: 'In Progress', type: 'started'},
                                 labels: {nodes: [{name: 'Feature'}, {name: 'CI'}]},
-                                blockedByIssues: {nodes: [{identifier: 'ROB-9'}]},
-                                project: {slug: 'forscherhaus'},
+                                relations: {
+                                    nodes: [
+                                        {
+                                            type: 'blocks',
+                                            issue: {id: 'issue-id-1', identifier: 'ROB-10'},
+                                            relatedIssue: {id: 'issue-id-2', identifier: 'ROB-11'},
+                                        },
+                                    ],
+                                },
+                                inverseRelations: {
+                                    nodes: [
+                                        {
+                                            type: 'blocks',
+                                            issue: {id: 'issue-id-9', identifier: 'ROB-9'},
+                                            relatedIssue: {id: 'issue-id-1', identifier: 'ROB-10'},
+                                        },
+                                    ],
+                                },
+                                project: {slugId: 'forscherhaus'},
                             },
                         ],
                         pageInfo: {
@@ -63,7 +80,7 @@ test('fetchCandidateIssues uses configured project/state filters and normalizes 
     assert.equal(issues[0].priority, 0);
 
     const body = JSON.parse(String(calls[0].init?.body));
-    assert.equal(body.variables.projectSlug, 'forscherhaus');
+    assert.equal(body.variables.projectSlugId, 'forscherhaus');
     assert.deepEqual(body.variables.stateNames, ['In Progress', 'Todo']);
 });
 
@@ -155,12 +172,29 @@ test('HTTP status errors are mapped to linear_api_status', async () => {
             projectSlug: 'forscherhaus',
             activeStates: ['In Progress'],
         },
-        fetchImpl: async () => jsonResponse({message: 'forbidden'}, 403),
+        fetchImpl: async () =>
+            new Response(
+                JSON.stringify({
+                    errors: [{message: 'Field "slug" is not defined by type "NullableProjectFilter".'}],
+                }),
+                {
+                    status: 400,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-request-id': 'req-123',
+                    },
+                },
+            ),
     });
 
     await assert.rejects(
         () => adapter.fetchCandidateIssues(),
-        (error) => error instanceof LinearTrackerError && error.errorClass === 'linear_api_status',
+        (error) =>
+            error instanceof LinearTrackerError &&
+            error.errorClass === 'linear_api_status' &&
+            error.message.includes('Field "slug" is not defined') &&
+            error.details.requestId === 'req-123' &&
+            Array.isArray(error.details.errors),
     );
 });
 

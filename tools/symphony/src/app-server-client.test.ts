@@ -32,6 +32,16 @@ function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
     };
 }
 
+async function emitHandshake(fakeProcess: FakeAppServerProcess, threadId: string, turnId: string): Promise<void> {
+    fakeProcess.stdout.write('{"id":1,"result":{"userAgent":"codex-test"}}\n');
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    fakeProcess.stdout.write(`{"id":2,"result":{"thread":{"id":"${threadId}"}}}\n`);
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    fakeProcess.stdout.write(
+        `{"id":3,"result":{"turn":{"id":"${turnId}","status":"inProgress","items":[],"error":null}}}\n`,
+    );
+}
+
 test('runTurn sends handshake in required order and handles partial-line buffering', async () => {
     const fakeProcess = new FakeAppServerProcess();
     const events: OrchestratorEvent[] = [];
@@ -43,7 +53,7 @@ test('runTurn sends handshake in required order and handles partial-line bufferi
     const client = new CodexAppServerClient({
         logger: createLoggerStub([]),
         config: {
-            command: 'codex --app-server',
+            command: 'codex app-server',
             workspacePath: '/tmp',
             responseTimeoutMs: 300,
             turnTimeoutMs: 1000,
@@ -56,15 +66,20 @@ test('runTurn sends handshake in required order and handles partial-line bufferi
         prompt: 'Test prompt',
         issueIdentifier: 'ROB-12',
         attempt: 1,
-        threadId: 'thread-123',
-        turnId: 'turn-456',
     });
 
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
-
-    fakeProcess.stdout.write('{"type":"response.output_text.delta","delta":"Hel');
-    fakeProcess.stdout.write('lo"}\n{"type":"response.output_text.delta","delta":" World"}\n');
-    fakeProcess.stdout.write('{"type":"response.completed"}\n');
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+    fakeProcess.stdout.write(
+        '{"method":"item/agentMessage/delta","params":{"threadId":"thread-123","turnId":"turn-456","itemId":"item-1","delta":"Hel',
+    );
+    fakeProcess.stdout.write('lo"}}\n');
+    fakeProcess.stdout.write(
+        '{"method":"item/agentMessage/delta","params":{"threadId":"thread-123","turnId":"turn-456","itemId":"item-1","delta":" World"}}\n',
+    );
+    fakeProcess.stdout.write(
+        '{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-456","status":"completed","items":[],"error":null}}}\n',
+    );
 
     const result = await turnPromise;
     assert.equal(result.status, 'completed');
@@ -76,7 +91,7 @@ test('runTurn sends handshake in required order and handles partial-line bufferi
         .split('\n')
         .map((line) => JSON.parse(line));
     assert.deepEqual(
-        sentMessages.map((message) => message.type),
+        sentMessages.map((message) => message.method),
         ['initialize', 'initialized', 'thread/start', 'turn/start'],
     );
 
@@ -88,12 +103,47 @@ test('runTurn sends handshake in required order and handles partial-line bufferi
     assert.equal(sessionEvent.sessionId, 'thread-123-turn-456');
 });
 
+test('runTurn accepts string-typed JSON-RPC response ids', async () => {
+    const fakeProcess = new FakeAppServerProcess();
+    const client = new CodexAppServerClient({
+        logger: createLoggerStub([]),
+        config: {
+            command: 'codex app-server',
+            workspacePath: '/tmp',
+            responseTimeoutMs: 300,
+            turnTimeoutMs: 1000,
+        },
+        spawnImpl: () => fakeProcess,
+    });
+
+    const turnPromise = client.runTurn({
+        prompt: 'String id response test',
+        issueIdentifier: 'ROB-12',
+        attempt: 1,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    fakeProcess.stdout.write('{"id":"1","result":{"userAgent":"codex-test"}}\n');
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    fakeProcess.stdout.write('{"id":"2","result":{"thread":{"id":"thread-123"}}}\n');
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    fakeProcess.stdout.write(
+        '{"id":"3","result":{"turn":{"id":"turn-456","status":"inProgress","items":[],"error":null}}}\n',
+    );
+    fakeProcess.stdout.write(
+        '{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-456","status":"completed","items":[],"error":null}}}\n',
+    );
+
+    const result = await turnPromise;
+    assert.equal(result.status, 'completed');
+});
+
 test('turn.input_required resolves without hanging', async () => {
     const fakeProcess = new FakeAppServerProcess();
     const client = new CodexAppServerClient({
         logger: createLoggerStub([]),
         config: {
-            command: 'codex --app-server',
+            command: 'codex app-server',
             workspacePath: '/tmp',
             responseTimeoutMs: 300,
             turnTimeoutMs: 1000,
@@ -108,7 +158,8 @@ test('turn.input_required resolves without hanging', async () => {
     });
 
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
-    fakeProcess.stdout.write('{"type":"turn.input_required"}\n');
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+    fakeProcess.stdout.write('{"id":"server-1","method":"item/tool/requestUserInput","params":{}}\n');
 
     const result = await turnPromise;
     assert.equal(result.status, 'input_required');
@@ -119,7 +170,7 @@ test('runTurn maps response timeout when no response arrives', async () => {
     const client = new CodexAppServerClient({
         logger: createLoggerStub([]),
         config: {
-            command: 'codex --app-server',
+            command: 'codex app-server',
             workspacePath: '/tmp',
             responseTimeoutMs: 20,
             turnTimeoutMs: 1000,
@@ -138,12 +189,42 @@ test('runTurn maps response timeout when no response arrives', async () => {
     );
 });
 
+test('runTurn does not trigger response timeout after turn start handshake', async () => {
+    const fakeProcess = new FakeAppServerProcess();
+    const client = new CodexAppServerClient({
+        logger: createLoggerStub([]),
+        config: {
+            command: 'codex app-server',
+            workspacePath: '/tmp',
+            responseTimeoutMs: 20,
+            turnTimeoutMs: 150,
+        },
+        spawnImpl: () => fakeProcess,
+    });
+
+    const turnPromise = client.runTurn({
+        prompt: 'Handshake timeout guard test',
+        issueIdentifier: 'ROB-12',
+        attempt: 1,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+    await new Promise<void>((resolve) => setTimeout(resolve, 60));
+    fakeProcess.stdout.write(
+        '{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-456","status":"completed","items":[],"error":null}}}\n',
+    );
+
+    const result = await turnPromise;
+    assert.equal(result.status, 'completed');
+});
+
 test('runTurn maps turn timeout when turn exceeds limit', async () => {
     const fakeProcess = new FakeAppServerProcess();
     const client = new CodexAppServerClient({
         logger: createLoggerStub([]),
         config: {
-            command: 'codex --app-server',
+            command: 'codex app-server',
             workspacePath: '/tmp',
             responseTimeoutMs: 2000,
             turnTimeoutMs: 20,
@@ -151,13 +232,17 @@ test('runTurn maps turn timeout when turn exceeds limit', async () => {
         spawnImpl: () => fakeProcess,
     });
 
+    const turnPromise = client.runTurn({
+        prompt: 'Turn timeout test',
+        issueIdentifier: 'ROB-12',
+        attempt: 1,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+
     await assert.rejects(
-        () =>
-            client.runTurn({
-                prompt: 'Turn timeout test',
-                issueIdentifier: 'ROB-12',
-                attempt: 1,
-            }),
+        () => turnPromise,
         (error) => error instanceof AppServerClientError && error.errorClass === 'turn_timeout',
     );
 });
@@ -169,7 +254,7 @@ test('runTurn emits rate-limit, token-usage and diagnostics events', async () =>
     const client = new CodexAppServerClient({
         logger: createLoggerStub([]),
         config: {
-            command: 'codex --app-server',
+            command: 'codex app-server',
             workspacePath: '/tmp',
             responseTimeoutMs: 300,
             turnTimeoutMs: 1000,
@@ -185,10 +270,15 @@ test('runTurn emits rate-limit, token-usage and diagnostics events', async () =>
     });
 
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
     fakeProcess.stderr.write('diagnostic line\n');
-    fakeProcess.stdout.write('{"type":"rate_limits.updated","rate_limits":{"remaining":17}}\n');
-    fakeProcess.stdout.write('{"type":"session.updated","usage":{"input_tokens":12,"output_tokens":5}}\n');
-    fakeProcess.stdout.write('{"type":"response.completed"}\n');
+    fakeProcess.stdout.write('{"method":"account/rateLimits/updated","params":{"rateLimits":{"remaining":17}}}\n');
+    fakeProcess.stdout.write(
+        '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-123","turnId":"turn-456","tokenUsage":{"total":{"totalTokens":17}}}}\n',
+    );
+    fakeProcess.stdout.write(
+        '{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-456","status":"completed","items":[],"error":null}}}\n',
+    );
 
     const result = await turnPromise;
     assert.equal(result.status, 'completed');
@@ -203,7 +293,7 @@ test('turn.failed is mapped to turn_failed error', async () => {
     const client = new CodexAppServerClient({
         logger: createLoggerStub([]),
         config: {
-            command: 'codex --app-server',
+            command: 'codex app-server',
             workspacePath: '/tmp',
             responseTimeoutMs: 300,
             turnTimeoutMs: 1000,
@@ -218,10 +308,66 @@ test('turn.failed is mapped to turn_failed error', async () => {
     });
 
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
-    fakeProcess.stdout.write('{"type":"turn.failed","error":"boom"}\n');
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+    fakeProcess.stdout.write(
+        '{"method":"error","params":{"threadId":"thread-123","turnId":"turn-456","willRetry":false,"error":{"message":"boom"}}}\n',
+    );
 
     await assert.rejects(
         () => turnPromise,
         (error) => error instanceof AppServerClientError && error.errorClass === 'turn_failed',
+    );
+});
+
+test('approval requests are auto-accepted and turn continues', async () => {
+    const fakeProcess = new FakeAppServerProcess();
+    let stdinBuffer = '';
+    fakeProcess.stdin.on('data', (chunk) => {
+        stdinBuffer += chunk.toString();
+    });
+
+    const client = new CodexAppServerClient({
+        logger: createLoggerStub([]),
+        config: {
+            command: 'codex app-server',
+            workspacePath: '/tmp',
+            responseTimeoutMs: 300,
+            turnTimeoutMs: 1000,
+        },
+        spawnImpl: () => fakeProcess,
+    });
+
+    const turnPromise = client.runTurn({
+        prompt: 'Approval flow',
+        issueIdentifier: 'ROB-12',
+        attempt: 1,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+    fakeProcess.stdout.write(
+        '{"id":"approve-1","method":"item/commandExecution/requestApproval","params":{"itemId":"item-1","threadId":"thread-123","turnId":"turn-456"}}\n',
+    );
+    fakeProcess.stdout.write(
+        '{"id":"approve-2","method":"item/fileChange/requestApproval","params":{"itemId":"item-2","threadId":"thread-123","turnId":"turn-456"}}\n',
+    );
+    fakeProcess.stdout.write(
+        '{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-456","status":"completed","items":[],"error":null}}}\n',
+    );
+
+    const result = await turnPromise;
+    assert.equal(result.status, 'completed');
+
+    const sentMessages = stdinBuffer
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+    const approvalResponses = sentMessages.filter(
+        (message) => message.id === 'approve-1' || message.id === 'approve-2',
+    );
+    assert.equal(approvalResponses.length, 2);
+    assert.deepEqual(
+        approvalResponses.map((message) => message.result),
+        [{decision: 'acceptForSession'}, {decision: 'acceptForSession'}],
     );
 });

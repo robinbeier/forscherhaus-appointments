@@ -23,7 +23,7 @@ npm run build
 # Validate bootstrap + workflow path and exit
 # Example:
 # SYMPHONY_LINEAR_API_KEY=token SYMPHONY_LINEAR_PROJECT_SLUG=project \
-# SYMPHONY_CODEX_COMMAND="codex --app-server" npm run dev -- --check
+# SYMPHONY_CODEX_COMMAND="codex app-server" npm run dev -- --check
 npm run dev -- --check
 
 # Start compiled service (runs until SIGINT/SIGTERM)
@@ -127,6 +127,10 @@ Key behavior:
 -   optional state endpoints:
     -   `GET /api/v1/state`
     -   `POST /api/v1/refresh`
+-   app-server approval callbacks for command/file change are auto-accepted with
+    session scope (`acceptForSession`) so pilot turns can continue unattended
+-   repo-specific pilots can prepare per-issue git worktrees via `before_run`
+    hooks and remove registrations via `before_remove` hooks
 
 ## Structure
 

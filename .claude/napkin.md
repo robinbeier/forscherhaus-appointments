@@ -10,6 +10,8 @@
 
 ## Execution & Validation (Highest Priority)
 
+1. **[2026-03-06] Keep Symphony Linear GraphQL queries aligned with current schema**
+   Do instead: use `project.slugId` (not `project.slug`) and relation-based issue links (`relations`/`inverseRelations`) instead of removed fields like `blockedByIssues`; include response-body details for non-2xx tracker errors to speed up diagnosis.
 1. **[2026-03-06] Validate dependency changes against the CI runtime, not just the host toolchain**
    Do instead: when changing `composer.json`, `composer.lock`, `package.json`, or `package-lock.json`, run the relevant Docker/CI-parity gates because host PHP/Node versions may be newer than the blocking CI versions.
 1. **[2026-03-04] Treat OpenAPI error responses as schema-optional in contract smokes**

@@ -45,13 +45,37 @@ interface GraphQlIssueNode {
             name: string;
         }>;
     } | null;
-    blockedByIssues?: {
-        nodes?: Array<{
-            identifier: string;
-        }>;
+    relations?: {
+        nodes?: GraphQlIssueRelationNode[];
+    } | null;
+    inverseRelations?: {
+        nodes?: GraphQlIssueRelationNode[];
     } | null;
     project?: {
-        slug: string;
+        slugId?: string | null;
+    } | null;
+}
+
+interface GraphQlIssueRelationNode {
+    type?: string | null;
+    issue?: {
+        id?: string | null;
+        identifier?: string | null;
+    } | null;
+    relatedIssue?: {
+        id?: string | null;
+        identifier?: string | null;
+    } | null;
+}
+
+interface GraphQlIssueStateNode {
+    id: string;
+    identifier: string;
+    updatedAt: string;
+    state?: {
+        id: string;
+        name: string;
+        type?: string | null;
     } | null;
 }
 
@@ -64,7 +88,7 @@ interface GraphQlIssueStatesPage {
 }
 
 interface GraphQlIssueStatesByIdsPage {
-    issues: GraphQlConnection<Pick<GraphQlIssueNode, 'id' | 'identifier' | 'state' | 'updatedAt'>>;
+    issues: GraphQlConnection<GraphQlIssueStateNode>;
 }
 
 interface GraphQlErrorEntry {
@@ -124,8 +148,38 @@ function normalizeLabels(node: GraphQlIssueNode): string[] {
 }
 
 function normalizeBlockedByIdentifiers(node: GraphQlIssueNode): string[] {
-    const blockedByNodes = node.blockedByIssues?.nodes ?? [];
-    return blockedByNodes.map((entry) => entry.identifier.trim()).filter((identifier) => identifier.length > 0);
+    const relationNodes: GraphQlIssueRelationNode[] = [
+        ...(node.relations?.nodes ?? []),
+        ...(node.inverseRelations?.nodes ?? []),
+    ];
+    const blockedByIdentifiers = new Set<string>();
+
+    for (const relationNode of relationNodes) {
+        if ((relationNode.type ?? '').trim().toLowerCase() !== 'blocks') {
+            continue;
+        }
+
+        const blockerIssueId = relationNode.issue?.id?.trim() ?? '';
+        const blockerIssueIdentifier = relationNode.issue?.identifier?.trim() ?? '';
+        const blockedIssueId = relationNode.relatedIssue?.id?.trim() ?? '';
+        const blockedIssueIdentifier = relationNode.relatedIssue?.identifier?.trim() ?? '';
+
+        const isCurrentIssueBlocked =
+            (blockedIssueId !== '' && blockedIssueId === node.id) ||
+            (blockedIssueIdentifier !== '' && blockedIssueIdentifier === node.identifier);
+
+        if (!isCurrentIssueBlocked || blockerIssueIdentifier === '') {
+            continue;
+        }
+
+        if (blockerIssueId !== '' && blockerIssueId === node.id) {
+            continue;
+        }
+
+        blockedByIdentifiers.add(blockerIssueIdentifier);
+    }
+
+    return Array.from(blockedByIdentifiers);
 }
 
 function normalizePriority(value: number | null): number {
@@ -137,7 +191,7 @@ function normalizePriority(value: number | null): number {
 }
 
 function normalizeIssue(node: GraphQlIssueNode, fallbackProjectSlug: string): TrackedIssue {
-    const projectSlug = node.project?.slug ?? fallbackProjectSlug;
+    const projectSlug = node.project?.slugId ?? fallbackProjectSlug;
     if (projectSlug.trim() === '') {
         throw new LinearTrackerError('linear_invalid_response', 'Missing project slug in Linear issue payload.');
     }
@@ -190,10 +244,10 @@ export class LinearTrackerAdapter {
         while (true) {
             const page: GraphQlIssuesPage = await this.executeGraphQl<GraphQlIssuesPage>(
                 `
-                query FetchIssuesByState($projectSlug: String!, $stateNames: [String!], $first: Int!, $after: String) {
+                query FetchIssuesByState($projectSlugId: String!, $stateNames: [String!], $first: Int!, $after: String) {
                     issues(
                         filter: {
-                            project: { slug: { eq: $projectSlug } }
+                            project: { slugId: { eq: $projectSlugId } }
                             state: { name: { in: $stateNames } }
                         }
                         first: $first
@@ -216,13 +270,34 @@ export class LinearTrackerAdapter {
                                     name
                                 }
                             }
-                            blockedByIssues {
+                            relations {
                                 nodes {
-                                    identifier
+                                    type
+                                    issue {
+                                        id
+                                        identifier
+                                    }
+                                    relatedIssue {
+                                        id
+                                        identifier
+                                    }
+                                }
+                            }
+                            inverseRelations {
+                                nodes {
+                                    type
+                                    issue {
+                                        id
+                                        identifier
+                                    }
+                                    relatedIssue {
+                                        id
+                                        identifier
+                                    }
                                 }
                             }
                             project {
-                                slug
+                                slugId
                             }
                         }
                         pageInfo {
@@ -233,7 +308,7 @@ export class LinearTrackerAdapter {
                 }
                 `,
                 {
-                    projectSlug,
+                    projectSlugId: projectSlug,
                     stateNames: trimmedStates,
                     first: this.config.pageSize,
                     after: afterCursor,
@@ -284,7 +359,7 @@ export class LinearTrackerAdapter {
 
         const page = await this.executeGraphQl<GraphQlIssueStatesByIdsPage>(
             `
-            query FetchIssueStatesByIds($ids: [String!], $first: Int!) {
+            query FetchIssueStatesByIds($ids: [ID!], $first: Int!) {
                 issues(filter: { id: { in: $ids } }, first: $first) {
                     nodes {
                         id
@@ -332,10 +407,10 @@ export class LinearTrackerAdapter {
 
         const page = await this.executeGraphQl<GraphQlIssueStatesPage>(
             `
-            query FetchIssueStatesByStateNames($projectSlug: String!, $stateNames: [String!], $first: Int!) {
+            query FetchIssueStatesByStateNames($projectSlugId: String!, $stateNames: [String!], $first: Int!) {
                 issues(
                     filter: {
-                        project: { slug: { eq: $projectSlug } }
+                        project: { slugId: { eq: $projectSlugId } }
                         state: { name: { in: $stateNames } }
                     }
                     first: $first
@@ -357,13 +432,34 @@ export class LinearTrackerAdapter {
                                 name
                             }
                         }
-                        blockedByIssues {
+                        relations {
                             nodes {
-                                identifier
+                                type
+                                issue {
+                                    id
+                                    identifier
+                                }
+                                relatedIssue {
+                                    id
+                                    identifier
+                                }
+                            }
+                        }
+                        inverseRelations {
+                            nodes {
+                                type
+                                issue {
+                                    id
+                                    identifier
+                                }
+                                relatedIssue {
+                                    id
+                                    identifier
+                                }
                             }
                         }
                         project {
-                            slug
+                            slugId
                         }
                     }
                     pageInfo {
@@ -374,7 +470,7 @@ export class LinearTrackerAdapter {
             }
             `,
             {
-                projectSlug: this.config.projectSlug,
+                projectSlugId: this.config.projectSlug,
                 stateNames: states,
                 first: this.config.pageSize,
             },
@@ -425,9 +521,14 @@ export class LinearTrackerAdapter {
         clearTimeout(timeoutHandle);
 
         if (!response.ok) {
-            throw new LinearTrackerError('linear_api_status', `Linear API returned status ${response.status}.`, {
-                status: response.status,
-            });
+            const details = await this.extractApiStatusErrorDetails(response);
+            const summary = this.summarizeApiStatusError(details);
+            const message =
+                summary.length > 0
+                    ? `Linear API returned status ${response.status}: ${summary}`
+                    : `Linear API returned status ${response.status}.`;
+
+            throw new LinearTrackerError('linear_api_status', message, details);
         }
 
         let payload: GraphQlResponse<ResponseType>;
@@ -448,5 +549,57 @@ export class LinearTrackerAdapter {
         }
 
         return payload.data;
+    }
+
+    private async extractApiStatusErrorDetails(response: Response): Promise<Record<string, unknown>> {
+        const details: Record<string, unknown> = {
+            status: response.status,
+            statusText: response.statusText,
+        };
+
+        const requestId = response.headers.get('x-request-id');
+        if (requestId) {
+            details.requestId = requestId;
+        }
+
+        let rawBody = '';
+        try {
+            rawBody = await response.text();
+        } catch {
+            return details;
+        }
+
+        if (rawBody.trim() === '') {
+            return details;
+        }
+
+        details.responseBody = rawBody.length > 2000 ? `${rawBody.slice(0, 2000)}...` : rawBody;
+
+        try {
+            const parsedPayload = JSON.parse(rawBody) as GraphQlResponse<unknown>;
+            if (parsedPayload.errors && parsedPayload.errors.length > 0) {
+                details.errors = parsedPayload.errors.map((entry) => entry.message ?? 'unknown GraphQL error');
+            }
+        } catch {
+            // Keep raw body details only when response is not JSON.
+        }
+
+        return details;
+    }
+
+    private summarizeApiStatusError(details: Record<string, unknown>): string {
+        const errorMessages = Array.isArray(details.errors)
+            ? details.errors.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+            : [];
+
+        if (errorMessages.length > 0) {
+            return errorMessages.join(' | ');
+        }
+
+        if (typeof details.responseBody === 'string' && details.responseBody.trim().length > 0) {
+            return details.responseBody;
+        }
+
+        return '';
     }
 }
