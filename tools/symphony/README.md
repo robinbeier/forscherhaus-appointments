@@ -79,6 +79,8 @@ Key behavior:
     `codex.command`
 -   dynamic reload on file change with last-known-good fallback when a reload is
     invalid
+-   orchestrator tick loop with bounded concurrency, Todo-blocker filtering,
+    and in-memory retry queue (`1s` continuation retry + exponential backoff)
 
 ## Structure
 
@@ -88,13 +90,15 @@ tools/symphony/
     cli.ts        # Entry point, signal handling
     logger.ts     # Structured log output
     options.ts    # CLI option parsing
-    service.ts    # Start/stop lifecycle
+    service.ts    # Start/stop lifecycle + poll scheduler
+    orchestrator.ts  # Poll/dispatch/reconcile/retry core
     linear-tracker.ts  # Linear GraphQL adapter (read-only)
     workspace-manager.ts  # Workspace safety + hook lifecycle
     app-server-client.ts  # Codex app-server launch/stream client
     workflow.ts   # Workflow loader + typed config + reload
     template.ts   # Strict prompt template rendering
     options.test.ts
+    orchestrator.test.ts
     app-server-client.test.ts
     linear-tracker.test.ts
     workspace-manager.test.ts
