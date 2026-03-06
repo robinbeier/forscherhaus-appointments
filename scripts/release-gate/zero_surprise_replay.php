@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/lib/GateProcessRunner.php';
 require_once __DIR__ . '/lib/ZeroSurpriseReport.php';
+require_once __DIR__ . '/lib/ZeroSurpriseCredentials.php';
 
 use ReleaseGate\GateProcessRunner;
+use ReleaseGate\ZeroSurpriseCredentials;
 use ReleaseGate\ZeroSurpriseReport;
 
 const ZERO_SURPRISE_EXIT_SUCCESS = 0;
@@ -15,7 +17,7 @@ const ZERO_SURPRISE_EXIT_RUNTIME_ERROR = 2;
 $repoRoot = dirname(__DIR__, 2);
 $timestamp = gmdate('Ymd\THis\Z');
 $defaultOutputPath = $repoRoot . '/storage/logs/release-gate/zero-surprise-' . $timestamp . '.json';
-$defaultTimezone = 'Europe/Berlin';
+$defaultProfile = 'school-day-default';
 
 $report = null;
 $exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
@@ -23,7 +25,7 @@ $composeProject = null;
 $config = [];
 
 try {
-    $config = parseCliOptions($defaultOutputPath, $defaultTimezone);
+    $config = parseCliOptions($defaultOutputPath, $defaultProfile);
 
     if (($config['help'] ?? false) === true) {
         printUsage();
@@ -40,6 +42,9 @@ try {
         $composeProject,
         [
             'dump_file' => $config['dump_file'],
+            'credentials_file' => $config['credentials_file'],
+            'profile_name' => $config['profile_name'],
+            'profile_window' => $config['profile_window'],
             'base_url' => $config['base_url'],
             'index_page' => $config['index_page'],
             'start_date' => $config['start_date'],
@@ -217,18 +222,20 @@ exit($exitCode);
 /**
  * @return array<string, mixed>
  */
-function parseCliOptions(string $defaultOutputPath, string $defaultTimezone): array
+function parseCliOptions(string $defaultOutputPath, string $defaultProfile): array
 {
     $options = getopt('', [
         'help',
         'release-id:',
         'dump-file:',
-        'base-url:',
-        'index-page:',
-        'username:',
-        'password:',
-        'start-date:',
-        'end-date:',
+        'credentials-file::',
+        'profile::',
+        'base-url::',
+        'index-page::',
+        'username::',
+        'password::',
+        'start-date::',
+        'end-date::',
         'booking-search-days::',
         'retry-count::',
         'max-pdf-duration-ms::',
@@ -249,33 +256,8 @@ function parseCliOptions(string $defaultOutputPath, string $defaultTimezone): ar
 
     $releaseId = trim(getRequiredOption($options, 'release-id'));
     $dumpFile = trim(getRequiredOption($options, 'dump-file'));
-    $baseUrl = trim(getRequiredOption($options, 'base-url'));
-    $indexPage = getRequiredOptionAllowEmpty($options, 'index-page');
-    $username = trim(getRequiredOption($options, 'username'));
-    $password = getRequiredOption($options, 'password');
-    $startDate = trim(getRequiredOption($options, 'start-date'));
-    $endDate = trim(getRequiredOption($options, 'end-date'));
-
-    $bookingSearchDays = parsePositiveInt(
-        getOptionalOption($options, 'booking-search-days', 14),
-        'booking-search-days',
-    );
-    $retryCount = parseNonNegativeInt(getOptionalOption($options, 'retry-count', 1), 'retry-count');
-    $maxPdfDurationMs = parsePositiveInt(
-        getOptionalOption($options, 'max-pdf-duration-ms', 30000),
-        'max-pdf-duration-ms',
-    );
-
-    $timezone = trim((string) getOptionalOption($options, 'timezone', $defaultTimezone));
-    if ($timezone === '') {
-        throw new InvalidArgumentException('Option --timezone must not be empty.');
-    }
-    try {
-        new DateTimeZone($timezone);
-    } catch (Exception $exception) {
-        throw new InvalidArgumentException('Option --timezone is invalid: ' . $timezone, 0, $exception);
-    }
-
+    $credentialsFile = trim((string) getOptionalOption($options, 'credentials-file', ''));
+    $profileName = trim((string) getOptionalOption($options, 'profile', $defaultProfile));
     $outputJson = trim((string) getOptionalOption($options, 'output-json', $defaultOutputPath));
     if ($outputJson === '') {
         throw new InvalidArgumentException('Option --output-json must not be empty.');
@@ -283,17 +265,6 @@ function parseCliOptions(string $defaultOutputPath, string $defaultTimezone): ar
 
     if (!preg_match('/^[A-Za-z0-9._-]+$/', $releaseId)) {
         throw new InvalidArgumentException('Option --release-id contains unsupported characters.');
-    }
-
-    if ($baseUrl === '') {
-        throw new InvalidArgumentException('Option --base-url must not be empty.');
-    }
-
-    validateDate($startDate, 'start-date');
-    validateDate($endDate, 'end-date');
-
-    if ($startDate > $endDate) {
-        throw new InvalidArgumentException('Option --start-date must be <= --end-date.');
     }
 
     if (!is_file($dumpFile) || !is_readable($dumpFile)) {
@@ -304,20 +275,45 @@ function parseCliOptions(string $defaultOutputPath, string $defaultTimezone): ar
         throw new InvalidArgumentException('Option --dump-file must end with .sql or .sql.gz.');
     }
 
+    if ($profileName === '') {
+        throw new InvalidArgumentException('Option --profile must not be empty.');
+    }
+
+    $cliOverrides = [];
+    appendStringOverride($cliOverrides, $options, 'base-url', 'base_url');
+    appendAllowEmptyOverride($cliOverrides, $options, 'index-page', 'index_page');
+    appendStringOverride($cliOverrides, $options, 'username', 'username');
+    appendStringOverride($cliOverrides, $options, 'password', 'password', false);
+    appendStringOverride($cliOverrides, $options, 'start-date', 'start_date');
+    appendStringOverride($cliOverrides, $options, 'end-date', 'end_date');
+    appendNumericOverride($cliOverrides, $options, 'booking-search-days', 'booking_search_days');
+    appendNumericOverride($cliOverrides, $options, 'retry-count', 'retry_count');
+    appendNumericOverride($cliOverrides, $options, 'max-pdf-duration-ms', 'max_pdf_duration_ms');
+    appendStringOverride($cliOverrides, $options, 'timezone', 'timezone');
+
+    $resolved = ZeroSurpriseCredentials::resolve(
+        $credentialsFile !== '' ? $credentialsFile : null,
+        $profileName,
+        $cliOverrides,
+    );
+
     return [
         'help' => false,
         'release_id' => $releaseId,
         'dump_file' => $dumpFile,
-        'base_url' => $baseUrl,
-        'index_page' => $indexPage,
-        'username' => $username,
-        'password' => $password,
-        'start_date' => $startDate,
-        'end_date' => $endDate,
-        'booking_search_days' => $bookingSearchDays,
-        'retry_count' => $retryCount,
-        'max_pdf_duration_ms' => $maxPdfDurationMs,
-        'timezone' => $timezone,
+        'credentials_file' => $resolved['credentials_file'],
+        'profile_name' => $resolved['profile_name'],
+        'profile_window' => $resolved['profile_window'],
+        'base_url' => $resolved['base_url'],
+        'index_page' => $resolved['index_page'],
+        'username' => $resolved['username'],
+        'password' => $resolved['password'],
+        'start_date' => $resolved['start_date'],
+        'end_date' => $resolved['end_date'],
+        'booking_search_days' => $resolved['booking_search_days'],
+        'retry_count' => $resolved['retry_count'],
+        'max_pdf_duration_ms' => $resolved['max_pdf_duration_ms'],
+        'timezone' => $resolved['timezone'],
         'output_json' => $outputJson,
     ];
 }
@@ -344,25 +340,6 @@ function getRequiredOption(array $options, string $name): string
 /**
  * @param array<string, mixed> $options
  */
-function getRequiredOptionAllowEmpty(array $options, string $name): string
-{
-    if (!array_key_exists($name, $options)) {
-        throw new InvalidArgumentException('Missing required option --' . $name . '.');
-    }
-
-    $value = $options[$name];
-    if ($value === false || $value === null) {
-        throw new InvalidArgumentException(
-            'Option --' . $name . ' requires an explicit value (empty allowed as --' . $name . '=).',
-        );
-    }
-
-    return is_array($value) ? (string) end($value) : (string) $value;
-}
-
-/**
- * @param array<string, mixed> $options
- */
 function getOptionalOption(array $options, string $name, mixed $default): mixed
 {
     if (!array_key_exists($name, $options)) {
@@ -375,6 +352,60 @@ function getOptionalOption(array $options, string $name, mixed $default): mixed
     }
 
     return $value;
+}
+
+/**
+ * @param array<string, mixed> $target
+ * @param array<string, mixed> $options
+ */
+function appendStringOverride(
+    array &$target,
+    array $options,
+    string $optionName,
+    string $targetKey,
+    bool $trim = true,
+): void {
+    if (!array_key_exists($optionName, $options)) {
+        return;
+    }
+
+    $value = $options[$optionName];
+    $resolved = is_array($value) ? (string) end($value) : (string) $value;
+    $target[$targetKey] = $trim ? trim($resolved) : $resolved;
+}
+
+/**
+ * @param array<string, mixed> $target
+ * @param array<string, mixed> $options
+ */
+function appendAllowEmptyOverride(array &$target, array $options, string $optionName, string $targetKey): void
+{
+    if (!array_key_exists($optionName, $options)) {
+        return;
+    }
+
+    $value = $options[$optionName];
+    if ($value === false || $value === null) {
+        throw new InvalidArgumentException(
+            'Option --' . $optionName . ' requires an explicit value (empty allowed as --' . $optionName . '=).',
+        );
+    }
+
+    $target[$targetKey] = is_array($value) ? (string) end($value) : (string) $value;
+}
+
+/**
+ * @param array<string, mixed> $target
+ * @param array<string, mixed> $options
+ */
+function appendNumericOverride(array &$target, array $options, string $optionName, string $targetKey): void
+{
+    if (!array_key_exists($optionName, $options)) {
+        return;
+    }
+
+    $value = $options[$optionName];
+    $target[$targetKey] = is_array($value) ? end($value) : $value;
 }
 
 function parsePositiveInt(mixed $raw, string $name): int
@@ -994,18 +1025,22 @@ function printUsage(): void
         'Required:',
         '  --release-id=VALUE             Release identifier (safe chars: letters, digits, ._-)',
         '  --dump-file=PATH               Absolute/relative path to .sql or .sql.gz dump file',
-        '  --base-url=URL                 App base URL for in-stack checks (example: http://nginx)',
-        '  --index-page=VALUE             URL index page segment (use --index-page= for rewrite mode)',
-        '  --username=NAME                Admin username',
-        '  --password=PASS                Admin password',
-        '  --start-date=YYYY-MM-DD        Dashboard filter start date (inclusive)',
-        '  --end-date=YYYY-MM-DD          Dashboard filter end date (inclusive)',
+        '  One credential source:',
+        '    --credentials-file=PATH      INI file with base_url/index_page/username/password',
+        '    or explicit --base-url/--index-page/--username/--password flags',
         '',
         'Optional:',
-        '  --booking-search-days=N        Booking slot search window (default: 14)',
-        '  --retry-count=N                Retry count for flaky write checks (default: 1)',
-        '  --max-pdf-duration-ms=N        Max allowed PDF export duration (default: 30000)',
-        '  --timezone=TZID                Time zone for deterministic fixtures (default: Europe/Berlin)',
+        '  --profile=NAME                 Named digital-twin profile (default: school-day-default)',
+        '  --base-url=URL                 App base URL override',
+        '  --index-page=VALUE             URL index page override (use --index-page= for rewrite mode)',
+        '  --username=NAME                Admin username override',
+        '  --password=PASS                Admin password override',
+        '  --start-date=YYYY-MM-DD        Dashboard filter start date override',
+        '  --end-date=YYYY-MM-DD          Dashboard filter end date override',
+        '  --booking-search-days=N        Booking slot search window override',
+        '  --retry-count=N                Retry count for flaky write checks override',
+        '  --max-pdf-duration-ms=N        Max allowed PDF export duration override',
+        '  --timezone=TZID                Time zone override (default profile: Europe/Berlin)',
         '  --output-json=PATH             Consolidated report path',
         '                                (default: storage/logs/release-gate/zero-surprise-<UTC>.json)',
         '  --help                         Show this help',
@@ -1018,3 +1053,4 @@ function printUsage(): void
 
     fwrite(STDOUT, implode(PHP_EOL, $lines) . PHP_EOL);
 }
+

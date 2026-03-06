@@ -7,6 +7,9 @@
 set -Eeuo pipefail
 umask 022
 
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_CWD="$(pwd -P)"
+
 REL=""
 APP="/var/www/html/easyappointments"
 SRC="/root/releases"
@@ -21,12 +24,22 @@ RENDERER_STATE_DIR="/var/lib/fh-pdf-renderer"
 DEEP_HEALTH_URL="http://localhost/index.php/healthz"
 HEALTHZ_TOKEN_FILE=""
 ZERO_SURPRISE_REPORT=""
+ZERO_SURPRISE_DUMP_FILE=""
+ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE=""
 ZERO_SURPRISE_MAX_AGE_MINUTES=240
 REQUIRE_ZERO_SURPRISE=1
 ZERO_SURPRISE_EXPECTED_MODE="predeploy"
+ZERO_SURPRISE_PROFILE="school-day-default"
+ZERO_SURPRISE_BREAKGLASS_FILE=""
+ZERO_SURPRISE_BREAKGLASS_USED=0
+ZERO_SURPRISE_BREAKGLASS_TICKET=""
+ZERO_SURPRISE_BREAKGLASS_REASON=""
 ZERO_SURPRISE_CANARY_ENABLED=1
 ZERO_SURPRISE_CANARY_TIMEOUT=300
 ZERO_SURPRISE_CANARY_CREDENTIALS_FILE=""
+ZERO_SURPRISE_CANARY_REPORT=""
+ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE=""
+ZERO_SURPRISE_INCIDENT_TIMEOUT=10
 
 RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
@@ -57,16 +70,27 @@ Renderer / health gate options:
   --renderer-state-dir PATH    Persistent renderer state dir      [default: /var/lib/fh-pdf-renderer]
   --deep-health-url URL         App deep health endpoint           [default: http://localhost/index.php/healthz]
   --healthz-token-file PATH     File containing deep-health token  [required for non-dry deploy]
-  --zero-surprise-report PATH   Path to zero-surprise report JSON  [required when gate is enabled]
+  --zero-surprise-report PATH   Output path for generated predeploy report
+  --zero-surprise-dump-file PATH
+                                Restore dump for predeploy replay   [required when gate is enabled]
+  --zero-surprise-predeploy-credentials-file PATH
+                                INI file for predeploy replay       [required when gate is enabled]
+  --zero-surprise-profile NAME  Named zero-surprise profile         [default: school-day-default]
   --zero-surprise-max-age-minutes N
                                 Max age for report in minutes      [default: 240]
   --require-zero-surprise 0|1   Enforce zero-surprise hard-fail    [default: 1]
+  --zero-surprise-breakglass-file PATH
+                                Expiring ack JSON required for any bypass
   --zero-surprise-canary-enabled 0|1
                                 Run post-switch live canary        [default: 1]
   --zero-surprise-canary-timeout N
                                 Live canary timeout in seconds      [default: 300]
   --zero-surprise-canary-credentials-file PATH
                                 INI file for live canary creds      [required when canary is enabled]
+  --zero-surprise-incident-webhook-file PATH
+                                INI file for zero-surprise incident webhook
+  --zero-surprise-incident-timeout N
+                                Incident webhook timeout seconds    [default: 10]
 
 Exit codes:
   0   Success
@@ -99,6 +123,42 @@ require_command() {
     return 0
   fi
   command -v "$cmd" >/dev/null 2>&1 || die "[!] Required command missing: $cmd"
+}
+
+require_docker_compose() {
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] prerequisite check: docker compose version"
+    return 0
+  fi
+
+  docker compose version >/dev/null 2>&1 || die "[!] Required command missing: docker compose"
+}
+
+absolutize_path() {
+  local value="$1"
+
+  case "$value" in
+    "~")
+      value="$HOME"
+      ;;
+    "~/"*)
+      value="$HOME/${value#~/}"
+      ;;
+  esac
+
+  if [[ "$value" != /* ]]; then
+    value="${DEPLOY_CWD}/${value}"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+absolutize_path_var() {
+  local var_name="$1"
+  local value="${!var_name:-}"
+
+  [[ -n "$value" ]] || return 0
+  printf -v "$var_name" '%s' "$(absolutize_path "$value")"
 }
 
 ensure_renderer_restart_permissions() {
@@ -295,6 +355,228 @@ is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
 
+extract_base64_field() {
+  local payload="$1"
+  local field="$2"
+
+  php -r '
+    $payload = stream_get_contents(STDIN);
+    $field = (string) ($argv[1] ?? "");
+    if ($payload === false || $field === "") {
+        exit(1);
+    }
+    $value = null;
+    foreach (preg_split("/\\r?\\n/", trim($payload)) as $line) {
+        if (!is_string($line) || $line === "") {
+            continue;
+        }
+        [$key, $encoded] = array_pad(explode("=", $line, 2), 2, "");
+        if ($key !== $field) {
+            continue;
+        }
+        $decoded = base64_decode($encoded, true);
+        if ($decoded === false) {
+            exit(1);
+        }
+        $value = $decoded;
+        break;
+    }
+    if ($value === null) {
+        exit(1);
+    }
+    echo $value;
+  ' "$field" <<<"$payload"
+}
+
+emit_zero_surprise_incident() {
+  local event="$1"
+  local severity="$2"
+  local reason="$3"
+  local rollback_result="${4:-}"
+  local report_path="${5:-}"
+  local report_root="${6:-$APP}"
+
+  if [[ -z "$ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE" ]]; then
+    echo "[i] Zero-surprise incident webhook not configured; skipping incident notification."
+    return 0
+  fi
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] notify zero-surprise incident event='$event' severity='$severity' reason='$reason' rollback='$rollback_result' report='${report_path:-<none>}'"
+    return 0
+  fi
+
+  local notify_script="${SCRIPT_ROOT}/scripts/release-gate/zero_surprise_incident_notify.php"
+  [[ -r "$notify_script" ]] || {
+    echo "[!] Zero-surprise incident notifier script missing or unreadable: $notify_script"
+    return 0
+  }
+
+  local command=(
+    php
+    "$notify_script"
+    "--webhook-file=$ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE"
+    "--event=$event"
+    "--severity=$severity"
+    "--release-id=$REL"
+    "--reason=$reason"
+    "--log-path=$LOG"
+    "--breakglass-used=$ZERO_SURPRISE_BREAKGLASS_USED"
+    "--timeout-seconds=$ZERO_SURPRISE_INCIDENT_TIMEOUT"
+  )
+
+  if [[ -n "$rollback_result" ]]; then
+    command+=("--rollback-result=$rollback_result")
+  fi
+  if [[ -n "$report_path" ]]; then
+    command+=("--report-path=$report_path" "--report-root=$report_root")
+  fi
+  if [[ -n "$ZERO_SURPRISE_BREAKGLASS_TICKET" ]]; then
+    command+=("--ticket=$ZERO_SURPRISE_BREAKGLASS_TICKET")
+  fi
+
+  if ! "${command[@]}"; then
+    echo "[!] Zero-surprise incident notification failed, continuing without blocking deploy/rollback."
+  fi
+
+  return 0
+}
+
+validate_breakglass_policy() {
+  local disable_predeploy=0
+  local disable_canary=0
+  local validator_file
+  local validator_runtime_code
+  local validator_output
+
+  [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]] || disable_predeploy=1
+  [[ "$ZERO_SURPRISE_CANARY_ENABLED" -eq 1 ]] || disable_canary=1
+
+  if [[ "$disable_predeploy" -ne 1 && "$disable_canary" -ne 1 ]]; then
+    return 0
+  fi
+
+  [[ -n "$ZERO_SURPRISE_BREAKGLASS_FILE" ]] || {
+    echo "[!] Zero-surprise bypass requested, but --zero-surprise-breakglass-file is missing."
+    return 1
+  }
+
+  ZERO_SURPRISE_BREAKGLASS_USED=1
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] validate breakglass file '$ZERO_SURPRISE_BREAKGLASS_FILE' for release '$REL' (disable_predeploy=$disable_predeploy disable_canary=$disable_canary)"
+    return 0
+  fi
+
+  validator_file="${SCRIPT_ROOT}/scripts/release-gate/lib/ZeroSurpriseBreakglassValidator.php"
+  [[ -r "$validator_file" ]] || {
+    echo "[!] Zero-surprise breakglass validator missing or unreadable: $validator_file"
+    return 1
+  }
+
+  read -r -d '' validator_runtime_code <<'PHP' || true
+require_once $argv[1];
+
+$validator = new \ReleaseGate\ZeroSurpriseBreakglassValidator();
+$result = $validator->validateFile(
+    (string) ($argv[2] ?? ''),
+    (string) ($argv[3] ?? ''),
+    ($argv[4] ?? '0') === '1',
+    ($argv[5] ?? '0') === '1',
+);
+
+if (($result['ok'] ?? false) !== true) {
+    foreach (($result['errors'] ?? []) as $error) {
+        fwrite(STDERR, "    - " . (string) $error . PHP_EOL);
+    }
+    exit(1);
+}
+
+$normalized = is_array($result['normalized'] ?? null) ? $result['normalized'] : [];
+foreach (['ticket', 'reason', 'approved_by', 'expires_at_utc'] as $field) {
+    $value = is_scalar($normalized[$field] ?? null) ? (string) $normalized[$field] : '';
+    fwrite(STDOUT, $field . '=' . base64_encode($value) . PHP_EOL);
+}
+exit(0);
+PHP
+
+  echo "[i] Validating zero-surprise breakglass ack: $ZERO_SURPRISE_BREAKGLASS_FILE"
+  if ! validator_output="$(php -r "$validator_runtime_code" \
+    "$validator_file" \
+    "$ZERO_SURPRISE_BREAKGLASS_FILE" \
+    "$REL" \
+    "$disable_predeploy" \
+    "$disable_canary" 2> >(cat >&2))"; then
+    echo "[!] Zero-surprise breakglass validation failed."
+    return 1
+  fi
+
+  ZERO_SURPRISE_BREAKGLASS_TICKET="$(extract_base64_field "$validator_output" ticket || true)"
+  ZERO_SURPRISE_BREAKGLASS_REASON="$(extract_base64_field "$validator_output" reason || true)"
+  local breakglass_approved_by
+  local breakglass_expires_at
+  breakglass_approved_by="$(extract_base64_field "$validator_output" approved_by || true)"
+  breakglass_expires_at="$(extract_base64_field "$validator_output" expires_at_utc || true)"
+
+  echo "[i] Breakglass ack accepted"
+  echo "    Ticket            : ${ZERO_SURPRISE_BREAKGLASS_TICKET:-<missing>}"
+  echo "    Approved by       : ${breakglass_approved_by:-<missing>}"
+  echo "    Expires at (UTC)  : ${breakglass_expires_at:-<missing>}"
+  echo "    Disable predeploy : $disable_predeploy"
+  echo "    Disable canary    : $disable_canary"
+
+  emit_zero_surprise_incident \
+    "zero_surprise_breakglass_used" \
+    "warning" \
+    "${ZERO_SURPRISE_BREAKGLASS_REASON:-zero-surprise breakglass used}" \
+    "not_applicable"
+
+  return 0
+}
+
+run_zero_surprise_predeploy_replay() {
+  local replay_script
+
+  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+    echo "[i] Zero-surprise predeploy replay disabled (--require-zero-surprise=0)."
+    return 0
+  fi
+
+  ZERO_SURPRISE_REPORT="${ZERO_SURPRISE_REPORT:-$STAGE_ROOT/storage/logs/release-gate/zero-surprise-predeploy-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json}"
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] run zero-surprise predeploy replay from '$STAGE_ROOT' with dump '$ZERO_SURPRISE_DUMP_FILE', credentials '$ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE', profile '$ZERO_SURPRISE_PROFILE', report '$ZERO_SURPRISE_REPORT'"
+    return 0
+  fi
+
+  replay_script="$STAGE_ROOT/scripts/release-gate/zero_surprise_replay.php"
+  [[ -r "$replay_script" ]] || {
+    echo "[!] Zero-surprise replay script missing or unreadable: $replay_script"
+    return 1
+  }
+
+  echo "[i] Running zero-surprise predeploy replay"
+  echo "    Dump file         : $ZERO_SURPRISE_DUMP_FILE"
+  echo "    Credentials file  : $ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE"
+  echo "    Profile           : $ZERO_SURPRISE_PROFILE"
+  echo "    Report            : $ZERO_SURPRISE_REPORT"
+
+  if ! (
+    cd "$STAGE_ROOT" && php scripts/release-gate/zero_surprise_replay.php \
+      --release-id="$REL" \
+      --dump-file="$ZERO_SURPRISE_DUMP_FILE" \
+      --credentials-file="$ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE" \
+      --profile="$ZERO_SURPRISE_PROFILE" \
+      --output-json="$ZERO_SURPRISE_REPORT"
+  ); then
+    echo "[!] Zero-surprise predeploy replay failed."
+    return 1
+  fi
+
+  echo "[OK] Zero-surprise predeploy replay passed."
+  return 0
+}
+
 validate_zero_surprise_report() {
   local validator_file
   local validator_runtime_code
@@ -309,7 +591,7 @@ validate_zero_surprise_report() {
     return 0
   fi
 
-  validator_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/release-gate/lib/ZeroSurpriseReportValidator.php"
+  validator_file="$STAGE_ROOT/scripts/release-gate/lib/ZeroSurpriseReportValidator.php"
   [[ -r "$validator_file" ]] || {
     echo "[!] Zero-surprise validator missing or unreadable: $validator_file"
     return 1
@@ -360,7 +642,6 @@ PHP
 
 run_zero_surprise_live_canary() {
   local canary_script
-  local canary_report
 
   if [[ "$ZERO_SURPRISE_CANARY_ENABLED" -ne 1 ]]; then
     echo "[i] Zero-surprise post-deploy canary disabled (--zero-surprise-canary-enabled=0)."
@@ -378,18 +659,20 @@ run_zero_surprise_live_canary() {
     return 1
   }
 
-  canary_report="$APP/storage/logs/release-gate/zero-surprise-live-canary-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json"
+  ZERO_SURPRISE_CANARY_REPORT="$APP/storage/logs/release-gate/zero-surprise-live-canary-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json"
 
   echo "[i] Running zero-surprise post-deploy canary"
   echo "    Credentials file : $ZERO_SURPRISE_CANARY_CREDENTIALS_FILE"
   echo "    Timeout (seconds): $ZERO_SURPRISE_CANARY_TIMEOUT"
-  echo "    Report           : $canary_report"
+  echo "    Profile          : $ZERO_SURPRISE_PROFILE"
+  echo "    Report           : $ZERO_SURPRISE_CANARY_REPORT"
 
   if ! php "$canary_script" \
     --release-id="$REL" \
     --credentials-file="$ZERO_SURPRISE_CANARY_CREDENTIALS_FILE" \
+    --profile="$ZERO_SURPRISE_PROFILE" \
     --timeout-seconds="$ZERO_SURPRISE_CANARY_TIMEOUT" \
-    --output-json="$canary_report"; then
+    --output-json="$ZERO_SURPRISE_CANARY_REPORT"; then
     echo "[!] Zero-surprise post-deploy canary failed."
     return 1
   fi
@@ -405,6 +688,10 @@ rollback_after_failure() {
   local renderer_result="skipped"
   local deep_result="skipped"
   local rollback_ok=1
+  local rollback_result="rollback_failed_or_unverifiable"
+  local incident_event="deploy_rollback"
+  local incident_report=""
+  local incident_report_root="$APP"
 
   if [[ -e "$failed_path" ]]; then
     failed_path="${failed_base}_$(date -u +%Y%m%d_%H%M%S)"
@@ -473,10 +760,34 @@ rollback_after_failure() {
   echo "    Deep health check   : $deep_result"
 
   if [[ "$rollback_ok" -eq 1 ]]; then
+    rollback_result="rollback_succeeded"
+    if [[ "$reason" == "zero-surprise canary failed" ]]; then
+      incident_event="zero_surprise_canary_failed"
+      incident_report="${ZERO_SURPRISE_CANARY_REPORT/$APP/$failed_path}"
+      incident_report_root="$failed_path"
+    fi
+    emit_zero_surprise_incident \
+      "$incident_event" \
+      "critical" \
+      "$reason" \
+      "$rollback_result" \
+      "$incident_report" \
+      "$incident_report_root"
     echo "[!] Rollback succeeded, deployment remains failed."
     exit "$EXIT_ROLLBACK_SUCCESS"
   fi
 
+  if [[ "$reason" == "zero-surprise canary failed" ]]; then
+    incident_event="zero_surprise_canary_failed"
+    incident_report="$ZERO_SURPRISE_CANARY_REPORT"
+  fi
+  emit_zero_surprise_incident \
+    "$incident_event" \
+    "critical" \
+    "$reason" \
+    "$rollback_result" \
+    "$incident_report" \
+    "$incident_report_root"
   echo "[!] Rollback failed or unverifiable. Manual intervention required."
   exit "$EXIT_ROLLBACK_FAILED"
 }
@@ -496,11 +807,17 @@ while [[ $# -gt 0 ]]; do
     --deep-health-url) DEEP_HEALTH_URL="$2"; shift 2;;
     --healthz-token-file) HEALTHZ_TOKEN_FILE="$2"; shift 2;;
     --zero-surprise-report) ZERO_SURPRISE_REPORT="$2"; shift 2;;
+    --zero-surprise-dump-file) ZERO_SURPRISE_DUMP_FILE="$2"; shift 2;;
+    --zero-surprise-predeploy-credentials-file) ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE="$2"; shift 2;;
+    --zero-surprise-profile) ZERO_SURPRISE_PROFILE="$2"; shift 2;;
     --zero-surprise-max-age-minutes) ZERO_SURPRISE_MAX_AGE_MINUTES="$2"; shift 2;;
     --require-zero-surprise) REQUIRE_ZERO_SURPRISE="$2"; shift 2;;
+    --zero-surprise-breakglass-file) ZERO_SURPRISE_BREAKGLASS_FILE="$2"; shift 2;;
     --zero-surprise-canary-enabled) ZERO_SURPRISE_CANARY_ENABLED="$2"; shift 2;;
     --zero-surprise-canary-timeout) ZERO_SURPRISE_CANARY_TIMEOUT="$2"; shift 2;;
     --zero-surprise-canary-credentials-file) ZERO_SURPRISE_CANARY_CREDENTIALS_FILE="$2"; shift 2;;
+    --zero-surprise-incident-webhook-file) ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE="$2"; shift 2;;
+    --zero-surprise-incident-timeout) ZERO_SURPRISE_INCIDENT_TIMEOUT="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) die "[!] Unknown option: $1";;
   esac
@@ -515,19 +832,53 @@ is_positive_integer "$ZERO_SURPRISE_MAX_AGE_MINUTES" \
   || die "[!] --zero-surprise-max-age-minutes must be a positive integer."
 is_positive_integer "$ZERO_SURPRISE_CANARY_TIMEOUT" \
   || die "[!] --zero-surprise-canary-timeout must be a positive integer."
+is_positive_integer "$ZERO_SURPRISE_INCIDENT_TIMEOUT" \
+  || die "[!] --zero-surprise-incident-timeout must be a positive integer."
 if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
-  [[ -n "$ZERO_SURPRISE_REPORT" ]] || die "[!] --zero-surprise-report is required when --require-zero-surprise=1."
+  [[ -n "$ZERO_SURPRISE_DUMP_FILE" ]] || die "[!] --zero-surprise-dump-file is required when --require-zero-surprise=1."
+  [[ -n "$ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE" ]] \
+    || die "[!] --zero-surprise-predeploy-credentials-file is required when --require-zero-surprise=1."
 fi
 if [[ "$ZERO_SURPRISE_CANARY_ENABLED" -eq 1 ]]; then
   [[ -n "$ZERO_SURPRISE_CANARY_CREDENTIALS_FILE" ]] \
     || die "[!] --zero-surprise-canary-credentials-file is required when --zero-surprise-canary-enabled=1."
 fi
+if [[ "$REQUIRE_ZERO_SURPRISE" -eq 0 || "$ZERO_SURPRISE_CANARY_ENABLED" -eq 0 ]]; then
+  [[ -n "$ZERO_SURPRISE_BREAKGLASS_FILE" ]] \
+    || die "[!] --zero-surprise-breakglass-file is required when any zero-surprise bypass is requested."
+fi
+if [[ -z "$ZERO_SURPRISE_PROFILE" ]]; then
+  die "[!] --zero-surprise-profile must not be empty."
+fi
+
+absolutize_path_var HEALTHZ_TOKEN_FILE
+absolutize_path_var ZERO_SURPRISE_REPORT
+absolutize_path_var ZERO_SURPRISE_DUMP_FILE
+absolutize_path_var ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE
+absolutize_path_var ZERO_SURPRISE_BREAKGLASS_FILE
+absolutize_path_var ZERO_SURPRISE_CANARY_CREDENTIALS_FILE
+absolutize_path_var ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE
+
 if [[ "$DRYRUN" -eq 0 ]]; then
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
   [[ -r "$HEALTHZ_TOKEN_FILE" ]] || die "[!] Token file is not readable: $HEALTHZ_TOKEN_FILE"
+  if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
+    [[ -r "$ZERO_SURPRISE_DUMP_FILE" ]] \
+      || die "[!] Predeploy dump file is not readable: $ZERO_SURPRISE_DUMP_FILE"
+    [[ -r "$ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE" ]] \
+      || die "[!] Predeploy credentials file is not readable: $ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE"
+  fi
   if [[ "$ZERO_SURPRISE_CANARY_ENABLED" -eq 1 ]]; then
     [[ -r "$ZERO_SURPRISE_CANARY_CREDENTIALS_FILE" ]] \
       || die "[!] Canary credentials file is not readable: $ZERO_SURPRISE_CANARY_CREDENTIALS_FILE"
+  fi
+  [[ -n "$ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE" ]] \
+    || die "[!] --zero-surprise-incident-webhook-file is required for non-dry deployments."
+  [[ -r "$ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE" ]] \
+    || die "[!] Incident webhook file is not readable: $ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE"
+  if [[ -n "$ZERO_SURPRISE_BREAKGLASS_FILE" ]]; then
+    [[ -r "$ZERO_SURPRISE_BREAKGLASS_FILE" ]] \
+      || die "[!] Breakglass file is not readable: $ZERO_SURPRISE_BREAKGLASS_FILE"
   fi
 fi
 
@@ -537,7 +888,11 @@ PREV="${APP}_prev_${REL}"
 LOG="/var/log/deploy_ea_${REL}.log"
 
 mkdir -p "$(dirname "$LOG")"
-exec > >(tee -a "$LOG") 2>&1
+if [[ "$DRYRUN" -eq 1 && ! -w "$(dirname "$LOG")" ]]; then
+  echo "[i] Dry-run log path is not writable, streaming output without tee: $LOG"
+else
+  exec > >(tee -a "$LOG") 2>&1
+fi
 
 echo "[i] Deploy Easy!Appointments"
 echo "    Release              : $REL"
@@ -553,11 +908,17 @@ echo "    Renderer state dir   : $RENDERER_STATE_DIR"
 echo "    Deep health URL      : $DEEP_HEALTH_URL"
 echo "    Token file           : ${HEALTHZ_TOKEN_FILE:-<not-set-dry-run>}"
 echo "    Zero-surprise gate   : $REQUIRE_ZERO_SURPRISE"
-echo "    Zero-surprise report : ${ZERO_SURPRISE_REPORT:-<not-set>}"
+echo "    Zero-surprise dump   : ${ZERO_SURPRISE_DUMP_FILE:-<not-set>}"
+echo "    Zero-surprise creds  : ${ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE:-<not-set>}"
+echo "    Zero-surprise report : ${ZERO_SURPRISE_REPORT:-<auto>}"
+echo "    Zero-surprise profile: ${ZERO_SURPRISE_PROFILE}"
 echo "    Zero-surprise max age: ${ZERO_SURPRISE_MAX_AGE_MINUTES}m"
+echo "    Breakglass file      : ${ZERO_SURPRISE_BREAKGLASS_FILE:-<not-set>}"
 echo "    Canary enabled       : $ZERO_SURPRISE_CANARY_ENABLED"
 echo "    Canary timeout       : ${ZERO_SURPRISE_CANARY_TIMEOUT}s"
 echo "    Canary credentials   : ${ZERO_SURPRISE_CANARY_CREDENTIALS_FILE:-<not-set>}"
+echo "    Incident webhook     : ${ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE:-<not-set>}"
+echo "    Incident timeout     : ${ZERO_SURPRISE_INCIDENT_TIMEOUT}s"
 echo "    Logfile              : $LOG"
 
 [[ -f "$ARCHIVE" ]] || die "[!] Archive not found: $ARCHIVE"
@@ -585,6 +946,10 @@ require_command npm
 require_command curl
 require_command php
 require_command runuser
+if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
+  require_command docker
+  require_docker_compose
+fi
 ensure_renderer_restart_permissions
 
 if [[ -e "$STAGE" ]]; then
@@ -603,6 +968,10 @@ else
   STAGE_ROOT="$STAGE"
 fi
 
+validate_breakglass_policy || die "[!] Zero-surprise breakglass policy validation failed."
+run_zero_surprise_predeploy_replay || die "[!] Zero-surprise pre-deploy replay failed. Aborting before atomic switch."
+validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
+
 run_shell "cp '$APP/config.php' '$STAGE_ROOT/config.php'"
 run_shell "mkdir -p '$STAGE_ROOT/storage'"
 run_shell "rsync -a '$APP/storage/' '$STAGE_ROOT/storage/' 2>/dev/null || true"
@@ -620,8 +989,6 @@ install_renderer_dependencies
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
 run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} \\;"
 run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} \\;"
-
-validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
 
 perform_atomic_switch
 
