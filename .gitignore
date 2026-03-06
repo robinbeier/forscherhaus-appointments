@@ -30,5 +30,6 @@
 !/storage/uploads/index.html
 /vendor/
 /metafile
+.env.symphony.pilot
 .DS_Store
 build_release.sh

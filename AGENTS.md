@@ -165,6 +165,11 @@ PRE_PR_BASE_REF=origin/release-branch PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 bas
 bash ./scripts/ci/run_symphony_pilot_checks.sh
 bash ./scripts/ci/run_symphony_pilot_checks.sh --with-full-gate
 
+# Optional: Symphony-Pilot Start/Stop (lokal, reproduzierbar)
+cp .env.symphony.pilot.example .env.symphony.pilot
+bash ./scripts/symphony/start_pilot.sh
+bash ./scripts/symphony/stop_pilot.sh
+
 # Optional: PHPStan status check (blocking)
 for run_id in $(gh run list --workflow CI --limit 20 --json databaseId -q '.[].databaseId'); do
   gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="phpstan-application") | .conclusion'
