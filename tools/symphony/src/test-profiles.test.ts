@@ -246,8 +246,8 @@ test('Fake profiles drive deterministic orchestrator retry behavior in CI-like r
 
     assert.equal(codexProfile.seenRequests.length, 2);
     assert.equal(snapshot.retrying.length, 0);
-    assert.equal(snapshot.codexTotals.completed, 1);
-    assert.equal(snapshot.codexTotals.failed, 1);
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 1);
 
     const scheduledRetryLog = logRecords.find((entry) => entry.message === 'Scheduled issue retry');
     assert.ok(scheduledRetryLog);
