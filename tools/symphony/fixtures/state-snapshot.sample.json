@@ -1,0 +1,19 @@
+{
+    "status": "ok",
+    "snapshot": {
+        "lastTickAtIso": "2026-03-06T12:00:00.000Z",
+        "running": [],
+        "retrying": [],
+        "codex_totals": {
+            "completed": 0,
+            "inputRequired": 0,
+            "failed": 0,
+            "responseTimeouts": 0,
+            "turnTimeouts": 0,
+            "launchFailures": 0
+        },
+        "rate_limits": {
+            "remaining": 100
+        }
+    }
+}
