@@ -91,9 +91,11 @@ tools/symphony/
     service.ts    # Start/stop lifecycle
     linear-tracker.ts  # Linear GraphQL adapter (read-only)
     workspace-manager.ts  # Workspace safety + hook lifecycle
+    app-server-client.ts  # Codex app-server launch/stream client
     workflow.ts   # Workflow loader + typed config + reload
     template.ts   # Strict prompt template rendering
     options.test.ts
+    app-server-client.test.ts
     linear-tracker.test.ts
     workspace-manager.test.ts
     template.test.ts
