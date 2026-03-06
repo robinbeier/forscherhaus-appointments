@@ -322,8 +322,8 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
     snapshot = orchestrator.getSnapshot();
     assert.deepEqual(attempts, [1, 2, 3]);
     assert.equal(snapshot.retrying.length, 0);
-    assert.equal(snapshot.codexTotals.completed, 1);
-    assert.equal(snapshot.codexTotals.failed, 2);
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 2);
 });
 
 test('reconcile removes retries when issue leaves active states', async () => {

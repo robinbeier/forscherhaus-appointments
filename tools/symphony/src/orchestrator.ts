@@ -76,6 +76,7 @@ interface RunningEntry {
     startedAtMs: number;
     suppressRetry: boolean;
     stallLogged: boolean;
+    sessionId?: string;
 }
 
 export interface OrchestratorSnapshot {
@@ -87,6 +88,7 @@ export interface OrchestratorSnapshot {
         source: DispatchSource;
         startedAtIso: string;
         suppressRetry: boolean;
+        sessionId: string | null;
     }>;
     retrying: Array<{
         issueId: string;
@@ -96,7 +98,7 @@ export interface OrchestratorSnapshot {
         availableAtIso: string;
         errorClass?: string;
     }>;
-    codexTotals: {
+    codex_totals: {
         completed: number;
         inputRequired: number;
         failed: number;
@@ -104,7 +106,7 @@ export interface OrchestratorSnapshot {
         turnTimeouts: number;
         launchFailures: number;
     };
-    rateLimits: Record<string, unknown>;
+    rate_limits: Record<string, unknown>;
 }
 
 const CONTINUATION_DELAY_MS = 1000;
@@ -158,6 +160,14 @@ function toIssueTemplatePayload(issue: TrackedIssue): Record<string, unknown> {
         created_at: issue.createdAt,
         updated_at: issue.updatedAt,
         project_slug: issue.projectSlug,
+    };
+}
+
+function issueLogFields(issue: TrackedIssue, sessionId?: string): Record<string, unknown> {
+    return {
+        issue_id: issue.id,
+        issue_identifier: issue.identifier,
+        session_id: sessionId ?? null,
     };
 }
 
@@ -245,6 +255,7 @@ export class SymphonyOrchestrator {
                     source: entry.source,
                     startedAtIso: new Date(entry.startedAtMs).toISOString(),
                     suppressRetry: entry.suppressRetry,
+                    sessionId: entry.sessionId ?? null,
                 }))
                 .sort((left, right) => left.issueIdentifier.localeCompare(right.issueIdentifier)),
             retrying: Array.from(this.retryByIssueId.values())
@@ -257,8 +268,8 @@ export class SymphonyOrchestrator {
                     errorClass: entry.errorClass,
                 }))
                 .sort((left, right) => left.availableAtIso.localeCompare(right.availableAtIso)),
-            codexTotals: {...this.codexTotals},
-            rateLimits: {...this.lastRateLimits},
+            codex_totals: {...this.codexTotals},
+            rate_limits: {...this.lastRateLimits},
         };
     }
 
@@ -337,7 +348,7 @@ export class SymphonyOrchestrator {
                 if (!activeStates.has(currentState) && !runningEntry.suppressRetry) {
                     runningEntry.suppressRetry = true;
                     this.logger.info('Marking running issue as terminal due to tracker state change', {
-                        issueIdentifier: runningEntry.issue.identifier,
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                         currentState: statesByIssueId.get(issueId) ?? '',
                     });
                 }
@@ -348,7 +359,7 @@ export class SymphonyOrchestrator {
                     runningEntry.stallLogged = true;
                     runningEntry.suppressRetry = true;
                     this.logger.warn('Detected stalled running issue session', {
-                        issueIdentifier: runningEntry.issue.identifier,
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                         runtimeMs,
                         stallThresholdMs,
                     });
@@ -363,7 +374,7 @@ export class SymphonyOrchestrator {
 
                 this.retryByIssueId.delete(issueId);
                 this.logger.info('Dropping retry because issue is no longer in active states', {
-                    issueIdentifier: retryEntry.issue.identifier,
+                    ...issueLogFields(retryEntry.issue),
                     currentState: statesByIssueId.get(issueId) ?? '',
                 });
             }
@@ -420,7 +431,7 @@ export class SymphonyOrchestrator {
             const blockedByTodo = issue.blockedByIdentifiers.some((blocker) => todoBlockerIdentifiers.has(blocker));
             if (blockedByTodo) {
                 this.logger.info('Skipping candidate issue because blocker is in Todo state', {
-                    issueIdentifier: issue.identifier,
+                    ...issueLogFields(issue),
                     blockers: issue.blockedByIdentifiers,
                 });
                 return false;
@@ -494,7 +505,7 @@ export class SymphonyOrchestrator {
             const appServer = this.appServerFactory({
                 config: effectiveConfig,
                 workspacePath,
-                emitEvent: (event) => this.handleOrchestratorEvent(event, runningEntry.issue.identifier),
+                emitEvent: (event) => this.handleOrchestratorEvent(event, runningEntry),
             });
 
             const turnResult = await appServer.runTurn({
@@ -508,11 +519,11 @@ export class SymphonyOrchestrator {
             if (turnResult.status === 'completed') {
                 this.codexTotals.completed += 1;
                 this.retryByIssueId.delete(runningEntry.issue.id);
+                runningEntry.sessionId = turnResult.sessionId;
                 this.logger.info('Issue turn completed', {
-                    issueIdentifier: runningEntry.issue.identifier,
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                     attempt: runningEntry.attempt,
                     source: runningEntry.source,
-                    sessionId: turnResult.sessionId,
                 });
                 return;
             }
@@ -521,7 +532,7 @@ export class SymphonyOrchestrator {
 
             if (runningEntry.suppressRetry) {
                 this.logger.info('Skipping continuation retry because issue is terminal', {
-                    issueIdentifier: runningEntry.issue.identifier,
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                     attempt: runningEntry.attempt,
                 });
                 this.retryByIssueId.delete(runningEntry.issue.id);
@@ -548,7 +559,7 @@ export class SymphonyOrchestrator {
             }
 
             this.logger.error('Issue dispatch failed', {
-                issueIdentifier: runningEntry.issue.identifier,
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                 attempt: runningEntry.attempt,
                 source: runningEntry.source,
                 errorClass: classified.errorClass,
@@ -575,7 +586,7 @@ export class SymphonyOrchestrator {
                     } catch (error) {
                         const classified = this.classifyError(error);
                         this.logger.error('after_run hooks failed', {
-                            issueIdentifier: runningEntry.issue.identifier,
+                            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                             errorClass: classified.errorClass,
                             error: classified.message,
                         });
@@ -588,7 +599,7 @@ export class SymphonyOrchestrator {
                     } catch (error) {
                         const classified = this.classifyError(error);
                         this.logger.error('Workspace cleanup failed', {
-                            issueIdentifier: runningEntry.issue.identifier,
+                            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                             errorClass: classified.errorClass,
                             error: classified.message,
                         });
@@ -609,7 +620,7 @@ export class SymphonyOrchestrator {
         if (args.attempt > args.maxAttempts) {
             this.retryByIssueId.delete(args.issue.id);
             this.logger.warn('Retry budget exhausted for issue', {
-                issueIdentifier: args.issue.identifier,
+                ...issueLogFields(args.issue),
                 maxAttempts: args.maxAttempts,
             });
             return;
@@ -625,7 +636,7 @@ export class SymphonyOrchestrator {
         });
 
         this.logger.info('Scheduled issue retry', {
-            issueIdentifier: args.issue.identifier,
+            ...issueLogFields(args.issue),
             attempt: args.attempt,
             reason: args.reason,
             availableAtIso: new Date(availableAtMs).toISOString(),
@@ -642,16 +653,16 @@ export class SymphonyOrchestrator {
         return Math.min(exponentialDelay, this.retryMaxDelayMs);
     }
 
-    private handleOrchestratorEvent(event: OrchestratorEvent, issueIdentifier: string): void {
+    private handleOrchestratorEvent(event: OrchestratorEvent, runningEntry: RunningEntry): void {
         if (event.type === 'rate_limit') {
             this.lastRateLimits = {...event.payload};
             return;
         }
 
         if (event.type === 'session') {
+            runningEntry.sessionId = event.sessionId;
             this.logger.info('Codex session created', {
-                issueIdentifier,
-                sessionId: event.sessionId,
+                ...issueLogFields(runningEntry.issue, event.sessionId),
                 threadId: event.threadId,
                 turnId: event.turnId,
             });
@@ -660,7 +671,7 @@ export class SymphonyOrchestrator {
 
         if (event.type === 'diagnostic') {
             this.logger.info('Codex diagnostic event', {
-                issueIdentifier,
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                 stream: event.stream,
                 message: event.message,
             });
@@ -669,7 +680,7 @@ export class SymphonyOrchestrator {
 
         if (event.type === 'token_usage') {
             this.logger.info('Codex token usage event', {
-                issueIdentifier,
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                 usage: event.payload,
             });
         }

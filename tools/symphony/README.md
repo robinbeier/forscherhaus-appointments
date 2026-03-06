@@ -64,6 +64,10 @@ Pilot guardrails im Startskript:
 -   Beim Start wird `SYMPHONY_CODEX_COMMAND` mit
     `CODEX_APPROVAL_POLICY`/`CODEX_SANDBOX_MODE` aus den Pilot-Policies
     gepraefixt, damit Guardrails im realen Launch-Command anliegen.
+-   Optionale Observability API per `.env.symphony.pilot`:
+    -   `SYMPHONY_STATE_API_ENABLED=1`
+    -   `SYMPHONY_STATE_API_HOST=127.0.0.1`
+    -   `SYMPHONY_STATE_API_PORT=8787`
 
 ## CLI options
 
@@ -112,6 +116,12 @@ Key behavior:
     invalid
 -   orchestrator tick loop with bounded concurrency, Todo-blocker filtering,
     and in-memory retry queue (`1s` continuation retry + exponential backoff)
+-   structured issue logs include `issue_id`, `issue_identifier`, `session_id`
+-   runtime snapshot model includes `running`, `retrying`, `codex_totals`,
+    `rate_limits`
+-   optional state endpoints:
+    -   `GET /api/v1/state`
+    -   `POST /api/v1/refresh`
 
 ## Structure
 
@@ -122,6 +132,7 @@ tools/symphony/
     logger.ts     # Structured log output
     options.ts    # CLI option parsing
     service.ts    # Start/stop lifecycle + poll scheduler
+    state-server.ts  # Optional /api/v1/state and /api/v1/refresh layer
     orchestrator.ts  # Poll/dispatch/reconcile/retry core
     linear-tracker.ts  # Linear GraphQL adapter (read-only)
     workspace-manager.ts  # Workspace safety + hook lifecycle
@@ -132,6 +143,7 @@ tools/symphony/
     options.test.ts
     orchestrator.test.ts
     app-server-client.test.ts
+    state-server.test.ts
     test-profiles.test.ts
     linear-tracker.test.ts
     workspace-manager.test.ts
