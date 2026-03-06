@@ -11,7 +11,8 @@
         "build": "tsc -p tsconfig.json",
         "start": "node dist/cli.js",
         "dev": "tsx src/cli.ts",
-        "test": "tsx --test src/**/*.test.ts"
+        "test": "tsx --test src/**/*.test.ts",
+        "test:conformance": "tsx --test src/workflow-config.test.ts src/template.test.ts src/workspace-manager.test.ts src/orchestrator.test.ts src/app-server-client.test.ts src/test-profiles.test.ts"
     },
     "dependencies": {
         "yaml": "^2.8.1"
