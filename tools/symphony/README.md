@@ -131,6 +131,9 @@ Key behavior:
     session scope (`acceptForSession`) so pilot turns can continue unattended
 -   repo-specific pilots can prepare per-issue git worktrees via `before_run`
     hooks and remove registrations via `before_remove` hooks
+-   hook entries are executed as shell commands; for repo scripts prefer
+    `bash /absolute/path/to/script.sh` so the workflow does not depend on the
+    executable bit being preserved
 
 ## Structure
 

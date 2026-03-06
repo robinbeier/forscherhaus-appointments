@@ -15,10 +15,10 @@ hooks:
     timeout_ms: 30000
     after_create: []
     before_run:
-        - $SYMPHONY_REPO_ROOT/scripts/symphony/ensure_issue_worktree.sh
+        - bash $SYMPHONY_REPO_ROOT/scripts/symphony/ensure_issue_worktree.sh
     after_run: []
     before_remove:
-        - $SYMPHONY_REPO_ROOT/scripts/symphony/remove_issue_worktree.sh
+        - bash $SYMPHONY_REPO_ROOT/scripts/symphony/remove_issue_worktree.sh
 agent:
     max_concurrent: 1
     max_attempts: 2
