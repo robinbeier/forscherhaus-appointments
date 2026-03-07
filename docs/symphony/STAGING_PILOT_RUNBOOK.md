@@ -13,6 +13,8 @@ a 24h soak gate before any production release decision.
    - `SYMPHONY_LINEAR_PROJECT_SLUG`
    - `SYMPHONY_CODEX_COMMAND`
    - `SYMPHONY_STATE_API_ENABLED=1`
+   - For local pilot runs, set `SYMPHONY_WORKTREE_BASE_REF=origin/main` so
+     per-issue worktrees stay isolated from the operator's local `HEAD`.
 3. `WORKFLOW.md` uses pilot-safe settings (`max_concurrent: 1` or `2`).
 4. Rollback owner and incident owner are named before start.
 
