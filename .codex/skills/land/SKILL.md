@@ -7,7 +7,7 @@ description: Drive an open PR from merge prep through merge by syncing the branc
 
 # Land
 
-Use this skill when the Linear issue is in `Merging` and the PR should be
+Use this skill when the Linear issue is in `Ready to Merge` and the PR should be
 shepherded to an actual merge.
 
 ## Goals

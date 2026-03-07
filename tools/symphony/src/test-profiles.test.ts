@@ -68,6 +68,8 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
             projectSlug: 'forscherhaus',
             activeStates: ['In Progress'],
             terminalStates: ['Done'],
+            reviewStateName: 'In Review',
+            mergeStateName: 'Ready to Merge',
         },
         polling: {
             intervalMs: 60000,
@@ -98,6 +100,7 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
             responseTimeoutMs: 2000,
             turnTimeoutMs: 5000,
             stallTimeoutMs: 1000,
+            publishNetworkAccess: false,
         },
     };
 }
@@ -143,14 +146,15 @@ function createNoopWorkspaceFactory() {
                 created: true,
             }),
             resolveWorkspacePath: (rawKey: string) => `/tmp/symphony-workspaces/${rawKey}`,
-            runBeforeRunHooks: async (_workspacePath: string) => undefined,
+            runBeforeRunHooks: async (_workspacePath: string, _envOverrides?: Record<string, string | undefined>) =>
+                undefined,
             runAfterRunHooks: async (_workspacePath: string) => undefined,
             cleanupTerminalWorkspace: async (_workspacePath: string) => undefined,
             captureWorkspaceState: async (_workspacePath: string) => {
                 const snapshot =
                     stateCaptureCount === 0
-                        ? {headSha: 'head-before', statusText: ''}
-                        : {headSha: 'head-after', statusText: ''};
+                        ? {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'}
+                        : {headSha: 'head-after', statusText: '', branchName: 'codex/symphony-test'};
                 stateCaptureCount += 1;
                 return snapshot;
             },

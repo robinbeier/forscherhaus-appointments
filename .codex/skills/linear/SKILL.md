@@ -48,9 +48,9 @@ This repo expects the Linear workflow states:
 
 -   `Todo`
 -   `In Progress`
--   `Human Review`
+-   `In Review`
 -   `Rework`
--   `Merging`
+-   `Ready to Merge`
 -   `Done`
 -   `Canceled`
 
@@ -210,7 +210,7 @@ Update the workpad at least:
 
 -   when a run starts and you have learned new facts
 -   before opening or updating a PR
--   when moving the issue to `Human Review`, `Rework`, `Merging`, or `Done`
+-   when moving the issue to `In Review`, `Rework`, `Ready to Merge`, or `Done`
 
 Workpad rules:
 

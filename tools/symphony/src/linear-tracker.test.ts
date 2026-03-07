@@ -774,3 +774,101 @@ test('executeLinearGraphQlToolCall rejects invalid GraphQL syntax before transpo
     assert.equal(invocationCount, 0);
     assert.equal((result.payload as {error?: string}).error, 'invalid_tool_input');
 });
+
+test('moveIssueToStateByName updates the Linear issue state by name', async () => {
+    const calls: MockFetchCall[] = [];
+
+    const adapter = new LinearTrackerAdapter({
+        config: {
+            apiKey: 'linear-token',
+            projectSlug: 'forscherhaus',
+            activeStates: ['In Progress'],
+        },
+        fetchImpl: async (url, init) => {
+            calls.push({url, init});
+            const body = JSON.parse(String(init?.body));
+            const query = String(body.query ?? '');
+
+            if (query.includes('query FetchIssueRunContext')) {
+                return jsonResponse({
+                    data: {
+                        issue: {
+                            id: 'issue-id-13',
+                            identifier: 'ROB-13',
+                            title: 'Publish handoff',
+                            description: null,
+                            branchName: 'beierrobin/rob-13',
+                            url: 'https://linear.app/forscherhaus/issue/ROB-13',
+                            createdAt: '2026-03-06T08:00:00.000Z',
+                            updatedAt: '2026-03-06T08:05:00.000Z',
+                            priority: null,
+                            state: {id: 'state-in-progress', name: 'In Progress', type: 'started'},
+                            labels: {nodes: []},
+                            relations: {nodes: []},
+                            inverseRelations: {nodes: []},
+                            project: {slugId: 'forscherhaus'},
+                            comments: {nodes: []},
+                            team: {
+                                states: {
+                                    nodes: [
+                                        {id: 'state-in-progress', name: 'In Progress', type: 'started'},
+                                        {id: 'state-in-review', name: 'In Review', type: 'unstarted'},
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            if (query.includes('mutation UpdateIssueState')) {
+                assert.equal(body.variables.stateId, 'state-in-review');
+                return jsonResponse({
+                    data: {
+                        issueUpdate: {
+                            success: true,
+                            issue: {
+                                id: 'issue-id-13',
+                                updatedAt: '2026-03-06T08:06:00.000Z',
+                                state: {
+                                    id: 'state-in-review',
+                                    name: 'In Review',
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            throw new Error(`Unexpected query: ${query}`);
+        },
+    });
+
+    const movedIssue = await adapter.moveIssueToStateByName(
+        {
+            id: 'issue-id-13',
+            identifier: 'ROB-13',
+            title: 'Publish handoff',
+            description: null,
+            stateName: 'In Progress',
+            stateType: 'started',
+            priority: null,
+            branchName: 'beierrobin/rob-13',
+            url: 'https://linear.app/forscherhaus/issue/ROB-13',
+            labels: [],
+            blockedBy: [],
+            blockedByIdentifiers: [],
+            createdAt: '2026-03-06T08:00:00.000Z',
+            updatedAt: '2026-03-06T08:05:00.000Z',
+            projectSlug: 'forscherhaus',
+            workpadCommentId: 'comment-1',
+            workpadCommentBody: '## Codex Workpad',
+            workpadCommentUrl: 'https://linear.app/comment-1',
+        },
+        'In Review',
+    );
+
+    assert.equal(movedIssue.stateName, 'In Review');
+    assert.equal(movedIssue.updatedAt, '2026-03-06T08:06:00.000Z');
+    assert.equal(calls.length, 2);
+});

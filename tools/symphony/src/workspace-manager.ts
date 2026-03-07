@@ -51,6 +51,7 @@ export interface WorkspaceHandle {
 export interface WorkspaceStateSnapshot {
     headSha: string;
     statusText: string;
+    branchName: string | null;
 }
 
 interface WorkspaceManagerArgs {
@@ -147,8 +148,11 @@ export class WorkspaceManager {
         };
     }
 
-    public async runBeforeRunHooks(workspacePath: string): Promise<void> {
-        await this.runHooks('before_run', ensurePathWithinRoot(this.rootPath, workspacePath));
+    public async runBeforeRunHooks(
+        workspacePath: string,
+        envOverrides: Record<string, string | undefined> = {},
+    ): Promise<void> {
+        await this.runHooks('before_run', ensurePathWithinRoot(this.rootPath, workspacePath), envOverrides);
     }
 
     public async runAfterRunHooks(workspacePath: string): Promise<void> {
@@ -179,10 +183,20 @@ export class WorkspaceManager {
                 windowsHide: true,
                 maxBuffer: 1024 * 1024,
             });
+            const branchResult = await execFile('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+                cwd: safeWorkspacePath,
+                env: this.env,
+                timeout: this.config.hooks.timeoutMs,
+                windowsHide: true,
+                maxBuffer: 1024 * 1024,
+            }).catch(() => ({
+                stdout: '',
+            }));
 
             return {
                 headSha: headResult.stdout.trim(),
                 statusText: statusResult.stdout.trimEnd(),
+                branchName: branchResult.stdout.trim() || null,
             };
         } catch (error) {
             const executionError = error as {
@@ -211,11 +225,15 @@ export class WorkspaceManager {
         return ensurePathWithinRoot(this.rootPath, candidatePath);
     }
 
-    private async runHooks(phase: WorkspaceHookPhase, workspacePath: string): Promise<void> {
+    private async runHooks(
+        phase: WorkspaceHookPhase,
+        workspacePath: string,
+        envOverrides: Record<string, string | undefined> = {},
+    ): Promise<void> {
         const commands = mapPhaseToCommands(this.config.hooks, phase);
         for (const command of commands) {
             try {
-                await this.executeHookCommand(phase, command, workspacePath);
+                await this.executeHookCommand(phase, command, workspacePath, envOverrides);
             } catch (error) {
                 if (!(error instanceof WorkspaceManagerError)) {
                     throw error;
@@ -236,11 +254,19 @@ export class WorkspaceManager {
         }
     }
 
-    private async executeHookCommand(phase: WorkspaceHookPhase, command: string, workspacePath: string): Promise<void> {
+    private async executeHookCommand(
+        phase: WorkspaceHookPhase,
+        command: string,
+        workspacePath: string,
+        envOverrides: Record<string, string | undefined>,
+    ): Promise<void> {
         try {
             await exec(command, {
                 cwd: workspacePath,
-                env: this.env,
+                env: {
+                    ...this.env,
+                    ...envOverrides,
+                },
                 shell: this.shellPath,
                 timeout: this.config.hooks.timeoutMs,
                 windowsHide: true,

@@ -75,6 +75,8 @@ export interface AppServerClientConfig {
     responseTimeoutMs?: number;
     turnTimeoutMs: number;
     approvalPolicy?: unknown;
+    publishApprovalPolicy?: unknown;
+    publishNetworkAccess?: boolean;
     threadSandbox?: unknown;
     turnSandboxPolicy?: unknown;
     env?: NodeJS.ProcessEnv;
@@ -108,6 +110,7 @@ export interface RunTurnRequest {
     issueIdentifier: string;
     issueTitle?: string;
     attempt: number | null;
+    publishMode?: boolean;
     threadId?: string;
     turnId?: string;
     responseTimeoutMs?: number;
@@ -178,6 +181,43 @@ function createDefaultTurnSandboxPolicy(workspacePath: string): Record<string, u
         networkAccess: false,
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
+    };
+}
+
+function clonePlainRecord(value: Record<string, unknown>): Record<string, unknown> {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function resolveApprovalPolicyForTurn(
+    approvalPolicy: unknown,
+    publishApprovalPolicy: unknown,
+    publishMode: boolean,
+): unknown {
+    if (publishMode && publishApprovalPolicy !== undefined) {
+        return publishApprovalPolicy;
+    }
+
+    return approvalPolicy;
+}
+
+function resolveTurnSandboxPolicyForTurn(
+    turnSandboxPolicy: unknown,
+    workspacePath: string,
+    publishMode: boolean,
+    publishNetworkAccess: boolean,
+): unknown {
+    if (!publishMode || !publishNetworkAccess) {
+        return turnSandboxPolicy;
+    }
+
+    const basePolicyRecord = asRecord(turnSandboxPolicy);
+    const basePolicy = basePolicyRecord
+        ? clonePlainRecord(basePolicyRecord)
+        : createDefaultTurnSandboxPolicy(workspacePath);
+
+    return {
+        ...basePolicy,
+        networkAccess: true,
     };
 }
 
@@ -528,6 +568,8 @@ export class CodexAppServerClient {
         this.config = {
             ...args.config,
             approvalPolicy: args.config.approvalPolicy ?? createDefaultApprovalPolicy(),
+            publishApprovalPolicy: args.config.publishApprovalPolicy,
+            publishNetworkAccess: args.config.publishNetworkAccess ?? false,
             threadSandbox: args.config.threadSandbox ?? 'workspace-write',
             turnSandboxPolicy:
                 args.config.turnSandboxPolicy ?? createDefaultTurnSandboxPolicy(args.config.workspacePath),
@@ -557,6 +599,17 @@ export class CodexAppServerClient {
         const responseTimeoutMs =
             request.responseTimeoutMs ?? this.config.readTimeoutMs ?? this.config.responseTimeoutMs ?? 5000;
         const turnTimeoutMs = request.turnTimeoutMs ?? this.config.turnTimeoutMs;
+        const effectiveApprovalPolicy = resolveApprovalPolicyForTurn(
+            this.config.approvalPolicy,
+            this.config.publishApprovalPolicy,
+            request.publishMode ?? false,
+        );
+        const effectiveTurnSandboxPolicy = resolveTurnSandboxPolicyForTurn(
+            this.config.turnSandboxPolicy,
+            this.config.workspacePath,
+            request.publishMode ?? false,
+            this.config.publishNetworkAccess ?? false,
+        );
 
         const processHandle = this.ensureAppServerProcess();
         this.stopRequested = false;
@@ -1322,8 +1375,8 @@ export class CodexAppServerClient {
                                 },
                             }));
                         }
-                        if (this.config.approvalPolicy !== undefined) {
-                            threadStartParams.approvalPolicy = this.config.approvalPolicy;
+                        if (effectiveApprovalPolicy !== undefined) {
+                            threadStartParams.approvalPolicy = effectiveApprovalPolicy;
                         }
                         if (this.config.threadSandbox !== undefined) {
                             threadStartParams.sandbox = this.config.threadSandbox;
@@ -1353,11 +1406,11 @@ export class CodexAppServerClient {
                             },
                         ],
                     };
-                    if (this.config.approvalPolicy !== undefined) {
-                        turnStartParams.approvalPolicy = this.config.approvalPolicy;
+                    if (effectiveApprovalPolicy !== undefined) {
+                        turnStartParams.approvalPolicy = effectiveApprovalPolicy;
                     }
-                    if (this.config.turnSandboxPolicy !== undefined) {
-                        turnStartParams.sandboxPolicy = this.config.turnSandboxPolicy;
+                    if (effectiveTurnSandboxPolicy !== undefined) {
+                        turnStartParams.sandboxPolicy = effectiveTurnSandboxPolicy;
                     }
 
                     const turnStartResult = await sendRequest('turn/start', turnStartParams);

@@ -69,6 +69,8 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
             projectSlug: 'forscherhaus',
             activeStates: ['In Progress'],
             terminalStates: ['Done'],
+            reviewStateName: 'In Review',
+            mergeStateName: 'Ready to Merge',
         },
         polling: {
             intervalMs: 1000,
@@ -99,6 +101,7 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
             responseTimeoutMs: 2000,
             turnTimeoutMs: 5000,
             stallTimeoutMs: 1000,
+            publishNetworkAccess: false,
         },
     };
 }
@@ -143,6 +146,7 @@ class TrackerStub implements TrackerClient {
     public statesByIssueId = new Map<string, string>();
     public todoIssues: TrackedIssue[] = [];
     public prepareIssueForRunCalls: string[] = [];
+    public moveIssueToStateByNameCalls: Array<{identifier: string; stateName: string}> = [];
 
     public async fetchCandidateIssues(): Promise<TrackedIssue[]> {
         return this.candidates;
@@ -175,14 +179,27 @@ class TrackerStub implements TrackerClient {
             workpadCommentUrl: issue.workpadCommentUrl,
         };
     }
+
+    public async moveIssueToStateByName(issue: TrackedIssue, stateName: string): Promise<TrackedIssue> {
+        this.moveIssueToStateByNameCalls.push({
+            identifier: issue.identifier,
+            stateName,
+        });
+        this.statesByIssueId.set(issue.id, stateName);
+        return {
+            ...issue,
+            stateName,
+        };
+    }
 }
 
 class WorkspaceStub implements WorkspaceClient {
     public cleanedPaths: string[] = [];
     public stateSnapshots: WorkspaceStateSnapshot[] = [
-        {headSha: 'head-before', statusText: ''},
-        {headSha: 'head-after', statusText: ''},
+        {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'},
+        {headSha: 'head-after', statusText: '', branchName: 'codex/symphony-test'},
     ];
+    public beforeRunEnvOverrides: Record<string, string | undefined> | undefined;
     private stateCaptureCount = 0;
 
     public async prepareWorkspace(rawKey: string): Promise<{key: string; path: string; created: boolean}> {
@@ -197,7 +214,11 @@ class WorkspaceStub implements WorkspaceClient {
         return `/tmp/symphony-workspaces/${rawKey}`;
     }
 
-    public async runBeforeRunHooks(_workspacePath: string): Promise<void> {
+    public async runBeforeRunHooks(
+        _workspacePath: string,
+        envOverrides?: Record<string, string | undefined>,
+    ): Promise<void> {
+        this.beforeRunEnvOverrides = envOverrides;
         return;
     }
 
@@ -369,6 +390,50 @@ test('worker reuses the same thread across continuation turns and only retries a
     assert.equal(workspace.cleanedPaths.length, 1);
 });
 
+test('before_run hooks receive the Linear issue branch and prompt context uses the effective workspace branch', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'branch-alignment-1',
+        identifier: 'ROB-13-BRANCH',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    issue.branchName = 'feature/rob-13-branch';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'Done');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-13-branch'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-branch'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => ({
+                status: 'completed',
+                outputText: 'ok',
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                sessionId: 'thread-1-turn-1',
+            }),
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    assert.equal(workspace.beforeRunEnvOverrides?.SYMPHONY_ISSUE_BRANCH_NAME, 'feature/rob-13-branch');
+    assert.equal(workflowStore.promptContexts[0].issue.branch_name, 'beierrobin/rob-13-branch');
+    assert.equal(workflowStore.promptContexts[0].issue.branch_name_or_default, 'beierrobin/rob-13-branch');
+});
+
 test('completed run without committed workspace changes is retried and not counted as success', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
@@ -382,8 +447,12 @@ test('completed run without committed workspace changes is retried and not count
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
     const workspace = new WorkspaceStub();
     workspace.stateSnapshots = [
-        {headSha: 'same-head', statusText: ''},
-        {headSha: 'same-head', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
+        {headSha: 'same-head', statusText: '', branchName: 'codex/symphony-test'},
+        {
+            headSha: 'same-head',
+            statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md',
+            branchName: 'codex/symphony-test',
+        },
     ];
 
     const orchestrator = new SymphonyOrchestrator({
@@ -423,13 +492,13 @@ test('state transition out of commit-required states counts as success without l
         createdAt: '2026-03-06T08:00:00.000Z',
     });
     tracker.candidates = [issue];
-    tracker.statesByIssueId.set(issue.id, 'Human Review');
+    tracker.statesByIssueId.set(issue.id, 'In Review');
 
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
     const workspace = new WorkspaceStub();
     workspace.stateSnapshots = [
-        {headSha: 'same-head', statusText: ''},
-        {headSha: 'same-head', statusText: ''},
+        {headSha: 'same-head', statusText: '', branchName: 'codex/symphony-test'},
+        {headSha: 'same-head', statusText: '', branchName: 'codex/symphony-test'},
     ];
 
     const orchestrator = new SymphonyOrchestrator({
@@ -459,6 +528,80 @@ test('state transition out of commit-required states counts as success without l
     assert.equal(workspace.cleanedPaths.length, 0);
 });
 
+test('successful publish turn moves issue to In Review and stops the active run', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'publish-review-1',
+        identifier: 'ROB-13-PUBLISH',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-13-publish'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-publish'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-publish'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-publish-review',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-publish-review-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_end',
+                        params: {
+                            msg: {
+                                command:
+                                    "git push -u origin HEAD && gh pr create --base main --title 'Review-ready PR'",
+                                exitCode: 0,
+                            },
+                        },
+                    },
+                });
+
+                return {
+                    status: 'completed',
+                    outputText: 'published',
+                    threadId: 'thread-publish-review',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-publish-review-turn-1',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.deepEqual(tracker.moveIssueToStateByNameCalls, [
+        {
+            identifier: 'ROB-13-PUBLISH',
+            stateName: 'In Review',
+        },
+    ]);
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 0);
+});
+
 test('non-commit merge states can continue without local commit output', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
@@ -466,19 +609,19 @@ test('non-commit merge states can continue without local commit output', async (
         identifier: 'ROB-13-MERGE',
         priority: 1,
         createdAt: '2026-03-06T08:00:00.000Z',
-        stateName: 'Merging',
+        stateName: 'Ready to Merge',
     });
     tracker.candidates = [issue];
-    tracker.statesByIssueId.set(issue.id, 'Merging');
+    tracker.statesByIssueId.set(issue.id, 'Ready to Merge');
 
     const config = createWorkflowConfig();
-    config.tracker.activeStates = ['In Progress', 'Merging'];
+    config.tracker.activeStates = ['In Progress', 'Ready to Merge'];
     config.agent.commitRequiredStates = ['Todo', 'In Progress', 'Rework'];
     const workflowStore = new WorkflowStoreStub(config);
     const workspace = new WorkspaceStub();
     workspace.stateSnapshots = [
-        {headSha: 'same-head', statusText: ''},
-        {headSha: 'same-head', statusText: ''},
+        {headSha: 'same-head', statusText: '', branchName: 'codex/symphony-test'},
+        {headSha: 'same-head', statusText: '', branchName: 'codex/symphony-test'},
     ];
 
     const attempts: Array<number | null> = [];
@@ -678,8 +821,12 @@ test('first-turn post-diff checkpoint schedules a continuation retry without cou
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
     const workspace = new WorkspaceStub();
     workspace.stateSnapshots = [
-        {headSha: 'head-before', statusText: ''},
-        {headSha: 'head-before', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
+        {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'},
+        {
+            headSha: 'head-before',
+            statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md',
+            branchName: 'codex/symphony-test',
+        },
     ];
 
     const firstDispatch = createDeferred<{
@@ -755,6 +902,125 @@ test('first-turn post-diff checkpoint schedules a continuation retry without cou
     assert.equal(issueDetails?.status, 'retrying');
     const retry = issueDetails?.retry as Record<string, unknown>;
     assert.match(String(retry.retry_directive), /required repo diff already exists/i);
+});
+
+test('post-diff checkpoint carries publish-capable mode into the scheduled retry', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'post-diff-publish-1',
+        identifier: 'ROB-13-PUBLISH',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+        description: 'Update `docs/symphony/STAGING_PILOT_RUNBOOK.md` only.',
+    });
+    tracker.candidates = [issue];
+
+    const workflowConfig = createWorkflowConfig();
+    workflowConfig.codex.publishNetworkAccess = true;
+    const workflowStore = new WorkflowStoreStub(workflowConfig);
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'},
+        {
+            headSha: 'head-before',
+            statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md',
+            branchName: 'codex/symphony-test',
+        },
+        {headSha: 'head-after', statusText: '', branchName: 'codex/symphony-test'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        continuationDelayMs: 0,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-publish-1',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-publish-1-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/diff',
+                        params: {
+                            msg: {
+                                payload: {
+                                    summary: 'updated docs/symphony/STAGING_PILOT_RUNBOOK.md',
+                                },
+                            },
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'token_usage',
+                    payload: {
+                        total: {
+                            totalTokens: 100000,
+                        },
+                        last: {
+                            totalTokens: 1600,
+                        },
+                        model_context_window: 258400,
+                    },
+                });
+                throw new AppServerClientError('turn_cancelled', 'App-server session was cancelled for checkpointing.');
+            },
+            stop: async () => {},
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-PUBLISH');
+    assert.ok(issueDetails);
+    const retry = issueDetails?.retry as Record<string, unknown>;
+    assert.equal(retry.publish_mode, true);
+});
+
+test('tracked issue branches start in publish-capable mode', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'tracked-branch-1',
+        identifier: 'ROB-13-BRANCH',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+        description: 'Publish the existing branch.',
+        stateName: 'In Progress',
+    });
+    issue.branchName = 'beierrobin/rob-13-existing';
+    tracker.candidates = [issue];
+
+    const requests: Array<{publishMode?: boolean}> = [];
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: new WorkflowStoreStub(createWorkflowConfig()),
+        trackerFactory: () => tracker,
+        workspaceFactory: () => new WorkspaceStub(),
+        appServerFactory: () => ({
+            runTurn: async (request) => {
+                requests.push({publishMode: request.publishMode});
+                return {
+                    status: 'completed',
+                    outputText: 'Publish-capable branch turn.',
+                    threadId: 'thread-branch',
+                    turnId: 'turn-branch',
+                    sessionId: 'thread-branch-turn-branch',
+                };
+            },
+            stop: async () => {},
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    assert.equal(requests[0]?.publishMode, true);
 });
 
 test('reconcile removes retries when issue leaves active states', async () => {
@@ -1023,7 +1289,7 @@ test('workspace_path_escape failures are not retried', async () => {
             runBeforeRunHooks: async () => undefined,
             runAfterRunHooks: async () => undefined,
             cleanupTerminalWorkspace: async () => undefined,
-            captureWorkspaceState: async () => ({headSha: 'head', statusText: ''}),
+            captureWorkspaceState: async () => ({headSha: 'head', statusText: '', branchName: null}),
         }),
         appServerFactory: () => ({
             runTurn: async () => {
@@ -1233,8 +1499,12 @@ test('first-turn trace captures pre-edit command execution details without forci
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
     const workspace = new WorkspaceStub();
     workspace.stateSnapshots = [
-        {headSha: 'head-before', statusText: ''},
-        {headSha: 'head-after', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
+        {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'},
+        {
+            headSha: 'head-after',
+            statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md',
+            branchName: 'codex/symphony-test',
+        },
     ];
 
     const orchestrator = new SymphonyOrchestrator({
@@ -1341,8 +1611,12 @@ test('first-turn trace captures plan-only candidates without stopping the run ea
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
     const workspace = new WorkspaceStub();
     workspace.stateSnapshots = [
-        {headSha: 'head-before', statusText: ''},
-        {headSha: 'head-after', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
+        {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'},
+        {
+            headSha: 'head-after',
+            statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md',
+            branchName: 'codex/symphony-test',
+        },
     ];
 
     const orchestrator = new SymphonyOrchestrator({

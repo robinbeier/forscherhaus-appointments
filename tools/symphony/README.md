@@ -99,11 +99,13 @@ tracker:
     endpoint: https://api.linear.app/graphql
     api_key: $SYMPHONY_LINEAR_API_KEY
     project_slug: $SYMPHONY_LINEAR_PROJECT_SLUG
+    review_state_name: In Review
+    merge_state_name: Ready to Merge
     active_states:
         - Todo
         - In Progress
         - Rework
-        - Merging
+        - Ready to Merge
     terminal_states:
         - Done
         - Closed
@@ -223,7 +225,7 @@ Key behavior:
     closed or merged
 -   completed runs require committed local progress only in configured
     `agent.commit_required_states`; review/merge runs in states such as
-    `Human Review`, `Merging`, or terminal states can complete without a new
+    `In Review`, `Ready to Merge`, or terminal states can complete without a new
     local commit as long as the workspace stays clean
 -   `before_run` hook failures are fatal; `after_run` and `before_remove` are
     best effort and log errors without aborting cleanup
@@ -234,7 +236,7 @@ Key behavior:
     `bash /absolute/path/to/script.sh` so the workflow does not depend on the
     executable bit being preserved
 -   the intended full-agent workflow uses non-standard Linear states
-    `Human Review`, `Rework`, and `Merging`, plus repo-local skills under
+    `In Review`, `Rework`, and `Ready to Merge`, plus repo-local skills under
     `.codex/skills/` for commit/pull/push/land/linear workpad operations
     and a single compact `## Codex Workpad` comment as the resumability anchor
 
