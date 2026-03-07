@@ -1,8 +1,18 @@
-import {AppServerClientError, CodexAppServerClient, type OrchestratorEvent} from './app-server-client.js';
+import {
+    AppServerClientError,
+    CodexAppServerClient,
+    type OrchestratorEvent,
+    type OrchestratorTraceCategory,
+} from './app-server-client.js';
 import {LinearTrackerAdapter, LinearTrackerError, type TrackedIssue} from './linear-tracker.js';
 import type {Logger} from './logger.js';
 import {type LoadedWorkflowConfig, type WorkflowConfigStore, WorkflowConfigError} from './workflow.js';
-import {WorkspaceManager, WorkspaceManagerError, type WorkspaceHandle} from './workspace-manager.js';
+import {
+    WorkspaceManager,
+    WorkspaceManagerError,
+    type WorkspaceHandle,
+    type WorkspaceStateSnapshot,
+} from './workspace-manager.js';
 
 type WorkflowConfigStoreLike = Pick<
     WorkflowConfigStore,
@@ -13,20 +23,25 @@ export interface TrackerClient {
     fetchCandidateIssues(): Promise<TrackedIssue[]>;
     fetchIssueStatesByIds(issueIds: string[]): Promise<Map<string, string>>;
     fetchIssueStatesByStateNames(stateNames: string[]): Promise<TrackedIssue[]>;
+    prepareIssueForRun?(issue: TrackedIssue): Promise<TrackedIssue>;
 }
 
 export interface WorkspaceClient {
     prepareWorkspace(rawKey: string): Promise<WorkspaceHandle>;
+    resolveWorkspacePath(rawKey: string): string;
     runBeforeRunHooks(workspacePath: string): Promise<void>;
     runAfterRunHooks(workspacePath: string): Promise<void>;
     cleanupTerminalWorkspace(workspacePath: string): Promise<void>;
+    captureWorkspaceState(workspacePath: string): Promise<WorkspaceStateSnapshot>;
 }
 
 export interface AppServerClient {
     runTurn(request: {
         prompt: string;
         issueIdentifier: string;
-        attempt: number;
+        issueTitle?: string;
+        attempt: number | null;
+        threadId?: string;
         responseTimeoutMs?: number;
         turnTimeoutMs?: number;
     }): Promise<{
@@ -35,7 +50,10 @@ export interface AppServerClient {
         threadId: string;
         turnId: string;
         sessionId: string;
+        inputRequiredType?: string;
+        inputRequiredPayload?: Record<string, unknown>;
     }>;
+    stop(): Promise<void>;
 }
 
 type TrackerFactory = (config: LoadedWorkflowConfig) => TrackerClient;
@@ -43,6 +61,7 @@ type WorkspaceFactory = (config: LoadedWorkflowConfig) => WorkspaceClient;
 type AppServerFactory = (args: {
     config: LoadedWorkflowConfig;
     workspacePath: string;
+    runningEntry: RunningEntry;
     emitEvent: (event: OrchestratorEvent) => void;
 }) => AppServerClient;
 
@@ -67,16 +86,102 @@ interface RetryEntry {
     reason: RetryReason;
     availableAtMs: number;
     errorClass?: string;
+    retryDirective?: string;
 }
 
 interface RunningEntry {
     issue: TrackedIssue;
-    attempt: number;
+    attempt: number | null;
     source: DispatchSource;
     startedAtMs: number;
+    lastEventAtMs: number;
+    turnCount: number;
     suppressRetry: boolean;
     stallLogged: boolean;
+    stopRequested: boolean;
+    cleanupWorkspaceOnStop: boolean;
+    stopReason?:
+        | 'reconciliation_terminal'
+        | 'reconciliation_non_active'
+        | 'stall_timeout'
+        | 'first_repo_step_guard'
+        | 'first_command_drift_guard'
+        | 'first_plan_only_guard'
+        | 'post_diff_checkpoint';
+    workspacePath?: string;
+    workspaceClient?: WorkspaceClient;
+    baselineWorkspaceState?: WorkspaceStateSnapshot;
+    appServer?: AppServerClient;
+    threadId?: string;
     sessionId?: string;
+    lastEventType?: string;
+    lastEventMessage?: string;
+    lastTokenUsage?: Record<string, unknown>;
+    hasObservedWorkspaceDiff: boolean;
+    firstTurnItemLifecycleEvents: number;
+    firstTurnCommandExecutionCount: number;
+    firstTurnBroadCommandExecutionCount: number;
+    workspaceStateCheckInFlight: boolean;
+    lastWorkspaceStateCheckAtMs?: number;
+    firstRepoStepGuardTriggered: boolean;
+    firstCommandDriftGuardTriggered: boolean;
+    firstPlanOnlyGuardTriggered: boolean;
+    firstRepoTargetPath?: string | null;
+    currentAgentMessageBuffer: string;
+    firstTurnAgentMessageText?: string;
+    firstTurnPlanOnlyCandidateAtMs?: number;
+    firstTurnPlanOnlyCandidateMessage?: string;
+    firstDiffObservedAtMs?: number;
+    postDiffCheckpointTriggered: boolean;
+    retryDirective?: string;
+    pendingGuardrailError?: OrchestratorGuardrailError;
+    traceEntries: TraceEntry[];
+    firstTurnTraceEntries: TraceEntry[];
+}
+
+interface TokenUsageSummary {
+    totalTokens: number | null;
+    lastTurnTokens: number | null;
+    contextWindowTokens: number | null;
+    contextHeadroomTokens: number | null;
+    contextUtilizationPercent: number | null;
+}
+
+interface TraceEntry {
+    atIso: string;
+    category: OrchestratorTraceCategory;
+    eventType: string;
+    message: string;
+    details?: Record<string, unknown>;
+}
+
+interface RawEventSummary {
+    eventType: string;
+    category: OrchestratorTraceCategory;
+    message: string;
+    details?: Record<string, unknown>;
+}
+
+type OrchestratorGuardrailErrorClass =
+    | 'workspace_no_committed_output'
+    | 'workspace_no_first_repo_step'
+    | 'workspace_first_repo_step_command_drift'
+    | 'workspace_first_repo_step_plan_only';
+
+class OrchestratorGuardrailError extends Error {
+    public readonly errorClass: OrchestratorGuardrailErrorClass;
+    public readonly details: Record<string, unknown>;
+
+    public constructor(
+        errorClass: OrchestratorGuardrailErrorClass,
+        message: string,
+        details: Record<string, unknown> = {},
+    ) {
+        super(message);
+        this.name = 'OrchestratorGuardrailError';
+        this.errorClass = errorClass;
+        this.details = details;
+    }
 }
 
 export interface OrchestratorSnapshot {
@@ -84,11 +189,24 @@ export interface OrchestratorSnapshot {
     running: Array<{
         issueId: string;
         issueIdentifier: string;
-        attempt: number;
+        attempt: number | null;
         source: DispatchSource;
         startedAtIso: string;
+        runtimeSeconds: number;
+        lastActivityAtIso: string;
+        idleSeconds: number;
         suppressRetry: boolean;
         sessionId: string | null;
+        threadId: string | null;
+        turnCount: number;
+        lastEvent: string | null;
+        lastActivity: string | null;
+        totalTokens: number | null;
+        lastTurnTokens: number | null;
+        contextWindowTokens: number | null;
+        contextHeadroomTokens: number | null;
+        contextUtilizationPercent: number | null;
+        traceTail: TraceEntry[];
     }>;
     retrying: Array<{
         issueId: string;
@@ -112,6 +230,21 @@ export interface OrchestratorSnapshot {
 const CONTINUATION_DELAY_MS = 1000;
 const RETRY_MAX_DELAY_MS = 60000;
 const STALL_GRACE_MS = 5000;
+const FIRST_REPO_STEP_GUARD_MIN_RUNTIME_MS = 15000;
+const FIRST_REPO_STEP_GUARD_CONTEXT_UTILIZATION_PERCENT = 45;
+const FIRST_REPO_STEP_GUARD_ITEM_LIFECYCLE_EVENTS = 6;
+const WORKSPACE_PROGRESS_CHECK_MIN_INTERVAL_MS = 2000;
+const FIRST_COMMAND_DRIFT_GUARD_MIN_RUNTIME_MS = 5000;
+const FIRST_COMMAND_DRIFT_GUARD_TOTAL_COMMAND_EXECUTIONS = 3;
+const FIRST_COMMAND_DRIFT_GUARD_BROAD_COMMAND_EXECUTIONS = 2;
+const FIRST_PLAN_ONLY_MESSAGE_MIN_LENGTH = 24;
+const FIRST_PLAN_ONLY_GUARD_GRACE_MS = 1000;
+const POST_DIFF_CHECKPOINT_MIN_RUNTIME_AFTER_DIFF_MS = 15000;
+const POST_DIFF_CHECKPOINT_CONTEXT_UTILIZATION_PERCENT = 35;
+const FIRST_AGENT_MESSAGE_MAX_CHARS = 1200;
+const TRACE_MAX_ENTRIES = 40;
+const FIRST_TURN_TRACE_MAX_ENTRIES = 20;
+const SNAPSHOT_TRACE_TAIL_ENTRIES = 5;
 
 function normalizeStateName(value: string | undefined): string {
     return (value ?? '').trim().toLowerCase();
@@ -125,8 +258,8 @@ function normalizePositiveInteger(value: number, fallback = 0): number {
     return Math.max(0, Math.floor(value));
 }
 
-function prioritySortWeight(priority: number): number {
-    if (!Number.isFinite(priority) || priority <= 0) {
+function prioritySortWeight(priority: number | null): number {
+    if (priority === null || !Number.isFinite(priority)) {
         return 5;
     }
 
@@ -148,18 +281,308 @@ function compareCandidateIssues(left: TrackedIssue, right: TrackedIssue): number
     return left.identifier.localeCompare(right.identifier);
 }
 
+function compactPromptText(value: string | null | undefined, fallback: string, maxChars: number): string {
+    const normalized = typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : '';
+    if (normalized.length === 0) {
+        return fallback;
+    }
+
+    if (normalized.length <= maxChars) {
+        return normalized;
+    }
+
+    return `${normalized.slice(0, Math.max(0, maxChars - 15)).trimEnd()}\n[truncated]`;
+}
+
+function extractLikelyRepoPaths(description: string | null | undefined): string[] {
+    const normalized = typeof description === 'string' ? description : '';
+    if (normalized.trim().length === 0) {
+        return [];
+    }
+
+    const candidates: string[] = [];
+    const backtickPattern = /`([^`\n]+)`/g;
+    for (const match of normalized.matchAll(backtickPattern)) {
+        const candidate = match[1]?.trim() ?? '';
+        if (candidate.length > 0) {
+            candidates.push(candidate);
+        }
+    }
+
+    const pathPattern = /\b(?:\.?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+)\b/g;
+    for (const match of normalized.matchAll(pathPattern)) {
+        const candidate = match[0]?.trim() ?? '';
+        if (candidate.length > 0) {
+            candidates.push(candidate);
+        }
+    }
+
+    const uniqueCandidates: string[] = [];
+    for (const candidate of candidates) {
+        if (
+            candidate.includes('://') ||
+            candidate.startsWith('http://') ||
+            candidate.startsWith('https://') ||
+            candidate.startsWith('www.')
+        ) {
+            continue;
+        }
+
+        if (!candidate.includes('/') && !candidate.startsWith('.')) {
+            continue;
+        }
+
+        if (!uniqueCandidates.includes(candidate)) {
+            uniqueCandidates.push(candidate);
+        }
+
+        if (uniqueCandidates.length >= 5) {
+            break;
+        }
+    }
+
+    return uniqueCandidates;
+}
+
+function scoreRepoTargetPath(candidate: string): number {
+    const normalized = candidate.trim();
+    if (normalized.length === 0) {
+        return Number.NEGATIVE_INFINITY;
+    }
+
+    if (
+        normalized.startsWith('vendor/') ||
+        normalized.startsWith('system/') ||
+        normalized.startsWith('node_modules/') ||
+        normalized.startsWith('.git/')
+    ) {
+        return Number.NEGATIVE_INFINITY;
+    }
+
+    let score = 0;
+    if (normalized.startsWith('application/')) {
+        score += 120;
+    } else if (normalized.startsWith('tests/')) {
+        score += 110;
+    } else if (normalized.startsWith('docs/')) {
+        score += 100;
+    } else if (normalized.startsWith('assets/')) {
+        score += 95;
+    } else if (normalized.startsWith('scripts/')) {
+        score += 90;
+    } else if (normalized.startsWith('build/')) {
+        score += 80;
+    } else if (normalized.startsWith('.github/')) {
+        score += 70;
+    } else if (normalized.startsWith('.')) {
+        score += 40;
+    }
+
+    if (/\.[A-Za-z0-9]+$/.test(normalized)) {
+        score += 15;
+    }
+
+    if (/\.env(\.|$)/.test(normalized)) {
+        score -= 40;
+    }
+
+    score -= normalized.split('/').length;
+    return score;
+}
+
+function pickFirstRepoTargetPath(targetPaths: string[]): string | null {
+    if (targetPaths.length === 0) {
+        return null;
+    }
+
+    return (
+        targetPaths
+            .map((candidate, index) => ({
+                candidate,
+                index,
+                score: scoreRepoTargetPath(candidate),
+            }))
+            .sort((left, right) => {
+                if (left.score !== right.score) {
+                    return right.score - left.score;
+                }
+
+                return left.index - right.index;
+            })[0]?.candidate ?? null
+    );
+}
+
+function buildFirstRepoStepContract(firstRepoTargetPath: string | null): string {
+    if (!firstRepoTargetPath) {
+        return 'Before broader exploration, make the smallest valid repo diff in the narrowest file implied by the issue. The runtime will stop and retry the turn if no repo diff appears.';
+    }
+
+    const scopeHint =
+        firstRepoTargetPath.startsWith('docs/') || firstRepoTargetPath.endsWith('.md')
+            ? 'Keep the first diff in docs scope unless the issue explicitly requires more.'
+            : 'Do not widen scope before this first diff exists.';
+
+    return `Before broader exploration, open and edit \`${firstRepoTargetPath}\`. Produce the smallest valid repo diff there in this first turn. ${scopeHint} The runtime will stop and retry the turn if no repo diff appears.`;
+}
+
+function appendMergedCappedText(existing: string, delta: string, maxLength: number): string {
+    if (delta.length === 0 || maxLength <= 0) {
+        return existing;
+    }
+
+    let merged = delta;
+    if (existing.length > 0) {
+        if (delta.startsWith(existing)) {
+            merged = delta;
+        } else if (existing.startsWith(delta)) {
+            merged = existing;
+        } else {
+            let overlapLength = 0;
+            const maxOverlap = Math.min(existing.length, delta.length);
+            for (let length = maxOverlap; length > 0; length -= 1) {
+                if (existing.slice(-length) === delta.slice(0, length)) {
+                    overlapLength = length;
+                    break;
+                }
+            }
+
+            merged = `${existing}${delta.slice(overlapLength)}`;
+        }
+    }
+
+    if (merged.length <= maxLength) {
+        return merged;
+    }
+
+    return merged.slice(0, maxLength);
+}
+
+function normalizeAgentMessageText(value: string, maxLength = FIRST_AGENT_MESSAGE_MAX_CHARS): string {
+    return normalizeText(value.replace(/\s+/g, ' '), maxLength);
+}
+
+function isAgentMessageItemKind(itemKind: unknown): boolean {
+    return typeof itemKind === 'string' && itemKind.trim().toLowerCase() === 'agentmessage';
+}
+
+function hasPlanOnlyLead(text: string): boolean {
+    return [
+        /\b(i(?:'|’)ll|i will|i am going to|i'm going to|let me|plan|approach)\b/i,
+        /\b(first|next|then|after that|before editing)\b/i,
+        /\b(editing|updating|adding|checking|reviewing|keeping scope)\b/i,
+        /\b(ich werde|ich prüfe|ich aktualisiere zunächst|zuerst|danach)\b/i,
+    ].some((pattern) => pattern.test(text));
+}
+
+function hasCompletedWorkSignal(text: string): boolean {
+    return [
+        /\b(updated|edited|changed|applied|patched|added|removed|ran|validated|committed|pushed|created|implemented|fixed|moved)\b/i,
+        /\b(aktualisiert|bearbeitet|geändert|angewendet|hinzugefügt|entfernt|ausgeführt|validiert|committed|gepusht)\b/i,
+    ].some((pattern) => pattern.test(text));
+}
+
+function hasTrueBlockerSignal(text: string): boolean {
+    return [
+        /\b(blocked|cannot|can't|unable|missing (?:permission|permissions|secret|secrets|auth|authentication)|need(?:s)? (?:permission|permissions|auth|credentials)|no access)\b/i,
+        /\b(blockiert|fehlende(?:n)? (?:rechte|berechtigungen|zugänge|secrets?)|kein zugriff|brauche (?:rechte|zugang))\b/i,
+    ].some((pattern) => pattern.test(text));
+}
+
+function isPlanOnlyFirstTurnMessage(text: string): boolean {
+    const normalized = normalizeAgentMessageText(text, FIRST_AGENT_MESSAGE_MAX_CHARS);
+    if (normalized.length < FIRST_PLAN_ONLY_MESSAGE_MIN_LENGTH) {
+        return false;
+    }
+
+    if (hasTrueBlockerSignal(normalized) || hasCompletedWorkSignal(normalized)) {
+        return false;
+    }
+
+    return hasPlanOnlyLead(normalized);
+}
+
+function buildRetryDirective(
+    firstRepoTargetPath: string | null | undefined,
+    firstTurnAgentMessageText: string | undefined,
+    errorClass: string | undefined,
+): string | undefined {
+    if (!errorClass) {
+        return undefined;
+    }
+
+    const firstStep =
+        firstRepoTargetPath && firstRepoTargetPath.trim().length > 0
+            ? `Open and edit \`${firstRepoTargetPath}\` before any broader explanation.`
+            : 'Open and edit the narrowest repo file implied by the issue before any broader explanation.';
+    const priorReply = firstTurnAgentMessageText
+        ? ` Do not repeat a reply like: "${normalizeText(firstTurnAgentMessageText, 220)}"`
+        : '';
+
+    if (errorClass === 'workspace_first_repo_step_plan_only') {
+        return `The previous first turn ended in a plan/status reply without a repo diff.${priorReply} ${firstStep}`;
+    }
+
+    if (errorClass === 'workspace_no_first_repo_step') {
+        return `The previous first turn still produced no repo diff.${priorReply} ${firstStep}`;
+    }
+
+    if (errorClass === 'workspace_first_repo_step_command_drift') {
+        return `The previous first turn drifted into shell exploration before editing.${priorReply} ${firstStep}`;
+    }
+
+    return undefined;
+}
+
+function buildPostDiffCheckpointRetryDirective(firstRepoTargetPath: string | null | undefined): string {
+    const firstStep =
+        firstRepoTargetPath && firstRepoTargetPath.trim().length > 0
+            ? `The required repo diff already exists in \`${firstRepoTargetPath}\`.`
+            : 'The required repo diff already exists in the workspace.';
+
+    return `${firstStep} Resume from the current workspace and thread state. Prioritize the narrowest remaining validation, local commit, and publish/state-update work before any broader exploration.`;
+}
+
 function toIssueTemplatePayload(issue: TrackedIssue): Record<string, unknown> {
+    const targetPaths = extractLikelyRepoPaths(issue.description);
+    const firstRepoTargetPath = pickFirstRepoTargetPath(targetPaths);
+    const firstRepoStepContract = buildFirstRepoStepContract(firstRepoTargetPath);
+
     return {
         id: issue.id,
         identifier: issue.identifier,
         title: issue.title,
+        title_or_identifier: issue.title.trim().length > 0 ? issue.title : issue.identifier,
+        description: issue.description,
+        description_or_default: compactPromptText(issue.description, 'No description provided.', 4000),
         state: issue.stateName,
         priority: issue.priority,
+        branch_name: issue.branchName,
+        branch_name_or_default: issue.branchName ?? '(no branch recorded yet)',
+        url: issue.url,
         labels: issue.labels,
-        blocked_by: issue.blockedByIdentifiers,
+        blocked_by: issue.blockedBy,
+        blocked_by_identifiers: issue.blockedByIdentifiers,
         created_at: issue.createdAt,
         updated_at: issue.updatedAt,
         project_slug: issue.projectSlug,
+        workpad_comment_id: issue.workpadCommentId,
+        workpad_comment_body: issue.workpadCommentBody,
+        workpad_comment_body_or_default: compactPromptText(
+            issue.workpadCommentBody,
+            'No workpad comment is available yet.',
+            4000,
+        ),
+        workpad_comment_url: issue.workpadCommentUrl,
+        target_paths: targetPaths,
+        target_paths_hint_or_default:
+            targetPaths.length > 0
+                ? targetPaths.map((targetPath) => `- ${targetPath}`).join('\n')
+                : '- No explicit target paths identified.',
+        first_repo_target_path: firstRepoTargetPath,
+        first_repo_target_path_or_default:
+            firstRepoTargetPath ?? '(use the narrowest repo file implied by the issue brief)',
+        first_repo_step_contract: firstRepoStepContract,
+        first_repo_step_contract_or_default: firstRepoStepContract,
     };
 }
 
@@ -168,6 +591,566 @@ function issueLogFields(issue: TrackedIssue, sessionId?: string): Record<string,
         issue_id: issue.id,
         issue_identifier: issue.identifier,
         session_id: sessionId ?? null,
+    };
+}
+
+function didWorkspaceHeadAdvance(before: WorkspaceStateSnapshot, after: WorkspaceStateSnapshot): boolean {
+    return before.headSha !== after.headSha;
+}
+
+function normalizeStateNames(values: string[]): Set<string> {
+    return new Set(values.map((value) => normalizeStateName(value)).filter((value) => value.length > 0));
+}
+
+function nextRetryAttempt(attempt: number | null): number {
+    return attempt === null ? 1 : attempt + 1;
+}
+
+function createContinuationPrompt(
+    issue: TrackedIssue,
+    turnNumber: number,
+    maxTurns: number,
+    attempt: number | null,
+): string {
+    return [
+        'Continuation guidance:',
+        '',
+        '- The previous Codex turn completed normally, but the Linear issue is still in an active state.',
+        `- This is continuation turn ${turnNumber} of ${maxTurns} for the current agent run.`,
+        '- Resume from the current workspace and workpad state instead of restarting from scratch.',
+        '- The original task instructions and prior turn context are already present in this thread, so do not restate them before acting.',
+        '- Focus on the remaining ticket work and do not end the turn while the issue stays active unless you are truly blocked.',
+        attempt === null
+            ? '- This worker session started from the initial dispatch.'
+            : `- This worker session is running retry/continuation attempt ${attempt}.`,
+        `- Current tracker state: ${issue.stateName}.`,
+    ].join('\n');
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+
+    return undefined;
+}
+
+function readPath(value: unknown, path: string[]): unknown {
+    let current: unknown = value;
+
+    for (const segment of path) {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) {
+            return undefined;
+        }
+
+        current = (current as Record<string, unknown>)[segment];
+    }
+
+    return current;
+}
+
+function firstFiniteNumber(source: Record<string, unknown>, candidatePaths: string[][]): number | undefined {
+    for (const path of candidatePaths) {
+        const value = asFiniteNumber(readPath(source, path));
+        if (value !== undefined) {
+            return value;
+        }
+    }
+
+    return undefined;
+}
+
+function firstStringValue(source: Record<string, unknown>, candidatePaths: string[][]): string | undefined {
+    for (const path of candidatePaths) {
+        const value = readPath(source, path);
+        if (typeof value === 'string' && value.trim().length > 0) {
+            return value;
+        }
+    }
+
+    return undefined;
+}
+
+function firstDefinedValue(source: Record<string, unknown>, candidatePaths: string[][]): unknown {
+    for (const path of candidatePaths) {
+        const value = readPath(source, path);
+        if (value !== undefined && value !== null) {
+            return value;
+        }
+    }
+
+    return undefined;
+}
+
+function normalizeCommandValue(value: unknown): string | undefined {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+    }
+
+    if (Array.isArray(value) && value.every((part) => typeof part === 'string')) {
+        const joined = value.join(' ').trim();
+        return joined.length > 0 ? joined : undefined;
+    }
+
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const record = value as Record<string, unknown>;
+        const binaryCommand = normalizeCommandValue(
+            record.parsedCmd ?? record.parsed_cmd ?? record.command ?? record.cmd,
+        );
+        const args = normalizeCommandValue(record.args ?? record.argv);
+        if (binaryCommand && args) {
+            return `${binaryCommand} ${args}`.trim();
+        }
+
+        return binaryCommand ?? args;
+    }
+
+    return undefined;
+}
+
+function extractStreamingText(payload: Record<string, unknown>): string | undefined {
+    const text = firstDefinedValue(payload, [
+        ['params', 'delta'],
+        ['params', 'msg', 'delta'],
+        ['params', 'textDelta'],
+        ['params', 'msg', 'textDelta'],
+        ['params', 'outputDelta'],
+        ['params', 'msg', 'outputDelta'],
+        ['params', 'text'],
+        ['params', 'msg', 'text'],
+        ['params', 'summaryText'],
+        ['params', 'msg', 'summaryText'],
+        ['params', 'content'],
+        ['params', 'msg', 'content'],
+        ['params', 'msg', 'payload', 'delta'],
+        ['params', 'msg', 'payload', 'textDelta'],
+        ['params', 'msg', 'payload', 'outputDelta'],
+        ['params', 'msg', 'payload', 'text'],
+        ['params', 'msg', 'payload', 'summaryText'],
+        ['params', 'msg', 'payload', 'content'],
+    ]);
+
+    return typeof text === 'string' && text.trim().length > 0 ? text : undefined;
+}
+
+function humanizeItemKind(itemKind: string | null): string | null {
+    if (!itemKind) {
+        return null;
+    }
+
+    return itemKind
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/[_-]+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function extractExecCommandDetails(payload: Record<string, unknown>): {
+    command: string | null;
+    cwd: string | null;
+    exitCode: number | null;
+} {
+    return {
+        command:
+            normalizeCommandValue(
+                firstDefinedValue(payload, [
+                    ['params', 'msg', 'command'],
+                    ['params', 'msg', 'parsed_cmd'],
+                    ['params', 'msg', 'parsedCmd'],
+                    ['params', 'msg', 'cmd'],
+                    ['params', 'msg', 'argv'],
+                    ['params', 'msg', 'args'],
+                    ['params', 'msg', 'payload', 'command'],
+                    ['params', 'msg', 'payload', 'parsed_cmd'],
+                    ['params', 'msg', 'payload', 'parsedCmd'],
+                    ['params', 'msg', 'payload', 'cmd'],
+                    ['params', 'msg', 'payload', 'argv'],
+                    ['params', 'msg', 'payload', 'args'],
+                    ['params', 'command'],
+                    ['params', 'parsed_cmd'],
+                    ['params', 'parsedCmd'],
+                    ['params', 'cmd'],
+                    ['params', 'argv'],
+                    ['params', 'args'],
+                    ['command'],
+                    ['parsed_cmd'],
+                    ['parsedCmd'],
+                    ['cmd'],
+                    ['argv'],
+                    ['args'],
+                ]),
+            ) ?? null,
+        cwd:
+            firstStringValue(payload, [
+                ['params', 'msg', 'cwd'],
+                ['params', 'msg', 'payload', 'cwd'],
+                ['params', 'cwd'],
+                ['cwd'],
+            ]) ?? null,
+        exitCode:
+            firstFiniteNumber(payload, [
+                ['params', 'msg', 'exitCode'],
+                ['params', 'msg', 'exit_code'],
+                ['params', 'exitCode'],
+                ['params', 'exit_code'],
+                ['exitCode'],
+                ['exit_code'],
+            ]) ?? null,
+    };
+}
+
+function commandMentionsTargetPath(command: string, firstRepoTargetPath: string | null | undefined): boolean {
+    if (!firstRepoTargetPath) {
+        return false;
+    }
+
+    const normalizedCommand = command.toLowerCase();
+    const normalizedTargetPath = firstRepoTargetPath.toLowerCase();
+    if (normalizedCommand.includes(normalizedTargetPath)) {
+        return true;
+    }
+
+    const targetBasename = normalizedTargetPath.split('/').pop();
+    return typeof targetBasename === 'string' && targetBasename.length > 0
+        ? normalizedCommand.includes(targetBasename)
+        : false;
+}
+
+function isBroadCommandBeforeFirstDiff(command: string, firstRepoTargetPath: string | null | undefined): boolean {
+    const normalized = command.trim().toLowerCase();
+    if (normalized.length === 0) {
+        return false;
+    }
+
+    if (commandMentionsTargetPath(normalized, firstRepoTargetPath)) {
+        return false;
+    }
+
+    if (/^(pwd|true|echo)\b/.test(normalized) || /^git (status|rev-parse|branch|log)\b/.test(normalized)) {
+        return false;
+    }
+
+    return (
+        /^(ls|tree|find|fd|rg|grep|sed|cat|head|tail)\b/.test(normalized) ||
+        /^git (show|diff)\b/.test(normalized) ||
+        normalized.includes('workflow.md') ||
+        normalized.includes('agents.md')
+    );
+}
+
+function normalizeText(value: string, maxLength = 240): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+
+    return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function formatTokenCount(value: number): string {
+    return value.toLocaleString('en-US');
+}
+
+function summarizeTokenUsage(payload?: Record<string, unknown>): TokenUsageSummary | null {
+    if (!payload) {
+        return null;
+    }
+
+    const totalTokens =
+        firstFiniteNumber(payload, [
+            ['total'],
+            ['totalTokens'],
+            ['total_tokens'],
+            ['total', 'totalTokens'],
+            ['total', 'total_tokens'],
+            ['total', 'total'],
+            ['totalTokenUsage'],
+            ['totalTokenUsage', 'totalTokens'],
+            ['totalTokenUsage', 'total_tokens'],
+            ['total_token_usage'],
+            ['total_token_usage', 'totalTokens'],
+            ['total_token_usage', 'total_tokens'],
+        ]) ?? null;
+    const lastTurnTokens =
+        firstFiniteNumber(payload, [
+            ['last'],
+            ['lastTokens'],
+            ['last_tokens'],
+            ['last', 'totalTokens'],
+            ['last', 'total_tokens'],
+            ['last', 'total'],
+            ['lastTokenUsage'],
+            ['lastTokenUsage', 'totalTokens'],
+            ['lastTokenUsage', 'total_tokens'],
+            ['last_token_usage'],
+            ['last_token_usage', 'totalTokens'],
+            ['last_token_usage', 'total_tokens'],
+        ]) ?? null;
+    const contextWindowTokens =
+        firstFiniteNumber(payload, [
+            ['modelContextWindow'],
+            ['model_context_window'],
+            ['contextWindow'],
+            ['context_window'],
+            ['modelContextWindowTokens'],
+            ['model_context_window_tokens'],
+            ['total', 'modelContextWindow'],
+            ['total', 'model_context_window'],
+            ['totalTokenUsage', 'modelContextWindow'],
+            ['totalTokenUsage', 'model_context_window'],
+            ['total_token_usage', 'modelContextWindow'],
+            ['total_token_usage', 'model_context_window'],
+        ]) ?? null;
+
+    if (totalTokens === null && lastTurnTokens === null && contextWindowTokens === null) {
+        return null;
+    }
+
+    const contextHeadroomTokens =
+        totalTokens !== null && contextWindowTokens !== null ? Math.max(contextWindowTokens - totalTokens, 0) : null;
+    const contextUtilizationPercent =
+        totalTokens !== null && contextWindowTokens !== null && contextWindowTokens > 0
+            ? Math.round(Math.min(totalTokens / contextWindowTokens, 1) * 1000) / 10
+            : null;
+
+    return {
+        totalTokens,
+        lastTurnTokens,
+        contextWindowTokens,
+        contextHeadroomTokens,
+        contextUtilizationPercent,
+    };
+}
+
+function describeTokenUsage(summary: TokenUsageSummary | null): string {
+    if (!summary) {
+        return 'Token usage updated.';
+    }
+
+    const parts: string[] = [];
+
+    if (summary.totalTokens !== null && summary.contextWindowTokens !== null) {
+        const utilization =
+            summary.contextUtilizationPercent !== null ? `${summary.contextUtilizationPercent.toFixed(1)}%` : 'n/a';
+        parts.push(
+            `Context ${formatTokenCount(summary.totalTokens)} / ${formatTokenCount(summary.contextWindowTokens)} tokens (${utilization} used)`,
+        );
+    } else if (summary.totalTokens !== null) {
+        parts.push(`Total tokens ${formatTokenCount(summary.totalTokens)}`);
+    }
+
+    if (summary.lastTurnTokens !== null) {
+        parts.push(`last turn ${formatTokenCount(summary.lastTurnTokens)}`);
+    }
+
+    return parts.length > 0 ? `${parts.join(', ')}.` : 'Token usage updated.';
+}
+
+function summarizeRawEvent(payload: Record<string, unknown>): RawEventSummary {
+    const eventType =
+        typeof payload.method === 'string'
+            ? payload.method
+            : typeof payload.type === 'string'
+              ? payload.type
+              : 'raw_event';
+    const normalizedType = eventType.trim().toLowerCase();
+
+    if (
+        normalizedType === 'item/agentmessage/delta' ||
+        normalizedType === 'codex/event/agent_message_delta' ||
+        normalizedType === 'codex/event/agent_message_content_delta'
+    ) {
+        const delta = extractStreamingText(payload) ?? '';
+        return {
+            eventType,
+            category: 'agent',
+            message: 'Codex is streaming a response.',
+            details: delta.length > 0 ? {delta: normalizeText(delta, 240)} : undefined,
+        };
+    }
+
+    if (normalizedType.includes('agentmessage') || normalizedType.includes('agent_message')) {
+        return {
+            eventType,
+            category: 'agent',
+            message: 'Codex is streaming a response.',
+            details: (() => {
+                const delta = extractStreamingText(payload);
+                return delta ? {delta: normalizeText(delta, 240)} : undefined;
+            })(),
+        };
+    }
+
+    if (normalizedType.includes('turn') && normalizedType.includes('started')) {
+        return {
+            eventType,
+            category: 'turn',
+            message: 'Turn started.',
+        };
+    }
+
+    if (normalizedType.includes('turn') && normalizedType.includes('completed')) {
+        return {
+            eventType,
+            category: 'turn',
+            message: 'Turn completed.',
+        };
+    }
+
+    if (normalizedType.includes('tool') && normalizedType.includes('call')) {
+        const toolName = firstStringValue(payload, [['params', 'tool'], ['tool']]) ?? null;
+        const callId = firstStringValue(payload, [['params', 'callId'], ['callId']]) ?? null;
+        return {
+            eventType,
+            category: 'tool',
+            message: toolName ? `Tool call requested: ${toolName}.` : 'Tool call requested.',
+            details: {
+                tool: toolName,
+                call_id: callId,
+            },
+        };
+    }
+
+    if (normalizedType.includes('requestuserinput') || normalizedType.includes('elicitation')) {
+        const params = readPath(payload, ['params']);
+        const questions =
+            params && typeof params === 'object' && !Array.isArray(params)
+                ? ((params as Record<string, unknown>).questions as unknown)
+                : undefined;
+        const firstQuestion =
+            Array.isArray(questions) && questions.length > 0 && questions[0] && typeof questions[0] === 'object'
+                ? (questions[0] as Record<string, unknown>)
+                : undefined;
+        const questionText =
+            firstStringValue(payload, [['params', 'question']]) ??
+            (typeof firstQuestion?.question === 'string' ? firstQuestion.question : undefined);
+
+        return {
+            eventType,
+            category: 'approval',
+            message: questionText
+                ? `Tool requires user input: ${normalizeText(questionText)}`
+                : 'Tool requires user input.',
+            details: questionText
+                ? {
+                      question: normalizeText(questionText, 400),
+                  }
+                : undefined,
+        };
+    }
+
+    if (normalizedType.includes('requestapproval')) {
+        const command =
+            firstStringValue(payload, [
+                ['params', 'parsedCmd'],
+                ['params', 'command'],
+            ]) ?? null;
+        const targetPath =
+            firstStringValue(payload, [
+                ['params', 'path'],
+                ['params', 'targetPath'],
+            ]) ?? null;
+
+        return {
+            eventType,
+            category: 'approval',
+            message: command
+                ? `Approval requested for command: ${normalizeText(command)}`
+                : targetPath
+                  ? `Approval requested for file change: ${normalizeText(targetPath)}`
+                  : 'Approval requested.',
+            details: {
+                command,
+                path: targetPath,
+            },
+        };
+    }
+
+    if (normalizedType === 'codex/event/exec_command_begin' || normalizedType === 'codex/event/exec_command_end') {
+        const details = extractExecCommandDetails(payload);
+        return {
+            eventType,
+            category: 'command',
+            message:
+                normalizedType === 'codex/event/exec_command_begin'
+                    ? details.command
+                        ? normalizeText(details.command, 400)
+                        : 'Command execution started.'
+                    : details.command
+                      ? `${normalizeText(details.command, 320)}${details.exitCode !== null ? ` (exit ${details.exitCode})` : ''}`
+                      : details.exitCode !== null
+                        ? `Command execution finished (exit ${details.exitCode}).`
+                        : 'Command execution finished.',
+            details: {
+                command: details.command,
+                cwd: details.cwd,
+                exit_code: details.exitCode,
+            },
+        };
+    }
+
+    if (normalizedType === 'item/started' || normalizedType === 'item/completed') {
+        const itemKind =
+            firstStringValue(payload, [
+                ['params', 'item', 'kind'],
+                ['params', 'item', 'type'],
+                ['params', 'kind'],
+            ]) ?? null;
+        const humanizedItemKind = humanizeItemKind(itemKind);
+
+        return {
+            eventType,
+            category: 'turn',
+            message:
+                normalizedType === 'item/started'
+                    ? humanizedItemKind
+                        ? `Work item started: ${humanizedItemKind}.`
+                        : 'Work item started.'
+                    : humanizedItemKind
+                      ? `Work item completed: ${humanizedItemKind}.`
+                      : 'Work item completed.',
+            details: {
+                item_kind: itemKind,
+            },
+        };
+    }
+
+    if (normalizedType.includes('diff')) {
+        return {
+            eventType,
+            category: 'workspace',
+            message: 'Workspace diff event reported.',
+        };
+    }
+
+    const extractedMessage = firstStringValue(payload, [
+        ['message'],
+        ['params', 'message'],
+        ['params', 'status'],
+        ['params', 'turn', 'status'],
+        ['error', 'message'],
+    ]);
+
+    if (extractedMessage) {
+        return {
+            eventType,
+            category: 'runtime',
+            message: normalizeText(extractedMessage),
+        };
+    }
+
+    return {
+        eventType,
+        category: 'runtime',
+        message: eventType === 'raw_event' ? 'Received app-server activity event.' : `Received ${eventType}.`,
     };
 }
 
@@ -184,11 +1167,13 @@ export class SymphonyOrchestrator {
 
     private readonly runningByIssueId = new Map<string, RunningEntry>();
     private readonly retryByIssueId = new Map<string, RetryEntry>();
+    private readonly terminalIssueDetailsByIdentifier = new Map<string, Record<string, unknown>>();
     private readonly claimedIssueVersions = new Map<string, string>();
     private readonly runningDispatches = new Set<Promise<void>>();
 
     private lastTickAtIso?: string;
     private lastRateLimits: Record<string, unknown> = {};
+    private startupCleanupCompleted = false;
     private codexTotals = {
         completed: 0,
         inputRequired: 0,
@@ -215,6 +1200,7 @@ export class SymphonyOrchestrator {
                         apiKey: config.tracker.apiKey,
                         projectSlug: config.tracker.projectSlug,
                         activeStates: config.tracker.activeStates,
+                        apiUrl: config.tracker.endpoint,
                     },
                 }));
 
@@ -231,32 +1217,193 @@ export class SymphonyOrchestrator {
 
         this.appServerFactory =
             args.appServerFactory ??
-            ((factoryArgs) =>
-                new CodexAppServerClient({
+            ((factoryArgs) => {
+                const linearToolAdapter =
+                    factoryArgs.config.tracker.kind === 'linear'
+                        ? new LinearTrackerAdapter({
+                              config: {
+                                  apiKey: factoryArgs.config.tracker.apiKey,
+                                  projectSlug: factoryArgs.config.tracker.projectSlug,
+                                  activeStates: factoryArgs.config.tracker.activeStates,
+                                  apiUrl: factoryArgs.config.tracker.endpoint,
+                              },
+                          })
+                        : undefined;
+
+                return new CodexAppServerClient({
                     logger: this.logger,
                     config: {
                         command: factoryArgs.config.codex.command,
                         workspacePath: factoryArgs.workspacePath,
-                        responseTimeoutMs: factoryArgs.config.codex.responseTimeoutMs,
+                        readTimeoutMs: factoryArgs.config.codex.readTimeoutMs,
                         turnTimeoutMs: factoryArgs.config.codex.turnTimeoutMs,
+                        approvalPolicy: factoryArgs.config.codex.approvalPolicy,
+                        threadSandbox: factoryArgs.config.codex.threadSandbox,
+                        turnSandboxPolicy: factoryArgs.config.codex.turnSandboxPolicy,
                     },
                     emitEvent: factoryArgs.emitEvent,
-                }));
+                    allowTrackerWriteToolApprovals: () =>
+                        factoryArgs.runningEntry.hasObservedWorkspaceDiff || factoryArgs.runningEntry.turnCount > 0,
+                    dynamicTools:
+                        factoryArgs.config.tracker.kind === 'linear' && factoryArgs.config.tracker.apiKey.trim() !== ''
+                            ? [
+                                  {
+                                      name: 'linear_graphql',
+                                      description:
+                                          "Execute raw Linear GraphQL queries or mutations using Symphony's configured tracker auth.",
+                                      inputSchema: {
+                                          type: 'object',
+                                          additionalProperties: false,
+                                          required: ['query'],
+                                          properties: {
+                                              query: {
+                                                  type: 'string',
+                                                  description:
+                                                      'GraphQL query or mutation document to execute against Linear.',
+                                              },
+                                              variables: {
+                                                  type: ['object', 'null'],
+                                                  description: 'Optional GraphQL variables object.',
+                                                  additionalProperties: true,
+                                              },
+                                          },
+                                      },
+                                  },
+                              ]
+                            : [],
+                    dynamicToolCallHandler: async (request) => {
+                        if (request.tool !== 'linear_graphql') {
+                            return undefined;
+                        }
+
+                        if (factoryArgs.config.tracker.kind !== 'linear') {
+                            return {
+                                success: false,
+                                contentItems: [
+                                    {
+                                        type: 'inputText',
+                                        text:
+                                            JSON.stringify({
+                                                error: 'tool_unavailable',
+                                                message: 'linear_graphql requires tracker.kind == "linear".',
+                                            }) ?? 'null',
+                                    },
+                                ],
+                            };
+                        }
+
+                        if (factoryArgs.config.tracker.apiKey.trim() === '') {
+                            return {
+                                success: false,
+                                contentItems: [
+                                    {
+                                        type: 'inputText',
+                                        text:
+                                            JSON.stringify({
+                                                error: 'missing_tracker_api_key',
+                                                message: 'linear_graphql requires a configured Linear API key.',
+                                            }) ?? 'null',
+                                    },
+                                ],
+                            };
+                        }
+
+                        const toolResult = await linearToolAdapter?.executeLinearGraphQlToolCall(request.arguments);
+
+                        return {
+                            success: toolResult?.success ?? false,
+                            contentItems: [
+                                {
+                                    type: 'inputText',
+                                    text:
+                                        JSON.stringify(
+                                            toolResult?.payload ?? {
+                                                error: 'tool_unavailable',
+                                                message: 'linear_graphql is not available for this session.',
+                                            },
+                                        ) ?? 'null',
+                                },
+                            ],
+                        };
+                    },
+                });
+            });
+    }
+
+    public async runStartupCleanup(): Promise<void> {
+        if (this.startupCleanupCompleted) {
+            return;
+        }
+
+        this.startupCleanupCompleted = true;
+
+        const config = this.workflowConfigStore.getCurrentConfig();
+        const tracker = this.trackerFactory(config);
+        const workspaceClient = this.workspaceFactory(config);
+
+        try {
+            const terminalIssues = await tracker.fetchIssueStatesByStateNames(config.tracker.terminalStates);
+            const seenWorkspacePaths = new Set<string>();
+
+            for (const issue of terminalIssues) {
+                const workspacePath = workspaceClient.resolveWorkspacePath(issue.identifier);
+                if (seenWorkspacePaths.has(workspacePath)) {
+                    continue;
+                }
+
+                seenWorkspacePaths.add(workspacePath);
+
+                try {
+                    await workspaceClient.cleanupTerminalWorkspace(workspacePath);
+                } catch (error) {
+                    const classified = this.classifyError(error);
+                    this.logger.warn('Startup terminal workspace cleanup failed for issue.', {
+                        ...issueLogFields(issue),
+                        workspacePath,
+                        errorClass: classified.errorClass,
+                        error: classified.message,
+                    });
+                }
+            }
+        } catch (error) {
+            const classified = this.classifyError(error);
+            this.logger.warn('Startup terminal workspace cleanup skipped due to tracker failure.', {
+                errorClass: classified.errorClass,
+                error: classified.message,
+            });
+        }
     }
 
     public getSnapshot(): OrchestratorSnapshot {
         return {
             lastTickAtIso: this.lastTickAtIso,
             running: Array.from(this.runningByIssueId.values())
-                .map((entry) => ({
-                    issueId: entry.issue.id,
-                    issueIdentifier: entry.issue.identifier,
-                    attempt: entry.attempt,
-                    source: entry.source,
-                    startedAtIso: new Date(entry.startedAtMs).toISOString(),
-                    suppressRetry: entry.suppressRetry,
-                    sessionId: entry.sessionId ?? null,
-                }))
+                .map((entry) => {
+                    const activity = this.buildRunningActivity(entry);
+
+                    return {
+                        issueId: entry.issue.id,
+                        issueIdentifier: entry.issue.identifier,
+                        attempt: entry.attempt,
+                        source: entry.source,
+                        startedAtIso: activity.startedAtIso,
+                        runtimeSeconds: activity.runtimeSeconds,
+                        lastActivityAtIso: activity.lastActivityAtIso,
+                        idleSeconds: activity.idleSeconds,
+                        suppressRetry: entry.suppressRetry,
+                        sessionId: entry.sessionId ?? null,
+                        threadId: entry.threadId ?? null,
+                        turnCount: entry.turnCount,
+                        lastEvent: entry.lastEventType ?? null,
+                        lastActivity: entry.lastEventMessage ?? null,
+                        totalTokens: activity.tokenUsage?.totalTokens ?? null,
+                        lastTurnTokens: activity.tokenUsage?.lastTurnTokens ?? null,
+                        contextWindowTokens: activity.tokenUsage?.contextWindowTokens ?? null,
+                        contextHeadroomTokens: activity.tokenUsage?.contextHeadroomTokens ?? null,
+                        contextUtilizationPercent: activity.tokenUsage?.contextUtilizationPercent ?? null,
+                        traceTail: entry.traceEntries.slice(-SNAPSHOT_TRACE_TAIL_ENTRIES),
+                    };
+                })
                 .sort((left, right) => left.issueIdentifier.localeCompare(right.issueIdentifier)),
             retrying: Array.from(this.retryByIssueId.values())
                 .map((entry) => ({
@@ -273,6 +1420,45 @@ export class SymphonyOrchestrator {
         };
     }
 
+    public getIssueDetails(issueIdentifier: string): Record<string, unknown> | undefined {
+        const runningEntry = Array.from(this.runningByIssueId.values()).find(
+            (entry) => entry.issue.identifier === issueIdentifier,
+        );
+        const retryEntry = Array.from(this.retryByIssueId.values()).find(
+            (entry) => entry.issue.identifier === issueIdentifier,
+        );
+        const issue = runningEntry?.issue ?? retryEntry?.issue;
+        const terminalIssueDetails = this.terminalIssueDetailsByIdentifier.get(issueIdentifier);
+
+        if (!issue) {
+            return terminalIssueDetails;
+        }
+
+        const payload = this.buildIssueDebugPayload({
+            issue,
+            status: runningEntry ? 'running' : retryEntry ? 'retrying' : 'idle',
+            runningEntry,
+            retryEntry,
+        });
+
+        if (retryEntry && !runningEntry && terminalIssueDetails) {
+            return {
+                ...terminalIssueDetails,
+                ...payload,
+                status: 'retrying',
+                attempts: payload.attempts,
+                retry: payload.retry,
+                terminal: terminalIssueDetails.terminal ?? payload.terminal,
+                trace: terminalIssueDetails.trace ?? payload.trace,
+                error_class: terminalIssueDetails.error_class ?? payload.error_class,
+                error: terminalIssueDetails.error ?? payload.error,
+                input_required: terminalIssueDetails.input_required ?? payload.input_required,
+            };
+        }
+
+        return payload;
+    }
+
     public async runTick(): Promise<void> {
         if (this.tickInProgress) {
             this.logger.warn('Skipping poll tick because previous tick is still running.');
@@ -285,20 +1471,17 @@ export class SymphonyOrchestrator {
         try {
             await this.workflowConfigStore.reloadIfChanged();
             const config = this.workflowConfigStore.getCurrentConfig();
-            this.workflowConfigStore.validateCurrentPreflight();
 
             const tracker = this.trackerFactory(config);
             await this.reconcileRunningAndRetryState(config, tracker);
+            this.workflowConfigStore.validateCurrentPreflight();
 
-            const maxConcurrent = normalizePositiveInteger(config.agent.maxConcurrent);
-            let availableSlots = Math.max(0, maxConcurrent - this.runningByIssueId.size);
-            if (availableSlots <= 0) {
+            if (this.runningByIssueId.size >= normalizePositiveInteger(config.agent.maxConcurrent)) {
                 return;
             }
 
-            const dispatchedRetries = this.dispatchDueRetries(config, availableSlots);
-            availableSlots -= dispatchedRetries;
-            if (availableSlots <= 0) {
+            this.dispatchDueRetries(config);
+            if (this.runningByIssueId.size >= normalizePositiveInteger(config.agent.maxConcurrent)) {
                 return;
             }
 
@@ -306,14 +1489,18 @@ export class SymphonyOrchestrator {
             this.pruneClaimedIssueVersions(candidates);
             const todoBlockerIdentifiers = await this.loadTodoBlockers(tracker);
             const maxCandidates = normalizePositiveInteger(config.polling.maxCandidates);
-            const eligibleCandidates = this.selectEligibleCandidates(
-                candidates,
-                todoBlockerIdentifiers,
-                maxCandidates,
-            ).slice(0, availableSlots);
+            const eligibleCandidates = this.selectEligibleCandidates(candidates, todoBlockerIdentifiers, maxCandidates);
 
             for (const issue of eligibleCandidates) {
-                this.dispatchIssue(config, issue, 1, 'candidate');
+                if (!this.canDispatchIssue(config, issue)) {
+                    continue;
+                }
+
+                this.dispatchIssue(config, issue, null, 'candidate');
+
+                if (this.runningByIssueId.size >= normalizePositiveInteger(config.agent.maxConcurrent)) {
+                    break;
+                }
             }
         } catch (error) {
             const classified = this.classifyError(error);
@@ -342,27 +1529,49 @@ export class SymphonyOrchestrator {
         if (trackedIssueIds.size > 0) {
             const statesByIssueId = await tracker.fetchIssueStatesByIds(Array.from(trackedIssueIds));
             const activeStates = new Set(config.tracker.activeStates.map((state) => normalizeStateName(state)));
+            const terminalStates = new Set(config.tracker.terminalStates.map((state) => normalizeStateName(state)));
 
             for (const [issueId, runningEntry] of this.runningByIssueId.entries()) {
                 const currentState = normalizeStateName(statesByIssueId.get(issueId));
-                if (!activeStates.has(currentState) && !runningEntry.suppressRetry) {
-                    runningEntry.suppressRetry = true;
-                    this.logger.info('Marking running issue as terminal due to tracker state change', {
-                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                if (activeStates.has(currentState)) {
+                    runningEntry.issue = {
+                        ...runningEntry.issue,
+                        stateName: statesByIssueId.get(issueId) ?? runningEntry.issue.stateName,
+                    };
+                } else if (terminalStates.has(currentState)) {
+                    await this.requestStopForRunningIssue(runningEntry, {
+                        suppressRetry: true,
+                        cleanupWorkspace: true,
+                        reason: 'reconciliation_terminal',
+                        currentState: statesByIssueId.get(issueId) ?? '',
+                    });
+                } else if (!runningEntry.suppressRetry) {
+                    await this.requestStopForRunningIssue(runningEntry, {
+                        suppressRetry: true,
+                        cleanupWorkspace: false,
+                        reason: 'reconciliation_non_active',
                         currentState: statesByIssueId.get(issueId) ?? '',
                     });
                 }
 
-                const runtimeMs = this.nowMs() - runningEntry.startedAtMs;
-                const stallThresholdMs = config.codex.turnTimeoutMs + this.stallGraceMs;
-                if (runtimeMs > stallThresholdMs && !runningEntry.stallLogged) {
-                    runningEntry.stallLogged = true;
-                    runningEntry.suppressRetry = true;
-                    this.logger.warn('Detected stalled running issue session', {
-                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
-                        runtimeMs,
-                        stallThresholdMs,
-                    });
+                const stallTimeoutMs = normalizePositiveInteger(config.codex.stallTimeoutMs);
+                if (stallTimeoutMs > 0) {
+                    const elapsedSinceLastEventMs = this.nowMs() - runningEntry.lastEventAtMs;
+                    const stallThresholdMs = stallTimeoutMs + this.stallGraceMs;
+                    if (elapsedSinceLastEventMs > stallThresholdMs && !runningEntry.stallLogged) {
+                        runningEntry.stallLogged = true;
+                        this.logger.warn('Detected stalled running issue session', {
+                            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                            elapsedSinceLastEventMs,
+                            stallThresholdMs,
+                        });
+                        await this.requestStopForRunningIssue(runningEntry, {
+                            suppressRetry: false,
+                            cleanupWorkspace: false,
+                            reason: 'stall_timeout',
+                            currentState: statesByIssueId.get(issueId) ?? '',
+                        });
+                    }
                 }
             }
 
@@ -381,7 +1590,7 @@ export class SymphonyOrchestrator {
         }
     }
 
-    private dispatchDueRetries(config: LoadedWorkflowConfig, availableSlots: number): number {
+    private dispatchDueRetries(config: LoadedWorkflowConfig): void {
         const nowMs = this.nowMs();
         const dueRetries = Array.from(this.retryByIssueId.values())
             .filter((entry) => entry.availableAtMs <= nowMs && !this.runningByIssueId.has(entry.issue.id))
@@ -391,15 +1600,20 @@ export class SymphonyOrchestrator {
                 }
 
                 return compareCandidateIssues(left.issue, right.issue);
-            })
-            .slice(0, availableSlots);
+            });
 
         for (const retryEntry of dueRetries) {
-            this.retryByIssueId.delete(retryEntry.issue.id);
-            this.dispatchIssue(config, retryEntry.issue, retryEntry.attempt, 'retry');
-        }
+            if (this.runningByIssueId.size >= normalizePositiveInteger(config.agent.maxConcurrent)) {
+                break;
+            }
 
-        return dueRetries.length;
+            if (!this.canDispatchIssue(config, retryEntry.issue)) {
+                continue;
+            }
+
+            this.retryByIssueId.delete(retryEntry.issue.id);
+            this.dispatchIssue(config, retryEntry.issue, retryEntry.attempt, 'retry', retryEntry);
+        }
     }
 
     private async loadTodoBlockers(tracker: TrackerClient): Promise<Set<string>> {
@@ -452,11 +1666,37 @@ export class SymphonyOrchestrator {
         }
     }
 
+    private canDispatchIssue(config: LoadedWorkflowConfig, issue: TrackedIssue): boolean {
+        if (this.runningByIssueId.size >= normalizePositiveInteger(config.agent.maxConcurrent)) {
+            return false;
+        }
+
+        const normalizedState = normalizeStateName(issue.stateName);
+        if (normalizedState.length === 0) {
+            return true;
+        }
+
+        const perStateLimit = config.agent.maxConcurrentByState[normalizedState];
+        if (!Number.isFinite(perStateLimit) || perStateLimit <= 0) {
+            return true;
+        }
+
+        let runningInStateCount = 0;
+        for (const runningEntry of this.runningByIssueId.values()) {
+            if (normalizeStateName(runningEntry.issue.stateName) === normalizedState) {
+                runningInStateCount += 1;
+            }
+        }
+
+        return runningInStateCount < perStateLimit;
+    }
+
     private dispatchIssue(
         config: LoadedWorkflowConfig,
         issue: TrackedIssue,
-        attempt: number,
+        attempt: number | null,
         source: DispatchSource,
+        retryEntry?: RetryEntry,
     ): void {
         if (this.runningByIssueId.has(issue.id)) {
             return;
@@ -467,10 +1707,33 @@ export class SymphonyOrchestrator {
             attempt,
             source,
             startedAtMs: this.nowMs(),
+            lastEventAtMs: this.nowMs(),
+            turnCount: 0,
             suppressRetry: false,
             stallLogged: false,
+            stopRequested: false,
+            cleanupWorkspaceOnStop: false,
+            hasObservedWorkspaceDiff: false,
+            firstTurnItemLifecycleEvents: 0,
+            firstTurnCommandExecutionCount: 0,
+            firstTurnBroadCommandExecutionCount: 0,
+            workspaceStateCheckInFlight: false,
+            firstRepoStepGuardTriggered: false,
+            firstCommandDriftGuardTriggered: false,
+            firstPlanOnlyGuardTriggered: false,
+            firstRepoTargetPath: pickFirstRepoTargetPath(extractLikelyRepoPaths(issue.description)),
+            currentAgentMessageBuffer: '',
+            firstTurnAgentMessageText: undefined,
+            firstTurnPlanOnlyCandidateAtMs: undefined,
+            firstTurnPlanOnlyCandidateMessage: undefined,
+            firstDiffObservedAtMs: undefined,
+            postDiffCheckpointTriggered: false,
+            retryDirective: retryEntry?.retryDirective,
+            traceEntries: [],
+            firstTurnTraceEntries: [],
         };
         this.claimedIssueVersions.set(issue.id, issue.updatedAt);
+        this.terminalIssueDetailsByIdentifier.delete(issue.identifier);
         this.runningByIssueId.set(issue.id, runningEntry);
 
         const dispatchPromise = this.executeIssueDispatch(config, runningEntry).finally(() => {
@@ -487,68 +1750,306 @@ export class SymphonyOrchestrator {
         let workspacePath: string | undefined;
         let effectiveConfig = config;
         let beforeRunCompleted = false;
+        let shouldCleanupWorkspace = false;
+        let baselineWorkspaceState: WorkspaceStateSnapshot | undefined;
+        let dispatchError: unknown;
+        let completedTurnCount = 0;
+        let shouldScheduleContinuationRetry = false;
+        let terminalStatus: 'completed' | 'failed' | 'stopped' = 'failed';
+        let terminalErrorClass: string | undefined;
+        let terminalErrorMessage: string | undefined;
+        let terminalInputRequiredType: string | undefined;
+        let terminalInputRequiredPayload: Record<string, unknown> | undefined;
+        let currentIssue = runningEntry.issue;
+        let currentThreadId: string | undefined;
+        const tracker = this.trackerFactory(config);
+        const activeStates = normalizeStateNames(config.tracker.activeStates);
+        const terminalStates = normalizeStateNames(config.tracker.terminalStates);
+        const commitRequiredStates = normalizeStateNames(config.agent.commitRequiredStates);
+        const maxTurns = Math.max(1, normalizePositiveInteger(config.agent.maxTurns, 1));
+        const initialIssueState = currentIssue.stateName;
 
         try {
+            if (tracker.prepareIssueForRun) {
+                currentIssue = await tracker.prepareIssueForRun(currentIssue);
+                runningEntry.issue = currentIssue;
+            }
+            runningEntry.firstRepoTargetPath = pickFirstRepoTargetPath(
+                extractLikelyRepoPaths(currentIssue.description),
+            );
+            this.recordTrace(runningEntry, 'runtime', 'issue/prepared', 'Issue prepared for execution.', {
+                state: currentIssue.stateName,
+                workpad_comment_id: currentIssue.workpadCommentId ?? null,
+                first_repo_target_path: runningEntry.firstRepoTargetPath,
+            });
+
             workspaceClient = this.workspaceFactory(config);
+            runningEntry.workspaceClient = workspaceClient;
             const workspaceHandle = await workspaceClient.prepareWorkspace(runningEntry.issue.identifier);
             workspacePath = workspaceHandle.path;
+            runningEntry.workspacePath = workspacePath;
+            this.recordTrace(runningEntry, 'workspace', 'workspace/prepared', 'Workspace prepared for issue.', {
+                workspace_path: workspacePath,
+            });
 
+            this.throwIfDispatchStopped(runningEntry, 'Issue dispatch was cancelled before before_run hooks.');
             await workspaceClient.runBeforeRunHooks(workspacePath);
             beforeRunCompleted = true;
+            this.throwIfDispatchStopped(runningEntry, 'Issue dispatch was cancelled before workspace state capture.');
+            baselineWorkspaceState = await workspaceClient.captureWorkspaceState(workspacePath);
+            runningEntry.baselineWorkspaceState = baselineWorkspaceState;
+            this.recordTrace(
+                runningEntry,
+                'workspace',
+                'workspace/baseline_captured',
+                'Captured baseline workspace state.',
+                {
+                    workspace_path: workspacePath,
+                    head_sha: baselineWorkspaceState.headSha,
+                    status_text: baselineWorkspaceState.statusText,
+                },
+            );
 
-            const dispatch = await this.workflowConfigStore.buildDispatchPrompt({
-                issue: toIssueTemplatePayload(runningEntry.issue),
-                attempt: runningEntry.attempt,
-            });
-            effectiveConfig = dispatch.config;
-
-            const appServer = this.appServerFactory({
+            runningEntry.appServer = this.appServerFactory({
                 config: effectiveConfig,
                 workspacePath,
+                runningEntry,
                 emitEvent: (event) => this.handleOrchestratorEvent(event, runningEntry),
             });
 
-            const turnResult = await appServer.runTurn({
-                prompt: dispatch.prompt,
-                issueIdentifier: runningEntry.issue.identifier,
-                attempt: runningEntry.attempt,
-                responseTimeoutMs: effectiveConfig.codex.responseTimeoutMs,
-                turnTimeoutMs: effectiveConfig.codex.turnTimeoutMs,
-            });
+            for (let turnNumber = 1; turnNumber <= maxTurns; turnNumber += 1) {
+                this.throwIfDispatchStopped(runningEntry, 'Issue dispatch was cancelled before turn start.');
 
-            if (turnResult.status === 'completed') {
-                this.codexTotals.completed += 1;
-                this.retryByIssueId.delete(runningEntry.issue.id);
+                const issueTemplatePayload = toIssueTemplatePayload(currentIssue);
+                const dispatch = await this.workflowConfigStore.buildDispatchPrompt({
+                    issue: issueTemplatePayload,
+                    attempt: runningEntry.attempt,
+                });
+                effectiveConfig = dispatch.config;
+                this.recordTrace(
+                    runningEntry,
+                    'turn',
+                    turnNumber === 1 ? 'turn/dispatch_first' : 'turn/dispatch_continuation',
+                    turnNumber === 1
+                        ? `Starting first turn with first repo target ${String(
+                              issueTemplatePayload.first_repo_target_path_or_default,
+                          )}.`
+                        : `Starting continuation turn ${turnNumber} of ${maxTurns}.`,
+                    {
+                        turn_number: turnNumber,
+                        max_turns: maxTurns,
+                        first_repo_target_path: issueTemplatePayload.first_repo_target_path ?? null,
+                        first_repo_step_contract: issueTemplatePayload.first_repo_step_contract ?? null,
+                    },
+                );
+
+                const prompt =
+                    turnNumber === 1
+                        ? dispatch.prompt
+                        : createContinuationPrompt(currentIssue, turnNumber, maxTurns, runningEntry.attempt);
+
+                const turnResult = await runningEntry.appServer.runTurn({
+                    prompt,
+                    issueIdentifier: currentIssue.identifier,
+                    issueTitle: currentIssue.title,
+                    attempt: runningEntry.attempt,
+                    threadId: currentThreadId,
+                    responseTimeoutMs: effectiveConfig.codex.readTimeoutMs,
+                    turnTimeoutMs: effectiveConfig.codex.turnTimeoutMs,
+                });
+
+                currentThreadId = turnResult.threadId;
+                runningEntry.threadId = turnResult.threadId;
                 runningEntry.sessionId = turnResult.sessionId;
+
+                if (turnResult.status === 'input_required') {
+                    this.codexTotals.inputRequired += 1;
+                    const inputRequiredSummary = turnResult.inputRequiredPayload
+                        ? summarizeRawEvent(turnResult.inputRequiredPayload)
+                        : undefined;
+                    if (inputRequiredSummary) {
+                        runningEntry.lastEventAtMs = this.nowMs();
+                        runningEntry.lastEventType = inputRequiredSummary.eventType;
+                        runningEntry.lastEventMessage = inputRequiredSummary.message;
+                    }
+
+                    throw new AppServerClientError(
+                        'turn_input_required',
+                        inputRequiredSummary?.message ?? 'App-server turn requested user input.',
+                        {
+                            sessionId: turnResult.sessionId,
+                            issueIdentifier: currentIssue.identifier,
+                            inputRequiredType: turnResult.inputRequiredType ?? inputRequiredSummary?.eventType ?? null,
+                            inputRequiredPayload: turnResult.inputRequiredPayload ?? null,
+                        },
+                    );
+                }
+
+                completedTurnCount += 1;
+                runningEntry.turnCount += 1;
+                runningEntry.lastEventAtMs = this.nowMs();
+                runningEntry.lastEventType = 'turn_completed';
+                runningEntry.lastEventMessage = `Turn ${turnResult.turnId} completed.`;
+                this.recordTrace(runningEntry, 'turn', 'turn/completed', `Turn ${turnResult.turnId} completed.`, {
+                    turn_id: turnResult.turnId,
+                    session_id: turnResult.sessionId,
+                    turn_number: turnNumber,
+                });
                 this.logger.info('Issue turn completed', {
-                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                    ...issueLogFields(currentIssue, turnResult.sessionId),
                     attempt: runningEntry.attempt,
                     source: runningEntry.source,
+                    turnNumber,
+                    maxTurns,
                 });
-                return;
+
+                const refreshedStates = await tracker.fetchIssueStatesByIds([currentIssue.id]);
+                const refreshedState = refreshedStates.get(currentIssue.id) ?? currentIssue.stateName;
+                currentIssue = {
+                    ...currentIssue,
+                    stateName: refreshedState,
+                };
+                runningEntry.issue = currentIssue;
+
+                if (runningEntry.stopRequested) {
+                    shouldCleanupWorkspace = shouldCleanupWorkspace || runningEntry.cleanupWorkspaceOnStop;
+                    break;
+                }
+
+                const normalizedState = normalizeStateName(refreshedState);
+                if (activeStates.has(normalizedState)) {
+                    if (turnNumber >= maxTurns) {
+                        shouldScheduleContinuationRetry = true;
+                        break;
+                    }
+
+                    continue;
+                }
+
+                if (terminalStates.has(normalizedState)) {
+                    shouldCleanupWorkspace = true;
+                }
+
+                break;
             }
-
-            this.codexTotals.inputRequired += 1;
-
-            if (runningEntry.suppressRetry) {
-                this.logger.info('Skipping continuation retry because issue is terminal', {
-                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
-                    attempt: runningEntry.attempt,
-                });
-                this.retryByIssueId.delete(runningEntry.issue.id);
-                return;
-            }
-
-            this.scheduleRetry({
-                issue: runningEntry.issue,
-                attempt: runningEntry.attempt + 1,
-                reason: 'continuation',
-                delayMs: this.continuationDelayMs,
-                maxAttempts: effectiveConfig.agent.maxAttempts,
-            });
         } catch (error) {
-            const classified = this.classifyError(error);
-            this.codexTotals.failed += 1;
+            dispatchError = error;
+        }
+
+        try {
+            if (runningEntry.appServer) {
+                await runningEntry.appServer.stop();
+            }
+
+            if (beforeRunCompleted && workspaceClient && workspacePath) {
+                try {
+                    await workspaceClient.runAfterRunHooks(workspacePath);
+                } catch (error) {
+                    const classified = this.classifyError(error);
+                    this.logger.error('after_run hooks failed', {
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                        errorClass: classified.errorClass,
+                        error: classified.message,
+                    });
+                }
+            }
+
+            if (dispatchError) {
+                throw dispatchError;
+            }
+
+            if (completedTurnCount === 0) {
+                if (runningEntry.stopRequested && runningEntry.suppressRetry) {
+                    this.retryByIssueId.delete(runningEntry.issue.id);
+                    return;
+                }
+
+                throw new OrchestratorGuardrailError(
+                    'workspace_no_committed_output',
+                    'Issue turn finished without a completed turn result.',
+                );
+            }
+
+            if (workspaceClient && workspacePath && baselineWorkspaceState) {
+                const finalWorkspaceState = await workspaceClient.captureWorkspaceState(workspacePath);
+                const normalizedFinalState = normalizeStateName(runningEntry.issue.stateName);
+                const requiresCommittedWorkspaceProgress =
+                    normalizedFinalState.length === 0 || commitRequiredStates.has(normalizedFinalState);
+
+                if (
+                    requiresCommittedWorkspaceProgress &&
+                    !didWorkspaceHeadAdvance(baselineWorkspaceState, finalWorkspaceState)
+                ) {
+                    throw new OrchestratorGuardrailError(
+                        'workspace_no_committed_output',
+                        'Completed turn produced no committed workspace changes.',
+                        {
+                            workspacePath,
+                            initialState: initialIssueState,
+                            finalState: runningEntry.issue.stateName,
+                            headSha: finalWorkspaceState.headSha,
+                            dirtyStateChanged: baselineWorkspaceState.statusText !== finalWorkspaceState.statusText,
+                            hasDirtyWorkspace: finalWorkspaceState.statusText.length > 0,
+                        },
+                    );
+                }
+            }
+
+            this.codexTotals.completed += 1;
+            this.retryByIssueId.delete(runningEntry.issue.id);
+
+            if (shouldScheduleContinuationRetry && !runningEntry.suppressRetry) {
+                this.scheduleRetry({
+                    issue: runningEntry.issue,
+                    attempt: nextRetryAttempt(runningEntry.attempt),
+                    reason: 'continuation',
+                    delayMs: this.continuationDelayMs,
+                    maxAttempts: effectiveConfig.agent.maxAttempts,
+                });
+                return;
+            }
+
+            if (shouldCleanupWorkspace || runningEntry.cleanupWorkspaceOnStop) {
+                shouldCleanupWorkspace = true;
+            }
+            terminalStatus = 'completed';
+        } catch (error) {
+            const effectiveError =
+                error instanceof AppServerClientError &&
+                error.errorClass === 'turn_cancelled' &&
+                (runningEntry.stopReason === 'first_repo_step_guard' ||
+                    runningEntry.stopReason === 'first_command_drift_guard' ||
+                    runningEntry.stopReason === 'first_plan_only_guard') &&
+                runningEntry.pendingGuardrailError
+                    ? runningEntry.pendingGuardrailError
+                    : error;
+            const classified = this.classifyError(effectiveError);
+            const cancelledByReconciliation = classified.errorClass === 'turn_cancelled' && runningEntry.suppressRetry;
+            const cancelledForPostDiffCheckpoint =
+                classified.errorClass === 'turn_cancelled' && runningEntry.stopReason === 'post_diff_checkpoint';
+            terminalStatus = cancelledByReconciliation || cancelledForPostDiffCheckpoint ? 'stopped' : 'failed';
+            terminalErrorClass = classified.errorClass;
+            terminalErrorMessage = classified.message;
+            this.recordTrace(runningEntry, 'runtime', 'dispatch/failed', classified.message, {
+                error_class: classified.errorClass,
+            });
+
+            if (effectiveError instanceof AppServerClientError && effectiveError.errorClass === 'turn_input_required') {
+                terminalInputRequiredType =
+                    typeof effectiveError.details.inputRequiredType === 'string'
+                        ? effectiveError.details.inputRequiredType
+                        : undefined;
+                terminalInputRequiredPayload =
+                    effectiveError.details.inputRequiredPayload &&
+                    typeof effectiveError.details.inputRequiredPayload === 'object' &&
+                    !Array.isArray(effectiveError.details.inputRequiredPayload)
+                        ? (effectiveError.details.inputRequiredPayload as Record<string, unknown>)
+                        : undefined;
+            }
+
+            if (!cancelledByReconciliation && !cancelledForPostDiffCheckpoint) {
+                this.codexTotals.failed += 1;
+            }
 
             if (classified.errorClass === 'response_timeout') {
                 this.codexTotals.responseTimeouts += 1;
@@ -558,42 +2059,64 @@ export class SymphonyOrchestrator {
                 this.codexTotals.launchFailures += 1;
             }
 
-            this.logger.error('Issue dispatch failed', {
-                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
-                attempt: runningEntry.attempt,
-                source: runningEntry.source,
-                errorClass: classified.errorClass,
-                error: classified.message,
-            });
+            if (cancelledByReconciliation) {
+                this.logger.info('Issue dispatch cancelled by reconciliation', {
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                    attempt: runningEntry.attempt,
+                    source: runningEntry.source,
+                    stopReason: runningEntry.stopReason ?? null,
+                });
+            } else if (cancelledForPostDiffCheckpoint) {
+                this.logger.info('Issue dispatch paused after first repo diff to continue in a follow-up turn', {
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                    attempt: runningEntry.attempt,
+                    source: runningEntry.source,
+                    stopReason: runningEntry.stopReason ?? null,
+                });
+            } else {
+                this.logger.error('Issue dispatch failed', {
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                    attempt: runningEntry.attempt,
+                    source: runningEntry.source,
+                    errorClass: classified.errorClass,
+                    error: classified.message,
+                });
+            }
 
-            if (!runningEntry.suppressRetry && this.isRetryableError(error)) {
+            if (cancelledForPostDiffCheckpoint && !runningEntry.suppressRetry) {
                 this.scheduleRetry({
                     issue: runningEntry.issue,
-                    attempt: runningEntry.attempt + 1,
+                    attempt: nextRetryAttempt(runningEntry.attempt),
+                    reason: 'continuation',
+                    delayMs: this.continuationDelayMs,
+                    maxAttempts: effectiveConfig.agent.maxAttempts,
+                    retryDirective: buildPostDiffCheckpointRetryDirective(runningEntry.firstRepoTargetPath),
+                });
+            } else if (!runningEntry.suppressRetry && this.isRetryableError(effectiveError)) {
+                const retryAttempt = nextRetryAttempt(runningEntry.attempt);
+                this.scheduleRetry({
+                    issue: runningEntry.issue,
+                    attempt: retryAttempt,
                     reason: 'dispatch_failed',
-                    delayMs: this.computeFailureRetryDelayMs(runningEntry.attempt),
+                    delayMs: this.computeFailureRetryDelayMs(retryAttempt, effectiveConfig.agent.maxRetryBackoffMs),
                     maxAttempts: effectiveConfig.agent.maxAttempts,
                     errorClass: classified.errorClass,
+                    retryDirective: buildRetryDirective(
+                        runningEntry.firstRepoTargetPath,
+                        runningEntry.firstTurnAgentMessageText,
+                        classified.errorClass,
+                    ),
                 });
             } else {
                 this.retryByIssueId.delete(runningEntry.issue.id);
             }
         } finally {
-            if (workspaceClient && workspacePath) {
-                if (beforeRunCompleted) {
-                    try {
-                        await workspaceClient.runAfterRunHooks(workspacePath);
-                    } catch (error) {
-                        const classified = this.classifyError(error);
-                        this.logger.error('after_run hooks failed', {
-                            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
-                            errorClass: classified.errorClass,
-                            error: classified.message,
-                        });
-                    }
-                }
+            runningEntry.appServer = undefined;
 
-                if (!effectiveConfig.workspace.keepTerminalWorkspaces) {
+            if (workspaceClient && workspacePath) {
+                const shouldRemoveWorkspace = shouldCleanupWorkspace || runningEntry.cleanupWorkspaceOnStop;
+
+                if (!effectiveConfig.workspace.keepTerminalWorkspaces && shouldRemoveWorkspace) {
                     try {
                         await workspaceClient.cleanupTerminalWorkspace(workspacePath);
                     } catch (error) {
@@ -604,9 +2127,82 @@ export class SymphonyOrchestrator {
                             error: classified.message,
                         });
                     }
+                } else if (!effectiveConfig.workspace.keepTerminalWorkspaces && !shouldRemoveWorkspace) {
+                    this.logger.info('Preserving workspace for debugging because issue did not complete successfully', {
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                        workspacePath,
+                    });
                 }
             }
+
+            this.terminalIssueDetailsByIdentifier.set(
+                runningEntry.issue.identifier,
+                this.buildIssueDebugPayload({
+                    issue: runningEntry.issue,
+                    status: terminalStatus,
+                    runningEntry,
+                    workspacePath,
+                    errorClass: terminalErrorClass,
+                    error: terminalErrorMessage,
+                    inputRequiredType: terminalInputRequiredType,
+                    inputRequiredPayload: terminalInputRequiredPayload,
+                }),
+            );
         }
+    }
+
+    private async requestStopForRunningIssue(
+        runningEntry: RunningEntry,
+        args: {
+            suppressRetry: boolean;
+            cleanupWorkspace: boolean;
+            reason: RunningEntry['stopReason'];
+            currentState: string;
+        },
+    ): Promise<void> {
+        runningEntry.stopRequested = true;
+        runningEntry.suppressRetry = args.suppressRetry;
+        runningEntry.cleanupWorkspaceOnStop = runningEntry.cleanupWorkspaceOnStop || args.cleanupWorkspace;
+        runningEntry.stopReason = args.reason;
+
+        this.logger.info('Stopping running issue due to reconciliation decision', {
+            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+            currentState: args.currentState,
+            suppressRetry: args.suppressRetry,
+            cleanupWorkspace: runningEntry.cleanupWorkspaceOnStop,
+            reason: args.reason,
+        });
+        this.recordTrace(
+            runningEntry,
+            args.reason === 'first_repo_step_guard' ||
+                args.reason === 'first_command_drift_guard' ||
+                args.reason === 'first_plan_only_guard'
+                ? 'guard'
+                : 'runtime',
+            'runtime/stop_requested',
+            `Stop requested for running issue (${args.reason}).`,
+            {
+                reason: args.reason,
+                current_state: args.currentState,
+                suppress_retry: args.suppressRetry,
+                cleanup_workspace: runningEntry.cleanupWorkspaceOnStop,
+            },
+        );
+
+        if (runningEntry.appServer) {
+            await runningEntry.appServer.stop();
+        }
+    }
+
+    private throwIfDispatchStopped(runningEntry: RunningEntry, message: string): void {
+        if (!runningEntry.stopRequested) {
+            return;
+        }
+
+        throw new AppServerClientError('turn_cancelled', message, {
+            issueIdentifier: runningEntry.issue.identifier,
+            stopReason: runningEntry.stopReason ?? null,
+        });
     }
 
     private scheduleRetry(args: {
@@ -616,6 +2212,7 @@ export class SymphonyOrchestrator {
         delayMs: number;
         maxAttempts: number;
         errorClass?: string;
+        retryDirective?: string;
     }): void {
         if (args.attempt > args.maxAttempts) {
             this.retryByIssueId.delete(args.issue.id);
@@ -633,6 +2230,7 @@ export class SymphonyOrchestrator {
             reason: args.reason,
             availableAtMs,
             errorClass: args.errorClass,
+            retryDirective: args.retryDirective,
         });
 
         this.logger.info('Scheduled issue retry', {
@@ -641,26 +2239,542 @@ export class SymphonyOrchestrator {
             reason: args.reason,
             availableAtIso: new Date(availableAtMs).toISOString(),
             errorClass: args.errorClass,
+            retryDirective: args.retryDirective ?? null,
         });
     }
 
-    private computeFailureRetryDelayMs(previousAttempt: number): number {
-        if (previousAttempt <= 1) {
-            return this.continuationDelayMs;
+    private buildRunningActivity(runningEntry: RunningEntry): {
+        startedAtIso: string;
+        runtimeSeconds: number;
+        lastActivityAtIso: string;
+        idleSeconds: number;
+        tokenUsage: TokenUsageSummary | null;
+    } {
+        const nowMs = this.nowMs();
+
+        return {
+            startedAtIso: new Date(runningEntry.startedAtMs).toISOString(),
+            runtimeSeconds: Math.max(0, Math.floor((nowMs - runningEntry.startedAtMs) / 1000)),
+            lastActivityAtIso: new Date(runningEntry.lastEventAtMs).toISOString(),
+            idleSeconds: Math.max(0, Math.floor((nowMs - runningEntry.lastEventAtMs) / 1000)),
+            tokenUsage: summarizeTokenUsage(runningEntry.lastTokenUsage),
+        };
+    }
+
+    private buildIssueDebugPayload(args: {
+        issue: TrackedIssue;
+        status: string;
+        runningEntry?: RunningEntry;
+        retryEntry?: RetryEntry;
+        workspacePath?: string;
+        errorClass?: string;
+        error?: string;
+        inputRequiredType?: string;
+        inputRequiredPayload?: Record<string, unknown>;
+    }): Record<string, unknown> {
+        const activity = args.runningEntry ? this.buildRunningActivity(args.runningEntry) : undefined;
+        const tokenUsage = activity?.tokenUsage ?? null;
+        const workspacePath = args.workspacePath ?? args.runningEntry?.workspacePath;
+
+        return {
+            issue_identifier: args.issue.identifier,
+            issue_id: args.issue.id,
+            status: args.status,
+            workspace: workspacePath
+                ? {
+                      path: workspacePath,
+                  }
+                : null,
+            attempts: {
+                restart_count: args.retryEntry
+                    ? Math.max(args.retryEntry.attempt - 1, 0)
+                    : args.runningEntry?.attempt ?? 0,
+                current_retry_attempt: args.retryEntry?.attempt ?? args.runningEntry?.attempt ?? null,
+            },
+            running:
+                args.status === 'running' && args.runningEntry
+                    ? {
+                          session_id: args.runningEntry.sessionId ?? null,
+                          thread_id: args.runningEntry.threadId ?? null,
+                          turn_count: args.runningEntry.turnCount,
+                          state: args.runningEntry.issue.stateName,
+                          started_at: activity?.startedAtIso ?? null,
+                          runtime_seconds: activity?.runtimeSeconds ?? null,
+                          last_event: args.runningEntry.lastEventType ?? null,
+                          last_message: args.runningEntry.lastEventMessage ?? null,
+                          last_event_at: activity?.lastActivityAtIso ?? null,
+                          idle_seconds: activity?.idleSeconds ?? null,
+                          tokens: args.runningEntry.lastTokenUsage ?? null,
+                          total_tokens: tokenUsage?.totalTokens ?? null,
+                          last_turn_tokens: tokenUsage?.lastTurnTokens ?? null,
+                          context_window_tokens: tokenUsage?.contextWindowTokens ?? null,
+                          context_headroom_tokens: tokenUsage?.contextHeadroomTokens ?? null,
+                          context_utilization_percent: tokenUsage?.contextUtilizationPercent ?? null,
+                          has_observed_workspace_diff: args.runningEntry.hasObservedWorkspaceDiff,
+                          first_repo_target_path: args.runningEntry.firstRepoTargetPath ?? null,
+                          first_turn_agent_message: args.runningEntry.firstTurnAgentMessageText ?? null,
+                          first_turn_plan_only_candidate_message:
+                              args.runningEntry.firstTurnPlanOnlyCandidateMessage ?? null,
+                          first_turn_command_execution_count: args.runningEntry.firstTurnCommandExecutionCount,
+                          first_turn_broad_command_execution_count:
+                              args.runningEntry.firstTurnBroadCommandExecutionCount,
+                          trace_tail: args.runningEntry.traceEntries.slice(-SNAPSHOT_TRACE_TAIL_ENTRIES),
+                      }
+                    : null,
+            terminal:
+                args.status !== 'running' && args.runningEntry
+                    ? {
+                          session_id: args.runningEntry.sessionId ?? null,
+                          thread_id: args.runningEntry.threadId ?? null,
+                          turn_count: args.runningEntry.turnCount,
+                          state: args.runningEntry.issue.stateName,
+                          started_at: activity?.startedAtIso ?? null,
+                          runtime_seconds: activity?.runtimeSeconds ?? null,
+                          last_event: args.runningEntry.lastEventType ?? null,
+                          last_message: args.runningEntry.lastEventMessage ?? null,
+                          last_event_at: activity?.lastActivityAtIso ?? null,
+                          idle_seconds: activity?.idleSeconds ?? null,
+                          tokens: args.runningEntry.lastTokenUsage ?? null,
+                          total_tokens: tokenUsage?.totalTokens ?? null,
+                          last_turn_tokens: tokenUsage?.lastTurnTokens ?? null,
+                          context_window_tokens: tokenUsage?.contextWindowTokens ?? null,
+                          context_headroom_tokens: tokenUsage?.contextHeadroomTokens ?? null,
+                          context_utilization_percent: tokenUsage?.contextUtilizationPercent ?? null,
+                          has_observed_workspace_diff: args.runningEntry.hasObservedWorkspaceDiff,
+                          first_repo_target_path: args.runningEntry.firstRepoTargetPath ?? null,
+                          first_turn_agent_message: args.runningEntry.firstTurnAgentMessageText ?? null,
+                          first_turn_plan_only_candidate_message:
+                              args.runningEntry.firstTurnPlanOnlyCandidateMessage ?? null,
+                          first_turn_command_execution_count: args.runningEntry.firstTurnCommandExecutionCount,
+                          first_turn_broad_command_execution_count:
+                              args.runningEntry.firstTurnBroadCommandExecutionCount,
+                          trace_tail: args.runningEntry.traceEntries.slice(-SNAPSHOT_TRACE_TAIL_ENTRIES),
+                      }
+                    : null,
+            trace: args.runningEntry
+                ? {
+                      recent: args.runningEntry.traceEntries,
+                      first_turn: args.runningEntry.firstTurnTraceEntries,
+                  }
+                : null,
+            retry: args.retryEntry
+                ? {
+                      attempt: args.retryEntry.attempt,
+                      reason: args.retryEntry.reason,
+                      due_at: new Date(args.retryEntry.availableAtMs).toISOString(),
+                      error_class: args.retryEntry.errorClass ?? null,
+                      retry_directive: args.retryEntry.retryDirective ?? null,
+                  }
+                : null,
+            error_class: args.errorClass ?? null,
+            error: args.error ?? null,
+            input_required:
+                args.inputRequiredType || args.inputRequiredPayload
+                    ? {
+                          event_type: args.inputRequiredType ?? null,
+                          payload: args.inputRequiredPayload ?? null,
+                      }
+                    : null,
+            rate_limits: Object.keys(this.lastRateLimits).length > 0 ? this.lastRateLimits : null,
+        };
+    }
+
+    private computeFailureRetryDelayMs(retryAttempt: number, maxRetryBackoffMs: number): number {
+        const cappedBackoffMs =
+            maxRetryBackoffMs > 0 && Number.isFinite(maxRetryBackoffMs) ? maxRetryBackoffMs : this.retryMaxDelayMs;
+        const exponentialDelay = 10000 * Math.pow(2, Math.max(retryAttempt, 1) - 1);
+        return Math.min(exponentialDelay, cappedBackoffMs);
+    }
+
+    private shouldEvaluateFirstRepoStepGuard(runningEntry: RunningEntry): boolean {
+        if (
+            runningEntry.turnCount > 0 ||
+            runningEntry.hasObservedWorkspaceDiff ||
+            runningEntry.firstRepoStepGuardTriggered ||
+            runningEntry.stopRequested ||
+            !runningEntry.workspaceClient ||
+            !runningEntry.workspacePath ||
+            !runningEntry.baselineWorkspaceState
+        ) {
+            return false;
         }
 
-        const exponentialDelay = this.continuationDelayMs * Math.pow(2, previousAttempt - 1);
-        return Math.min(exponentialDelay, this.retryMaxDelayMs);
+        return this.nowMs() - runningEntry.startedAtMs >= FIRST_REPO_STEP_GUARD_MIN_RUNTIME_MS;
+    }
+
+    private shouldEvaluateFirstCommandDriftGuard(runningEntry: RunningEntry): boolean {
+        if (
+            runningEntry.turnCount > 0 ||
+            runningEntry.hasObservedWorkspaceDiff ||
+            runningEntry.firstCommandDriftGuardTriggered ||
+            runningEntry.stopRequested
+        ) {
+            return false;
+        }
+
+        return this.nowMs() - runningEntry.startedAtMs >= FIRST_COMMAND_DRIFT_GUARD_MIN_RUNTIME_MS;
+    }
+
+    private shouldEvaluateFirstPlanOnlyGuard(runningEntry: RunningEntry): boolean {
+        if (
+            runningEntry.turnCount > 0 ||
+            runningEntry.hasObservedWorkspaceDiff ||
+            runningEntry.firstPlanOnlyGuardTriggered ||
+            runningEntry.stopRequested ||
+            runningEntry.firstTurnPlanOnlyCandidateAtMs === undefined ||
+            runningEntry.firstTurnCommandExecutionCount > 0
+        ) {
+            return false;
+        }
+
+        return (
+            runningEntry.lastEventType === 'item/completed' ||
+            this.nowMs() - runningEntry.firstTurnPlanOnlyCandidateAtMs >= FIRST_PLAN_ONLY_GUARD_GRACE_MS
+        );
+    }
+
+    private shouldEvaluatePostDiffCheckpoint(runningEntry: RunningEntry): boolean {
+        if (
+            runningEntry.turnCount > 0 ||
+            !runningEntry.hasObservedWorkspaceDiff ||
+            runningEntry.postDiffCheckpointTriggered ||
+            runningEntry.stopRequested ||
+            runningEntry.firstDiffObservedAtMs === undefined
+        ) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private hasReachedPostDiffCheckpointThreshold(runningEntry: RunningEntry): boolean {
+        if (runningEntry.firstDiffObservedAtMs === undefined) {
+            return false;
+        }
+
+        const tokenUsage = summarizeTokenUsage(runningEntry.lastTokenUsage);
+        const contextUtilizationPercent = tokenUsage?.contextUtilizationPercent ?? null;
+
+        if (
+            contextUtilizationPercent !== null &&
+            contextUtilizationPercent >= POST_DIFF_CHECKPOINT_CONTEXT_UTILIZATION_PERCENT
+        ) {
+            return true;
+        }
+
+        return this.nowMs() - runningEntry.firstDiffObservedAtMs >= POST_DIFF_CHECKPOINT_MIN_RUNTIME_AFTER_DIFF_MS;
+    }
+
+    private hasReachedFirstCommandDriftThreshold(runningEntry: RunningEntry): boolean {
+        if (runningEntry.firstTurnBroadCommandExecutionCount >= FIRST_COMMAND_DRIFT_GUARD_BROAD_COMMAND_EXECUTIONS) {
+            return true;
+        }
+
+        return runningEntry.firstTurnCommandExecutionCount >= FIRST_COMMAND_DRIFT_GUARD_TOTAL_COMMAND_EXECUTIONS;
+    }
+
+    private hasReachedFirstRepoStepGuardThreshold(runningEntry: RunningEntry): boolean {
+        const tokenUsage = summarizeTokenUsage(runningEntry.lastTokenUsage);
+        const contextUtilizationPercent = tokenUsage?.contextUtilizationPercent ?? null;
+
+        if (
+            contextUtilizationPercent !== null &&
+            contextUtilizationPercent >= FIRST_REPO_STEP_GUARD_CONTEXT_UTILIZATION_PERCENT
+        ) {
+            return true;
+        }
+
+        return runningEntry.firstTurnItemLifecycleEvents >= FIRST_REPO_STEP_GUARD_ITEM_LIFECYCLE_EVENTS;
+    }
+
+    private async refreshWorkspaceDiffObservation(runningEntry: RunningEntry, force = false): Promise<boolean> {
+        if (
+            !runningEntry.workspaceClient ||
+            !runningEntry.workspacePath ||
+            !runningEntry.baselineWorkspaceState ||
+            runningEntry.hasObservedWorkspaceDiff ||
+            runningEntry.workspaceStateCheckInFlight
+        ) {
+            return runningEntry.hasObservedWorkspaceDiff;
+        }
+
+        const nowMs = this.nowMs();
+        if (
+            !force &&
+            runningEntry.lastWorkspaceStateCheckAtMs !== undefined &&
+            nowMs - runningEntry.lastWorkspaceStateCheckAtMs < WORKSPACE_PROGRESS_CHECK_MIN_INTERVAL_MS
+        ) {
+            return runningEntry.hasObservedWorkspaceDiff;
+        }
+
+        runningEntry.workspaceStateCheckInFlight = true;
+        runningEntry.lastWorkspaceStateCheckAtMs = nowMs;
+
+        try {
+            const currentWorkspaceState = await runningEntry.workspaceClient.captureWorkspaceState(
+                runningEntry.workspacePath,
+            );
+            if (
+                didWorkspaceHeadAdvance(runningEntry.baselineWorkspaceState, currentWorkspaceState) ||
+                runningEntry.baselineWorkspaceState.statusText !== currentWorkspaceState.statusText
+            ) {
+                runningEntry.hasObservedWorkspaceDiff = true;
+                runningEntry.firstDiffObservedAtMs ??= this.nowMs();
+                runningEntry.firstTurnPlanOnlyCandidateAtMs = undefined;
+                runningEntry.firstTurnPlanOnlyCandidateMessage = undefined;
+                this.recordTrace(
+                    runningEntry,
+                    'workspace',
+                    'workspace/first_diff_observed',
+                    'Observed first repo diff/workspace progress.',
+                    {
+                        workspace_path: runningEntry.workspacePath,
+                        head_sha: currentWorkspaceState.headSha,
+                        status_text: currentWorkspaceState.statusText,
+                    },
+                );
+                this.logger.info('Observed first repo diff/workspace progress during active turn.', {
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                    workspacePath: runningEntry.workspacePath,
+                });
+            }
+        } catch (error) {
+            const classified = this.classifyError(error);
+            this.logger.warn('Workspace progress check failed during active turn.', {
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                errorClass: classified.errorClass,
+                error: classified.message,
+            });
+        } finally {
+            runningEntry.workspaceStateCheckInFlight = false;
+        }
+
+        return runningEntry.hasObservedWorkspaceDiff;
+    }
+
+    private async maybeTriggerFirstRepoStepGuard(runningEntry: RunningEntry): Promise<void> {
+        if (
+            !this.shouldEvaluateFirstRepoStepGuard(runningEntry) ||
+            !this.hasReachedFirstRepoStepGuardThreshold(runningEntry)
+        ) {
+            return;
+        }
+
+        const observedWorkspaceDiff = await this.refreshWorkspaceDiffObservation(runningEntry, true);
+        if (observedWorkspaceDiff || runningEntry.firstRepoStepGuardTriggered || runningEntry.stopRequested) {
+            return;
+        }
+
+        runningEntry.firstRepoStepGuardTriggered = true;
+        const tokenUsage = summarizeTokenUsage(runningEntry.lastTokenUsage);
+        const contextUtilizationPercent = tokenUsage?.contextUtilizationPercent ?? null;
+        const message =
+            'First-turn guard tripped before the first repo diff. Stop and retry with a narrower, concrete edit.';
+        runningEntry.pendingGuardrailError = new OrchestratorGuardrailError('workspace_no_first_repo_step', message, {
+            issueIdentifier: runningEntry.issue.identifier,
+            workspacePath: runningEntry.workspacePath,
+            runtimeMs: this.nowMs() - runningEntry.startedAtMs,
+            contextUtilizationPercent,
+            firstTurnItemLifecycleEvents: runningEntry.firstTurnItemLifecycleEvents,
+        });
+
+        this.logger.warn('Stopping issue because no repo diff was observed before first-turn guard threshold.', {
+            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+            workspacePath: runningEntry.workspacePath,
+            contextUtilizationPercent,
+            firstTurnItemLifecycleEvents: runningEntry.firstTurnItemLifecycleEvents,
+        });
+        this.recordTrace(
+            runningEntry,
+            'guard',
+            'guard/first_repo_step',
+            'Stopped issue because no repo diff was observed before the first-turn guard threshold.',
+            {
+                workspace_path: runningEntry.workspacePath,
+                context_utilization_percent: contextUtilizationPercent,
+                first_turn_item_lifecycle_events: runningEntry.firstTurnItemLifecycleEvents,
+            },
+        );
+
+        await this.requestStopForRunningIssue(runningEntry, {
+            suppressRetry: false,
+            cleanupWorkspace: false,
+            reason: 'first_repo_step_guard',
+            currentState: runningEntry.issue.stateName,
+        });
+    }
+
+    private async maybeTriggerFirstCommandDriftGuard(runningEntry: RunningEntry): Promise<void> {
+        if (
+            !this.shouldEvaluateFirstCommandDriftGuard(runningEntry) ||
+            !this.hasReachedFirstCommandDriftThreshold(runningEntry)
+        ) {
+            return;
+        }
+
+        const observedWorkspaceDiff = await this.refreshWorkspaceDiffObservation(runningEntry, true);
+        if (observedWorkspaceDiff || runningEntry.firstCommandDriftGuardTriggered || runningEntry.stopRequested) {
+            return;
+        }
+
+        runningEntry.firstCommandDriftGuardTriggered = true;
+        const message =
+            'First turn drifted into pre-edit shell exploration before the first repo diff. Stop and retry with a direct file edit.';
+        runningEntry.pendingGuardrailError = new OrchestratorGuardrailError(
+            'workspace_first_repo_step_command_drift',
+            message,
+            {
+                issueIdentifier: runningEntry.issue.identifier,
+                workspacePath: runningEntry.workspacePath,
+                runtimeMs: this.nowMs() - runningEntry.startedAtMs,
+                firstRepoTargetPath: runningEntry.firstRepoTargetPath ?? null,
+                firstTurnCommandExecutionCount: runningEntry.firstTurnCommandExecutionCount,
+                firstTurnBroadCommandExecutionCount: runningEntry.firstTurnBroadCommandExecutionCount,
+            },
+        );
+
+        this.logger.warn('Stopping issue because the first turn drifted into command exploration before a repo diff.', {
+            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+            workspacePath: runningEntry.workspacePath,
+            firstRepoTargetPath: runningEntry.firstRepoTargetPath ?? null,
+            firstTurnCommandExecutionCount: runningEntry.firstTurnCommandExecutionCount,
+            firstTurnBroadCommandExecutionCount: runningEntry.firstTurnBroadCommandExecutionCount,
+        });
+        this.recordTrace(
+            runningEntry,
+            'guard',
+            'guard/first_command_drift',
+            'Stopped issue because the first turn drifted into command exploration before the first repo diff.',
+            {
+                workspace_path: runningEntry.workspacePath,
+                first_repo_target_path: runningEntry.firstRepoTargetPath ?? null,
+                first_turn_command_execution_count: runningEntry.firstTurnCommandExecutionCount,
+                first_turn_broad_command_execution_count: runningEntry.firstTurnBroadCommandExecutionCount,
+            },
+        );
+
+        await this.requestStopForRunningIssue(runningEntry, {
+            suppressRetry: false,
+            cleanupWorkspace: false,
+            reason: 'first_command_drift_guard',
+            currentState: runningEntry.issue.stateName,
+        });
+    }
+
+    private async maybeTriggerFirstPlanOnlyGuard(runningEntry: RunningEntry): Promise<void> {
+        if (!this.shouldEvaluateFirstPlanOnlyGuard(runningEntry)) {
+            return;
+        }
+
+        const observedWorkspaceDiff = await this.refreshWorkspaceDiffObservation(runningEntry, true);
+        if (observedWorkspaceDiff || runningEntry.firstPlanOnlyGuardTriggered || runningEntry.stopRequested) {
+            return;
+        }
+
+        runningEntry.firstPlanOnlyGuardTriggered = true;
+        const message =
+            'First turn ended in a plan/status reply before the first repo diff. Stop and retry with a direct edit.';
+        runningEntry.pendingGuardrailError = new OrchestratorGuardrailError(
+            'workspace_first_repo_step_plan_only',
+            message,
+            {
+                issueIdentifier: runningEntry.issue.identifier,
+                workspacePath: runningEntry.workspacePath,
+                runtimeMs: this.nowMs() - runningEntry.startedAtMs,
+                firstRepoTargetPath: runningEntry.firstRepoTargetPath ?? null,
+                firstTurnAgentMessage: runningEntry.firstTurnPlanOnlyCandidateMessage ?? null,
+            },
+        );
+
+        this.logger.warn('Stopping issue because the first turn ended in a plan-only reply before a repo diff.', {
+            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+            workspacePath: runningEntry.workspacePath,
+            firstRepoTargetPath: runningEntry.firstRepoTargetPath ?? null,
+            firstTurnAgentMessage: runningEntry.firstTurnPlanOnlyCandidateMessage ?? null,
+        });
+        this.recordTrace(
+            runningEntry,
+            'guard',
+            'guard/first_plan_only',
+            'Stopped issue because the first turn ended in a plan/status reply before the first repo diff.',
+            {
+                workspace_path: runningEntry.workspacePath,
+                first_repo_target_path: runningEntry.firstRepoTargetPath ?? null,
+                first_turn_agent_message: runningEntry.firstTurnPlanOnlyCandidateMessage ?? null,
+            },
+        );
+
+        await this.requestStopForRunningIssue(runningEntry, {
+            suppressRetry: false,
+            cleanupWorkspace: false,
+            reason: 'first_plan_only_guard',
+            currentState: runningEntry.issue.stateName,
+        });
+    }
+
+    private async maybeTriggerPostDiffCheckpoint(runningEntry: RunningEntry): Promise<void> {
+        if (
+            !this.shouldEvaluatePostDiffCheckpoint(runningEntry) ||
+            !this.hasReachedPostDiffCheckpointThreshold(runningEntry)
+        ) {
+            return;
+        }
+
+        runningEntry.postDiffCheckpointTriggered = true;
+        const tokenUsage = summarizeTokenUsage(runningEntry.lastTokenUsage);
+        const contextUtilizationPercent = tokenUsage?.contextUtilizationPercent ?? null;
+        this.logger.info('Stopping issue after first repo diff to continue in a narrower follow-up turn.', {
+            ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+            workspacePath: runningEntry.workspacePath,
+            contextUtilizationPercent,
+            firstRepoTargetPath: runningEntry.firstRepoTargetPath ?? null,
+        });
+        this.recordTrace(
+            runningEntry,
+            'turn',
+            'turn/post_diff_checkpoint',
+            'Stopping after the first repo diff so the next turn can focus on validation and commit work.',
+            {
+                workspace_path: runningEntry.workspacePath,
+                context_utilization_percent: contextUtilizationPercent,
+                first_repo_target_path: runningEntry.firstRepoTargetPath ?? null,
+            },
+        );
+
+        await this.requestStopForRunningIssue(runningEntry, {
+            suppressRetry: false,
+            cleanupWorkspace: false,
+            reason: 'post_diff_checkpoint',
+            currentState: runningEntry.issue.stateName,
+        });
     }
 
     private handleOrchestratorEvent(event: OrchestratorEvent, runningEntry: RunningEntry): void {
+        runningEntry.lastEventAtMs = this.nowMs();
+        runningEntry.lastEventType = event.type;
+
+        if (event.type === 'trace') {
+            runningEntry.lastEventType = event.eventType;
+            runningEntry.lastEventMessage = event.message;
+            this.recordTrace(runningEntry, event.category, event.eventType, event.message, event.details);
+            return;
+        }
+
         if (event.type === 'rate_limit') {
             this.lastRateLimits = {...event.payload};
+            runningEntry.lastEventMessage = 'Rate limits updated.';
             return;
         }
 
         if (event.type === 'session') {
+            runningEntry.threadId = event.threadId;
             runningEntry.sessionId = event.sessionId;
+            runningEntry.lastEventMessage = 'Session started.';
+            this.recordTrace(runningEntry, 'runtime', 'session/started', 'Session started.', {
+                thread_id: event.threadId,
+                turn_id: event.turnId,
+                session_id: event.sessionId,
+            });
             this.logger.info('Codex session created', {
                 ...issueLogFields(runningEntry.issue, event.sessionId),
                 threadId: event.threadId,
@@ -670,6 +2784,10 @@ export class SymphonyOrchestrator {
         }
 
         if (event.type === 'diagnostic') {
+            runningEntry.lastEventMessage = normalizeText(event.message);
+            this.recordTrace(runningEntry, 'diagnostic', `diagnostic/${event.stream}`, normalizeText(event.message), {
+                stream: event.stream,
+            });
             this.logger.info('Codex diagnostic event', {
                 ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                 stream: event.stream,
@@ -679,16 +2797,166 @@ export class SymphonyOrchestrator {
         }
 
         if (event.type === 'token_usage') {
+            runningEntry.lastTokenUsage = {...event.payload};
+            runningEntry.lastEventMessage = describeTokenUsage(summarizeTokenUsage(runningEntry.lastTokenUsage));
             this.logger.info('Codex token usage event', {
                 ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                 usage: event.payload,
             });
+            void this.maybeTriggerPostDiffCheckpoint(runningEntry);
+            return;
+        }
+
+        if (event.type === 'raw_event') {
+            const summary = summarizeRawEvent(event.payload);
+            runningEntry.lastEventType = summary.eventType;
+            runningEntry.lastEventMessage = summary.message;
+            const normalizedEventType = summary.eventType.trim().toLowerCase();
+            let traceDetails = summary.details;
+
+            if (
+                (normalizedEventType === 'item/agentmessage/delta' ||
+                    normalizedEventType === 'codex/event/agent_message_delta' ||
+                    normalizedEventType === 'codex/event/agent_message_content_delta') &&
+                typeof summary.details?.delta === 'string'
+            ) {
+                runningEntry.currentAgentMessageBuffer = appendMergedCappedText(
+                    runningEntry.currentAgentMessageBuffer,
+                    summary.details.delta,
+                    FIRST_AGENT_MESSAGE_MAX_CHARS,
+                );
+            }
+
+            if (
+                (normalizedEventType === 'item/started' || normalizedEventType === 'item/completed') &&
+                isAgentMessageItemKind(summary.details?.item_kind)
+            ) {
+                if (normalizedEventType === 'item/started') {
+                    runningEntry.currentAgentMessageBuffer = '';
+                } else {
+                    const completedAgentMessage = normalizeAgentMessageText(runningEntry.currentAgentMessageBuffer);
+                    runningEntry.currentAgentMessageBuffer = '';
+
+                    if (completedAgentMessage.length > 0) {
+                        runningEntry.lastEventMessage = completedAgentMessage;
+                        if (!runningEntry.firstTurnAgentMessageText) {
+                            runningEntry.firstTurnAgentMessageText = completedAgentMessage;
+                        }
+
+                        this.recordTrace(
+                            runningEntry,
+                            'agent',
+                            'agent/message_completed',
+                            normalizeText(completedAgentMessage, 280),
+                            {
+                                text: completedAgentMessage,
+                                char_count: completedAgentMessage.length,
+                            },
+                        );
+
+                        if (
+                            runningEntry.turnCount === 0 &&
+                            !runningEntry.hasObservedWorkspaceDiff &&
+                            runningEntry.firstTurnCommandExecutionCount === 0 &&
+                            isPlanOnlyFirstTurnMessage(completedAgentMessage)
+                        ) {
+                            runningEntry.firstTurnPlanOnlyCandidateAtMs = this.nowMs();
+                            runningEntry.firstTurnPlanOnlyCandidateMessage = completedAgentMessage;
+                            this.recordTrace(
+                                runningEntry,
+                                'guard',
+                                'guard/first_plan_only_candidate',
+                                'Detected a first-turn plan/status reply before the first repo diff.',
+                                {
+                                    first_repo_target_path: runningEntry.firstRepoTargetPath ?? null,
+                                    first_turn_agent_message: completedAgentMessage,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+
+            if (
+                normalizedEventType === 'codex/event/exec_command_begin' &&
+                runningEntry.turnCount === 0 &&
+                !runningEntry.hasObservedWorkspaceDiff
+            ) {
+                const command = typeof summary.details?.command === 'string' ? summary.details.command : '';
+                const isBroadBeforeFirstDiff = isBroadCommandBeforeFirstDiff(command, runningEntry.firstRepoTargetPath);
+                runningEntry.firstTurnCommandExecutionCount += 1;
+                runningEntry.firstTurnPlanOnlyCandidateAtMs = undefined;
+                runningEntry.firstTurnPlanOnlyCandidateMessage = undefined;
+                if (isBroadBeforeFirstDiff) {
+                    runningEntry.firstTurnBroadCommandExecutionCount += 1;
+                }
+
+                traceDetails = {
+                    ...(summary.details ?? {}),
+                    first_repo_target_path: runningEntry.firstRepoTargetPath ?? null,
+                    targets_first_repo_path:
+                        command.length > 0
+                            ? commandMentionsTargetPath(command, runningEntry.firstRepoTargetPath)
+                            : false,
+                    is_broad_before_first_diff: isBroadBeforeFirstDiff,
+                };
+            }
+
+            if (summary.category !== 'agent') {
+                this.recordTrace(runningEntry, summary.category, summary.eventType, summary.message, traceDetails);
+            }
+            if (normalizedEventType === 'item/started' || normalizedEventType === 'item/completed') {
+                runningEntry.firstTurnItemLifecycleEvents += 1;
+            }
+
+            if (normalizedEventType.includes('diff')) {
+                runningEntry.firstTurnPlanOnlyCandidateAtMs = undefined;
+                runningEntry.firstTurnPlanOnlyCandidateMessage = undefined;
+                void this.refreshWorkspaceDiffObservation(runningEntry, true);
+            }
+
+            void this.maybeTriggerPostDiffCheckpoint(runningEntry);
+        }
+    }
+
+    private recordTrace(
+        runningEntry: RunningEntry,
+        category: OrchestratorTraceCategory,
+        eventType: string,
+        message: string,
+        details?: Record<string, unknown>,
+    ): void {
+        const entry: TraceEntry = {
+            atIso: new Date(this.nowMs()).toISOString(),
+            category,
+            eventType,
+            message,
+            details,
+        };
+
+        runningEntry.traceEntries.push(entry);
+        if (runningEntry.traceEntries.length > TRACE_MAX_ENTRIES) {
+            runningEntry.traceEntries.splice(0, runningEntry.traceEntries.length - TRACE_MAX_ENTRIES);
+        }
+
+        if (runningEntry.turnCount === 0) {
+            runningEntry.firstTurnTraceEntries.push(entry);
+            if (runningEntry.firstTurnTraceEntries.length > FIRST_TURN_TRACE_MAX_ENTRIES) {
+                runningEntry.firstTurnTraceEntries.splice(
+                    0,
+                    runningEntry.firstTurnTraceEntries.length - FIRST_TURN_TRACE_MAX_ENTRIES,
+                );
+            }
         }
     }
 
     private isRetryableError(error: unknown): boolean {
-        if (error instanceof AppServerClientError) {
+        if (error instanceof OrchestratorGuardrailError) {
             return true;
+        }
+
+        if (error instanceof AppServerClientError) {
+            return error.errorClass !== 'turn_input_required' && error.errorClass !== 'approval_required';
         }
 
         if (error instanceof WorkspaceManagerError) {
@@ -699,6 +2967,13 @@ export class SymphonyOrchestrator {
     }
 
     private classifyError(error: unknown): {errorClass: string; message: string} {
+        if (error instanceof OrchestratorGuardrailError) {
+            return {
+                errorClass: error.errorClass,
+                message: error.message,
+            };
+        }
+
         if (error instanceof AppServerClientError) {
             return {
                 errorClass: error.errorClass,

@@ -39,14 +39,154 @@ Issue {{issue.identifier}} (attempt {{attempt}})
         contents,
         env: {
             LINEAR_API_KEY: 'secret-token',
-            SYMPHONY_CODEX_COMMAND: 'codex --app-server',
+            SYMPHONY_CODEX_COMMAND: 'codex app-server',
         },
         homeDir: '/home/robin',
     });
 
     assert.equal(config.tracker.apiKey, 'secret-token');
-    assert.equal(config.codex.command, 'codex --app-server');
+    assert.equal(config.codex.command, 'codex app-server');
     assert.equal(config.workspace.root, '/home/robin/pilot/workspaces');
+    assert.deepEqual(config.agent.commitRequiredStates, ['Todo', 'In Progress', 'Rework']);
+});
+
+test('parseWorkflowConfig supports commit_required_states override', () => {
+    const config = parseWorkflowConfig({
+        workflowPath: '/repo/WORKFLOW.md',
+        contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+agent:
+  commit_required_states:
+    - Todo
+    - In Progress
+codex:
+  command: codex app-server
+---
+Issue {{issue.identifier}}
+`,
+        env: {},
+        homeDir: '/home/robin',
+    });
+
+    assert.deepEqual(config.agent.commitRequiredStates, ['Todo', 'In Progress']);
+});
+
+test('parseWorkflowConfig accepts future non-empty codex approval and sandbox strings', () => {
+    const config = parseWorkflowConfig({
+        workflowPath: '/repo/WORKFLOW.md',
+        contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+codex:
+  command: codex app-server
+  approval_policy: future-policy
+  thread_sandbox: future-sandbox
+  turn_sandbox_policy:
+    type: futureSandbox
+    nested:
+      flag: true
+---
+Issue {{issue.identifier}}
+`,
+        env: {},
+        homeDir: '/home/robin',
+    });
+
+    assert.equal(config.codex.approvalPolicy, 'future-policy');
+    assert.equal(config.codex.threadSandbox, 'future-sandbox');
+    assert.deepEqual(config.codex.turnSandboxPolicy, {
+        type: 'futureSandbox',
+        nested: {
+            flag: true,
+        },
+    });
+});
+
+test('parseWorkflowConfig rejects invalid codex approval_policy values', () => {
+    assert.throws(
+        () =>
+            parseWorkflowConfig({
+                workflowPath: '/repo/WORKFLOW.md',
+                contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+codex:
+  command: codex app-server
+  approval_policy: ""
+---
+Issue {{issue.identifier}}
+`,
+                env: {},
+                homeDir: '/home/robin',
+            }),
+        (error) => error instanceof WorkflowConfigError && error.errorClass === 'invalid_codex_approval_policy',
+    );
+
+    assert.throws(
+        () =>
+            parseWorkflowConfig({
+                workflowPath: '/repo/WORKFLOW.md',
+                contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+codex:
+  command: codex app-server
+  approval_policy: 123
+---
+Issue {{issue.identifier}}
+`,
+                env: {},
+                homeDir: '/home/robin',
+            }),
+        (error) => error instanceof WorkflowConfigError && error.errorClass === 'invalid_codex_approval_policy',
+    );
+});
+
+test('parseWorkflowConfig rejects invalid codex thread_sandbox and turn_sandbox_policy values', () => {
+    assert.throws(
+        () =>
+            parseWorkflowConfig({
+                workflowPath: '/repo/WORKFLOW.md',
+                contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+codex:
+  command: codex app-server
+  thread_sandbox: ""
+---
+Issue {{issue.identifier}}
+`,
+                env: {},
+                homeDir: '/home/robin',
+            }),
+        (error) => error instanceof WorkflowConfigError && error.errorClass === 'invalid_codex_thread_sandbox',
+    );
+
+    assert.throws(
+        () =>
+            parseWorkflowConfig({
+                workflowPath: '/repo/WORKFLOW.md',
+                contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+codex:
+  command: codex app-server
+  turn_sandbox_policy: bad
+---
+Issue {{issue.identifier}}
+`,
+                env: {},
+                homeDir: '/home/robin',
+            }),
+        (error) => error instanceof WorkflowConfigError && error.errorClass === 'invalid_codex_turn_sandbox_policy',
+    );
 });
 
 test('validateDispatchPreflight classifies missing required fields', () => {
@@ -55,7 +195,7 @@ test('validateDispatchPreflight classifies missing required fields', () => {
 tracker:
   project_slug: school-appointments
 codex:
-  command: codex --app-server
+  command: codex app-server
 ---
 Issue {{issue.identifier}}
 `;
@@ -120,7 +260,7 @@ Issue {{issue.identifier}}
 
     const errorLog = logs.find((entry) => entry.level === 'error');
     assert.ok(errorLog);
-    assert.equal(errorLog?.errorClass, 'invalid_workflow');
+    assert.equal(errorLog?.errorClass, 'workflow_parse_error');
 });
 
 test('WorkflowConfigStore keeps last known good config when workflow file disappears', async () => {
@@ -158,7 +298,7 @@ Issue {{issue.identifier}}
 
     const errorLog = logs.find((entry) => entry.level === 'error');
     assert.ok(errorLog);
-    assert.equal(errorLog?.errorClass, 'missing_workflow');
+    assert.equal(errorLog?.errorClass, 'missing_workflow_file');
 });
 
 test('WorkflowConfigStore applies valid reload for new dispatches', async () => {
@@ -216,4 +356,44 @@ Issue {{issue.identifier}} / {{issue.title}} / {{attempt}}
 
     assert.equal(dispatch.config.tracker.projectSlug, 'project-b');
     assert.equal(dispatch.prompt, 'Issue ROB-9 / Workflow loader / 3');
+});
+
+test('parseWorkflowConfig rejects non-map front matter with workflow_front_matter_not_a_map', () => {
+    assert.throws(
+        () =>
+            parseWorkflowConfig({
+                workflowPath: '/repo/WORKFLOW.md',
+                contents: `---
+- not
+- a
+- map
+---
+Issue {{issue.identifier}}
+`,
+                env: {},
+                homeDir: '/home/robin',
+            }),
+        (error) => error instanceof WorkflowConfigError && error.errorClass === 'workflow_front_matter_not_a_map',
+    );
+});
+
+test('parseWorkflowConfig maps invalid template syntax to template_parse_error', () => {
+    assert.throws(
+        () =>
+            parseWorkflowConfig({
+                workflowPath: '/repo/WORKFLOW.md',
+                contents: `---
+tracker:
+  api_key: token
+  project_slug: project-a
+codex:
+  command: codex run
+---
+Issue {{invalid.identifier}}
+`,
+                env: {},
+                homeDir: '/home/robin',
+            }),
+        (error) => error instanceof WorkflowConfigError && error.errorClass === 'template_parse_error',
+    );
 });

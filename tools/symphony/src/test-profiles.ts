@@ -12,7 +12,11 @@ function cloneIssue(issue: TrackedIssue): TrackedIssue {
     return {
         ...issue,
         labels: [...issue.labels],
+        blockedBy: issue.blockedBy.map((blocker) => ({...blocker})),
         blockedByIdentifiers: [...issue.blockedByIdentifiers],
+        workpadCommentId: issue.workpadCommentId,
+        workpadCommentBody: issue.workpadCommentBody,
+        workpadCommentUrl: issue.workpadCommentUrl,
     };
 }
 
@@ -75,6 +79,22 @@ export class FakeLinearProfile implements TrackerClient {
                 return cloned;
             });
     }
+
+    public async prepareIssueForRun(issue: TrackedIssue): Promise<TrackedIssue> {
+        const preparedIssue = cloneIssue(issue);
+        if (preparedIssue.stateName.trim().toLowerCase() === 'todo') {
+            preparedIssue.stateName = 'In Progress';
+            this.issueStatesById.set(preparedIssue.id, preparedIssue.stateName);
+        }
+
+        if (!preparedIssue.workpadCommentId) {
+            preparedIssue.workpadCommentId = `workpad-${preparedIssue.id}`;
+            preparedIssue.workpadCommentBody = '## Codex Workpad';
+            preparedIssue.workpadCommentUrl = null;
+        }
+
+        return preparedIssue;
+    }
 }
 
 export type FakeCodexOutcome =
@@ -96,8 +116,9 @@ export class FakeCodexProfile implements AppServerClient {
     private readonly outcomes: FakeCodexOutcome[];
     public readonly seenRequests: Array<{
         issueIdentifier: string;
-        attempt: number;
+        attempt: number | null;
         prompt: string;
+        threadId?: string;
     }> = [];
 
     public constructor(outcomes: FakeCodexOutcome[]) {
@@ -107,7 +128,9 @@ export class FakeCodexProfile implements AppServerClient {
     public async runTurn(request: {
         prompt: string;
         issueIdentifier: string;
-        attempt: number;
+        issueTitle?: string;
+        attempt: number | null;
+        threadId?: string;
         responseTimeoutMs?: number;
         turnTimeoutMs?: number;
     }): Promise<{
@@ -121,6 +144,7 @@ export class FakeCodexProfile implements AppServerClient {
             issueIdentifier: request.issueIdentifier,
             attempt: request.attempt,
             prompt: request.prompt,
+            threadId: request.threadId,
         });
 
         const outcome = this.outcomes.shift() ?? {type: 'completed', outputText: ''};
@@ -137,7 +161,7 @@ export class FakeCodexProfile implements AppServerClient {
         }
 
         const threadId = `thread-${request.issueIdentifier}`;
-        const turnId = `turn-${request.attempt}`;
+        const turnId = `turn-${request.attempt ?? 'initial'}`;
 
         return {
             status: outcome.type,
@@ -146,5 +170,9 @@ export class FakeCodexProfile implements AppServerClient {
             turnId,
             sessionId: `${threadId}-${turnId}`,
         };
+    }
+
+    public async stop(): Promise<void> {
+        return;
     }
 }

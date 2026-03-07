@@ -1,3 +1,5 @@
+import {parse} from 'graphql';
+
 export type LinearTrackerErrorClass =
     | 'linear_api_status'
     | 'linear_graphql_errors'
@@ -32,6 +34,9 @@ interface GraphQlIssueNode {
     id: string;
     identifier: string;
     title: string;
+    description?: string | null;
+    branchName?: string | null;
+    url?: string | null;
     createdAt: string;
     updatedAt: string;
     priority: number | null;
@@ -45,13 +50,107 @@ interface GraphQlIssueNode {
             name: string;
         }>;
     } | null;
-    blockedByIssues?: {
-        nodes?: Array<{
-            identifier: string;
-        }>;
+    relations?: {
+        nodes?: GraphQlIssueRelationNode[];
+    } | null;
+    inverseRelations?: {
+        nodes?: GraphQlIssueRelationNode[];
     } | null;
     project?: {
-        slug: string;
+        slugId?: string | null;
+    } | null;
+}
+
+interface GraphQlIssueRelationNode {
+    type?: string | null;
+    issue?: {
+        id?: string | null;
+        identifier?: string | null;
+        state?: {
+            name?: string | null;
+        } | null;
+    } | null;
+    relatedIssue?: {
+        id?: string | null;
+        identifier?: string | null;
+        state?: {
+            name?: string | null;
+        } | null;
+    } | null;
+}
+
+interface GraphQlIssueStateNode {
+    id: string;
+    identifier: string;
+    updatedAt: string;
+    state?: {
+        id: string;
+        name: string;
+        type?: string | null;
+    } | null;
+}
+
+interface GraphQlCommentNode {
+    id: string;
+    body?: string | null;
+    url?: string | null;
+    updatedAt: string;
+}
+
+interface GraphQlTeamStateNode {
+    id: string;
+    name: string;
+    type?: string | null;
+}
+
+interface GraphQlIssueRunContext {
+    issue:
+        | (GraphQlIssueNode & {
+              comments?: {
+                  nodes?: GraphQlCommentNode[];
+              } | null;
+              team?: {
+                  states?: {
+                      nodes?: GraphQlTeamStateNode[];
+                  } | null;
+              } | null;
+          })
+        | null;
+}
+
+interface GraphQlIssueStateUpdateResult {
+    issueUpdate?: {
+        success?: boolean | null;
+        issue?: {
+            id?: string | null;
+            updatedAt?: string | null;
+            state?: {
+                id?: string | null;
+                name?: string | null;
+            } | null;
+        } | null;
+    } | null;
+}
+
+interface GraphQlCommentCreateResult {
+    commentCreate?: {
+        success?: boolean | null;
+        comment?: {
+            id?: string | null;
+            url?: string | null;
+            body?: string | null;
+        } | null;
+    } | null;
+}
+
+interface GraphQlCommentUpdateResult {
+    commentUpdate?: {
+        success?: boolean | null;
+        comment?: {
+            id?: string | null;
+            url?: string | null;
+            body?: string | null;
+        } | null;
     } | null;
 }
 
@@ -64,7 +163,7 @@ interface GraphQlIssueStatesPage {
 }
 
 interface GraphQlIssueStatesByIdsPage {
-    issues: GraphQlConnection<Pick<GraphQlIssueNode, 'id' | 'identifier' | 'state' | 'updatedAt'>>;
+    issues: GraphQlConnection<GraphQlIssueStateNode>;
 }
 
 interface GraphQlErrorEntry {
@@ -89,14 +188,25 @@ export interface TrackedIssue {
     id: string;
     identifier: string;
     title: string;
+    description: string | null;
     stateName: string;
     stateType: string;
-    priority: number;
+    priority: number | null;
+    branchName: string | null;
+    url: string | null;
     labels: string[];
+    blockedBy: Array<{
+        id: string | null;
+        identifier: string | null;
+        state: string | null;
+    }>;
     blockedByIdentifiers: string[];
     createdAt: string;
     updatedAt: string;
     projectSlug: string;
+    workpadCommentId: string | null;
+    workpadCommentBody: string | null;
+    workpadCommentUrl: string | null;
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -107,8 +217,17 @@ interface LinearTrackerAdapterArgs {
 }
 
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
-const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_PAGE_SIZE = 50;
+
+function asOptionalTrimmedString(value: unknown): string | null {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const trimmedValue = value.trim();
+    return trimmedValue.length > 0 ? trimmedValue : null;
+}
 
 function asIsoTimestamp(timestamp: string, fieldName: string): string {
     if (!Number.isNaN(Date.parse(timestamp))) {
@@ -123,37 +242,437 @@ function normalizeLabels(node: GraphQlIssueNode): string[] {
     return labels.map((label) => label.name.trim().toLowerCase()).filter((label) => label.length > 0);
 }
 
-function normalizeBlockedByIdentifiers(node: GraphQlIssueNode): string[] {
-    const blockedByNodes = node.blockedByIssues?.nodes ?? [];
-    return blockedByNodes.map((entry) => entry.identifier.trim()).filter((identifier) => identifier.length > 0);
+function normalizeBlockedBy(node: GraphQlIssueNode): {
+    blockedBy: TrackedIssue['blockedBy'];
+    blockedByIdentifiers: string[];
+} {
+    const relationNodes: GraphQlIssueRelationNode[] = [
+        ...(node.relations?.nodes ?? []),
+        ...(node.inverseRelations?.nodes ?? []),
+    ];
+    const blockedBy: TrackedIssue['blockedBy'] = [];
+    const blockedByIdentifiers = new Set<string>();
+    const seenBlockers = new Set<string>();
+
+    for (const relationNode of relationNodes) {
+        if ((relationNode.type ?? '').trim().toLowerCase() !== 'blocks') {
+            continue;
+        }
+
+        const blockerIssueId = asOptionalTrimmedString(relationNode.issue?.id);
+        const blockerIssueIdentifier = asOptionalTrimmedString(relationNode.issue?.identifier);
+        const blockerIssueState = asOptionalTrimmedString(relationNode.issue?.state?.name);
+        const blockedIssueId = asOptionalTrimmedString(relationNode.relatedIssue?.id);
+        const blockedIssueIdentifier = asOptionalTrimmedString(relationNode.relatedIssue?.identifier);
+
+        const isCurrentIssueBlocked =
+            (blockedIssueId !== null && blockedIssueId === node.id) ||
+            (blockedIssueIdentifier !== null && blockedIssueIdentifier === node.identifier);
+
+        if (!isCurrentIssueBlocked) {
+            continue;
+        }
+
+        if (blockerIssueId !== null && blockerIssueId === node.id) {
+            continue;
+        }
+
+        if (blockerIssueId === null && blockerIssueIdentifier === null) {
+            continue;
+        }
+
+        const blockerKey = `${blockerIssueId ?? ''}:${blockerIssueIdentifier ?? ''}`;
+        if (seenBlockers.has(blockerKey)) {
+            continue;
+        }
+
+        seenBlockers.add(blockerKey);
+        blockedBy.push({
+            id: blockerIssueId,
+            identifier: blockerIssueIdentifier,
+            state: blockerIssueState,
+        });
+
+        if (blockerIssueIdentifier !== null) {
+            blockedByIdentifiers.add(blockerIssueIdentifier);
+        }
+    }
+
+    return {
+        blockedBy,
+        blockedByIdentifiers: Array.from(blockedByIdentifiers),
+    };
 }
 
-function normalizePriority(value: number | null): number {
-    if (typeof value === 'number' && Number.isFinite(value)) {
+function normalizePriority(value: number | null): number | null {
+    if (typeof value === 'number' && Number.isInteger(value)) {
         return value;
     }
 
-    return 0;
+    return null;
 }
 
 function normalizeIssue(node: GraphQlIssueNode, fallbackProjectSlug: string): TrackedIssue {
-    const projectSlug = node.project?.slug ?? fallbackProjectSlug;
+    const projectSlug = node.project?.slugId ?? fallbackProjectSlug;
     if (projectSlug.trim() === '') {
         throw new LinearTrackerError('linear_invalid_response', 'Missing project slug in Linear issue payload.');
     }
+
+    const blockers = normalizeBlockedBy(node);
 
     return {
         id: node.id,
         identifier: node.identifier,
         title: node.title,
+        description: asOptionalTrimmedString(node.description),
         stateName: node.state?.name ?? '',
         stateType: node.state?.type ?? '',
         priority: normalizePriority(node.priority),
+        branchName: asOptionalTrimmedString(node.branchName),
+        url: asOptionalTrimmedString(node.url),
         labels: normalizeLabels(node),
-        blockedByIdentifiers: normalizeBlockedByIdentifiers(node),
+        blockedBy: blockers.blockedBy,
+        blockedByIdentifiers: blockers.blockedByIdentifiers,
         createdAt: asIsoTimestamp(node.createdAt, 'createdAt'),
         updatedAt: asIsoTimestamp(node.updatedAt, 'updatedAt'),
         projectSlug,
+        workpadCommentId: null,
+        workpadCommentBody: null,
+        workpadCommentUrl: null,
+    };
+}
+
+function normalizeCommentBody(value: unknown): string | null {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    return value.replace(/\r\n/g, '\n').trim();
+}
+
+function isWorkpadComment(comment: GraphQlCommentNode): boolean {
+    const body = normalizeCommentBody(comment.body);
+    return body !== null && body.startsWith('## Codex Workpad');
+}
+
+function compareCommentsByUpdatedAtDescending(left: GraphQlCommentNode, right: GraphQlCommentNode): number {
+    return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+}
+
+function normalizeHeadingName(value: string): string {
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function parseDescriptionSections(description: string | null): Map<string, string[]> {
+    const sections = new Map<string, string[]>();
+    let currentSection = '__root__';
+    sections.set(currentSection, []);
+
+    if (!description) {
+        return sections;
+    }
+
+    for (const line of description.replace(/\r\n/g, '\n').split('\n')) {
+        const headingMatch = line.match(/^#{1,6}\s+(.+?)\s*$/);
+        if (headingMatch) {
+            currentSection = normalizeHeadingName(headingMatch[1]);
+            if (!sections.has(currentSection)) {
+                sections.set(currentSection, []);
+            }
+            continue;
+        }
+
+        sections.get(currentSection)?.push(line);
+    }
+
+    return sections;
+}
+
+function extractChecklistItems(lines: string[]): string[] {
+    const items: string[] = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (line.length === 0 || line.startsWith('```')) {
+            continue;
+        }
+
+        const bulletMatch = line.match(/^[-*+]\s+(.*)$/);
+        if (bulletMatch) {
+            items.push(bulletMatch[1].trim());
+            continue;
+        }
+
+        const numberedMatch = line.match(/^\d+[.)]\s+(.*)$/);
+        if (numberedMatch) {
+            items.push(numberedMatch[1].trim());
+        }
+    }
+
+    return items;
+}
+
+function extractParagraphLines(lines: string[]): string[] {
+    const items: string[] = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (line.length === 0 || line.startsWith('```') || /^[-*+]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) {
+            continue;
+        }
+
+        items.push(line);
+    }
+
+    return items;
+}
+
+function collectSectionContent(
+    sections: Map<string, string[]>,
+    sectionNames: string[],
+    extractor: (lines: string[]) => string[],
+): string[] {
+    const collected: string[] = [];
+
+    for (const sectionName of sectionNames) {
+        const key = sectionName === '__root__' ? '__root__' : normalizeHeadingName(sectionName);
+        collected.push(...extractor(sections.get(key) ?? []));
+    }
+
+    return collected;
+}
+
+function dedupeAndLimit(items: string[], limit: number): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    for (const rawItem of items) {
+        const item = rawItem.trim().replace(/\s+/g, ' ');
+        if (item.length === 0) {
+            continue;
+        }
+
+        const key = item.toLowerCase();
+        if (seen.has(key)) {
+            continue;
+        }
+
+        seen.add(key);
+        result.push(item);
+
+        if (result.length >= limit) {
+            break;
+        }
+    }
+
+    return result;
+}
+
+function asChecklistLines(items: string[]): string[] {
+    return items.map((item) => `- [ ] ${item}`);
+}
+
+function shouldRefreshBootstrapWorkpad(body: string | null): boolean {
+    if (body === null) {
+        return false;
+    }
+
+    return (
+        body.startsWith('## Codex Workpad') &&
+        body.includes('Summary: Starting Symphony run for') &&
+        body.includes('Reconcile the issue scope against the current workspace state.') &&
+        !body.includes('### Acceptance Criteria')
+    );
+}
+
+function buildBootstrapWorkpad(issue: TrackedIssue): string {
+    const sections = parseDescriptionSections(issue.description);
+    const goalSummary = dedupeAndLimit(
+        collectSectionContent(sections, ['Goal', 'Problem', 'Context'], extractParagraphLines),
+        1,
+    )[0];
+    const scopeItems = dedupeAndLimit(
+        collectSectionContent(sections, ['Scope', 'Implementation Scope'], extractChecklistItems),
+        4,
+    );
+    const acceptanceItems = dedupeAndLimit(
+        collectSectionContent(sections, ['Definition of Done', 'Acceptance Criteria'], extractChecklistItems),
+        5,
+    );
+    const validationItems = dedupeAndLimit(
+        collectSectionContent(sections, ['Validation', 'Test Plan', 'Testing'], extractChecklistItems),
+        4,
+    );
+    const noteItems = dedupeAndLimit(
+        [
+            ...collectSectionContent(sections, ['Goal', 'Problem', 'Context'], extractParagraphLines),
+            ...collectSectionContent(sections, ['__root__'], extractParagraphLines),
+        ],
+        2,
+    );
+    const planItems =
+        scopeItems.length > 0
+            ? scopeItems
+            : [
+                  `Deliver the scoped change for ${issue.identifier}.`,
+                  'Verify the result with the narrowest relevant check.',
+              ];
+    const criteriaItems =
+        acceptanceItems.length > 0
+            ? acceptanceItems
+            : scopeItems.length > 0
+              ? scopeItems
+              : ['Keep the change scoped to the ticket and avoid unrelated edits.'];
+    const workpadValidationItems =
+        validationItems.length > 0 ? validationItems : ['Run the narrowest relevant check for the current diff.'];
+    const nextAction = planItems[0] ?? `Deliver the scoped change for ${issue.identifier}.`;
+    const summary = goalSummary ?? `Starting Symphony run for ${issue.identifier}: ${issue.title}.`;
+
+    return [
+        '## Codex Workpad',
+        '',
+        '### Status',
+        `- Summary: ${summary}`,
+        `- Next: ${nextAction}`,
+        '',
+        '### Plan',
+        ...asChecklistLines(planItems),
+        '',
+        '### Acceptance Criteria',
+        ...asChecklistLines(criteriaItems),
+        '',
+        '### Validation',
+        ...asChecklistLines(workpadValidationItems),
+        '',
+        '### Notes',
+        ...(noteItems.length > 0 ? noteItems.map((item) => `- ${item}`) : ['- No extra notes yet.']),
+        '',
+        '### Blockers',
+        '- None.',
+    ].join('\n');
+}
+
+function validateGraphQlDocument(document: string):
+    | {
+          ok: true;
+      }
+    | {
+          ok: false;
+          message: string;
+      } {
+    try {
+        parse(document);
+
+        return {
+            ok: true,
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            message: `linear_graphql query is not valid GraphQL: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        };
+    }
+}
+
+function normalizeLinearGraphQlToolInput(rawArguments: unknown):
+    | {
+          ok: true;
+          payload: {
+              query: string;
+              variables: Record<string, unknown>;
+          };
+      }
+    | {
+          ok: false;
+          payload: Record<string, unknown>;
+      } {
+    if (typeof rawArguments === 'string') {
+        const query = rawArguments.trim();
+        if (query.length === 0) {
+            return {
+                ok: false,
+                payload: {
+                    error: 'invalid_tool_input',
+                    message: 'linear_graphql query must be a non-empty string.',
+                },
+            };
+        }
+
+        const validation = validateGraphQlDocument(query);
+        if (!validation.ok) {
+            return {
+                ok: false,
+                payload: {
+                    error: 'invalid_tool_input',
+                    message: validation.message,
+                },
+            };
+        }
+
+        return {
+            ok: true,
+            payload: {
+                query,
+                variables: {},
+            },
+        };
+    }
+
+    if (!rawArguments || typeof rawArguments !== 'object' || Array.isArray(rawArguments)) {
+        return {
+            ok: false,
+            payload: {
+                error: 'invalid_tool_input',
+                message: 'linear_graphql arguments must be a query string or an object with query/variables.',
+            },
+        };
+    }
+
+    const record = rawArguments as Record<string, unknown>;
+    const query = typeof record.query === 'string' ? record.query.trim() : '';
+    if (query.length === 0) {
+        return {
+            ok: false,
+            payload: {
+                error: 'invalid_tool_input',
+                message: 'linear_graphql.query must be a non-empty string.',
+            },
+        };
+    }
+
+    const validation = validateGraphQlDocument(query);
+    if (!validation.ok) {
+        return {
+            ok: false,
+            payload: {
+                error: 'invalid_tool_input',
+                message: validation.message,
+            },
+        };
+    }
+
+    const rawVariables = record.variables;
+    if (
+        rawVariables !== undefined &&
+        (rawVariables === null || typeof rawVariables !== 'object' || Array.isArray(rawVariables))
+    ) {
+        return {
+            ok: false,
+            payload: {
+                error: 'invalid_tool_input',
+                message: 'linear_graphql.variables must be an object when provided.',
+            },
+        };
+    }
+
+    return {
+        ok: true,
+        payload: {
+            query,
+            variables: (rawVariables as Record<string, unknown> | undefined) ?? {},
+        },
     };
 }
 
@@ -177,6 +696,157 @@ export class LinearTrackerAdapter {
         return this.fetchIssuesByStates(this.config.activeStates, this.config.projectSlug);
     }
 
+    public async prepareIssueForRun(issue: TrackedIssue): Promise<TrackedIssue> {
+        const runContext = await this.fetchIssueRunContext(issue.id);
+        const fetchedIssue = runContext.issue;
+        if (!fetchedIssue) {
+            throw new LinearTrackerError('linear_invalid_response', `Linear issue payload missing issue ${issue.id}.`);
+        }
+
+        const normalizedIssue = normalizeIssue(fetchedIssue, this.config.projectSlug);
+        let preparedIssue = normalizedIssue;
+
+        if ((normalizedIssue.stateName ?? '').trim().toLowerCase() === 'todo') {
+            preparedIssue = await this.updateIssueStateByName(normalizedIssue, runContext, 'In Progress');
+        }
+
+        const existingWorkpad = this.selectWorkpadComment(fetchedIssue.comments?.nodes ?? []);
+        if (existingWorkpad) {
+            const existingBody = normalizeCommentBody(existingWorkpad.body);
+            if (shouldRefreshBootstrapWorkpad(existingBody)) {
+                const refreshedWorkpad = await this.updateIssueComment(
+                    existingWorkpad.id,
+                    buildBootstrapWorkpad(preparedIssue),
+                );
+
+                return {
+                    ...preparedIssue,
+                    workpadCommentId: refreshedWorkpad.id,
+                    workpadCommentBody: refreshedWorkpad.body,
+                    workpadCommentUrl: refreshedWorkpad.url,
+                };
+            }
+
+            return {
+                ...preparedIssue,
+                workpadCommentId: existingWorkpad.id,
+                workpadCommentBody: existingBody,
+                workpadCommentUrl: asOptionalTrimmedString(existingWorkpad.url),
+            };
+        }
+
+        const createdWorkpad = await this.createIssueComment(preparedIssue.id, buildBootstrapWorkpad(preparedIssue));
+        return {
+            ...preparedIssue,
+            workpadCommentId: createdWorkpad.id,
+            workpadCommentBody: createdWorkpad.body,
+            workpadCommentUrl: createdWorkpad.url,
+        };
+    }
+
+    public async executeLinearGraphQlToolCall(rawArguments: unknown): Promise<{
+        success: boolean;
+        payload: Record<string, unknown>;
+    }> {
+        const normalizedInput = normalizeLinearGraphQlToolInput(rawArguments);
+        if (!normalizedInput.ok) {
+            return {
+                success: false,
+                payload: normalizedInput.payload,
+            };
+        }
+
+        const {query, variables} = normalizedInput.payload;
+        const controller = new AbortController();
+        const timeoutHandle = setTimeout(() => {
+            controller.abort();
+        }, this.config.timeoutMs);
+
+        let response: Response;
+
+        try {
+            response = await this.fetchImpl(this.config.apiUrl, {
+                method: 'POST',
+                headers: {
+                    Authorization: this.config.apiKey,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({query, variables}),
+                signal: controller.signal,
+            });
+        } catch (error) {
+            clearTimeout(timeoutHandle);
+
+            if (error instanceof Error && error.name === 'AbortError') {
+                return {
+                    success: false,
+                    payload: {
+                        error: 'linear_timeout',
+                        message: `Linear GraphQL request timed out after ${this.config.timeoutMs}ms.`,
+                        timeoutMs: this.config.timeoutMs,
+                    },
+                };
+            }
+
+            return {
+                success: false,
+                payload: {
+                    error: 'linear_network',
+                    message: 'Linear GraphQL request failed.',
+                    reason: error instanceof Error ? error.message : String(error),
+                },
+            };
+        }
+
+        clearTimeout(timeoutHandle);
+
+        if (!response.ok) {
+            const details = await this.extractApiStatusErrorDetails(response);
+            return {
+                success: false,
+                payload: {
+                    error: 'linear_api_status',
+                    ...details,
+                },
+            };
+        }
+
+        let payload: GraphQlResponse<unknown>;
+        try {
+            payload = (await response.json()) as GraphQlResponse<unknown>;
+        } catch {
+            return {
+                success: false,
+                payload: {
+                    error: 'linear_invalid_response',
+                    message: 'Linear GraphQL response is not valid JSON.',
+                },
+            };
+        }
+
+        if (payload.errors && payload.errors.length > 0) {
+            return {
+                success: false,
+                payload: payload as Record<string, unknown>,
+            };
+        }
+
+        if (!('data' in payload)) {
+            return {
+                success: false,
+                payload: {
+                    error: 'linear_invalid_response',
+                    message: 'Linear GraphQL response missing data payload.',
+                },
+            };
+        }
+
+        return {
+            success: true,
+            payload: payload as Record<string, unknown>,
+        };
+    }
+
     public async fetchIssuesByStates(states: string[], projectSlug = this.config.projectSlug): Promise<TrackedIssue[]> {
         const trimmedStates = states.map((stateName) => stateName.trim()).filter((stateName) => stateName.length > 0);
         if (trimmedStates.length === 0) {
@@ -190,10 +860,10 @@ export class LinearTrackerAdapter {
         while (true) {
             const page: GraphQlIssuesPage = await this.executeGraphQl<GraphQlIssuesPage>(
                 `
-                query FetchIssuesByState($projectSlug: String!, $stateNames: [String!], $first: Int!, $after: String) {
+                query FetchIssuesByState($projectSlugId: String!, $stateNames: [String!], $first: Int!, $after: String) {
                     issues(
                         filter: {
-                            project: { slug: { eq: $projectSlug } }
+                            project: { slugId: { eq: $projectSlugId } }
                             state: { name: { in: $stateNames } }
                         }
                         first: $first
@@ -203,6 +873,9 @@ export class LinearTrackerAdapter {
                             id
                             identifier
                             title
+                            description
+                            branchName
+                            url
                             createdAt
                             updatedAt
                             priority
@@ -216,13 +889,46 @@ export class LinearTrackerAdapter {
                                     name
                                 }
                             }
-                            blockedByIssues {
+                            relations {
                                 nodes {
-                                    identifier
+                                    type
+                                    issue {
+                                        id
+                                        identifier
+                                        state {
+                                            name
+                                        }
+                                    }
+                                    relatedIssue {
+                                        id
+                                        identifier
+                                        state {
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                            inverseRelations {
+                                nodes {
+                                    type
+                                    issue {
+                                        id
+                                        identifier
+                                        state {
+                                            name
+                                        }
+                                    }
+                                    relatedIssue {
+                                        id
+                                        identifier
+                                        state {
+                                            name
+                                        }
+                                    }
                                 }
                             }
                             project {
-                                slug
+                                slugId
                             }
                         }
                         pageInfo {
@@ -233,7 +939,7 @@ export class LinearTrackerAdapter {
                 }
                 `,
                 {
-                    projectSlug,
+                    projectSlugId: projectSlug,
                     stateNames: trimmedStates,
                     first: this.config.pageSize,
                     after: afterCursor,
@@ -284,7 +990,7 @@ export class LinearTrackerAdapter {
 
         const page = await this.executeGraphQl<GraphQlIssueStatesByIdsPage>(
             `
-            query FetchIssueStatesByIds($ids: [String!], $first: Int!) {
+            query FetchIssueStatesByIds($ids: [ID!], $first: Int!) {
                 issues(filter: { id: { in: $ids } }, first: $first) {
                     nodes {
                         id
@@ -332,10 +1038,10 @@ export class LinearTrackerAdapter {
 
         const page = await this.executeGraphQl<GraphQlIssueStatesPage>(
             `
-            query FetchIssueStatesByStateNames($projectSlug: String!, $stateNames: [String!], $first: Int!) {
+            query FetchIssueStatesByStateNames($projectSlugId: String!, $stateNames: [String!], $first: Int!) {
                 issues(
                     filter: {
-                        project: { slug: { eq: $projectSlug } }
+                        project: { slugId: { eq: $projectSlugId } }
                         state: { name: { in: $stateNames } }
                     }
                     first: $first
@@ -344,6 +1050,9 @@ export class LinearTrackerAdapter {
                         id
                         identifier
                         title
+                        description
+                        branchName
+                        url
                         createdAt
                         updatedAt
                         priority
@@ -357,13 +1066,46 @@ export class LinearTrackerAdapter {
                                 name
                             }
                         }
-                        blockedByIssues {
+                        relations {
                             nodes {
-                                identifier
+                                type
+                                issue {
+                                    id
+                                    identifier
+                                    state {
+                                        name
+                                    }
+                                }
+                                relatedIssue {
+                                    id
+                                    identifier
+                                    state {
+                                        name
+                                    }
+                                }
+                            }
+                        }
+                        inverseRelations {
+                            nodes {
+                                type
+                                issue {
+                                    id
+                                    identifier
+                                    state {
+                                        name
+                                    }
+                                }
+                                relatedIssue {
+                                    id
+                                    identifier
+                                    state {
+                                        name
+                                    }
+                                }
                             }
                         }
                         project {
-                            slug
+                            slugId
                         }
                     }
                     pageInfo {
@@ -374,13 +1116,249 @@ export class LinearTrackerAdapter {
             }
             `,
             {
-                projectSlug: this.config.projectSlug,
+                projectSlugId: this.config.projectSlug,
                 stateNames: states,
                 first: this.config.pageSize,
             },
         );
 
         return page.issues.nodes.map((node) => normalizeIssue(node, this.config.projectSlug));
+    }
+
+    private async fetchIssueRunContext(issueId: string): Promise<GraphQlIssueRunContext> {
+        const payload = await this.executeGraphQl<GraphQlIssueRunContext>(
+            `
+            query FetchIssueRunContext($id: String!) {
+                issue(id: $id) {
+                    id
+                    identifier
+                    title
+                    description
+                    branchName
+                    url
+                    createdAt
+                    updatedAt
+                    priority
+                    state {
+                        id
+                        name
+                        type
+                    }
+                    labels {
+                        nodes {
+                            name
+                        }
+                    }
+                    relations {
+                        nodes {
+                            type
+                            issue {
+                                id
+                                identifier
+                                state {
+                                    name
+                                }
+                            }
+                            relatedIssue {
+                                id
+                                identifier
+                                state {
+                                    name
+                                }
+                            }
+                        }
+                    }
+                    inverseRelations {
+                        nodes {
+                            type
+                            issue {
+                                id
+                                identifier
+                                state {
+                                    name
+                                }
+                            }
+                            relatedIssue {
+                                id
+                                identifier
+                                state {
+                                    name
+                                }
+                            }
+                        }
+                    }
+                    project {
+                        slugId
+                    }
+                    comments(first: 50) {
+                        nodes {
+                            id
+                            body
+                            url
+                            updatedAt
+                        }
+                    }
+                    team {
+                        states {
+                            nodes {
+                                id
+                                name
+                                type
+                            }
+                        }
+                    }
+                }
+            }
+            `,
+            {
+                id: issueId,
+            },
+        );
+
+        if (!payload.issue) {
+            throw new LinearTrackerError('linear_invalid_response', `Linear issue payload missing issue ${issueId}.`);
+        }
+
+        return payload;
+    }
+
+    private selectWorkpadComment(comments: GraphQlCommentNode[]): GraphQlCommentNode | undefined {
+        return comments.filter((comment) => isWorkpadComment(comment)).sort(compareCommentsByUpdatedAtDescending)[0];
+    }
+
+    private async createIssueComment(
+        issueId: string,
+        body: string,
+    ): Promise<{
+        id: string;
+        body: string;
+        url: string | null;
+    }> {
+        const payload = await this.executeGraphQl<GraphQlCommentCreateResult>(
+            `
+            mutation CreateComment($issueId: String!, $body: String!) {
+                commentCreate(input: { issueId: $issueId, body: $body }) {
+                    success
+                    comment {
+                        id
+                        body
+                        url
+                    }
+                }
+            }
+            `,
+            {
+                issueId,
+                body,
+            },
+        );
+
+        const createdComment = payload.commentCreate?.comment;
+        if (payload.commentCreate?.success !== true || !createdComment?.id) {
+            throw new LinearTrackerError(
+                'linear_invalid_response',
+                `Failed to create workpad comment for issue ${issueId}.`,
+            );
+        }
+
+        return {
+            id: createdComment.id,
+            body: normalizeCommentBody(createdComment.body) ?? body,
+            url: asOptionalTrimmedString(createdComment.url),
+        };
+    }
+
+    private async updateIssueComment(
+        commentId: string,
+        body: string,
+    ): Promise<{
+        id: string;
+        body: string;
+        url: string | null;
+    }> {
+        const payload = await this.executeGraphQl<GraphQlCommentUpdateResult>(
+            `
+            mutation UpdateComment($id: String!, $body: String!) {
+                commentUpdate(id: $id, input: { body: $body }) {
+                    success
+                    comment {
+                        id
+                        body
+                        url
+                    }
+                }
+            }
+            `,
+            {
+                id: commentId,
+                body,
+            },
+        );
+
+        const updatedComment = payload.commentUpdate?.comment;
+        if (payload.commentUpdate?.success !== true || !updatedComment?.id) {
+            throw new LinearTrackerError('linear_invalid_response', `Failed to update workpad comment ${commentId}.`);
+        }
+
+        return {
+            id: updatedComment.id,
+            body: normalizeCommentBody(updatedComment.body) ?? body,
+            url: asOptionalTrimmedString(updatedComment.url),
+        };
+    }
+
+    private async updateIssueStateByName(
+        issue: TrackedIssue,
+        context: GraphQlIssueRunContext,
+        stateName: string,
+    ): Promise<TrackedIssue> {
+        const availableStates = context.issue?.team?.states?.nodes ?? [];
+        const targetState = availableStates.find(
+            (candidate) => candidate.name.trim().toLowerCase() === stateName.trim().toLowerCase(),
+        );
+
+        if (!targetState?.id) {
+            throw new LinearTrackerError(
+                'linear_invalid_response',
+                `Linear issue ${issue.identifier} is missing target state ${stateName}.`,
+            );
+        }
+
+        const payload = await this.executeGraphQl<GraphQlIssueStateUpdateResult>(
+            `
+            mutation UpdateIssueState($id: String!, $stateId: String!) {
+                issueUpdate(id: $id, input: { stateId: $stateId }) {
+                    success
+                    issue {
+                        id
+                        updatedAt
+                        state {
+                            id
+                            name
+                        }
+                    }
+                }
+            }
+            `,
+            {
+                id: issue.id,
+                stateId: targetState.id,
+            },
+        );
+
+        if (payload.issueUpdate?.success !== true) {
+            throw new LinearTrackerError(
+                'linear_invalid_response',
+                `Failed to move issue ${issue.identifier} to ${stateName}.`,
+            );
+        }
+
+        const nextUpdatedAt = asOptionalTrimmedString(payload.issueUpdate.issue?.updatedAt) ?? issue.updatedAt;
+        return {
+            ...issue,
+            stateName: asOptionalTrimmedString(payload.issueUpdate.issue?.state?.name) ?? stateName,
+            updatedAt: nextUpdatedAt,
+        };
     }
 
     private async executeGraphQl<ResponseType>(
@@ -425,9 +1403,14 @@ export class LinearTrackerAdapter {
         clearTimeout(timeoutHandle);
 
         if (!response.ok) {
-            throw new LinearTrackerError('linear_api_status', `Linear API returned status ${response.status}.`, {
-                status: response.status,
-            });
+            const details = await this.extractApiStatusErrorDetails(response);
+            const summary = this.summarizeApiStatusError(details);
+            const message =
+                summary.length > 0
+                    ? `Linear API returned status ${response.status}: ${summary}`
+                    : `Linear API returned status ${response.status}.`;
+
+            throw new LinearTrackerError('linear_api_status', message, details);
         }
 
         let payload: GraphQlResponse<ResponseType>;
@@ -448,5 +1431,57 @@ export class LinearTrackerAdapter {
         }
 
         return payload.data;
+    }
+
+    private async extractApiStatusErrorDetails(response: Response): Promise<Record<string, unknown>> {
+        const details: Record<string, unknown> = {
+            status: response.status,
+            statusText: response.statusText,
+        };
+
+        const requestId = response.headers.get('x-request-id');
+        if (requestId) {
+            details.requestId = requestId;
+        }
+
+        let rawBody = '';
+        try {
+            rawBody = await response.text();
+        } catch {
+            return details;
+        }
+
+        if (rawBody.trim() === '') {
+            return details;
+        }
+
+        details.responseBody = rawBody.length > 2000 ? `${rawBody.slice(0, 2000)}...` : rawBody;
+
+        try {
+            const parsedPayload = JSON.parse(rawBody) as GraphQlResponse<unknown>;
+            if (parsedPayload.errors && parsedPayload.errors.length > 0) {
+                details.errors = parsedPayload.errors.map((entry) => entry.message ?? 'unknown GraphQL error');
+            }
+        } catch {
+            // Keep raw body details only when response is not JSON.
+        }
+
+        return details;
+    }
+
+    private summarizeApiStatusError(details: Record<string, unknown>): string {
+        const errorMessages = Array.isArray(details.errors)
+            ? details.errors.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+            : [];
+
+        if (errorMessages.length > 0) {
+            return errorMessages.join(' | ');
+        }
+
+        if (typeof details.responseBody === 'string' && details.responseBody.trim().length > 0) {
+            return details.responseBody;
+        }
+
+        return '';
     }
 }

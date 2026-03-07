@@ -1,12 +1,17 @@
-import {exec as execCallback} from 'node:child_process';
+import {exec as execCallback, execFile as execFileCallback} from 'node:child_process';
 import {access, mkdir, rm} from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import type {Logger} from './logger.js';
 
 const exec = promisify(execCallback);
+const execFile = promisify(execFileCallback);
 
-export type WorkspaceErrorClass = 'workspace_path_escape' | 'workspace_hook_timeout' | 'workspace_hook_failed';
+export type WorkspaceErrorClass =
+    | 'workspace_path_escape'
+    | 'workspace_hook_timeout'
+    | 'workspace_hook_failed'
+    | 'workspace_state_capture_failed';
 
 export class WorkspaceManagerError extends Error {
     public readonly errorClass: WorkspaceErrorClass;
@@ -43,6 +48,11 @@ export interface WorkspaceHandle {
     created: boolean;
 }
 
+export interface WorkspaceStateSnapshot {
+    headSha: string;
+    statusText: string;
+}
+
 interface WorkspaceManagerArgs {
     config: WorkspaceManagerConfig;
     logger: Logger;
@@ -64,7 +74,7 @@ function mapPhaseToCommands(config: WorkspaceHooksConfig, phase: WorkspaceHookPh
 }
 
 function isFatalPhase(phase: WorkspaceHookPhase): boolean {
-    return phase === 'before_run' || phase === 'before_remove';
+    return phase === 'before_run';
 }
 
 export function sanitizeWorkspaceKey(rawKey: string): string {
@@ -149,6 +159,51 @@ export class WorkspaceManager {
         const safeWorkspacePath = ensurePathWithinRoot(this.rootPath, workspacePath);
         await this.runHooks('before_remove', safeWorkspacePath);
         await rm(safeWorkspacePath, {recursive: true, force: true});
+    }
+
+    public async captureWorkspaceState(workspacePath: string): Promise<WorkspaceStateSnapshot> {
+        const safeWorkspacePath = ensurePathWithinRoot(this.rootPath, workspacePath);
+
+        try {
+            const headResult = await execFile('git', ['rev-parse', 'HEAD'], {
+                cwd: safeWorkspacePath,
+                env: this.env,
+                timeout: this.config.hooks.timeoutMs,
+                windowsHide: true,
+                maxBuffer: 1024 * 1024,
+            });
+            const statusResult = await execFile('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+                cwd: safeWorkspacePath,
+                env: this.env,
+                timeout: this.config.hooks.timeoutMs,
+                windowsHide: true,
+                maxBuffer: 1024 * 1024,
+            });
+
+            return {
+                headSha: headResult.stdout.trim(),
+                statusText: statusResult.stdout.trimEnd(),
+            };
+        } catch (error) {
+            const executionError = error as {
+                code?: number;
+                killed?: boolean;
+                signal?: string;
+                message?: string;
+                stdout?: string;
+                stderr?: string;
+            };
+
+            throw new WorkspaceManagerError(
+                'workspace_state_capture_failed',
+                `Failed to capture workspace state: ${executionError.message ?? 'unknown error'}`,
+                {
+                    workspacePath: safeWorkspacePath,
+                    exitCode: executionError.code ?? null,
+                    stderr: executionError.stderr ?? '',
+                },
+            );
+        }
     }
 
     public resolveWorkspacePath(workspaceKey: string): string {

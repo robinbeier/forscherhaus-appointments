@@ -9,6 +9,7 @@ interface SymphonyStateServerArgs {
     host: string;
     port: number;
     getSnapshot: () => OrchestratorSnapshot;
+    getIssueDetails: (issueIdentifier: string) => Record<string, unknown> | undefined;
     refresh: () => Promise<void>;
 }
 
@@ -18,6 +19,7 @@ export class SymphonyStateServer {
     private readonly host: string;
     private readonly port: number;
     private readonly getSnapshot: () => OrchestratorSnapshot;
+    private readonly getIssueDetails: (issueIdentifier: string) => Record<string, unknown> | undefined;
     private readonly refresh: () => Promise<void>;
     private server?: http.Server;
     private listeningPort?: number;
@@ -28,6 +30,7 @@ export class SymphonyStateServer {
         this.host = args.host;
         this.port = args.port;
         this.getSnapshot = args.getSnapshot;
+        this.getIssueDetails = args.getIssueDetails;
         this.refresh = args.refresh;
     }
 
@@ -88,7 +91,14 @@ export class SymphonyStateServer {
             const requestUrl = request.url ?? '/';
             const {pathname} = new URL(requestUrl, `http://${this.host}:${this.port}`);
 
-            if (method === 'GET' && pathname === '/api/v1/state') {
+            if (pathname === '/api/v1/state') {
+                if (method !== 'GET') {
+                    this.respondJson(response, 405, {
+                        status: 'method_not_allowed',
+                    });
+                    return;
+                }
+
                 this.respondJson(response, 200, {
                     status: 'ok',
                     snapshot: this.getSnapshot(),
@@ -96,7 +106,14 @@ export class SymphonyStateServer {
                 return;
             }
 
-            if (method === 'POST' && pathname === '/api/v1/refresh') {
+            if (pathname === '/api/v1/refresh') {
+                if (method !== 'POST') {
+                    this.respondJson(response, 405, {
+                        status: 'method_not_allowed',
+                    });
+                    return;
+                }
+
                 void this.refresh().catch((error) => {
                     const message = error instanceof Error ? error.message : String(error);
                     this.logger.error('State API refresh failed', {error: message});
@@ -106,6 +123,29 @@ export class SymphonyStateServer {
                     status: 'accepted',
                 });
                 return;
+            }
+
+            if (pathname.startsWith('/api/v1/')) {
+                if (method !== 'GET') {
+                    this.respondJson(response, 405, {
+                        status: 'method_not_allowed',
+                    });
+                    return;
+                }
+
+                const issueIdentifier = decodeURIComponent(pathname.slice('/api/v1/'.length));
+                if (issueIdentifier.length > 0) {
+                    const issueDetails = this.getIssueDetails(issueIdentifier);
+                    if (!issueDetails) {
+                        this.respondJson(response, 404, {
+                            status: 'not_found',
+                        });
+                        return;
+                    }
+
+                    this.respondJson(response, 200, issueDetails);
+                    return;
+                }
             }
 
             this.respondJson(response, 404, {

@@ -1,4 +1,5 @@
 import {readFile, stat} from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {parse as parseYaml} from 'yaml';
 import type {Logger} from './logger.js';
@@ -24,12 +25,16 @@ interface WorkflowFrontMatter {
 }
 
 export type WorkflowErrorClass =
-    | 'missing_workflow'
-    | 'invalid_workflow'
-    | 'invalid_reload_keeping_last_known_good'
+    | 'missing_workflow_file'
+    | 'workflow_parse_error'
+    | 'workflow_front_matter_not_a_map'
     | 'preflight_missing_tracker_api_key'
     | 'preflight_missing_tracker_project_slug'
     | 'preflight_missing_codex_command'
+    | 'invalid_codex_approval_policy'
+    | 'invalid_codex_thread_sandbox'
+    | 'invalid_codex_turn_sandbox_policy'
+    | 'template_parse_error'
     | 'template_render_error';
 
 export class WorkflowConfigError extends Error {
@@ -53,10 +58,13 @@ interface LoadedWorkflowDocument {
 }
 
 export interface TrackerConfig {
+    kind: string;
     provider: string;
+    endpoint: string;
     apiKey: string;
     projectSlug: string;
     activeStates: string[];
+    terminalStates: string[];
 }
 
 export interface PollingConfig {
@@ -80,12 +88,21 @@ export interface HookConfig {
 export interface AgentConfig {
     maxConcurrent: number;
     maxAttempts: number;
+    maxTurns: number;
+    maxRetryBackoffMs: number;
+    maxConcurrentByState: Record<string, number>;
+    commitRequiredStates: string[];
 }
 
 export interface CodexConfig {
     command: string;
+    readTimeoutMs: number;
     responseTimeoutMs: number;
     turnTimeoutMs: number;
+    stallTimeoutMs: number;
+    approvalPolicy?: unknown;
+    threadSandbox?: unknown;
+    turnSandboxPolicy?: unknown;
 }
 
 export interface WorkflowConfig {
@@ -124,6 +141,9 @@ export interface DispatchConfigResult {
 
 const FRONT_MATTER_PATTERN = /^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/;
 const ENV_VARIABLE_PATTERN = /\$([A-Z0-9_]+)/g;
+const DEFAULT_LINEAR_ENDPOINT = 'https://api.linear.app/graphql';
+const DEFAULT_WORKSPACE_ROOT = path.join(os.tmpdir(), 'symphony_workspaces');
+const DEFAULT_MINIMAL_PROMPT = 'You are working on an issue from Linear.';
 
 function asRecord(value: unknown): MutableRecord {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -139,6 +159,10 @@ function asString(value: unknown): string | undefined {
     }
 
     return value;
+}
+
+function isRecord(value: unknown): value is MutableRecord {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -174,13 +198,61 @@ function asBoolean(value: unknown): boolean | undefined {
     return undefined;
 }
 
-function asStringArray(value: unknown): string[] | undefined {
-    if (!Array.isArray(value)) {
+function asStringList(value: unknown): string[] | undefined {
+    if (typeof value === 'string') {
+        return value
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0);
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .filter((entry): entry is string => typeof entry === 'string')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0);
+    }
+
+    return undefined;
+}
+
+function asCommandList(value: unknown): string[] | undefined {
+    if (typeof value === 'string') {
+        const trimmedValue = value.trim();
+        return trimmedValue.length > 0 ? [trimmedValue] : [];
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .filter((entry): entry is string => typeof entry === 'string')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0);
+    }
+
+    return undefined;
+}
+
+function asPositiveIntegerMap(value: unknown): Record<string, number> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return undefined;
     }
 
-    const strings = value.filter((entry): entry is string => typeof entry === 'string').map((entry) => entry.trim());
-    return strings;
+    const normalized: Record<string, number> = {};
+    for (const [rawKey, rawValue] of Object.entries(value)) {
+        const parsedValue = asNumber(rawValue);
+        if (parsedValue === undefined || !Number.isFinite(parsedValue) || parsedValue <= 0) {
+            continue;
+        }
+
+        const normalizedKey = rawKey.trim().toLowerCase();
+        if (normalizedKey.length === 0) {
+            continue;
+        }
+
+        normalized[normalizedKey] = Math.floor(parsedValue);
+    }
+
+    return normalized;
 }
 
 function pickString(config: MutableRecord, keys: string[], fallback = ''): string {
@@ -218,13 +290,118 @@ function pickBoolean(config: MutableRecord, keys: string[], fallback: boolean): 
 
 function pickStringArray(config: MutableRecord, keys: string[], fallback: string[]): string[] {
     for (const key of keys) {
-        const value = asStringArray(config[key]);
+        const value = asStringList(config[key]);
         if (value !== undefined) {
             return value;
         }
     }
 
     return fallback;
+}
+
+function pickCommandArray(config: MutableRecord, keys: string[], fallback: string[]): string[] {
+    for (const key of keys) {
+        const value = asCommandList(config[key]);
+        if (value !== undefined) {
+            return value;
+        }
+    }
+
+    return fallback;
+}
+
+function pickPositiveIntegerMap(config: MutableRecord, keys: string[]): Record<string, number> {
+    for (const key of keys) {
+        const value = asPositiveIntegerMap(config[key]);
+        if (value !== undefined) {
+            return value;
+        }
+    }
+
+    return {};
+}
+
+function sanitizePositiveInteger(value: number, fallback: number): number {
+    if (!Number.isFinite(value) || value <= 0) {
+        return fallback;
+    }
+
+    return Math.floor(value);
+}
+
+function pickValue(config: MutableRecord, keys: string[]): unknown {
+    for (const key of keys) {
+        if (key in config) {
+            return config[key];
+        }
+    }
+
+    return undefined;
+}
+
+function normalizeCodexApprovalPolicy(value: unknown): unknown {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (typeof value === 'string') {
+        const trimmedValue = value.trim();
+        if (trimmedValue.length === 0) {
+            throw new WorkflowConfigError(
+                'invalid_codex_approval_policy',
+                'codex.approval_policy must be a non-empty string or object when provided.',
+            );
+        }
+
+        return trimmedValue;
+    }
+
+    if (isRecord(value)) {
+        return value;
+    }
+
+    throw new WorkflowConfigError(
+        'invalid_codex_approval_policy',
+        'codex.approval_policy must be a non-empty string or object when provided.',
+    );
+}
+
+function normalizeCodexThreadSandbox(value: unknown): unknown {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (typeof value !== 'string') {
+        throw new WorkflowConfigError(
+            'invalid_codex_thread_sandbox',
+            'codex.thread_sandbox must be a non-empty string when provided.',
+        );
+    }
+
+    const trimmedValue = value.trim();
+    if (trimmedValue.length === 0) {
+        throw new WorkflowConfigError(
+            'invalid_codex_thread_sandbox',
+            'codex.thread_sandbox must be a non-empty string when provided.',
+        );
+    }
+
+    return trimmedValue;
+}
+
+function normalizeCodexTurnSandboxPolicy(value: unknown): unknown {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (!isRecord(value)) {
+        throw new WorkflowConfigError(
+            'invalid_codex_turn_sandbox_policy',
+            'codex.turn_sandbox_policy must be an object when provided.',
+        );
+    }
+
+    return value;
 }
 
 function expandHomePath(candidatePath: string, homeDir: string): string {
@@ -288,7 +465,14 @@ function splitFrontMatter(contents: string): {frontMatter: WorkflowFrontMatter; 
         parsedFrontMatter = parseYaml(match[1]);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new WorkflowConfigError('invalid_workflow', `Invalid WORKFLOW.md front matter: ${message}`);
+        throw new WorkflowConfigError('workflow_parse_error', `Invalid WORKFLOW.md front matter: ${message}`);
+    }
+
+    if (parsedFrontMatter !== null && (typeof parsedFrontMatter !== 'object' || Array.isArray(parsedFrontMatter))) {
+        throw new WorkflowConfigError(
+            'workflow_front_matter_not_a_map',
+            'WORKFLOW.md front matter must be a YAML map/object.',
+        );
     }
 
     const record = asRecord(parsedFrontMatter);
@@ -337,7 +521,7 @@ export function resolveWorkflowPath(args: ResolveWorkflowPathArgs): string {
         return path.resolve(args.cwd, args.cliWorkflowPath);
     }
 
-    return path.resolve(args.moduleDir, '../../..', 'WORKFLOW.md');
+    return path.resolve(args.cwd, 'WORKFLOW.md');
 }
 
 export async function readWorkflowFile(workflowPath: string): Promise<string> {
@@ -351,17 +535,17 @@ async function readWorkflowDocument(workflowPath: string): Promise<LoadedWorkflo
     try {
         fileStats = await stat(workflowPath);
     } catch {
-        throw new WorkflowConfigError('missing_workflow', `Workflow file not found: ${workflowPath}`);
+        throw new WorkflowConfigError('missing_workflow_file', `Workflow file not found: ${workflowPath}`);
     }
 
     if (!fileStats.isFile()) {
-        throw new WorkflowConfigError('missing_workflow', `Workflow path is not a file: ${workflowPath}`);
+        throw new WorkflowConfigError('missing_workflow_file', `Workflow path is not a file: ${workflowPath}`);
     }
 
     const contents = await readFile(workflowPath, 'utf8');
 
     if (contents.trim().length === 0) {
-        throw new WorkflowConfigError('invalid_workflow', `Workflow file is empty: ${workflowPath}`);
+        throw new WorkflowConfigError('workflow_parse_error', `Workflow file is empty: ${workflowPath}`);
     }
 
     return {
@@ -386,32 +570,62 @@ export function parseWorkflowConfig(args: ParseWorkflowConfigArgs): LoadedWorkfl
     const splitDocument = splitFrontMatter(args.contents);
     const resolvedFrontMatter = resolveValue(splitDocument.frontMatter, args.env, args.homeDir) as WorkflowFrontMatter;
 
-    if (splitDocument.promptTemplate.length === 0) {
-        throw new WorkflowConfigError('invalid_workflow', 'WORKFLOW.md prompt body must not be empty.');
+    const promptTemplate =
+        splitDocument.promptTemplate.length > 0 ? splitDocument.promptTemplate : DEFAULT_MINIMAL_PROMPT;
+
+    try {
+        validateStrictTemplate(promptTemplate);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new WorkflowConfigError('template_parse_error', message);
     }
 
-    validateStrictTemplate(splitDocument.promptTemplate);
-
-    const workspaceRootRaw = pickString(
-        resolvedFrontMatter.workspace,
-        ['root'],
-        path.join(args.homeDir, '.symphony', 'workspaces'),
+    const workspaceRoot = pickString(resolvedFrontMatter.workspace, ['root'], DEFAULT_WORKSPACE_ROOT);
+    const trackerKind = pickString(resolvedFrontMatter.tracker, ['kind', 'provider'], 'linear');
+    const trackerEndpoint = pickString(resolvedFrontMatter.tracker, ['endpoint'], DEFAULT_LINEAR_ENDPOINT);
+    const hookTimeoutMs = sanitizePositiveInteger(
+        pickNumber(resolvedFrontMatter.hooks, ['timeoutMs', 'timeout_ms'], 60000),
+        60000,
     );
-
-    const workspaceRoot = path.isAbsolute(workspaceRootRaw)
-        ? workspaceRootRaw
-        : path.resolve(path.dirname(args.workflowPath), workspaceRootRaw);
+    const maxConcurrentAgents = sanitizePositiveInteger(
+        pickNumber(
+            resolvedFrontMatter.agent,
+            ['maxConcurrentAgents', 'max_concurrent_agents', 'maxConcurrent', 'max_concurrent'],
+            10,
+        ),
+        10,
+    );
+    const maxRetryBackoffMs = sanitizePositiveInteger(
+        pickNumber(resolvedFrontMatter.agent, ['maxRetryBackoffMs', 'max_retry_backoff_ms'], 300000),
+        300000,
+    );
+    const maxTurns = sanitizePositiveInteger(pickNumber(resolvedFrontMatter.agent, ['maxTurns', 'max_turns'], 20), 20);
+    const readTimeoutMs = sanitizePositiveInteger(
+        pickNumber(
+            resolvedFrontMatter.codex,
+            ['readTimeoutMs', 'read_timeout_ms', 'responseTimeoutMs', 'response_timeout_ms'],
+            5000,
+        ),
+        5000,
+    );
+    const turnTimeoutMs = sanitizePositiveInteger(
+        pickNumber(resolvedFrontMatter.codex, ['turnTimeoutMs', 'turn_timeout_ms'], 3600000),
+        3600000,
+    );
+    const stallTimeoutMs = pickNumber(resolvedFrontMatter.codex, ['stallTimeoutMs', 'stall_timeout_ms'], 300000);
 
     const config: LoadedWorkflowConfig = {
         workflowPath: args.workflowPath,
         loadedAtIso: new Date().toISOString(),
-        promptTemplate: splitDocument.promptTemplate,
+        promptTemplate,
         tracker: {
-            provider: pickString(resolvedFrontMatter.tracker, ['provider'], 'linear'),
+            kind: trackerKind,
+            provider: trackerKind,
+            endpoint: trackerEndpoint,
             apiKey: pickString(
                 resolvedFrontMatter.tracker,
                 ['apiKey', 'api_key'],
-                args.env.SYMPHONY_LINEAR_API_KEY ?? '',
+                args.env.LINEAR_API_KEY ?? args.env.SYMPHONY_LINEAR_API_KEY ?? '',
             ),
             projectSlug: pickString(
                 resolvedFrontMatter.tracker,
@@ -421,15 +635,20 @@ export function parseWorkflowConfig(args: ParseWorkflowConfigArgs): LoadedWorkfl
             activeStates: pickStringArray(
                 resolvedFrontMatter.tracker,
                 ['activeStates', 'active_states'],
-                ['In Progress'],
+                ['Todo', 'In Progress'],
+            ),
+            terminalStates: pickStringArray(
+                resolvedFrontMatter.tracker,
+                ['terminalStates', 'terminal_states'],
+                ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'],
             ),
         },
         polling: {
-            intervalMs: pickNumber(resolvedFrontMatter.polling, ['intervalMs', 'interval_ms'], 60000),
+            intervalMs: pickNumber(resolvedFrontMatter.polling, ['intervalMs', 'interval_ms'], 30000),
             maxCandidates: pickNumber(resolvedFrontMatter.polling, ['maxCandidates', 'max_candidates'], 20),
         },
         workspace: {
-            root: workspaceRoot,
+            root: path.isAbsolute(workspaceRoot) ? workspaceRoot : workspaceRoot,
             keepTerminalWorkspaces: pickBoolean(
                 resolvedFrontMatter.workspace,
                 ['keepTerminalWorkspaces', 'keep_terminal_workspaces', 'keepTerminal', 'keep_terminal'],
@@ -437,24 +656,42 @@ export function parseWorkflowConfig(args: ParseWorkflowConfigArgs): LoadedWorkfl
             ),
         },
         hooks: {
-            timeoutMs: pickNumber(resolvedFrontMatter.hooks, ['timeoutMs', 'timeout_ms'], 30000),
-            afterCreate: pickStringArray(resolvedFrontMatter.hooks, ['afterCreate', 'after_create'], []),
-            beforeRun: pickStringArray(resolvedFrontMatter.hooks, ['beforeRun', 'before_run'], []),
-            afterRun: pickStringArray(resolvedFrontMatter.hooks, ['afterRun', 'after_run'], []),
-            beforeRemove: pickStringArray(resolvedFrontMatter.hooks, ['beforeRemove', 'before_remove'], []),
+            timeoutMs: hookTimeoutMs,
+            afterCreate: pickCommandArray(resolvedFrontMatter.hooks, ['afterCreate', 'after_create'], []),
+            beforeRun: pickCommandArray(resolvedFrontMatter.hooks, ['beforeRun', 'before_run'], []),
+            afterRun: pickCommandArray(resolvedFrontMatter.hooks, ['afterRun', 'after_run'], []),
+            beforeRemove: pickCommandArray(resolvedFrontMatter.hooks, ['beforeRemove', 'before_remove'], []),
         },
         agent: {
-            maxConcurrent: pickNumber(resolvedFrontMatter.agent, ['maxConcurrent', 'max_concurrent'], 1),
+            maxConcurrent: maxConcurrentAgents,
             maxAttempts: pickNumber(resolvedFrontMatter.agent, ['maxAttempts', 'max_attempts'], 2),
+            maxTurns,
+            maxRetryBackoffMs,
+            maxConcurrentByState: pickPositiveIntegerMap(resolvedFrontMatter.agent, [
+                'maxConcurrentAgentsByState',
+                'max_concurrent_agents_by_state',
+            ]),
+            commitRequiredStates: pickStringArray(
+                resolvedFrontMatter.agent,
+                ['commitRequiredStates', 'commit_required_states'],
+                ['Todo', 'In Progress', 'Rework'],
+            ),
         },
         codex: {
             command: pickString(resolvedFrontMatter.codex, ['command'], args.env.SYMPHONY_CODEX_COMMAND ?? ''),
-            responseTimeoutMs: pickNumber(
-                resolvedFrontMatter.codex,
-                ['responseTimeoutMs', 'response_timeout_ms'],
-                120000,
+            readTimeoutMs,
+            responseTimeoutMs: readTimeoutMs,
+            turnTimeoutMs,
+            stallTimeoutMs,
+            approvalPolicy: normalizeCodexApprovalPolicy(
+                pickValue(resolvedFrontMatter.codex, ['approvalPolicy', 'approval_policy']),
             ),
-            turnTimeoutMs: pickNumber(resolvedFrontMatter.codex, ['turnTimeoutMs', 'turn_timeout_ms'], 900000),
+            threadSandbox: normalizeCodexThreadSandbox(
+                pickValue(resolvedFrontMatter.codex, ['threadSandbox', 'thread_sandbox']),
+            ),
+            turnSandboxPolicy: normalizeCodexTurnSandboxPolicy(
+                pickValue(resolvedFrontMatter.codex, ['turnSandboxPolicy', 'turn_sandbox_policy']),
+            ),
         },
     };
 
@@ -500,7 +737,7 @@ export class WorkflowConfigStore {
 
     public getCurrentConfig(): LoadedWorkflowConfig {
         if (!this.currentConfig) {
-            throw new WorkflowConfigError('missing_workflow', 'Workflow config has not been initialized.');
+            throw new WorkflowConfigError('missing_workflow_file', 'Workflow config has not been initialized.');
         }
 
         return this.currentConfig;
@@ -516,7 +753,7 @@ export class WorkflowConfigStore {
         try {
             currentSnapshot = await this.statWorkflowPath();
         } catch (error) {
-            const normalizedError = normalizeWorkflowError(error, 'invalid_reload_keeping_last_known_good');
+            const normalizedError = normalizeWorkflowError(error, 'workflow_parse_error');
 
             if (!this.currentConfig) {
                 throw normalizedError;
@@ -558,7 +795,7 @@ export class WorkflowConfigStore {
 
             return true;
         } catch (error) {
-            const normalizedError = normalizeWorkflowError(error, 'invalid_reload_keeping_last_known_good');
+            const normalizedError = normalizeWorkflowError(error, 'workflow_parse_error');
 
             if (!this.currentConfig) {
                 throw normalizedError;
@@ -603,7 +840,7 @@ export class WorkflowConfigStore {
                 size: snapshot.size,
             };
         } catch {
-            throw new WorkflowConfigError('missing_workflow', `Workflow file not found: ${this.workflowPath}`);
+            throw new WorkflowConfigError('missing_workflow_file', `Workflow file not found: ${this.workflowPath}`);
         }
     }
 }
