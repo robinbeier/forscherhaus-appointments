@@ -14,12 +14,14 @@
    Do instead: when debugging Symphony first-turn behavior, extract agent text from `params.msg.payload.*` and command text from `params.msg.{command,parsed_cmd}`, and merge streaming deltas with overlap detection because Codex wrapper updates may be cumulative rather than purely incremental.
 1. **[2026-03-07] Align fresh Symphony issue worktrees with the Linear branch context**
    Do instead: before a serious Symphony pilot rerun on a real issue, recreate the preserved issue worktree from `origin/main` on the branch name Linear already shows for the ticket (or update Linear to the branch Symphony will use) so the prompt branch context and actual workspace branch do not drift apart.
-1. **[2026-03-06] Put the Symphony commit requirement in the workflow prompt itself**
-   Do instead: state near the top of `WORKFLOW.md` that file-changing runs in implementation states must create a local commit before ending, while clean review/merge runs may finish without a new commit.
+1. **[2026-03-07] Keep Symphony state and commit rules explicit in the workflow prompt**
+   Do instead: state near the top of `WORKFLOW.md` that `In Progress`/other implementation states must create a local commit before ending, while clean `In Review`/`Ready to Merge`/terminal runs may finish without a new commit.
 1. **[2026-03-06] Preserve failed Symphony worktrees for inspection**
    Do instead: clean up issue worktrees only after successful runs; keep timed-out or failed workspaces on disk so you can inspect what the agent changed before it got stuck.
-1. **[2026-03-06] Enforce committed output only in commit-required Symphony states**
-   Do instead: require the issue-branch `HEAD` to change for implementation states such as `Todo`, `In Progress`, and `Rework`, but allow clean `Human Review`/`Merging`/terminal runs to complete without a new local commit.
+1. **[2026-03-07] Keep repo-local Symphony skills and napkin available inside worker worktrees**
+   Do instead: sync `.codex/skills/` and `.claude/napkin.md` into each issue worktree, keep skill front matter YAML-valid, and treat these files as runtime dependencies rather than operator-only docs.
+1. **[2026-03-07] Treat Symphony merge reconciliation as a possible success path**
+   Do instead: after `gh pr merge` exits non-zero or a run stops with `reconciliation_terminal`, re-check GitHub and Linear before retrying because the PR may already be merged and the issue may already be `Done`.
 1. **[2026-03-06] Keep Symphony Linear GraphQL queries aligned with current schema**
    Do instead: use `project.slugId` (not `project.slug`) and relation-based issue links (`relations`/`inverseRelations`) instead of removed fields like `blockedByIssues`; include response-body details for non-2xx tracker errors to speed up diagnosis.
 1. **[2026-03-06] Validate merge-sensitive and dependency changes in the CI runtime**
@@ -28,12 +30,6 @@
    Do instead: for 4xx/5xx checks (for example unauthorized guards), assert status/header contracts first and only enforce JSON schema when the spec actually defines one.
 1. **[2026-02-22] Rebuild frontend bundles when touching `assets/js` or `assets/css`**
    Do instead: run `npx gulp scripts` and/or `npx gulp styles`, then verify updated artifacts in `build/`.
-1. **[2026-02-22] Keep migration rollback path complete**
-   Do instead: implement database changes only via CodeIgniter migrations and verify both migrate up and down behavior.
-1. **[2026-02-26] Keep deep health checks fast under dependency outages**
-   Do instead: gate local-only fallback endpoints by `APP_ENV` and keep health-check network timeouts short to avoid long blocking requests.
-1. **[2026-02-28] Match CI smoke DB readiness before dashboard checks**
-   Do instead: wait for both MySQL root ping and app-user query readiness, then retry `php index.php console install` up to 3 times before running `scripts/ci/dashboard_integration_smoke.php`.
 
 ## Repo Guardrails & Domain Behavior
 

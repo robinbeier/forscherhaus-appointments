@@ -1264,6 +1264,100 @@ test('reconciliation stops a running issue that moved to a terminal state and cl
     assert.equal(workspace.cleanedPaths.length, 1);
 });
 
+test('merge-triggered terminal reconciliation is treated as a successful completion', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'terminal-merge-1',
+        identifier: 'ROB-13-MERGE',
+        priority: 1,
+        stateName: 'Ready to Merge',
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-13-merge';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'Ready to Merge');
+
+    const config = createWorkflowConfig();
+    config.tracker.activeStates = ['In Progress', 'Ready to Merge'];
+    const workflowStore = new WorkflowStoreStub(config);
+    const workspace = new WorkspaceStub();
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let stopCalls = 0;
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-merge',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-merge-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_end',
+                        params: {
+                            msg: {
+                                command: '/bin/bash -lc gh pr merge 135 --squash --delete-branch',
+                                cwd: '/tmp/symphony-workspaces/ROB-13-MERGE',
+                                exitCode: 1,
+                            },
+                        },
+                    },
+                });
+
+                return firstDispatch.promise;
+            },
+            stop: async () => {
+                stopCalls += 1;
+                firstDispatch.reject(
+                    new AppServerClientError('turn_cancelled', 'App-server session was cancelled after merge.'),
+                );
+            },
+        }),
+    });
+
+    await orchestrator.runTick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    tracker.statesByIssueId.set(issue.id, 'Done');
+    tracker.candidates = [];
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.ok(stopCalls >= 1);
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 1);
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-MERGE');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'completed');
+    assert.equal(issueDetails?.error_class, null);
+    assert.equal(issueDetails?.error, null);
+    const terminal = issueDetails?.terminal as Record<string, unknown>;
+    assert.equal(terminal.state, 'Done');
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(
+        (trace.recent as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'dispatch/completed_after_terminal_merge',
+        ),
+    );
+});
+
 test('workspace_path_escape failures are not retried', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
