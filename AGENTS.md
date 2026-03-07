@@ -170,6 +170,11 @@ cp .env.symphony.pilot.example .env.symphony.pilot
 bash ./scripts/symphony/start_pilot.sh
 bash ./scripts/symphony/stop_pilot.sh
 
+# Hinweis: Dieses Repo nutzt fuer Symphony die Linear-States `In Progress -> In Review -> Ready to Merge -> Done`.
+# Hinweis: `In Review` bedeutet PR publiziert und Symphony stoppt; `Ready to Merge` ist der explizite Resume-State fuer `land`/`$Babysit PR`.
+# Hinweis: Ernste frische Symphony-Pilotchecks nur von `origin/main` oder mit explizitem `SYMPHONY_WORKTREE_BASE_REF` fahren, damit Worker nicht auf veraltetem Runtime-/Skill-Kontext starten.
+# Hinweis: Repo-lokale Worker-Abhaengigkeiten unter `.codex/skills/` und `.claude/napkin.md` muessen versioniert, YAML-gueltig und worktree-tauglich bleiben.
+
 # Optional: Symphony Soak Gate (staging/local state API)
 python3 ./scripts/symphony/run_soak_gate.py --state-url http://127.0.0.1:8787/api/v1/state --duration-seconds 86400 --poll-seconds 60
 
