@@ -103,6 +103,7 @@ interface RunningEntry {
     stallLogged: boolean;
     stopRequested: boolean;
     cleanupWorkspaceOnStop: boolean;
+    stopCurrentState?: string;
     stopReason?:
         | 'reconciliation_terminal'
         | 'reconciliation_non_active'
@@ -142,6 +143,7 @@ interface RunningEntry {
     observedPullRequestMutation: boolean;
     observedOpenPullRequest: boolean;
     observedBranchPush: boolean;
+    observedPullRequestMergeAttempt: boolean;
     traceEntries: TraceEntry[];
     firstTurnTraceEntries: TraceEntry[];
 }
@@ -575,6 +577,14 @@ function didCommandPushBranch(command: string | null, exitCode: number | null): 
     }
 
     return commandMatches(command, /\bgit push\b/);
+}
+
+function didCommandAttemptPullRequestMerge(command: string | null): boolean {
+    if (command === null) {
+        return false;
+    }
+
+    return /\bgh pr merge\b/.test(command);
 }
 
 function toIssueTemplatePayload(issue: TrackedIssue): Record<string, unknown> {
@@ -1786,6 +1796,7 @@ export class SymphonyOrchestrator {
             stallLogged: false,
             stopRequested: false,
             cleanupWorkspaceOnStop: false,
+            stopCurrentState: undefined,
             hasObservedWorkspaceDiff: false,
             firstTurnItemLifecycleEvents: 0,
             firstTurnCommandExecutionCount: 0,
@@ -1806,6 +1817,7 @@ export class SymphonyOrchestrator {
             observedPullRequestMutation: false,
             observedOpenPullRequest: false,
             observedBranchPush: false,
+            observedPullRequestMergeAttempt: false,
             traceEntries: [],
             firstTurnTraceEntries: [],
         };
@@ -2146,12 +2158,33 @@ export class SymphonyOrchestrator {
             const cancelledByReconciliation = classified.errorClass === 'turn_cancelled' && runningEntry.suppressRetry;
             const cancelledForPostDiffCheckpoint =
                 classified.errorClass === 'turn_cancelled' && runningEntry.stopReason === 'post_diff_checkpoint';
-            terminalStatus = cancelledByReconciliation || cancelledForPostDiffCheckpoint ? 'stopped' : 'failed';
-            terminalErrorClass = classified.errorClass;
-            terminalErrorMessage = classified.message;
-            this.recordTrace(runningEntry, 'runtime', 'dispatch/failed', classified.message, {
-                error_class: classified.errorClass,
-            });
+            const cancelledAfterMergeCompletion =
+                classified.errorClass === 'turn_cancelled' &&
+                runningEntry.stopReason === 'reconciliation_terminal' &&
+                runningEntry.publishMode &&
+                runningEntry.observedPullRequestMergeAttempt &&
+                normalizeStateNames(effectiveConfig.tracker.terminalStates).has(
+                    normalizeStateName(runningEntry.stopCurrentState ?? runningEntry.issue.stateName),
+                );
+            terminalStatus = cancelledAfterMergeCompletion
+                ? 'completed'
+                : cancelledByReconciliation || cancelledForPostDiffCheckpoint
+                  ? 'stopped'
+                  : 'failed';
+            terminalErrorClass = cancelledAfterMergeCompletion ? undefined : classified.errorClass;
+            terminalErrorMessage = cancelledAfterMergeCompletion ? undefined : classified.message;
+            if (cancelledAfterMergeCompletion) {
+                this.recordTrace(
+                    runningEntry,
+                    'runtime',
+                    'dispatch/completed_after_terminal_merge',
+                    'Issue reached a terminal tracker state after a PR merge attempt; treating the cancelled session as successful completion.',
+                );
+            } else {
+                this.recordTrace(runningEntry, 'runtime', 'dispatch/failed', classified.message, {
+                    error_class: classified.errorClass,
+                });
+            }
 
             if (effectiveError instanceof AppServerClientError && effectiveError.errorClass === 'turn_input_required') {
                 terminalInputRequiredType =
@@ -2166,7 +2199,9 @@ export class SymphonyOrchestrator {
                         : undefined;
             }
 
-            if (!cancelledByReconciliation && !cancelledForPostDiffCheckpoint) {
+            if (cancelledAfterMergeCompletion) {
+                this.codexTotals.completed += 1;
+            } else if (!cancelledByReconciliation && !cancelledForPostDiffCheckpoint) {
                 this.codexTotals.failed += 1;
             }
 
@@ -2179,12 +2214,22 @@ export class SymphonyOrchestrator {
             }
 
             if (cancelledByReconciliation) {
-                this.logger.info('Issue dispatch cancelled by reconciliation', {
-                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
-                    attempt: runningEntry.attempt,
-                    source: runningEntry.source,
-                    stopReason: runningEntry.stopReason ?? null,
-                });
+                if (cancelledAfterMergeCompletion) {
+                    this.logger.info('Issue dispatch completed after merge-triggered terminal reconciliation', {
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                        attempt: runningEntry.attempt,
+                        source: runningEntry.source,
+                        stopReason: runningEntry.stopReason ?? null,
+                        currentState: runningEntry.stopCurrentState ?? runningEntry.issue.stateName,
+                    });
+                } else {
+                    this.logger.info('Issue dispatch cancelled by reconciliation', {
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                        attempt: runningEntry.attempt,
+                        source: runningEntry.source,
+                        stopReason: runningEntry.stopReason ?? null,
+                    });
+                }
             } else if (cancelledForPostDiffCheckpoint) {
                 this.logger.info('Issue dispatch paused after first repo diff to continue in a follow-up turn', {
                     ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
@@ -2285,6 +2330,13 @@ export class SymphonyOrchestrator {
         runningEntry.suppressRetry = args.suppressRetry;
         runningEntry.cleanupWorkspaceOnStop = runningEntry.cleanupWorkspaceOnStop || args.cleanupWorkspace;
         runningEntry.stopReason = args.reason;
+        runningEntry.stopCurrentState = args.currentState;
+        if (args.currentState.trim().length > 0) {
+            runningEntry.issue = {
+                ...runningEntry.issue,
+                stateName: args.currentState,
+            };
+        }
 
         this.logger.info('Stopping running issue due to reconciliation decision', {
             ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
@@ -3106,6 +3158,8 @@ export class SymphonyOrchestrator {
                     runningEntry.observedOpenPullRequest || didCommandObserveOpenPullRequest(command, exitCode);
                 runningEntry.observedBranchPush =
                     runningEntry.observedBranchPush || didCommandPushBranch(command, exitCode);
+                runningEntry.observedPullRequestMergeAttempt =
+                    runningEntry.observedPullRequestMergeAttempt || didCommandAttemptPullRequestMerge(command);
             }
 
             if (summary.category !== 'agent') {

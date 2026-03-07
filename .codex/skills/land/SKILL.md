@@ -34,7 +34,10 @@ shepherded to an actual merge.
     - update the workpad
     - fix the code, commit, push, and return to the watcher
 6. Once the PR is green and mergeable, merge it explicitly:
-    - `gh pr merge --squash --delete-branch`
+    - `gh pr merge --squash`
+    - do not force `--delete-branch` from inside the worker worktree; local
+      workspace cleanup handles branch removal separately and avoids false
+      non-zero exits after a successful merge
 7. After merge:
     - move the Linear issue to `Done`
     - update the `## Codex Workpad` comment with merge result and final

@@ -442,6 +442,7 @@ php index.php console sync
 -   Vor `ready for review` den vollen Pre-PR-Gate inklusive Coverage Delta ausfuehren (`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`).
 -   Wenn alle Gates gruen sind: `ready for review` pushen und danach mit `$Babysit PR` weiter monitoren.
 -   Wenn ein Umsetzungsplan mehrere PRs umfasst, gilt das sequentielle Standardvorgehen: jeden PR `ready for review` pushen, mit [$babysit-pr](/Users/robinbeier/Developers/forscherhaus-appointments/.codex/skills/babysit-pr/SKILL.md) bis zu komplett gruener CI, fehlenden offenen Review-Items und `mergeable`-Status beobachten, dann den PR mergen und erst danach mit dem naechsten PR im Plan weitermachen.
+-   Symphony-/Infrastruktur-PRs nur dann mit Linear-Issue-IDs in Titel oder PR-Body verknuepfen, wenn der PR fachlich wirklich zu diesem Ticket gehoert; sonst entstehen verwirrende Fremd-Attachments auf Arbeits-Issues.
 
 ## Release-Fokus (naechste 9 Tage bis Deployment)
 
