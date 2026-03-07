@@ -22,7 +22,8 @@ test('remove_issue_worktree closes open PRs best-effort before removing the work
     const gitLogPath = path.join(temporaryDirectory, 'git.log');
     const ghLogPath = path.join(temporaryDirectory, 'gh.log');
 
-    await mkdir(path.join(repoRoot, '.git'), {recursive: true});
+    await mkdir(repoRoot, {recursive: true});
+    await writeFile(path.join(repoRoot, '.git'), 'gitdir: /tmp/fake-remove-hook-gitdir\n', 'utf8');
     await mkdir(workspacePath, {recursive: true});
     await mkdir(fakeBin, {recursive: true});
     const workspaceRealPath = await realpath(workspacePath);
@@ -33,6 +34,10 @@ test('remove_issue_worktree closes open PRs best-effort before removing the work
 printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
 if [[ "$*" == *"worktree list --porcelain"* ]]; then
     printf 'worktree %s\n' "$WORKSPACE_PATH"
+    exit 0
+fi
+if [[ "$*" == *"rev-parse --git-dir"* ]]; then
+    printf '.git\n'
     exit 0
 fi
 if [[ "$*" == *"symbolic-ref --quiet --short HEAD"* ]]; then
@@ -111,7 +116,8 @@ test('remove_issue_worktree still removes the worktree when gh is unavailable', 
     const fakeBin = path.join(temporaryDirectory, 'bin');
     const gitLogPath = path.join(temporaryDirectory, 'git.log');
 
-    await mkdir(path.join(repoRoot, '.git'), {recursive: true});
+    await mkdir(repoRoot, {recursive: true});
+    await writeFile(path.join(repoRoot, '.git'), 'gitdir: /tmp/fake-remove-hook-no-gh-gitdir\n', 'utf8');
     await mkdir(workspacePath, {recursive: true});
     await mkdir(fakeBin, {recursive: true});
     const workspaceRealPath = await realpath(workspacePath);
@@ -122,6 +128,10 @@ test('remove_issue_worktree still removes the worktree when gh is unavailable', 
 printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
 if [[ "$*" == *"worktree list --porcelain"* ]]; then
     printf 'worktree %s\n' "$WORKSPACE_PATH"
+    exit 0
+fi
+if [[ "$*" == *"rev-parse --git-dir"* ]]; then
+    printf '.git\n'
     exit 0
 fi
 if [[ "$*" == *"symbolic-ref --quiet --short HEAD"* ]]; then

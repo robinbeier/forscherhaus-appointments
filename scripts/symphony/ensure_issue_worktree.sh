@@ -7,11 +7,15 @@ resolve_repo_root() {
     cd "$script_dir/../.." && pwd -P
 }
 
+repo_root_is_git_repository() {
+    git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1
+}
+
 workspace_path="$(pwd -P)"
 repo_root="${SYMPHONY_REPO_ROOT:-$(resolve_repo_root)}"
 issue_key="$(basename "$workspace_path")"
 
-if [[ ! -d "$repo_root/.git" ]]; then
+if ! repo_root_is_git_repository; then
     echo "[symphony-worktree] Repo root is not a git repository: $repo_root" >&2
     exit 1
 fi

@@ -7,6 +7,10 @@ resolve_repo_root() {
     cd "$script_dir/../.." && pwd -P
 }
 
+repo_root_is_git_repository() {
+    git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1
+}
+
 close_open_prs_for_branch() {
     local workspace_path="$1"
     local branch_name="$2"
@@ -53,7 +57,7 @@ close_open_prs_for_branch() {
 workspace_path="$(pwd -P)"
 repo_root="${SYMPHONY_REPO_ROOT:-$(resolve_repo_root)}"
 
-if [[ ! -d "$repo_root/.git" ]]; then
+if ! repo_root_is_git_repository; then
     exit 0
 fi
 
