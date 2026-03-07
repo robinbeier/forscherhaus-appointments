@@ -92,7 +92,7 @@ require_env SYMPHONY_CODEX_COMMAND
 : "${SYMPHONY_PILOT_APPROVAL_POLICY:=on-request}"
 : "${SYMPHONY_PILOT_SANDBOX_MODE:=workspace-write}"
 : "${SYMPHONY_REPO_ROOT:=$ROOT_DIR}"
-: "${SYMPHONY_WORKTREE_BASE_REF:=HEAD}"
+: "${SYMPHONY_WORKTREE_BASE_REF:=origin/main}"
 
 if [[ "$SYMPHONY_PILOT_APPROVAL_POLICY" == "never" ]]; then
     echo "[symphony-pilot] Unsafe pilot policy: approval must not be 'never'." >&2

@@ -24,23 +24,35 @@ function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
 function createIssue(args: {
     id: string;
     identifier: string;
-    priority: number;
+    priority: number | null;
     createdAt: string;
     blockedBy?: string[];
     stateName?: string;
+    description?: string | null;
 }): TrackedIssue {
     return {
         id: args.id,
         identifier: args.identifier,
         title: args.identifier,
+        description: args.description ?? null,
         stateName: args.stateName ?? 'In Progress',
         stateType: 'started',
         priority: args.priority,
+        branchName: null,
+        url: null,
         labels: [],
+        blockedBy: (args.blockedBy ?? []).map((identifier) => ({
+            id: null,
+            identifier,
+            state: null,
+        })),
         blockedByIdentifiers: args.blockedBy ?? [],
         createdAt: args.createdAt,
         updatedAt: args.createdAt,
         projectSlug: 'forscherhaus',
+        workpadCommentId: null,
+        workpadCommentBody: null,
+        workpadCommentUrl: null,
     };
 }
 
@@ -50,10 +62,13 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
         loadedAtIso: '2026-03-06T00:00:00.000Z',
         promptTemplate: 'Issue {{issue.identifier}} attempt {{attempt}}',
         tracker: {
+            kind: 'linear',
             provider: 'linear',
+            endpoint: 'https://api.linear.app/graphql',
             apiKey: 'token',
             projectSlug: 'forscherhaus',
             activeStates: ['In Progress'],
+            terminalStates: ['Done'],
         },
         polling: {
             intervalMs: 1000,
@@ -73,17 +88,27 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
         agent: {
             maxConcurrent: 1,
             maxAttempts: 3,
+            maxTurns: 1,
+            maxRetryBackoffMs: 60000,
+            maxConcurrentByState: {},
+            commitRequiredStates: ['Todo', 'In Progress', 'Rework'],
         },
         codex: {
             command: 'codex app-server',
+            readTimeoutMs: 2000,
             responseTimeoutMs: 2000,
             turnTimeoutMs: 5000,
+            stallTimeoutMs: 1000,
         },
     };
 }
 
 class WorkflowStoreStub {
     public config: LoadedWorkflowConfig;
+    public promptContexts: Array<{
+        issue: Record<string, unknown>;
+        attempt: number | null;
+    }> = [];
 
     public constructor(config: LoadedWorkflowConfig) {
         this.config = config;
@@ -101,10 +126,11 @@ class WorkflowStoreStub {
         return;
     }
 
-    public async buildDispatchPrompt(context: {issue: Record<string, unknown>; attempt: number}): Promise<{
+    public async buildDispatchPrompt(context: {issue: Record<string, unknown>; attempt: number | null}): Promise<{
         config: LoadedWorkflowConfig;
         prompt: string;
     }> {
+        this.promptContexts.push(context);
         return {
             config: this.config,
             prompt: `Issue ${String(context.issue.identifier)} attempt ${context.attempt}`,
@@ -116,6 +142,7 @@ class TrackerStub implements TrackerClient {
     public candidates: TrackedIssue[] = [];
     public statesByIssueId = new Map<string, string>();
     public todoIssues: TrackedIssue[] = [];
+    public prepareIssueForRunCalls: string[] = [];
 
     public async fetchCandidateIssues(): Promise<TrackedIssue[]> {
         return this.candidates;
@@ -137,6 +164,17 @@ class TrackerStub implements TrackerClient {
 
         return [];
     }
+
+    public async prepareIssueForRun(issue: TrackedIssue): Promise<TrackedIssue> {
+        this.prepareIssueForRunCalls.push(issue.identifier);
+        return {
+            ...issue,
+            stateName: issue.stateName === 'Todo' ? 'In Progress' : issue.stateName,
+            workpadCommentId: issue.workpadCommentId ?? `workpad-${issue.id}`,
+            workpadCommentBody: issue.workpadCommentBody ?? '## Codex Workpad',
+            workpadCommentUrl: issue.workpadCommentUrl,
+        };
+    }
 }
 
 class WorkspaceStub implements WorkspaceClient {
@@ -153,6 +191,10 @@ class WorkspaceStub implements WorkspaceClient {
             path: `/tmp/symphony-workspaces/${rawKey}`,
             created: true,
         };
+    }
+
+    public resolveWorkspacePath(rawKey: string): string {
+        return `/tmp/symphony-workspaces/${rawKey}`;
     }
 
     public async runBeforeRunHooks(_workspacePath: string): Promise<void> {
@@ -230,9 +272,10 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
             stateName: 'Todo',
         }),
     ];
+    tracker.statesByIssueId.set('c', 'Done');
 
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
-    const dispatchRequests: Array<{issueIdentifier: string; attempt: number}> = [];
+    const dispatchRequests: Array<{issueIdentifier: string; attempt: number | null}> = [];
     const workspace = new WorkspaceStub();
 
     const orchestrator = new SymphonyOrchestrator({
@@ -254,14 +297,75 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
                     sessionId: 'thread-1-turn-1',
                 };
             },
+            stop: async () => undefined,
         }),
     });
 
     await orchestrator.runTick();
     await orchestrator.shutdown();
 
-    assert.deepEqual(dispatchRequests, [{issueIdentifier: 'ROB-13-C', attempt: 1}]);
+    assert.deepEqual(dispatchRequests, [{issueIdentifier: 'ROB-13-C', attempt: null}]);
     assert.equal(orchestrator.getSnapshot().retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 1);
+});
+
+test('worker reuses the same thread across continuation turns and only retries after maxTurns', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'multi-turn-1',
+        identifier: 'ROB-13-MULTI',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const config = createWorkflowConfig();
+    config.agent.maxTurns = 2;
+    const workflowStore = new WorkflowStoreStub(config);
+    const workspace = new WorkspaceStub();
+    const requests: Array<{attempt: number | null; prompt: string; threadId?: string}> = [];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async (request) => {
+                requests.push({
+                    attempt: request.attempt,
+                    prompt: request.prompt,
+                    threadId: request.threadId,
+                });
+
+                if (requests.length === 2) {
+                    tracker.statesByIssueId.set(issue.id, 'Done');
+                }
+
+                return {
+                    status: 'completed',
+                    outputText: 'ok',
+                    threadId: 'thread-shared',
+                    turnId: `turn-${requests.length}`,
+                    sessionId: `thread-shared-turn-${requests.length}`,
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].threadId, undefined);
+    assert.equal(requests[1].threadId, 'thread-shared');
+    assert.match(requests[1].prompt, /Continuation guidance:/);
+    assert.match(requests[1].prompt, /continuation turn 2 of 2/i);
+    assert.match(requests[1].prompt, /do not end the turn while the issue stays active unless you are truly blocked/i);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(workspace.cleanedPaths.length, 1);
 });
 
@@ -295,6 +399,7 @@ test('completed run without committed workspace changes is retried and not count
                 turnId: 'turn-1',
                 sessionId: 'thread-1-turn-1',
             }),
+            stop: async () => undefined,
         }),
     });
 
@@ -306,7 +411,182 @@ test('completed run without committed workspace changes is retried and not count
     assert.equal(snapshot.codex_totals.failed, 1);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].errorClass, 'workspace_no_committed_output');
-    assert.equal(workspace.cleanedPaths.length, 1);
+    assert.equal(workspace.cleanedPaths.length, 0);
+});
+
+test('state transition out of commit-required states counts as success without local commit', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'review-state-1',
+        identifier: 'ROB-13-REVIEW',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'Human Review');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'same-head', statusText: ''},
+        {headSha: 'same-head', statusText: ''},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => ({
+                status: 'completed',
+                outputText: 'opened pr',
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                sessionId: 'thread-1-turn-1',
+            }),
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 0);
+});
+
+test('non-commit merge states can continue without local commit output', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'merge-state-1',
+        identifier: 'ROB-13-MERGE',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+        stateName: 'Merging',
+    });
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'Merging');
+
+    const config = createWorkflowConfig();
+    config.tracker.activeStates = ['In Progress', 'Merging'];
+    config.agent.commitRequiredStates = ['Todo', 'In Progress', 'Rework'];
+    const workflowStore = new WorkflowStoreStub(config);
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'same-head', statusText: ''},
+        {headSha: 'same-head', statusText: ''},
+    ];
+
+    const attempts: Array<number | null> = [];
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async (request) => {
+                attempts.push(request.attempt);
+                return {
+                    status: 'completed',
+                    outputText: 'waiting for merge',
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-1-turn-1',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.deepEqual(attempts, [null]);
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 1);
+    assert.equal(snapshot.retrying[0].reason, 'continuation');
+});
+
+test('turn_timeout preserves workspace for debugging and schedules a retry', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'timeout-1',
+        identifier: 'ROB-13-TIMEOUT',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => {
+                throw new AppServerClientError('turn_timeout', 'App-server turn exceeded turn timeout.');
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.completed, 0);
+    assert.equal(snapshot.codex_totals.failed, 1);
+    assert.equal(snapshot.codex_totals.turnTimeouts, 1);
+    assert.equal(snapshot.retrying.length, 1);
+    assert.equal(snapshot.retrying[0].errorClass, 'turn_timeout');
+    assert.equal(workspace.cleanedPaths.length, 0);
+});
+
+test('approval_required preserves workspace and does not schedule a retry', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'approval-1',
+        identifier: 'ROB-13-APPROVAL',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => {
+                throw new AppServerClientError(
+                    'approval_required',
+                    'Codex app-server requested approval but the current approval policy does not allow auto-approval.',
+                );
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.failed, 1);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 0);
 });
 
 test('retry queue uses continuation delay first and exponential backoff afterwards', async () => {
@@ -320,7 +600,7 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
     tracker.candidates = [issue];
 
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
-    const attempts: number[] = [];
+    const attempts: Array<number | null> = [];
     let now = Date.parse('2026-03-06T09:00:00.000Z');
 
     const orchestrator = new SymphonyOrchestrator({
@@ -331,9 +611,11 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
         appServerFactory: () => ({
             runTurn: async (request) => {
                 attempts.push(request.attempt);
-                if (request.attempt < 3) {
+                if ((request.attempt ?? 0) < 2) {
                     throw new AppServerClientError('turn_failed', 'simulated failure');
                 }
+
+                tracker.statesByIssueId.set(issue.id, 'Done');
 
                 return {
                     status: 'completed',
@@ -343,6 +625,7 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
                     sessionId: 'thread-turn',
                 };
             },
+            stop: async () => undefined,
         }),
         nowMs: () => now,
     });
@@ -351,34 +634,127 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
     await orchestrator.shutdown();
 
     let snapshot = orchestrator.getSnapshot();
-    assert.deepEqual(attempts, [1]);
+    assert.deepEqual(attempts, [null]);
+    assert.equal(snapshot.retrying.length, 1);
+    assert.equal(snapshot.retrying[0].attempt, 1);
+    assert.equal(snapshot.retrying[0].availableAtIso, new Date(now + 10000).toISOString());
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+    assert.deepEqual(attempts, [null]);
+
+    now += 10000;
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    snapshot = orchestrator.getSnapshot();
+    assert.deepEqual(attempts, [null, 1]);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].attempt, 2);
-    assert.equal(snapshot.retrying[0].availableAtIso, new Date(now + 1000).toISOString());
+    assert.equal(snapshot.retrying[0].availableAtIso, new Date(now + 20000).toISOString());
 
-    await orchestrator.runTick();
-    await orchestrator.shutdown();
-    assert.deepEqual(attempts, [1]);
-
-    now += 1000;
+    now += 20000;
     await orchestrator.runTick();
     await orchestrator.shutdown();
 
     snapshot = orchestrator.getSnapshot();
-    assert.deepEqual(attempts, [1, 2]);
-    assert.equal(snapshot.retrying.length, 1);
-    assert.equal(snapshot.retrying[0].attempt, 3);
-    assert.equal(snapshot.retrying[0].availableAtIso, new Date(now + 2000).toISOString());
-
-    now += 2000;
-    await orchestrator.runTick();
-    await orchestrator.shutdown();
-
-    snapshot = orchestrator.getSnapshot();
-    assert.deepEqual(attempts, [1, 2, 3]);
+    assert.deepEqual(attempts, [null, 1, 2]);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(snapshot.codex_totals.failed, 2);
+});
+
+test('first-turn post-diff checkpoint schedules a continuation retry without counting a failure', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'post-diff-checkpoint-1',
+        identifier: 'ROB-13-POST-DIFF',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+        description: 'Update `docs/symphony/STAGING_PILOT_RUNBOOK.md` only.',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: ''},
+        {headSha: 'head-before', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
+    ];
+
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let stopCalls = 0;
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-post-diff',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-post-diff-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/diff',
+                        params: {
+                            msg: {
+                                payload: {
+                                    summary: 'updated docs/symphony/STAGING_PILOT_RUNBOOK.md',
+                                },
+                            },
+                        },
+                    },
+                });
+                await new Promise((resolve) => setTimeout(resolve, 5));
+                emitEvent({
+                    type: 'token_usage',
+                    payload: {
+                        total: {
+                            totalTokens: 100000,
+                        },
+                        last: {
+                            totalTokens: 1600,
+                        },
+                        model_context_window: 258400,
+                    },
+                });
+                return firstDispatch.promise;
+            },
+            stop: async () => {
+                stopCalls += 1;
+                firstDispatch.reject(
+                    new AppServerClientError('turn_cancelled', 'App-server session was cancelled for checkpointing.'),
+                );
+            },
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.ok(stopCalls >= 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 1);
+    assert.equal(snapshot.retrying[0].reason, 'continuation');
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-POST-DIFF');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'retrying');
+    const retry = issueDetails?.retry as Record<string, unknown>;
+    assert.match(String(retry.retry_directive), /required repo diff already exists/i);
 });
 
 test('reconcile removes retries when issue leaves active states', async () => {
@@ -392,7 +768,7 @@ test('reconcile removes retries when issue leaves active states', async () => {
     tracker.candidates = [issue];
 
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
-    const attempts: number[] = [];
+    const attempts: Array<number | null> = [];
     let now = Date.parse('2026-03-06T09:00:00.000Z');
 
     const orchestrator = new SymphonyOrchestrator({
@@ -405,6 +781,7 @@ test('reconcile removes retries when issue leaves active states', async () => {
                 attempts.push(request.attempt);
                 throw new AppServerClientError('turn_failed', 'simulated failure');
             },
+            stop: async () => undefined,
         }),
         nowMs: () => now,
     });
@@ -414,18 +791,81 @@ test('reconcile removes retries when issue leaves active states', async () => {
 
     let snapshot = orchestrator.getSnapshot();
     assert.equal(snapshot.retrying.length, 1);
-    assert.equal(snapshot.retrying[0].attempt, 2);
+    assert.equal(snapshot.retrying[0].attempt, 1);
 
     tracker.statesByIssueId.set(issue.id, 'Done');
     tracker.candidates = [];
-    now += 1000;
+    now += 10000;
 
     await orchestrator.runTick();
     await orchestrator.shutdown();
 
     snapshot = orchestrator.getSnapshot();
-    assert.deepEqual(attempts, [1]);
+    assert.deepEqual(attempts, [null]);
     assert.equal(snapshot.retrying.length, 0);
+});
+
+test('dispatch prepares Todo issues for the first turn and exposes workpad context to the prompt builder', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'bootstrap-1',
+        identifier: 'ROB-13-BOOTSTRAP',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+        stateName: 'Todo',
+        description: '## Scope\n\n- Update `docs/symphony/STAGING_PILOT_RUNBOOK.md`.\n- Mention `.env.symphony.pilot`.',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    let firstPrompt = '';
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => new WorkspaceStub(),
+        appServerFactory: () => ({
+            runTurn: async (request) => {
+                firstPrompt = request.prompt;
+                return {
+                    status: 'completed',
+                    outputText: 'ok',
+                    threadId: 'thread-bootstrap',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-bootstrap-turn-1',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    assert.deepEqual(tracker.prepareIssueForRunCalls, ['ROB-13-BOOTSTRAP']);
+    assert.equal(workflowStore.promptContexts.length, 1);
+    assert.equal(workflowStore.promptContexts[0].issue.state, 'In Progress');
+    assert.equal(
+        workflowStore.promptContexts[0].issue.description_or_default,
+        '## Scope\n\n- Update `docs/symphony/STAGING_PILOT_RUNBOOK.md`.\n- Mention `.env.symphony.pilot`.',
+    );
+    assert.equal(workflowStore.promptContexts[0].issue.workpad_comment_id, 'workpad-bootstrap-1');
+    assert.equal(workflowStore.promptContexts[0].issue.workpad_comment_body, '## Codex Workpad');
+    assert.equal(workflowStore.promptContexts[0].issue.workpad_comment_body_or_default, '## Codex Workpad');
+    assert.equal(
+        workflowStore.promptContexts[0].issue.target_paths_hint_or_default,
+        '- docs/symphony/STAGING_PILOT_RUNBOOK.md\n- .env.symphony.pilot',
+    );
+    assert.equal(
+        workflowStore.promptContexts[0].issue.first_repo_target_path_or_default,
+        'docs/symphony/STAGING_PILOT_RUNBOOK.md',
+    );
+    assert.match(
+        String(workflowStore.promptContexts[0].issue.first_repo_step_contract_or_default),
+        /open and edit `docs\/symphony\/STAGING_PILOT_RUNBOOK\.md`/,
+    );
+    assert.doesNotMatch(firstPrompt, /Runtime first-turn directive:/);
+    assert.equal(firstPrompt, 'Issue ROB-13-BOOTSTRAP attempt null');
 });
 
 test('maxConcurrent avoids double dispatch while issue is still running', async () => {
@@ -478,6 +918,7 @@ test('maxConcurrent avoids double dispatch while issue is still running', async 
                     sessionId: 'thread-2-turn-2',
                 };
             },
+            stop: async () => undefined,
         }),
     });
 
@@ -504,6 +945,59 @@ test('maxConcurrent avoids double dispatch while issue is still running', async 
     assert.deepEqual(requests, ['ROB-13-RUN-1', 'ROB-13-RUN-2']);
 });
 
+test('reconciliation stops a running issue that moved to a terminal state and cleans the workspace', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'terminal-stop-1',
+        identifier: 'ROB-13-STOP',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let stopCalls = 0;
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => firstDispatch.promise,
+            stop: async () => {
+                stopCalls += 1;
+                firstDispatch.reject(
+                    new AppServerClientError('turn_cancelled', 'App-server session was cancelled by reconciliation.'),
+                );
+            },
+        }),
+    });
+
+    await orchestrator.runTick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    tracker.statesByIssueId.set(issue.id, 'Done');
+    tracker.candidates = [];
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.ok(stopCalls >= 1);
+    assert.equal(snapshot.codex_totals.completed, 0);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 1);
+});
+
 test('workspace_path_escape failures are not retried', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
@@ -525,6 +1019,7 @@ test('workspace_path_escape failures are not retried', async () => {
             prepareWorkspace: async () => {
                 throw new WorkspaceManagerError('workspace_path_escape', 'workspace escaped root');
             },
+            resolveWorkspacePath: (rawKey: string) => `/tmp/symphony-workspaces/${rawKey}`,
             runBeforeRunHooks: async () => undefined,
             runAfterRunHooks: async () => undefined,
             cleanupTerminalWorkspace: async () => undefined,
@@ -541,6 +1036,7 @@ test('workspace_path_escape failures are not retried', async () => {
                     sessionId: 'thread-turn',
                 };
             },
+            stop: async () => undefined,
         }),
     });
 
@@ -550,4 +1046,422 @@ test('workspace_path_escape failures are not retried', async () => {
     const snapshot = orchestrator.getSnapshot();
     assert.equal(runTurnCalled, false);
     assert.equal(snapshot.retrying.length, 0);
+});
+
+test('running snapshot surfaces humanized activity and context headroom', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'telemetry-1',
+        identifier: 'ROB-13-TELEMETRY',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let now = Date.parse('2026-03-06T09:00:00.000Z');
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-ctx',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-ctx-turn-1',
+                });
+                emitEvent({
+                    type: 'token_usage',
+                    payload: {
+                        total: {
+                            totalTokens: 193468,
+                        },
+                        last: {
+                            totalTokens: 1440,
+                        },
+                        model_context_window: 258400,
+                    },
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'item/agentMessage/delta',
+                    },
+                });
+
+                return firstDispatch.promise;
+            },
+            stop: async () => undefined,
+        }),
+        nowMs: () => now,
+    });
+
+    await orchestrator.runTick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    now += 42000;
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.running.length, 1);
+    assert.equal(snapshot.running[0].issueIdentifier, 'ROB-13-TELEMETRY');
+    assert.equal(snapshot.running[0].threadId, 'thread-ctx');
+    assert.equal(snapshot.running[0].lastEvent, 'item/agentMessage/delta');
+    assert.equal(snapshot.running[0].lastActivity, 'Codex is streaming a response.');
+    assert.equal(snapshot.running[0].runtimeSeconds, 42);
+    assert.equal(snapshot.running[0].idleSeconds, 42);
+    assert.equal(snapshot.running[0].totalTokens, 193468);
+    assert.equal(snapshot.running[0].lastTurnTokens, 1440);
+    assert.equal(snapshot.running[0].contextWindowTokens, 258400);
+    assert.equal(snapshot.running[0].contextHeadroomTokens, 64932);
+    assert.equal(snapshot.running[0].contextUtilizationPercent, 74.9);
+    assert.ok(Array.isArray(snapshot.running[0].traceTail));
+    assert.ok(snapshot.running[0].traceTail.some((entry) => entry.eventType === 'session/started'));
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-TELEMETRY');
+    assert.ok(issueDetails);
+    const running = issueDetails?.running as Record<string, unknown>;
+    assert.equal(running.thread_id, 'thread-ctx');
+    assert.equal(running.last_event, 'item/agentMessage/delta');
+    assert.equal(running.last_message, 'Codex is streaming a response.');
+    assert.equal(running.runtime_seconds, 42);
+    assert.equal(running.idle_seconds, 42);
+    assert.equal(running.total_tokens, 193468);
+    assert.equal(running.last_turn_tokens, 1440);
+    assert.equal(running.context_window_tokens, 258400);
+    assert.equal(running.context_headroom_tokens, 64932);
+    assert.equal(running.context_utilization_percent, 74.9);
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(Array.isArray(trace.recent));
+    assert.ok((trace.recent as Array<Record<string, unknown>>).some((entry) => entry.eventType === 'session/started'));
+
+    tracker.statesByIssueId.set(issue.id, 'Done');
+    now += 1000;
+    firstDispatch.resolve({
+        status: 'completed',
+        outputText: 'ok',
+        threadId: 'thread-ctx',
+        turnId: 'turn-1',
+        sessionId: 'thread-ctx-turn-1',
+    });
+    await orchestrator.shutdown();
+
+    assert.equal(workspace.cleanedPaths.length, 1);
+});
+
+test('issue details preserve terminal input_required payload for debugging after dispatch failure', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'input-required-1',
+        identifier: 'ROB-13-INPUT',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => ({
+                status: 'input_required',
+                outputText: '',
+                threadId: 'thread-input',
+                turnId: 'turn-input',
+                sessionId: 'thread-input-turn-input',
+                inputRequiredType: 'item/tool/requestUserInput',
+                inputRequiredPayload: {
+                    method: 'item/tool/requestUserInput',
+                    params: {
+                        question: 'Should I continue?',
+                    },
+                },
+            }),
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-INPUT');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'failed');
+    assert.equal(issueDetails?.error_class, 'turn_input_required');
+    assert.equal(issueDetails?.error, 'Tool requires user input: Should I continue?');
+
+    const terminal = issueDetails?.terminal as Record<string, unknown>;
+    assert.equal(terminal.last_event, 'item/tool/requestUserInput');
+    assert.equal(terminal.last_message, 'Tool requires user input: Should I continue?');
+
+    const inputRequired = issueDetails?.input_required as Record<string, unknown>;
+    assert.equal(inputRequired.event_type, 'item/tool/requestUserInput');
+    assert.deepEqual(inputRequired.payload, {
+        method: 'item/tool/requestUserInput',
+        params: {
+            question: 'Should I continue?',
+        },
+    });
+});
+
+test('first-turn trace captures pre-edit command execution details without forcing an early retry', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'first-turn-command-trace-1',
+        identifier: 'ROB-13-COMMAND-TRACE',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+        description: 'Update `docs/symphony/STAGING_PILOT_RUNBOOK.md` only.',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: ''},
+        {headSha: 'head-after', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-command-trace',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-command-trace-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_begin',
+                        params: {
+                            msg: {
+                                parsed_cmd: {
+                                    command: 'ls',
+                                    args: ['-la'],
+                                },
+                                cwd: '/tmp/symphony-workspaces/ROB-13-COMMAND-TRACE',
+                            },
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_begin',
+                        params: {
+                            msg: {
+                                parsed_cmd: ['sed', '-n', '1,200p', 'WORKFLOW.md'],
+                                cwd: '/tmp/symphony-workspaces/ROB-13-COMMAND-TRACE',
+                            },
+                        },
+                    },
+                });
+                tracker.statesByIssueId.set(issue.id, 'Done');
+                return {
+                    status: 'completed',
+                    outputText: 'updated docs',
+                    threadId: 'thread-command-trace',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-command-trace-turn-1',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(snapshot.codex_totals.completed, 1);
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-COMMAND-TRACE');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'completed');
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(Array.isArray(trace.first_turn));
+    assert.ok(
+        (trace.first_turn as Array<Record<string, unknown>>).some(
+            (entry) =>
+                entry.eventType === 'codex/event/exec_command_begin' &&
+                typeof entry.details === 'object' &&
+                entry.details !== null &&
+                (entry.details as Record<string, unknown>).command === 'ls -la',
+        ),
+    );
+    assert.ok(
+        (trace.first_turn as Array<Record<string, unknown>>).some(
+            (entry) =>
+                entry.eventType === 'codex/event/exec_command_begin' &&
+                typeof entry.details === 'object' &&
+                entry.details !== null &&
+                (entry.details as Record<string, unknown>).command === 'sed -n 1,200p WORKFLOW.md',
+        ),
+    );
+    assert.ok(
+        !(trace.first_turn as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'guard/first_command_drift',
+        ),
+    );
+});
+
+test('first-turn trace captures plan-only candidates without stopping the run early', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'plan-only-trace-1',
+        identifier: 'ROB-13-PLAN-ONLY-TRACE',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+        description: 'Update `docs/symphony/STAGING_PILOT_RUNBOOK.md` only.',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: ''},
+        {headSha: 'head-after', statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-plan-only-trace',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-plan-only-trace-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'item/started',
+                        params: {
+                            item: {
+                                kind: 'agentMessage',
+                            },
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/agent_message_delta',
+                        params: {
+                            msg: {
+                                payload: {
+                                    delta: "I'll inspect the target file",
+                                },
+                            },
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/agent_message_delta',
+                        params: {
+                            msg: {
+                                payload: {
+                                    delta: "I'll inspect the target file first and then update it.",
+                                },
+                            },
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'item/completed',
+                        params: {
+                            item: {
+                                kind: 'agentMessage',
+                            },
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'token_usage',
+                    payload: {
+                        total: {
+                            totalTokens: 32000,
+                        },
+                        last: {
+                            totalTokens: 900,
+                        },
+                        model_context_window: 258400,
+                    },
+                });
+                tracker.statesByIssueId.set(issue.id, 'Done');
+                return {
+                    status: 'completed',
+                    outputText: 'updated docs',
+                    threadId: 'thread-plan-only-trace',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-plan-only-trace-turn-1',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.retrying.length, 0);
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-PLAN-ONLY-TRACE');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'completed');
+    const terminal = issueDetails?.terminal as Record<string, unknown>;
+    assert.equal(terminal.first_turn_agent_message, "I'll inspect the target file first and then update it.");
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(Array.isArray(trace.first_turn));
+    assert.ok(
+        (trace.first_turn as Array<Record<string, unknown>>).some(
+            (entry) =>
+                entry.eventType === 'agent/message_completed' &&
+                typeof entry.details === 'object' &&
+                entry.details !== null &&
+                (entry.details as Record<string, unknown>).text ===
+                    "I'll inspect the target file first and then update it.",
+        ),
+    );
+    assert.ok(
+        (trace.first_turn as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'guard/first_plan_only_candidate',
+        ),
+    );
+    assert.ok(
+        !(trace.first_turn as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'guard/first_plan_only',
+        ),
+    );
 });

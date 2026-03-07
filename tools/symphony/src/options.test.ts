@@ -19,17 +19,23 @@ test('parseCliOptions parses --workflow=value', () => {
     assert.equal(options.workflowPath, 'custom.md');
 });
 
+test('parseCliOptions parses positional workflow path', () => {
+    const options = parseCliOptions(['custom.md', '--check']);
+    assert.equal(options.workflowPath, 'custom.md');
+    assert.equal(options.checkOnly, true);
+});
+
 test('parseCliOptions rejects unknown options', () => {
     assert.throws(() => parseCliOptions(['--unknown']), /Unknown argument/);
 });
 
-test('resolveWorkflowPath defaults to repo root WORKFLOW.md', () => {
+test('resolveWorkflowPath defaults to cwd WORKFLOW.md', () => {
     const workflowPath = resolveWorkflowPath({
         cwd: '/tmp/symphony',
         moduleDir: '/repo/tools/symphony/src',
     });
 
-    assert.equal(workflowPath, '/repo/WORKFLOW.md');
+    assert.equal(workflowPath, '/tmp/symphony/WORKFLOW.md');
 });
 
 test('resolveWorkflowPath resolves custom path relative to cwd', () => {

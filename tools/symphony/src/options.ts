@@ -7,9 +7,20 @@ export function parseCliOptions(argv: string[]): CliOptions {
     const options: CliOptions = {
         checkOnly: false,
     };
+    let positionalWorkflowPathConsumed = false;
 
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
+
+        if (!token.startsWith('-')) {
+            if (positionalWorkflowPathConsumed || options.workflowPath) {
+                throw new Error(`Unexpected positional argument: ${token}`);
+            }
+
+            options.workflowPath = token;
+            positionalWorkflowPathConsumed = true;
+            continue;
+        }
 
         if (token === '--check') {
             options.checkOnly = true;

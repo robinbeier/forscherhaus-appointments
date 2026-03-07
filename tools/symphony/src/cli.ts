@@ -35,9 +35,34 @@ async function run(argv: string[]): Promise<void> {
     if (options.checkOnly) {
         await workflowConfigStore.buildDispatchPrompt({
             issue: {
+                id: 'check-issue-id',
                 identifier: 'CHECK-ISSUE',
                 title: 'Symphony check mode',
+                title_or_identifier: 'Symphony check mode',
                 state: 'In Progress',
+                description: 'Synthetic issue payload for workflow validation.',
+                description_or_default: 'Synthetic issue payload for workflow validation.',
+                branch_name: 'codex/symphony-check-issue',
+                branch_name_or_default: 'codex/symphony-check-issue',
+                url: 'https://linear.app/check/issue/CHECK-ISSUE',
+                labels: [],
+                blocked_by: [],
+                blocked_by_identifiers: [],
+                created_at: '2026-03-07T00:00:00.000Z',
+                updated_at: '2026-03-07T00:00:00.000Z',
+                project_slug: loadedConfig.tracker.projectSlug,
+                workpad_comment_id: 'check-workpad',
+                workpad_comment_body: '## Codex Workpad',
+                workpad_comment_body_or_default: '## Codex Workpad',
+                workpad_comment_url: 'https://linear.app/check/comment/check-workpad',
+                target_paths: ['docs/symphony/STAGING_PILOT_RUNBOOK.md'],
+                target_paths_hint_or_default: '- docs/symphony/STAGING_PILOT_RUNBOOK.md',
+                first_repo_target_path: 'docs/symphony/STAGING_PILOT_RUNBOOK.md',
+                first_repo_target_path_or_default: 'docs/symphony/STAGING_PILOT_RUNBOOK.md',
+                first_repo_step_contract:
+                    'Before broader exploration, open and edit `docs/symphony/STAGING_PILOT_RUNBOOK.md`. Produce the smallest valid repo diff there in this first turn. Keep the first diff in docs scope unless the issue explicitly requires more. The runtime will stop and retry the turn if no repo diff appears.',
+                first_repo_step_contract_or_default:
+                    'Before broader exploration, open and edit `docs/symphony/STAGING_PILOT_RUNBOOK.md`. Produce the smallest valid repo diff there in this first turn. Keep the first diff in docs scope unless the issue explicitly requires more. The runtime will stop and retry the turn if no repo diff appears.',
             },
             attempt: 1,
         });

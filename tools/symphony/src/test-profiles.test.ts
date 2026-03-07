@@ -24,7 +24,7 @@ function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
 function createIssue(args: {
     id: string;
     identifier: string;
-    priority: number;
+    priority: number | null;
     createdAt: string;
     stateName?: string;
     blockedBy?: string[];
@@ -33,14 +33,25 @@ function createIssue(args: {
         id: args.id,
         identifier: args.identifier,
         title: args.identifier,
+        description: null,
         stateName: args.stateName ?? 'In Progress',
         stateType: 'started',
         priority: args.priority,
+        branchName: null,
+        url: null,
         labels: [],
+        blockedBy: (args.blockedBy ?? []).map((identifier) => ({
+            id: null,
+            identifier,
+            state: null,
+        })),
         blockedByIdentifiers: args.blockedBy ?? [],
         createdAt: args.createdAt,
         updatedAt: args.createdAt,
         projectSlug: 'forscherhaus',
+        workpadCommentId: null,
+        workpadCommentBody: null,
+        workpadCommentUrl: null,
     };
 }
 
@@ -50,10 +61,13 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
         loadedAtIso: '2026-03-06T00:00:00.000Z',
         promptTemplate: 'Issue {{issue.identifier}} attempt {{attempt}}',
         tracker: {
+            kind: 'linear',
             provider: 'linear',
+            endpoint: 'https://api.linear.app/graphql',
             apiKey: 'token',
             projectSlug: 'forscherhaus',
             activeStates: ['In Progress'],
+            terminalStates: ['Done'],
         },
         polling: {
             intervalMs: 60000,
@@ -73,11 +87,17 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
         agent: {
             maxConcurrent: 1,
             maxAttempts: 3,
+            maxTurns: 1,
+            maxRetryBackoffMs: 60000,
+            maxConcurrentByState: {},
+            commitRequiredStates: ['Todo', 'In Progress', 'Rework'],
         },
         codex: {
             command: 'codex app-server',
+            readTimeoutMs: 2000,
             responseTimeoutMs: 2000,
             turnTimeoutMs: 5000,
+            stallTimeoutMs: 1000,
         },
     };
 }
@@ -101,7 +121,7 @@ class WorkflowStoreStub {
         return;
     }
 
-    public async buildDispatchPrompt(context: {issue: Record<string, unknown>; attempt: number}): Promise<{
+    public async buildDispatchPrompt(context: {issue: Record<string, unknown>; attempt: number | null}): Promise<{
         config: LoadedWorkflowConfig;
         prompt: string;
     }> {
@@ -122,6 +142,7 @@ function createNoopWorkspaceFactory() {
                 path: `/tmp/symphony-workspaces/${rawKey}`,
                 created: true,
             }),
+            resolveWorkspacePath: (rawKey: string) => `/tmp/symphony-workspaces/${rawKey}`,
             runBeforeRunHooks: async (_workspacePath: string) => undefined,
             runAfterRunHooks: async (_workspacePath: string) => undefined,
             cleanupTerminalWorkspace: async (_workspacePath: string) => undefined,
@@ -250,14 +271,16 @@ test('Fake profiles drive deterministic orchestrator retry behavior in CI-like r
 
     assert.equal(codexProfile.seenRequests.length, 1);
     assert.equal(snapshot.retrying.length, 1);
-    assert.equal(snapshot.retrying[0].attempt, 2);
+    assert.equal(snapshot.retrying[0].attempt, 1);
 
-    now += 1000;
+    now += 10000;
     await runTickAndDrain(orchestrator);
     snapshot = orchestrator.getSnapshot();
 
     assert.equal(codexProfile.seenRequests.length, 2);
-    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(snapshot.retrying.length, 1);
+    assert.equal(snapshot.retrying[0].attempt, 2);
+    assert.equal(snapshot.retrying[0].reason, 'continuation');
     assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(snapshot.codex_totals.failed, 1);
 

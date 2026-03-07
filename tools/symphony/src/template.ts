@@ -1,6 +1,6 @@
 export interface PromptTemplateContext {
     issue: Record<string, unknown>;
-    attempt: number;
+    attempt: number | null;
 }
 
 const TOKEN_PATTERN = /\{\{\s*([^{}]+?)\s*\}\}/g;
@@ -74,7 +74,7 @@ export function renderStrictTemplate(template: string, context: PromptTemplateCo
                 throw new Error('Template value "attempt" does not support nested paths.');
             }
 
-            return String(context.attempt);
+            return formatTemplateValue(context.attempt);
         }
 
         if (root === 'issue') {

@@ -74,7 +74,7 @@ function mapPhaseToCommands(config: WorkspaceHooksConfig, phase: WorkspaceHookPh
 }
 
 function isFatalPhase(phase: WorkspaceHookPhase): boolean {
-    return phase === 'before_run' || phase === 'before_remove';
+    return phase === 'before_run';
 }
 
 export function sanitizeWorkspaceKey(rawKey: string): string {

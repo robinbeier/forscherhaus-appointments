@@ -11,10 +11,12 @@
         "build": "tsc -p tsconfig.json",
         "start": "node dist/cli.js",
         "dev": "tsx src/cli.ts",
+        "pr-body-check": "tsx src/pr-body-check.ts",
         "test": "tsx --test src/**/*.test.ts",
-        "test:conformance": "tsx --test src/workflow-config.test.ts src/template.test.ts src/workspace-manager.test.ts src/orchestrator.test.ts src/app-server-client.test.ts src/test-profiles.test.ts"
+        "test:conformance": "tsx --test src/workflow-config.test.ts src/template.test.ts src/pr-body-check.test.ts src/remove-issue-worktree-hook.test.ts src/workspace-manager.test.ts src/orchestrator.test.ts src/app-server-client.test.ts src/test-profiles.test.ts"
     },
     "dependencies": {
+        "graphql": "^16.13.1",
         "yaml": "^2.8.1"
     },
     "devDependencies": {

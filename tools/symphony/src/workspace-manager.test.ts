@@ -118,7 +118,7 @@ test('after_run hook failures are best effort', async () => {
     assert.equal(errorLog?.errorClass, 'workspace_hook_failed');
 });
 
-test('hook timeouts are classified and before_remove remains fatal', async () => {
+test('hook timeouts are classified and before_remove remains best effort', async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-timeout-'));
     const logRecords: Array<Record<string, unknown>> = [];
 
@@ -137,10 +137,16 @@ test('hook timeouts are classified and before_remove remains fatal', async () =>
     });
 
     const handle = await manager.prepareWorkspace('ROB-11-timeout');
-    await assert.rejects(
-        () => manager.cleanupTerminalWorkspace(handle.path),
-        (error) => error instanceof WorkspaceManagerError && error.errorClass === 'workspace_hook_timeout',
+    await manager.cleanupTerminalWorkspace(handle.path);
+
+    await assert.rejects(() => access(handle.path));
+    const errorLog = logRecords.find(
+        (entry) =>
+            entry.level === 'error' &&
+            entry.message === 'Workspace hook failed' &&
+            entry.errorClass === 'workspace_hook_timeout',
     );
+    assert.ok(errorLog);
 });
 
 test('cleanupTerminalWorkspace runs before_remove and deletes workspace', async () => {

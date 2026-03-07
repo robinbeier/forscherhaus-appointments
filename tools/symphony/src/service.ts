@@ -66,6 +66,7 @@ export class SymphonyService {
             host: process.env.SYMPHONY_STATE_API_HOST ?? DEFAULT_STATE_API_HOST,
             port: sanitizeStateApiPort(process.env.SYMPHONY_STATE_API_PORT),
             getSnapshot: () => this.getSnapshot(),
+            getIssueDetails: (issueIdentifier) => this.orchestrator.getIssueDetails(issueIdentifier),
             refresh: async () => this.refreshNow(),
         });
     }
@@ -89,6 +90,8 @@ export class SymphonyService {
             const message = error instanceof Error ? error.message : String(error);
             this.logger.error('State API failed to start. Continuing without state API.', {error: message});
         }
+
+        await this.orchestrator.runStartupCleanup();
         this.scheduleNextTick(0);
     }
 
