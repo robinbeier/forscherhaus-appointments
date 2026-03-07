@@ -872,3 +872,116 @@ test('moveIssueToStateByName updates the Linear issue state by name', async () =
     assert.equal(movedIssue.updatedAt, '2026-03-06T08:06:00.000Z');
     assert.equal(calls.length, 2);
 });
+
+test('syncIssueWorkpadToState refreshes the workpad for In Review', async () => {
+    const calls: MockFetchCall[] = [];
+
+    const adapter = new LinearTrackerAdapter({
+        config: {
+            apiKey: 'linear-token',
+            projectSlug: 'forscherhaus',
+            activeStates: ['In Progress'],
+        },
+        fetchImpl: async (url, init) => {
+            calls.push({url, init});
+            const body = JSON.parse(String(init?.body));
+            const query = String(body.query ?? '');
+
+            if (query.includes('query FetchIssueRunContext')) {
+                return jsonResponse({
+                    data: {
+                        issue: {
+                            id: 'issue-id-27',
+                            identifier: 'ROB-27',
+                            title: 'Quick state API check',
+                            description: [
+                                '## Goal',
+                                '',
+                                'Add a quick local health check section.',
+                                '',
+                                '## Definition of Done',
+                                '',
+                                '- Section exists and is easy to scan.',
+                            ].join('\n'),
+                            branchName: 'beierrobin/rob-27',
+                            url: 'https://linear.app/forscherhaus/issue/ROB-27',
+                            createdAt: '2026-03-06T08:00:00.000Z',
+                            updatedAt: '2026-03-06T08:05:00.000Z',
+                            priority: null,
+                            state: {id: 'state-in-review', name: 'In Review', type: 'unstarted'},
+                            labels: {nodes: []},
+                            relations: {nodes: []},
+                            inverseRelations: {nodes: []},
+                            project: {slugId: 'forscherhaus'},
+                            comments: {
+                                nodes: [
+                                    {
+                                        id: 'comment-27',
+                                        body: '## Codex Workpad\n\nOld body',
+                                        url: 'https://linear.app/comment-27',
+                                        updatedAt: '2026-03-06T08:04:00.000Z',
+                                    },
+                                ],
+                            },
+                            team: {
+                                states: {
+                                    nodes: [
+                                        {id: 'state-in-progress', name: 'In Progress', type: 'started'},
+                                        {id: 'state-in-review', name: 'In Review', type: 'unstarted'},
+                                        {id: 'state-done', name: 'Done', type: 'completed'},
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            if (query.includes('mutation UpdateComment')) {
+                assert.equal(body.variables.id, 'comment-27');
+                assert.match(String(body.variables.body), /waiting in `In Review`/);
+                assert.match(String(body.variables.body), /Ready to Merge/);
+                return jsonResponse({
+                    data: {
+                        commentUpdate: {
+                            success: true,
+                            comment: {
+                                id: 'comment-27',
+                                body: body.variables.body,
+                                url: 'https://linear.app/comment-27',
+                            },
+                        },
+                    },
+                });
+            }
+
+            throw new Error(`Unexpected query: ${query}`);
+        },
+    });
+
+    const syncedIssue = await adapter.syncIssueWorkpadToState({
+        id: 'issue-id-27',
+        identifier: 'ROB-27',
+        title: 'Quick state API check',
+        description: null,
+        stateName: 'In Review',
+        stateType: 'unstarted',
+        priority: null,
+        branchName: 'beierrobin/rob-27',
+        url: 'https://linear.app/forscherhaus/issue/ROB-27',
+        labels: [],
+        blockedBy: [],
+        blockedByIdentifiers: [],
+        createdAt: '2026-03-06T08:00:00.000Z',
+        updatedAt: '2026-03-06T08:05:00.000Z',
+        projectSlug: 'forscherhaus',
+        workpadCommentId: 'comment-27',
+        workpadCommentBody: '## Codex Workpad\n\nOld body',
+        workpadCommentUrl: 'https://linear.app/comment-27',
+    });
+
+    assert.equal(syncedIssue.workpadCommentId, 'comment-27');
+    assert.match(syncedIssue.workpadCommentBody ?? '', /waiting in `In Review`/);
+    assert.match(syncedIssue.workpadCommentBody ?? '', /Ready to Merge/);
+    assert.equal(calls.length, 2);
+});

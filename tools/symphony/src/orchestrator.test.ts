@@ -147,6 +147,7 @@ class TrackerStub implements TrackerClient {
     public todoIssues: TrackedIssue[] = [];
     public prepareIssueForRunCalls: string[] = [];
     public moveIssueToStateByNameCalls: Array<{identifier: string; stateName: string}> = [];
+    public syncIssueWorkpadToStateCalls: Array<{identifier: string; stateName: string}> = [];
 
     public async fetchCandidateIssues(): Promise<TrackedIssue[]> {
         return this.candidates;
@@ -189,6 +190,18 @@ class TrackerStub implements TrackerClient {
         return {
             ...issue,
             stateName,
+        };
+    }
+
+    public async syncIssueWorkpadToState(issue: TrackedIssue): Promise<TrackedIssue> {
+        this.syncIssueWorkpadToStateCalls.push({
+            identifier: issue.identifier,
+            stateName: issue.stateName,
+        });
+
+        return {
+            ...issue,
+            workpadCommentBody: `## Codex Workpad\n\nState: ${issue.stateName}`,
         };
     }
 }
@@ -600,6 +613,97 @@ test('successful publish turn moves issue to In Review and stops the active run'
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 0);
+});
+
+test('successful Linear review handoff during a publish turn stops immediately and syncs the workpad', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'review-handoff-1',
+        identifier: 'ROB-13-REVIEW-HANDOFF',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-13-review-handoff';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let stopCalls = 0;
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-review',
+                    turnId: 'turn-review',
+                    sessionId: 'thread-review-turn-review',
+                });
+                tracker.statesByIssueId.set(issue.id, 'In Review');
+                emitEvent({
+                    type: 'trace',
+                    category: 'tool',
+                    eventType: 'tool/call/responded',
+                    message: 'Dynamic tool response sent for linear_graphql.',
+                    details: {
+                        tool: 'linear_graphql',
+                        success: true,
+                    },
+                });
+
+                return firstDispatch.promise;
+            },
+            stop: async () => {
+                stopCalls += 1;
+                firstDispatch.reject(
+                    new AppServerClientError(
+                        'turn_cancelled',
+                        'App-server session was cancelled after review handoff.',
+                    ),
+                );
+            },
+        }),
+    });
+
+    await orchestrator.runTick();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.ok(stopCalls >= 1);
+    assert.equal(snapshot.codex_totals.completed, 0);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
+        {
+            identifier: 'ROB-13-REVIEW-HANDOFF',
+            stateName: 'In Review',
+        },
+    ]);
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-REVIEW-HANDOFF');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'stopped');
+    const terminal = issueDetails?.terminal as Record<string, unknown>;
+    assert.equal(terminal.state, 'In Review');
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(
+        (trace.recent as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'turn/review_handoff_checkpoint',
+        ),
+    );
 });
 
 test('non-commit merge states can continue without local commit output', async () => {

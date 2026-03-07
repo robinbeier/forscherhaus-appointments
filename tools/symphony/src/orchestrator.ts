@@ -25,6 +25,7 @@ export interface TrackerClient {
     fetchIssueStatesByStateNames(stateNames: string[]): Promise<TrackedIssue[]>;
     prepareIssueForRun?(issue: TrackedIssue): Promise<TrackedIssue>;
     moveIssueToStateByName?(issue: TrackedIssue, stateName: string): Promise<TrackedIssue>;
+    syncIssueWorkpadToState?(issue: TrackedIssue): Promise<TrackedIssue>;
 }
 
 export interface WorkspaceClient {
@@ -104,6 +105,7 @@ interface RunningEntry {
     stopRequested: boolean;
     cleanupWorkspaceOnStop: boolean;
     stopCurrentState?: string;
+    publishStateCheckpointInFlight: boolean;
     stopReason?:
         | 'reconciliation_terminal'
         | 'reconciliation_non_active'
@@ -144,6 +146,9 @@ interface RunningEntry {
     observedOpenPullRequest: boolean;
     observedBranchPush: boolean;
     observedPullRequestMergeAttempt: boolean;
+    trackerClient?: TrackerClient;
+    reviewStateName?: string;
+    terminalStates?: string[];
     traceEntries: TraceEntry[];
     firstTurnTraceEntries: TraceEntry[];
 }
@@ -1797,6 +1802,7 @@ export class SymphonyOrchestrator {
             stopRequested: false,
             cleanupWorkspaceOnStop: false,
             stopCurrentState: undefined,
+            publishStateCheckpointInFlight: false,
             hasObservedWorkspaceDiff: false,
             firstTurnItemLifecycleEvents: 0,
             firstTurnCommandExecutionCount: 0,
@@ -1818,6 +1824,9 @@ export class SymphonyOrchestrator {
             observedOpenPullRequest: false,
             observedBranchPush: false,
             observedPullRequestMergeAttempt: false,
+            trackerClient: undefined,
+            reviewStateName: undefined,
+            terminalStates: undefined,
             traceEntries: [],
             firstTurnTraceEntries: [],
         };
@@ -1883,6 +1892,9 @@ export class SymphonyOrchestrator {
             const workspaceHandle = await workspaceClient.prepareWorkspace(runningEntry.issue.identifier);
             workspacePath = workspaceHandle.path;
             runningEntry.workspacePath = workspacePath;
+            runningEntry.trackerClient = tracker;
+            runningEntry.reviewStateName = effectiveConfig.tracker.reviewStateName;
+            runningEntry.terminalStates = effectiveConfig.tracker.terminalStates;
             this.recordTrace(runningEntry, 'workspace', 'workspace/prepared', 'Workspace prepared for issue.', {
                 workspace_path: workspacePath,
             });
@@ -2041,13 +2053,23 @@ export class SymphonyOrchestrator {
                     runningEntry.issue = currentIssue;
                 }
 
+                const normalizedCurrentState = normalizeStateName(currentIssue.stateName);
+                if (
+                    !autoMovedToReviewState &&
+                    tracker.syncIssueWorkpadToState &&
+                    (normalizedCurrentState === normalizeStateName(effectiveConfig.tracker.reviewStateName) ||
+                        terminalStates.has(normalizedCurrentState))
+                ) {
+                    currentIssue = await tracker.syncIssueWorkpadToState(currentIssue);
+                    runningEntry.issue = currentIssue;
+                }
+
                 if (runningEntry.stopRequested) {
                     shouldCleanupWorkspace = shouldCleanupWorkspace || runningEntry.cleanupWorkspaceOnStop;
                     break;
                 }
 
-                const normalizedState = normalizeStateName(currentIssue.stateName);
-                if (activeStates.has(normalizedState)) {
+                if (activeStates.has(normalizedCurrentState)) {
                     if (turnNumber >= maxTurns) {
                         shouldScheduleContinuationRetry = true;
                         break;
@@ -2056,7 +2078,7 @@ export class SymphonyOrchestrator {
                     continue;
                 }
 
-                if (terminalStates.has(normalizedState)) {
+                if (terminalStates.has(normalizedCurrentState)) {
                     shouldCleanupWorkspace = true;
                 }
 
@@ -2930,6 +2952,101 @@ export class SymphonyOrchestrator {
         });
     }
 
+    private async maybeTriggerPublishStateCheckpoint(runningEntry: RunningEntry): Promise<void> {
+        if (
+            runningEntry.stopRequested ||
+            !runningEntry.publishMode ||
+            !runningEntry.trackerClient ||
+            !runningEntry.reviewStateName ||
+            !runningEntry.terminalStates ||
+            runningEntry.publishStateCheckpointInFlight
+        ) {
+            return;
+        }
+
+        runningEntry.publishStateCheckpointInFlight = true;
+
+        try {
+            const refreshedStates = await runningEntry.trackerClient.fetchIssueStatesByIds([runningEntry.issue.id]);
+            const currentState = refreshedStates.get(runningEntry.issue.id) ?? runningEntry.issue.stateName;
+            const normalizedCurrentState = normalizeStateName(currentState);
+            const normalizedReviewState = normalizeStateName(runningEntry.reviewStateName);
+            const terminalStates = normalizeStateNames(runningEntry.terminalStates);
+
+            if (normalizedCurrentState.length === 0) {
+                return;
+            }
+
+            if (normalizedCurrentState !== normalizedReviewState && !terminalStates.has(normalizedCurrentState)) {
+                return;
+            }
+
+            runningEntry.issue = {
+                ...runningEntry.issue,
+                stateName: currentState,
+            };
+
+            if (runningEntry.trackerClient.syncIssueWorkpadToState) {
+                try {
+                    runningEntry.issue = await runningEntry.trackerClient.syncIssueWorkpadToState(runningEntry.issue);
+                } catch (error) {
+                    const classified = this.classifyError(error);
+                    this.logger.warn('Failed to synchronize issue workpad during publish-state checkpoint.', {
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                        errorClass: classified.errorClass,
+                        error: classified.message,
+                        currentState,
+                    });
+                }
+            }
+
+            if (normalizedCurrentState === normalizedReviewState) {
+                this.logger.info('Stopping publish turn immediately after issue entered review state.', {
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                    currentState,
+                });
+                this.recordTrace(
+                    runningEntry,
+                    'turn',
+                    'turn/review_handoff_checkpoint',
+                    `Stopping immediately after issue entered ${currentState}.`,
+                    {
+                        current_state: currentState,
+                    },
+                );
+                await this.requestStopForRunningIssue(runningEntry, {
+                    suppressRetry: true,
+                    cleanupWorkspace: false,
+                    reason: 'reconciliation_non_active',
+                    currentState,
+                });
+                return;
+            }
+
+            this.logger.info('Stopping publish turn immediately after issue reached a terminal state.', {
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                currentState,
+            });
+            this.recordTrace(
+                runningEntry,
+                'turn',
+                'turn/terminal_state_checkpoint',
+                `Stopping immediately after issue reached terminal state ${currentState}.`,
+                {
+                    current_state: currentState,
+                },
+            );
+            await this.requestStopForRunningIssue(runningEntry, {
+                suppressRetry: true,
+                cleanupWorkspace: true,
+                reason: 'reconciliation_terminal',
+                currentState,
+            });
+        } finally {
+            runningEntry.publishStateCheckpointInFlight = false;
+        }
+    }
+
     private async maybeAutoMoveIssueToReviewState(args: {
         tracker: TrackerClient;
         runningEntry: RunningEntry;
@@ -2993,6 +3110,10 @@ export class SymphonyOrchestrator {
             },
         );
 
+        if (tracker.syncIssueWorkpadToState) {
+            return await tracker.syncIssueWorkpadToState(nextIssue);
+        }
+
         return nextIssue;
     }
 
@@ -3004,6 +3125,14 @@ export class SymphonyOrchestrator {
             runningEntry.lastEventType = event.eventType;
             runningEntry.lastEventMessage = event.message;
             this.recordTrace(runningEntry, event.category, event.eventType, event.message, event.details);
+            if (
+                event.eventType === 'tool/call/responded' &&
+                event.category === 'tool' &&
+                event.details?.tool === 'linear_graphql' &&
+                event.details?.success === true
+            ) {
+                void this.maybeTriggerPublishStateCheckpoint(runningEntry);
+            }
             return;
         }
 
