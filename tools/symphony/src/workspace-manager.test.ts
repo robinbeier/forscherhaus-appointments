@@ -211,4 +211,5 @@ test('captureWorkspaceState returns head sha and tracked status changes', async 
 
     assert.match(snapshot.headSha, /^[0-9a-f]{40}$/);
     assert.match(snapshot.statusText, /^ M README\.md$/m);
+    assert.equal(snapshot.branchName, 'codex/symphony-rob-11-state');
 });

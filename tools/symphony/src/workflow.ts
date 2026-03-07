@@ -65,6 +65,8 @@ export interface TrackerConfig {
     projectSlug: string;
     activeStates: string[];
     terminalStates: string[];
+    reviewStateName: string;
+    mergeStateName: string;
 }
 
 export interface PollingConfig {
@@ -101,6 +103,8 @@ export interface CodexConfig {
     turnTimeoutMs: number;
     stallTimeoutMs: number;
     approvalPolicy?: unknown;
+    publishApprovalPolicy?: unknown;
+    publishNetworkAccess: boolean;
     threadSandbox?: unknown;
     turnSandboxPolicy?: unknown;
 }
@@ -642,6 +646,16 @@ export function parseWorkflowConfig(args: ParseWorkflowConfigArgs): LoadedWorkfl
                 ['terminalStates', 'terminal_states'],
                 ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'],
             ),
+            reviewStateName: pickString(
+                resolvedFrontMatter.tracker,
+                ['reviewStateName', 'review_state_name', 'reviewState', 'review_state'],
+                'Human Review',
+            ),
+            mergeStateName: pickString(
+                resolvedFrontMatter.tracker,
+                ['mergeStateName', 'merge_state_name', 'mergeState', 'merge_state'],
+                'Merging',
+            ),
         },
         polling: {
             intervalMs: pickNumber(resolvedFrontMatter.polling, ['intervalMs', 'interval_ms'], 30000),
@@ -685,6 +699,14 @@ export function parseWorkflowConfig(args: ParseWorkflowConfigArgs): LoadedWorkfl
             stallTimeoutMs,
             approvalPolicy: normalizeCodexApprovalPolicy(
                 pickValue(resolvedFrontMatter.codex, ['approvalPolicy', 'approval_policy']),
+            ),
+            publishApprovalPolicy: normalizeCodexApprovalPolicy(
+                pickValue(resolvedFrontMatter.codex, ['publishApprovalPolicy', 'publish_approval_policy']),
+            ),
+            publishNetworkAccess: pickBoolean(
+                resolvedFrontMatter.codex,
+                ['publishNetworkAccess', 'publish_network_access'],
+                false,
             ),
             threadSandbox: normalizeCodexThreadSandbox(
                 pickValue(resolvedFrontMatter.codex, ['threadSandbox', 'thread_sandbox']),

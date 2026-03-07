@@ -4,11 +4,13 @@ tracker:
     endpoint: https://api.linear.app/graphql
     api_key: $SYMPHONY_LINEAR_API_KEY
     project_slug: $SYMPHONY_LINEAR_PROJECT_SLUG
+    review_state_name: In Review
+    merge_state_name: Ready to Merge
     active_states:
         - Todo
         - In Progress
         - Rework
-        - Merging
+        - Ready to Merge
     terminal_states:
         - Done
         - Closed
@@ -44,6 +46,7 @@ codex:
     read_timeout_ms: 120000
     turn_timeout_ms: 3600000
     stall_timeout_ms: 300000
+    publish_network_access: true
 ---
 
 Issue {{issue.identifier}} is active in attempt {{attempt}}.
@@ -79,12 +82,12 @@ Run-ending rules:
 -   Use [$pull](.codex/skills/pull/SKILL.md) before editing when the branch
     already exists or the remote moved.
 -   Use [$push](.codex/skills/push/SKILL.md) to publish commits, create/update
-    the PR, attach it to Linear, and move the issue into `Human Review` unless
-    it should stay fully agent-owned in `Merging`.
--   Use [$land](.codex/skills/land/SKILL.md) in `Merging` to drive the PR all the
+    the PR, attach it to Linear, and move the issue into `In Review` unless it
+    should stay fully agent-owned in `Ready to Merge`.
+-   Use [$land](.codex/skills/land/SKILL.md) in `Ready to Merge` to drive the PR all the
     way to merge, and use [$babysit-pr](.codex/skills/babysit-pr/SKILL.md) when
     CI or review needs watching.
--   In `Merging`, the run may finish without a new local commit only if PR,
+-   In `Ready to Merge`, the run may finish without a new local commit only if PR,
     review, or merge work advanced and the workspace is clean.
 -   Once the workpad and current evidence are up to date, compact context and
     continue execution instead of repeating long status recaps.
@@ -105,6 +108,9 @@ Turn discipline:
     validation, local commit, and publish/state-update work.
 -   If the required repo change already exists in the workspace, prioritize
     validation, commit, push, and Linear updates instead of more exploration.
+-   Existing tracked issue branches, `Ready to Merge`, and post-diff continuation turns
+    may use the publish-capable runtime lane so GitHub push/PR work can finish
+    without reopening broad exploration.
 -   For small doc-only or single-file tasks, do not broaden scope once the
     requested diff is correct.
 -   Do not end a turn while the issue remains in an active state unless you are
@@ -135,40 +141,40 @@ This workflow expects these Linear statuses to exist:
 
 -   `Todo`
 -   `In Progress`
--   `Human Review`
+-   `In Review`
 -   `Rework`
--   `Merging`
+-   `Ready to Merge`
 -   `Done`
 -   `Canceled`
 
-Only `Todo`, `In Progress`, `Rework`, and `Merging` are active Symphony states.
-`Human Review` is intentionally non-active: it parks the issue while humans or
-external systems review the PR. Move the issue back into `Rework` or
-`Merging` when agent work should resume.
+Only `Todo`, `In Progress`, `Rework`, and `Ready to Merge` are active Symphony
+states. `In Review` is intentionally non-active: it parks the issue while
+humans or external systems review the PR. Move the issue back into `Rework` or
+`Ready to Merge` when agent work should resume.
 
 ## State Model
 
 Normal path:
 
-`Todo` -> `In Progress` -> `Human Review` -> `Merging` -> `Done`
+`Todo` -> `In Progress` -> `In Review` -> `Ready to Merge` -> `Done`
 
 Review change path:
 
-`Human Review` -> `Rework` -> `Human Review`
+`In Review` -> `Rework` -> `In Review`
 
 Continuous full-agent path:
 
-`Todo` -> `In Progress` -> `Merging` -> `Done`
+`Todo` -> `In Progress` -> `Ready to Merge` -> `Done`
 
 Use the states as follows:
 
 -   `Todo`: ready to start, no implementation has begun yet.
 -   `In Progress`: active implementation and local validation.
--   `Human Review`: PR exists; waiting on human review, CI completion, or explicit
+-   `In Review`: PR exists; waiting on human review, CI completion, or explicit
     merge intent. Symphony should not work in this state.
 -   `Rework`: active response to PR review feedback, CI failures, or requested
     follow-up on the same PR.
--   `Merging`: active final landing phase. Symphony should babysit the PR, fix
+-   `Ready to Merge`: active final landing phase. Symphony should babysit the PR, fix
     final merge blockers, and merge it.
 -   `Done`: merged and complete.
 
@@ -285,11 +291,14 @@ When the branch is ready to publish:
 -   lint the final PR body before `gh pr create` or `gh pr edit`, for example
     with `npm --prefix tools/symphony run pr-body-check -- --file /tmp/pr-body.md`
 -   attach the PR to the Linear issue
--   move the Linear issue to `Human Review` by default
+-   move the Linear issue to `In Review` by default
 -   if the PR should stay fully agent-owned through review and merge, move it
-    directly to `Merging` instead and continue into the merge loop immediately
+    directly to `Ready to Merge` instead and continue into the merge loop
+    immediately
 -   update the workpad with validation status, merge/review posture, and what
     would reactivate the issue
+-   after the issue is in `In Review`, stop the active Symphony run; do not
+    keep burning context in the same publish turn
 
 Do not leave a reviewable PR in `In Progress`.
 
@@ -301,15 +310,16 @@ When the issue is moved to `Rework`:
 -   update the workpad with the current rework plan
 -   fix the required issues
 -   commit and push the changes
--   return the issue to `Human Review` when waiting on reviewers again
--   move it directly to `Merging` only when the PR is truly in the landing phase
+-   return the issue to `In Review` when waiting on reviewers again
+-   move it directly to `Ready to Merge` only when the PR is truly in the
+    landing phase
 
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
 
 ### 6. Merge loop
 
-When the issue is moved to `Merging`:
+When the issue is moved to `Ready to Merge`:
 
 -   use [$land](.codex/skills/land/SKILL.md)
 -   keep the PR synced and mergeable
@@ -318,6 +328,14 @@ When the issue is moved to `Merging`:
 -   if new code changes are required, move the issue back to `Rework`
 -   merge the PR when it is green, review-clean, and mergeable
 -   after merge, move the issue to `Done` and update the workpad
+
+This is an explicit resume point. The normal pilot flow is:
+
+`In Progress` publish -> `In Review` stop
+
+human moves issue -> `Ready to Merge`
+
+Symphony resumes -> `land` / `babysit-pr` loop -> merge -> `Done`
 
 ## PR and Review Expectations
 

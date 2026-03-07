@@ -105,6 +105,56 @@ Issue {{issue.identifier}}
     });
 });
 
+test('parseWorkflowConfig accepts publish-capable codex settings', () => {
+    const config = parseWorkflowConfig({
+        workflowPath: '/repo/WORKFLOW.md',
+        contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+codex:
+  command: codex app-server
+  publish_approval_policy: never
+  publish_network_access: true
+---
+Issue {{issue.identifier}}
+`,
+        env: {},
+        homeDir: '/home/robin',
+    });
+
+    assert.equal(config.codex.publishApprovalPolicy, 'never');
+    assert.equal(config.codex.publishNetworkAccess, true);
+});
+
+test('parseWorkflowConfig accepts custom review and merge state names', () => {
+    const config = parseWorkflowConfig({
+        workflowPath: '/repo/WORKFLOW.md',
+        contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+  review_state_name: In Review
+  merge_state_name: Ready to Merge
+  active_states:
+    - Todo
+    - In Progress
+    - Rework
+    - Ready to Merge
+codex:
+  command: codex app-server
+---
+Issue {{issue.identifier}}
+`,
+        env: {},
+        homeDir: '/home/robin',
+    });
+
+    assert.equal(config.tracker.reviewStateName, 'In Review');
+    assert.equal(config.tracker.mergeStateName, 'Ready to Merge');
+    assert.deepEqual(config.tracker.activeStates, ['Todo', 'In Progress', 'Rework', 'Ready to Merge']);
+});
+
 test('parseWorkflowConfig rejects invalid codex approval_policy values', () => {
     assert.throws(
         () =>

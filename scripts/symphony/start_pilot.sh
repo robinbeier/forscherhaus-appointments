@@ -73,9 +73,19 @@ if [[ ! -f "$WORKFLOW_PATH" ]]; then
     exit 1
 fi
 
+explicit_worktree_base_ref="${SYMPHONY_WORKTREE_BASE_REF:-}"
+explicit_worktree_base_ref_was_set=0
+if [[ -n "${SYMPHONY_WORKTREE_BASE_REF+x}" ]]; then
+    explicit_worktree_base_ref_was_set=1
+fi
+
 set -a
 source "$ENV_FILE"
 set +a
+
+if [[ "$explicit_worktree_base_ref_was_set" -eq 1 ]]; then
+    SYMPHONY_WORKTREE_BASE_REF="$explicit_worktree_base_ref"
+fi
 
 require_env() {
     local name="$1"

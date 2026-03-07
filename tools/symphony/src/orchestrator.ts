@@ -24,12 +24,13 @@ export interface TrackerClient {
     fetchIssueStatesByIds(issueIds: string[]): Promise<Map<string, string>>;
     fetchIssueStatesByStateNames(stateNames: string[]): Promise<TrackedIssue[]>;
     prepareIssueForRun?(issue: TrackedIssue): Promise<TrackedIssue>;
+    moveIssueToStateByName?(issue: TrackedIssue, stateName: string): Promise<TrackedIssue>;
 }
 
 export interface WorkspaceClient {
     prepareWorkspace(rawKey: string): Promise<WorkspaceHandle>;
     resolveWorkspacePath(rawKey: string): string;
-    runBeforeRunHooks(workspacePath: string): Promise<void>;
+    runBeforeRunHooks(workspacePath: string, envOverrides?: Record<string, string | undefined>): Promise<void>;
     runAfterRunHooks(workspacePath: string): Promise<void>;
     cleanupTerminalWorkspace(workspacePath: string): Promise<void>;
     captureWorkspaceState(workspacePath: string): Promise<WorkspaceStateSnapshot>;
@@ -41,6 +42,7 @@ export interface AppServerClient {
         issueIdentifier: string;
         issueTitle?: string;
         attempt: number | null;
+        publishMode?: boolean;
         threadId?: string;
         responseTimeoutMs?: number;
         turnTimeoutMs?: number;
@@ -85,6 +87,7 @@ interface RetryEntry {
     attempt: number;
     reason: RetryReason;
     availableAtMs: number;
+    publishMode: boolean;
     errorClass?: string;
     retryDirective?: string;
 }
@@ -135,6 +138,10 @@ interface RunningEntry {
     postDiffCheckpointTriggered: boolean;
     retryDirective?: string;
     pendingGuardrailError?: OrchestratorGuardrailError;
+    publishMode: boolean;
+    observedPullRequestMutation: boolean;
+    observedOpenPullRequest: boolean;
+    observedBranchPush: boolean;
     traceEntries: TraceEntry[];
     firstTurnTraceEntries: TraceEntry[];
 }
@@ -542,6 +549,34 @@ function buildPostDiffCheckpointRetryDirective(firstRepoTargetPath: string | nul
     return `${firstStep} Resume from the current workspace and thread state. Prioritize the narrowest remaining validation, local commit, and publish/state-update work before any broader exploration.`;
 }
 
+function commandMatches(command: string, pattern: RegExp): boolean {
+    return pattern.test(command);
+}
+
+function didCommandObserveOpenPullRequest(command: string | null, exitCode: number | null): boolean {
+    if (command === null || exitCode !== 0) {
+        return false;
+    }
+
+    return /\bgh pr (?:create|edit|view|list)\b/.test(command);
+}
+
+function didCommandMutatePullRequest(command: string | null, exitCode: number | null): boolean {
+    if (command === null || exitCode !== 0) {
+        return false;
+    }
+
+    return /\bgh pr (?:create|edit)\b/.test(command);
+}
+
+function didCommandPushBranch(command: string | null, exitCode: number | null): boolean {
+    if (command === null || exitCode !== 0) {
+        return false;
+    }
+
+    return commandMatches(command, /\bgit push\b/);
+}
+
 function toIssueTemplatePayload(issue: TrackedIssue): Record<string, unknown> {
     const targetPaths = extractLikelyRepoPaths(issue.description);
     const firstRepoTargetPath = pickFirstRepoTargetPath(targetPaths);
@@ -604,6 +639,42 @@ function normalizeStateNames(values: string[]): Set<string> {
 
 function nextRetryAttempt(attempt: number | null): number {
     return attempt === null ? 1 : attempt + 1;
+}
+
+function hasTrackedIssueBranch(issue: TrackedIssue): boolean {
+    return typeof issue.branchName === 'string' && issue.branchName.trim().length > 0;
+}
+
+function isMergeState(issue: TrackedIssue, mergeStateName: string): boolean {
+    return normalizeStateName(issue.stateName) === normalizeStateName(mergeStateName);
+}
+
+function shouldStartPublishMode(
+    issue: TrackedIssue,
+    mergeStateName: string,
+    runningEntry?: Pick<RunningEntry, 'publishMode'>,
+): boolean {
+    if (runningEntry?.publishMode) {
+        return true;
+    }
+
+    if (isMergeState(issue, mergeStateName)) {
+        return true;
+    }
+
+    return hasTrackedIssueBranch(issue);
+}
+
+function shouldUsePublishMode(
+    issue: TrackedIssue,
+    mergeStateName: string,
+    runningEntry?: Pick<RunningEntry, 'publishMode'>,
+): boolean {
+    if (runningEntry?.publishMode) {
+        return true;
+    }
+
+    return isMergeState(issue, mergeStateName);
 }
 
 function createContinuationPrompt(
@@ -1238,6 +1309,8 @@ export class SymphonyOrchestrator {
                         readTimeoutMs: factoryArgs.config.codex.readTimeoutMs,
                         turnTimeoutMs: factoryArgs.config.codex.turnTimeoutMs,
                         approvalPolicy: factoryArgs.config.codex.approvalPolicy,
+                        publishApprovalPolicy: factoryArgs.config.codex.publishApprovalPolicy,
+                        publishNetworkAccess: factoryArgs.config.codex.publishNetworkAccess,
                         threadSandbox: factoryArgs.config.codex.threadSandbox,
                         turnSandboxPolicy: factoryArgs.config.codex.turnSandboxPolicy,
                     },
@@ -1729,6 +1802,10 @@ export class SymphonyOrchestrator {
             firstDiffObservedAtMs: undefined,
             postDiffCheckpointTriggered: false,
             retryDirective: retryEntry?.retryDirective,
+            publishMode: retryEntry?.publishMode ?? shouldStartPublishMode(issue, config.tracker.mergeStateName),
+            observedPullRequestMutation: false,
+            observedOpenPullRequest: false,
+            observedBranchPush: false,
             traceEntries: [],
             firstTurnTraceEntries: [],
         };
@@ -1773,6 +1850,11 @@ export class SymphonyOrchestrator {
             if (tracker.prepareIssueForRun) {
                 currentIssue = await tracker.prepareIssueForRun(currentIssue);
                 runningEntry.issue = currentIssue;
+                runningEntry.publishMode = shouldStartPublishMode(
+                    currentIssue,
+                    effectiveConfig.tracker.mergeStateName,
+                    runningEntry,
+                );
             }
             runningEntry.firstRepoTargetPath = pickFirstRepoTargetPath(
                 extractLikelyRepoPaths(currentIssue.description),
@@ -1781,6 +1863,7 @@ export class SymphonyOrchestrator {
                 state: currentIssue.stateName,
                 workpad_comment_id: currentIssue.workpadCommentId ?? null,
                 first_repo_target_path: runningEntry.firstRepoTargetPath,
+                publish_mode: runningEntry.publishMode,
             });
 
             workspaceClient = this.workspaceFactory(config);
@@ -1793,11 +1876,20 @@ export class SymphonyOrchestrator {
             });
 
             this.throwIfDispatchStopped(runningEntry, 'Issue dispatch was cancelled before before_run hooks.');
-            await workspaceClient.runBeforeRunHooks(workspacePath);
+            await workspaceClient.runBeforeRunHooks(workspacePath, {
+                SYMPHONY_ISSUE_BRANCH_NAME: currentIssue.branchName ?? undefined,
+            });
             beforeRunCompleted = true;
             this.throwIfDispatchStopped(runningEntry, 'Issue dispatch was cancelled before workspace state capture.');
             baselineWorkspaceState = await workspaceClient.captureWorkspaceState(workspacePath);
             runningEntry.baselineWorkspaceState = baselineWorkspaceState;
+            if (baselineWorkspaceState.branchName) {
+                currentIssue = {
+                    ...currentIssue,
+                    branchName: baselineWorkspaceState.branchName,
+                };
+                runningEntry.issue = currentIssue;
+            }
             this.recordTrace(
                 runningEntry,
                 'workspace',
@@ -1807,6 +1899,8 @@ export class SymphonyOrchestrator {
                     workspace_path: workspacePath,
                     head_sha: baselineWorkspaceState.headSha,
                     status_text: baselineWorkspaceState.statusText,
+                    branch_name: baselineWorkspaceState.branchName,
+                    publish_mode: runningEntry.publishMode,
                 },
             );
 
@@ -1840,6 +1934,11 @@ export class SymphonyOrchestrator {
                         max_turns: maxTurns,
                         first_repo_target_path: issueTemplatePayload.first_repo_target_path ?? null,
                         first_repo_step_contract: issueTemplatePayload.first_repo_step_contract ?? null,
+                        publish_mode: shouldUsePublishMode(
+                            currentIssue,
+                            effectiveConfig.tracker.mergeStateName,
+                            runningEntry,
+                        ),
                     },
                 );
 
@@ -1853,6 +1952,11 @@ export class SymphonyOrchestrator {
                     issueIdentifier: currentIssue.identifier,
                     issueTitle: currentIssue.title,
                     attempt: runningEntry.attempt,
+                    publishMode: shouldUsePublishMode(
+                        currentIssue,
+                        effectiveConfig.tracker.mergeStateName,
+                        runningEntry,
+                    ),
                     threadId: currentThreadId,
                     responseTimeoutMs: effectiveConfig.codex.readTimeoutMs,
                     turnTimeoutMs: effectiveConfig.codex.turnTimeoutMs,
@@ -1911,12 +2015,26 @@ export class SymphonyOrchestrator {
                 };
                 runningEntry.issue = currentIssue;
 
+                const autoMovedToReviewState = await this.maybeAutoMoveIssueToReviewState({
+                    tracker,
+                    runningEntry,
+                    workspaceClient,
+                    workspacePath,
+                    currentIssue,
+                    reviewStateName: effectiveConfig.tracker.reviewStateName,
+                    mergeStateName: effectiveConfig.tracker.mergeStateName,
+                });
+                if (autoMovedToReviewState) {
+                    currentIssue = autoMovedToReviewState;
+                    runningEntry.issue = currentIssue;
+                }
+
                 if (runningEntry.stopRequested) {
                     shouldCleanupWorkspace = shouldCleanupWorkspace || runningEntry.cleanupWorkspaceOnStop;
                     break;
                 }
 
-                const normalizedState = normalizeStateName(refreshedState);
+                const normalizedState = normalizeStateName(currentIssue.stateName);
                 if (activeStates.has(normalizedState)) {
                     if (turnNumber >= maxTurns) {
                         shouldScheduleContinuationRetry = true;
@@ -2003,6 +2121,7 @@ export class SymphonyOrchestrator {
                     issue: runningEntry.issue,
                     attempt: nextRetryAttempt(runningEntry.attempt),
                     reason: 'continuation',
+                    publishMode: runningEntry.publishMode,
                     delayMs: this.continuationDelayMs,
                     maxAttempts: effectiveConfig.agent.maxAttempts,
                 });
@@ -2088,6 +2207,7 @@ export class SymphonyOrchestrator {
                     issue: runningEntry.issue,
                     attempt: nextRetryAttempt(runningEntry.attempt),
                     reason: 'continuation',
+                    publishMode: true,
                     delayMs: this.continuationDelayMs,
                     maxAttempts: effectiveConfig.agent.maxAttempts,
                     retryDirective: buildPostDiffCheckpointRetryDirective(runningEntry.firstRepoTargetPath),
@@ -2098,6 +2218,7 @@ export class SymphonyOrchestrator {
                     issue: runningEntry.issue,
                     attempt: retryAttempt,
                     reason: 'dispatch_failed',
+                    publishMode: runningEntry.publishMode,
                     delayMs: this.computeFailureRetryDelayMs(retryAttempt, effectiveConfig.agent.maxRetryBackoffMs),
                     maxAttempts: effectiveConfig.agent.maxAttempts,
                     errorClass: classified.errorClass,
@@ -2209,6 +2330,7 @@ export class SymphonyOrchestrator {
         issue: TrackedIssue;
         attempt: number;
         reason: RetryReason;
+        publishMode: boolean;
         delayMs: number;
         maxAttempts: number;
         errorClass?: string;
@@ -2229,6 +2351,7 @@ export class SymphonyOrchestrator {
             attempt: args.attempt,
             reason: args.reason,
             availableAtMs,
+            publishMode: args.publishMode,
             errorClass: args.errorClass,
             retryDirective: args.retryDirective,
         });
@@ -2237,6 +2360,7 @@ export class SymphonyOrchestrator {
             ...issueLogFields(args.issue),
             attempt: args.attempt,
             reason: args.reason,
+            publishMode: args.publishMode,
             availableAtIso: new Date(availableAtMs).toISOString(),
             errorClass: args.errorClass,
             retryDirective: args.retryDirective ?? null,
@@ -2311,6 +2435,7 @@ export class SymphonyOrchestrator {
                           context_headroom_tokens: tokenUsage?.contextHeadroomTokens ?? null,
                           context_utilization_percent: tokenUsage?.contextUtilizationPercent ?? null,
                           has_observed_workspace_diff: args.runningEntry.hasObservedWorkspaceDiff,
+                          publish_mode: args.runningEntry.publishMode,
                           first_repo_target_path: args.runningEntry.firstRepoTargetPath ?? null,
                           first_turn_agent_message: args.runningEntry.firstTurnAgentMessageText ?? null,
                           first_turn_plan_only_candidate_message:
@@ -2341,6 +2466,7 @@ export class SymphonyOrchestrator {
                           context_headroom_tokens: tokenUsage?.contextHeadroomTokens ?? null,
                           context_utilization_percent: tokenUsage?.contextUtilizationPercent ?? null,
                           has_observed_workspace_diff: args.runningEntry.hasObservedWorkspaceDiff,
+                          publish_mode: args.runningEntry.publishMode,
                           first_repo_target_path: args.runningEntry.firstRepoTargetPath ?? null,
                           first_turn_agent_message: args.runningEntry.firstTurnAgentMessageText ?? null,
                           first_turn_plan_only_candidate_message:
@@ -2362,6 +2488,7 @@ export class SymphonyOrchestrator {
                       attempt: args.retryEntry.attempt,
                       reason: args.retryEntry.reason,
                       due_at: new Date(args.retryEntry.availableAtMs).toISOString(),
+                      publish_mode: args.retryEntry.publishMode,
                       error_class: args.retryEntry.errorClass ?? null,
                       retry_directive: args.retryEntry.retryDirective ?? null,
                   }
@@ -2519,6 +2646,7 @@ export class SymphonyOrchestrator {
                 runningEntry.baselineWorkspaceState.statusText !== currentWorkspaceState.statusText
             ) {
                 runningEntry.hasObservedWorkspaceDiff = true;
+                runningEntry.publishMode = true;
                 runningEntry.firstDiffObservedAtMs ??= this.nowMs();
                 runningEntry.firstTurnPlanOnlyCandidateAtMs = undefined;
                 runningEntry.firstTurnPlanOnlyCandidateMessage = undefined;
@@ -2531,6 +2659,7 @@ export class SymphonyOrchestrator {
                         workspace_path: runningEntry.workspacePath,
                         head_sha: currentWorkspaceState.headSha,
                         status_text: currentWorkspaceState.statusText,
+                        publish_mode: runningEntry.publishMode,
                     },
                 );
                 this.logger.info('Observed first repo diff/workspace progress during active turn.', {
@@ -2749,6 +2878,72 @@ export class SymphonyOrchestrator {
         });
     }
 
+    private async maybeAutoMoveIssueToReviewState(args: {
+        tracker: TrackerClient;
+        runningEntry: RunningEntry;
+        workspaceClient: WorkspaceClient;
+        workspacePath: string;
+        currentIssue: TrackedIssue;
+        reviewStateName: string;
+        mergeStateName: string;
+    }): Promise<TrackedIssue | null> {
+        const {tracker, runningEntry, workspaceClient, workspacePath, currentIssue, reviewStateName, mergeStateName} =
+            args;
+        if (!tracker.moveIssueToStateByName) {
+            return null;
+        }
+
+        const normalizedState = normalizeStateName(currentIssue.stateName);
+        if (
+            normalizedState === normalizeStateName(reviewStateName) ||
+            normalizedState === normalizeStateName(mergeStateName)
+        ) {
+            return null;
+        }
+
+        if (!runningEntry.observedOpenPullRequest) {
+            return null;
+        }
+
+        if (!runningEntry.observedPullRequestMutation && !runningEntry.observedBranchPush) {
+            return null;
+        }
+
+        const workspaceState = await workspaceClient.captureWorkspaceState(workspacePath);
+        if (workspaceState.statusText.trim().length > 0) {
+            this.recordTrace(
+                runningEntry,
+                'workspace',
+                'workspace/review_handoff_skipped_dirty',
+                'Kept issue active after publish because the workspace still has uncommitted changes.',
+                {
+                    workspace_path: workspacePath,
+                    status_text: workspaceState.statusText,
+                },
+            );
+            return null;
+        }
+
+        const nextIssue = await tracker.moveIssueToStateByName(currentIssue, reviewStateName);
+        this.logger.info(`Moved issue to ${reviewStateName} after successful PR publish.`, {
+            ...issueLogFields(nextIssue, runningEntry.sessionId),
+            workspacePath,
+        });
+        this.recordTrace(
+            runningEntry,
+            'runtime',
+            'issue/moved_to_review_state',
+            `Moved issue to ${reviewStateName} after a successful publish turn.`,
+            {
+                workspace_path: workspacePath,
+                previous_state: currentIssue.stateName,
+                next_state: nextIssue.stateName,
+            },
+        );
+
+        return nextIssue;
+    }
+
     private handleOrchestratorEvent(event: OrchestratorEvent, runningEntry: RunningEntry): void {
         runningEntry.lastEventAtMs = this.nowMs();
         runningEntry.lastEventType = event.type;
@@ -2900,6 +3095,17 @@ export class SymphonyOrchestrator {
                             : false,
                     is_broad_before_first_diff: isBroadBeforeFirstDiff,
                 };
+            }
+
+            if (normalizedEventType === 'codex/event/exec_command_end') {
+                const command = typeof summary.details?.command === 'string' ? summary.details.command : null;
+                const exitCode = typeof summary.details?.exit_code === 'number' ? summary.details.exit_code : null;
+                runningEntry.observedPullRequestMutation =
+                    runningEntry.observedPullRequestMutation || didCommandMutatePullRequest(command, exitCode);
+                runningEntry.observedOpenPullRequest =
+                    runningEntry.observedOpenPullRequest || didCommandObserveOpenPullRequest(command, exitCode);
+                runningEntry.observedBranchPush =
+                    runningEntry.observedBranchPush || didCommandPushBranch(command, exitCode);
             }
 
             if (summary.category !== 'agent') {

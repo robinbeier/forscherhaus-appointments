@@ -744,6 +744,11 @@ export class LinearTrackerAdapter {
         };
     }
 
+    public async moveIssueToStateByName(issue: TrackedIssue, stateName: string): Promise<TrackedIssue> {
+        const runContext = await this.fetchIssueRunContext(issue.id);
+        return await this.updateIssueStateByName(issue, runContext, stateName);
+    }
+
     public async executeLinearGraphQlToolCall(rawArguments: unknown): Promise<{
         success: boolean;
         payload: Record<string, unknown>;

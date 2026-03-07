@@ -2,8 +2,8 @@
 
 - Issue: <!-- z. B. ROB-24 -->
 - Status vor PR: `In Progress`
-- Status nach PR-Erstellung: `Human Review` oder `Merging`
-- Status vor Merge: `Merging`
+- Status nach PR-Erstellung: `In Review` oder `Ready to Merge`
+- Status vor Merge: `Ready to Merge`
 
 ## Summary
 

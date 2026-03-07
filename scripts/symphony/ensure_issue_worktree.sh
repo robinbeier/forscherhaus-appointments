@@ -72,48 +72,132 @@ workspace_registered_in_git() {
     '
 }
 
+ensure_line_in_file() {
+    local file_path="$1"
+    local line="$2"
+
+    touch "$file_path"
+    if ! grep -Fqx "$line" "$file_path"; then
+        printf '%s\n' "$line" >>"$file_path"
+    fi
+}
+
+align_workspace_to_issue_branch() {
+    local issue_branch="${SYMPHONY_ISSUE_BRANCH_NAME:-}"
+    local workspace_status=""
+    local current_branch=""
+
+    if [[ -z "$issue_branch" ]]; then
+        return
+    fi
+
+    workspace_status="$(git -C "$workspace_path" status --porcelain=v1 --untracked-files=all 2>/dev/null || true)"
+    if [[ -n "$workspace_status" ]]; then
+        echo "[symphony-worktree] Preserving dirty workspace on current branch; skipping branch alignment to $issue_branch." >&2
+        return
+    fi
+
+    current_branch="$(git -C "$workspace_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+    if git -C "$repo_root" show-ref --verify --quiet "refs/remotes/origin/$issue_branch"; then
+        if git -C "$workspace_path" checkout -B "$issue_branch" "origin/$issue_branch" >/dev/null 2>&1; then
+            if [[ "$current_branch" != "$issue_branch" ]]; then
+                echo "[symphony-worktree] Aligned workspace branch to origin/$issue_branch." >&2
+            fi
+        else
+            echo "[symphony-worktree] Warning: failed to align workspace branch to origin/$issue_branch. Continuing on ${current_branch:-current HEAD}." >&2
+        fi
+        return
+    fi
+
+    if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$issue_branch"; then
+        if git -C "$workspace_path" checkout "$issue_branch" >/dev/null 2>&1; then
+            if [[ "$current_branch" != "$issue_branch" ]]; then
+                echo "[symphony-worktree] Switched workspace branch to local $issue_branch." >&2
+            fi
+        else
+            echo "[symphony-worktree] Warning: failed to switch workspace branch to local $issue_branch. Continuing on ${current_branch:-current HEAD}." >&2
+        fi
+    fi
+}
+
+sync_worker_support_files() {
+    local repo_skills_path="$repo_root/.codex/skills"
+    local repo_napkin_path="$repo_root/.claude/napkin.md"
+    local exclude_file
+
+    mkdir -p "$workspace_path/.codex" "$workspace_path/.claude"
+
+    if [[ -d "$repo_skills_path" ]]; then
+        rm -rf "$workspace_path/.codex/skills"
+        cp -R "$repo_skills_path" "$workspace_path/.codex/skills"
+    fi
+
+    if [[ -f "$repo_napkin_path" ]]; then
+        cp "$repo_napkin_path" "$workspace_path/.claude/napkin.md"
+    fi
+
+    exclude_file="$(git -C "$workspace_path" rev-parse --git-path info/exclude)"
+    if [[ "$exclude_file" != /* ]]; then
+        exclude_file="$(cd "$workspace_path" && pwd -P)/$exclude_file"
+    fi
+
+    mkdir -p "$(dirname "$exclude_file")"
+    ensure_line_in_file "$exclude_file" '/.codex/skills/*'
+    ensure_line_in_file "$exclude_file" '/.codex/skills/**'
+    ensure_line_in_file "$exclude_file" '/.claude/napkin.md'
+
+    while IFS= read -r tracked_path; do
+        if [[ -n "$tracked_path" ]]; then
+            git -C "$workspace_path" update-index --assume-unchanged -- "$tracked_path" >/dev/null 2>&1 || true
+        fi
+    done < <(git -C "$workspace_path" ls-files .codex/skills .claude/napkin.md 2>/dev/null || true)
+}
+
 refresh_origin_refs
 base_ref="$(resolve_base_ref)"
+worktree_ready=0
 
 if workspace_registered_in_git; then
     if git -C "$workspace_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        exit 0
+        worktree_ready=1
+    else
+        # Recover from stale registrations where the directory exists but is no longer a worktree.
+        git -C "$repo_root" worktree remove --force "$workspace_path" >/dev/null 2>&1 || true
+        git -C "$repo_root" worktree prune >/dev/null 2>&1 || true
     fi
-
-    # Recover from stale registrations where the directory exists but is no longer a worktree.
-    git -C "$repo_root" worktree remove --force "$workspace_path" >/dev/null 2>&1 || true
-    git -C "$repo_root" worktree prune >/dev/null 2>&1 || true
 fi
 
-if find "$workspace_path" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-    echo "[symphony-worktree] Workspace is not empty and cannot be initialized safely: $workspace_path" >&2
-    exit 1
-fi
-
-git -C "$repo_root" worktree prune >/dev/null 2>&1 || true
-
-find_branch_worktree_path() {
-    git -C "$repo_root" worktree list --porcelain | awk -v target="refs/heads/$branch_name" '
-        $1 == "worktree" { path = $2 }
-        $1 == "branch" && $2 == target { print path }
-    '
-}
-
-while IFS= read -r branch_worktree_path; do
-    if [[ "$branch_worktree_path" == "$workspace_path" ]]; then
-        continue
-    fi
-
-    if [[ -d "$branch_worktree_path" ]]; then
-        echo "[symphony-worktree] Branch $branch_name is already checked out at $branch_worktree_path" >&2
+if [[ "$worktree_ready" -ne 1 ]]; then
+    if find "$workspace_path" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+        echo "[symphony-worktree] Workspace is not empty and cannot be initialized safely: $workspace_path" >&2
         exit 1
     fi
-done < <(
-    git -C "$repo_root" worktree list --porcelain | awk -v target="refs/heads/$branch_name" '
-        $1 == "worktree" { path = $2 }
-        $1 == "branch" && $2 == target { print path }
-    '
-)
+
+    git -C "$repo_root" worktree prune >/dev/null 2>&1 || true
+
+    find_branch_worktree_path() {
+        git -C "$repo_root" worktree list --porcelain | awk -v target="refs/heads/$branch_name" '
+            $1 == "worktree" { path = $2 }
+            $1 == "branch" && $2 == target { print path }
+        '
+    }
+
+    while IFS= read -r branch_worktree_path; do
+        if [[ "$branch_worktree_path" == "$workspace_path" ]]; then
+            continue
+        fi
+
+        if [[ -d "$branch_worktree_path" ]]; then
+            echo "[symphony-worktree] Branch $branch_name is already checked out at $branch_worktree_path" >&2
+            exit 1
+        fi
+    done < <(
+        git -C "$repo_root" worktree list --porcelain | awk -v target="refs/heads/$branch_name" '
+            $1 == "worktree" { path = $2 }
+            $1 == "branch" && $2 == target { print path }
+        '
+    )
 
 branch_is_merged_into_base() {
     git -C "$repo_root" merge-base --is-ancestor "refs/heads/$branch_name" "$base_ref" >/dev/null 2>&1
@@ -170,10 +254,14 @@ if [[ "$branch_requires_recreation" -eq 1 ]]; then
     git -C "$repo_root" branch -D "$branch_name" >/dev/null
 fi
 
-if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch_name"; then
-    git -C "$repo_root" worktree add --force "$workspace_path" "$branch_name" >/dev/null
-else
-    git -C "$repo_root" worktree add -b "$branch_name" "$workspace_path" "$base_ref" >/dev/null
+    if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch_name"; then
+        git -C "$repo_root" worktree add --force "$workspace_path" "$branch_name" >/dev/null
+    else
+        git -C "$repo_root" worktree add -b "$branch_name" "$workspace_path" "$base_ref" >/dev/null
+    fi
 fi
+
+align_workspace_to_issue_branch
+sync_worker_support_files
 
 echo "[symphony-worktree] Prepared worktree $workspace_path on branch $branch_name (base: $base_ref)."

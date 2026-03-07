@@ -1,14 +1,13 @@
 ---
 name: land
-description:
-  Drive an open PR from merge prep through merge: sync the branch, monitor CI
-  and review feedback, fix issues when needed, and merge once everything is
-  green and mergeable.
+description: Drive an open PR from merge prep through merge by syncing the branch,
+    monitoring CI and review feedback, fixing issues when needed, and merging
+    once everything is green and mergeable.
 ---
 
 # Land
 
-Use this skill when the Linear issue is in `Merging` and the PR should be
+Use this skill when the Linear issue is in `Ready to Merge` and the PR should be
 shepherded to an actual merge.
 
 ## Goals

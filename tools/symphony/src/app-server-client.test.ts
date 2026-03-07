@@ -204,6 +204,110 @@ test('runTurn applies safe default approval and sandbox settings when omitted', 
     });
 });
 
+test('runTurn enables publish-capable network access only for publish turns', async () => {
+    const fakeProcess = new FakeAppServerProcess();
+    let stdinBuffer = '';
+    fakeProcess.stdin.on('data', (chunk) => {
+        stdinBuffer += chunk.toString();
+    });
+
+    const client = new CodexAppServerClient({
+        logger: createLoggerStub([]),
+        config: {
+            command: 'codex app-server',
+            workspacePath: '/tmp/symphony-workspaces/ROB-12',
+            responseTimeoutMs: 300,
+            turnTimeoutMs: 1000,
+            publishNetworkAccess: true,
+        },
+        spawnImpl: () => fakeProcess,
+    });
+
+    const turnPromise = client.runTurn({
+        prompt: 'Publish policy test',
+        issueIdentifier: 'ROB-12',
+        attempt: null,
+        publishMode: true,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+    fakeProcess.stdout.write(
+        '{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-456","status":"completed","items":[],"error":null}}}\n',
+    );
+
+    const result = await turnPromise;
+    assert.equal(result.status, 'completed');
+
+    const sentMessages = stdinBuffer
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+
+    assert.equal(sentMessages[2].params.sandbox, 'workspace-write');
+    assert.deepEqual(sentMessages[3].params.sandboxPolicy, {
+        type: 'workspaceWrite',
+        writableRoots: ['/tmp/symphony-workspaces/ROB-12'],
+        readOnlyAccess: {
+            type: 'fullAccess',
+        },
+        networkAccess: true,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+    });
+});
+
+test('runTurn uses publish approval policy override only for publish turns', async () => {
+    const fakeProcess = new FakeAppServerProcess();
+    let stdinBuffer = '';
+    fakeProcess.stdin.on('data', (chunk) => {
+        stdinBuffer += chunk.toString();
+    });
+
+    const client = new CodexAppServerClient({
+        logger: createLoggerStub([]),
+        config: {
+            command: 'codex app-server',
+            workspacePath: '/tmp/symphony-workspaces/ROB-12',
+            responseTimeoutMs: 300,
+            turnTimeoutMs: 1000,
+            approvalPolicy: {
+                reject: {
+                    sandbox_approval: true,
+                    rules: true,
+                    mcp_elicitations: true,
+                },
+            },
+            publishApprovalPolicy: 'never',
+        },
+        spawnImpl: () => fakeProcess,
+    });
+
+    const turnPromise = client.runTurn({
+        prompt: 'Publish approval policy test',
+        issueIdentifier: 'ROB-12',
+        attempt: null,
+        publishMode: true,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await emitHandshake(fakeProcess, 'thread-123', 'turn-456');
+    fakeProcess.stdout.write(
+        '{"method":"turn/completed","params":{"threadId":"thread-123","turn":{"id":"turn-456","status":"completed","items":[],"error":null}}}\n',
+    );
+
+    const result = await turnPromise;
+    assert.equal(result.status, 'completed');
+
+    const sentMessages = stdinBuffer
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+
+    assert.equal(sentMessages[2].params.approvalPolicy, 'never');
+    assert.equal(sentMessages[3].params.approvalPolicy, 'never');
+});
+
 test('runTurn fails with approval_required when command approval is requested under safe defaults', async () => {
     const fakeProcess = new FakeAppServerProcess();
     const client = new CodexAppServerClient({
