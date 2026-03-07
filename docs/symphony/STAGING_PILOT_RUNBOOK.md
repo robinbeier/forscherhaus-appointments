@@ -30,6 +30,16 @@ The service exposes optional state endpoints when enabled:
 - `GET /api/v1/state`
 - `POST /api/v1/refresh`
 
+## Quick Local Health Check
+
+Use this quick check to confirm the local state API is reachable and can refresh
+once on demand:
+
+```bash
+curl -fsS http://127.0.0.1:8787/api/v1/state | jq
+curl -fsS -X POST http://127.0.0.1:8787/api/v1/refresh
+```
+
 ## 24h Soak Gate
 
 Run the soak gate against the state endpoint:
