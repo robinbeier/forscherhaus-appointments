@@ -985,3 +985,109 @@ test('syncIssueWorkpadToState refreshes the workpad for In Review', async () => 
     assert.match(syncedIssue.workpadCommentBody ?? '', /Ready to Merge/);
     assert.equal(calls.length, 2);
 });
+
+test('syncIssueWorkpadToState refreshes the workpad for Ready to Merge', async () => {
+    const calls: MockFetchCall[] = [];
+
+    const adapter = new LinearTrackerAdapter({
+        config: {
+            apiKey: 'linear-token',
+            projectSlug: 'forscherhaus',
+            activeStates: ['In Progress', 'Ready to Merge'],
+        },
+        fetchImpl: async (url, init) => {
+            calls.push({url, init});
+            const body = JSON.parse(String(init?.body));
+            const query = String(body.query ?? '');
+
+            if (query.includes('query FetchIssueRunContext')) {
+                return jsonResponse({
+                    data: {
+                        issue: {
+                            id: 'issue-id-42',
+                            identifier: 'ROB-42',
+                            title: 'Heatmap refresh',
+                            description: '## Goal\n\nShip the ready-to-merge heatmap refresh.',
+                            branchName: 'beierrobin/rob-42',
+                            url: 'https://linear.app/forscherhaus/issue/ROB-42',
+                            createdAt: '2026-03-06T08:00:00.000Z',
+                            updatedAt: '2026-03-06T08:05:00.000Z',
+                            priority: null,
+                            state: {id: 'state-ready', name: 'Ready to Merge', type: 'started'},
+                            labels: {nodes: []},
+                            relations: {nodes: []},
+                            inverseRelations: {nodes: []},
+                            project: {slugId: 'forscherhaus'},
+                            comments: {
+                                nodes: [
+                                    {
+                                        id: 'comment-42',
+                                        body: '## Codex Workpad\n\nOld body',
+                                        url: 'https://linear.app/comment-42',
+                                        updatedAt: '2026-03-06T08:04:00.000Z',
+                                    },
+                                ],
+                            },
+                            team: {
+                                states: {
+                                    nodes: [
+                                        {id: 'state-in-progress', name: 'In Progress', type: 'started'},
+                                        {id: 'state-in-review', name: 'In Review', type: 'unstarted'},
+                                        {id: 'state-ready', name: 'Ready to Merge', type: 'started'},
+                                        {id: 'state-done', name: 'Done', type: 'completed'},
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            if (query.includes('mutation UpdateComment')) {
+                assert.equal(body.variables.id, 'comment-42');
+                assert.match(String(body.variables.body), /cleared for `Ready to Merge`/);
+                assert.match(String(body.variables.body), /Resume the land flow now/);
+                return jsonResponse({
+                    data: {
+                        commentUpdate: {
+                            success: true,
+                            comment: {
+                                id: 'comment-42',
+                                body: body.variables.body,
+                                url: 'https://linear.app/comment-42',
+                            },
+                        },
+                    },
+                });
+            }
+
+            throw new Error(`Unexpected query: ${query}`);
+        },
+    });
+
+    const syncedIssue = await adapter.syncIssueWorkpadToState({
+        id: 'issue-id-42',
+        identifier: 'ROB-42',
+        title: 'Heatmap refresh',
+        description: null,
+        stateName: 'Ready to Merge',
+        stateType: 'started',
+        priority: null,
+        branchName: 'beierrobin/rob-42',
+        url: 'https://linear.app/forscherhaus/issue/ROB-42',
+        labels: [],
+        blockedBy: [],
+        blockedByIdentifiers: [],
+        createdAt: '2026-03-06T08:00:00.000Z',
+        updatedAt: '2026-03-06T08:05:00.000Z',
+        projectSlug: 'forscherhaus',
+        workpadCommentId: 'comment-42',
+        workpadCommentBody: '## Codex Workpad\n\nOld body',
+        workpadCommentUrl: 'https://linear.app/comment-42',
+    });
+
+    assert.equal(syncedIssue.workpadCommentId, 'comment-42');
+    assert.match(syncedIssue.workpadCommentBody ?? '', /cleared for `Ready to Merge`/);
+    assert.match(syncedIssue.workpadCommentBody ?? '', /Resume the land flow now/);
+    assert.equal(calls.length, 2);
+});

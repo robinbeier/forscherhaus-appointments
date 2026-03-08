@@ -568,9 +568,10 @@ function buildStateSynchronizedWorkpad(issue: TrackedIssue): string {
 
     const normalizedState = normalizeHeadingName(issue.stateName);
     const isReviewState = normalizedState === 'in review';
+    const isReadyToMergeState = normalizedState === 'ready to merge';
     const isTerminalState = ['done', 'closed', 'cancelled', 'canceled', 'duplicate'].includes(normalizedState);
 
-    if (!isReviewState && !isTerminalState) {
+    if (!isReviewState && !isReadyToMergeState && !isTerminalState) {
         return buildBootstrapWorkpad(issue);
     }
 
@@ -580,19 +581,27 @@ function buildStateSynchronizedWorkpad(issue: TrackedIssue): string {
             : ['Keep the change scoped to the ticket and avoid unrelated edits.'];
     const statusSummary = isReviewState
         ? `The PR is published and ${issue.identifier} is waiting in \`${issue.stateName}\`.`
-        : `${issue.identifier} is complete in \`${issue.stateName}\`.`;
+        : isReadyToMergeState
+          ? `The PR is published and ${issue.identifier} is cleared for \`${issue.stateName}\`.`
+          : `${issue.identifier} is complete in \`${issue.stateName}\`.`;
     const nextLine = isReviewState
         ? 'Move the issue to `Ready to Merge` when the PR is green, review-clean, and approved for landing.'
-        : 'None.';
+        : isReadyToMergeState
+          ? 'Resume the land flow now and merge once the final PR watch stays green.'
+          : 'None.';
     const planItems = isReviewState
         ? [
               'Wait for reviewer feedback or explicit merge authorization.',
               'Resume the land flow when the issue moves to `Ready to Merge`.',
           ]
-        : ['No further action.'];
+        : isReadyToMergeState
+          ? ['Re-enter the land flow from the current PR state.', 'Merge the PR and move the issue to `Done`.']
+          : ['No further action.'];
     const validationItems = isReviewState
         ? [`Issue state is now \`${issue.stateName}\`.`, 'PR publish and review handoff completed.']
-        : [`Issue state is now \`${issue.stateName}\`.`, 'Merge/closure handoff completed.'];
+        : isReadyToMergeState
+          ? [`Issue state is now \`${issue.stateName}\`.`, 'PR is already published and waiting for the land flow.']
+          : [`Issue state is now \`${issue.stateName}\`.`, 'Merge/closure handoff completed.'];
 
     return [
         '## Codex Workpad',

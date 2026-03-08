@@ -652,6 +652,28 @@ function normalizeStateNames(values: string[]): Set<string> {
     return new Set(values.map((value) => normalizeStateName(value)).filter((value) => value.length > 0));
 }
 
+function getOutstandingBlockers(
+    issue: Pick<TrackedIssue, 'blockedBy'>,
+    terminalStates: Set<string>,
+): Array<{id: string | null; identifier: string | null; state: string | null}> {
+    return issue.blockedBy.filter((blocker) => {
+        const hasIdentity =
+            (typeof blocker.id === 'string' && blocker.id.trim().length > 0) ||
+            (typeof blocker.identifier === 'string' && blocker.identifier.trim().length > 0);
+
+        if (!hasIdentity) {
+            return false;
+        }
+
+        const normalizedBlockerState = normalizeStateName(blocker.state ?? undefined);
+        if (normalizedBlockerState.length === 0) {
+            return true;
+        }
+
+        return !terminalStates.has(normalizedBlockerState);
+    });
+}
+
 function nextRetryAttempt(attempt: number | null): number {
     return attempt === null ? 1 : attempt + 1;
 }
@@ -1575,9 +1597,8 @@ export class SymphonyOrchestrator {
 
             const candidates = await tracker.fetchCandidateIssues();
             this.pruneClaimedIssueVersions(candidates);
-            const todoBlockerIdentifiers = await this.loadTodoBlockers(tracker);
             const maxCandidates = normalizePositiveInteger(config.polling.maxCandidates);
-            const eligibleCandidates = this.selectEligibleCandidates(candidates, todoBlockerIdentifiers, maxCandidates);
+            const eligibleCandidates = this.selectEligibleCandidates(candidates, maxCandidates);
 
             for (const issue of eligibleCandidates) {
                 if (!this.canDispatchIssue(config, issue)) {
@@ -1704,16 +1725,7 @@ export class SymphonyOrchestrator {
         }
     }
 
-    private async loadTodoBlockers(tracker: TrackerClient): Promise<Set<string>> {
-        const todoIssues = await tracker.fetchIssueStatesByStateNames(['Todo']);
-        return new Set(todoIssues.map((issue) => issue.identifier));
-    }
-
-    private selectEligibleCandidates(
-        candidates: TrackedIssue[],
-        todoBlockerIdentifiers: Set<string>,
-        maxCandidates: number,
-    ): TrackedIssue[] {
+    private selectEligibleCandidates(candidates: TrackedIssue[], maxCandidates: number): TrackedIssue[] {
         const sorted = candidates.slice().sort(compareCandidateIssues).slice(0, maxCandidates);
 
         return sorted.filter((issue) => {
@@ -1728,15 +1740,6 @@ export class SymphonyOrchestrator {
 
             if (claimedVersion && claimedVersion !== issue.updatedAt) {
                 this.claimedIssueVersions.delete(issue.id);
-            }
-
-            const blockedByTodo = issue.blockedByIdentifiers.some((blocker) => todoBlockerIdentifiers.has(blocker));
-            if (blockedByTodo) {
-                this.logger.info('Skipping candidate issue because blocker is in Todo state', {
-                    ...issueLogFields(issue),
-                    blockers: issue.blockedByIdentifiers,
-                });
-                return false;
             }
 
             return true;
@@ -1756,6 +1759,20 @@ export class SymphonyOrchestrator {
 
     private canDispatchIssue(config: LoadedWorkflowConfig, issue: TrackedIssue): boolean {
         if (this.runningByIssueId.size >= normalizePositiveInteger(config.agent.maxConcurrent)) {
+            return false;
+        }
+
+        const terminalStates = normalizeStateNames(config.tracker.terminalStates);
+        const outstandingBlockers = getOutstandingBlockers(issue, terminalStates);
+        if (outstandingBlockers.length > 0) {
+            this.logger.info('Skipping issue because blockedBy issues are not terminal yet', {
+                ...issueLogFields(issue),
+                blockers: outstandingBlockers.map((blocker) => ({
+                    id: blocker.id,
+                    identifier: blocker.identifier,
+                    state: blocker.state,
+                })),
+            });
             return false;
         }
 

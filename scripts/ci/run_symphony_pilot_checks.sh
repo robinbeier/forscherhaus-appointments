@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 RUN_FULL_GATE=0
 COMPOSE_CMD=()
+LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
 
 usage() {
     cat <<'USAGE'
@@ -50,11 +51,15 @@ ensure_docker_compose() {
     fi
 
     require_cmd docker
+    local compose_files=()
+    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$LOCAL_CI_COMPOSE_OVERRIDE" ]]; then
+        compose_files=(-f docker-compose.yml -f "$LOCAL_CI_COMPOSE_OVERRIDE")
+    fi
 
     if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose)
+        COMPOSE_CMD=(docker compose "${compose_files[@]}")
     elif command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose)
+        COMPOSE_CMD=(docker-compose "${compose_files[@]}")
     else
         echo "[symphony-pilot-checks] docker compose command not found." >&2
         exit 1

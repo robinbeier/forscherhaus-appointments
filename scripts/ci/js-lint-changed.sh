@@ -4,15 +4,20 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+source ./scripts/ci/git_helpers.sh
 
 event_name="${GITHUB_EVENT_NAME:-local}"
 range=""
 
 if [[ "$event_name" == "pull_request" ]]; then
     base_ref="${GITHUB_BASE_REF:-main}"
-    git fetch --no-tags --no-write-fetch-head origin "$base_ref"
-    base_sha="$(git merge-base HEAD "origin/$base_ref")"
-    range="$base_sha...HEAD"
+    git_ci_refresh_base_ref_if_safe "$base_ref" "js-lint-changed"
+    if git rev-parse --verify "origin/$base_ref" >/dev/null 2>&1; then
+        base_sha="$(git merge-base HEAD "origin/$base_ref")"
+        range="$base_sha...HEAD"
+    else
+        range="HEAD~1...HEAD"
+    fi
 elif [[ "$event_name" == "push" ]]; then
     before_sha="${GITHUB_EVENT_BEFORE:-}"
     if [[ -n "$before_sha" && "$before_sha" != "0000000000000000000000000000000000000000" ]]; then

@@ -27,6 +27,7 @@ function createIssue(args: {
     priority: number | null;
     createdAt: string;
     blockedBy?: string[];
+    blockedByStates?: Record<string, string | null>;
     stateName?: string;
     description?: string | null;
 }): TrackedIssue {
@@ -44,7 +45,7 @@ function createIssue(args: {
         blockedBy: (args.blockedBy ?? []).map((identifier) => ({
             id: null,
             identifier,
-            state: null,
+            state: args.blockedByStates?.[identifier] ?? null,
         })),
         blockedByIdentifiers: args.blockedBy ?? [],
         createdAt: args.createdAt,
@@ -274,7 +275,7 @@ function createDeferred<T>(): {
     };
 }
 
-test('runTick dispatches highest-priority eligible candidate and skips Todo-blocked issues', async () => {
+test('runTick dispatches highest-priority eligible candidate and skips issues with non-terminal blockers', async () => {
     const tracker = new TrackerStub();
     tracker.candidates = [
         createIssue({
@@ -289,6 +290,7 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
             priority: 1,
             createdAt: '2026-03-06T07:00:00.000Z',
             blockedBy: ['ROB-1'],
+            blockedByStates: {'ROB-1': 'In Progress'},
         }),
         createIssue({
             id: 'c',
@@ -296,14 +298,13 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
             priority: 1,
             createdAt: '2026-03-06T07:30:00.000Z',
         }),
-    ];
-    tracker.todoIssues = [
         createIssue({
-            id: 'todo-1',
-            identifier: 'ROB-1',
-            priority: 3,
-            createdAt: '2026-03-01T00:00:00.000Z',
-            stateName: 'Todo',
+            id: 'd',
+            identifier: 'ROB-13-D',
+            priority: 1,
+            createdAt: '2026-03-06T06:30:00.000Z',
+            blockedBy: ['ROB-2'],
+            blockedByStates: {'ROB-2': 'Done'},
         }),
     ];
     tracker.statesByIssueId.set('c', 'Done');
@@ -323,6 +324,9 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
                     issueIdentifier: request.issueIdentifier,
                     attempt: request.attempt,
                 });
+                if (request.issueIdentifier === 'ROB-13-D') {
+                    tracker.statesByIssueId.set('d', 'Done');
+                }
                 return {
                     status: 'completed',
                     outputText: 'ok',
@@ -338,7 +342,7 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
     await orchestrator.runTick();
     await orchestrator.shutdown();
 
-    assert.deepEqual(dispatchRequests, [{issueIdentifier: 'ROB-13-C', attempt: null}]);
+    assert.deepEqual(dispatchRequests, [{issueIdentifier: 'ROB-13-D', attempt: null}]);
     assert.equal(orchestrator.getSnapshot().retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
 });

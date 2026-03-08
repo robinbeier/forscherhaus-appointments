@@ -3,10 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+source ./scripts/ci/git_helpers.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 COMPOSE_CMD=()
 ROOT_NODE_MINIMUM_MAJOR=18
+LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -33,11 +35,15 @@ ensure_docker_compose() {
     fi
 
     require_cmd docker
+    local compose_files=()
+    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$LOCAL_CI_COMPOSE_OVERRIDE" ]]; then
+        compose_files=(-f docker-compose.yml -f "$LOCAL_CI_COMPOSE_OVERRIDE")
+    fi
 
     if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose)
+        COMPOSE_CMD=(docker compose "${compose_files[@]}")
     elif command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose)
+        COMPOSE_CMD=(docker-compose "${compose_files[@]}")
     else
         echo "[pre-pr-quick] docker compose command not found." >&2
         exit 1
@@ -109,7 +115,7 @@ require_cmd node
 require_minimum_node_major "$ROOT_NODE_MINIMUM_MAJOR"
 
 # Keep changed-file checks deterministic against current base branch state.
-git fetch --no-tags --no-write-fetch-head origin "$BASE_REF" >/dev/null 2>&1 || true
+git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh

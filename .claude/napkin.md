@@ -12,10 +12,14 @@
 
 1. **[2026-03-07] Parse Symphony wrapper events from nested Codex payloads**
    Do instead: when debugging Symphony first-turn behavior, extract agent text from `params.msg.payload.*` and command text from `params.msg.{command,parsed_cmd}`, and merge streaming deltas with overlap detection because Codex wrapper updates may be cumulative rather than purely incremental.
+1. **[2026-03-07] End Symphony publish turns immediately after the review handoff**
+   Do instead: once PR creation, Linear attachment, workpad sync, and the state transition to `In Review` are complete, stop the active turn immediately; a publish turn that keeps running after the review handoff is a regression and wastes context.
 1. **[2026-03-07] Align fresh Symphony issue worktrees with the Linear branch context**
    Do instead: before a serious Symphony pilot rerun on a real issue, recreate the preserved issue worktree from `origin/main` on the branch name Linear already shows for the ticket (or update Linear to the branch Symphony will use) so the prompt branch context and actual workspace branch do not drift apart.
 1. **[2026-03-07] Keep Symphony state and commit rules explicit in the workflow prompt**
    Do instead: state near the top of `WORKFLOW.md` that `In Progress`/other implementation states must create a local commit before ending, while clean `In Review`/`Ready to Merge`/terminal runs may finish without a new commit.
+1. **[2026-03-08] Enforce Symphony campaign sequencing from real `blockedBy` states**
+   Do instead: in upgrade campaigns, dispatch a Linear issue only when every `blockedBy` issue is already in a terminal state; treating only `Todo` blockers as blocking lets later tickets run out of order and weakens the whole batch.
 1. **[2026-03-06] Preserve failed Symphony worktrees for inspection**
    Do instead: clean up issue worktrees only after successful runs; keep timed-out or failed workspaces on disk so you can inspect what the agent changed before it got stuck.
 1. **[2026-03-07] Keep repo-local Symphony skills and napkin available inside worker worktrees**
@@ -24,12 +28,10 @@
    Do instead: after `gh pr merge` exits non-zero or a run stops with `reconciliation_terminal`, re-check GitHub and Linear before retrying because the PR may already be merged and the issue may already be `Done`.
 1. **[2026-03-06] Keep Symphony Linear GraphQL queries aligned with current schema**
    Do instead: use `project.slugId` (not `project.slug`) and relation-based issue links (`relations`/`inverseRelations`) instead of removed fields like `blockedByIssues`; include response-body details for non-2xx tracker errors to speed up diagnosis.
-1. **[2026-03-06] Validate merge-sensitive and dependency changes in the CI runtime**
-   Do instead: run the relevant Docker/CI-parity gates for merge-sensitive changes, especially when touching `composer.json`, `composer.lock`, `package.json`, or `package-lock.json`, because host PHP/Node versions may be newer than the blocking CI versions.
-1. **[2026-03-04] Treat OpenAPI error responses as schema-optional in contract smokes**
-   Do instead: for 4xx/5xx checks (for example unauthorized guards), assert status/header contracts first and only enforce JSON schema when the spec actually defines one.
-1. **[2026-02-22] Rebuild frontend bundles when touching `assets/js` or `assets/css`**
-   Do instead: run `npx gulp scripts` and/or `npx gulp styles`, then verify updated artifacts in `build/`.
+1. **[2026-03-07] Read Symphony token totals as spend telemetry, not raw live context**
+   Do instead: debug pilot efficiency primarily with `time-to-first-diff`, handoff timing, per-event `last.totalTokens`, and final stop reason; the logged `totalTokens` values are cumulative session spend and can exceed the model context window without meaning the live prompt is that large.
+1. **[2026-03-07] Re-check final workpad state after Symphony review or merge handoffs**
+   Do instead: after a real pilot run reaches `In Review` or `Done`, verify that the last `## Codex Workpad` comment matches the actual PR/merge outcome; a correct Linear state alone can still leave stale operator guidance behind.
 
 ## Repo Guardrails & Domain Behavior
 
@@ -54,8 +56,8 @@
    Do instead: use `docker compose run --rm php-fpm composer deptrac:analyze` because newer host PHP runtimes can emit vendor-level deprecation noise.
 4. **[2026-03-03] Scope `rg` to the repository/workspace root**
    Do instead: run `rg` from the project directory (or target folders explicitly) to avoid macOS permission noise and long scans across `~/Library`.
-5. **[2026-03-02] When moving the repo root path, repair git + automation path dependencies**
-   Do instead: stop compose, move repo, keep temporary symlink at old path, run `git worktree repair && git worktree prune`, then replace old path in `/Users/robinbeier/.codex/automations/*/automation.toml` `cwds`.
+5. **[2026-03-08] Keep pre-PR diff checks worktree-safe inside Symphony workers**
+   Do instead: avoid hard `git fetch` writes from worker worktrees whose git common dir lives outside the writable workspace; fall back to existing `origin/*` refs or a local `HEAD~1...HEAD` diff range so quick/full gates stay usable under `workspace-write`.
 6. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
    Do instead: check for `* 2.*`/`* 3.*` files (especially in `assets/vendor` and `vendor`) and remove/rehydrate them before `./build_release.sh`, because `rsync` can stall on FileProvider `compressed,dataless` entries.
 7. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
