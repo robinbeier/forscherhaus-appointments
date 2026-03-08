@@ -29,7 +29,7 @@ let deleteSyncPromise;
 
 function getDeleteSync() {
     // `del` >= 8 is ESM-only, so keep the existing CommonJS gulpfile and load it lazily.
-    deleteSyncPromise ??= import('del').then(({deleteSync}) => deleteSync);
+    deleteSyncPromise ??= import('del').then((mod) => mod.deleteSync ?? mod.sync ?? mod.default?.sync);
     return deleteSyncPromise;
 }
 
@@ -74,7 +74,9 @@ function archive(done) {
             fs.copySync('README.md', 'build/README.md');
             fs.copySync('LICENSE', 'build/LICENSE');
 
-            childProcess.execSync('cd build && composer install --no-interaction --no-dev --no-scripts --optimize-autoloader');
+            childProcess.execSync(
+                'cd build && composer install --no-interaction --no-dev --no-scripts --optimize-autoloader',
+            );
 
             fs.removeSync('build/composer.lock');
             deleteSync('**/.DS_Store');
@@ -188,9 +190,10 @@ function vendor(done) {
             );
 
             // select2
-            gulp.src(['node_modules/select2/dist/js/select2.min.js', 'node_modules/select2/dist/css/select2.min.css']).pipe(
-                gulp.dest('assets/vendor/select2'),
-            );
+            gulp.src([
+                'node_modules/select2/dist/js/select2.min.js',
+                'node_modules/select2/dist/css/select2.min.css',
+            ]).pipe(gulp.dest('assets/vendor/select2'));
 
             // tippy.js
             gulp.src(['node_modules/tippy.js/dist/tippy-bundle.umd.min.js']).pipe(gulp.dest('assets/vendor/tippy.js'));
