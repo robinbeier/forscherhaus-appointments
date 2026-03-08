@@ -226,8 +226,10 @@ PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 bash ./scripts/ci/pre_pr_full.sh
 ```
 
-Hook note: `./scripts/setup-worktree.sh` installs a managed `.git/hooks/pre-push` hook that runs `pre_pr_quick.sh`.
-Use `SKIP_PREPUSH=1 git push ...` to bypass once, or `PRE_PUSH_FULL=1 git push ...` to run the full gate at push time.
+Hook note: `./scripts/setup-worktree.sh` installs managed `.git/hooks/pre-commit` and `.git/hooks/pre-push` hooks.
+The managed `pre-commit` keeps PHP-related commits on the same deterministic MySQL/bootstrap path as `pre_pr_quick.sh`, while the managed `pre-push` runs `pre_pr_quick.sh`.
+Use `./scripts/install-git-hooks.sh` to refresh an existing clone, or `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` to replace older custom hooks intentionally.
+Use `SKIP_PRECOMMIT=1 git commit ...` or `SKIP_PREPUSH=1 git push ...` to bypass once; use `PRE_PUSH_FULL=1 git push ...` to run the full gate at push time.
 
 CI note: deep docker-compose jobs run only when relevant files changed and, for pull requests, only when the PR is not in draft mode.
 CI note: `deep-check-bootstrap` now ships a vendor-only dependency artifact. Deep docker-compose jobs restore `vendor/` from that artifact and set CI-only bootstrap flags so `php-fpm` does not rerun `npm install` or asset compilation when `node_modules/` is absent.

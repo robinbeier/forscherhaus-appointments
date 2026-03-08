@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# managed-by-forscherhaus-precommit
+if [[ "${SKIP_PRECOMMIT:-0}" == "1" ]]; then
+    echo "SKIP_PRECOMMIT=1 detected - skipping hook."
+    exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+source ./scripts/ci/docker_compose_helpers.sh
+
+if git diff --cached --quiet; then
+    exit 0
+fi
+
+staged_files=()
+while IFS= read -r file; do
+    staged_files+=("$file")
+done < <(git diff --cached --name-only --diff-filter=ACMRD)
+
+IN_CONTAINER=0
+if [[ -f /.dockerenv ]]; then
+    IN_CONTAINER=1
+fi
+
+CI_DOCKER_LOG_PREFIX="pre-commit"
+STACK_STARTED=0
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+require_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        die "Required command '$1' not found. Please install it and retry."
+    fi
+}
+
+echo_section() {
+    echo
+    echo "== $*"
+}
+
+ensure_local_config() {
+    if [[ -f config.php ]]; then
+        return
+    fi
+
+    cp config-sample.php config.php
+}
+
+configure_hook_compose_project() {
+    local repo_slug
+    local git_dir_checksum
+
+    repo_slug="$(basename "${repo_root}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
+    git_dir_checksum="$(printf '%s' "$(git rev-parse --absolute-git-dir)" | cksum | awk '{print $1}')"
+    CI_DOCKER_COMPOSE_PROJECT_NAME="${CI_DOCKER_COMPOSE_PROJECT_NAME:-${repo_slug}-precommit-${git_dir_checksum}}"
+    export CI_DOCKER_COMPOSE_PROJECT_NAME
+}
+
+ensure_stack_started() {
+    if [[ "${STACK_STARTED}" == "1" || "${IN_CONTAINER}" == "1" ]]; then
+        return
+    fi
+
+    ci_docker_compose up -d php-fpm mysql >/dev/null
+    STACK_STARTED=1
+}
+
+cleanup_stack() {
+    if [[ "${STACK_STARTED}" == "1" ]]; then
+        ci_docker_cleanup_stack
+    fi
+}
+
+run_in_env() {
+    if [[ "${IN_CONTAINER}" -eq 1 ]]; then
+        "$@"
+        return
+    fi
+
+    "$@"
+}
+
+trap cleanup_stack EXIT
+
+[[ -d vendor ]] || die "Composer dependencies missing (vendor/ not found). Run './scripts/setup-worktree.sh'."
+[[ -d node_modules ]] || die "Node dependencies missing (node_modules/ not found). Run './scripts/setup-worktree.sh'."
+
+require_cmd git
+
+echo_section "Check forbidden files"
+if printf '%s\n' "${staged_files[@]}" | grep -q '^storage/logs/'; then
+    die "Files under storage/logs/ must not be committed."
+fi
+
+git diff --cached --check || die "Whitespace errors detected in staged changes."
+
+php_files=()
+prettier_files=()
+php_related=false
+frontend_related=false
+
+for file in "${staged_files[@]}"; do
+    case "${file}" in
+        *.php)
+            if [[ -f "${file}" ]]; then
+                php_files+=("${file}")
+                prettier_files+=("${file}")
+            fi
+            php_related=true
+            ;;
+        *.js|*.jsx|*.ts|*.tsx|*.css|*.scss|*.sass|*.json|*.md|*.yml|*.yaml|*.html|*.htm)
+            if [[ -f "${file}" ]]; then
+                prettier_files+=("${file}")
+            fi
+            ;;
+    esac
+
+    case "${file}" in
+        application/*|tests/*|composer.json|composer.lock|phpunit.xml|config/*.php|config.php|database/migrations/*)
+            php_related=true
+            ;;
+    esac
+
+    case "${file}" in
+        assets/*|build/*|gulpfile.js|package.json|package-lock.json|babel.config.json|build_release.sh)
+            frontend_related=true
+            ;;
+    esac
+done
+
+if [[ "${#prettier_files[@]}" -gt 0 ]]; then
+    echo_section "Run prettier checks"
+    require_cmd npx
+    run_in_env npx --yes prettier --check "${prettier_files[@]}"
+fi
+
+if [[ "${#php_files[@]}" -gt 0 ]]; then
+    echo_section "Run php -l syntax checks"
+    if [[ "${IN_CONTAINER}" -eq 1 ]]; then
+        require_cmd php
+        for php_file in "${php_files[@]}"; do
+            run_in_env php -l "${php_file}" >/dev/null || die "PHP syntax error in ${php_file}"
+        done
+    else
+        require_cmd docker
+        configure_hook_compose_project
+        ensure_stack_started
+        for php_file in "${php_files[@]}"; do
+            ci_docker_compose exec -T -w /var/www/html php-fpm php -l "${php_file}" >/dev/null || die "PHP syntax error in ${php_file}"
+        done
+    fi
+fi
+
+if [[ "${php_related}" == true ]]; then
+    echo_section "Run PHPUnit suite"
+    ensure_local_config
+
+    if [[ "${IN_CONTAINER}" -eq 1 ]]; then
+        require_cmd composer
+        composer test
+    else
+        require_cmd docker
+        configure_hook_compose_project
+        ensure_stack_started
+        ci_docker_wait_for_mysql_readiness "pre-commit"
+        ci_docker_install_seed_instance "pre-commit" run --rm php-fpm php index.php console install
+        ci_docker_compose run --rm php-fpm composer test
+    fi
+fi
+
+if [[ "${frontend_related}" == true ]]; then
+    echo_section "Build frontend assets (npm run build)"
+    require_cmd npm
+    pre_status="$(git status --porcelain)"
+    run_in_env npm run build --silent
+    post_status="$(git status --porcelain)"
+    if [[ "${pre_status}" != "${post_status}" ]]; then
+        echo "INFO: npm run build produced filesystem changes. Please review the output."
+        die "Build artifacts not staged. Stage or discard the generated files before committing."
+    fi
+fi
+
+echo
+echo "Pre-commit checks passed."
+exit 0

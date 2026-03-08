@@ -412,13 +412,14 @@ php index.php console sync
 
 ## Pre-Commit Preconditions
 
--   Der lokale `pre-commit` Hook erwartet `vendor/` und `node_modules/`.
+-   Der managed `pre-commit` Hook erwartet `vendor/` und `node_modules/` und faehrt fuer PHP-bezogene Commits einen deterministischen Docker-/MySQL-Bootstrap aehnlich zu `pre_pr_quick.sh`.
 -   In neuen Worktrees einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausfuehren.
 -   `scripts/ci/pre_pr_quick.sh` und `scripts/ci/pre_pr_full.sh` bootstrappen fehlende `vendor/`/`node_modules/` automatisch (via `composer install` + `npm ci`/`npm install`).
 -   Bei diesem Auto-Bootstrap ist Netzwerkzugriff auf Package-Registries erforderlich; ohne Netz bleiben die Gates weiterhin blockiert.
 -   Bei Netzwerkrestriktionen koennen `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
 -   Ausnahme fuer reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
--   `./scripts/setup-worktree.sh` installiert einen managed `.git/hooks/pre-push` Hook (`pre_pr_quick.sh`).
+-   `./scripts/setup-worktree.sh` installiert managed `.git/hooks/pre-commit` und `.git/hooks/pre-push` Hooks.
+-   Bestehende Clones koennen die Hooks mit `./scripts/install-git-hooks.sh` aktualisieren; mit `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` werden bewusst aeltere Custom-Hooks ersetzt.
 -   Fuer einmaliges Bypassen: `SKIP_PREPUSH=1 git push ...`; fuer Full-Gate beim Push: `PRE_PUSH_FULL=1 git push ...`.
 -   Optional kann die Hook-/Pre-PR-Basis mit `PRE_PR_BASE_REF` ueberschrieben werden (Standard: `main`).
 -   `--no-verify` nur als letzter Ausweg verwenden.

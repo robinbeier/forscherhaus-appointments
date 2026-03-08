@@ -39,7 +39,7 @@ bash ./scripts/ci/ensure_local_deps.sh --force
 # Populate assets/vendor from node_modules (needed by gulp workflows).
 npx gulp vendor
 
-# Install managed git hooks for pre-push CI preflight checks.
+# Install managed git hooks for local pre-commit and pre-push checks.
 bash ./scripts/install-git-hooks.sh
 
 echo "[setup] Worktree setup completed."
