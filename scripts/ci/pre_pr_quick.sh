@@ -6,10 +6,23 @@ cd "$ROOT_DIR"
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 COMPOSE_CMD=()
+ROOT_NODE_MINIMUM_MAJOR=18
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "[pre-pr-quick] Missing required command: $1" >&2
+        exit 1
+    fi
+}
+
+require_minimum_node_major() {
+    local required_major="$1"
+    local node_major
+
+    node_major="$(node -p "process.versions.node.split('.')[0]")"
+
+    if [[ "$node_major" -lt "$required_major" ]]; then
+        echo "[pre-pr-quick] Node.js >=${required_major} is required (found $(node --version))." >&2
         exit 1
     fi
 }
@@ -77,6 +90,8 @@ fi
 
 require_cmd git
 require_cmd python3
+require_cmd node
+require_minimum_node_major "$ROOT_NODE_MINIMUM_MAJOR"
 
 # Keep changed-file checks deterministic against current base branch state.
 git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
