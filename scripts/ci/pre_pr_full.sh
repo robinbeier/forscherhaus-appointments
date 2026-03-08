@@ -102,8 +102,10 @@ for suite in "${DEEP_RUNTIME_SUITES[@]}"; do
 done
 
 if [[ "$RUN_COVERAGE" == "1" ]]; then
-    echo_section "Coverage delta gate"
-    ci_docker_compose exec -T php-fpm composer test:coverage:unit
+    echo_section "Coverage shard + delta gate"
+    ci_docker_compose exec -T php-fpm composer test:coverage:unit-shard
+    ci_docker_compose exec -T php-fpm composer test:coverage:integration-shard
+    ci_docker_compose exec -T php-fpm composer test:coverage:merge-shards
     ci_docker_compose exec -T php-fpm composer check:coverage:delta
 fi
 
@@ -112,7 +114,7 @@ if [[ "$RUN_COVERAGE" == "1" ]]; then
     if [[ "$REQUEST_CONTRACTS_L2_WARNED" == "1" ]]; then
         echo "[pre-pr-full] All blocking checks passed (including coverage); request-contracts:l2 reported advisory findings."
     else
-        echo "[pre-pr-full] All checks passed (including coverage delta gate)."
+        echo "[pre-pr-full] All checks passed (including coverage shard merge + delta gate)."
     fi
 else
     if [[ "$REQUEST_CONTRACTS_L2_WARNED" == "1" ]]; then

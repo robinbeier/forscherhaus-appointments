@@ -68,6 +68,8 @@ class GateCliSupportTest extends TestCase
         try {
             $tarResult = $this->runCommand(['tar', '-czf', $archivePath, '-C', $archiveRoot, '.']);
             $this->assertSame(0, $tarResult['exit_code'], $tarResult['stderr']);
+            $resolvedCwd = realpath($cwd);
+            $this->assertIsString($resolvedCwd);
 
             $result = $this->runCommand(
                 [
@@ -93,9 +95,9 @@ class GateCliSupportTest extends TestCase
             );
 
             $this->assertSame(0, $result['exit_code'], $result['stderr']);
-            $this->assertStringContainsString("dump '{$cwd}/fixtures/dump.sql.gz'", $result['stdout']);
-            $this->assertStringContainsString("credentials '{$cwd}/fixtures/predeploy.ini'", $result['stdout']);
-            $this->assertStringContainsString("report '{$cwd}/reports/predeploy.json'", $result['stdout']);
+            $this->assertStringContainsString("dump '{$resolvedCwd}/fixtures/dump.sql.gz'", $result['stdout']);
+            $this->assertStringContainsString("credentials '{$resolvedCwd}/fixtures/predeploy.ini'", $result['stdout']);
+            $this->assertStringContainsString("report '{$resolvedCwd}/reports/predeploy.json'", $result['stdout']);
         } finally {
             $this->removeDirectory($workspace);
         }
