@@ -11,13 +11,11 @@
 ## Execution & Validation (Highest Priority)
 
 1. **[2026-03-07] Parse Symphony wrapper events from nested Codex payloads**
-   Do instead: when debugging Symphony first-turn behavior, extract agent text from `params.msg.payload.*` and command text from `params.msg.{command,parsed_cmd}`, and merge streaming deltas with overlap detection because Codex wrapper updates may be cumulative rather than purely incremental.
+   Do instead: when debugging Symphony first-turn behavior, extract agent text from `params.msg.payload.*` and command text from `params.msg.{command,parsed_cmd}`, merge streaming deltas with overlap detection because Codex wrapper updates may be cumulative rather than purely incremental, and sanity-check derived helper fields like `first_repo_target_path` before trusting them because slashy package identifiers can be misclassified as file targets.
 1. **[2026-03-07] End Symphony publish turns immediately after the review handoff**
-   Do instead: once PR creation, Linear attachment, workpad sync, and the state transition to `In Review` are complete, stop the active turn immediately; a publish turn that keeps running after the review handoff is a regression and wastes context.
+   Do instead: once PR creation, Linear attachment, workpad sync, and the state transition to `In Review` are complete, stop the active turn immediately; a publish turn that keeps running after the review handoff is a regression and wastes context, and the resulting `reconciliation_non_active` / `turn_cancelled` stop is an expected success-path handoff, not a failure.
 1. **[2026-03-07] Align fresh Symphony issue worktrees with the Linear branch context**
    Do instead: before a serious Symphony pilot rerun on a real issue, recreate the preserved issue worktree from `origin/main` on the branch name Linear already shows for the ticket (or update Linear to the branch Symphony will use) so the prompt branch context and actual workspace branch do not drift apart.
-1. **[2026-03-07] Keep Symphony state and commit rules explicit in the workflow prompt**
-   Do instead: state near the top of `WORKFLOW.md` that `In Progress`/other implementation states must create a local commit before ending, while clean `In Review`/`Ready to Merge`/terminal runs may finish without a new commit.
 1. **[2026-03-08] Enforce Symphony campaign sequencing from real `blockedBy` states**
    Do instead: in upgrade campaigns, dispatch a Linear issue only when every `blockedBy` issue is already in a terminal state; treating only `Todo` blockers as blocking lets later tickets run out of order and weakens the whole batch.
 1. **[2026-03-06] Preserve failed Symphony worktrees for inspection**
@@ -28,8 +26,8 @@
    Do instead: after `gh pr merge` exits non-zero or a run stops with `reconciliation_terminal`, re-check GitHub and Linear before retrying because the PR may already be merged and the issue may already be `Done`.
 1. **[2026-03-06] Keep Symphony Linear GraphQL queries aligned with current schema**
    Do instead: use `project.slugId` (not `project.slug`) and relation-based issue links (`relations`/`inverseRelations`) instead of removed fields like `blockedByIssues`; include response-body details for non-2xx tracker errors to speed up diagnosis.
-1. **[2026-03-07] Read Symphony token totals as spend telemetry, not raw live context**
-   Do instead: debug pilot efficiency primarily with `time-to-first-diff`, handoff timing, per-event `last.totalTokens`, and final stop reason; the logged `totalTokens` values are cumulative session spend and can exceed the model context window without meaning the live prompt is that large.
+1. **[2026-03-07] Read Symphony token totals as spend telemetry and interpret post-diff stops separately**
+   Do instead: debug pilot efficiency primarily with `time-to-first-diff`, handoff timing, per-event `last.totalTokens`, and final stop reason; the logged `totalTokens` values are cumulative session spend and can exceed the model context window without meaning the live prompt is that large, and a `post_diff_checkpoint` that exhausts retry budget is a continuation-budget problem rather than proof that the code path itself failed.
 1. **[2026-03-07] Re-check final workpad state after Symphony review or merge handoffs**
    Do instead: after a real pilot run reaches `In Review` or `Done`, verify that the last `## Codex Workpad` comment matches the actual PR/merge outcome; a correct Linear state alone can still leave stale operator guidance behind.
 
@@ -54,10 +52,10 @@
    Do instead: set `PRE_PR_BASE_REF=<target-base>` for `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh`, or managed pre-push runs; add `PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=1` when strict local request-contracts L2 blocking is required.
 3. **[2026-03-03] Run Deptrac via Docker for stable local output**
    Do instead: use `docker compose run --rm php-fpm composer deptrac:analyze` because newer host PHP runtimes can emit vendor-level deprecation noise.
-4. **[2026-03-03] Scope `rg` to the repository/workspace root**
-   Do instead: run `rg` from the project directory (or target folders explicitly) to avoid macOS permission noise and long scans across `~/Library`.
-5. **[2026-03-08] Keep pre-PR diff checks worktree-safe inside Symphony workers**
-   Do instead: avoid hard `git fetch` writes from worker worktrees whose git common dir lives outside the writable workspace; fall back to existing `origin/*` refs or a local `HEAD~1...HEAD` diff range so quick/full gates stay usable under `workspace-write`.
+4. **[2026-03-08] Keep pre-PR diff checks worktree-safe inside Symphony workers**
+   Do instead: avoid hard `git fetch` writes from worker worktrees whose git common dir lives outside the writable workspace; fall back to existing `origin/*` refs or a local `HEAD~1...HEAD` diff range so quick/full gates stay usable under `workspace-write`, and make sure no host stack is still binding the worktree's expected MySQL/HTTP ports before commit or pre-push hooks run.
+5. **[2026-03-08] Run lockfile-refresh gates from a committed lockfile baseline**
+   Do instead: for branches whose main change is `package-lock.json`, commit the converged lockfile before running `pre_pr_quick` or `pre_pr_full`; the quick gate intentionally re-runs `npm install --package-lock-only` and compares the result to `HEAD`, so running it before the lockfile commit produces a false drift failure.
 6. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
    Do instead: check for `* 2.*`/`* 3.*` files (especially in `assets/vendor` and `vendor`) and remove/rehydrate them before `./build_release.sh`, because `rsync` can stall on FileProvider `compressed,dataless` entries.
 7. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
