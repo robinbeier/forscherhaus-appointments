@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "636367a864dc94f3ada4196516fabfae",
+    "content-hash": "b2eb04699fec954162967f52241a718c",
     "packages": [
         {
             "name": "ezyang/htmlpurifier",
@@ -1828,16 +1828,16 @@
     "packages-dev": [
         {
             "name": "deptrac/deptrac",
-            "version": "2.0.7",
+            "version": "3.0.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/deptrac/deptrac.git",
-                "reference": "815c349a027ed4f0c866405b783f4d4623f1960c"
+                "reference": "605ee322f273ade1727f5ff2db3b47566140f4bf"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/deptrac/deptrac/zipball/815c349a027ed4f0c866405b783f4d4623f1960c",
-                "reference": "815c349a027ed4f0c866405b783f4d4623f1960c",
+                "url": "https://api.github.com/repos/deptrac/deptrac/zipball/605ee322f273ade1727f5ff2db3b47566140f4bf",
+                "reference": "605ee322f273ade1727f5ff2db3b47566140f4bf",
                 "shasum": ""
             },
             "require": {
@@ -1857,7 +1857,7 @@
                     "bootstrap.php"
                 ],
                 "psr-4": {
-                    "Qossmic\\Deptrac\\": "src/"
+                    "Deptrac\\Deptrac\\": "src/"
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
@@ -1870,9 +1870,9 @@
             ],
             "support": {
                 "issues": "https://github.com/deptrac/deptrac/issues",
-                "source": "https://github.com/deptrac/deptrac/tree/2.0.7"
+                "source": "https://github.com/deptrac/deptrac/tree/3.0.0"
             },
-            "time": "2025-03-07T14:29:19+00:00"
+            "time": "2025-02-17T08:20:48+00:00"
         },
         {
             "name": "doctrine/instantiator",
@@ -2182,15 +2182,15 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "1.12.33",
+            "version": "2.1.40",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/37982d6fc7cbb746dda7773530cda557cdf119e1",
-                "reference": "37982d6fc7cbb746dda7773530cda557cdf119e1",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/9b2c7aeb83a75d8680ea5e7c9b7fca88052b766b",
+                "reference": "9b2c7aeb83a75d8680ea5e7c9b7fca88052b766b",
                 "shasum": ""
             },
             "require": {
-                "php": "^7.2|^8.0"
+                "php": "^7.4|^8.0"
             },
             "conflict": {
                 "phpstan/phpstan-shim": "*"
@@ -2231,7 +2231,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-02-28T20:30:03+00:00"
+            "time": "2026-02-23T15:04:35+00:00"
         },
         {
             "name": "phpunit/php-code-coverage",
