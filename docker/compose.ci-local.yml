@@ -1,0 +1,6 @@
+services:
+    nginx:
+        ports: []
+
+    mysql:
+        ports: []

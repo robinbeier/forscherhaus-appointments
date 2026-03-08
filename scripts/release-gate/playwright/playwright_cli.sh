@@ -6,6 +6,10 @@ if ! command -v npx >/dev/null 2>&1; then
   exit 1
 fi
 
+export PLAYWRIGHT_MCP_BROWSER="${PLAYWRIGHT_MCP_BROWSER:-chrome}"
+export PLAYWRIGHT_MCP_NO_SANDBOX="${PLAYWRIGHT_MCP_NO_SANDBOX:-1}"
+export PLAYWRIGHT_MCP_HEADLESS="${PLAYWRIGHT_MCP_HEADLESS:-1}"
+
 has_session_flag="false"
 for arg in "$@"; do
   case "$arg" in

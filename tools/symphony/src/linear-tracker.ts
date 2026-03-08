@@ -179,6 +179,7 @@ export interface LinearTrackerConfig {
     apiKey: string;
     projectSlug: string;
     activeStates: string[];
+    terminalStates?: string[];
     apiUrl?: string;
     timeoutMs?: number;
     pageSize?: number;
@@ -219,6 +220,7 @@ interface LinearTrackerAdapterArgs {
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_TERMINAL_STATES = ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'];
 
 function asOptionalTrimmedString(value: unknown): string | null {
     if (typeof value !== 'string') {
@@ -552,6 +554,82 @@ function buildBootstrapWorkpad(issue: TrackedIssue): string {
     ].join('\n');
 }
 
+function buildStateSynchronizedWorkpad(issue: TrackedIssue, terminalStateNames: string[]): string {
+    const sections = parseDescriptionSections(issue.description);
+    const acceptanceItems = dedupeAndLimit(
+        collectSectionContent(sections, ['Definition of Done', 'Acceptance Criteria'], extractChecklistItems),
+        5,
+    );
+    const noteItems = dedupeAndLimit(
+        [
+            ...collectSectionContent(sections, ['Goal', 'Problem', 'Context'], extractParagraphLines),
+            ...collectSectionContent(sections, ['__root__'], extractParagraphLines),
+        ],
+        2,
+    );
+
+    const normalizedState = normalizeHeadingName(issue.stateName);
+    const isReviewState = normalizedState === 'in review';
+    const isReadyToMergeState = normalizedState === 'ready to merge';
+    const normalizedTerminalStates = new Set(terminalStateNames.map((state) => normalizeHeadingName(state)));
+    const isTerminalState = normalizedTerminalStates.has(normalizedState);
+
+    if (!isReviewState && !isReadyToMergeState && !isTerminalState) {
+        return buildBootstrapWorkpad(issue);
+    }
+
+    const criteriaItems =
+        acceptanceItems.length > 0
+            ? acceptanceItems
+            : ['Keep the change scoped to the ticket and avoid unrelated edits.'];
+    const statusSummary = isReviewState
+        ? `The PR is published and ${issue.identifier} is waiting in \`${issue.stateName}\`.`
+        : isReadyToMergeState
+          ? `The PR is published and ${issue.identifier} is cleared for \`${issue.stateName}\`.`
+          : `${issue.identifier} is complete in \`${issue.stateName}\`.`;
+    const nextLine = isReviewState
+        ? 'Move the issue to `Ready to Merge` when the PR is green, review-clean, and approved for landing.'
+        : isReadyToMergeState
+          ? 'Resume the land flow now and merge once the final PR watch stays green.'
+          : 'None.';
+    const planItems = isReviewState
+        ? [
+              'Wait for reviewer feedback or explicit merge authorization.',
+              'Resume the land flow when the issue moves to `Ready to Merge`.',
+          ]
+        : isReadyToMergeState
+          ? ['Re-enter the land flow from the current PR state.', 'Merge the PR and move the issue to `Done`.']
+          : ['No further action.'];
+    const validationItems = isReviewState
+        ? [`Issue state is now \`${issue.stateName}\`.`, 'PR publish and review handoff completed.']
+        : isReadyToMergeState
+          ? [`Issue state is now \`${issue.stateName}\`.`, 'PR is already published and waiting for the land flow.']
+          : [`Issue state is now \`${issue.stateName}\`.`, 'Merge/closure handoff completed.'];
+
+    return [
+        '## Codex Workpad',
+        '',
+        '### Status',
+        `- Summary: ${statusSummary}`,
+        `- Next: ${nextLine}`,
+        '',
+        '### Plan',
+        ...asChecklistLines(planItems),
+        '',
+        '### Acceptance Criteria',
+        ...asChecklistLines(criteriaItems),
+        '',
+        '### Validation',
+        ...validationItems.map((item) => `- Done: ${item}`),
+        '',
+        '### Notes',
+        ...(noteItems.length > 0 ? noteItems.map((item) => `- ${item}`) : ['- No extra notes yet.']),
+        '',
+        '### Blockers',
+        '- None.',
+    ].join('\n');
+}
+
 function validateGraphQlDocument(document: string):
     | {
           ok: true;
@@ -688,6 +766,7 @@ export class LinearTrackerAdapter {
             apiKey: args.config.apiKey,
             projectSlug: args.config.projectSlug,
             activeStates: args.config.activeStates,
+            terminalStates: args.config.terminalStates ?? DEFAULT_TERMINAL_STATES,
         };
         this.fetchImpl = args.fetchImpl ?? fetch;
     }
@@ -747,6 +826,40 @@ export class LinearTrackerAdapter {
     public async moveIssueToStateByName(issue: TrackedIssue, stateName: string): Promise<TrackedIssue> {
         const runContext = await this.fetchIssueRunContext(issue.id);
         return await this.updateIssueStateByName(issue, runContext, stateName);
+    }
+
+    public async syncIssueWorkpadToState(issue: TrackedIssue): Promise<TrackedIssue> {
+        const runContext = await this.fetchIssueRunContext(issue.id);
+        const fetchedIssue = runContext.issue;
+        if (!fetchedIssue) {
+            throw new LinearTrackerError('linear_invalid_response', `Linear issue payload missing issue ${issue.id}.`);
+        }
+
+        const normalizedIssue = normalizeIssue(fetchedIssue, this.config.projectSlug);
+        const currentIssue = {
+            ...normalizedIssue,
+            stateName: issue.stateName,
+        };
+        const workpadBody = buildStateSynchronizedWorkpad(currentIssue, this.config.terminalStates);
+        const existingWorkpad = this.selectWorkpadComment(fetchedIssue.comments?.nodes ?? []);
+
+        if (existingWorkpad) {
+            const updatedWorkpad = await this.updateIssueComment(existingWorkpad.id, workpadBody);
+            return {
+                ...currentIssue,
+                workpadCommentId: updatedWorkpad.id,
+                workpadCommentBody: updatedWorkpad.body,
+                workpadCommentUrl: updatedWorkpad.url,
+            };
+        }
+
+        const createdWorkpad = await this.createIssueComment(currentIssue.id, workpadBody);
+        return {
+            ...currentIssue,
+            workpadCommentId: createdWorkpad.id,
+            workpadCommentBody: createdWorkpad.body,
+            workpadCommentUrl: createdWorkpad.url,
+        };
     }
 
     public async executeLinearGraphQlToolCall(rawArguments: unknown): Promise<{
