@@ -229,24 +229,50 @@ class Email_messages
         $php_mailer = new PHPMailer(true);
 
         $php_mailer->CharSet = 'UTF-8';
-        $php_mailer->SMTPDebug = config('smtp_debug') ? SMTP::DEBUG_SERVER : null;
+        $php_mailer->SMTPDebug = config('smtp_debug') ? SMTP::DEBUG_SERVER : SMTP::DEBUG_OFF;
 
         if (config('protocol') === 'smtp') {
+            $smtp_host = config('smtp_host');
+            $smtp_auth = config('smtp_auth');
+            $smtp_user = config('smtp_user');
+            $smtp_pass = config('smtp_pass');
+            $smtp_crypto = config('smtp_crypto');
+            $smtp_port = config('smtp_port');
+
             $php_mailer->isSMTP();
-            $php_mailer->Host = config('smtp_host');
-            $php_mailer->SMTPAuth = config('smtp_auth');
-            $php_mailer->Username = config('smtp_user');
-            $php_mailer->Password = config('smtp_pass');
-            $php_mailer->SMTPSecure = config('smtp_crypto');
-            $php_mailer->Port = config('smtp_port');
+
+            if ($smtp_host !== null && trim((string) $smtp_host) !== '') {
+                $php_mailer->Host = trim((string) $smtp_host);
+            }
+
+            $php_mailer->SMTPAuth = (bool) $smtp_auth;
+
+            if ($smtp_user !== null) {
+                $php_mailer->Username = (string) $smtp_user;
+            }
+
+            if ($smtp_pass !== null) {
+                $php_mailer->Password = (string) $smtp_pass;
+            }
+
+            if ($smtp_crypto !== null && trim((string) $smtp_crypto) !== '') {
+                $php_mailer->SMTPSecure = trim((string) $smtp_crypto);
+            }
+
+            if ($smtp_port !== null && $smtp_port !== '') {
+                $php_mailer->Port = (int) $smtp_port;
+            }
         }
 
-        $from_name = config('from_name') ?: setting('company_name');
-        $from_address = config('from_address') ?: setting('company_email');
-        $reply_to_address = config('reply_to') ?: setting('company_email');
+        $from_name = (string) (config('from_name') ?: setting('company_name'));
+        $from_address = (string) (config('from_address') ?: setting('company_email'));
+        $reply_to_address = trim((string) (config('reply_to') ?: setting('company_email')));
 
         $php_mailer->setFrom($from_address, $from_name);
-        $php_mailer->addReplyTo($reply_to_address);
+
+        if ($reply_to_address !== '') {
+            $php_mailer->addReplyTo($reply_to_address);
+        }
 
         if ($recipient_email) {
             $php_mailer->addAddress($recipient_email);
