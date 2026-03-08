@@ -10,11 +10,10 @@
  * ---------------------------------------------------------------------------- */
 
 const babel = require('gulp-babel');
-const changed = require('gulp-changed');
+const changedModule = require('gulp-changed');
 const cached = require('gulp-cached');
 const childProcess = require('child_process');
 const css = require('gulp-clean-css');
-const del = require('del');
 const fs = require('fs-extra');
 const gulp = require('gulp');
 const plumber = require('gulp-plumber');
@@ -24,58 +23,73 @@ const zip = require('zip-dir');
 
 // const debug = require('gulp-debug');
 
+const changed = changedModule.default ?? changedModule;
+
+let deleteSyncPromise;
+
+function getDeleteSync() {
+    // `del` >= 8 is ESM-only, so keep the existing CommonJS gulpfile and load it lazily.
+    deleteSyncPromise ??= import('del').then(({deleteSync}) => deleteSync);
+    return deleteSyncPromise;
+}
+
 function archive(done) {
-    const filename = 'easyappointments-0.0.0.zip';
+    getDeleteSync()
+        .then((deleteSync) => {
+            const filename = 'easyappointments-0.0.0.zip';
 
-    fs.removeSync('build');
-    fs.removeSync(filename);
+            fs.removeSync('build');
+            fs.removeSync(filename);
 
-    fs.mkdirsSync('build');
-    fs.copySync('application', 'build/application');
-    fs.copySync('assets', 'build/assets');
-    fs.copySync('system', 'build/system');
+            fs.mkdirsSync('build');
+            fs.copySync('application', 'build/application');
+            fs.copySync('assets', 'build/assets');
+            fs.copySync('system', 'build/system');
 
-    fs.ensureDirSync('build/storage/backups');
-    fs.copySync('storage/backups/.htaccess', 'build/storage/backups/.htaccess');
-    fs.copySync('storage/backups/index.html', 'build/storage/backups/index.html');
+            fs.ensureDirSync('build/storage/backups');
+            fs.copySync('storage/backups/.htaccess', 'build/storage/backups/.htaccess');
+            fs.copySync('storage/backups/index.html', 'build/storage/backups/index.html');
 
-    fs.ensureDirSync('build/storage/cache');
-    fs.copySync('storage/cache/index.html', 'build/storage/cache/index.html');
-    fs.copySync('storage/cache/.htaccess', 'build/storage/cache/.htaccess');
+            fs.ensureDirSync('build/storage/cache');
+            fs.copySync('storage/cache/index.html', 'build/storage/cache/index.html');
+            fs.copySync('storage/cache/.htaccess', 'build/storage/cache/.htaccess');
 
-    fs.ensureDirSync('build/storage/logs');
-    fs.copySync('storage/logs/.htaccess', 'build/storage/logs/.htaccess');
-    fs.copySync('storage/logs/index.html', 'build/storage/logs/index.html');
+            fs.ensureDirSync('build/storage/logs');
+            fs.copySync('storage/logs/.htaccess', 'build/storage/logs/.htaccess');
+            fs.copySync('storage/logs/index.html', 'build/storage/logs/index.html');
 
-    fs.ensureDirSync('build/storage/sessions');
-    fs.copySync('storage/sessions/.htaccess', 'build/storage/sessions/.htaccess');
-    fs.copySync('storage/sessions/index.html', 'build/storage/sessions/index.html');
+            fs.ensureDirSync('build/storage/sessions');
+            fs.copySync('storage/sessions/.htaccess', 'build/storage/sessions/.htaccess');
+            fs.copySync('storage/sessions/index.html', 'build/storage/sessions/index.html');
 
-    fs.ensureDirSync('build/storage/uploads');
-    fs.copySync('storage/uploads/index.html', 'build/storage/uploads/index.html');
+            fs.ensureDirSync('build/storage/uploads');
+            fs.copySync('storage/uploads/index.html', 'build/storage/uploads/index.html');
 
-    fs.copySync('index.php', 'build/index.php');
-    fs.copySync('patch.php', 'build/patch.php');
-    fs.copySync('composer.json', 'build/composer.json');
-    fs.copySync('composer.lock', 'build/composer.lock');
-    fs.copySync('config-sample.php', 'build/config-sample.php');
-    fs.copySync('CHANGELOG.md', 'build/CHANGELOG.md');
-    fs.copySync('README.md', 'build/README.md');
-    fs.copySync('LICENSE', 'build/LICENSE');
+            fs.copySync('index.php', 'build/index.php');
+            fs.copySync('patch.php', 'build/patch.php');
+            fs.copySync('composer.json', 'build/composer.json');
+            fs.copySync('composer.lock', 'build/composer.lock');
+            fs.copySync('config-sample.php', 'build/config-sample.php');
+            fs.copySync('CHANGELOG.md', 'build/CHANGELOG.md');
+            fs.copySync('README.md', 'build/README.md');
+            fs.copySync('LICENSE', 'build/LICENSE');
 
-    childProcess.execSync('cd build && composer install --no-interaction --no-dev --no-scripts --optimize-autoloader');
+            childProcess.execSync('cd build && composer install --no-interaction --no-dev --no-scripts --optimize-autoloader');
 
-    fs.removeSync('build/composer.lock');
-    del.sync('**/.DS_Store');
-    del.sync('build/**/.git');
+            fs.removeSync('build/composer.lock');
+            deleteSync('**/.DS_Store');
+            deleteSync('build/**/.git');
 
-    zip('build', {saveTo: filename}, function (error) {
-        if (error) {
-            console.log('Zip Error', error);
-        }
+            zip('build', {saveTo: filename}, function (error) {
+                if (error) {
+                    done(error);
+                    return;
+                }
 
-        done();
-    });
+                done();
+            });
+        })
+        .catch(done);
 }
 
 function clean(done) {
@@ -113,96 +127,104 @@ function watch(done) {
 }
 
 function vendor(done) {
-    del.sync(['assets/vendor/**', '!assets/vendor/index.html']);
+    getDeleteSync()
+        .then((deleteSync) => {
+            deleteSync(['assets/vendor/**', '!assets/vendor/index.html']);
 
-    // bootstrap
-    gulp.src([
-        'node_modules/bootstrap/dist/js/bootstrap.min.js',
-        'node_modules/bootstrap/dist/css/bootstrap.min.css',
-    ]).pipe(gulp.dest('assets/vendor/bootstrap'));
+            // bootstrap
+            gulp.src([
+                'node_modules/bootstrap/dist/js/bootstrap.min.js',
+                'node_modules/bootstrap/dist/css/bootstrap.min.css',
+            ]).pipe(gulp.dest('assets/vendor/bootstrap'));
 
-    // @fortawesome-fontawesome-free
-    gulp.src([
-        'node_modules/@fortawesome/fontawesome-free/js/fontawesome.min.js',
-        'node_modules/@fortawesome/fontawesome-free/js/solid.min.js',
-    ]).pipe(gulp.dest('assets/vendor/@fortawesome-fontawesome-free'));
+            // @fortawesome-fontawesome-free
+            gulp.src([
+                'node_modules/@fortawesome/fontawesome-free/js/fontawesome.min.js',
+                'node_modules/@fortawesome/fontawesome-free/js/solid.min.js',
+            ]).pipe(gulp.dest('assets/vendor/@fortawesome-fontawesome-free'));
 
-    // cookieconsent
-    gulp.src([
-        'node_modules/cookieconsent/build/cookieconsent.min.js',
-        'node_modules/cookieconsent/build/cookieconsent.min.css',
-    ]).pipe(gulp.dest('assets/vendor/cookieconsent'));
+            // cookieconsent
+            gulp.src([
+                'node_modules/cookieconsent/build/cookieconsent.min.js',
+                'node_modules/cookieconsent/build/cookieconsent.min.css',
+            ]).pipe(gulp.dest('assets/vendor/cookieconsent'));
 
-    // fullcalendar
-    gulp.src(['node_modules/fullcalendar/index.global.min.js']).pipe(gulp.dest('assets/vendor/fullcalendar'));
+            // fullcalendar
+            gulp.src(['node_modules/fullcalendar/index.global.min.js']).pipe(gulp.dest('assets/vendor/fullcalendar'));
 
-    // fullcalendar-moment
-    gulp.src(['node_modules/@fullcalendar/moment/index.global.min.js']).pipe(
-        gulp.dest('assets/vendor/fullcalendar-moment'),
-    );
+            // fullcalendar-moment
+            gulp.src(['node_modules/@fullcalendar/moment/index.global.min.js']).pipe(
+                gulp.dest('assets/vendor/fullcalendar-moment'),
+            );
 
-    // jquery
-    gulp.src(['node_modules/jquery/dist/jquery.min.js']).pipe(gulp.dest('assets/vendor/jquery'));
+            // jquery
+            gulp.src(['node_modules/jquery/dist/jquery.min.js']).pipe(gulp.dest('assets/vendor/jquery'));
 
-    // jquery-jeditable
-    gulp.src(['node_modules/jquery-jeditable/dist/jquery.jeditable.min.js']).pipe(
-        gulp.dest('assets/vendor/jquery-jeditable'),
-    );
+            // jquery-jeditable
+            gulp.src(['node_modules/jquery-jeditable/dist/jquery.jeditable.min.js']).pipe(
+                gulp.dest('assets/vendor/jquery-jeditable'),
+            );
 
-    // html2canvas
-    gulp.src(['node_modules/html2canvas/dist/html2canvas.min.js']).pipe(gulp.dest('assets/vendor/html2canvas'));
+            // html2canvas
+            gulp.src(['node_modules/html2canvas/dist/html2canvas.min.js']).pipe(gulp.dest('assets/vendor/html2canvas'));
 
-    // jspdf
-    gulp.src(['node_modules/jspdf/dist/jspdf.umd.min.js']).pipe(gulp.dest('assets/vendor/jspdf'));
+            // jspdf
+            gulp.src(['node_modules/jspdf/dist/jspdf.umd.min.js']).pipe(gulp.dest('assets/vendor/jspdf'));
 
-    // qrcode (pre-bundled browser build)
-    gulp.src(['resources/vendor/qrcode/qrcode.min.js']).pipe(gulp.dest('assets/vendor/qrcode'));
+            // qrcode (pre-bundled browser build)
+            gulp.src(['resources/vendor/qrcode/qrcode.min.js']).pipe(gulp.dest('assets/vendor/qrcode'));
 
-    // moment
-    gulp.src(['node_modules/moment/min/moment.min.js']).pipe(gulp.dest('assets/vendor/moment'));
+            // moment
+            gulp.src(['node_modules/moment/min/moment.min.js']).pipe(gulp.dest('assets/vendor/moment'));
 
-    // moment-timezone
-    gulp.src(['node_modules/moment-timezone/builds/moment-timezone-with-data.min.js']).pipe(
-        gulp.dest('assets/vendor/moment-timezone'),
-    );
+            // moment-timezone
+            gulp.src(['node_modules/moment-timezone/builds/moment-timezone-with-data.min.js']).pipe(
+                gulp.dest('assets/vendor/moment-timezone'),
+            );
 
-    // @popperjs-core
-    gulp.src(['node_modules/@popperjs/core/dist/umd/popper.min.js']).pipe(gulp.dest('assets/vendor/@popperjs-core'));
+            // @popperjs-core
+            gulp.src(['node_modules/@popperjs/core/dist/umd/popper.min.js']).pipe(
+                gulp.dest('assets/vendor/@popperjs-core'),
+            );
 
-    // select2
-    gulp.src(['node_modules/select2/dist/js/select2.min.js', 'node_modules/select2/dist/css/select2.min.css']).pipe(
-        gulp.dest('assets/vendor/select2'),
-    );
+            // select2
+            gulp.src(['node_modules/select2/dist/js/select2.min.js', 'node_modules/select2/dist/css/select2.min.css']).pipe(
+                gulp.dest('assets/vendor/select2'),
+            );
 
-    // tippy.js
-    gulp.src(['node_modules/tippy.js/dist/tippy-bundle.umd.min.js']).pipe(gulp.dest('assets/vendor/tippy.js'));
+            // tippy.js
+            gulp.src(['node_modules/tippy.js/dist/tippy-bundle.umd.min.js']).pipe(gulp.dest('assets/vendor/tippy.js'));
 
-    // trumbowyg
-    gulp.src(['node_modules/trumbowyg/dist/trumbowyg.min.js', 'node_modules/trumbowyg/dist/ui/trumbowyg.min.css']).pipe(
-        gulp.dest('assets/vendor/trumbowyg'),
-    );
+            // trumbowyg
+            gulp.src([
+                'node_modules/trumbowyg/dist/trumbowyg.min.js',
+                'node_modules/trumbowyg/dist/ui/trumbowyg.min.css',
+            ]).pipe(gulp.dest('assets/vendor/trumbowyg'));
 
-    gulp.src(['node_modules/trumbowyg/dist/ui/icons.svg']).pipe(gulp.dest('assets/vendor/trumbowyg/ui'));
+            gulp.src(['node_modules/trumbowyg/dist/ui/icons.svg']).pipe(gulp.dest('assets/vendor/trumbowyg/ui'));
 
-    // flatpickr
-    gulp.src(['node_modules/flatpickr/dist/flatpickr.min.js', 'node_modules/flatpickr/dist/flatpickr.min.css']).pipe(
-        gulp.dest('assets/vendor/flatpickr'),
-    );
+            // flatpickr
+            gulp.src([
+                'node_modules/flatpickr/dist/flatpickr.min.js',
+                'node_modules/flatpickr/dist/flatpickr.min.css',
+            ]).pipe(gulp.dest('assets/vendor/flatpickr'));
 
-    gulp.src(['node_modules/flatpickr/dist/themes/material_green.css'])
-        .pipe(css())
-        .pipe(rename({suffix: '.min'}))
-        .pipe(gulp.dest('assets/vendor/flatpickr'));
+            gulp.src(['node_modules/flatpickr/dist/themes/material_green.css'])
+                .pipe(css())
+                .pipe(rename({suffix: '.min'}))
+                .pipe(gulp.dest('assets/vendor/flatpickr'));
 
-    // chart.js
-    gulp.src(['node_modules/chart.js/dist/chart.umd.min.js']).pipe(gulp.dest('assets/vendor/chart.js'));
+            // chart.js
+            gulp.src(['node_modules/chart.js/dist/chart.umd.min.js']).pipe(gulp.dest('assets/vendor/chart.js'));
 
-    // chartjs-chart-matrix
-    gulp.src(['node_modules/chartjs-chart-matrix/dist/chartjs-chart-matrix.min.js']).pipe(
-        gulp.dest('assets/vendor/chartjs-chart-matrix'),
-    );
+            // chartjs-chart-matrix
+            gulp.src(['node_modules/chartjs-chart-matrix/dist/chartjs-chart-matrix.min.js']).pipe(
+                gulp.dest('assets/vendor/chartjs-chart-matrix'),
+            );
 
-    done();
+            done();
+        })
+        .catch(done);
 }
 
 exports.clean = gulp.series(clean);
