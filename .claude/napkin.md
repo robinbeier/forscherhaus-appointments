@@ -28,8 +28,8 @@
    Do instead: use `project.slugId` (not `project.slug`) and relation-based issue links (`relations`/`inverseRelations`) instead of removed fields like `blockedByIssues`; include response-body details for non-2xx tracker errors to speed up diagnosis.
 1. **[2026-03-07] Read Symphony token totals as spend telemetry and interpret post-diff stops separately**
    Do instead: debug pilot efficiency primarily with `time-to-first-diff`, handoff timing, per-event `last.totalTokens`, and final stop reason; the logged `totalTokens` values are cumulative session spend and can exceed the model context window without meaning the live prompt is that large, and a `post_diff_checkpoint` that exhausts retry budget is a continuation-budget problem rather than proof that the code path itself failed.
-1. **[2026-03-07] Re-check final workpad state after Symphony review or merge handoffs**
-   Do instead: after a real pilot run reaches `In Review` or `Done`, verify that the last `## Codex Workpad` comment matches the actual PR/merge outcome; a correct Linear state alone can still leave stale operator guidance behind.
+1. **[2026-03-08] Re-check final workpad state and actual PR/Linear outcome after apparent post-push hangs**
+   Do instead: when a Symphony run looks stuck after `git push`, verify the live state API, PR existence, and the last `## Codex Workpad` comment before intervening; the run may already have created the PR, moved the issue to `In Review`, and stopped correctly via `reconciliation_non_active`, while older first-turn summaries still describe an earlier validation blocker.
 
 ## Repo Guardrails & Domain Behavior
 
