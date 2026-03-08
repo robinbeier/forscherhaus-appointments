@@ -106,6 +106,20 @@ export function ensurePathWithinRoot(root: string, candidatePath: string): strin
     return resolvedCandidatePath;
 }
 
+async function pathExists(candidatePath: string): Promise<boolean> {
+    try {
+        await access(candidatePath);
+        return true;
+    } catch (error) {
+        const accessError = error as NodeJS.ErrnoException;
+        if (accessError.code === 'ENOENT') {
+            return false;
+        }
+
+        throw error;
+    }
+}
+
 export class WorkspaceManager {
     private readonly logger: Logger;
     private readonly config: WorkspaceManagerConfig;
@@ -161,6 +175,13 @@ export class WorkspaceManager {
 
     public async cleanupTerminalWorkspace(workspacePath: string): Promise<void> {
         const safeWorkspacePath = ensurePathWithinRoot(this.rootPath, workspacePath);
+        if (!(await pathExists(safeWorkspacePath))) {
+            this.logger.info('Workspace cleanup skipped because workspace is already absent', {
+                workspacePath: safeWorkspacePath,
+            });
+            return;
+        }
+
         await this.runHooks('before_remove', safeWorkspacePath);
         await rm(safeWorkspacePath, {recursive: true, force: true});
     }
@@ -200,7 +221,7 @@ export class WorkspaceManager {
             };
         } catch (error) {
             const executionError = error as {
-                code?: number;
+                code?: number | string;
                 killed?: boolean;
                 signal?: string;
                 message?: string;
@@ -280,13 +301,22 @@ export class WorkspaceManager {
             });
         } catch (error) {
             const executionError = error as {
-                code?: number;
+                code?: number | string;
                 killed?: boolean;
                 signal?: string;
                 message?: string;
                 stdout?: string;
                 stderr?: string;
             };
+
+            if (phase === 'before_remove' && executionError.code === 'ENOENT' && !(await pathExists(workspacePath))) {
+                this.logger.info('Workspace hook skipped because workspace is already absent', {
+                    phase,
+                    command,
+                    workspacePath,
+                });
+                return;
+            }
 
             if (executionError.killed || executionError.signal === 'SIGTERM') {
                 throw new WorkspaceManagerError(
