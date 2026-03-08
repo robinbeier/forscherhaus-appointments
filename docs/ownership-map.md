@@ -9,6 +9,7 @@ Ownership model: Role + Handles (primary/secondary).
 | Component | Role | Primary | Secondary |
 |---|---|---|---|
 | `auth-session` | Access & Session | @robinbeier | @robinbeier |
+| `installation-bootstrap` | Installation & Bootstrap | @robinbeier | @robinbeier |
 | `booking-public` | Public Booking | @robinbeier | @robinbeier |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | @robinbeier | @robinbeier |
 | `scheduling-backoffice` | Calendar & Scheduling | @robinbeier | @robinbeier |
@@ -45,6 +46,20 @@ Ownership model: Role + Handles (primary/secondary).
   - `assets/js/pages/login.js`
   - `assets/js/pages/recovery.js`
   - `assets/js/pages/account.js`
+
+### `installation-bootstrap`
+
+- Role: Installation & Bootstrap
+- Primary: @robinbeier
+- Secondary: @robinbeier
+- Key files:
+  - `application/controllers/Installation.php`
+  - `application/views/pages/installation.php`
+  - `assets/js/pages/installation.js`
+- Path prefixes:
+  - `application/controllers/Installation.php`
+  - `application/views/pages/installation.php`
+  - `assets/js/pages/installation.js`
 
 ### `booking-public`
 

@@ -24,6 +24,7 @@
 /application/controllers/Google.php @robinbeier
 /application/controllers/Google_analytics_settings.php @robinbeier
 /application/controllers/Healthz.php @robinbeier
+/application/controllers/Installation.php @robinbeier
 /application/controllers/Integrations.php @robinbeier
 /application/controllers/Ldap_settings.php @robinbeier
 /application/controllers/Legal_settings.php @robinbeier
@@ -91,6 +92,7 @@
 /application/views/pages/dashboard_teacher.php @robinbeier
 /application/views/pages/general_settings.php @robinbeier
 /application/views/pages/google_analytics_settings.php @robinbeier
+/application/views/pages/installation.php @robinbeier
 /application/views/pages/integrations.php @robinbeier
 /application/views/pages/ldap_settings.php @robinbeier
 /application/views/pages/legal_settings.php @robinbeier
@@ -118,6 +120,7 @@
 /assets/js/pages/dashboard_teacher.js @robinbeier
 /assets/js/pages/general_settings.js @robinbeier
 /assets/js/pages/google_analytics_settings.js @robinbeier
+/assets/js/pages/installation.js @robinbeier
 /assets/js/pages/ldap_settings.js @robinbeier
 /assets/js/pages/legal_settings.js @robinbeier
 /assets/js/pages/login.js @robinbeier

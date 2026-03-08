@@ -9,6 +9,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | Component | Role | Depends On | Path Prefixes | Key Files |
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
+| `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 3 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 3 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 17 | 3 |
@@ -51,6 +52,25 @@ Key files:
 - `application/controllers/Login.php`
 - `application/controllers/Recovery.php`
 - `assets/js/pages/login.js`
+
+### `installation-bootstrap` - Installation & Bootstrap
+
+First-run installation flow that seeds the initial admin, company, and demo booking data.
+
+Dependencies:
+- `people-services-admin`
+- `settings-compliance`
+- `shared-core`
+
+Path prefixes:
+- `application/controllers/Installation.php`
+- `application/views/pages/installation.php`
+- `assets/js/pages/installation.js`
+
+Key files:
+- `application/controllers/Installation.php`
+- `application/views/pages/installation.php`
+- `assets/js/pages/installation.js`
 
 ### `booking-public` - Public Booking
 
