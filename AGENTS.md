@@ -448,7 +448,7 @@ php index.php console sync
 
 -   Fokus nach dem Release: kontrollierte Dependency-, Upstream- und Gate-Nachpflege in kleinen, mergebaren PRs.
 -   Pro Kampagnen-PR genau ein klar abgegrenzter Slice: entweder Dependency-Update, Upstream-Nachpflege oder Gate-/Governance-Dokumentation; keine Mischung mit fachlichen Produkt-Aenderungen.
--   Reine Docs-/Governance-PRs validieren ueber inhaltliche Konsistenzpruefung und Gegenlesen aller genannten Kommandos, Skripte und Gate-Namen gegen die aktuelle Repo-Struktur.
+-   Reine Docs-/Governance-PRs bleiben docs-only und validieren ueber inhaltliche Konsistenzpruefung sowie Gegenlesen aller genannten Kommandos, Skripte und Gate-Namen gegen die aktuelle Repo-Struktur.
 -   Dependency-/Gate-PRs starten mit dem schmalsten passenden lokalen Check; bevor sie `ready for review` werden, bleiben die einschlaegigen Blocking-Gates inklusive `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` massgeblich.
 -   Die Kampagne bleibt strikt sequentiell: immer nur ein aktiver Upgrade-PR; der naechste Slice startet erst nach gruener CI, geklaerten Findings und abgeschlossenem Merge des vorherigen PRs.
 -   Blocking-Gates bleiben auch in der Kampagne blocking; temporaere Advisory-Ausnahmen sind nur bei nachweisbaren False-Positives zulaessig und brauchen ein Follow-up-Issue mit Rueckkehrfrist von hoechstens 14 Tagen.
