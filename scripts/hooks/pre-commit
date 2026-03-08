@@ -57,6 +57,10 @@ ensure_stack_started() {
         return
     fi
 
+    if ci_docker_service_running php-fpm && ci_docker_service_running mysql; then
+        return
+    fi
+
     ci_docker_compose up -d php-fpm mysql >/dev/null
     STACK_STARTED=1
 }

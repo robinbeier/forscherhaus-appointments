@@ -40,6 +40,11 @@ ci_docker_compose() {
     "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
 }
 
+ci_docker_service_running() {
+    local service_name="$1"
+    ci_docker_compose ps --status running --services | grep -Fxq "$service_name"
+}
+
 ci_docker_wait_for_mysql_readiness() {
     local log_prefix="${1:-ci-docker}"
     local max_attempts=60
