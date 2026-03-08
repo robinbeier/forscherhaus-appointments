@@ -444,9 +444,14 @@ php index.php console sync
 -   Wenn ein Umsetzungsplan mehrere PRs umfasst, gilt das sequentielle Standardvorgehen: jeden PR `ready for review` pushen, mit [$babysit-pr](/Users/robinbeier/Developers/forscherhaus-appointments/.codex/skills/babysit-pr/SKILL.md) bis zu komplett gruener CI, fehlenden offenen Review-Items und `mergeable`-Status beobachten, dann den PR mergen und erst danach mit dem naechsten PR im Plan weitermachen.
 -   Symphony-/Infrastruktur-PRs nur dann mit Linear-Issue-IDs in Titel oder PR-Body verknuepfen, wenn der PR fachlich wirklich zu diesem Ticket gehoert; sonst entstehen verwirrende Fremd-Attachments auf Arbeits-Issues.
 
-## Release-Fokus (naechste 9 Tage bis Deployment)
+## Post-Release-Upgrade-Kampagne
 
--   Fokus bis zum Deployment: Stabilitaet und ggf. Performance-Verbesserungen mit geringem Risiko.
+-   Fokus nach dem Release: kontrollierte Dependency-, Upstream- und Gate-Nachpflege in kleinen, mergebaren PRs.
+-   Pro Kampagnen-PR genau ein klar abgegrenzter Slice: entweder Dependency-Update, Upstream-Nachpflege oder Gate-/Governance-Dokumentation; keine Mischung mit fachlichen Produkt-Aenderungen.
+-   Reine Docs-/Governance-PRs bleiben docs-only und validieren ueber inhaltliche Konsistenzpruefung sowie Gegenlesen aller genannten Kommandos, Skripte und Gate-Namen gegen die aktuelle Repo-Struktur.
+-   Dependency-/Gate-PRs starten mit dem schmalsten passenden lokalen Check; bevor sie `ready for review` werden, bleiben die einschlaegigen Blocking-Gates inklusive `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` massgeblich.
+-   Die Kampagne bleibt strikt sequentiell: immer nur ein aktiver Upgrade-PR; der naechste Slice startet erst nach gruener CI, geklaerten Findings und abgeschlossenem Merge des vorherigen PRs.
+-   Blocking-Gates bleiben auch in der Kampagne blocking; temporaere Advisory-Ausnahmen sind nur bei nachweisbaren False-Positives zulaessig und brauchen ein Follow-up-Issue mit Rueckkehrfrist von hoechstens 14 Tagen.
 -   Keine Major-Dependency-Upgrades in dieser Phase; diese werden in die naechste Entwicklungsphase verschoben.
 -   Fuer Dependency-Sweeps vor dem geplanten Upstream-Merge (`easyappointments` 1.6.0): den `roave/security-advisories`-Konflikt nicht isoliert aufloesen; stattdessen nur produktionsrelevante Security-Hotfixes (z. B. `firebase/php-jwt`) umsetzen und `roave` erst nach dem Upstream-Merge neu bewerten.
 -   Nach Deployment ist ein Zeitfenster von ca. 6 Monaten bis zum naechsten Major-Update vorgesehen; dort werden Major-Upgrades geplant, getestet und gebuendelt umgesetzt.
