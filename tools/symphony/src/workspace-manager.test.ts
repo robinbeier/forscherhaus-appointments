@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {execFile as execFileCallback} from 'node:child_process';
-import {access, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {access, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -175,6 +175,90 @@ test('cleanupTerminalWorkspace runs before_remove and deletes workspace', async 
     await assert.rejects(() => access(handle.path));
     const marker = await readFile(path.join(temporaryRoot, 'before-remove-marker.txt'), 'utf8');
     assert.equal(marker.trim(), 'cleanup');
+});
+
+test('cleanupTerminalWorkspace treats an already removed workspace as a benign no-op', async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-missing-cleanup-'));
+    const logRecords: Array<Record<string, unknown>> = [];
+
+    const manager = new WorkspaceManager({
+        logger: createLoggerStub(logRecords),
+        config: {
+            root: temporaryRoot,
+            hooks: {
+                timeoutMs: 5000,
+                afterCreate: [],
+                beforeRun: [],
+                afterRun: [],
+                beforeRemove: ['exit 99'],
+            },
+        },
+    });
+
+    const handle = await manager.prepareWorkspace('ROB-11-missing-cleanup');
+    await rm(handle.path, {recursive: true, force: true});
+
+    await manager.cleanupTerminalWorkspace(handle.path);
+
+    const errorLog = logRecords.find((entry) => entry.level === 'error');
+    const infoLog = logRecords.find(
+        (entry) =>
+            entry.level === 'info' && entry.message === 'Workspace cleanup skipped because workspace is already absent',
+    );
+    assert.equal(errorLog, undefined);
+    assert.ok(infoLog);
+});
+
+test('before_remove hook treats cwd ENOENT as benign when the workspace is already absent', async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-before-remove-enoent-'));
+    const logRecords: Array<Record<string, unknown>> = [];
+
+    const manager = new WorkspaceManager({
+        logger: createLoggerStub(logRecords),
+        config: {
+            root: temporaryRoot,
+            hooks: {
+                timeoutMs: 5000,
+                afterCreate: [],
+                beforeRun: [],
+                afterRun: [],
+                beforeRemove: [],
+            },
+        },
+    });
+
+    const handle = await manager.prepareWorkspace('ROB-11-before-remove-enoent');
+    await rm(handle.path, {recursive: true, force: true});
+
+    const invokeHook = (
+        manager as unknown as {
+            executeHookCommand: (
+                phase: 'before_remove',
+                command: string,
+                workspacePath: string,
+                envOverrides: Record<string, string | undefined>,
+            ) => Promise<void>;
+        }
+    ).executeHookCommand.bind(
+        manager as unknown as {
+            executeHookCommand: (
+                phase: 'before_remove',
+                command: string,
+                workspacePath: string,
+                envOverrides: Record<string, string | undefined>,
+            ) => Promise<void>;
+        },
+    );
+
+    await assert.doesNotReject(() => invokeHook('before_remove', 'echo cleanup', handle.path, {}));
+
+    const errorLog = logRecords.find((entry) => entry.level === 'error');
+    const infoLog = logRecords.find(
+        (entry) =>
+            entry.level === 'info' && entry.message === 'Workspace hook skipped because workspace is already absent',
+    );
+    assert.equal(errorLog, undefined);
+    assert.ok(infoLog);
 });
 
 test('captureWorkspaceState returns head sha and tracked status changes', async () => {
