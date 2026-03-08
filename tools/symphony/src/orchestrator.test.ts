@@ -1018,7 +1018,7 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
     assert.equal(snapshot.codex_totals.failed, 2);
 });
 
-test('first-turn post-diff checkpoint schedules a continuation retry without counting a failure', async () => {
+test('first-turn repo diffs do not trigger a synthetic checkpoint retry', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
         id: 'post-diff-checkpoint-1',
@@ -1040,17 +1040,10 @@ test('first-turn post-diff checkpoint schedules a continuation retry without cou
         },
     ];
 
-    const firstDispatch = createDeferred<{
-        status: 'completed' | 'input_required';
-        outputText: string;
-        threadId: string;
-        turnId: string;
-        sessionId: string;
-    }>();
-    let stopCalls = 0;
+    const logRecords: Array<Record<string, unknown>> = [];
 
     const orchestrator = new SymphonyOrchestrator({
-        logger: createLoggerStub([]),
+        logger: createLoggerStub(logRecords),
         workflowConfigStore: workflowStore,
         trackerFactory: () => tracker,
         workspaceFactory: () => workspace,
@@ -1088,14 +1081,16 @@ test('first-turn post-diff checkpoint schedules a continuation retry without cou
                         model_context_window: 258400,
                     },
                 });
-                return firstDispatch.promise;
+                tracker.statesByIssueId.set(issue.id, 'Done');
+                return {
+                    status: 'completed',
+                    outputText: 'updated docs',
+                    threadId: 'thread-post-diff',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-post-diff-turn-1',
+                };
             },
-            stop: async () => {
-                stopCalls += 1;
-                firstDispatch.reject(
-                    new AppServerClientError('turn_cancelled', 'App-server session was cancelled for checkpointing.'),
-                );
-            },
+            stop: async () => undefined,
         }),
     });
 
@@ -1103,83 +1098,51 @@ test('first-turn post-diff checkpoint schedules a continuation retry without cou
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.ok(stopCalls >= 1);
+    assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(snapshot.codex_totals.failed, 0);
-    assert.equal(snapshot.retrying.length, 1);
-    assert.equal(snapshot.retrying[0].reason, 'continuation');
+    assert.equal(snapshot.retrying.length, 0);
+    assert.ok(
+        !logRecords.some(
+            (record) =>
+                record.level === 'info' &&
+                record.message === 'Stopping issue after first repo diff to continue in a narrower follow-up turn.',
+        ),
+    );
 
     const issueDetails = orchestrator.getIssueDetails('ROB-13-POST-DIFF');
     assert.ok(issueDetails);
-    assert.equal(issueDetails?.status, 'retrying');
-    const retry = issueDetails?.retry as Record<string, unknown>;
-    assert.match(String(retry.retry_directive), /required repo diff already exists/i);
+    assert.equal(issueDetails?.status, 'completed');
 });
 
-test('post-diff checkpoint carries publish-capable mode into the scheduled retry', async () => {
+test('prompt target path extraction ignores shell commands in backticks', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
-        id: 'post-diff-publish-1',
-        identifier: 'ROB-13-PUBLISH',
+        id: 'target-path-filter-1',
+        identifier: 'ROB-13-TARGET-FILTER',
         priority: 1,
         createdAt: '2026-03-06T08:00:00.000Z',
-        description: 'Update `docs/symphony/STAGING_PILOT_RUNBOOK.md` only.',
+        description:
+            '## Scope\n\n- Update `deptrac.yaml`.\n\n## Validation\n\n- `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`',
     });
     tracker.candidates = [issue];
 
-    const workflowConfig = createWorkflowConfig();
-    workflowConfig.codex.publishNetworkAccess = true;
-    const workflowStore = new WorkflowStoreStub(workflowConfig);
-    const workspace = new WorkspaceStub();
-    workspace.stateSnapshots = [
-        {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'},
-        {
-            headSha: 'head-before',
-            statusText: ' M docs/symphony/STAGING_PILOT_RUNBOOK.md',
-            branchName: 'codex/symphony-test',
-        },
-        {headSha: 'head-after', statusText: '', branchName: 'codex/symphony-test'},
-    ];
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
 
     const orchestrator = new SymphonyOrchestrator({
         logger: createLoggerStub([]),
         workflowConfigStore: workflowStore,
         trackerFactory: () => tracker,
-        workspaceFactory: () => workspace,
-        continuationDelayMs: 0,
-        appServerFactory: ({emitEvent}) => ({
+        workspaceFactory: () => new WorkspaceStub(),
+        appServerFactory: () => ({
             runTurn: async () => {
-                emitEvent({
-                    type: 'session',
-                    threadId: 'thread-publish-1',
-                    turnId: 'turn-1',
-                    sessionId: 'thread-publish-1-turn-1',
-                });
-                emitEvent({
-                    type: 'raw_event',
-                    payload: {
-                        method: 'codex/event/diff',
-                        params: {
-                            msg: {
-                                payload: {
-                                    summary: 'updated docs/symphony/STAGING_PILOT_RUNBOOK.md',
-                                },
-                            },
-                        },
-                    },
-                });
-                emitEvent({
-                    type: 'token_usage',
-                    payload: {
-                        total: {
-                            totalTokens: 100000,
-                        },
-                        last: {
-                            totalTokens: 1600,
-                        },
-                        model_context_window: 258400,
-                    },
-                });
-                throw new AppServerClientError('turn_cancelled', 'App-server session was cancelled for checkpointing.');
+                tracker.statesByIssueId.set(issue.id, 'Done');
+                return {
+                    status: 'completed',
+                    outputText: 'updated deptrac',
+                    threadId: 'thread-target',
+                    turnId: 'turn-target',
+                    sessionId: 'thread-target-turn-target',
+                };
             },
             stop: async () => {},
         }),
@@ -1188,10 +1151,11 @@ test('post-diff checkpoint carries publish-capable mode into the scheduled retry
     await orchestrator.runTick();
     await orchestrator.shutdown();
 
-    const issueDetails = orchestrator.getIssueDetails('ROB-13-PUBLISH');
-    assert.ok(issueDetails);
-    const retry = issueDetails?.retry as Record<string, unknown>;
-    assert.equal(retry.publish_mode, true);
+    assert.equal(workflowStore.promptContexts[0].issue.first_repo_target_path_or_default, 'deptrac.yaml');
+    assert.doesNotMatch(
+        String(workflowStore.promptContexts[0].issue.target_paths_hint_or_default),
+        /PRE_PR_RUN_COVERAGE=1 bash/,
+    );
 });
 
 test('tracked issue branches start in publish-capable mode', async () => {

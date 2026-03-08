@@ -308,6 +308,48 @@ function compactPromptText(value: string | null | undefined, fallback: string, m
     return `${normalized.slice(0, Math.max(0, maxChars - 15)).trimEnd()}\n[truncated]`;
 }
 
+function isLikelyRepoPathToken(candidate: string): boolean {
+    const normalized = candidate.trim();
+    if (normalized.length === 0) {
+        return false;
+    }
+
+    if (/\s/.test(normalized)) {
+        return false;
+    }
+
+    if (/[;&|<>]/.test(normalized)) {
+        return false;
+    }
+
+    if (
+        normalized.includes('://') ||
+        normalized.startsWith('http://') ||
+        normalized.startsWith('https://') ||
+        normalized.startsWith('www.')
+    ) {
+        return false;
+    }
+
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(normalized)) {
+        return false;
+    }
+
+    if (/^\d+(?:\.\d+)+$/.test(normalized)) {
+        return false;
+    }
+
+    if (!normalized.includes('/') && !normalized.includes('.')) {
+        return false;
+    }
+
+    if (normalized === '.' || normalized === '..') {
+        return false;
+    }
+
+    return /^(?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/.test(normalized);
+}
+
 function extractLikelyRepoPaths(description: string | null | undefined): string[] {
     const normalized = typeof description === 'string' ? description : '';
     if (normalized.trim().length === 0) {
@@ -318,34 +360,22 @@ function extractLikelyRepoPaths(description: string | null | undefined): string[
     const backtickPattern = /`([^`\n]+)`/g;
     for (const match of normalized.matchAll(backtickPattern)) {
         const candidate = match[1]?.trim() ?? '';
-        if (candidate.length > 0) {
+        if (isLikelyRepoPathToken(candidate)) {
             candidates.push(candidate);
         }
     }
 
-    const pathPattern = /\b(?:\.?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+)\b/g;
-    for (const match of normalized.matchAll(pathPattern)) {
-        const candidate = match[0]?.trim() ?? '';
-        if (candidate.length > 0) {
+    const strippedBackticks = normalized.replace(backtickPattern, ' ');
+    const pathPattern = /(?:^|[^A-Za-z0-9_])((?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+)(?=$|[^A-Za-z0-9_])/g;
+    for (const match of strippedBackticks.matchAll(pathPattern)) {
+        const candidate = match[1]?.trim() ?? '';
+        if (isLikelyRepoPathToken(candidate)) {
             candidates.push(candidate);
         }
     }
 
     const uniqueCandidates: string[] = [];
     for (const candidate of candidates) {
-        if (
-            candidate.includes('://') ||
-            candidate.startsWith('http://') ||
-            candidate.startsWith('https://') ||
-            candidate.startsWith('www.')
-        ) {
-            continue;
-        }
-
-        if (!candidate.includes('/') && !candidate.startsWith('.')) {
-            continue;
-        }
-
         if (!uniqueCandidates.includes(candidate)) {
             uniqueCandidates.push(candidate);
         }
@@ -2659,17 +2689,12 @@ export class SymphonyOrchestrator {
     }
 
     private shouldEvaluatePostDiffCheckpoint(runningEntry: RunningEntry): boolean {
-        if (
-            runningEntry.turnCount > 0 ||
-            !runningEntry.hasObservedWorkspaceDiff ||
-            runningEntry.postDiffCheckpointTriggered ||
-            runningEntry.stopRequested ||
-            runningEntry.firstDiffObservedAtMs === undefined
-        ) {
-            return false;
-        }
-
-        return true;
+        void runningEntry;
+        // Upstream keeps the turn alive after the first repo diff and relies on
+        // normal turn completion plus issue-state checks to decide whether the
+        // agent should continue. Disabling the synthetic first-diff checkpoint
+        // prevents continuation handoffs from consuming the normal retry budget.
+        return false;
     }
 
     private hasReachedPostDiffCheckpointThreshold(runningEntry: RunningEntry): boolean {
