@@ -9,6 +9,10 @@ BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
 REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-1}"
 REQUEST_CONTRACTS_L2_WARNED=0
+PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
+PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT:-phpstan:request-contracts:l1}"
+PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT:-phpstan:request-contracts:l2}"
+DEPTRAC_ANALYZE_SCRIPT="${PRE_PR_DEPTRAC_ANALYZE_SCRIPT:-deptrac:analyze}"
 COMPOSE_CMD=()
 LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
 
@@ -106,23 +110,23 @@ echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
 
 echo_section "PHPStan static-analysis gate"
-run_compose run --rm php-fpm composer phpstan:application
-run_compose run --rm php-fpm composer phpstan:request-contracts:l1
+run_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
+run_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT"
 run_compose run --rm php-fpm composer test:request-contracts
 run_compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
 if [[ "$REQUEST_CONTRACTS_L2_BLOCKING" == "1" ]]; then
-    run_compose run --rm php-fpm composer phpstan:request-contracts:l2
+    run_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"
 else
-    if ! run_compose run --rm php-fpm composer phpstan:request-contracts:l2; then
+    if ! run_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"; then
         REQUEST_CONTRACTS_L2_WARNED=1
-        echo "[pre-pr-full] WARN: composer phpstan:request-contracts:l2 failed (advisory override mode)." >&2
+        echo "[pre-pr-full] WARN: composer ${PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT} failed (advisory override mode)." >&2
         echo "[pre-pr-full] WARN: See storage/logs/ci/phpstan-request-contracts-l2.raw for details." >&2
         echo "[pre-pr-full] WARN: Remove PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 to restore strict local blocking." >&2
     fi
 fi
 
 echo_section "Deptrac architecture boundaries gate"
-run_compose run --rm php-fpm composer deptrac:analyze
+run_compose run --rm php-fpm composer "$DEPTRAC_ANALYZE_SCRIPT"
 python3 scripts/docs/generate_codeowners_from_map.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" bash scripts/ci/run_deptrac_changed_gate.sh
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py

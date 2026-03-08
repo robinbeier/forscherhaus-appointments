@@ -48,3 +48,33 @@ deptrac:
         Core:
             - Core
             - Helpers
+    # Deptrac 3 resolves EA_Controller's CodeIgniter @property service-locator hints.
+    skip_violations:
+        EA_Controller:
+            - Admins_model
+            - Appointments_model
+            - Service_categories_model
+            - Consents_model
+            - Customers_model
+            - Providers_model
+            - Roles_model
+            - Secretaries_model
+            - Services_model
+            - Settings_model
+            - Unavailabilities_model
+            - Users_model
+            - Webhooks_model
+            - Blocked_periods_model
+            - Accounts
+            - Api
+            - Availability
+            - Email_messages
+            - Captcha_builder
+            - Ics_file
+            - Instance
+            - Ldap_client
+            - Notifications
+            - Permissions
+            - Synchronization
+            - Timezones
+            - Webhooks_client
