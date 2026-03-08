@@ -105,7 +105,8 @@ git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-full"
 echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
 
-echo_section "PHPStan request-contracts gate"
+echo_section "PHPStan static-analysis gate"
+run_compose run --rm php-fpm composer phpstan:application
 run_compose run --rm php-fpm composer phpstan:request-contracts:l1
 run_compose run --rm php-fpm composer test:request-contracts
 run_compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
@@ -121,6 +122,7 @@ else
 fi
 
 echo_section "Deptrac architecture boundaries gate"
+run_compose run --rm php-fpm composer deptrac:analyze
 python3 scripts/docs/generate_codeowners_from_map.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" bash scripts/ci/run_deptrac_changed_gate.sh
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py
