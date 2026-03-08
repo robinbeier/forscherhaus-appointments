@@ -7,8 +7,11 @@ RUN apt-get update \
         git \
         zip \
         unzip \
-    && curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o - | sh -s \
+    && curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /tmp/install-php-extensions \
+    && chmod +x /tmp/install-php-extensions \
+    && /tmp/install-php-extensions \
         curl gd intl ldap mbstring mysqli odbc pdo pdo_mysql soap sockets xml zip xdebug exif sqlite3 gettext bcmath csv event inotify redis \
+    && rm -f /tmp/install-php-extensions \
     && docker-php-ext-enable xdebug \
     && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
     && curl -sLS https://deb.nodesource.com/setup_18.x | bash - \
