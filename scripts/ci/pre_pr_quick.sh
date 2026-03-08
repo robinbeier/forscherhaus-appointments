@@ -4,14 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 source ./scripts/ci/git_helpers.sh
+source ./scripts/ci/docker_compose_helpers.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 # Keep quick-gate static analysis configurable for toolchain upgrade branches.
 PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
-COMPOSE_CMD=()
 # Keep the quick gate aligned with the repo's frontend tooling baseline.
 ROOT_NODE_MINIMUM_MAJOR=18
-LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
+CI_DOCKER_LOG_PREFIX="pre-pr-quick"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -32,79 +32,13 @@ require_minimum_node_major() {
     fi
 }
 
-ensure_docker_compose() {
-    if [[ "${#COMPOSE_CMD[@]}" -gt 0 ]]; then
-        return
-    fi
-
-    require_cmd docker
-    local compose_files=()
-    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$LOCAL_CI_COMPOSE_OVERRIDE" ]]; then
-        compose_files=(-f docker-compose.yml -f "$LOCAL_CI_COMPOSE_OVERRIDE")
-    fi
-
-    if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose "${compose_files[@]}")
-    elif command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose "${compose_files[@]}")
-    else
-        echo "[pre-pr-quick] docker compose command not found." >&2
-        exit 1
-    fi
-}
-
-run_compose() {
-    ensure_docker_compose
-    "${COMPOSE_CMD[@]}" "$@"
-}
-
 echo_section() {
     echo
     echo "== $*"
 }
 
-wait_for_mysql_readiness() {
-    local max_attempts=60
-    local attempt=1
-
-    until run_compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-        if [[ "$attempt" -ge "$max_attempts" ]]; then
-            echo "[pre-pr-quick] MySQL root readiness timed out after ${max_attempts} attempts." >&2
-            return 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-
-    attempt=1
-    until run_compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-        if [[ "$attempt" -ge "$max_attempts" ]]; then
-            echo "[pre-pr-quick] MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-            return 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-
-    return 0
-}
-
-install_seed_instance() {
-    local attempt
-    for attempt in 1 2 3; do
-        if run_compose run --rm php-fpm php index.php console install; then
-            return 0
-        fi
-        echo "[pre-pr-quick] console install failed on attempt ${attempt}; retrying in 3s." >&2
-        sleep 3
-    done
-
-    echo "[pre-pr-quick] console install failed after 3 attempts." >&2
-    return 1
-}
-
 cleanup_stack() {
-    run_compose down -v --remove-orphans >/dev/null 2>&1 || true
+    ci_docker_cleanup_stack
 }
 
 ensure_local_config() {
@@ -165,20 +99,20 @@ git diff --quiet --exit-code -- assets/vendor build || {
 
 echo_section "Start quick gate database service"
 trap cleanup_stack EXIT
-run_compose up -d mysql
-wait_for_mysql_readiness
-install_seed_instance
+ci_docker_compose up -d mysql
+ci_docker_wait_for_mysql_readiness "pre-pr-quick"
+ci_docker_install_seed_instance "pre-pr-quick" run --rm php-fpm php index.php console install
 
 echo_section "PHPUnit"
-run_compose run --rm php-fpm composer test
+ci_docker_compose run --rm php-fpm composer test
 
 echo_section "PHPStan application"
-run_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
+ci_docker_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
 
 echo_section "Typed request-dto gate"
-run_compose run --rm php-fpm composer phpstan:request-dto
-run_compose run --rm php-fpm composer test:request-dto
-run_compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
+ci_docker_compose run --rm php-fpm composer phpstan:request-dto
+ci_docker_compose run --rm php-fpm composer test:request-dto
+ci_docker_compose run --rm php-fpm php scripts/ci/check_request_dto_adoption.php
 
 echo_section "Architecture ownership gate"
 python3 scripts/docs/generate_architecture_ownership_docs.py --check

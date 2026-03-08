@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 source ./scripts/ci/git_helpers.sh
+source ./scripts/ci/docker_compose_helpers.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
@@ -14,8 +15,7 @@ PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:applica
 PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT:-phpstan:request-contracts:l1}"
 PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT:-phpstan:request-contracts:l2}"
 DEPTRAC_ANALYZE_SCRIPT="${PRE_PR_DEPTRAC_ANALYZE_SCRIPT:-deptrac:analyze}"
-COMPOSE_CMD=()
-LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
+CI_DOCKER_LOG_PREFIX="pre-pr-full"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -24,79 +24,13 @@ require_cmd() {
     fi
 }
 
-ensure_docker_compose() {
-    if [[ "${#COMPOSE_CMD[@]}" -gt 0 ]]; then
-        return
-    fi
-
-    require_cmd docker
-    local compose_files=()
-    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$LOCAL_CI_COMPOSE_OVERRIDE" ]]; then
-        compose_files=(-f docker-compose.yml -f "$LOCAL_CI_COMPOSE_OVERRIDE")
-    fi
-
-    if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose "${compose_files[@]}")
-    elif command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose "${compose_files[@]}")
-    else
-        echo "[pre-pr-full] docker compose command not found." >&2
-        exit 1
-    fi
-}
-
-run_compose() {
-    ensure_docker_compose
-    "${COMPOSE_CMD[@]}" "$@"
-}
-
 echo_section() {
     echo
     echo "== $*"
 }
 
-wait_for_mysql_readiness() {
-    local max_attempts=60
-    local attempt=1
-
-    until run_compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-        if [[ "$attempt" -ge "$max_attempts" ]]; then
-            echo "[pre-pr-full] MySQL root readiness timed out after ${max_attempts} attempts." >&2
-            return 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-
-    attempt=1
-    until run_compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-        if [[ "$attempt" -ge "$max_attempts" ]]; then
-            echo "[pre-pr-full] MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-            return 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-
-    return 0
-}
-
-install_seed_instance() {
-    local attempt
-    for attempt in 1 2 3; do
-        if run_compose exec -T php-fpm php index.php console install; then
-            return 0
-        fi
-        echo "[pre-pr-full] console install failed on attempt ${attempt}; retrying in 3s." >&2
-        sleep 3
-    done
-
-    echo "[pre-pr-full] console install failed after 3 attempts." >&2
-    return 1
-}
-
 cleanup_stack() {
-    run_compose down -v --remove-orphans >/dev/null 2>&1 || true
+    ci_docker_cleanup_stack
 }
 
 bash ./scripts/ci/ensure_local_deps.sh
@@ -111,14 +45,14 @@ echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" PRE_PR_PHPSTAN_APPLICATION_SCRIPT="$PHPSTAN_APPLICATION_SCRIPT" bash ./scripts/ci/pre_pr_quick.sh
 
 echo_section "PHPStan static-analysis gate"
-run_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
-run_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT"
-run_compose run --rm php-fpm composer test:request-contracts
-run_compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
+ci_docker_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
+ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT"
+ci_docker_compose run --rm php-fpm composer test:request-contracts
+ci_docker_compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
 if [[ "$REQUEST_CONTRACTS_L2_BLOCKING" == "1" ]]; then
-    run_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"
+    ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"
 else
-    if ! run_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"; then
+    if ! ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"; then
         REQUEST_CONTRACTS_L2_WARNED=1
         echo "[pre-pr-full] WARN: composer ${PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT} failed (advisory override mode)." >&2
         echo "[pre-pr-full] WARN: See storage/logs/ci/phpstan-request-contracts-l2.raw for details." >&2
@@ -127,16 +61,16 @@ else
 fi
 
 echo_section "Deptrac architecture boundaries gate"
-run_compose run --rm php-fpm composer "$DEPTRAC_ANALYZE_SCRIPT"
+ci_docker_compose run --rm php-fpm composer "$DEPTRAC_ANALYZE_SCRIPT"
 python3 scripts/docs/generate_codeowners_from_map.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" bash scripts/ci/run_deptrac_changed_gate.sh
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py
 
 echo_section "Start integration stack"
 trap cleanup_stack EXIT
-run_compose up -d mysql php-fpm nginx
-wait_for_mysql_readiness
-install_seed_instance
+ci_docker_compose up -d mysql php-fpm nginx
+ci_docker_wait_for_mysql_readiness "pre-pr-full"
+ci_docker_install_seed_instance "pre-pr-full" exec -T php-fpm php index.php console install
 
 DEEP_RUNTIME_MANIFEST="storage/logs/ci/deep-runtime-suite/manifest.json"
 # Keep runtime dependency upgrades, including Monolog, on the shared deep gate by default.
@@ -151,7 +85,7 @@ DEEP_RUNTIME_SUITES=(
 echo_section "Deep runtime suite"
 rm -rf storage/logs/ci/deep-runtime-suite
 mkdir -p storage/logs/ci/deep-runtime-suite
-run_compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
+ci_docker_compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
     --suites="$(IFS=,; echo "${DEEP_RUNTIME_SUITES[*]}")" \
     --base-url=http://nginx --index-page=index.php \
     --openapi-spec=/var/www/html/openapi.yml \
@@ -162,15 +96,15 @@ run_compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
 
 echo_section "Deep runtime verdicts"
 for suite in "${DEEP_RUNTIME_SUITES[@]}"; do
-    run_compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php \
+    ci_docker_compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php \
         --manifest="$DEEP_RUNTIME_MANIFEST" \
         --suite="$suite"
 done
 
 if [[ "$RUN_COVERAGE" == "1" ]]; then
     echo_section "Coverage delta gate"
-    run_compose exec -T php-fpm composer test:coverage:unit
-    run_compose exec -T php-fpm composer check:coverage:delta
+    ci_docker_compose exec -T php-fpm composer test:coverage:unit
+    ci_docker_compose exec -T php-fpm composer check:coverage:delta
 fi
 
 echo
