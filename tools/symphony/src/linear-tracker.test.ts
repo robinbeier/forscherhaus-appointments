@@ -1091,3 +1091,108 @@ test('syncIssueWorkpadToState refreshes the workpad for Ready to Merge', async (
     assert.match(syncedIssue.workpadCommentBody ?? '', /Resume the land flow now/);
     assert.equal(calls.length, 2);
 });
+
+test('syncIssueWorkpadToState respects configured terminal states', async () => {
+    const calls: MockFetchCall[] = [];
+
+    const adapter = new LinearTrackerAdapter({
+        config: {
+            apiKey: 'linear-token',
+            projectSlug: 'forscherhaus',
+            activeStates: ['In Progress'],
+            terminalStates: ['Resolved'],
+        },
+        fetchImpl: async (url, init) => {
+            calls.push({url, init});
+            const body = JSON.parse(String(init?.body));
+            const query = String(body.query ?? '');
+
+            if (query.includes('query FetchIssueRunContext')) {
+                return jsonResponse({
+                    data: {
+                        issue: {
+                            id: 'issue-id-50',
+                            identifier: 'ROB-50',
+                            title: 'Resolve campaign tail work',
+                            description: '## Goal\n\nClose the remaining campaign follow-up.',
+                            branchName: 'beierrobin/rob-50',
+                            url: 'https://linear.app/forscherhaus/issue/ROB-50',
+                            createdAt: '2026-03-06T08:00:00.000Z',
+                            updatedAt: '2026-03-06T08:05:00.000Z',
+                            priority: null,
+                            state: {id: 'state-resolved', name: 'Resolved', type: 'completed'},
+                            labels: {nodes: []},
+                            relations: {nodes: []},
+                            inverseRelations: {nodes: []},
+                            project: {slugId: 'forscherhaus'},
+                            comments: {
+                                nodes: [
+                                    {
+                                        id: 'comment-50',
+                                        body: '## Codex Workpad\n\nOld body',
+                                        url: 'https://linear.app/comment-50',
+                                        updatedAt: '2026-03-06T08:04:00.000Z',
+                                    },
+                                ],
+                            },
+                            team: {
+                                states: {
+                                    nodes: [
+                                        {id: 'state-in-progress', name: 'In Progress', type: 'started'},
+                                        {id: 'state-resolved', name: 'Resolved', type: 'completed'},
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            if (query.includes('mutation UpdateComment')) {
+                assert.equal(body.variables.id, 'comment-50');
+                assert.match(String(body.variables.body), /ROB-50 is complete in `Resolved`/);
+                assert.ok(String(body.variables.body).includes('Merge/closure handoff completed'));
+                return jsonResponse({
+                    data: {
+                        commentUpdate: {
+                            success: true,
+                            comment: {
+                                id: 'comment-50',
+                                body: body.variables.body,
+                                url: 'https://linear.app/comment-50',
+                            },
+                        },
+                    },
+                });
+            }
+
+            throw new Error(`Unexpected query: ${query}`);
+        },
+    });
+
+    const syncedIssue = await adapter.syncIssueWorkpadToState({
+        id: 'issue-id-50',
+        identifier: 'ROB-50',
+        title: 'Resolve campaign tail work',
+        description: null,
+        stateName: 'Resolved',
+        stateType: 'completed',
+        priority: null,
+        branchName: 'beierrobin/rob-50',
+        url: 'https://linear.app/forscherhaus/issue/ROB-50',
+        labels: [],
+        blockedBy: [],
+        blockedByIdentifiers: [],
+        createdAt: '2026-03-06T08:00:00.000Z',
+        updatedAt: '2026-03-06T08:05:00.000Z',
+        projectSlug: 'forscherhaus',
+        workpadCommentId: 'comment-50',
+        workpadCommentBody: '## Codex Workpad\n\nOld body',
+        workpadCommentUrl: 'https://linear.app/comment-50',
+    });
+
+    assert.equal(syncedIssue.workpadCommentId, 'comment-50');
+    assert.match(syncedIssue.workpadCommentBody ?? '', /ROB-50 is complete in `Resolved`/);
+    assert.ok((syncedIssue.workpadCommentBody ?? '').includes('Merge/closure handoff completed'));
+    assert.equal(calls.length, 2);
+});

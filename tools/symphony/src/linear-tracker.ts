@@ -179,6 +179,7 @@ export interface LinearTrackerConfig {
     apiKey: string;
     projectSlug: string;
     activeStates: string[];
+    terminalStates?: string[];
     apiUrl?: string;
     timeoutMs?: number;
     pageSize?: number;
@@ -219,6 +220,7 @@ interface LinearTrackerAdapterArgs {
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_TERMINAL_STATES = ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'];
 
 function asOptionalTrimmedString(value: unknown): string | null {
     if (typeof value !== 'string') {
@@ -552,7 +554,7 @@ function buildBootstrapWorkpad(issue: TrackedIssue): string {
     ].join('\n');
 }
 
-function buildStateSynchronizedWorkpad(issue: TrackedIssue): string {
+function buildStateSynchronizedWorkpad(issue: TrackedIssue, terminalStateNames: string[]): string {
     const sections = parseDescriptionSections(issue.description);
     const acceptanceItems = dedupeAndLimit(
         collectSectionContent(sections, ['Definition of Done', 'Acceptance Criteria'], extractChecklistItems),
@@ -569,7 +571,8 @@ function buildStateSynchronizedWorkpad(issue: TrackedIssue): string {
     const normalizedState = normalizeHeadingName(issue.stateName);
     const isReviewState = normalizedState === 'in review';
     const isReadyToMergeState = normalizedState === 'ready to merge';
-    const isTerminalState = ['done', 'closed', 'cancelled', 'canceled', 'duplicate'].includes(normalizedState);
+    const normalizedTerminalStates = new Set(terminalStateNames.map((state) => normalizeHeadingName(state)));
+    const isTerminalState = normalizedTerminalStates.has(normalizedState);
 
     if (!isReviewState && !isReadyToMergeState && !isTerminalState) {
         return buildBootstrapWorkpad(issue);
@@ -763,6 +766,7 @@ export class LinearTrackerAdapter {
             apiKey: args.config.apiKey,
             projectSlug: args.config.projectSlug,
             activeStates: args.config.activeStates,
+            terminalStates: args.config.terminalStates ?? DEFAULT_TERMINAL_STATES,
         };
         this.fetchImpl = args.fetchImpl ?? fetch;
     }
@@ -836,7 +840,7 @@ export class LinearTrackerAdapter {
             ...normalizedIssue,
             stateName: issue.stateName,
         };
-        const workpadBody = buildStateSynchronizedWorkpad(currentIssue);
+        const workpadBody = buildStateSynchronizedWorkpad(currentIssue, this.config.terminalStates);
         const existingWorkpad = this.selectWorkpadComment(fetchedIssue.comments?.nodes ?? []);
 
         if (existingWorkpad) {

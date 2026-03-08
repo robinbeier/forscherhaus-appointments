@@ -1308,6 +1308,7 @@ export class SymphonyOrchestrator {
                         apiKey: config.tracker.apiKey,
                         projectSlug: config.tracker.projectSlug,
                         activeStates: config.tracker.activeStates,
+                        terminalStates: config.tracker.terminalStates,
                         apiUrl: config.tracker.endpoint,
                     },
                 }));
@@ -1333,6 +1334,7 @@ export class SymphonyOrchestrator {
                                   apiKey: factoryArgs.config.tracker.apiKey,
                                   projectSlug: factoryArgs.config.tracker.projectSlug,
                                   activeStates: factoryArgs.config.tracker.activeStates,
+                                  terminalStates: factoryArgs.config.tracker.terminalStates,
                                   apiUrl: factoryArgs.config.tracker.endpoint,
                               },
                           })
@@ -2077,7 +2079,12 @@ export class SymphonyOrchestrator {
                     (normalizedCurrentState === normalizeStateName(effectiveConfig.tracker.reviewStateName) ||
                         terminalStates.has(normalizedCurrentState))
                 ) {
-                    currentIssue = await tracker.syncIssueWorkpadToState(currentIssue);
+                    currentIssue = await this.syncIssueWorkpadToStateBestEffort({
+                        tracker,
+                        issue: currentIssue,
+                        sessionId: runningEntry.sessionId,
+                        warningMessage: 'Failed to synchronize issue workpad after state refresh.',
+                    });
                     runningEntry.issue = currentIssue;
                 }
 
@@ -3127,11 +3134,35 @@ export class SymphonyOrchestrator {
             },
         );
 
-        if (tracker.syncIssueWorkpadToState) {
-            return await tracker.syncIssueWorkpadToState(nextIssue);
+        return await this.syncIssueWorkpadToStateBestEffort({
+            tracker,
+            issue: nextIssue,
+            sessionId: runningEntry.sessionId,
+            warningMessage: 'Failed to synchronize issue workpad after moving issue to review state.',
+        });
+    }
+
+    private async syncIssueWorkpadToStateBestEffort(args: {
+        tracker: TrackerClient;
+        issue: TrackedIssue;
+        sessionId?: string | null;
+        warningMessage: string;
+    }): Promise<TrackedIssue> {
+        if (!args.tracker.syncIssueWorkpadToState) {
+            return args.issue;
         }
 
-        return nextIssue;
+        try {
+            return await args.tracker.syncIssueWorkpadToState(args.issue);
+        } catch (error) {
+            const classified = this.classifyError(error);
+            this.logger.warn(args.warningMessage, {
+                ...issueLogFields(args.issue, args.sessionId ?? undefined),
+                errorClass: classified.errorClass,
+                error: classified.message,
+            });
+            return args.issue;
+        }
     }
 
     private handleOrchestratorEvent(event: OrchestratorEvent, runningEntry: RunningEntry): void {

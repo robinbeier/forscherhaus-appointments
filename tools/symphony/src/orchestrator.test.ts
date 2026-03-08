@@ -710,6 +710,109 @@ test('successful Linear review handoff during a publish turn stops immediately a
     );
 });
 
+test('review handoff stays successful when workpad sync fails after moving to In Review', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'review-handoff-sync-failure-1',
+        identifier: 'ROB-13-REVIEW-HANDOFF-SYNC-FAIL',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-13-review-handoff-sync-fail';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+    tracker.syncIssueWorkpadToState = async (trackedIssue) => {
+        tracker.syncIssueWorkpadToStateCalls.push({
+            identifier: trackedIssue.identifier,
+            stateName: trackedIssue.stateName,
+        });
+        throw new Error('Linear comment update failed');
+    };
+
+    const logRecords: Array<Record<string, unknown>> = [];
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-13-review-handoff-sync-fail'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-review-handoff-sync-fail'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-review-handoff-sync-fail'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub(logRecords),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-review-sync-fail',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-review-sync-fail-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_end',
+                        params: {
+                            msg: {
+                                command:
+                                    "git push -u origin HEAD && gh pr create --base main --title 'Review-ready PR'",
+                                exitCode: 0,
+                            },
+                        },
+                    },
+                });
+
+                return {
+                    status: 'completed',
+                    outputText: 'published',
+                    threadId: 'thread-review-sync-fail',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-review-sync-fail-turn-1',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.deepEqual(tracker.moveIssueToStateByNameCalls, [
+        {
+            identifier: 'ROB-13-REVIEW-HANDOFF-SYNC-FAIL',
+            stateName: 'In Review',
+        },
+    ]);
+    assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
+        {
+            identifier: 'ROB-13-REVIEW-HANDOFF-SYNC-FAIL',
+            stateName: 'In Review',
+        },
+    ]);
+    assert.ok(
+        logRecords.some(
+            (record) =>
+                record.level === 'warn' &&
+                record.message === 'Failed to synchronize issue workpad after moving issue to review state.' &&
+                record.errorClass === 'orchestrator_unknown_error' &&
+                record.error === 'Linear comment update failed',
+        ),
+    );
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-REVIEW-HANDOFF-SYNC-FAIL');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'completed');
+    const terminal = issueDetails?.terminal as Record<string, unknown>;
+    assert.equal(terminal.state, 'In Review');
+});
+
 test('non-commit merge states can continue without local commit output', async () => {
     const tracker = new TrackerStub();
     const issue = createIssue({
