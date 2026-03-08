@@ -44,8 +44,8 @@
     },
     "require-dev": {
         "roave/security-advisories": "dev-master",
-        "deptrac/deptrac": "^2.0",
-        "phpstan/phpstan": "^1.12",
+        "deptrac/deptrac": "^3.0",
+        "phpstan/phpstan": "^2.0",
         "phpunit/phpunit": "^9.6",
         "symfony/yaml": "^6.4"
     },
