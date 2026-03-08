@@ -130,21 +130,33 @@ git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
 
-# Frontend dependency bumps, including chartjs-chart-matrix@3 and the booking
-# confirmation PDF's jspdf@4 refresh, can change generated bundles or the
-# resolved lockfile without touching app source files.
+# Frontend dependency spikes, including jquery@4 trials and prior package
+# bumps, can change generated bundles or the resolved lockfile without
+# touching app source files.
 echo_section "Frontend lockfile sync"
+# Run dependency spikes from a committed baseline so the quick gate only flags
+# fresh drift introduced by the lockfile refresh itself.
+git diff --quiet --exit-code -- package.json package-lock.json || {
+    echo "[pre-pr-quick] Frontend dependency files are already dirty." >&2
+    echo "[pre-pr-quick] Commit the refreshed package.json/package-lock.json baseline before rerunning this gate for dependency spikes." >&2
+    git status --short -- package.json package-lock.json >&2 || true
+    exit 1
+}
 npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-git diff --quiet --exit-code -- package-lock.json || {
-    echo "[pre-pr-quick] Frontend dependency sync produced uncommitted changes in package-lock.json." >&2
+git diff --quiet --exit-code -- package.json package-lock.json || {
+    echo "[pre-pr-quick] Frontend dependency sync produced uncommitted changes in package.json/package-lock.json." >&2
+    echo "[pre-pr-quick] Commit the refreshed lockfile baseline before rerunning this gate for dependency spikes." >&2
     git status --short -- package.json package-lock.json >&2 || true
     exit 1
 }
 
 echo_section "Frontend vendor assets refresh"
+# Keep dependency-driven frontend artifact drift, including jquery@4 spikes,
+# visible in the quick gate.
 npm run assets:refresh
 git diff --quiet --exit-code -- assets/vendor build || {
     echo "[pre-pr-quick] Frontend dependency refresh produced uncommitted changes in assets/vendor or build." >&2
+    echo "[pre-pr-quick] Commit dependency-driven asset refreshes before rerunning this gate for frontend upgrade spikes." >&2
     git status --short -- assets/vendor build >&2 || true
     exit 1
 }
