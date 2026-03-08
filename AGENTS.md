@@ -351,6 +351,7 @@ Docker-Services (lokal) & Debug:
 Warnung (Worktrees): Nutze pro Worktree einen eindeutigen Compose-Projektnamen, damit sich Container/Volumes nicht ueberlagern.
 Beispiel: `docker compose -p fh-main up -d` im Haupt-Worktree und `docker compose -p fh-hotfix up -d` in einem zweiten Worktree.
 So vermeidest du gemischte Stacks (z. B. `nginx` aus Worktree A, `php-fpm`/`mysql` aus Worktree B).
+Managed lokale Hook-/Gate-Stacks leiten ihren MySQL-Datenpfad jetzt automatisch nach `docker/.ci-mysql/<compose-project>` ab; der normale Dev-Stack bleibt bei `docker/mysql`.
 
 ## Lokaler DB-Dump Restore (Docker)
 
