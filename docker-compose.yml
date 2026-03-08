@@ -23,7 +23,7 @@ services:
     mysql:
         image: 'mysql:8.0'
         volumes:
-            - './docker/mysql:/var/lib/mysql'
+            - '${EA_MYSQL_DATA_PATH:-./docker/mysql}:/var/lib/mysql'
         environment:
             - MYSQL_ROOT_PASSWORD=secret
             - MYSQL_DATABASE=easyappointments

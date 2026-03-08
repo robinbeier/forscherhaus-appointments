@@ -70,6 +70,7 @@ test('managed pre-commit uses the deterministic docker bootstrap path for php-re
             path.join(fakeBin, 'docker'),
             `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+printf 'EA_MYSQL_DATA_PATH=%s\\n' "\${EA_MYSQL_DATA_PATH:-}" >> "$FAKE_DOCKER_LOG"
 if [[ "$*" == "compose version" ]]; then
     exit 0
 fi
@@ -138,6 +139,10 @@ exit 0
             dockerLog,
             /compose -p managed-pre-commit-[a-z0-9-]+-precommit-[0-9]+ -f docker-compose\.yml -f docker\/compose\.ci-local\.yml up -d php-fpm mysql/,
         );
+        assert.match(
+            dockerLog,
+            /EA_MYSQL_DATA_PATH=\.\/docker\/\.ci-mysql\/managed-pre-commit-[a-z0-9-]+-precommit-[0-9]+/,
+        );
         assert.match(dockerLog, /run --rm php-fpm php index\.php console install/);
         assert.match(dockerLog, /run --rm php-fpm composer test/);
         assert.match(dockerLog, /down -v --remove-orphans/);
@@ -152,6 +157,7 @@ test('managed pre-commit derives unique compose project names for same-named clo
     const repoBasename = 'managed-pre-commit-repo';
     const fakeDockerScript = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+printf 'EA_MYSQL_DATA_PATH=%s\\n' "\${EA_MYSQL_DATA_PATH:-}" >> "$FAKE_DOCKER_LOG"
 if [[ "$*" == "compose version" ]]; then
     exit 0
 fi
@@ -245,10 +251,15 @@ exit 99
         const secondDockerLog = await readFile(secondRepo.dockerLogPath, 'utf8');
         const firstProjectName = firstDockerLog.match(/compose -p ([^ ]+) -f docker-compose\.yml/)?.[1];
         const secondProjectName = secondDockerLog.match(/compose -p ([^ ]+) -f docker-compose\.yml/)?.[1];
+        const firstMysqlPath = firstDockerLog.match(/EA_MYSQL_DATA_PATH=([^\n]+)/)?.[1];
+        const secondMysqlPath = secondDockerLog.match(/EA_MYSQL_DATA_PATH=([^\n]+)/)?.[1];
 
         assert.ok(firstProjectName, 'first repo should emit a compose project name');
         assert.ok(secondProjectName, 'second repo should emit a compose project name');
+        assert.ok(firstMysqlPath, 'first repo should emit a MySQL data path');
+        assert.ok(secondMysqlPath, 'second repo should emit a MySQL data path');
         assert.notEqual(firstProjectName, secondProjectName);
+        assert.notEqual(firstMysqlPath, secondMysqlPath);
     } finally {
         await rm(temporaryDirectory, {recursive: true, force: true});
     }

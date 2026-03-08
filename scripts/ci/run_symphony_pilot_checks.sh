@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+source ./scripts/ci/docker_compose_helpers.sh
 
 RUN_FULL_GATE=0
-COMPOSE_CMD=()
-LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
+CI_DOCKER_LOG_PREFIX="symphony-pilot-checks"
 
 usage() {
     cat <<'USAGE'
@@ -38,70 +38,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-require_cmd() {
-    if ! command -v "$1" >/dev/null 2>&1; then
-        echo "[symphony-pilot-checks] Missing required command: $1" >&2
-        exit 1
-    fi
-}
-
-ensure_docker_compose() {
-    if [[ "${#COMPOSE_CMD[@]}" -gt 0 ]]; then
-        return
-    fi
-
-    require_cmd docker
-    local compose_files=()
-    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$LOCAL_CI_COMPOSE_OVERRIDE" ]]; then
-        compose_files=(-f docker-compose.yml -f "$LOCAL_CI_COMPOSE_OVERRIDE")
-    fi
-
-    if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose "${compose_files[@]}")
-    elif command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose "${compose_files[@]}")
-    else
-        echo "[symphony-pilot-checks] docker compose command not found." >&2
-        exit 1
-    fi
-}
-
-run_compose() {
-    ensure_docker_compose
-    "${COMPOSE_CMD[@]}" "$@"
-}
-
 echo_section() {
     echo
     echo "== $*"
 }
 
-wait_for_mysql_readiness() {
-    local max_attempts=60
-    local attempt=1
-
-    until run_compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do
-        if [[ "$attempt" -ge "$max_attempts" ]]; then
-            echo "[symphony-pilot-checks] MySQL root readiness timed out after ${max_attempts} attempts." >&2
-            return 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-
-    attempt=1
-    until run_compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do
-        if [[ "$attempt" -ge "$max_attempts" ]]; then
-            echo "[symphony-pilot-checks] MySQL app-user readiness timed out after ${max_attempts} attempts." >&2
-            return 1
-        fi
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-}
-
 cleanup_stack() {
-    run_compose down -v --remove-orphans >/dev/null 2>&1 || true
+    ci_docker_cleanup_stack
 }
 
 echo_section "Symphony pilot baseline checks"
@@ -110,11 +53,11 @@ echo "[symphony-pilot-checks] deterministic order: composer test -> optional ful
 trap cleanup_stack EXIT
 
 echo_section "Start MySQL service"
-run_compose up -d mysql
-wait_for_mysql_readiness
+ci_docker_compose up -d mysql
+ci_docker_wait_for_mysql_readiness "symphony-pilot-checks"
 
 echo_section "Composer test (CI parity)"
-run_compose run --rm php-fpm composer test
+ci_docker_compose run --rm php-fpm composer test
 
 if [[ "$RUN_FULL_GATE" -eq 1 ]]; then
     echo_section "Full pre-PR gate (coverage enabled)"

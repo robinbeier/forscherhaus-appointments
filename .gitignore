@@ -6,6 +6,7 @@
 /docs/jsdoc/html
 /docs/plato/html
 /docker/mysql/
+/docker/.ci-mysql/
 /docker/baikal/
 /docker/openldap/
 /node_modules/

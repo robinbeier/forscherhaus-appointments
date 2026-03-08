@@ -1,6 +1,6 @@
 services:
     nginx:
-        ports: []
+        ports: !reset []
 
     mysql:
-        ports: []
+        ports: !reset []
