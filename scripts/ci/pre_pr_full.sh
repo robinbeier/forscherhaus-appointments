@@ -132,6 +132,7 @@ wait_for_mysql_readiness
 install_seed_instance
 
 DEEP_RUNTIME_MANIFEST="storage/logs/ci/deep-runtime-suite/manifest.json"
+# Keep runtime dependency upgrades, including Monolog, on the shared deep gate by default.
 DEEP_RUNTIME_SUITES=(
     api-contract-openapi
     write-contract-booking
