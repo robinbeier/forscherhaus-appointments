@@ -12,6 +12,7 @@ ci_docker_require_cmd() {
 ci_docker_init_compose() {
     local log_prefix="${1:-ci-docker}"
     local local_ci_compose_override="${EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH:-docker/compose.ci-local.yml}"
+    local compose_project_name="${CI_DOCKER_COMPOSE_PROJECT_NAME:-}"
 
     if [[ "${#CI_DOCKER_COMPOSE_CMD[@]}" -gt 0 ]]; then
         return
@@ -19,15 +20,20 @@ ci_docker_init_compose() {
 
     ci_docker_require_cmd docker "$log_prefix"
 
+    local compose_project_args=()
+    if [[ -n "${compose_project_name}" ]]; then
+        compose_project_args=(-p "${compose_project_name}")
+    fi
+
     local compose_files=()
     if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$local_ci_compose_override" ]]; then
         compose_files=(-f docker-compose.yml -f "$local_ci_compose_override")
     fi
 
     if docker compose version >/dev/null 2>&1; then
-        CI_DOCKER_COMPOSE_CMD=(docker compose "${compose_files[@]}")
+        CI_DOCKER_COMPOSE_CMD=(docker compose "${compose_project_args[@]}" "${compose_files[@]}")
     elif command -v docker-compose >/dev/null 2>&1; then
-        CI_DOCKER_COMPOSE_CMD=(docker-compose "${compose_files[@]}")
+        CI_DOCKER_COMPOSE_CMD=(docker-compose "${compose_project_args[@]}" "${compose_files[@]}")
     else
         echo "[$log_prefix] docker compose command not found." >&2
         exit 1
@@ -38,11 +44,6 @@ ci_docker_compose() {
     local log_prefix="${CI_DOCKER_LOG_PREFIX:-ci-docker}"
     ci_docker_init_compose "$log_prefix"
     "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
-}
-
-ci_docker_service_running() {
-    local service_name="$1"
-    ci_docker_compose ps --status running --services | grep -Fxq "$service_name"
 }
 
 ci_docker_wait_for_mysql_readiness() {
@@ -91,12 +92,4 @@ ci_docker_install_seed_instance() {
 
 ci_docker_cleanup_stack() {
     ci_docker_compose down -v --remove-orphans >/dev/null 2>&1 || true
-}
-
-ci_docker_stop_services() {
-    if [[ "$#" -eq 0 ]]; then
-        return
-    fi
-
-    ci_docker_compose stop "$@" >/dev/null 2>&1 || true
 }

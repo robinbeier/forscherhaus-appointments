@@ -27,7 +27,6 @@ fi
 
 CI_DOCKER_LOG_PREFIX="pre-commit"
 STACK_STARTED=0
-PARTIAL_STACK_STARTED_SERVICES=()
 
 die() {
     echo "ERROR: $*" >&2
@@ -53,40 +52,28 @@ ensure_local_config() {
     cp config-sample.php config.php
 }
 
+configure_hook_compose_project() {
+    local repo_slug
+    local git_dir_checksum
+
+    repo_slug="$(basename "${repo_root}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
+    git_dir_checksum="$(printf '%s' "$(git rev-parse --git-dir)" | cksum | awk '{print $1}')"
+    CI_DOCKER_COMPOSE_PROJECT_NAME="${CI_DOCKER_COMPOSE_PROJECT_NAME:-${repo_slug}-precommit-${git_dir_checksum}}"
+    export CI_DOCKER_COMPOSE_PROJECT_NAME
+}
+
 ensure_stack_started() {
     if [[ "${STACK_STARTED}" == "1" || "${IN_CONTAINER}" == "1" ]]; then
         return
     fi
 
-    local missing_services=()
-    local service
-    for service in php-fpm mysql; do
-        if ! ci_docker_service_running "${service}"; then
-            missing_services+=("${service}")
-        fi
-    done
-
-    if [[ "${#missing_services[@]}" -eq 0 ]]; then
-        return
-    fi
-
-    ci_docker_compose up -d "${missing_services[@]}" >/dev/null
-    if [[ "${#missing_services[@]}" -eq 2 ]]; then
-        STACK_STARTED=1
-        return
-    fi
-
-    PARTIAL_STACK_STARTED_SERVICES=("${missing_services[@]}")
+    ci_docker_compose up -d php-fpm mysql >/dev/null
+    STACK_STARTED=1
 }
 
 cleanup_stack() {
     if [[ "${STACK_STARTED}" == "1" ]]; then
         ci_docker_cleanup_stack
-        return
-    fi
-
-    if [[ "${#PARTIAL_STACK_STARTED_SERVICES[@]}" -gt 0 ]]; then
-        ci_docker_stop_services "${PARTIAL_STACK_STARTED_SERVICES[@]}"
     fi
 }
 
@@ -166,6 +153,7 @@ if [[ "${php_related}" == true ]]; then
         composer test
     else
         require_cmd docker
+        configure_hook_compose_project
         ensure_stack_started
         ci_docker_wait_for_mysql_readiness "pre-commit"
         ci_docker_install_seed_instance "pre-commit" run --rm php-fpm php index.php console install
