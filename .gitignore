@@ -29,6 +29,7 @@
 /storage/uploads/*
 !/storage/uploads/index.html
 /vendor/
+/.phpunit.cache/
 /metafile
 .env.symphony.pilot
 __pycache__/
