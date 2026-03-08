@@ -9,6 +9,7 @@ BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
 REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-1}"
 REQUEST_CONTRACTS_L2_WARNED=0
+# Allow toolchain-upgrade branches to override composer script targets without forking this gate.
 PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
 PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT:-phpstan:request-contracts:l1}"
 PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT:-phpstan:request-contracts:l2}"
@@ -107,7 +108,7 @@ require_cmd python3
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-full"
 
 echo_section "Run quick pre-PR gate"
-SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
+SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" PRE_PR_PHPSTAN_APPLICATION_SCRIPT="$PHPSTAN_APPLICATION_SCRIPT" bash ./scripts/ci/pre_pr_quick.sh
 
 echo_section "PHPStan static-analysis gate"
 run_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"

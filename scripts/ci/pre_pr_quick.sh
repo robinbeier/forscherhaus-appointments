@@ -6,6 +6,8 @@ cd "$ROOT_DIR"
 source ./scripts/ci/git_helpers.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
+# Keep quick-gate static analysis configurable for toolchain upgrade branches.
+PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
 COMPOSE_CMD=()
 # Keep the quick gate aligned with the repo's frontend tooling baseline.
 ROOT_NODE_MINIMUM_MAJOR=18
@@ -171,7 +173,7 @@ echo_section "PHPUnit"
 run_compose run --rm php-fpm composer test
 
 echo_section "PHPStan application"
-run_compose run --rm php-fpm composer phpstan:application
+run_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
 
 echo_section "Typed request-dto gate"
 run_compose run --rm php-fpm composer phpstan:request-dto
