@@ -10,7 +10,7 @@ range=""
 
 if [[ "$event_name" == "pull_request" ]]; then
     base_ref="${GITHUB_BASE_REF:-main}"
-    git fetch --no-tags origin "$base_ref"
+    git fetch --no-tags --no-write-fetch-head origin "$base_ref"
     base_sha="$(git merge-base HEAD "origin/$base_ref")"
     range="$base_sha...HEAD"
 elif [[ "$event_name" == "push" ]]; then
