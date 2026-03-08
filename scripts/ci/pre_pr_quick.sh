@@ -98,6 +98,14 @@ cleanup_stack() {
     run_compose down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
+ensure_local_config() {
+    if [[ -f config.php ]]; then
+        return
+    fi
+
+    cp config-sample.php config.php
+}
+
 if [[ "${SKIP_LOCAL_DEPS_BOOTSTRAP:-0}" != "1" ]]; then
     bash ./scripts/ci/ensure_local_deps.sh
 fi
@@ -107,6 +115,7 @@ require_cmd python3
 require_cmd npm
 require_cmd node
 require_minimum_node_major "$ROOT_NODE_MINIMUM_MAJOR"
+ensure_local_config
 
 # Keep changed-file checks deterministic against current base branch state.
 git fetch --no-tags --no-write-fetch-head origin "$BASE_REF" >/dev/null 2>&1 || true
@@ -114,11 +123,14 @@ git fetch --no-tags --no-write-fetch-head origin "$BASE_REF" >/dev/null 2>&1 || 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
 
+# Frontend dependency bumps, including the dashboard heatmap matrix plugin, can
+# change generated bundles or the resolved lockfile without touching app source
+# files.
 echo_section "Frontend vendor assets refresh"
 npm run assets:refresh
-git diff --quiet --exit-code -- assets/vendor build || {
-    echo "[pre-pr-quick] Vendor asset refresh produced uncommitted changes in assets/vendor or build." >&2
-    git status --short -- assets/vendor build >&2 || true
+git diff --quiet --exit-code -- assets/vendor build package-lock.json || {
+    echo "[pre-pr-quick] Frontend dependency refresh produced uncommitted changes in assets/vendor, build, or package-lock.json." >&2
+    git status --short -- assets/vendor build package-lock.json >&2 || true
     exit 1
 }
 
