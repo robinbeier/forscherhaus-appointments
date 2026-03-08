@@ -326,3 +326,118 @@ exit 0
         await rm(temporaryDirectory, {recursive: true, force: true});
     }
 });
+
+test('managed pre-commit keeps php validation enabled for delete-only php commits', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'managed-pre-commit-delete-php-'));
+    const fakeBin = path.join(temporaryDirectory, 'bin');
+    const dockerLogPath = path.join(temporaryDirectory, 'docker.log');
+    const npxLogPath = path.join(temporaryDirectory, 'npx.log');
+    const phpLogPath = path.join(temporaryDirectory, 'php.log');
+
+    try {
+        await mkdir(path.join(temporaryDirectory, 'scripts', 'hooks'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'scripts', 'ci'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'docker'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'application'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'vendor'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'node_modules'), {recursive: true});
+        await mkdir(fakeBin, {recursive: true});
+
+        await copyExecutable(preCommitHookPath, path.join(temporaryDirectory, 'scripts', 'hooks', 'pre-commit'));
+        await copyExecutable(
+            dockerHelperPath,
+            path.join(temporaryDirectory, 'scripts', 'ci', 'docker_compose_helpers.sh'),
+        );
+        await writeFile(path.join(temporaryDirectory, 'config-sample.php'), '<?php\nreturn [];\n', 'utf8');
+        await writeFile(
+            path.join(temporaryDirectory, 'docker-compose.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(
+            path.join(temporaryDirectory, 'docker', 'compose.ci-local.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(
+            path.join(temporaryDirectory, 'application', 'DeleteMe.php'),
+            '<?php\n\nreturn true;\n',
+            'utf8',
+        );
+
+        await execFile('git', ['init', '-b', 'main'], {cwd: temporaryDirectory});
+        await execFile('git', ['config', 'user.name', 'Codex'], {cwd: temporaryDirectory});
+        await execFile('git', ['config', 'user.email', 'codex@example.com'], {cwd: temporaryDirectory});
+        await execFile('git', ['add', 'application/DeleteMe.php'], {cwd: temporaryDirectory});
+        await execFile('git', ['commit', '-m', 'Seed delete candidate'], {cwd: temporaryDirectory});
+        await rm(path.join(temporaryDirectory, 'application', 'DeleteMe.php'));
+        await execFile('git', ['add', '-u', 'application/DeleteMe.php'], {cwd: temporaryDirectory});
+
+        await writeExecutable(
+            path.join(fakeBin, 'docker'),
+            `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+if [[ "$*" == "compose version" ]]; then
+    exit 0
+fi
+if [[ "$*" == *"up -d php-fpm mysql"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysql -uuser -ppassword -e USE easyappointments; SELECT 1;"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm php index.php console install"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm composer test"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"down -v --remove-orphans"* ]]; then
+    exit 0
+fi
+exit 99
+`,
+        );
+        await writeExecutable(
+            path.join(fakeBin, 'npx'),
+            `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_NPX_LOG"
+exit 0
+`,
+        );
+        await writeExecutable(
+            path.join(fakeBin, 'php'),
+            `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_PHP_LOG"
+if [[ "$1" == "-l" ]]; then
+    exit 0
+fi
+exit 99
+`,
+        );
+        await writeExecutable(path.join(fakeBin, 'npm'), '#!/usr/bin/env bash\nexit 0\n');
+
+        const {stdout} = await execFile('bash', [path.join('scripts', 'hooks', 'pre-commit')], {
+            cwd: temporaryDirectory,
+            env: {
+                ...process.env,
+                PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+                FAKE_DOCKER_LOG: dockerLogPath,
+                FAKE_NPX_LOG: npxLogPath,
+                FAKE_PHP_LOG: phpLogPath,
+            },
+        });
+
+        const dockerLog = await readFile(dockerLogPath, 'utf8');
+        assert.match(stdout, /Run PHPUnit suite/);
+        assert.match(stdout, /Pre-commit checks passed/);
+        assert.match(dockerLog, /run --rm php-fpm composer test/);
+        await assert.rejects(() => readFile(npxLogPath, 'utf8'));
+        await assert.rejects(() => readFile(phpLogPath, 'utf8'));
+    } finally {
+        await rm(temporaryDirectory, {recursive: true, force: true});
+    }
+});

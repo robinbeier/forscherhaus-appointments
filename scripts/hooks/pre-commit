@@ -18,7 +18,7 @@ fi
 staged_files=()
 while IFS= read -r file; do
     staged_files+=("$file")
-done < <(git diff --cached --name-only --diff-filter=ACMR)
+done < <(git diff --cached --name-only --diff-filter=ACMRD)
 
 IN_CONTAINER=0
 if [[ -f /.dockerenv ]]; then
@@ -108,12 +108,16 @@ frontend_related=false
 for file in "${staged_files[@]}"; do
     case "${file}" in
         *.php)
-            php_files+=("${file}")
-            prettier_files+=("${file}")
+            if [[ -f "${file}" ]]; then
+                php_files+=("${file}")
+                prettier_files+=("${file}")
+            fi
             php_related=true
             ;;
         *.js|*.jsx|*.ts|*.tsx|*.css|*.scss|*.sass|*.json|*.md|*.yml|*.yaml|*.html|*.htm)
-            prettier_files+=("${file}")
+            if [[ -f "${file}" ]]; then
+                prettier_files+=("${file}")
+            fi
             ;;
     esac
 
