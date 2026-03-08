@@ -69,6 +69,7 @@ Ownership model: Role + Handles (primary/secondary).
 - Key files:
   - `application/controllers/Booking.php`
   - `application/views/pages/booking.php`
+  - `application/libraries/Email_messages.php`
   - `assets/js/pages/booking.js`
 - Path prefixes:
   - `application/controllers/Booking.php`
@@ -76,6 +77,7 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/views/components/booking_`
   - `assets/js/pages/booking.js`
   - `application/libraries/Availability.php`
+  - `application/libraries/Email_messages.php`
   - `application/libraries/Booking_request_dto_factory.php`
 
 ### `booking-lifecycle`
