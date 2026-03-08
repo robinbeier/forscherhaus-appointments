@@ -159,6 +159,110 @@ exit 99
     }
 });
 
+test('managed pre-commit derives unique compose project names for same-named clones', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'managed-pre-commit-collision-'));
+    const repoBasename = 'managed-pre-commit-repo';
+    const fakeDockerScript = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+if [[ "$*" == "compose version" ]]; then
+    exit 0
+fi
+if [[ "$*" == *"up -d php-fpm mysql"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysql -uuser -ppassword -e USE easyappointments; SELECT 1;"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm php index.php console install"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm composer test"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"down -v --remove-orphans"* ]]; then
+    exit 0
+fi
+exit 99
+`;
+
+    async function createRepo(parentName: string): Promise<{dockerLogPath: string; repoDirectory: string}> {
+        const repoDirectory = path.join(temporaryDirectory, parentName, repoBasename);
+        const fakeBin = path.join(repoDirectory, 'bin');
+        const dockerLogPath = path.join(repoDirectory, 'docker.log');
+
+        await mkdir(path.join(repoDirectory, 'scripts', 'hooks'), {recursive: true});
+        await mkdir(path.join(repoDirectory, 'scripts', 'ci'), {recursive: true});
+        await mkdir(path.join(repoDirectory, 'docker'), {recursive: true});
+        await mkdir(path.join(repoDirectory, 'application'), {recursive: true});
+        await mkdir(path.join(repoDirectory, 'vendor'), {recursive: true});
+        await mkdir(path.join(repoDirectory, 'node_modules'), {recursive: true});
+        await mkdir(fakeBin, {recursive: true});
+
+        await copyExecutable(preCommitHookPath, path.join(repoDirectory, 'scripts', 'hooks', 'pre-commit'));
+        await copyExecutable(dockerHelperPath, path.join(repoDirectory, 'scripts', 'ci', 'docker_compose_helpers.sh'));
+        await writeFile(path.join(repoDirectory, 'config-sample.php'), '<?php\nreturn [];\n', 'utf8');
+        await writeFile(
+            path.join(repoDirectory, 'docker-compose.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(
+            path.join(repoDirectory, 'docker', 'compose.ci-local.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(path.join(repoDirectory, 'application', 'HookSmoke.php'), '<?php\n\nreturn true;\n', 'utf8');
+
+        await execFile('git', ['init', '-b', 'main'], {cwd: repoDirectory});
+        await execFile('git', ['config', 'user.name', 'Codex'], {cwd: repoDirectory});
+        await execFile('git', ['config', 'user.email', 'codex@example.com'], {cwd: repoDirectory});
+        await execFile('git', ['add', 'application/HookSmoke.php'], {cwd: repoDirectory});
+
+        await writeExecutable(path.join(fakeBin, 'docker'), fakeDockerScript);
+        await writeExecutable(path.join(fakeBin, 'npm'), '#!/usr/bin/env bash\nexit 0\n');
+        await writeExecutable(path.join(fakeBin, 'npx'), '#!/usr/bin/env bash\nexit 0\n');
+        await writeExecutable(
+            path.join(fakeBin, 'php'),
+            `#!/usr/bin/env bash
+if [[ "$1" == "-l" ]]; then
+    exit 0
+fi
+exit 99
+`,
+        );
+
+        await execFile('bash', [path.join('scripts', 'hooks', 'pre-commit')], {
+            cwd: repoDirectory,
+            env: {
+                ...process.env,
+                PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+                FAKE_DOCKER_LOG: dockerLogPath,
+            },
+        });
+
+        return {dockerLogPath, repoDirectory};
+    }
+
+    try {
+        const firstRepo = await createRepo('clone-a');
+        const secondRepo = await createRepo('clone-b');
+
+        const firstDockerLog = await readFile(firstRepo.dockerLogPath, 'utf8');
+        const secondDockerLog = await readFile(secondRepo.dockerLogPath, 'utf8');
+        const firstProjectName = firstDockerLog.match(/compose -p ([^ ]+) -f docker-compose\.yml/)?.[1];
+        const secondProjectName = secondDockerLog.match(/compose -p ([^ ]+) -f docker-compose\.yml/)?.[1];
+
+        assert.ok(firstProjectName, 'first repo should emit a compose project name');
+        assert.ok(secondProjectName, 'second repo should emit a compose project name');
+        assert.notEqual(firstProjectName, secondProjectName);
+    } finally {
+        await rm(temporaryDirectory, {recursive: true, force: true});
+    }
+});
+
 test('managed pre-commit does not start docker for docs-only prettier checks', async () => {
     const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'managed-pre-commit-docs-'));
     const fakeBin = path.join(temporaryDirectory, 'bin');

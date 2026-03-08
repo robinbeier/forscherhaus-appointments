@@ -57,7 +57,7 @@ configure_hook_compose_project() {
     local git_dir_checksum
 
     repo_slug="$(basename "${repo_root}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
-    git_dir_checksum="$(printf '%s' "$(git rev-parse --git-dir)" | cksum | awk '{print $1}')"
+    git_dir_checksum="$(printf '%s' "$(git rev-parse --absolute-git-dir)" | cksum | awk '{print $1}')"
     CI_DOCKER_COMPOSE_PROJECT_NAME="${CI_DOCKER_COMPOSE_PROJECT_NAME:-${repo_slug}-precommit-${git_dir_checksum}}"
     export CI_DOCKER_COMPOSE_PROJECT_NAME
 }
