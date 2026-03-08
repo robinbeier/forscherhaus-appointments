@@ -53,6 +53,7 @@
 /application/libraries/Dashboard_heatmap.php @robinbeier
 /application/libraries/Dashboard_metrics.php @robinbeier
 /application/libraries/Dashboard_request_dto_factory.php @robinbeier
+/application/libraries/Email_messages.php @robinbeier
 /application/libraries/Google_sync.php @robinbeier
 /application/libraries/Integrations_request_dto_factory.php @robinbeier
 /application/libraries/Ldap_client.php @robinbeier
