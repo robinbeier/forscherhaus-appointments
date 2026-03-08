@@ -29,7 +29,6 @@ test('managed pre-commit uses the deterministic docker bootstrap path for php-re
     const fakeBin = path.join(temporaryDirectory, 'bin');
     const dockerLogPath = path.join(temporaryDirectory, 'docker.log');
     const npxLogPath = path.join(temporaryDirectory, 'npx.log');
-    const phpLogPath = path.join(temporaryDirectory, 'php.log');
 
     try {
         await mkdir(path.join(temporaryDirectory, 'scripts', 'hooks'), {recursive: true});
@@ -117,16 +116,7 @@ printf '%s\\n' "$*" >> "$FAKE_NPX_LOG"
 exit 0
 `,
         );
-        await writeExecutable(
-            path.join(fakeBin, 'php'),
-            `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$FAKE_PHP_LOG"
-if [[ "$1" == "-l" ]]; then
-    exit 0
-fi
-exit 99
-`,
-        );
+        await writeExecutable(path.join(fakeBin, 'php'), '#!/usr/bin/env bash\nexit 99\n');
 
         const {stdout} = await execFile('bash', [path.join('scripts', 'hooks', 'pre-commit')], {
             cwd: temporaryDirectory,
@@ -135,17 +125,15 @@ exit 99
                 PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
                 FAKE_DOCKER_LOG: dockerLogPath,
                 FAKE_NPX_LOG: npxLogPath,
-                FAKE_PHP_LOG: phpLogPath,
             },
         });
 
         const dockerLog = await readFile(dockerLogPath, 'utf8');
         const npxLog = await readFile(npxLogPath, 'utf8');
-        const phpLog = await readFile(phpLogPath, 'utf8');
         assert.match(stdout, /Run PHPUnit suite/);
         assert.match(stdout, /Pre-commit checks passed/);
         assert.match(npxLog, /--yes prettier --check application\/HookSmoke\.php/);
-        assert.match(phpLog, /-l application\/HookSmoke\.php/);
+        assert.match(dockerLog, /exec -T -w \/var\/www\/html php-fpm php -l application\/HookSmoke\.php/);
         assert.match(
             dockerLog,
             /compose -p managed-pre-commit-[a-z0-9-]+-precommit-[0-9]+ -f docker-compose\.yml -f docker\/compose\.ci-local\.yml up -d php-fpm mysql/,
@@ -168,6 +156,9 @@ if [[ "$*" == "compose version" ]]; then
     exit 0
 fi
 if [[ "$*" == *"up -d php-fpm mysql"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T -w /var/www/html php-fpm php -l application/HookSmoke.php"* ]]; then
     exit 0
 fi
 if [[ "$*" == *"exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent"* ]]; then
@@ -437,6 +428,110 @@ exit 99
         assert.match(dockerLog, /run --rm php-fpm composer test/);
         await assert.rejects(() => readFile(npxLogPath, 'utf8'));
         await assert.rejects(() => readFile(phpLogPath, 'utf8'));
+    } finally {
+        await rm(temporaryDirectory, {recursive: true, force: true});
+    }
+});
+
+test('managed pre-commit falls back to container php -l when host php is unavailable', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'managed-pre-commit-container-php-l-'));
+    const fakeBin = path.join(temporaryDirectory, 'bin');
+    const dockerLogPath = path.join(temporaryDirectory, 'docker.log');
+    const npxLogPath = path.join(temporaryDirectory, 'npx.log');
+
+    try {
+        await mkdir(path.join(temporaryDirectory, 'scripts', 'hooks'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'scripts', 'ci'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'docker'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'application'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'vendor'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'node_modules'), {recursive: true});
+        await mkdir(fakeBin, {recursive: true});
+
+        await copyExecutable(preCommitHookPath, path.join(temporaryDirectory, 'scripts', 'hooks', 'pre-commit'));
+        await copyExecutable(
+            dockerHelperPath,
+            path.join(temporaryDirectory, 'scripts', 'ci', 'docker_compose_helpers.sh'),
+        );
+        await writeFile(path.join(temporaryDirectory, 'config-sample.php'), '<?php\nreturn [];\n', 'utf8');
+        await writeFile(
+            path.join(temporaryDirectory, 'docker-compose.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(
+            path.join(temporaryDirectory, 'docker', 'compose.ci-local.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(
+            path.join(temporaryDirectory, 'application', 'HookSmoke.php'),
+            '<?php\n\nreturn true;\n',
+            'utf8',
+        );
+
+        await execFile('git', ['init', '-b', 'main'], {cwd: temporaryDirectory});
+        await execFile('git', ['config', 'user.name', 'Codex'], {cwd: temporaryDirectory});
+        await execFile('git', ['config', 'user.email', 'codex@example.com'], {cwd: temporaryDirectory});
+        await execFile('git', ['add', 'application/HookSmoke.php'], {cwd: temporaryDirectory});
+
+        await writeExecutable(
+            path.join(fakeBin, 'docker'),
+            `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+if [[ "$*" == "compose version" ]]; then
+    exit 0
+fi
+if [[ "$*" == *"up -d php-fpm mysql"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T -w /var/www/html php-fpm php -l application/HookSmoke.php"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysql -uuser -ppassword -e USE easyappointments; SELECT 1;"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm php index.php console install"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm composer test"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"down -v --remove-orphans"* ]]; then
+    exit 0
+fi
+exit 99
+`,
+        );
+        await writeExecutable(
+            path.join(fakeBin, 'npx'),
+            `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_NPX_LOG"
+exit 0
+`,
+        );
+        await writeExecutable(path.join(fakeBin, 'npm'), '#!/usr/bin/env bash\nexit 0\n');
+
+        const {stdout} = await execFile('bash', [path.join('scripts', 'hooks', 'pre-commit')], {
+            cwd: temporaryDirectory,
+            env: {
+                ...process.env,
+                PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+                FAKE_DOCKER_LOG: dockerLogPath,
+                FAKE_NPX_LOG: npxLogPath,
+            },
+        });
+
+        const dockerLog = await readFile(dockerLogPath, 'utf8');
+        const npxLog = await readFile(npxLogPath, 'utf8');
+        assert.match(stdout, /Run php -l syntax checks/);
+        assert.match(stdout, /Run PHPUnit suite/);
+        assert.match(dockerLog, /exec -T -w \/var\/www\/html php-fpm php -l application\/HookSmoke\.php/);
+        assert.match(dockerLog, /run --rm php-fpm composer test/);
+        assert.match(npxLog, /--yes prettier --check application\/HookSmoke\.php/);
     } finally {
         await rm(temporaryDirectory, {recursive: true, force: true});
     }

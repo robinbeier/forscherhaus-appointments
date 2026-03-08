@@ -142,10 +142,19 @@ fi
 
 if [[ "${#php_files[@]}" -gt 0 ]]; then
     echo_section "Run php -l syntax checks"
-    require_cmd php
-    for php_file in "${php_files[@]}"; do
-        run_in_env php -l "${php_file}" >/dev/null || die "PHP syntax error in ${php_file}"
-    done
+    if [[ "${IN_CONTAINER}" -eq 1 ]]; then
+        require_cmd php
+        for php_file in "${php_files[@]}"; do
+            run_in_env php -l "${php_file}" >/dev/null || die "PHP syntax error in ${php_file}"
+        done
+    else
+        require_cmd docker
+        configure_hook_compose_project
+        ensure_stack_started
+        for php_file in "${php_files[@]}"; do
+            ci_docker_compose exec -T -w /var/www/html php-fpm php -l "${php_file}" >/dev/null || die "PHP syntax error in ${php_file}"
+        done
+    fi
 fi
 
 if [[ "${php_related}" == true ]]; then
