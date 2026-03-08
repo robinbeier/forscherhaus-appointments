@@ -1,3 +1,5 @@
+import {readdir, rm} from 'node:fs/promises';
+import path from 'node:path';
 import {
     AppServerClientError,
     CodexAppServerClient,
@@ -146,6 +148,8 @@ interface RunningEntry {
     observedOpenPullRequest: boolean;
     observedBranchPush: boolean;
     observedPullRequestMergeAttempt: boolean;
+    observedHelperRepoPaths: string[];
+    workspaceBranchSourceOfTruthConfirmed: boolean;
     trackerClient?: TrackerClient;
     reviewStateName?: string;
     terminalStates?: string[];
@@ -620,6 +624,35 @@ function didCommandAttemptPullRequestMerge(command: string | null): boolean {
     }
 
     return /\bgh pr merge\b/.test(command);
+}
+
+function normalizeWorkspacePath(value: string): string {
+    return path.resolve(value);
+}
+
+function isPathWithinWorkspace(candidatePath: string, workspacePath: string): boolean {
+    const normalizedCandidate = normalizeWorkspacePath(candidatePath);
+    const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+    const relativePath = path.relative(normalizedWorkspace, normalizedCandidate);
+
+    return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+function isHelperRepoPath(candidatePath: string | null): boolean {
+    if (!candidatePath) {
+        return false;
+    }
+
+    return normalizeWorkspacePath(candidatePath)
+        .split(path.sep)
+        .some((segment) => segment.startsWith('.git-codex-local-'));
+}
+
+function addUniquePath(target: string[], candidatePath: string): void {
+    const normalizedCandidate = normalizeWorkspacePath(candidatePath);
+    if (!target.includes(normalizedCandidate)) {
+        target.push(normalizedCandidate);
+    }
 }
 
 function toIssueTemplatePayload(issue: TrackedIssue): Record<string, unknown> {
@@ -1873,6 +1906,8 @@ export class SymphonyOrchestrator {
             observedOpenPullRequest: false,
             observedBranchPush: false,
             observedPullRequestMergeAttempt: false,
+            observedHelperRepoPaths: [],
+            workspaceBranchSourceOfTruthConfirmed: false,
             trackerClient: undefined,
             reviewStateName: undefined,
             terminalStates: undefined,
@@ -2356,6 +2391,18 @@ export class SymphonyOrchestrator {
             runningEntry.appServer = undefined;
 
             if (workspaceClient && workspacePath) {
+                const normalizedTerminalState = normalizeStateName(runningEntry.issue.stateName);
+                const shouldCleanupHelperRepos =
+                    runningEntry.workspaceBranchSourceOfTruthConfirmed &&
+                    (runningEntry.stopReason === 'reconciliation_non_active' ||
+                        runningEntry.stopReason === 'reconciliation_terminal' ||
+                        normalizeStateName(effectiveConfig.tracker.reviewStateName) === normalizedTerminalState ||
+                        normalizeStateNames(effectiveConfig.tracker.terminalStates).has(normalizedTerminalState));
+
+                if (shouldCleanupHelperRepos) {
+                    await this.cleanupObservedHelperReposBestEffort(runningEntry);
+                }
+
                 const shouldRemoveWorkspace = shouldCleanupWorkspace || runningEntry.cleanupWorkspaceOnStop;
 
                 if (!effectiveConfig.workspace.keepTerminalWorkspaces && shouldRemoveWorkspace) {
@@ -2564,6 +2611,8 @@ export class SymphonyOrchestrator {
                           context_utilization_percent: tokenUsage?.contextUtilizationPercent ?? null,
                           has_observed_workspace_diff: args.runningEntry.hasObservedWorkspaceDiff,
                           publish_mode: args.runningEntry.publishMode,
+                          workspace_source_of_truth_confirmed: args.runningEntry.workspaceBranchSourceOfTruthConfirmed,
+                          helper_repo_paths: args.runningEntry.observedHelperRepoPaths,
                           first_repo_target_path: args.runningEntry.firstRepoTargetPath ?? null,
                           first_turn_agent_message: args.runningEntry.firstTurnAgentMessageText ?? null,
                           first_turn_plan_only_candidate_message:
@@ -2595,6 +2644,8 @@ export class SymphonyOrchestrator {
                           context_utilization_percent: tokenUsage?.contextUtilizationPercent ?? null,
                           has_observed_workspace_diff: args.runningEntry.hasObservedWorkspaceDiff,
                           publish_mode: args.runningEntry.publishMode,
+                          workspace_source_of_truth_confirmed: args.runningEntry.workspaceBranchSourceOfTruthConfirmed,
+                          helper_repo_paths: args.runningEntry.observedHelperRepoPaths,
                           first_repo_target_path: args.runningEntry.firstRepoTargetPath ?? null,
                           first_turn_agent_message: args.runningEntry.firstTurnAgentMessageText ?? null,
                           first_turn_plan_only_candidate_message:
@@ -3030,6 +3081,40 @@ export class SymphonyOrchestrator {
                 return;
             }
 
+            const workspaceIsSourceOfTruth = await this.confirmWorkspaceBranchSourceOfTruth(runningEntry);
+            if (!workspaceIsSourceOfTruth) {
+                this.recordTrace(
+                    runningEntry,
+                    'workspace',
+                    'workspace/review_handoff_skipped_unconfirmed_source',
+                    'Skipped publish handoff because the issue workspace is not yet the confirmed source of truth.',
+                    {
+                        workspace_path: runningEntry.workspacePath,
+                        current_state: currentState,
+                    },
+                );
+                return;
+            }
+
+            if (runningEntry.workspaceClient && runningEntry.workspacePath) {
+                const workspaceState = await runningEntry.workspaceClient.captureWorkspaceState(
+                    runningEntry.workspacePath,
+                );
+                if (workspaceState.statusText.trim().length > 0) {
+                    this.recordTrace(
+                        runningEntry,
+                        'workspace',
+                        'workspace/review_handoff_skipped_dirty',
+                        'Kept issue active after publish because the workspace still has uncommitted changes.',
+                        {
+                            workspace_path: runningEntry.workspacePath,
+                            status_text: workspaceState.statusText,
+                        },
+                    );
+                    return;
+                }
+            }
+
             runningEntry.issue = {
                 ...runningEntry.issue,
                 stateName: currentState,
@@ -3053,6 +3138,7 @@ export class SymphonyOrchestrator {
                 this.logger.info('Stopping publish turn immediately after issue entered review state.', {
                     ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                     currentState,
+                    helperRepoPaths: runningEntry.observedHelperRepoPaths,
                 });
                 this.recordTrace(
                     runningEntry,
@@ -3075,6 +3161,7 @@ export class SymphonyOrchestrator {
             this.logger.info('Stopping publish turn immediately after issue reached a terminal state.', {
                 ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                 currentState,
+                helperRepoPaths: runningEntry.observedHelperRepoPaths,
             });
             this.recordTrace(
                 runningEntry,
@@ -3093,6 +3180,122 @@ export class SymphonyOrchestrator {
             });
         } finally {
             runningEntry.publishStateCheckpointInFlight = false;
+        }
+    }
+
+    private async confirmWorkspaceBranchSourceOfTruth(runningEntry: RunningEntry): Promise<boolean> {
+        if (
+            runningEntry.workspaceBranchSourceOfTruthConfirmed ||
+            !runningEntry.workspaceClient ||
+            !runningEntry.workspacePath ||
+            !runningEntry.baselineWorkspaceState
+        ) {
+            return runningEntry.workspaceBranchSourceOfTruthConfirmed;
+        }
+
+        const expectedBranchName =
+            runningEntry.issue.branchName?.trim() ||
+            runningEntry.baselineWorkspaceState.branchName?.trim() ||
+            undefined;
+
+        if (!expectedBranchName) {
+            return false;
+        }
+
+        try {
+            const workspaceState = await runningEntry.workspaceClient.captureWorkspaceState(runningEntry.workspacePath);
+            const branchMatches = workspaceState.branchName?.trim() === expectedBranchName;
+            const publishProgressObserved =
+                runningEntry.observedBranchPush ||
+                runningEntry.observedPullRequestMutation ||
+                runningEntry.observedOpenPullRequest ||
+                runningEntry.hasObservedWorkspaceDiff ||
+                didWorkspaceHeadAdvance(runningEntry.baselineWorkspaceState, workspaceState);
+
+            if (!branchMatches || !publishProgressObserved) {
+                return false;
+            }
+
+            runningEntry.workspaceBranchSourceOfTruthConfirmed = true;
+            this.recordTrace(
+                runningEntry,
+                'workspace',
+                'workspace/source_of_truth_confirmed',
+                'Confirmed the issue workspace branch as the source of truth for publish handoff.',
+                {
+                    workspace_path: runningEntry.workspacePath,
+                    branch_name: workspaceState.branchName,
+                    head_sha: workspaceState.headSha,
+                    status_text: workspaceState.statusText,
+                },
+            );
+            return true;
+        } catch (error) {
+            const classified = this.classifyError(error);
+            this.logger.warn('Failed to confirm issue workspace as publish source of truth.', {
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                errorClass: classified.errorClass,
+                error: classified.message,
+            });
+            return false;
+        }
+    }
+
+    private async cleanupObservedHelperReposBestEffort(runningEntry: RunningEntry): Promise<void> {
+        if (!runningEntry.workspacePath) {
+            return;
+        }
+
+        const candidatePaths = new Set<string>(runningEntry.observedHelperRepoPaths);
+
+        try {
+            const directoryEntries = await readdir(runningEntry.workspacePath, {withFileTypes: true});
+            for (const entry of directoryEntries) {
+                if (!entry.name.startsWith('.git-codex-local-')) {
+                    continue;
+                }
+
+                candidatePaths.add(path.join(runningEntry.workspacePath, entry.name));
+            }
+        } catch (error) {
+            const filesystemError = error as NodeJS.ErrnoException;
+            if (filesystemError.code === 'ENOENT') {
+                return;
+            }
+            const classified = this.classifyError(error);
+            this.logger.warn('Failed to enumerate helper repos for publish cleanup.', {
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                errorClass: classified.errorClass,
+                error: classified.message,
+                workspacePath: runningEntry.workspacePath,
+            });
+        }
+
+        for (const candidatePath of candidatePaths) {
+            if (!isHelperRepoPath(candidatePath) || !isPathWithinWorkspace(candidatePath, runningEntry.workspacePath)) {
+                continue;
+            }
+
+            try {
+                await rm(candidatePath, {recursive: true, force: true});
+                this.recordTrace(
+                    runningEntry,
+                    'workspace',
+                    'workspace/helper_repo_cleaned',
+                    'Removed a temporary helper repo after publish handoff.',
+                    {
+                        helper_repo_path: candidatePath,
+                    },
+                );
+            } catch (error) {
+                const classified = this.classifyError(error);
+                this.logger.warn('Failed to remove temporary helper repo after publish handoff.', {
+                    ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                    errorClass: classified.errorClass,
+                    error: classified.message,
+                    helperRepoPath: candidatePath,
+                });
+            }
         }
     }
 
@@ -3124,6 +3327,19 @@ export class SymphonyOrchestrator {
         }
 
         if (!runningEntry.observedPullRequestMutation && !runningEntry.observedBranchPush) {
+            return null;
+        }
+
+        if (!(await this.confirmWorkspaceBranchSourceOfTruth(runningEntry))) {
+            this.recordTrace(
+                runningEntry,
+                'workspace',
+                'workspace/review_handoff_skipped_unconfirmed_source',
+                'Skipped auto-move to review because the issue workspace is not yet the confirmed source of truth.',
+                {
+                    workspace_path: workspacePath,
+                },
+            );
             return null;
         }
 
@@ -3353,6 +3569,7 @@ export class SymphonyOrchestrator {
 
             if (normalizedEventType === 'codex/event/exec_command_end') {
                 const command = typeof summary.details?.command === 'string' ? summary.details.command : null;
+                const cwd = typeof summary.details?.cwd === 'string' ? summary.details.cwd : null;
                 const exitCode = typeof summary.details?.exit_code === 'number' ? summary.details.exit_code : null;
                 runningEntry.observedPullRequestMutation =
                     runningEntry.observedPullRequestMutation || didCommandMutatePullRequest(command, exitCode);
@@ -3362,6 +3579,30 @@ export class SymphonyOrchestrator {
                     runningEntry.observedBranchPush || didCommandPushBranch(command, exitCode);
                 runningEntry.observedPullRequestMergeAttempt =
                     runningEntry.observedPullRequestMergeAttempt || didCommandAttemptPullRequestMerge(command);
+
+                if (cwd && isHelperRepoPath(cwd)) {
+                    addUniquePath(runningEntry.observedHelperRepoPaths, cwd);
+                    this.recordTrace(
+                        runningEntry,
+                        'workspace',
+                        'workspace/helper_repo_activity',
+                        'Observed helper repo command activity while the issue workspace remained the source of truth.',
+                        {
+                            command,
+                            cwd,
+                            exit_code: exitCode,
+                        },
+                    );
+                }
+
+                if (
+                    runningEntry.publishMode &&
+                    (didCommandObserveOpenPullRequest(command, exitCode) ||
+                        didCommandMutatePullRequest(command, exitCode) ||
+                        didCommandPushBranch(command, exitCode))
+                ) {
+                    void this.maybeTriggerPublishStateCheckpoint(runningEntry);
+                }
             }
 
             if (summary.category !== 'agent') {

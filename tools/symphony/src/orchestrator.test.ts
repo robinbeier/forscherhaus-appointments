@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import {access, mkdir, mkdtemp, rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {AppServerClientError} from './app-server-client.js';
 import {type TrackerClient, SymphonyOrchestrator, type WorkspaceClient} from './orchestrator.js';
@@ -633,6 +636,10 @@ test('successful Linear review handoff during a publish turn stops immediately a
 
     const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
     const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-13-review-handoff'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-review-handoff'},
+    ];
     const firstDispatch = createDeferred<{
         status: 'completed' | 'input_required';
         outputText: string;
@@ -811,6 +818,367 @@ test('review handoff stays successful when workpad sync fails after moving to In
     assert.equal(issueDetails?.status, 'completed');
     const terminal = issueDetails?.terminal as Record<string, unknown>;
     assert.equal(terminal.state, 'In Review');
+});
+
+test('helper-repo publish handoff stops on the real workspace and cleans temporary helper repos', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'helper-review-handoff-1',
+        identifier: 'ROB-51-HELPER-HANDOFF',
+        priority: 1,
+        createdAt: '2026-03-08T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-51-helper-handoff';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-helper-handoff-'));
+    const workspacePath = path.join(workspaceRoot, issue.identifier);
+    const helperRepoPath = path.join(workspacePath, '.git-codex-local-publish');
+    await mkdir(helperRepoPath, {recursive: true});
+
+    const workspace: WorkspaceClient = {
+        async prepareWorkspace(rawKey: string) {
+            assert.equal(rawKey, issue.identifier);
+            return {
+                key: rawKey,
+                path: workspacePath,
+                created: false,
+            };
+        },
+        resolveWorkspacePath(rawKey: string) {
+            return path.join(workspaceRoot, rawKey);
+        },
+        async runBeforeRunHooks() {
+            return;
+        },
+        async runAfterRunHooks() {
+            return;
+        },
+        async cleanupTerminalWorkspace() {
+            return;
+        },
+        async captureWorkspaceState() {
+            return {
+                headSha: tracker.statesByIssueId.get(issue.id) === 'In Review' ? 'head-after' : 'head-before',
+                statusText: '',
+                branchName: 'beierrobin/rob-51-helper-handoff',
+            };
+        },
+    };
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let stopCalls = 0;
+
+    try {
+        const orchestrator = new SymphonyOrchestrator({
+            logger: createLoggerStub([]),
+            workflowConfigStore: workflowStore,
+            trackerFactory: () => tracker,
+            workspaceFactory: () => workspace,
+            appServerFactory: ({emitEvent}) => ({
+                runTurn: async () => {
+                    emitEvent({
+                        type: 'session',
+                        threadId: 'thread-helper-review',
+                        turnId: 'turn-helper-review',
+                        sessionId: 'thread-helper-review-turn-1',
+                    });
+                    tracker.statesByIssueId.set(issue.id, 'In Review');
+                    emitEvent({
+                        type: 'raw_event',
+                        payload: {
+                            method: 'codex/event/exec_command_end',
+                            params: {
+                                msg: {
+                                    command:
+                                        "git push -u origin HEAD && gh pr create --base main --title 'Review-ready PR'",
+                                    cwd: helperRepoPath,
+                                    exitCode: 0,
+                                },
+                            },
+                        },
+                    });
+
+                    return firstDispatch.promise;
+                },
+                stop: async () => {
+                    stopCalls += 1;
+                    firstDispatch.reject(
+                        new AppServerClientError(
+                            'turn_cancelled',
+                            'App-server session was cancelled after helper publish handoff.',
+                        ),
+                    );
+                },
+            }),
+        });
+
+        await orchestrator.runTick();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        await orchestrator.shutdown();
+
+        const snapshot = orchestrator.getSnapshot();
+        assert.ok(stopCalls >= 1);
+        assert.equal(snapshot.codex_totals.completed, 0);
+        assert.equal(snapshot.codex_totals.failed, 0);
+        assert.equal(snapshot.retrying.length, 0);
+        await assert.rejects(() => access(helperRepoPath));
+
+        const issueDetails = orchestrator.getIssueDetails(issue.identifier);
+        assert.ok(issueDetails);
+        assert.equal(issueDetails?.status, 'stopped');
+        const terminal = issueDetails?.terminal as Record<string, unknown>;
+        assert.equal(terminal.state, 'In Review');
+        assert.equal(terminal.workspace_source_of_truth_confirmed, true);
+        assert.deepEqual(terminal.helper_repo_paths, [helperRepoPath]);
+
+        const trace = issueDetails?.trace as Record<string, unknown>;
+        assert.ok(
+            (trace.recent as Array<Record<string, unknown>>).some(
+                (entry) => entry.eventType === 'workspace/helper_repo_cleaned',
+            ),
+        );
+    } finally {
+        await rm(workspaceRoot, {recursive: true, force: true});
+    }
+});
+
+test('helper-repo review handoff does not stop early when the issue workspace is not the source of truth', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'helper-review-unconfirmed-1',
+        identifier: 'ROB-51-HELPER-UNCONFIRMED',
+        priority: 1,
+        createdAt: '2026-03-08T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-51-helper-unconfirmed';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-helper-unconfirmed-'));
+    const workspacePath = path.join(workspaceRoot, issue.identifier);
+    const helperRepoPath = path.join(workspacePath, '.git-codex-local-publish');
+    await mkdir(helperRepoPath, {recursive: true});
+
+    const workspace: WorkspaceClient = {
+        async prepareWorkspace(rawKey: string) {
+            assert.equal(rawKey, issue.identifier);
+            return {
+                key: rawKey,
+                path: workspacePath,
+                created: false,
+            };
+        },
+        resolveWorkspacePath(rawKey: string) {
+            return path.join(workspaceRoot, rawKey);
+        },
+        async runBeforeRunHooks() {
+            return;
+        },
+        async runAfterRunHooks() {
+            return;
+        },
+        async cleanupTerminalWorkspace() {
+            return;
+        },
+        async captureWorkspaceState() {
+            return {
+                headSha: 'same-head',
+                statusText: '',
+                branchName: null,
+            };
+        },
+    };
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    let stopCalls = 0;
+
+    try {
+        const orchestrator = new SymphonyOrchestrator({
+            logger: createLoggerStub([]),
+            workflowConfigStore: workflowStore,
+            trackerFactory: () => tracker,
+            workspaceFactory: () => workspace,
+            appServerFactory: ({emitEvent}) => ({
+                runTurn: async () => {
+                    emitEvent({
+                        type: 'session',
+                        threadId: 'thread-helper-review-unconfirmed',
+                        turnId: 'turn-helper-review-unconfirmed',
+                        sessionId: 'thread-helper-review-unconfirmed-turn-1',
+                    });
+                    tracker.statesByIssueId.set(issue.id, 'In Review');
+                    emitEvent({
+                        type: 'raw_event',
+                        payload: {
+                            method: 'codex/event/exec_command_end',
+                            params: {
+                                msg: {
+                                    command:
+                                        "git push -u origin HEAD && gh pr create --base main --title 'Review-ready PR'",
+                                    cwd: helperRepoPath,
+                                    exitCode: 0,
+                                },
+                            },
+                        },
+                    });
+
+                    return {
+                        status: 'completed',
+                        outputText: 'helper publish finished',
+                        threadId: 'thread-helper-review-unconfirmed',
+                        turnId: 'turn-helper-review-unconfirmed',
+                        sessionId: 'thread-helper-review-unconfirmed-turn-1',
+                    };
+                },
+                stop: async () => {
+                    stopCalls += 1;
+                },
+            }),
+        });
+
+        await orchestrator.runTick();
+        await orchestrator.shutdown();
+
+        assert.equal(stopCalls, 1);
+        const issueDetails = orchestrator.getIssueDetails(issue.identifier);
+        assert.ok(issueDetails);
+        assert.equal(issueDetails?.status, 'completed');
+        const terminal = issueDetails?.terminal as Record<string, unknown>;
+        assert.equal(terminal.workspace_source_of_truth_confirmed, false);
+        await access(helperRepoPath);
+
+        const trace = issueDetails?.trace as Record<string, unknown>;
+        assert.ok(
+            (trace.recent as Array<Record<string, unknown>>).some(
+                (entry) => entry.eventType === 'workspace/review_handoff_skipped_unconfirmed_source',
+            ),
+        );
+    } finally {
+        await rm(workspaceRoot, {recursive: true, force: true});
+    }
+});
+
+test('helper-repo review handoff does not stop early when the issue workspace is still dirty', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'helper-review-dirty-1',
+        identifier: 'ROB-51-HELPER-DIRTY',
+        priority: 1,
+        createdAt: '2026-03-08T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-51-helper-dirty';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-helper-dirty-'));
+    const workspacePath = path.join(workspaceRoot, issue.identifier);
+    const helperRepoPath = path.join(workspacePath, '.git-codex-local-publish');
+    await mkdir(helperRepoPath, {recursive: true});
+
+    let stateCaptureCount = 0;
+    const workspace: WorkspaceClient = {
+        async prepareWorkspace(rawKey: string) {
+            assert.equal(rawKey, issue.identifier);
+            return {
+                key: rawKey,
+                path: workspacePath,
+                created: false,
+            };
+        },
+        resolveWorkspacePath(rawKey: string) {
+            return path.join(workspaceRoot, rawKey);
+        },
+        async runBeforeRunHooks() {
+            return;
+        },
+        async runAfterRunHooks() {
+            return;
+        },
+        async cleanupTerminalWorkspace() {
+            return;
+        },
+        async captureWorkspaceState() {
+            stateCaptureCount += 1;
+            return {
+                headSha: stateCaptureCount === 1 ? 'head-before' : 'head-after',
+                statusText: stateCaptureCount >= 3 ? ' M tools/symphony/src/orchestrator.ts' : '',
+                branchName: 'beierrobin/rob-51-helper-dirty',
+            };
+        },
+    };
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    let stopCalls = 0;
+
+    try {
+        const orchestrator = new SymphonyOrchestrator({
+            logger: createLoggerStub([]),
+            workflowConfigStore: workflowStore,
+            trackerFactory: () => tracker,
+            workspaceFactory: () => workspace,
+            appServerFactory: ({emitEvent}) => ({
+                runTurn: async () => {
+                    emitEvent({
+                        type: 'session',
+                        threadId: 'thread-helper-review-dirty',
+                        turnId: 'turn-helper-review-dirty',
+                        sessionId: 'thread-helper-review-dirty-turn-1',
+                    });
+                    tracker.statesByIssueId.set(issue.id, 'In Review');
+                    emitEvent({
+                        type: 'raw_event',
+                        payload: {
+                            method: 'codex/event/exec_command_end',
+                            params: {
+                                msg: {
+                                    command:
+                                        "git push -u origin HEAD && gh pr create --base main --title 'Review-ready PR'",
+                                    cwd: helperRepoPath,
+                                    exitCode: 0,
+                                },
+                            },
+                        },
+                    });
+
+                    return {
+                        status: 'completed',
+                        outputText: 'helper publish finished',
+                        threadId: 'thread-helper-review-dirty',
+                        turnId: 'turn-helper-review-dirty',
+                        sessionId: 'thread-helper-review-dirty-turn-1',
+                    };
+                },
+                stop: async () => {
+                    stopCalls += 1;
+                },
+            }),
+        });
+
+        await orchestrator.runTick();
+        await orchestrator.shutdown();
+
+        assert.equal(stopCalls, 1);
+        const issueDetails = orchestrator.getIssueDetails(issue.identifier);
+        assert.ok(issueDetails);
+        assert.equal(issueDetails?.status, 'completed');
+        const trace = issueDetails?.trace as Record<string, unknown>;
+        assert.ok(
+            (trace.recent as Array<Record<string, unknown>>).some(
+                (entry) => entry.eventType === 'workspace/review_handoff_skipped_dirty',
+            ),
+        );
+    } finally {
+        await rm(workspaceRoot, {recursive: true, force: true});
+    }
 });
 
 test('non-commit merge states can continue without local commit output', async () => {
