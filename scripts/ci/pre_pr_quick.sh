@@ -130,8 +130,9 @@ git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
 
-# Frontend dependency bumps, including chartjs-chart-matrix@3 for the dashboard heatmap, can
-# change generated bundles or the resolved lockfile without touching app source files.
+# Frontend dependency bumps, including chartjs-chart-matrix@3 and the booking
+# confirmation PDF's jspdf@4 refresh, can change generated bundles or the
+# resolved lockfile without touching app source files.
 echo_section "Frontend lockfile sync"
 npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 git diff --quiet --exit-code -- package-lock.json || {
