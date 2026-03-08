@@ -27,6 +27,7 @@ fi
 
 CI_DOCKER_LOG_PREFIX="pre-commit"
 STACK_STARTED=0
+PARTIAL_STACK_STARTED_SERVICES=()
 
 die() {
     echo "ERROR: $*" >&2
@@ -57,17 +58,35 @@ ensure_stack_started() {
         return
     fi
 
-    if ci_docker_service_running php-fpm && ci_docker_service_running mysql; then
+    local missing_services=()
+    local service
+    for service in php-fpm mysql; do
+        if ! ci_docker_service_running "${service}"; then
+            missing_services+=("${service}")
+        fi
+    done
+
+    if [[ "${#missing_services[@]}" -eq 0 ]]; then
         return
     fi
 
-    ci_docker_compose up -d php-fpm mysql >/dev/null
-    STACK_STARTED=1
+    ci_docker_compose up -d "${missing_services[@]}" >/dev/null
+    if [[ "${#missing_services[@]}" -eq 2 ]]; then
+        STACK_STARTED=1
+        return
+    fi
+
+    PARTIAL_STACK_STARTED_SERVICES=("${missing_services[@]}")
 }
 
 cleanup_stack() {
     if [[ "${STACK_STARTED}" == "1" ]]; then
         ci_docker_cleanup_stack
+        return
+    fi
+
+    if [[ "${#PARTIAL_STACK_STARTED_SERVICES[@]}" -gt 0 ]]; then
+        ci_docker_stop_services "${PARTIAL_STACK_STARTED_SERVICES[@]}"
     fi
 }
 
@@ -86,17 +105,6 @@ trap cleanup_stack EXIT
 [[ -d node_modules ]] || die "Node dependencies missing (node_modules/ not found). Run './scripts/setup-worktree.sh'."
 
 require_cmd git
-if [[ "${IN_CONTAINER}" -eq 0 ]]; then
-    require_cmd docker
-    require_cmd php
-    require_cmd npm
-    require_cmd npx
-else
-    require_cmd php
-    require_cmd composer
-    require_cmd npm
-    require_cmd npx
-fi
 
 echo_section "Check forbidden files"
 if printf '%s\n' "${staged_files[@]}" | grep -q '^storage/logs/'; then
@@ -137,11 +145,13 @@ done
 
 if [[ "${#prettier_files[@]}" -gt 0 ]]; then
     echo_section "Run prettier checks"
+    require_cmd npx
     run_in_env npx --yes prettier --check "${prettier_files[@]}"
 fi
 
 if [[ "${#php_files[@]}" -gt 0 ]]; then
     echo_section "Run php -l syntax checks"
+    require_cmd php
     for php_file in "${php_files[@]}"; do
         run_in_env php -l "${php_file}" >/dev/null || die "PHP syntax error in ${php_file}"
     done
@@ -152,8 +162,10 @@ if [[ "${php_related}" == true ]]; then
     ensure_local_config
 
     if [[ "${IN_CONTAINER}" -eq 1 ]]; then
+        require_cmd composer
         composer test
     else
+        require_cmd docker
         ensure_stack_started
         ci_docker_wait_for_mysql_readiness "pre-commit"
         ci_docker_install_seed_instance "pre-commit" run --rm php-fpm php index.php console install
@@ -163,6 +175,7 @@ fi
 
 if [[ "${frontend_related}" == true ]]; then
     echo_section "Build frontend assets (npm run build)"
+    require_cmd npm
     pre_status="$(git status --porcelain)"
     run_in_env npm run build --silent
     post_status="$(git status --porcelain)"

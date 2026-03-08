@@ -92,3 +92,11 @@ ci_docker_install_seed_instance() {
 ci_docker_cleanup_stack() {
     ci_docker_compose down -v --remove-orphans >/dev/null 2>&1 || true
 }
+
+ci_docker_stop_services() {
+    if [[ "$#" -eq 0 ]]; then
+        return
+    fi
+
+    ci_docker_compose stop "$@" >/dev/null 2>&1 || true
+}

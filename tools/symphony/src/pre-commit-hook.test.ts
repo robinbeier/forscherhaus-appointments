@@ -258,8 +258,128 @@ exit 99
         assert.match(stdout, /Run PHPUnit suite/);
         assert.match(stdout, /Pre-commit checks passed/);
         assert.doesNotMatch(dockerLog, /up -d php-fpm mysql/);
+        assert.doesNotMatch(dockerLog, /up -d php-fpm( |$)/);
+        assert.doesNotMatch(dockerLog, /up -d mysql( |$)/);
+        assert.doesNotMatch(dockerLog, /stop php-fpm/);
+        assert.doesNotMatch(dockerLog, /stop mysql/);
         assert.doesNotMatch(dockerLog, /down -v --remove-orphans/);
         assert.match(dockerLog, /run --rm php-fpm composer test/);
+    } finally {
+        await rm(temporaryDirectory, {recursive: true, force: true});
+    }
+});
+
+test('managed pre-commit only stops services it started when reusing a partial compose stack', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'managed-pre-commit-partial-stack-'));
+    const fakeBin = path.join(temporaryDirectory, 'bin');
+    const dockerLogPath = path.join(temporaryDirectory, 'docker.log');
+
+    try {
+        await mkdir(path.join(temporaryDirectory, 'scripts', 'hooks'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'scripts', 'ci'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'docker'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'application'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'vendor'), {recursive: true});
+        await mkdir(path.join(temporaryDirectory, 'node_modules'), {recursive: true});
+        await mkdir(fakeBin, {recursive: true});
+
+        await copyExecutable(preCommitHookPath, path.join(temporaryDirectory, 'scripts', 'hooks', 'pre-commit'));
+        await copyExecutable(
+            dockerHelperPath,
+            path.join(temporaryDirectory, 'scripts', 'ci', 'docker_compose_helpers.sh'),
+        );
+        await writeFile(path.join(temporaryDirectory, 'config-sample.php'), '<?php\nreturn [];\n', 'utf8');
+        await writeFile(
+            path.join(temporaryDirectory, 'docker-compose.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(
+            path.join(temporaryDirectory, 'docker', 'compose.ci-local.yml'),
+            'services:\n  php-fpm: {}\n  mysql: {}\n',
+            'utf8',
+        );
+        await writeFile(
+            path.join(temporaryDirectory, 'application', 'HookSmoke.php'),
+            '<?php\n\nreturn true;\n',
+            'utf8',
+        );
+
+        await execFile('git', ['init', '-b', 'main'], {cwd: temporaryDirectory});
+        await execFile('git', ['config', 'user.name', 'Codex'], {cwd: temporaryDirectory});
+        await execFile('git', ['config', 'user.email', 'codex@example.com'], {cwd: temporaryDirectory});
+        await execFile('git', ['add', 'application/HookSmoke.php'], {cwd: temporaryDirectory});
+
+        await writeExecutable(
+            path.join(fakeBin, 'docker'),
+            `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+if [[ "$*" == "compose version" ]]; then
+    exit 0
+fi
+if [[ "$*" == *"ps --status running --services"* ]]; then
+    printf '%s\\n' "mysql"
+    exit 0
+fi
+if [[ "$*" == *"up -d php-fpm"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"exec -T mysql mysql -uuser -ppassword -e USE easyappointments; SELECT 1;"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm php index.php console install"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"run --rm php-fpm composer test"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"stop php-fpm"* ]]; then
+    exit 0
+fi
+exit 99
+`,
+        );
+        await writeExecutable(
+            path.join(fakeBin, 'npx'),
+            `#!/usr/bin/env bash
+exit 0
+`,
+        );
+        await writeExecutable(
+            path.join(fakeBin, 'npm'),
+            `#!/usr/bin/env bash
+exit 0
+`,
+        );
+        await writeExecutable(
+            path.join(fakeBin, 'php'),
+            `#!/usr/bin/env bash
+if [[ "$1" == "-l" ]]; then
+    exit 0
+fi
+exit 99
+`,
+        );
+
+        const {stdout} = await execFile('bash', [path.join('scripts', 'hooks', 'pre-commit')], {
+            cwd: temporaryDirectory,
+            env: {
+                ...process.env,
+                PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+                FAKE_DOCKER_LOG: dockerLogPath,
+            },
+        });
+
+        const dockerLog = await readFile(dockerLogPath, 'utf8');
+        assert.match(stdout, /Run PHPUnit suite/);
+        assert.match(stdout, /Pre-commit checks passed/);
+        assert.match(dockerLog, /up -d php-fpm/);
+        assert.match(dockerLog, /stop php-fpm/);
+        assert.doesNotMatch(dockerLog, /stop mysql/);
+        assert.doesNotMatch(dockerLog, /down -v --remove-orphans/);
     } finally {
         await rm(temporaryDirectory, {recursive: true, force: true});
     }
@@ -291,13 +411,6 @@ test('managed pre-commit does not start docker for docs-only prettier checks', a
         await execFile('git', ['add', 'README.md'], {cwd: temporaryDirectory});
 
         await writeExecutable(
-            path.join(fakeBin, 'docker'),
-            `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
-exit 99
-`,
-        );
-        await writeExecutable(
             path.join(fakeBin, 'npx'),
             `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_NPX_LOG"
@@ -322,23 +435,15 @@ exit 0
             env: {
                 ...process.env,
                 PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
-                FAKE_DOCKER_LOG: dockerLogPath,
                 FAKE_NPX_LOG: npxLogPath,
             },
         });
 
         const npxLog = await readFile(npxLogPath, 'utf8');
-        let dockerLog = '';
-        try {
-            dockerLog = await readFile(dockerLogPath, 'utf8');
-        } catch {
-            dockerLog = '';
-        }
-
         assert.match(stdout, /Run prettier checks/);
         assert.match(stdout, /Pre-commit checks passed/);
         assert.match(npxLog, /--yes prettier --check README\.md/);
-        assert.equal(dockerLog, '');
+        await assert.rejects(() => readFile(dockerLogPath, 'utf8'));
     } finally {
         await rm(temporaryDirectory, {recursive: true, force: true});
     }
