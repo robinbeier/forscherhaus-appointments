@@ -20,23 +20,21 @@ ci_docker_init_compose() {
 
     ci_docker_require_cmd docker "$log_prefix"
 
-    local compose_project_args=()
-    if [[ -n "${compose_project_name}" ]]; then
-        compose_project_args=(-p "${compose_project_name}")
-    fi
-
-    local compose_files=()
-    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$local_ci_compose_override" ]]; then
-        compose_files=(-f docker-compose.yml -f "$local_ci_compose_override")
-    fi
-
     if docker compose version >/dev/null 2>&1; then
-        CI_DOCKER_COMPOSE_CMD=(docker compose "${compose_project_args[@]}" "${compose_files[@]}")
+        CI_DOCKER_COMPOSE_CMD=(docker compose)
     elif command -v docker-compose >/dev/null 2>&1; then
-        CI_DOCKER_COMPOSE_CMD=(docker-compose "${compose_project_args[@]}" "${compose_files[@]}")
+        CI_DOCKER_COMPOSE_CMD=(docker-compose)
     else
         echo "[$log_prefix] docker compose command not found." >&2
         exit 1
+    fi
+
+    if [[ -n "${compose_project_name}" ]]; then
+        CI_DOCKER_COMPOSE_CMD+=(-p "${compose_project_name}")
+    fi
+
+    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$local_ci_compose_override" ]]; then
+        CI_DOCKER_COMPOSE_CMD+=(-f docker-compose.yml -f "$local_ci_compose_override")
     fi
 }
 
