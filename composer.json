@@ -1,21 +1,18 @@
 {
-    "name": "alextselegidis/easyappointments",
-    "description": "Open Source Web Scheduler",
-    "version": "1.5.2",
-    "homepage": "https://easyappointments.org",
+    "name": "forscherhaus/forscherhaus-appointments",
+    "description": "School appointment scheduling system based on Easy!Appointments",
+    "version": "1.5.2.1",
+    "homepage": "https://github.com/robinbeier/forscherhaus-appointments",
     "type": "project",
     "license": "GPL-3.0",
     "authors": [
         {
-            "name": "Alex Tselegidis",
-            "email": "alextselegidis@gmail.com"
+            "name": "Robin Beier"
         }
     ],
     "support": {
-        "issues": "https://github.com/alextselegidis/easyappointments/issues",
-        "forum": "https://groups.google.com/forum/#!forum/easy-appointments",
-        "wiki": "https://easyappointments.org/docs",
-        "source": "https://github.com/alextselegidis/easyappointments"
+        "issues": "https://github.com/robinbeier/forscherhaus-appointments/issues",
+        "source": "https://github.com/robinbeier/forscherhaus-appointments"
     },
     "keywords": [
         "calendar",

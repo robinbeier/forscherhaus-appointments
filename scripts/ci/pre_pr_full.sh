@@ -3,12 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+source ./scripts/ci/git_helpers.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
 REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-1}"
 REQUEST_CONTRACTS_L2_WARNED=0
 COMPOSE_CMD=()
+LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -23,11 +25,15 @@ ensure_docker_compose() {
     fi
 
     require_cmd docker
+    local compose_files=()
+    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$LOCAL_CI_COMPOSE_OVERRIDE" ]]; then
+        compose_files=(-f docker-compose.yml -f "$LOCAL_CI_COMPOSE_OVERRIDE")
+    fi
 
     if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose)
+        COMPOSE_CMD=(docker compose "${compose_files[@]}")
     elif command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose)
+        COMPOSE_CMD=(docker-compose "${compose_files[@]}")
     else
         echo "[pre-pr-full] docker compose command not found." >&2
         exit 1
@@ -94,7 +100,7 @@ require_cmd git
 require_cmd python3
 
 # Keep changed-file checks deterministic against current base branch state.
-git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
+git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-full"
 
 echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh

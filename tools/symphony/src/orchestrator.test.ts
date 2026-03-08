@@ -27,6 +27,7 @@ function createIssue(args: {
     priority: number | null;
     createdAt: string;
     blockedBy?: string[];
+    blockedByStates?: Record<string, string | null>;
     stateName?: string;
     description?: string | null;
 }): TrackedIssue {
@@ -44,7 +45,7 @@ function createIssue(args: {
         blockedBy: (args.blockedBy ?? []).map((identifier) => ({
             id: null,
             identifier,
-            state: null,
+            state: args.blockedByStates?.[identifier] ?? null,
         })),
         blockedByIdentifiers: args.blockedBy ?? [],
         createdAt: args.createdAt,
@@ -147,6 +148,7 @@ class TrackerStub implements TrackerClient {
     public todoIssues: TrackedIssue[] = [];
     public prepareIssueForRunCalls: string[] = [];
     public moveIssueToStateByNameCalls: Array<{identifier: string; stateName: string}> = [];
+    public syncIssueWorkpadToStateCalls: Array<{identifier: string; stateName: string}> = [];
 
     public async fetchCandidateIssues(): Promise<TrackedIssue[]> {
         return this.candidates;
@@ -189,6 +191,18 @@ class TrackerStub implements TrackerClient {
         return {
             ...issue,
             stateName,
+        };
+    }
+
+    public async syncIssueWorkpadToState(issue: TrackedIssue): Promise<TrackedIssue> {
+        this.syncIssueWorkpadToStateCalls.push({
+            identifier: issue.identifier,
+            stateName: issue.stateName,
+        });
+
+        return {
+            ...issue,
+            workpadCommentBody: `## Codex Workpad\n\nState: ${issue.stateName}`,
         };
     }
 }
@@ -261,7 +275,7 @@ function createDeferred<T>(): {
     };
 }
 
-test('runTick dispatches highest-priority eligible candidate and skips Todo-blocked issues', async () => {
+test('runTick dispatches highest-priority eligible candidate and skips issues with non-terminal blockers', async () => {
     const tracker = new TrackerStub();
     tracker.candidates = [
         createIssue({
@@ -276,6 +290,7 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
             priority: 1,
             createdAt: '2026-03-06T07:00:00.000Z',
             blockedBy: ['ROB-1'],
+            blockedByStates: {'ROB-1': 'In Progress'},
         }),
         createIssue({
             id: 'c',
@@ -283,14 +298,13 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
             priority: 1,
             createdAt: '2026-03-06T07:30:00.000Z',
         }),
-    ];
-    tracker.todoIssues = [
         createIssue({
-            id: 'todo-1',
-            identifier: 'ROB-1',
-            priority: 3,
-            createdAt: '2026-03-01T00:00:00.000Z',
-            stateName: 'Todo',
+            id: 'd',
+            identifier: 'ROB-13-D',
+            priority: 1,
+            createdAt: '2026-03-06T06:30:00.000Z',
+            blockedBy: ['ROB-2'],
+            blockedByStates: {'ROB-2': 'Done'},
         }),
     ];
     tracker.statesByIssueId.set('c', 'Done');
@@ -310,6 +324,9 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
                     issueIdentifier: request.issueIdentifier,
                     attempt: request.attempt,
                 });
+                if (request.issueIdentifier === 'ROB-13-D') {
+                    tracker.statesByIssueId.set('d', 'Done');
+                }
                 return {
                     status: 'completed',
                     outputText: 'ok',
@@ -325,7 +342,7 @@ test('runTick dispatches highest-priority eligible candidate and skips Todo-bloc
     await orchestrator.runTick();
     await orchestrator.shutdown();
 
-    assert.deepEqual(dispatchRequests, [{issueIdentifier: 'ROB-13-C', attempt: null}]);
+    assert.deepEqual(dispatchRequests, [{issueIdentifier: 'ROB-13-D', attempt: null}]);
     assert.equal(orchestrator.getSnapshot().retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
 });
@@ -600,6 +617,200 @@ test('successful publish turn moves issue to In Review and stops the active run'
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 0);
+});
+
+test('successful Linear review handoff during a publish turn stops immediately and syncs the workpad', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'review-handoff-1',
+        identifier: 'ROB-13-REVIEW-HANDOFF',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-13-review-handoff';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let stopCalls = 0;
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-review',
+                    turnId: 'turn-review',
+                    sessionId: 'thread-review-turn-review',
+                });
+                tracker.statesByIssueId.set(issue.id, 'In Review');
+                emitEvent({
+                    type: 'trace',
+                    category: 'tool',
+                    eventType: 'tool/call/responded',
+                    message: 'Dynamic tool response sent for linear_graphql.',
+                    details: {
+                        tool: 'linear_graphql',
+                        success: true,
+                    },
+                });
+
+                return firstDispatch.promise;
+            },
+            stop: async () => {
+                stopCalls += 1;
+                firstDispatch.reject(
+                    new AppServerClientError(
+                        'turn_cancelled',
+                        'App-server session was cancelled after review handoff.',
+                    ),
+                );
+            },
+        }),
+    });
+
+    await orchestrator.runTick();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.ok(stopCalls >= 1);
+    assert.equal(snapshot.codex_totals.completed, 0);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
+        {
+            identifier: 'ROB-13-REVIEW-HANDOFF',
+            stateName: 'In Review',
+        },
+    ]);
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-REVIEW-HANDOFF');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'stopped');
+    const terminal = issueDetails?.terminal as Record<string, unknown>;
+    assert.equal(terminal.state, 'In Review');
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(
+        (trace.recent as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'turn/review_handoff_checkpoint',
+        ),
+    );
+});
+
+test('review handoff stays successful when workpad sync fails after moving to In Review', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'review-handoff-sync-failure-1',
+        identifier: 'ROB-13-REVIEW-HANDOFF-SYNC-FAIL',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-13-review-handoff-sync-fail';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+    tracker.syncIssueWorkpadToState = async (trackedIssue) => {
+        tracker.syncIssueWorkpadToStateCalls.push({
+            identifier: trackedIssue.identifier,
+            stateName: trackedIssue.stateName,
+        });
+        throw new Error('Linear comment update failed');
+    };
+
+    const logRecords: Array<Record<string, unknown>> = [];
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-13-review-handoff-sync-fail'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-review-handoff-sync-fail'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-13-review-handoff-sync-fail'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub(logRecords),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-review-sync-fail',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-review-sync-fail-turn-1',
+                });
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_end',
+                        params: {
+                            msg: {
+                                command:
+                                    "git push -u origin HEAD && gh pr create --base main --title 'Review-ready PR'",
+                                exitCode: 0,
+                            },
+                        },
+                    },
+                });
+
+                return {
+                    status: 'completed',
+                    outputText: 'published',
+                    threadId: 'thread-review-sync-fail',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-review-sync-fail-turn-1',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.deepEqual(tracker.moveIssueToStateByNameCalls, [
+        {
+            identifier: 'ROB-13-REVIEW-HANDOFF-SYNC-FAIL',
+            stateName: 'In Review',
+        },
+    ]);
+    assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
+        {
+            identifier: 'ROB-13-REVIEW-HANDOFF-SYNC-FAIL',
+            stateName: 'In Review',
+        },
+    ]);
+    assert.ok(
+        logRecords.some(
+            (record) =>
+                record.level === 'warn' &&
+                record.message === 'Failed to synchronize issue workpad after moving issue to review state.' &&
+                record.errorClass === 'orchestrator_unknown_error' &&
+                record.error === 'Linear comment update failed',
+        ),
+    );
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-13-REVIEW-HANDOFF-SYNC-FAIL');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'completed');
+    const terminal = issueDetails?.terminal as Record<string, unknown>;
+    assert.equal(terminal.state, 'In Review');
 });
 
 test('non-commit merge states can continue without local commit output', async () => {

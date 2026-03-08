@@ -3,10 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+source ./scripts/ci/git_helpers.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 COMPOSE_CMD=()
+# Keep the quick gate aligned with the repo's frontend tooling baseline.
 ROOT_NODE_MINIMUM_MAJOR=18
+LOCAL_CI_COMPOSE_OVERRIDE="docker/compose.ci-local.yml"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -33,11 +36,15 @@ ensure_docker_compose() {
     fi
 
     require_cmd docker
+    local compose_files=()
+    if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$LOCAL_CI_COMPOSE_OVERRIDE" ]]; then
+        compose_files=(-f docker-compose.yml -f "$LOCAL_CI_COMPOSE_OVERRIDE")
+    fi
 
     if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose)
+        COMPOSE_CMD=(docker compose "${compose_files[@]}")
     elif command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose)
+        COMPOSE_CMD=(docker-compose "${compose_files[@]}")
     else
         echo "[pre-pr-quick] docker compose command not found." >&2
         exit 1
@@ -98,6 +105,14 @@ cleanup_stack() {
     run_compose down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
+ensure_local_config() {
+    if [[ -f config.php ]]; then
+        return
+    fi
+
+    cp config-sample.php config.php
+}
+
 if [[ "${SKIP_LOCAL_DEPS_BOOTSTRAP:-0}" != "1" ]]; then
     bash ./scripts/ci/ensure_local_deps.sh
 fi
@@ -107,17 +122,28 @@ require_cmd python3
 require_cmd npm
 require_cmd node
 require_minimum_node_major "$ROOT_NODE_MINIMUM_MAJOR"
+ensure_local_config
 
 # Keep changed-file checks deterministic against current base branch state.
-git fetch --no-tags --no-write-fetch-head origin "$BASE_REF" >/dev/null 2>&1 || true
+git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
 
+# Frontend dependency bumps, including chartjs-chart-matrix@3 for the dashboard heatmap, can
+# change generated bundles or the resolved lockfile without touching app source files.
+echo_section "Frontend lockfile sync"
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+git diff --quiet --exit-code -- package-lock.json || {
+    echo "[pre-pr-quick] Frontend dependency sync produced uncommitted changes in package-lock.json." >&2
+    git status --short -- package.json package-lock.json >&2 || true
+    exit 1
+}
+
 echo_section "Frontend vendor assets refresh"
 npm run assets:refresh
 git diff --quiet --exit-code -- assets/vendor build || {
-    echo "[pre-pr-quick] Vendor asset refresh produced uncommitted changes in assets/vendor or build." >&2
+    echo "[pre-pr-quick] Frontend dependency refresh produced uncommitted changes in assets/vendor or build." >&2
     git status --short -- assets/vendor build >&2 || true
     exit 1
 }
