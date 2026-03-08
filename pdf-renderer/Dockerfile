@@ -1,6 +1,10 @@
 FROM ghcr.io/puppeteer/puppeteer:22
 
+USER root
+
 WORKDIR /app
+
+RUN mkdir -p /app && chown -R pptruser:pptruser /app
 
 RUN apt-get update || true
 RUN apt-get install -y --no-install-recommends \
@@ -15,6 +19,10 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev || npm install --omit=dev
 
 COPY server.js ./
+
+RUN chown -R pptruser:pptruser /app
+
+USER pptruser
 
 EXPOSE 3000
 
