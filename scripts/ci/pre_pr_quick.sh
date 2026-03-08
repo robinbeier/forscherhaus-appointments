@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 COMPOSE_CMD=()
+# Keep the quick gate aligned with the repo's frontend tooling baseline.
 ROOT_NODE_MINIMUM_MAJOR=18
 
 require_cmd() {
@@ -123,14 +124,21 @@ git fetch --no-tags --no-write-fetch-head origin "$BASE_REF" >/dev/null 2>&1 || 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
 
-# Frontend dependency bumps, including the dashboard heatmap matrix plugin, can
-# change generated bundles or the resolved lockfile without touching app source
-# files.
+# Frontend dependency bumps, including chartjs-chart-matrix@3 for the dashboard heatmap, can
+# change generated bundles or the resolved lockfile without touching app source files.
+echo_section "Frontend lockfile sync"
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+git diff --quiet --exit-code -- package-lock.json || {
+    echo "[pre-pr-quick] Frontend dependency sync produced uncommitted changes in package-lock.json." >&2
+    git status --short -- package.json package-lock.json >&2 || true
+    exit 1
+}
+
 echo_section "Frontend vendor assets refresh"
 npm run assets:refresh
-git diff --quiet --exit-code -- assets/vendor build package-lock.json || {
-    echo "[pre-pr-quick] Frontend dependency refresh produced uncommitted changes in assets/vendor, build, or package-lock.json." >&2
-    git status --short -- assets/vendor build package-lock.json >&2 || true
+git diff --quiet --exit-code -- assets/vendor build || {
+    echo "[pre-pr-quick] Frontend dependency refresh produced uncommitted changes in assets/vendor or build." >&2
+    git status --short -- assets/vendor build >&2 || true
     exit 1
 }
 
