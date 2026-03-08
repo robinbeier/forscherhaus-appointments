@@ -111,6 +111,7 @@ interface RunningEntry {
     stopReason?:
         | 'reconciliation_terminal'
         | 'reconciliation_non_active'
+        | 'review_handoff'
         | 'stall_timeout'
         | 'first_repo_step_guard'
         | 'first_command_drift_guard'
@@ -775,6 +776,39 @@ function shouldUsePublishMode(
     }
 
     return isMergeState(issue, mergeStateName);
+}
+
+function isReviewState(stateName: string, reviewStateName: string): boolean {
+    return normalizeStateName(stateName) === normalizeStateName(reviewStateName);
+}
+
+function hasReviewHandoffEvidence(
+    runningEntry: Pick<
+        RunningEntry,
+        'publishMode' | 'observedOpenPullRequest' | 'observedPullRequestMutation' | 'observedBranchPush'
+    >,
+): boolean {
+    return (
+        runningEntry.publishMode ||
+        runningEntry.observedOpenPullRequest ||
+        runningEntry.observedPullRequestMutation ||
+        runningEntry.observedBranchPush
+    );
+}
+
+function isSuccessfulReviewHandoff(
+    stateName: string,
+    reviewStateName: string,
+    runningEntry: Pick<
+        RunningEntry,
+        'publishMode' | 'observedOpenPullRequest' | 'observedPullRequestMutation' | 'observedBranchPush'
+    >,
+): boolean {
+    return isReviewState(stateName, reviewStateName) && hasReviewHandoffEvidence(runningEntry);
+}
+
+function isReviewHandoffStop(runningEntry: Pick<RunningEntry, 'stopReason'>): boolean {
+    return runningEntry.stopReason === 'review_handoff';
 }
 
 function createContinuationPrompt(
@@ -1704,6 +1738,7 @@ export class SymphonyOrchestrator {
             const statesByIssueId = await tracker.fetchIssueStatesByIds(Array.from(trackedIssueIds));
             const activeStates = new Set(config.tracker.activeStates.map((state) => normalizeStateName(state)));
             const terminalStates = new Set(config.tracker.terminalStates.map((state) => normalizeStateName(state)));
+            const normalizedReviewState = normalizeStateName(config.tracker.reviewStateName);
 
             for (const [issueId, runningEntry] of this.runningByIssueId.entries()) {
                 const currentState = normalizeStateName(statesByIssueId.get(issueId));
@@ -1712,6 +1747,20 @@ export class SymphonyOrchestrator {
                         ...runningEntry.issue,
                         stateName: statesByIssueId.get(issueId) ?? runningEntry.issue.stateName,
                     };
+                } else if (
+                    currentState === normalizedReviewState &&
+                    isSuccessfulReviewHandoff(
+                        statesByIssueId.get(issueId) ?? runningEntry.issue.stateName,
+                        config.tracker.reviewStateName,
+                        runningEntry,
+                    )
+                ) {
+                    await this.requestStopForRunningIssue(runningEntry, {
+                        suppressRetry: true,
+                        cleanupWorkspace: true,
+                        reason: 'review_handoff',
+                        currentState: statesByIssueId.get(issueId) ?? '',
+                    });
                 } else if (terminalStates.has(currentState)) {
                     await this.requestStopForRunningIssue(runningEntry, {
                         suppressRetry: true,
@@ -2141,7 +2190,7 @@ export class SymphonyOrchestrator {
                 if (
                     !autoMovedToReviewState &&
                     tracker.syncIssueWorkpadToState &&
-                    (normalizedCurrentState === normalizeStateName(effectiveConfig.tracker.reviewStateName) ||
+                    (isReviewState(currentIssue.stateName, effectiveConfig.tracker.reviewStateName) ||
                         terminalStates.has(normalizedCurrentState))
                 ) {
                     currentIssue = await this.syncIssueWorkpadToStateBestEffort({
@@ -2165,6 +2214,16 @@ export class SymphonyOrchestrator {
                     }
 
                     continue;
+                }
+
+                if (
+                    isSuccessfulReviewHandoff(
+                        currentIssue.stateName,
+                        effectiveConfig.tracker.reviewStateName,
+                        runningEntry,
+                    )
+                ) {
+                    shouldCleanupWorkspace = true;
                 }
 
                 if (terminalStates.has(normalizedCurrentState)) {
@@ -2269,6 +2328,14 @@ export class SymphonyOrchestrator {
             const cancelledByReconciliation = classified.errorClass === 'turn_cancelled' && runningEntry.suppressRetry;
             const cancelledForPostDiffCheckpoint =
                 classified.errorClass === 'turn_cancelled' && runningEntry.stopReason === 'post_diff_checkpoint';
+            const cancelledAfterReviewHandoff =
+                classified.errorClass === 'turn_cancelled' &&
+                isReviewHandoffStop(runningEntry) &&
+                isSuccessfulReviewHandoff(
+                    runningEntry.stopCurrentState ?? runningEntry.issue.stateName,
+                    effectiveConfig.tracker.reviewStateName,
+                    runningEntry,
+                );
             const cancelledAfterMergeCompletion =
                 classified.errorClass === 'turn_cancelled' &&
                 runningEntry.stopReason === 'reconciliation_terminal' &&
@@ -2277,19 +2344,30 @@ export class SymphonyOrchestrator {
                 normalizeStateNames(effectiveConfig.tracker.terminalStates).has(
                     normalizeStateName(runningEntry.stopCurrentState ?? runningEntry.issue.stateName),
                 );
-            terminalStatus = cancelledAfterMergeCompletion
-                ? 'completed'
-                : cancelledByReconciliation || cancelledForPostDiffCheckpoint
-                  ? 'stopped'
-                  : 'failed';
-            terminalErrorClass = cancelledAfterMergeCompletion ? undefined : classified.errorClass;
-            terminalErrorMessage = cancelledAfterMergeCompletion ? undefined : classified.message;
+            terminalStatus =
+                cancelledAfterMergeCompletion || cancelledAfterReviewHandoff
+                    ? 'completed'
+                    : cancelledByReconciliation || cancelledForPostDiffCheckpoint
+                      ? 'stopped'
+                      : 'failed';
+            terminalErrorClass =
+                cancelledAfterMergeCompletion || cancelledAfterReviewHandoff ? undefined : classified.errorClass;
+            terminalErrorMessage =
+                cancelledAfterMergeCompletion || cancelledAfterReviewHandoff ? undefined : classified.message;
             if (cancelledAfterMergeCompletion) {
                 this.recordTrace(
                     runningEntry,
                     'runtime',
                     'dispatch/completed_after_terminal_merge',
                     'Issue reached a terminal tracker state after a PR merge attempt; treating the cancelled session as successful completion.',
+                );
+            } else if (cancelledAfterReviewHandoff) {
+                shouldCleanupWorkspace = true;
+                this.recordTrace(
+                    runningEntry,
+                    'runtime',
+                    'dispatch/completed_after_review_handoff',
+                    'Issue reached the review handoff state; treating the cancelled session as successful completion.',
                 );
             } else {
                 this.recordTrace(runningEntry, 'runtime', 'dispatch/failed', classified.message, {
@@ -2310,7 +2388,7 @@ export class SymphonyOrchestrator {
                         : undefined;
             }
 
-            if (cancelledAfterMergeCompletion) {
+            if (cancelledAfterMergeCompletion || cancelledAfterReviewHandoff) {
                 this.codexTotals.completed += 1;
             } else if (!cancelledByReconciliation && !cancelledForPostDiffCheckpoint) {
                 this.codexTotals.failed += 1;
@@ -2327,6 +2405,14 @@ export class SymphonyOrchestrator {
             if (cancelledByReconciliation) {
                 if (cancelledAfterMergeCompletion) {
                     this.logger.info('Issue dispatch completed after merge-triggered terminal reconciliation', {
+                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                        attempt: runningEntry.attempt,
+                        source: runningEntry.source,
+                        stopReason: runningEntry.stopReason ?? null,
+                        currentState: runningEntry.stopCurrentState ?? runningEntry.issue.stateName,
+                    });
+                } else if (cancelledAfterReviewHandoff) {
+                    this.logger.info('Issue dispatch completed after review handoff reconciliation', {
                         ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                         attempt: runningEntry.attempt,
                         source: runningEntry.source,
@@ -2394,9 +2480,9 @@ export class SymphonyOrchestrator {
                 const normalizedTerminalState = normalizeStateName(runningEntry.issue.stateName);
                 const shouldCleanupHelperRepos =
                     runningEntry.workspaceBranchSourceOfTruthConfirmed &&
-                    (runningEntry.stopReason === 'reconciliation_non_active' ||
+                    (isReviewHandoffStop(runningEntry) ||
+                        runningEntry.stopReason === 'reconciliation_non_active' ||
                         runningEntry.stopReason === 'reconciliation_terminal' ||
-                        normalizeStateName(effectiveConfig.tracker.reviewStateName) === normalizedTerminalState ||
                         normalizeStateNames(effectiveConfig.tracker.terminalStates).has(normalizedTerminalState));
 
                 if (shouldCleanupHelperRepos) {
@@ -3134,7 +3220,10 @@ export class SymphonyOrchestrator {
                 }
             }
 
-            if (normalizedCurrentState === normalizedReviewState) {
+            if (
+                normalizedCurrentState === normalizedReviewState &&
+                isSuccessfulReviewHandoff(currentState, runningEntry.reviewStateName, runningEntry)
+            ) {
                 this.logger.info('Stopping publish turn immediately after issue entered review state.', {
                     ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                     currentState,
@@ -3151,8 +3240,8 @@ export class SymphonyOrchestrator {
                 );
                 await this.requestStopForRunningIssue(runningEntry, {
                     suppressRetry: true,
-                    cleanupWorkspace: false,
-                    reason: 'reconciliation_non_active',
+                    cleanupWorkspace: true,
+                    reason: 'review_handoff',
                     currentState,
                 });
                 return;

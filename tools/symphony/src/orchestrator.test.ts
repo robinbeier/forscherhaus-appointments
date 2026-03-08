@@ -619,7 +619,7 @@ test('successful publish turn moves issue to In Review and stops the active run'
     assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
-    assert.equal(workspace.cleanedPaths.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 1);
 });
 
 test('successful Linear review handoff during a publish turn stops immediately and syncs the workpad', async () => {
@@ -694,9 +694,10 @@ test('successful Linear review handoff during a publish turn stops immediately a
 
     const snapshot = orchestrator.getSnapshot();
     assert.ok(stopCalls >= 1);
-    assert.equal(snapshot.codex_totals.completed, 0);
+    assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 1);
     assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
         {
             identifier: 'ROB-13-REVIEW-HANDOFF',
@@ -706,7 +707,7 @@ test('successful Linear review handoff during a publish turn stops immediately a
 
     const issueDetails = orchestrator.getIssueDetails('ROB-13-REVIEW-HANDOFF');
     assert.ok(issueDetails);
-    assert.equal(issueDetails?.status, 'stopped');
+    assert.equal(issueDetails?.status, 'completed');
     const terminal = issueDetails?.terminal as Record<string, unknown>;
     assert.equal(terminal.state, 'In Review');
     const trace = issueDetails?.trace as Record<string, unknown>;
@@ -927,14 +928,14 @@ test('helper-repo publish handoff stops on the real workspace and cleans tempora
 
         const snapshot = orchestrator.getSnapshot();
         assert.ok(stopCalls >= 1);
-        assert.equal(snapshot.codex_totals.completed, 0);
+        assert.equal(snapshot.codex_totals.completed, 1);
         assert.equal(snapshot.codex_totals.failed, 0);
         assert.equal(snapshot.retrying.length, 0);
         await assert.rejects(() => access(helperRepoPath));
 
         const issueDetails = orchestrator.getIssueDetails(issue.identifier);
         assert.ok(issueDetails);
-        assert.equal(issueDetails?.status, 'stopped');
+        assert.equal(issueDetails?.status, 'completed');
         const terminal = issueDetails?.terminal as Record<string, unknown>;
         assert.equal(terminal.state, 'In Review');
         assert.equal(terminal.workspace_source_of_truth_confirmed, true);
@@ -1271,6 +1272,59 @@ test('turn_timeout preserves workspace for debugging and schedules a retry', asy
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].errorClass, 'turn_timeout');
     assert.equal(workspace.cleanedPaths.length, 0);
+});
+
+test('turn_timeout in review state is not misclassified as a successful review handoff', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'timeout-review-1',
+        identifier: 'ROB-53-TIMEOUT-REVIEW',
+        priority: 1,
+        createdAt: '2026-03-08T08:00:00.000Z',
+        stateName: 'In Review',
+    });
+    issue.branchName = 'beierrobin/rob-53-timeout-review';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Review');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    const logRecords: Array<Record<string, unknown>> = [];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub(logRecords),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: () => ({
+            runTurn: async () => {
+                throw new AppServerClientError('turn_timeout', 'App-server turn exceeded turn timeout.');
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.completed, 0);
+    assert.equal(snapshot.codex_totals.failed, 1);
+    assert.equal(snapshot.codex_totals.turnTimeouts, 1);
+    assert.equal(snapshot.retrying.length, 1);
+    assert.equal(workspace.cleanedPaths.length, 0);
+
+    const issueDetails = orchestrator.getIssueDetails(issue.identifier);
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'retrying');
+    assert.ok(
+        logRecords.some(
+            (record) =>
+                record.level === 'error' &&
+                record.message === 'Issue dispatch failed' &&
+                record.errorClass === 'turn_timeout',
+        ),
+    );
 });
 
 test('approval_required preserves workspace and does not schedule a retry', async () => {
