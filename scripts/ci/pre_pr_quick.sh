@@ -67,6 +67,20 @@ wait_for_mysql_readiness() {
     return 0
 }
 
+install_seed_instance() {
+    local attempt
+    for attempt in 1 2 3; do
+        if run_compose run --rm php-fpm php index.php console install; then
+            return 0
+        fi
+        echo "[pre-pr-quick] console install failed on attempt ${attempt}; retrying in 3s." >&2
+        sleep 3
+    done
+
+    echo "[pre-pr-quick] console install failed after 3 attempts." >&2
+    return 1
+}
+
 cleanup_stack() {
     run_compose down -v --remove-orphans >/dev/null 2>&1 || true
 }
@@ -77,9 +91,10 @@ fi
 
 require_cmd git
 require_cmd python3
+require_cmd npm
 
 # Keep changed-file checks deterministic against current base branch state.
-git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
+git fetch --no-tags --no-write-fetch-head origin "$BASE_REF" >/dev/null 2>&1 || true
 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
@@ -88,6 +103,7 @@ echo_section "Start quick gate database service"
 trap cleanup_stack EXIT
 run_compose up -d mysql
 wait_for_mysql_readiness
+install_seed_instance
 
 echo_section "PHPUnit"
 run_compose run --rm php-fpm composer test
