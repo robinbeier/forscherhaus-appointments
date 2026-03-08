@@ -36,6 +36,28 @@
       ]
     },
     {
+      "component_id": "installation-bootstrap",
+      "role": "Installation & Bootstrap",
+      "summary": "First-run installation flow that seeds the initial admin, company, and demo booking data.",
+      "primary_handle": "@robinbeier",
+      "secondary_handle": "@robinbeier",
+      "folder_prefixes": [
+        "application/controllers/Installation.php",
+        "application/views/pages/installation.php",
+        "assets/js/pages/installation.js"
+      ],
+      "key_files": [
+        "application/controllers/Installation.php",
+        "application/views/pages/installation.php",
+        "assets/js/pages/installation.js"
+      ],
+      "depends_on": [
+        "people-services-admin",
+        "settings-compliance",
+        "shared-core"
+      ]
+    },
+    {
       "component_id": "booking-public",
       "role": "Public Booking",
       "summary": "Public booking wizard read/write path up to booking completion handoff.",
