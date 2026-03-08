@@ -27,7 +27,7 @@
 1. **[2026-03-06] Keep Symphony Linear GraphQL queries aligned with current schema**
    Do instead: use `project.slugId` (not `project.slug`) and relation-based issue links (`relations`/`inverseRelations`) instead of removed fields like `blockedByIssues`; include response-body details for non-2xx tracker errors to speed up diagnosis.
 1. **[2026-03-07] Read Symphony token totals as spend telemetry and interpret post-diff stops separately**
-   Do instead: debug pilot efficiency primarily with `time-to-first-diff`, handoff timing, per-event `last.totalTokens`, and final stop reason; the logged `totalTokens` values are cumulative session spend and can exceed the model context window without meaning the live prompt is that large, and a `post_diff_checkpoint` that exhausts retry budget is a continuation-budget problem rather than proof that the code path itself failed.
+   Do instead: debug pilot efficiency primarily with `time-to-first-diff`, handoff timing, per-event `last.totalTokens`, and final stop reason; the logged `totalTokens` values are cumulative session spend and can exceed the model context window without meaning the live prompt is that large, and a `post_diff_checkpoint` that exhausts retry budget is a continuation-budget problem rather than proof that the code path itself failed, especially when the first observed diff is only governance/gate work such as ownership-map or pre-PR script updates.
 1. **[2026-03-08] Re-check final workpad state and actual PR/Linear outcome after apparent post-push hangs**
    Do instead: when a Symphony run looks stuck after `git push`, verify the live state API, PR existence, and the last `## Codex Workpad` comment before intervening; the run may already have created the PR, moved the issue to `In Review`, and stopped correctly via `reconciliation_non_active`, while older first-turn summaries still describe an earlier validation blocker.
 
@@ -53,19 +53,19 @@
 3. **[2026-03-03] Run Deptrac via Docker for stable local output**
    Do instead: use `docker compose run --rm php-fpm composer deptrac:analyze` because newer host PHP runtimes can emit vendor-level deprecation noise.
 4. **[2026-03-08] Keep pre-PR diff checks worktree-safe inside Symphony workers**
-   Do instead: avoid hard `git fetch` writes from worker worktrees whose git common dir lives outside the writable workspace; fall back to existing `origin/*` refs or a local `HEAD~1...HEAD` diff range so quick/full gates stay usable under `workspace-write`, and make sure no host stack is still binding the worktree's expected MySQL/HTTP ports before commit or pre-push hooks run.
+   Do instead: avoid hard `git fetch` writes from worker worktrees whose git common dir lives outside the writable workspace; fall back to existing `origin/*` refs or a local `HEAD~1...HEAD` diff range so quick/full gates stay usable under `workspace-write`, make sure no host stack is still binding the worktree's expected MySQL/HTTP ports before commit or pre-push hooks run, and re-check support containers before treating frontend/browser failures as code regressions because a stopped branch-local MySQL or app stack can mimic a broken dependency spike.
 5. **[2026-03-08] Run lockfile-refresh gates from a committed lockfile baseline**
    Do instead: for branches whose main change is `package-lock.json`, commit the converged lockfile before running `pre_pr_quick` or `pre_pr_full`; the quick gate intentionally re-runs `npm install --package-lock-only` and compares the result to `HEAD`, so running it before the lockfile commit produces a false drift failure.
-6. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
+6. **[2026-03-08] Use containerized Playwright when host browser permissions are noisy**
+   Do instead: if host Playwright/Chrome fails with Crashpad permission errors or Firefox SIGABRT, run a targeted browser smoke from `mcr.microsoft.com/playwright` against the branch-local stack via `host.docker.internal`; that gives real-browser evidence without depending on the host browser sandbox.
+7. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
    Do instead: check for `* 2.*`/`* 3.*` files (especially in `assets/vendor` and `vendor`) and remove/rehydrate them before `./build_release.sh`, because `rsync` can stall on FileProvider `compressed,dataless` entries.
-7. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
+8. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
    Do instead: when logs show OS error 35 on `./#innodb_redo/*`, inspect `docker/mysql` with `ls -lO@`; rehydrate `compressed,dataless` files (for example `dd if='<file>' of=/dev/null bs=512 count=1`) and restart MySQL, or reset `docker/mysql` if recovery fails.
-8. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
+9. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
    Do instead: build/upload `${REL}.tar.gz` (for example via `./build_release.sh --rel "$REL"`) before deploy; do not confuse DB rollback dumps like `predeploy-db-...sql.gz` with deploy archives.
-9. **[2026-02-23] Use unique Compose project names per worktree**
+10. **[2026-02-23] Use unique Compose project names per worktree**
    Do instead: start Docker with `docker compose -p <unique-name> ...` in each worktree and verify mounts via `docker inspect` before smoke-tests.
-10. **[2026-02-22] Avoid brittle host-PHP assumptions for tests**
-    Do instead: run tests via docker compose where `DB_HOST='mysql'` and container DNS match CI behavior.
 
 ## User Directives
 
