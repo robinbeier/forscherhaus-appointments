@@ -339,6 +339,7 @@
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "folder_prefixes": [
+        "application/views/components/jquery_compat_inline.php",
         "application/libraries/Accounts.php",
         "application/libraries/Notifications.php",
         "application/libraries/Request_normalizer.php",
