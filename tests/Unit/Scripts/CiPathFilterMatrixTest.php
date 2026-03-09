@@ -14,6 +14,7 @@ class CiPathFilterMatrixTest extends TestCase
 
         self::assertTrue($matches['coverage_required']);
         self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
         self::assertFalse($matches['request_contracts_required']);
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
@@ -29,6 +30,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['request_contracts_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
@@ -43,6 +45,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['request_contracts_required']);
         self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
         self::assertFalse($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertTrue($matches['integration_smoke']);
@@ -57,6 +60,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['request_contracts_required']);
         self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
+        self::assertTrue($matches['heavy_job_trends_required']);
         self::assertTrue($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertTrue($matches['integration_smoke']);
@@ -71,6 +75,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['request_contracts_required']);
         self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
         self::assertFalse($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
@@ -85,6 +90,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['request_contracts_required']);
         self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
         self::assertTrue($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertTrue($matches['integration_smoke']);
@@ -115,7 +121,23 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertStringContainsString("needs.changes.outputs.request_contracts_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.deep_bootstrap_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.coverage_required == 'true'", $workflow);
+        self::assertStringContainsString("needs.changes.outputs.heavy_job_trends_required == 'true'", $workflow);
         self::assertStringNotContainsString("needs.changes.outputs.deep_required == 'true'", $workflow);
+    }
+
+    public function testHeavyJobDurationTrendScriptUsesDedicatedFilterOnly(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/check_heavy_job_duration_trends.php']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertFalse($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertTrue($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertFalse($matches['booking_flows']);
+        self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['write_contract_booking']);
+        self::assertFalse($matches['write_contract_api']);
     }
 
     /**
@@ -192,6 +214,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertArrayHasKey('request_contracts_required', $filters);
         self::assertArrayHasKey('deep_bootstrap_required', $filters);
         self::assertArrayHasKey('coverage_required', $filters);
+        self::assertArrayHasKey('heavy_job_trends_required', $filters);
 
         return $filters;
     }

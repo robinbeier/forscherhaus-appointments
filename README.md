@@ -110,6 +110,11 @@ docker compose run --rm php-fpm composer test:coverage:integration-shard
 docker compose run --rm php-fpm composer test:coverage:merge-shards
 docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
+
+# optional heavy-job duration trend report (requires GitHub API token)
+GITHUB_TOKEN="$(gh auth token)" php scripts/ci/check_heavy_job_duration_trends.php \
+  --repo=robinbeier/forscherhaus-appointments \
+  --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
 ```
 
 ## Release Gates
@@ -253,6 +258,8 @@ CI note: coverage now runs in two blocking deep-check shards (`coverage-shard-un
 CI note: the coverage shards, coverage delta, and shared deep bootstrap now use dedicated coverage/bootstrap filters so CI-only or unrelated harness edits do not fan out into the full heavy pipeline.
 CI note: `coverage-delta` current policy thresholds are baseline `22.45%`, absolute minimum `22.25%`, max drop `0.20pp`, epsilon `0.02pp`. Coverage runs on pushes to `main` and non-draft PRs when deep checks are relevant.
 CI note: coverage artifacts are written to `storage/logs/ci/coverage-shard-unit.phpcov`, `storage/logs/ci/coverage-shard-integration.phpcov`, `storage/logs/ci/coverage-unit-clover.xml`, `storage/logs/ci/coverage-merge-latest.json`, and `storage/logs/ci/coverage-delta-latest.json`.
+CI note: `heavy-job-duration-trends` is a non-blocking push-to-`main` signal that compares the latest heavy-job median against an older successful-run baseline and emits warnings plus the artifact `heavy-job-duration-trends-artifacts`.
+CI note: heavy-job trend reports are written to `storage/logs/ci/heavy-job-duration-trends-latest.json`; review the GitHub step summary or uploaded artifact when a regression warning appears.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
 CI note: `write-contract-booking` artifacts are written to `storage/logs/ci/booking-write-contract-<UTC>.json`.
 CI note: `write-contract-api` artifacts are written to `storage/logs/ci/api-openapi-write-contract-<UTC>.json`.

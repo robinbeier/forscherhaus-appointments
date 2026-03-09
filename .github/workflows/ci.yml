@@ -27,6 +27,7 @@ jobs:
       request_contracts_required: ${{ steps.filter.outputs.request_contracts_required }}
       deep_bootstrap_required: ${{ steps.filter.outputs.deep_bootstrap_required }}
       coverage_required: ${{ steps.filter.outputs.coverage_required }}
+      heavy_job_trends_required: ${{ steps.filter.outputs.heavy_job_trends_required }}
       api_contract: ${{ steps.filter.outputs.api_contract }}
       booking_flows: ${{ steps.filter.outputs.booking_flows }}
       integration_smoke: ${{ steps.filter.outputs.integration_smoke }}
@@ -225,6 +226,12 @@ jobs:
               - 'phpunit.coverage.unit.xml'
               - 'phpunit.coverage.integration.xml'
               - 'index.php'
+              - '.github/workflows/ci.yml'
+            heavy_job_trends_required:
+              - 'scripts/ci/check_heavy_job_duration_trends.php'
+              - 'scripts/ci/config/heavy_job_duration_trend_policy.php'
+              - 'tests/Unit/Scripts/HeavyJobDurationTrendTest.php'
+              - 'composer.json'
               - '.github/workflows/ci.yml'
             api_contract:
               - 'application/controllers/api/**'
@@ -887,6 +894,61 @@ jobs:
         run: |
           cat storage/logs/ci/coverage-merge-latest.json || true
           cat storage/logs/ci/coverage-delta-latest.json || true
+
+  heavy-job-duration-trends:
+    needs:
+      - changes
+      - deep-runtime-suite
+      - coverage-shard-unit
+      - coverage-shard-integration
+      - coverage-delta
+    if: >
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      (
+        needs.changes.outputs.deep_bootstrap_required == 'true' ||
+        needs.changes.outputs.coverage_required == 'true' ||
+        needs.changes.outputs.heavy_job_trends_required == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v2
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          coverage: none
+      - name: Evaluate heavy job duration trends
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          set +e
+          php scripts/ci/check_heavy_job_duration_trends.php \
+            --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::heavy-job-duration-trends exited with status ${status}; see storage/logs/ci/heavy-job-duration-trends-latest.json."
+          fi
+      - name: Upload heavy job trend artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heavy-job-duration-trends-artifacts
+          path: storage/logs/ci/heavy-job-duration-trends-latest.json
+          if-no-files-found: warn
+      - name: Diagnostics (heavy job trend report)
+        if: always()
+        run: cat storage/logs/ci/heavy-job-duration-trends-latest.json || true
 
   architecture-ownership-map:
     runs-on: ubuntu-latest

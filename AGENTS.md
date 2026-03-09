@@ -154,6 +154,11 @@ docker compose run --rm php-fpm composer test:coverage:merge-shards
 docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
 
+# Optional: Heavy-job duration trend report (read-only GitHub API signal)
+GITHUB_TOKEN="$(gh auth token)" php scripts/ci/check_heavy_job_duration_trends.php \
+  --repo=robinbeier/forscherhaus-appointments \
+  --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
+
 # Optional: Lokale Pre-PR Gates (schnell/voll)
 bash ./scripts/ci/pre_pr_quick.sh
 bash ./scripts/ci/pre_pr_full.sh
@@ -317,6 +322,7 @@ Hinweis: Die bestehenden Blocking-Gates fuer diese fuenf Checks bleiben als leic
 Hinweis: `coverage-shard-integration` importiert in CI weiterhin den gemeinsamen `deep-check-seed-snapshot`; die Runtime-Deep-Suites seeden dagegen einmal zentral in `deep-runtime-suite`.
 Hinweis: Die CI-Jobs `coverage-shard-unit` und `coverage-shard-integration` sind blocking und laufen auf `push` nach `main` sowie auf non-draft PRs mit relevanten Deep-Changes; `coverage-shard-unit` deckt nur den pure-PHPUnit-Slice ohne Docker/MySQL/Seed ab, waehrend `coverage-shard-integration` die DB-gebundenen Unit-Tests plus Integrations-Controller im dockerisierten Stack ausfuehrt.
 Hinweis: Der CI-Job `coverage-delta` ist blocking, aggregiert die beiden Coverage-Shards und prueft die gemergte Clover gegen die Repo-Policy; aktuelle Schwellwerte: baseline `22.45`, absolute minimum `22.25`, max drop `0.20pp`, epsilon `0.02pp`.
+Hinweis: Der CI-Job `heavy-job-duration-trends` ist bewusst nicht blocking; er laeuft auf `push` nach `main`, vergleicht Median-Fenster der schweren Jobs gegen eine aeltere erfolgreiche Basis und meldet Regressionssignale nur per Warning/Artifact.
 Hinweis: Das Architecture Boundaries Gate schreibt standardmaessig nach `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log` und `storage/logs/ci/component-boundary-latest.json`.
 Hinweis: Das Request Contracts Gate schreibt standardmaessig nach `storage/logs/ci/request-contract-adoption-latest.json` und `storage/logs/ci/phpstan-request-contracts-l2.raw`.
 Hinweis: Der API OpenAPI Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
@@ -324,6 +330,7 @@ Hinweis: Der Booking Write Contract Smoke schreibt standardmaessig nach `storage
 Hinweis: Der API OpenAPI Write Contract Smoke schreibt standardmaessig nach `storage/logs/ci/api-openapi-write-contract-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Der Integration Smoke schreibt standardmaessig nach `storage/logs/ci/dashboard-integration-smoke-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Die Coverage-Shard-Reports schreiben standardmaessig nach `storage/logs/ci/coverage-shard-unit.phpcov` und `storage/logs/ci/coverage-shard-integration.phpcov`; der gemergte Clover nach `storage/logs/ci/coverage-unit-clover.xml`, der Merge-Report nach `storage/logs/ci/coverage-merge-latest.json` und der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
+Hinweis: Der Heavy-Job-Trend-Report schreibt standardmaessig nach `storage/logs/ci/heavy-job-duration-trends-latest.json`; in GitHub Actions wird zusaetzlich das Artifact `heavy-job-duration-trends-artifacts` hochgeladen.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `typed-request-contracts` durch False-Positives Releases blockiert, den L2-Step in `ci.yml` temporaer auf advisory (`continue-on-error: true`) zurueckstellen und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
