@@ -271,6 +271,7 @@ Ownership model: Role + Handles (primary/secondary).
   - `application/libraries/Accounts.php`
   - `application/libraries/Notifications.php`
 - Path prefixes:
+  - `application/views/components/jquery_compat_inline.php`
   - `application/libraries/Accounts.php`
   - `application/libraries/Notifications.php`
   - `application/libraries/Request_normalizer.php`
