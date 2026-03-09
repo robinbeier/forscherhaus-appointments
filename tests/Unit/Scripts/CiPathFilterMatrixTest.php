@@ -84,22 +84,10 @@ class CiPathFilterMatrixTest extends TestCase
         $workflow = file_get_contents($this->workflowPath());
         self::assertNotFalse($workflow);
 
-        self::assertStringContainsString(
-            "needs.changes.outputs.request_contracts_required == 'true'",
-            $workflow,
-        );
-        self::assertStringContainsString(
-            "needs.changes.outputs.deep_bootstrap_required == 'true'",
-            $workflow,
-        );
-        self::assertStringContainsString(
-            "needs.changes.outputs.coverage_required == 'true'",
-            $workflow,
-        );
-        self::assertStringNotContainsString(
-            "needs.changes.outputs.deep_required == 'true'",
-            $workflow,
-        );
+        self::assertStringContainsString("needs.changes.outputs.request_contracts_required == 'true'", $workflow);
+        self::assertStringContainsString("needs.changes.outputs.deep_bootstrap_required == 'true'", $workflow);
+        self::assertStringContainsString("needs.changes.outputs.coverage_required == 'true'", $workflow);
+        self::assertStringNotContainsString("needs.changes.outputs.deep_required == 'true'", $workflow);
     }
 
     /**
@@ -168,10 +156,7 @@ class CiPathFilterMatrixTest extends TestCase
                 continue;
             }
 
-            if (
-                $currentFilter !== null &&
-                preg_match("/^\s{14}- '([^']+)'\s*$/", $line, $matches) === 1
-            ) {
+            if ($currentFilter !== null && preg_match("/^\s{14}- '([^']+)'\s*$/", $line, $matches) === 1) {
                 $filters[$currentFilter][] = $matches[1];
             }
         }
