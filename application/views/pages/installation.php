@@ -198,7 +198,7 @@
 <?php component('js_lang_script'); ?>
 
 <script src="<?= asset_url('assets/vendor/jquery/jquery.min.js') ?>"></script>
-<script src="<?= asset_url('assets/js/jquery_compat.js') ?>"></script>
+<?php component('jquery_compat_inline'); ?>
 <script src="<?= asset_url('assets/vendor/@popperjs-core/popper.min.js') ?>"></script>
 <script src="<?= asset_url('assets/vendor/bootstrap/bootstrap.min.js') ?>"></script>
 
