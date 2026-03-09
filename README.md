@@ -244,12 +244,13 @@ CI note: the `write-contract-api` check validates API write-path OpenAPI contrac
 CI note: rollback policy for `write-contract-api`: if false positives block delivery, restore warn-only (`continue-on-error: true`) in one commit and create a follow-up issue with max 14-day expiry.
 CI note: the `booking-controller-flows` check validates booking register/reschedule/cancel controller flows and is blocking.
 CI note: the `typed-request-dto` check validates scoped DTO normalization adoption and is blocking.
-CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is blocking (L1 + adoption + L2).
+CI note: the `typed-request-contracts` check validates typed request-contract rollout on the full domain-critical scope and is blocking (L1 + adoption + L2); it now keys off a dedicated request-contracts filter instead of the broad deep-runtime umbrella.
 CI note: the `phpstan-application` check is blocking.
 CI note: the `js-lint-changed` check is blocking.
 CI note: the `architecture-ownership-map` check is blocking.
 CI note: the `architecture-boundaries` check validates CODEOWNERS drift + Deptrac changed-file layer violations + component loader boundaries and is blocking.
 CI note: coverage now runs in two blocking deep-check shards (`coverage-shard-unit`, `coverage-shard-integration`) and feeds an aggregating blocking `coverage-delta` gate. `coverage-shard-unit` runs the pure PHPUnit-only subset on the GitHub runner without Docker/MySQL/seed, while `coverage-shard-integration` carries the DB-backed unit tests plus integration controllers in the dockerized deep stack.
+CI note: the coverage shards, coverage delta, and shared deep bootstrap now use dedicated coverage/bootstrap filters so CI-only or unrelated harness edits do not fan out into the full heavy pipeline.
 CI note: `coverage-delta` current policy thresholds are baseline `22.45%`, absolute minimum `22.25%`, max drop `0.20pp`, epsilon `0.02pp`. Coverage runs on pushes to `main` and non-draft PRs when deep checks are relevant.
 CI note: coverage artifacts are written to `storage/logs/ci/coverage-shard-unit.phpcov`, `storage/logs/ci/coverage-shard-integration.phpcov`, `storage/logs/ci/coverage-unit-clover.xml`, `storage/logs/ci/coverage-merge-latest.json`, and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.

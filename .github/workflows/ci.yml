@@ -24,7 +24,9 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      deep_required: ${{ steps.filter.outputs.deep_required }}
+      request_contracts_required: ${{ steps.filter.outputs.request_contracts_required }}
+      deep_bootstrap_required: ${{ steps.filter.outputs.deep_bootstrap_required }}
+      coverage_required: ${{ steps.filter.outputs.coverage_required }}
       api_contract: ${{ steps.filter.outputs.api_contract }}
       booking_flows: ${{ steps.filter.outputs.booking_flows }}
       integration_smoke: ${{ steps.filter.outputs.integration_smoke }}
@@ -41,19 +43,188 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            deep_required:
+            request_contracts_required:
+              - 'application/controllers/Account.php'
+              - 'application/controllers/Login.php'
+              - 'application/controllers/Recovery.php'
+              - 'application/controllers/Localization.php'
+              - 'application/controllers/Booking*.php'
+              - 'application/controllers/Appointments.php'
+              - 'application/controllers/Blocked_periods.php'
+              - 'application/controllers/Unavailabilities.php'
+              - 'application/controllers/Calendar.php'
+              - 'application/controllers/Admins.php'
+              - 'application/controllers/Providers.php'
+              - 'application/controllers/Customers.php'
+              - 'application/controllers/Secretaries.php'
+              - 'application/controllers/Services.php'
+              - 'application/controllers/Service_categories.php'
+              - 'application/controllers/Api_settings.php'
+              - 'application/controllers/Booking_settings.php'
+              - 'application/controllers/Business_settings.php'
+              - 'application/controllers/General_settings.php'
+              - 'application/controllers/Google_analytics_settings.php'
+              - 'application/controllers/Matomo_analytics_settings.php'
+              - 'application/controllers/Legal_settings.php'
+              - 'application/controllers/Consents.php'
+              - 'application/controllers/Privacy.php'
+              - 'application/controllers/Ldap_settings.php'
+              - 'application/controllers/Caldav.php'
+              - 'application/controllers/Google.php'
+              - 'application/controllers/Webhooks.php'
+              - 'application/controllers/api/v1/Admins_api_v1.php'
+              - 'application/controllers/api/v1/Appointments_api_v1.php'
+              - 'application/controllers/api/v1/Availabilities_api_v1.php'
+              - 'application/controllers/api/v1/Blocked_periods_api_v1.php'
+              - 'application/controllers/api/v1/Customers_api_v1.php'
+              - 'application/controllers/api/v1/Providers_api_v1.php'
+              - 'application/controllers/api/v1/Secretaries_api_v1.php'
+              - 'application/controllers/api/v1/Service_categories_api_v1.php'
+              - 'application/controllers/api/v1/Services_api_v1.php'
+              - 'application/controllers/api/v1/Settings_api_v1.php'
+              - 'application/controllers/api/v1/Unavailabilities_api_v1.php'
+              - 'application/controllers/api/v1/Webhooks_api_v1.php'
+              - 'application/models/**'
+              - 'application/libraries/**'
+              - 'application/helpers/installation_helper.php'
+              - 'application/libraries/Request_normalizer.php'
+              - 'application/libraries/Booking_request_dto_factory.php'
+              - 'application/libraries/Dashboard_request_dto_factory.php'
+              - 'application/libraries/Api_request_dto_factory.php'
+              - 'application/libraries/Auth_request_dto_factory.php'
+              - 'application/libraries/Backoffice_request_dto_factory.php'
+              - 'application/libraries/Calendar_request_dto_factory.php'
+              - 'application/libraries/Integrations_request_dto_factory.php'
+              - 'scripts/ci/check_request_contract_adoption.php'
+              - 'scripts/ci/config/request_contract_adoption_scope.php'
+              - 'phpstan.request-contracts.l1.neon.dist'
+              - 'phpstan.request-contracts.l2.neon.dist'
+              - 'phpstan/bootstrap.php'
+              - 'phpstan/stubs/codeigniter-functions.stub.php'
+              - 'phpstan/stubs/request-dto-api.stub.php'
+              - 'tests/bootstrap_request_contracts.php'
+              - 'tests/Unit/Libraries/RequestNormalizerTest.php'
+              - 'tests/Unit/Libraries/BookingRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/DashboardRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/ApiRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/AuthRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/BackofficeRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/CalendarRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/IntegrationsRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/ApiRequestDtoFactoryWriteTest.php'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'phpunit.request-contracts.xml'
+              - '.github/workflows/ci.yml'
+            deep_bootstrap_required:
               - 'application/**'
               - 'config/**'
               - 'database/**'
               - 'docker/**'
-              - 'scripts/ci/**'
+              - 'scripts/ci/run_deep_runtime_suite.php'
+              - 'scripts/ci/assert_deep_runtime_suite.php'
+              - 'scripts/ci/api_openapi_contract_smoke.php'
+              - 'scripts/ci/booking_write_contract_smoke.php'
+              - 'scripts/ci/api_openapi_write_contract_smoke.php'
+              - 'scripts/ci/dashboard_integration_smoke.php'
+              - 'scripts/ci/check_coverage_delta.php'
+              - 'scripts/ci/merge_coverage_shards.php'
+              - 'scripts/ci/wait_for_mysql_readiness.sh'
+              - 'scripts/ci/export_deep_seed_snapshot.sh'
+              - 'scripts/ci/import_deep_seed_snapshot.sh'
+              - 'scripts/ci/lib/CheckSelection.php'
+              - 'scripts/ci/lib/DeterministicFixtureFactory.php'
+              - 'scripts/ci/lib/WriteContractCleanupRegistry.php'
+              - 'scripts/ci/lib/FlakeRetry.php'
+              - 'scripts/ci/lib/OpenApiContractValidator.php'
+              - 'scripts/ci/config/api_openapi_contract_matrix.php'
+              - 'scripts/ci/config/api_openapi_write_contract_matrix.php'
+              - 'scripts/ci/config/coverage_delta_policy.php'
               - 'scripts/release-gate/**'
-              - 'tests/**'
+              - 'tests/bootstrap.php'
+              - 'tests/bootstrap.coverage-unit.php'
+              - 'tests/Unit/Controllers/**'
+              - 'tests/Unit/Helper/**'
+              - 'tests/Unit/Migrations/**'
+              - 'tests/Unit/Models/**'
+              - 'tests/Unit/Views/**'
+              - 'tests/Unit/Libraries/AvailabilityBufferTest.php'
+              - 'tests/Unit/Libraries/DashboardHeatmapTest.php'
+              - 'tests/Unit/Libraries/DashboardMetricsTest.php'
+              - 'tests/Unit/Libraries/IcsFileTest.php'
+              - 'tests/Unit/Libraries/PdfRendererTest.php'
+              - 'tests/Unit/Libraries/ProviderUtilizationTest.php'
+              - 'tests/Unit/Libraries/RequestNormalizerTest.php'
+              - 'tests/Unit/Libraries/BookingRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/DashboardRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/ApiRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/AuthRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/BackofficeRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/CalendarRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/IntegrationsRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/ApiRequestDtoFactoryWriteTest.php'
+              - 'tests/Unit/Scripts/**'
+              - 'tests/Integration/Controllers/BookingControllerFlowTest.php'
+              - 'tests/Integration/Controllers/BookingCancellationControllerFlowTest.php'
+              - 'tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php'
+              - 'tests/Integration/Controllers/ApiReadControllerFlowTest.php'
               - 'composer.json'
               - 'composer.lock'
-              - 'phpunit*.xml'
+              - 'phpunit.booking-flows.xml'
+              - 'phpunit.coverage.unit.xml'
+              - 'phpunit.coverage.integration.xml'
               - 'index.php'
               - 'openapi.yml'
+              - '.github/workflows/ci.yml'
+            coverage_required:
+              - 'application/controllers/**'
+              - 'application/libraries/**'
+              - 'application/models/**'
+              - 'application/helpers/**'
+              - 'application/core/**'
+              - 'application/views/**'
+              - 'application/config/**'
+              - 'config/**'
+              - 'database/**'
+              - 'docker/**'
+              - 'scripts/ci/check_coverage_delta.php'
+              - 'scripts/ci/merge_coverage_shards.php'
+              - 'scripts/ci/wait_for_mysql_readiness.sh'
+              - 'scripts/ci/export_deep_seed_snapshot.sh'
+              - 'scripts/ci/import_deep_seed_snapshot.sh'
+              - 'scripts/ci/config/coverage_delta_policy.php'
+              - 'tests/bootstrap.php'
+              - 'tests/bootstrap.coverage-unit.php'
+              - 'tests/Unit/Controllers/**'
+              - 'tests/Unit/Helper/**'
+              - 'tests/Unit/Migrations/**'
+              - 'tests/Unit/Models/**'
+              - 'tests/Unit/Views/**'
+              - 'tests/Unit/Libraries/AvailabilityBufferTest.php'
+              - 'tests/Unit/Libraries/DashboardHeatmapTest.php'
+              - 'tests/Unit/Libraries/DashboardMetricsTest.php'
+              - 'tests/Unit/Libraries/IcsFileTest.php'
+              - 'tests/Unit/Libraries/PdfRendererTest.php'
+              - 'tests/Unit/Libraries/ProviderUtilizationTest.php'
+              - 'tests/Unit/Libraries/RequestNormalizerTest.php'
+              - 'tests/Unit/Libraries/BookingRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/DashboardRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/ApiRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/AuthRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/BackofficeRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/CalendarRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/IntegrationsRequestDtoFactoryTest.php'
+              - 'tests/Unit/Libraries/ApiRequestDtoFactoryWriteTest.php'
+              - 'tests/Unit/Scripts/**'
+              - 'tests/Integration/Controllers/BookingControllerFlowTest.php'
+              - 'tests/Integration/Controllers/BookingCancellationControllerFlowTest.php'
+              - 'tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php'
+              - 'tests/Integration/Controllers/ApiReadControllerFlowTest.php'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'phpunit.coverage.unit.xml'
+              - 'phpunit.coverage.integration.xml'
+              - 'index.php'
               - '.github/workflows/ci.yml'
             api_contract:
               - 'application/controllers/api/**'
@@ -80,10 +251,16 @@ jobs:
               - 'application/helpers/**'
               - 'application/config/**'
               - 'database/**'
-              - 'scripts/ci/**'
-              - 'tests/Integration/Controllers/Booking*'
+              - 'scripts/ci/run_deep_runtime_suite.php'
+              - 'scripts/ci/assert_deep_runtime_suite.php'
+              - 'scripts/ci/lib/CheckSelection.php'
+              - 'tests/bootstrap.php'
+              - 'tests/Integration/Controllers/BookingControllerFlowTest.php'
+              - 'tests/Integration/Controllers/BookingCancellationControllerFlowTest.php'
+              - 'tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php'
               - 'composer.json'
               - 'composer.lock'
+              - 'phpunit.booking-flows.xml'
               - 'index.php'
               - '.github/workflows/ci.yml'
             integration_smoke:
@@ -257,7 +434,7 @@ jobs:
     needs:
       - changes
     if: >
-      needs.changes.outputs.deep_required == 'true' &&
+      needs.changes.outputs.request_contracts_required == 'true' &&
       (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
@@ -311,7 +488,7 @@ jobs:
     needs:
       - changes
     if: >
-      needs.changes.outputs.deep_required == 'true' &&
+      needs.changes.outputs.deep_bootstrap_required == 'true' &&
       (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
@@ -352,7 +529,7 @@ jobs:
       - changes
       - deep-check-bootstrap
     if: >
-      needs.changes.outputs.deep_required == 'true' &&
+      needs.changes.outputs.coverage_required == 'true' &&
       (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
@@ -529,7 +706,7 @@ jobs:
       - changes
       - deep-check-bootstrap
     if: >
-      needs.changes.outputs.deep_required == 'true' &&
+      needs.changes.outputs.coverage_required == 'true' &&
       (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
@@ -579,7 +756,7 @@ jobs:
       - deep-check-bootstrap
       - deep-check-seed-snapshot
     if: >
-      needs.changes.outputs.deep_required == 'true' &&
+      needs.changes.outputs.coverage_required == 'true' &&
       (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
@@ -642,7 +819,7 @@ jobs:
       - coverage-shard-integration
     # Keep push/main signal and run on non-draft PRs when deep checks are relevant.
     if: >
-      needs.changes.outputs.deep_required == 'true' &&
+      needs.changes.outputs.coverage_required == 'true' &&
       (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
