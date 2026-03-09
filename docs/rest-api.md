@@ -235,6 +235,7 @@ You can also try the GET requests with your browser by navigating to the respect
 - `DELETE /api/v1/services/:id` Remove an existing service record.
 
 * The `availabilitiesType` must be either `flexible` or `fixed`.
+* In this fork, `attendantsNumber` must be `1`; higher values are rejected by validation.
 
 ### Service Categories
 
