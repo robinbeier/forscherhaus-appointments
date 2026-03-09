@@ -209,6 +209,31 @@ test('cleanupTerminalWorkspace treats an already removed workspace as a benign n
     assert.ok(infoLog);
 });
 
+test('cleanupTerminalWorkspace rethrows non-ENOENT access errors', async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-access-error-'));
+    const manager = new WorkspaceManager({
+        logger: createLoggerStub([]),
+        config: {
+            root: temporaryRoot,
+            hooks: {
+                timeoutMs: 5000,
+                afterCreate: [],
+                beforeRun: [],
+                afterRun: [],
+                beforeRemove: [],
+            },
+        },
+    });
+
+    const invalidWorkspacePath = path.join(temporaryRoot, 'invalid\0workspace');
+    await assert.rejects(
+        () => manager.cleanupTerminalWorkspace(invalidWorkspacePath),
+        (error) =>
+            error instanceof TypeError &&
+            (error as NodeJS.ErrnoException).code === 'ERR_INVALID_ARG_VALUE',
+    );
+});
+
 test('before_remove hook treats cwd ENOENT as benign when the workspace is already absent', async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-before-remove-enoent-'));
     const logRecords: Array<Record<string, unknown>> = [];
