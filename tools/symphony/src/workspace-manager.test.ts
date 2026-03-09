@@ -177,6 +177,36 @@ test('cleanupTerminalWorkspace runs before_remove and deletes workspace', async 
     assert.equal(marker.trim(), 'cleanup');
 });
 
+test('cleanupTerminalWorkspace forwards cleanup options to before_remove hooks', async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-cleanup-options-'));
+    const logRecords: Array<Record<string, unknown>> = [];
+
+    const manager = new WorkspaceManager({
+        logger: createLoggerStub(logRecords),
+        config: {
+            root: temporaryRoot,
+            hooks: {
+                timeoutMs: 5000,
+                afterCreate: [],
+                beforeRun: [],
+                afterRun: [],
+                beforeRemove: [
+                    'printf "%s:%s" "$SYMPHONY_CLOSE_OPEN_PRS" "$SYMPHONY_WORKSPACE_CLEANUP_REASON" > ../before-remove-env.txt',
+                ],
+            },
+        },
+    });
+
+    const handle = await manager.prepareWorkspace('ROB-11-cleanup-options');
+    await manager.cleanupTerminalWorkspace(handle.path, {
+        closeOpenPrs: false,
+        reason: 'review_handoff',
+    });
+
+    const marker = await readFile(path.join(temporaryRoot, 'before-remove-env.txt'), 'utf8');
+    assert.equal(marker.trim(), '0:review_handoff');
+});
+
 test('cleanupTerminalWorkspace treats an already removed workspace as a benign no-op', async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'symphony-workspace-missing-cleanup-'));
     const logRecords: Array<Record<string, unknown>> = [];

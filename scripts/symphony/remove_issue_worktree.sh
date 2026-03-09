@@ -11,6 +11,17 @@ repo_root_is_git_repository() {
     git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1
 }
 
+should_close_open_prs() {
+    case "${SYMPHONY_CLOSE_OPEN_PRS:-1}" in
+        0 | false | FALSE | no | NO)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 close_open_prs_for_branch() {
     local workspace_path="$1"
     local branch_name="$2"
@@ -74,7 +85,11 @@ if [[ "$is_registered_worktree" -eq 0 ]]; then
 fi
 
 branch_name="$(git -C "$workspace_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-close_open_prs_for_branch "$workspace_path" "$branch_name"
+if should_close_open_prs; then
+    close_open_prs_for_branch "$workspace_path" "$branch_name"
+else
+    echo "[symphony-worktree] Skipping PR close for branch $branch_name (reason: ${SYMPHONY_WORKSPACE_CLEANUP_REASON:-unspecified})."
+fi
 
 git -C "$repo_root" worktree remove --force "$workspace_path" >/dev/null 2>&1 || true
 git -C "$repo_root" worktree prune >/dev/null 2>&1 || true

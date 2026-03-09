@@ -167,3 +167,86 @@ exit 99
         await rm(temporaryDirectory, {recursive: true, force: true});
     }
 });
+
+test('remove_issue_worktree keeps open PRs when cleanup disables PR closing', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'symphony-remove-hook-skip-close-'));
+    const repoRoot = path.join(temporaryDirectory, 'repo');
+    const workspacePath = path.join(temporaryDirectory, 'workspace');
+    const fakeBin = path.join(temporaryDirectory, 'bin');
+    const gitLogPath = path.join(temporaryDirectory, 'git.log');
+    const ghLogPath = path.join(temporaryDirectory, 'gh.log');
+
+    await mkdir(repoRoot, {recursive: true});
+    await writeFile(path.join(repoRoot, '.git'), 'gitdir: /tmp/fake-remove-hook-skip-close-gitdir\n', 'utf8');
+    await mkdir(workspacePath, {recursive: true});
+    await mkdir(fakeBin, {recursive: true});
+    const workspaceRealPath = await realpath(workspacePath);
+
+    await writeExecutable(
+        path.join(fakeBin, 'git'),
+        `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
+if [[ "$*" == *"worktree list --porcelain"* ]]; then
+    printf 'worktree %s\n' "$WORKSPACE_PATH"
+    exit 0
+fi
+if [[ "$*" == *"rev-parse --git-dir"* ]]; then
+    printf '.git\n'
+    exit 0
+fi
+if [[ "$*" == *"symbolic-ref --quiet --short HEAD"* ]]; then
+    printf 'codex/symphony-rob-44\n'
+    exit 0
+fi
+if [[ "$*" == *"worktree remove --force"* || "$*" == *"worktree prune"* ]]; then
+    exit 0
+fi
+exit 99
+`,
+    );
+
+    await writeExecutable(
+        path.join(fakeBin, 'gh'),
+        `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_GH_LOG"
+if [[ "$1" == "auth" && "$2" == "status" ]]; then
+    exit 0
+fi
+exit 99
+`,
+    );
+
+    try {
+        const {stdout, stderr} = await execFile('bash', [hookPath], {
+            cwd: workspaceRealPath,
+            env: {
+                ...process.env,
+                PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+                SYMPHONY_REPO_ROOT: repoRoot,
+                WORKSPACE_PATH: workspaceRealPath,
+                FAKE_GIT_LOG: gitLogPath,
+                FAKE_GH_LOG: ghLogPath,
+                SYMPHONY_CLOSE_OPEN_PRS: '0',
+                SYMPHONY_WORKSPACE_CLEANUP_REASON: 'review_handoff',
+            },
+        });
+
+        assert.equal(stderr, '');
+        assert.match(stdout, /Skipping PR close for branch codex\/symphony-rob-44 \(reason: review_handoff\)\./);
+        assert.match(stdout, /Removed worktree registration/);
+
+        const gitLog = await readFile(gitLogPath, 'utf8');
+        assert.match(gitLog, /worktree remove --force/);
+
+        const ghLog = await readFile(ghLogPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') {
+                return '';
+            }
+
+            throw error;
+        });
+        assert.equal(ghLog.trim(), '');
+    } finally {
+        await rm(temporaryDirectory, {recursive: true, force: true});
+    }
+});

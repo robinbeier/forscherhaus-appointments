@@ -54,6 +54,11 @@ export interface WorkspaceStateSnapshot {
     branchName: string | null;
 }
 
+export interface WorkspaceCleanupOptions {
+    closeOpenPrs?: boolean;
+    reason?: string;
+}
+
 interface WorkspaceManagerArgs {
     config: WorkspaceManagerConfig;
     logger: Logger;
@@ -173,7 +178,7 @@ export class WorkspaceManager {
         await this.runHooks('after_run', ensurePathWithinRoot(this.rootPath, workspacePath));
     }
 
-    public async cleanupTerminalWorkspace(workspacePath: string): Promise<void> {
+    public async cleanupTerminalWorkspace(workspacePath: string, options: WorkspaceCleanupOptions = {}): Promise<void> {
         const safeWorkspacePath = ensurePathWithinRoot(this.rootPath, workspacePath);
         if (!(await pathExists(safeWorkspacePath))) {
             this.logger.info('Workspace cleanup skipped because workspace is already absent', {
@@ -182,7 +187,10 @@ export class WorkspaceManager {
             return;
         }
 
-        await this.runHooks('before_remove', safeWorkspacePath);
+        await this.runHooks('before_remove', safeWorkspacePath, {
+            SYMPHONY_CLOSE_OPEN_PRS: options.closeOpenPrs === false ? '0' : '1',
+            SYMPHONY_WORKSPACE_CLEANUP_REASON: options.reason,
+        });
         await rm(safeWorkspacePath, {recursive: true, force: true});
     }
 
