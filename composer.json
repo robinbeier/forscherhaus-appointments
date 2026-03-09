@@ -65,6 +65,7 @@
         "test:coverage:merge-shards": "php scripts/ci/merge_coverage_shards.php --input=storage/logs/ci/coverage-shard-unit-clover.xml --input=storage/logs/ci/coverage-shard-integration-clover.xml --output-clover=storage/logs/ci/coverage-unit-clover.xml --output-json=storage/logs/ci/coverage-merge-latest.json",
         "deptrac:analyze": "deptrac analyse --config-file=deptrac.yaml",
         "check:coverage:delta": "php scripts/ci/check_coverage_delta.php --clover=storage/logs/ci/coverage-unit-clover.xml --policy=scripts/ci/config/coverage_delta_policy.php --output-json=storage/logs/ci/coverage-delta-latest.json",
+        "check:heavy-job-duration-trends": "php scripts/ci/check_heavy_job_duration_trends.php --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json",
         "check:request-contract-adoption": "php scripts/ci/check_request_contract_adoption.php",
         "check:typed-request-contracts": [
             "@phpstan:request-contracts:l1",
