@@ -49,13 +49,10 @@ If you have console access to your server then head to the installation director
 
 ###### Step 3: Remove unnecessary files 
 
-The following directories are not needed: 
+No folder removals are required in this repository.
 
-* /system
-
-The following files are not needed:
-
-* /autoload.php 
+- Keep `/system` in place (the runtime bootstrap in `index.php` depends on it).
+- Keep Composer autoload files managed via `composer install`.
 
  
 ### Updating from v1.2.x to v1.3.x
@@ -74,22 +71,6 @@ Database migrations will bring your database structure to the latest state.
 
 Open your browser to the Easy!Appointments installation URL, login to the backend and type in the browser address the following URL to complete the database upgrade: `https://url/to/easyappointments/folder/index.php/backend/update`
 
-
-### Updating from v1.2.x to v1.3.x
-
-###### Step 1: Update your Easy!Appointments files 
-
-Replace all files and directories in your installation directory.
-
-> Note: If you have any custom developed files in these directories, please make copies of them first.
-        
-###### Step 2: Run the database migrations 
-
-Database migrations will bring your database structure to the latest state.
-
-**Browser**
-
-Open your browser to the Easy!Appointments installation URL, login to the backend and type in the browser address the following URL to complete the database upgrade: `https://url/to/easyappointments/folder/index.php/backend/update`
 
 ### Updating from v1.1.x to v1.2.x 
 

@@ -12,6 +12,7 @@ import {type LoadedWorkflowConfig, type WorkflowConfigStore, WorkflowConfigError
 import {
     WorkspaceManager,
     WorkspaceManagerError,
+    type WorkspaceCleanupOptions,
     type WorkspaceHandle,
     type WorkspaceStateSnapshot,
 } from './workspace-manager.js';
@@ -35,7 +36,7 @@ export interface WorkspaceClient {
     resolveWorkspacePath(rawKey: string): string;
     runBeforeRunHooks(workspacePath: string, envOverrides?: Record<string, string | undefined>): Promise<void>;
     runAfterRunHooks(workspacePath: string): Promise<void>;
-    cleanupTerminalWorkspace(workspacePath: string): Promise<void>;
+    cleanupTerminalWorkspace(workspacePath: string, options?: WorkspaceCleanupOptions): Promise<void>;
     captureWorkspaceState(workspacePath: string): Promise<WorkspaceStateSnapshot>;
 }
 
@@ -1725,6 +1726,25 @@ export class SymphonyOrchestrator {
         await Promise.allSettled(Array.from(this.runningDispatches));
     }
 
+    private buildWorkspaceCleanupOptions(runningEntry: RunningEntry): WorkspaceCleanupOptions {
+        const reviewStateName = runningEntry.reviewStateName ?? '';
+        const completedReviewHandoff =
+            reviewStateName.length > 0 &&
+            isSuccessfulReviewHandoff(runningEntry.issue.stateName, reviewStateName, runningEntry);
+
+        if (isReviewHandoffStop(runningEntry) || completedReviewHandoff) {
+            return {
+                closeOpenPrs: false,
+                reason: 'review_handoff',
+            };
+        }
+
+        return {
+            closeOpenPrs: true,
+            reason: runningEntry.stopReason ?? 'terminal_cleanup',
+        };
+    }
+
     private async reconcileRunningAndRetryState(config: LoadedWorkflowConfig, tracker: TrackerClient): Promise<void> {
         const trackedIssueIds = new Set<string>();
         for (const issueId of this.runningByIssueId.keys()) {
@@ -2493,7 +2513,10 @@ export class SymphonyOrchestrator {
 
                 if (!effectiveConfig.workspace.keepTerminalWorkspaces && shouldRemoveWorkspace) {
                     try {
-                        await workspaceClient.cleanupTerminalWorkspace(workspacePath);
+                        await workspaceClient.cleanupTerminalWorkspace(
+                            workspacePath,
+                            this.buildWorkspaceCleanupOptions(runningEntry),
+                        );
                     } catch (error) {
                         const classified = this.classifyError(error);
                         this.logger.error('Workspace cleanup failed', {

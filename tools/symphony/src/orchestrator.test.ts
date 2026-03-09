@@ -8,7 +8,7 @@ import {type TrackerClient, SymphonyOrchestrator, type WorkspaceClient} from './
 import type {TrackedIssue} from './linear-tracker.js';
 import type {Logger} from './logger.js';
 import type {LoadedWorkflowConfig} from './workflow.js';
-import {WorkspaceManagerError, type WorkspaceStateSnapshot} from './workspace-manager.js';
+import {WorkspaceManagerError, type WorkspaceCleanupOptions, type WorkspaceStateSnapshot} from './workspace-manager.js';
 
 function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
     return {
@@ -212,6 +212,7 @@ class TrackerStub implements TrackerClient {
 
 class WorkspaceStub implements WorkspaceClient {
     public cleanedPaths: string[] = [];
+    public cleanupCalls: Array<{workspacePath: string; options?: WorkspaceCleanupOptions}> = [];
     public stateSnapshots: WorkspaceStateSnapshot[] = [
         {headSha: 'head-before', statusText: '', branchName: 'codex/symphony-test'},
         {headSha: 'head-after', statusText: '', branchName: 'codex/symphony-test'},
@@ -243,8 +244,9 @@ class WorkspaceStub implements WorkspaceClient {
         return;
     }
 
-    public async cleanupTerminalWorkspace(workspacePath: string): Promise<void> {
+    public async cleanupTerminalWorkspace(workspacePath: string, options?: WorkspaceCleanupOptions): Promise<void> {
         this.cleanedPaths.push(workspacePath);
+        this.cleanupCalls.push({workspacePath, options});
     }
 
     public async captureWorkspaceState(_workspacePath: string): Promise<WorkspaceStateSnapshot> {
@@ -620,6 +622,15 @@ test('successful publish turn moves issue to In Review and stops the active run'
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
+    assert.deepEqual(workspace.cleanupCalls, [
+        {
+            workspacePath: '/tmp/symphony-workspaces/ROB-13-PUBLISH',
+            options: {
+                closeOpenPrs: false,
+                reason: 'review_handoff',
+            },
+        },
+    ]);
 });
 
 test('successful Linear review handoff during a publish turn stops immediately and syncs the workpad', async () => {
@@ -698,6 +709,15 @@ test('successful Linear review handoff during a publish turn stops immediately a
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
+    assert.deepEqual(workspace.cleanupCalls, [
+        {
+            workspacePath: '/tmp/symphony-workspaces/ROB-13-REVIEW-HANDOFF',
+            options: {
+                closeOpenPrs: false,
+                reason: 'review_handoff',
+            },
+        },
+    ]);
     assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
         {
             identifier: 'ROB-13-REVIEW-HANDOFF',
