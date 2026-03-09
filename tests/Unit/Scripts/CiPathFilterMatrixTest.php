@@ -64,6 +64,20 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['write_contract_api']);
     }
 
+    public function testBookingFlowsConfigChangeStillTriggersBootstrapProducer(): void
+    {
+        $matches = $this->applyFilters(['phpunit.booking-flows.xml']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertTrue($matches['booking_flows']);
+        self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['write_contract_booking']);
+        self::assertFalse($matches['write_contract_api']);
+    }
+
     public function testRequestContractsFilterCoversEveryAdoptionScopeFile(): void
     {
         /** @var array<int, array{file:string,methods:array<int, string>}> $scope */

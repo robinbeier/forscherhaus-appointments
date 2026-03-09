@@ -168,6 +168,7 @@ jobs:
               - 'tests/Integration/Controllers/ApiReadControllerFlowTest.php'
               - 'composer.json'
               - 'composer.lock'
+              - 'phpunit.booking-flows.xml'
               - 'phpunit.coverage.unit.xml'
               - 'phpunit.coverage.integration.xml'
               - 'index.php'
