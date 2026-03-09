@@ -675,6 +675,19 @@ test('successful Linear review handoff during a publish turn stops immediately a
                 });
                 tracker.statesByIssueId.set(issue.id, 'In Review');
                 emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_end',
+                        params: {
+                            msg: {
+                                command:
+                                    "git push -u origin HEAD && gh pr create --base main --title 'Review-ready PR'",
+                                exitCode: 0,
+                            },
+                        },
+                    },
+                });
+                emitEvent({
                     type: 'trace',
                     category: 'tool',
                     eventType: 'tool/call/responded',
@@ -735,6 +748,94 @@ test('successful Linear review handoff during a publish turn stops immediately a
         (trace.recent as Array<Record<string, unknown>>).some(
             (entry) => entry.eventType === 'turn/review_handoff_checkpoint',
         ),
+    );
+});
+
+test('publish turn does not treat In Review as a successful handoff without push or PR evidence', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'review-handoff-no-evidence-1',
+        identifier: 'ROB-65-REVIEW-HANDOFF-NO-EVIDENCE',
+        priority: 1,
+        createdAt: '2026-03-09T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-65-review-handoff-no-evidence';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-65-review-handoff-no-evidence'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-65-review-handoff-no-evidence'},
+    ];
+    let stopCalls = 0;
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-review-no-evidence',
+                    turnId: 'turn-review-no-evidence',
+                    sessionId: 'thread-review-no-evidence-turn-review-no-evidence',
+                });
+                tracker.statesByIssueId.set(issue.id, 'In Review');
+                emitEvent({
+                    type: 'trace',
+                    category: 'tool',
+                    eventType: 'tool/call/responded',
+                    message: 'Dynamic tool response sent for linear_graphql.',
+                    details: {
+                        tool: 'linear_graphql',
+                        success: true,
+                    },
+                });
+                await new Promise((resolve) => setTimeout(resolve, 25));
+
+                return {
+                    status: 'completed',
+                    outputText: 'state moved without publish evidence',
+                    threadId: 'thread-review-no-evidence',
+                    turnId: 'turn-review-no-evidence',
+                    sessionId: 'thread-review-no-evidence-turn-review-no-evidence',
+                };
+            },
+            stop: async () => {
+                stopCalls += 1;
+            },
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(stopCalls, 0);
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.equal(workspace.cleanedPaths.length, 0);
+    assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
+        {
+            identifier: 'ROB-65-REVIEW-HANDOFF-NO-EVIDENCE',
+            stateName: 'In Review',
+        },
+    ]);
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-65-REVIEW-HANDOFF-NO-EVIDENCE');
+    assert.ok(issueDetails);
+    assert.equal(issueDetails?.status, 'completed');
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.equal(
+        (trace.recent as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'turn/review_handoff_checkpoint',
+        ),
+        false,
     );
 });
 

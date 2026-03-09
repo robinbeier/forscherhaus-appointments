@@ -784,13 +784,9 @@ function isReviewState(stateName: string, reviewStateName: string): boolean {
 }
 
 function hasReviewHandoffEvidence(
-    runningEntry: Pick<
-        RunningEntry,
-        'publishMode' | 'observedOpenPullRequest' | 'observedPullRequestMutation' | 'observedBranchPush'
-    >,
+    runningEntry: Pick<RunningEntry, 'observedOpenPullRequest' | 'observedPullRequestMutation' | 'observedBranchPush'>,
 ): boolean {
     return (
-        runningEntry.publishMode ||
         runningEntry.observedOpenPullRequest ||
         runningEntry.observedPullRequestMutation ||
         runningEntry.observedBranchPush
@@ -800,10 +796,7 @@ function hasReviewHandoffEvidence(
 function isSuccessfulReviewHandoff(
     stateName: string,
     reviewStateName: string,
-    runningEntry: Pick<
-        RunningEntry,
-        'publishMode' | 'observedOpenPullRequest' | 'observedPullRequestMutation' | 'observedBranchPush'
-    >,
+    runningEntry: Pick<RunningEntry, 'observedOpenPullRequest' | 'observedPullRequestMutation' | 'observedBranchPush'>,
 ): boolean {
     return isReviewState(stateName, reviewStateName) && hasReviewHandoffEvidence(runningEntry);
 }
