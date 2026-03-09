@@ -78,6 +78,20 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testModelChangeStillTriggersRequestContractsGate(): void
+    {
+        $matches = $this->applyFilters(['application/models/Settings_model.php']);
+
+        self::assertTrue($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertTrue($matches['coverage_required']);
+        self::assertTrue($matches['api_contract']);
+        self::assertTrue($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertTrue($matches['write_contract_booking']);
+        self::assertTrue($matches['write_contract_api']);
+    }
+
     public function testRequestContractsFilterCoversEveryAdoptionScopeFile(): void
     {
         /** @var array<int, array{file:string,methods:array<int, string>}> $scope */
