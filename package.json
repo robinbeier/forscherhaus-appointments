@@ -28,7 +28,7 @@
         "@fullcalendar/moment": "^6.1.20",
         "@popperjs/core": "^2.11.8",
         "bootstrap": "^5.3.8",
-        "chart.js": "^4.4.4",
+        "chart.js": "^4.5.1",
         "chartjs-chart-matrix": "^3.0.0",
         "cookieconsent": "^3.1.1",
         "flatpickr": "^4.6.13",
