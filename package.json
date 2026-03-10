@@ -50,7 +50,7 @@
         "@prettier/plugin-php": "^0.24.0",
         "babel-preset-minify": "^0.5.2",
         "del": "^8.0.1",
-        "eslint": "^8.57.1",
+        "eslint": "^9.39.4",
         "fs-extra": "^11.3.4",
         "gulp": "^5.0.1",
         "gulp-babel": "^8.0.0",
