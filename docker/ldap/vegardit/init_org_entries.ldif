@@ -1,0 +1,16 @@
+dn: cn=user,dc=example,dc=org
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: user
+description: LDAP read only user
+userPassword: password
+
+dn: uid=ada,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: ada
+givenName: Ada
+sn: Lovelace
+mail: ada.lovelace@example.org
+uid: ada
+telephoneNumber: +49 30 1234567
+userPassword: ada-local-pass

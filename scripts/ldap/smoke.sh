@@ -11,6 +11,7 @@ LDAP_READONLY_PASSWORD="${LDAP_READONLY_PASSWORD:-password}"
 LDAP_BASE_DN="${LDAP_BASE_DN:-dc=example,dc=org}"
 LDAP_URI="${LDAP_URI:-ldap://localhost:389}"
 LDAP_COMPOSE_PROJECT_NAME="${LDAP_COMPOSE_PROJECT_NAME:-}"
+LDAP_SERVICE_NAME="${LDAP_SERVICE_NAME:-openldap}"
 LDAP_EXPECTED_UID="${LDAP_EXPECTED_UID:-ada}"
 LDAP_EXPECTED_GIVEN_NAME="${LDAP_EXPECTED_GIVEN_NAME:-Ada}"
 LDAP_EXPECTED_SN="${LDAP_EXPECTED_SN:-Lovelace}"
@@ -31,7 +32,7 @@ compose() {
 }
 
 run_ldap() {
-    compose exec -T openldap "$@"
+    compose exec -T "${LDAP_SERVICE_NAME}" "$@"
 }
 
 wait_for_openldap() {
@@ -39,7 +40,12 @@ wait_for_openldap() {
 
     for attempt in $(seq 1 60); do
         if run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
-            return 0
+            # Some images expose a temporary init slapd before their final runtime restart.
+            sleep 2
+
+            if run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
+                return 0
+            fi
         fi
 
         sleep 1
@@ -70,7 +76,7 @@ main() {
     local base_search
     local user_search
 
-    compose up -d openldap >/dev/null
+    compose up -d "${LDAP_SERVICE_NAME}" >/dev/null
     wait_for_openldap
 
     admin_whoami="$(run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}")"

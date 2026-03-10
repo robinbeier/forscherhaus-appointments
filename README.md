@@ -198,6 +198,7 @@ This prevents mixed container mounts across worktrees.
 - [Google Calendar sync](docs/google-calendar-sync.md)
 - [CalDAV sync](docs/caldav-calendar-sync.md)
 - [LDAP](docs/ldap.md)
+- [LDAP parallel replacement spike](docs/ldap-parallel-spike.md)
 - [Provider room feature](docs/feature-provider-room.md)
 - [FAQ](docs/faq.md)
 

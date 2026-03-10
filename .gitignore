@@ -9,6 +9,7 @@
 /docker/.ci-mysql/
 /docker/baikal/
 /docker/openldap/
+/docker/openldap-parallel/
 /node_modules/
 /npm-debug.log
 /assets/js/**/*.min.js
