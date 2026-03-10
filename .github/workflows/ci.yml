@@ -345,7 +345,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -380,7 +380,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Setup Node.js
@@ -401,7 +401,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -432,7 +432,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -475,7 +475,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -535,7 +535,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Cache Composer downloads
         uses: actions/cache@v4
         with:
@@ -576,7 +576,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v4
         with:
@@ -644,7 +644,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v4
         with:
@@ -753,7 +753,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -803,7 +803,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v4
         with:
@@ -866,7 +866,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v4
         with:
@@ -949,7 +949,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -1042,7 +1042,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Setup Python
@@ -1062,7 +1062,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Setup Python
@@ -1123,7 +1123,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v4
         with:
@@ -1155,7 +1155,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v4
         with:
@@ -1187,7 +1187,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v4
         with:
@@ -1218,7 +1218,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v4
         with:
@@ -1248,7 +1248,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v4
         with:
