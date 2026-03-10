@@ -815,7 +815,7 @@ test('publish turn does not treat In Review as a successful handoff without push
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(stopCalls, 0);
+    assert.equal(stopCalls, 1);
     assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
