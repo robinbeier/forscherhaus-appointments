@@ -33,7 +33,7 @@ services:
             - '3306:3306'
 
     phpmyadmin:
-        image: 'phpmyadmin:5.2.1'
+        image: 'phpmyadmin:5.2.3'
         ports:
             - '8080:80'
         environment:
@@ -41,14 +41,14 @@ services:
             - 'UPLOAD_LIMIT=102400K'
 
     mailpit:
-        image: 'axllent/mailpit:v1.7'
+        image: 'axllent/mailpit:v1.29'
         ports:
             - '8025:8025'
             - '1025:1025'
 
     swagger-ui:
         platform: linux/amd64
-        image: swaggerapi/swagger-ui:v5.10.5
+        image: swaggerapi/swagger-ui:v5.32.0
         ports:
             - '8000:8080'
         volumes:
