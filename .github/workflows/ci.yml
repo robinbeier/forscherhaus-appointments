@@ -436,6 +436,12 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx gulp compile
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
@@ -1001,6 +1007,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
