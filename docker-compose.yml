@@ -57,11 +57,10 @@ services:
             API_URL: openapi.yml
 
     baikal:
-        image: ckulka/baikal:0.10.1-apache
+        image: ckulka/baikal:0.10.1-apache-php8.2
         ports:
             - '8100:80'
         volumes:
-            - ./docker/baikal:/var/www/html
             - ./docker/baikal/config:/var/www/baikal/config
             - ./docker/baikal/data:/var/www/baikal/Specific
 
