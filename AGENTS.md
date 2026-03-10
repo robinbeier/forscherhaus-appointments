@@ -155,6 +155,7 @@ docker compose run --rm php-fpm composer test:coverage:unit
 docker compose run --rm php-fpm composer check:coverage:delta
 
 # Optional: Heavy-job duration trend report (read-only GitHub API signal)
+GITHUB_TOKEN="$(gh auth token)" GITHUB_REPOSITORY="robinbeier/forscherhaus-appointments" composer check:heavy-job-duration-trends
 GITHUB_TOKEN="$(gh auth token)" php scripts/ci/check_heavy_job_duration_trends.php \
   --repo=robinbeier/forscherhaus-appointments \
   --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
