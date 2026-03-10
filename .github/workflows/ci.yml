@@ -352,7 +352,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPUnit Tests
@@ -402,7 +402,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPStan Application
@@ -427,7 +427,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPStan Request DTO
@@ -464,7 +464,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPStan Request Contracts L1
@@ -516,7 +516,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: Archive deep-check dependencies
@@ -986,7 +986,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: Check generated CODEOWNERS
