@@ -108,6 +108,66 @@ class PdfRendererLatencyGateTest extends TestCase
         self::assertSame(4, $postCalls);
     }
 
+    public function testMeasurePdfRendererLatencyRetriesTransientPdfResponseByRetryCount(): void
+    {
+        $postCalls = 0;
+
+        $requester = static function (
+            string $method,
+            string $url,
+            ?string $body,
+            int $timeoutSeconds,
+            array $headers,
+        ) use (&$postCalls): array {
+            self::assertGreaterThan(0, $timeoutSeconds);
+            self::assertNotSame('', $url);
+            self::assertNotSame([], $headers);
+
+            if ($method === 'GET') {
+                return [
+                    'status' => 200,
+                    'headers' => ['content-type' => 'application/json'],
+                    'body' => '{"ok":true}',
+                ];
+            }
+
+            $postCalls++;
+            self::assertNotNull($body);
+
+            if ($postCalls === 1) {
+                return [
+                    'status' => 503,
+                    'headers' => ['content-type' => 'application/json'],
+                    'body' => '{"error":"temporary"}',
+                ];
+            }
+
+            return [
+                'status' => 200,
+                'headers' => ['content-type' => 'application/pdf'],
+                'body' => '%PDF-1.4 fixture',
+            ];
+        };
+
+        $result = measurePdfRendererLatency(
+            [
+                'base_url' => 'http://localhost:3003',
+                'pdf_endpoint' => '/pdf',
+                'health_endpoint' => '/healthz',
+                'iterations' => 1,
+                'warmup_iterations' => 0,
+                'timeout_seconds' => 5,
+                'retry_count' => 1,
+                'skip_health_check' => false,
+            ],
+            $requester,
+        );
+
+        self::assertCount(1, $result['samples']);
+        self::assertCount(1, $result['measured_durations_ms']);
+        self::assertSame(2, $postCalls);
+    }
+
     public function testRunPdfRendererLatencyCliFailsForUnknownOption(): void
     {
         $outputFile = $this->tmpDir . '/pdf-renderer-latency-error.json';

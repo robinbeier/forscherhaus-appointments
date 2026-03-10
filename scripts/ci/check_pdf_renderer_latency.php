@@ -280,7 +280,7 @@ function parsePdfRendererLatencyCliOptions(array $argv, array &$config): void
         }
 
         if (str_starts_with($arg, '--retry-count=')) {
-            $config['retry_count'] = normalizePdfRendererLatencyPositiveInt(
+            $config['retry_count'] = normalizePdfRendererLatencyNonNegativeInt(
                 requirePdfRendererLatencyNonEmptyCliValue($arg, '--retry-count='),
                 '--retry-count',
             );
@@ -400,8 +400,9 @@ function measurePdfRendererLatency(array $config, ?callable $requester = null): 
     for ($index = 0; $index < $totalRequests; $index++) {
         $response = null;
         $durationMs = 0.0;
+        $totalAttempts = $config['retry_count'] + 1;
 
-        for ($attempt = 1; $attempt <= $config['retry_count']; $attempt++) {
+        for ($attempt = 1; $attempt <= $totalAttempts; $attempt++) {
             $start = microtime(true);
             $response = $request(
                 'POST',
@@ -416,7 +417,7 @@ function measurePdfRendererLatency(array $config, ?callable $requester = null): 
                 break;
             }
 
-            if ($attempt < $config['retry_count'] && $response['status'] >= 500) {
+            if ($attempt < $totalAttempts && $response['status'] >= 500) {
                 usleep(200000);
                 continue;
             }
