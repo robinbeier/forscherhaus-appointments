@@ -111,9 +111,28 @@ class PdfRendererLatencyGateTest extends TestCase
     public function testRunPdfRendererLatencyCliFailsForUnknownOption(): void
     {
         $outputFile = $this->tmpDir . '/pdf-renderer-latency-error.json';
+        $customPolicy = $this->tmpDir . '/custom-policy.php';
+
+        file_put_contents(
+            $customPolicy,
+            <<<'PHP'
+            <?php
+            return [
+                'min_samples' => 1,
+                'warn' => ['p50_ms' => 1000.0, 'p95_ms' => 1000.0],
+                'fail' => ['p50_ms' => 2000.0, 'p95_ms' => 2000.0],
+                'max_stddev_ms' => 1000.0,
+            ];
+            PHP
+            ,
+        );
 
         $exitCode = runPdfRendererLatencyCli([
             'check_pdf_renderer_latency.php',
+            '--base-url=http://latency.invalid:8123',
+            '--pdf-endpoint=/custom-pdf',
+            '--health-endpoint=/custom-health',
+            '--policy=' . $customPolicy,
             '--output-json=' . $outputFile,
             '--bogus',
         ]);
@@ -123,6 +142,10 @@ class PdfRendererLatencyGateTest extends TestCase
         self::assertSame(PDF_RENDERER_LATENCY_EXIT_RUNTIME_ERROR, $exitCode);
         self::assertSame('error', $report['status']);
         self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
+        self::assertSame('http://latency.invalid:8123', $report['base_url']);
+        self::assertSame('/custom-pdf', $report['pdf_endpoint']);
+        self::assertSame('/custom-health', $report['health_endpoint']);
+        self::assertSame($customPolicy, $report['policy_file']);
     }
 
     public function testLoadPdfRendererLatencyPolicyUsesRepositoryDefaults(): void

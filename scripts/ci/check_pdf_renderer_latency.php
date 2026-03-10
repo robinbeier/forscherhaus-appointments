@@ -21,15 +21,13 @@ function runPdfRendererLatencyCli(array $argv): int
         'schema_version' => 1,
         'status' => 'error',
         'generated_at_utc' => gmdate('c'),
-        'base_url' => $config['base_url'],
-        'pdf_endpoint' => $config['pdf_endpoint'],
-        'health_endpoint' => $config['health_endpoint'],
-        'policy_file' => $config['policy'],
     ];
+    $report = array_merge($report, pdfRendererLatencyReportSettings($config));
     $exitCode = PDF_RENDERER_LATENCY_EXIT_RUNTIME_ERROR;
 
     try {
         parsePdfRendererLatencyCliOptions($argv, $config);
+        $report = array_merge($report, pdfRendererLatencyReportSettings($config));
 
         if ($config['help'] === true) {
             fwrite(STDOUT, pdfRendererLatencyUsage());
@@ -101,6 +99,7 @@ function runPdfRendererLatencyCli(array $argv): int
             }
         }
     } catch (Throwable $e) {
+        $report = array_merge($report, pdfRendererLatencyReportSettings($config));
         $report['status'] = 'error';
         $report['error'] = [
             'message' => $e->getMessage(),
@@ -122,6 +121,38 @@ function runPdfRendererLatencyCli(array $argv): int
     }
 
     return $exitCode;
+}
+
+/**
+ * @param array{
+ *     base_url:string,
+ *     pdf_endpoint:string,
+ *     health_endpoint:string,
+ *     iterations:int,
+ *     warmup_iterations:int,
+ *     timeout_seconds:int,
+ *     retry_count:int,
+ *     skip_health_check:bool,
+ *     policy:string,
+ *     output_json:string,
+ *     help:bool
+ * } $config
+ *
+ * @return array{
+ *     base_url:string,
+ *     pdf_endpoint:string,
+ *     health_endpoint:string,
+ *     policy_file:string
+ * }
+ */
+function pdfRendererLatencyReportSettings(array $config): array
+{
+    return [
+        'base_url' => $config['base_url'],
+        'pdf_endpoint' => $config['pdf_endpoint'],
+        'health_endpoint' => $config['health_endpoint'],
+        'policy_file' => $config['policy'],
+    ];
 }
 
 function pdfRendererLatencyUsage(): string
