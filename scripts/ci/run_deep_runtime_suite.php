@@ -304,7 +304,7 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
                     escapeshellarg((string) $config['start_date']),
                     escapeshellarg((string) $config['end_date']),
                     escapeshellarg(
-                        'readiness_login_page,auth_login_validate,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities',
+                        'readiness_login_page,auth_login_validate,ldap_settings_search,ldap_settings_search_missing_keyword,ldap_sso_success,ldap_sso_wrong_password,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities',
                     ),
                     escapeshellarg($reportDir . '/integration-smoke.json'),
                 ),
