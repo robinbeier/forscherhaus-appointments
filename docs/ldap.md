@@ -7,7 +7,7 @@ Easy!Appointments.
 
 ## Canonical Local Workflow
 
-The canonical local workflow is seed-driven, not phpLDAPadmin-driven:
+The canonical local workflow is fixture-driven, not phpLDAPadmin-driven:
 
 ```bash
 docker compose up -d openldap phpldapadmin
@@ -15,10 +15,19 @@ bash ./scripts/ldap/reset_directory.sh
 bash ./scripts/ldap/smoke.sh
 ```
 
-The versioned LDAP fixture lives in `docker/ldap/seed`, while the generated OpenLDAP runtime state under
-`docker/openldap/slapd/*` remains local-only and disposable.
+The default helper stack now uses the versioned `docker/ldap/vegardit` bootstrap fixtures, while the generated runtime
+state under `docker/openldap/{var,etc}` remains local-only and disposable.
 
-For the parallel replacement candidate introduced in `ROB-92`, see [LDAP parallel replacement spike](ldap-parallel-spike.md).
+For the replacement validation that led to this default cutover, see [LDAP parallel replacement spike](ldap-parallel-spike.md).
+
+If you need the old reference stack temporarily, start the profiled fallback and target it explicitly from the helper
+scripts:
+
+```bash
+docker compose --profile ldap-legacy up -d openldap-legacy
+LDAP_SERVICE_NAME=openldap-legacy bash ./scripts/ldap/reset_directory.sh
+LDAP_SERVICE_NAME=openldap-legacy bash ./scripts/ldap/smoke.sh
+```
 
 By default, OpenLDAP is configured to run on `localhost:389`, so it can be accessed on the host machine from this
 address.

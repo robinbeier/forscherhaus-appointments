@@ -3,9 +3,9 @@
 This directory contains the versioned LDAP fixture contract for local development.
 
 - `seed/*.ldif` is the canonical source for the deterministic local directory state.
-- `vegardit/*.ldif` contains the first-launch bootstrap fixtures for the parallel replacement spike.
-- Runtime-generated OpenLDAP state under `docker/openldap/slapd/*` stays gitignored.
-- Runtime-generated parallel candidate state under `docker/openldap-parallel/*` stays gitignored.
+- `vegardit/*.ldif` contains the first-launch bootstrap fixtures for the current default helper stack.
+- Runtime-generated default LDAP state under `docker/openldap/*` stays gitignored.
+- Runtime-generated legacy fallback state under `docker/openldap-legacy/*` stays gitignored.
 - `bash ./scripts/ldap/reset_directory.sh` recreates the local directory from these fixtures.
 - `bash ./scripts/ldap/smoke.sh` verifies the expected bind and search contract.
 
