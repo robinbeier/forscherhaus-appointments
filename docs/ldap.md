@@ -18,6 +18,8 @@ bash ./scripts/ldap/smoke.sh
 The versioned LDAP fixture lives in `docker/ldap/seed`, while the generated OpenLDAP runtime state under
 `docker/openldap/slapd/*` remains local-only and disposable.
 
+For the parallel replacement candidate introduced in `ROB-92`, see [LDAP parallel replacement spike](ldap-parallel-spike.md).
+
 By default, OpenLDAP is configured to run on `localhost:389`, so it can be accessed on the host machine from this
 address.
 

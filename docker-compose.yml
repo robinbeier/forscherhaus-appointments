@@ -93,6 +93,25 @@ services:
         depends_on:
             - openldap
 
+    openldap-parallel:
+        profiles:
+            - ldap-parallel
+        image: vegardit/openldap@sha256:efa7cff027fa2ac503b073161849f93e4ccaaa1b9ac0a9788814865032952564
+        hostname: openldap-parallel
+        ports:
+            - '1389:389'
+            - '1636:636'
+        volumes:
+            - ./docker/ldap/vegardit/init_org_tree.ldif:/opt/ldifs/init_org_tree.ldif:ro
+            - ./docker/ldap/vegardit/init_org_entries.ldif:/opt/ldifs/init_org_entries.ldif:ro
+            - ./docker/openldap-parallel/var:/var/lib/ldap
+            - ./docker/openldap-parallel/etc:/etc/ldap/slapd.d
+        environment:
+            - LDAP_INIT_ORG_DN=dc=example,dc=org
+            - LDAP_INIT_ORG_NAME=example
+            - LDAP_INIT_ROOT_USER_DN=cn=admin,dc=example,dc=org
+            - LDAP_INIT_ROOT_USER_PW=admin
+
     pdf-renderer:
         platform: linux/amd64
         build: ./pdf-renderer
