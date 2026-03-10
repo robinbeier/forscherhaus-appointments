@@ -33,6 +33,7 @@ module.exports = {
         'no-extra-boolean-cast': 'off',
         'no-prototype-builtins': 'off',
         'no-unused-vars': 'off',
+        'no-useless-assignment': 'off',
         'no-useless-escape': 'off',
     },
 };

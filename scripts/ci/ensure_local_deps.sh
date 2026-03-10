@@ -6,6 +6,7 @@ ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
 FORCE_INSTALL=0
+ROOT_NODE_MINIMUM_VERSION=20.19.0
 
 case "${1:-}" in
 --force)
@@ -35,6 +36,7 @@ run_composer_install() {
 run_npm_install() {
     require_cmd node
     require_cmd npm
+    bash ./scripts/ci/require_node_minimum.sh "$ROOT_NODE_MINIMUM_VERSION" "deps"
     echo "[deps] Running npm install ..."
 
     if [[ -f package-lock.json ]]; then

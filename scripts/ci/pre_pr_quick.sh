@@ -10,24 +10,12 @@ BASE_REF="${PRE_PR_BASE_REF:-main}"
 # Keep quick-gate static analysis configurable for toolchain upgrade branches.
 PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
 # Keep the quick gate aligned with the repo's frontend tooling baseline.
-ROOT_NODE_MINIMUM_MAJOR=18
+ROOT_NODE_MINIMUM_VERSION=20.19.0
 CI_DOCKER_LOG_PREFIX="pre-pr-quick"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "[pre-pr-quick] Missing required command: $1" >&2
-        exit 1
-    fi
-}
-
-require_minimum_node_major() {
-    local required_major="$1"
-    local node_major
-
-    node_major="$(node -p "process.versions.node.split('.')[0]")"
-
-    if [[ "$node_major" -lt "$required_major" ]]; then
-        echo "[pre-pr-quick] Node.js >=${required_major} is required (found $(node --version))." >&2
         exit 1
     fi
 }
@@ -57,7 +45,7 @@ require_cmd git
 require_cmd python3
 require_cmd npm
 require_cmd node
-require_minimum_node_major "$ROOT_NODE_MINIMUM_MAJOR"
+bash ./scripts/ci/require_node_minimum.sh "$ROOT_NODE_MINIMUM_VERSION" "pre-pr-quick"
 ensure_local_config
 
 # Keep changed-file checks deterministic against current base branch state.
