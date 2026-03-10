@@ -4,26 +4,26 @@ Ziel: Merge-faehige, konsistente Beitraege fuer das Schul-Terminbuchungssystem.
 
 ## Projektueberblick (Kurz)
 
--   **Stack:** PHP (>= 8.1; bevorzugt 8.2+), CodeIgniter (MVC), MySQL; Frontend: JavaScript/jQuery/Bootstrap/FullCalendar; Build: npm + Gulp.
--   **Ziel:** Anpassung von Easy!Appointments an den Schulkontext ("forscherhaus-appointments").
+- **Stack:** PHP (>= 8.1; bevorzugt 8.2+), CodeIgniter (MVC), MySQL; Frontend: JavaScript/jQuery/Bootstrap/FullCalendar; Build: npm + Gulp.
+- **Ziel:** Anpassung von Easy!Appointments an den Schulkontext ("forscherhaus-appointments").
 
 ## Verzeichnisstruktur & Leitplanken
 
--   `application/` - Feature-Entwicklung, MVC-Artefakte.
--   `system/` - nicht aendern (nur Upstream-Patches).
--   `assets/` -> Kompilation nach `build/`.
--   `build/` - kompilierte Artefakte (committed).
--   `docker/` - Container-Setups.
--   `tests/` - PHPUnit-Tests (Unit/Integration).
--   `storage/logs/` - Laufzeitlogs (vor Releases saeubern).
+- `application/` - Feature-Entwicklung, MVC-Artefakte.
+- `system/` - nicht aendern (nur Upstream-Patches).
+- `assets/` -> Kompilation nach `build/`.
+- `build/` - kompilierte Artefakte (committed).
+- `docker/` - Container-Setups.
+- `tests/` - PHPUnit-Tests (Unit/Integration).
+- `storage/logs/` - Laufzeitlogs (vor Releases saeubern).
 
 Leitplanke: Kein Produktionscode ausserhalb von `application/`. Keine direkten Aenderungen unter `system/`.
 
 ## Lokale Entwicklung & Prerequisites
 
--   **Option A (Host):** Apache/Nginx, PHP >= 8.1, MySQL, Node.js (npm), Composer.
--   **Option B (Docker):** `docker compose up` fuer CI-paritaetische Umgebung.
--   Bei Host-PHP + Docker-`pdf-renderer`: `PDF_RENDERER_URL=http://localhost:3003` setzen.
+- **Option A (Host):** Apache/Nginx, PHP >= 8.1, MySQL, Node.js (npm), Composer.
+- **Option B (Docker):** `docker compose up` fuer CI-paritaetische Umgebung.
+- Bei Host-PHP + Docker-`pdf-renderer`: `PDF_RENDERER_URL=http://localhost:3003` setzen.
 
 ## Erstinstallation
 
@@ -159,6 +159,11 @@ GITHUB_TOKEN="$(gh auth token)" GITHUB_REPOSITORY="robinbeier/forscherhaus-appoi
 GITHUB_TOKEN="$(gh auth token)" php scripts/ci/check_heavy_job_duration_trends.php \
   --repo=robinbeier/forscherhaus-appointments \
   --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
+
+# Optional: PDF renderer latency trend signal (deterministic fixture, p50/p95)
+php scripts/ci/check_pdf_renderer_latency.php \
+  --base-url=http://localhost:3003 \
+  --output-json=storage/logs/ci/pdf-renderer-latency-latest.json
 
 # Optional: Lokale Pre-PR Gates (schnell/voll)
 bash ./scripts/ci/pre_pr_quick.sh
@@ -332,6 +337,8 @@ Hinweis: Der API OpenAPI Write Contract Smoke schreibt standardmaessig nach `sto
 Hinweis: Der Integration Smoke schreibt standardmaessig nach `storage/logs/ci/dashboard-integration-smoke-<UTC>.json`; mit `--output-json=/pfad/report.json` kann der Zielpfad ueberschrieben werden.
 Hinweis: Die Coverage-Shard-Reports schreiben standardmaessig nach `storage/logs/ci/coverage-shard-unit.phpcov` und `storage/logs/ci/coverage-shard-integration.phpcov`; der gemergte Clover nach `storage/logs/ci/coverage-unit-clover.xml`, der Merge-Report nach `storage/logs/ci/coverage-merge-latest.json` und der Coverage Delta Gate Report nach `storage/logs/ci/coverage-delta-latest.json`.
 Hinweis: Der Heavy-Job-Trend-Report schreibt standardmaessig nach `storage/logs/ci/heavy-job-duration-trends-latest.json`; in GitHub Actions wird zusaetzlich das Artifact `heavy-job-duration-trends-artifacts` hochgeladen.
+Hinweis: Der CI-Job `pdf-renderer-latency` ist bewusst nicht blocking; er laeuft bei relevanten `pdf-renderer`/latency-guard-Aenderungen und meldet Schwellwertverletzungen als Warning + Artifact.
+Hinweis: Der PDF-Renderer-Latenz-Report schreibt standardmaessig nach `storage/logs/ci/pdf-renderer-latency-latest.json`; in GitHub Actions wird zusaetzlich das Artifact `pdf-renderer-latency-artifacts` hochgeladen.
 Hinweis: Der CI-Job `integration-smoke` prueft read-only die Kette Login/Auth + Dashboard Metrics + Booking-Read-Endpoints + API-Auth/Read.
 Hinweis: Falls `architecture-boundaries` nach Blocking-Umschaltung durch False-Positives Releases blockiert, in einem Commit `continue-on-error: true` fuer den Job reaktivieren und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
 Hinweis: Falls `typed-request-contracts` durch False-Positives Releases blockiert, den L2-Step in `ci.yml` temporaer auf advisory (`continue-on-error: true`) zurueckstellen und ein Follow-up-Issue mit max. 14 Tagen Frist zur Rueckkehr in den Blocking-Modus anlegen.
@@ -341,20 +348,20 @@ Hinweis: Falls `coverage-delta` nach Blocking-Umschaltung durch False-Positives 
 
 Docker php-fpm Bootstrap (`docker/php-fpm/start-container`):
 
--   setzt `git config core.fileMode false` und `chmod -R 777 storage`
--   erstellt `config.php` via `cp config-sample.php config.php`, falls fehlend
--   installiert Abhaengigkeiten bei Bedarf: `composer install`, `npm install`
--   baut Assets, falls `assets/vendor` fehlt: `npx gulp compile`
--   respektiert in CI optional `EA_SKIP_NPM_BOOTSTRAP=1` und `EA_SKIP_ASSET_BUILD_BOOTSTRAP=1`, um Deep-Jobs ohne redundantes Node-/Asset-Bootstrap zu starten
+- setzt `git config core.fileMode false` und `chmod -R 777 storage`
+- erstellt `config.php` via `cp config-sample.php config.php`, falls fehlend
+- installiert Abhaengigkeiten bei Bedarf: `composer install`, `npm install`
+- baut Assets, falls `assets/vendor` fehlt: `npx gulp compile`
+- respektiert in CI optional `EA_SKIP_NPM_BOOTSTRAP=1` und `EA_SKIP_ASSET_BUILD_BOOTSTRAP=1`, um Deep-Jobs ohne redundantes Node-/Asset-Bootstrap zu starten
 
 Docker-Services (lokal) & Debug:
 
--   phpMyAdmin: `http://localhost:8080` (credentials `root` / `secret`)
--   Mailpit: `http://localhost:8025`
--   PDF-Renderer: `PDF_RENDERER_DEBUG_DUMP=true` aktiviert temporaere HTML-Debug-Dumps
--   CalDAV (Baikal): `http://localhost:8100` (credentials `admin` / `admin`), danach `http://baikal/dav.php` mit angelegtem Nutzer verwenden
--   OpenLDAP: `openldap` auf `389`/`636`, Admin-UI unter `http://localhost:8200` (credentials `cn=admin,dc=example,dc=org` / `admin`)
--   macOS/iCloud Troubleshooting (MySQL InnoDB OS error 35 auf `./#innodb_redo/*`): `ls -lO@ docker/mysql/#innodb_redo`; bei `compressed,dataless` Dateien rehydrieren (z. B. `dd if='docker/mysql/#innodb_redo/#ib_redo6' of=/dev/null bs=512 count=1`) und Container neu starten; falls erfolglos `docker/mysql` wie im DB-Restore-Abschnitt zuruecksetzen.
+- phpMyAdmin: `http://localhost:8080` (credentials `root` / `secret`)
+- Mailpit: `http://localhost:8025`
+- PDF-Renderer: `PDF_RENDERER_DEBUG_DUMP=true` aktiviert temporaere HTML-Debug-Dumps
+- CalDAV (Baikal): `http://localhost:8100` (credentials `admin` / `admin`), danach `http://baikal/dav.php` mit angelegtem Nutzer verwenden
+- OpenLDAP: `openldap` auf `389`/`636`, Admin-UI unter `http://localhost:8200` (credentials `cn=admin,dc=example,dc=org` / `admin`)
+- macOS/iCloud Troubleshooting (MySQL InnoDB OS error 35 auf `./#innodb_redo/*`): `ls -lO@ docker/mysql/#innodb_redo`; bei `compressed,dataless` Dateien rehydrieren (z. B. `dd if='docker/mysql/#innodb_redo/#ib_redo6' of=/dev/null bs=512 count=1`) und Container neu starten; falls erfolglos `docker/mysql` wie im DB-Restore-Abschnitt zuruecksetzen.
 
 Warnung (Worktrees): Nutze pro Worktree einen eindeutigen Compose-Projektnamen, damit sich Container/Volumes nicht ueberlagern.
 Beispiel: `docker compose -p fh-main up -d` im Haupt-Worktree und `docker compose -p fh-hotfix up -d` in einem zweiten Worktree.
@@ -421,55 +428,55 @@ php index.php console sync
 
 ## Pre-Commit Preconditions
 
--   Der managed `pre-commit` Hook erwartet `vendor/` und `node_modules/` und faehrt fuer PHP-bezogene Commits einen deterministischen Docker-/MySQL-Bootstrap aehnlich zu `pre_pr_quick.sh`.
--   In neuen Worktrees einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausfuehren.
--   `scripts/ci/pre_pr_quick.sh` und `scripts/ci/pre_pr_full.sh` bootstrappen fehlende `vendor/`/`node_modules/` automatisch (via `composer install` + `npm ci`/`npm install`).
--   Bei diesem Auto-Bootstrap ist Netzwerkzugriff auf Package-Registries erforderlich; ohne Netz bleiben die Gates weiterhin blockiert.
--   Bei Netzwerkrestriktionen koennen `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
--   Ausnahme fuer reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
--   `./scripts/setup-worktree.sh` installiert managed `.git/hooks/pre-commit` und `.git/hooks/pre-push` Hooks.
--   Bestehende Clones koennen die Hooks mit `./scripts/install-git-hooks.sh` aktualisieren; mit `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` werden bewusst aeltere Custom-Hooks ersetzt.
--   Fuer einmaliges Bypassen: `SKIP_PREPUSH=1 git push ...`; fuer Full-Gate beim Push: `PRE_PUSH_FULL=1 git push ...`.
--   Optional kann die Hook-/Pre-PR-Basis mit `PRE_PR_BASE_REF` ueberschrieben werden (Standard: `main`).
--   `--no-verify` nur als letzter Ausweg verwenden.
+- Der managed `pre-commit` Hook erwartet `vendor/` und `node_modules/` und faehrt fuer PHP-bezogene Commits einen deterministischen Docker-/MySQL-Bootstrap aehnlich zu `pre_pr_quick.sh`.
+- In neuen Worktrees einmal `./scripts/setup-worktree.sh` vor dem ersten Commit ausfuehren.
+- `scripts/ci/pre_pr_quick.sh` und `scripts/ci/pre_pr_full.sh` bootstrappen fehlende `vendor/`/`node_modules/` automatisch (via `composer install` + `npm ci`/`npm install`).
+- Bei diesem Auto-Bootstrap ist Netzwerkzugriff auf Package-Registries erforderlich; ohne Netz bleiben die Gates weiterhin blockiert.
+- Bei Netzwerkrestriktionen koennen `composer install`/`npm ci` scheitern; Hook-Fehler sind dann erwartbar.
+- Ausnahme fuer reine Doku-/Meta-Commits: `SKIP_PRECOMMIT=1 git commit ...`
+- `./scripts/setup-worktree.sh` installiert managed `.git/hooks/pre-commit` und `.git/hooks/pre-push` Hooks.
+- Bestehende Clones koennen die Hooks mit `./scripts/install-git-hooks.sh` aktualisieren; mit `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` werden bewusst aeltere Custom-Hooks ersetzt.
+- Fuer einmaliges Bypassen: `SKIP_PREPUSH=1 git push ...`; fuer Full-Gate beim Push: `PRE_PUSH_FULL=1 git push ...`.
+- Optional kann die Hook-/Pre-PR-Basis mit `PRE_PR_BASE_REF` ueberschrieben werden (Standard: `main`).
+- `--no-verify` nur als letzter Ausweg verwenden.
 
 ## Coding Style & Konventionen
 
--   Editor/Format: `.editorconfig` (4 Spaces, LF, Final Newline).
--   Prettier fuer PHP/JS gemaess Repo-Konfiguration, z. B. `npx prettier --write application/**/*.php`.
--   Benennung: Controller enden auf `Controller`, Models auf `Model`, Views nach Route-Alias.
--   JS: Modulnamen spiegeln Verzeichnisstruktur (z. B. `assets/js/booking/book.js`).
--   `snake_case` fuer Config-Keys, `camelCase` in JS.
--   Datenbankaenderungen immer via CodeIgniter-Migrations (inkl. Rollback-Pfad).
--   Secrets nie ins VCS; nutze `config.php`.
--   Bugs: Bei Bugfixes einen passenden Regressionstest ergaenzen, wenn sinnvoll.
+- Editor/Format: `.editorconfig` (4 Spaces, LF, Final Newline).
+- Prettier fuer PHP/JS gemaess Repo-Konfiguration, z. B. `npx prettier --write application/**/*.php`.
+- Benennung: Controller enden auf `Controller`, Models auf `Model`, Views nach Route-Alias.
+- JS: Modulnamen spiegeln Verzeichnisstruktur (z. B. `assets/js/booking/book.js`).
+- `snake_case` fuer Config-Keys, `camelCase` in JS.
+- Datenbankaenderungen immer via CodeIgniter-Migrations (inkl. Rollback-Pfad).
+- Secrets nie ins VCS; nutze `config.php`.
+- Bugs: Bei Bugfixes einen passenden Regressionstest ergaenzen, wenn sinnvoll.
 
 ## Commit- & PR-Richtlinien
 
--   Commits: kurz, praesentisch, imperativ (z. B. `Fix booking validation`).
--   Vor PR: Tests gruen (`docker compose run --rm php-fpm composer test`), Migrations inkl. Rollback vorhanden.
--   `config-sample.php`/Docs bei Bedarf aktualisieren; bei UI-Aenderungen Screenshots/GIFs beilegen.
--   Jeder PR-Implementierungsplan enthaelt einen Review-Loop: Reviewer A prueft Bugs/Regressionen/Security/Edge-Cases, Reviewer B prueft Architektur/Lesbarkeit/Testluecken/Wartbarkeit; Findings fixen und wiederholen bis keine Issues mehr offen sind.
--   Vor `ready for review` den vollen Pre-PR-Gate inklusive Coverage Delta ausfuehren (`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`).
--   Wenn alle Gates gruen sind: `ready for review` pushen und danach mit `$Babysit PR` weiter monitoren.
--   Wenn ein Umsetzungsplan mehrere PRs umfasst, gilt das sequentielle Standardvorgehen: jeden PR `ready for review` pushen, mit [$babysit-pr](/Users/robinbeier/Developers/forscherhaus-appointments/.codex/skills/babysit-pr/SKILL.md) bis zu komplett gruener CI, fehlenden offenen Review-Items und `mergeable`-Status beobachten, dann den PR mergen und erst danach mit dem naechsten PR im Plan weitermachen.
--   Symphony-/Infrastruktur-PRs nur dann mit Linear-Issue-IDs in Titel oder PR-Body verknuepfen, wenn der PR fachlich wirklich zu diesem Ticket gehoert; sonst entstehen verwirrende Fremd-Attachments auf Arbeits-Issues.
+- Commits: kurz, praesentisch, imperativ (z. B. `Fix booking validation`).
+- Vor PR: Tests gruen (`docker compose run --rm php-fpm composer test`), Migrations inkl. Rollback vorhanden.
+- `config-sample.php`/Docs bei Bedarf aktualisieren; bei UI-Aenderungen Screenshots/GIFs beilegen.
+- Jeder PR-Implementierungsplan enthaelt einen Review-Loop: Reviewer A prueft Bugs/Regressionen/Security/Edge-Cases, Reviewer B prueft Architektur/Lesbarkeit/Testluecken/Wartbarkeit; Findings fixen und wiederholen bis keine Issues mehr offen sind.
+- Vor `ready for review` den vollen Pre-PR-Gate inklusive Coverage Delta ausfuehren (`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`).
+- Wenn alle Gates gruen sind: `ready for review` pushen und danach mit `$Babysit PR` weiter monitoren.
+- Wenn ein Umsetzungsplan mehrere PRs umfasst, gilt das sequentielle Standardvorgehen: jeden PR `ready for review` pushen, mit [$babysit-pr](/Users/robinbeier/Developers/forscherhaus-appointments/.codex/skills/babysit-pr/SKILL.md) bis zu komplett gruener CI, fehlenden offenen Review-Items und `mergeable`-Status beobachten, dann den PR mergen und erst danach mit dem naechsten PR im Plan weitermachen.
+- Symphony-/Infrastruktur-PRs nur dann mit Linear-Issue-IDs in Titel oder PR-Body verknuepfen, wenn der PR fachlich wirklich zu diesem Ticket gehoert; sonst entstehen verwirrende Fremd-Attachments auf Arbeits-Issues.
 
 ## Post-Release-Upgrade-Kampagne
 
--   Fokus nach dem Release: kontrollierte Dependency-, Upstream- und Gate-Nachpflege in kleinen, mergebaren PRs.
--   Pro Kampagnen-PR genau ein klar abgegrenzter Slice: entweder Dependency-Update, Upstream-Nachpflege oder Gate-/Governance-Dokumentation; keine Mischung mit fachlichen Produkt-Aenderungen.
--   Reine Docs-/Governance-PRs bleiben docs-only und validieren ueber inhaltliche Konsistenzpruefung sowie Gegenlesen aller genannten Kommandos, Skripte und Gate-Namen gegen die aktuelle Repo-Struktur.
--   Dependency-/Gate-PRs starten mit dem schmalsten passenden lokalen Check; bevor sie `ready for review` werden, bleiben die einschlaegigen Blocking-Gates inklusive `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` massgeblich.
--   Die Kampagne bleibt strikt sequentiell: immer nur ein aktiver Upgrade-PR; der naechste Slice startet erst nach gruener CI, geklaerten Findings und abgeschlossenem Merge des vorherigen PRs.
--   Blocking-Gates bleiben auch in der Kampagne blocking; temporaere Advisory-Ausnahmen sind nur bei nachweisbaren False-Positives zulaessig und brauchen ein Follow-up-Issue mit Rueckkehrfrist von hoechstens 14 Tagen.
--   Keine Major-Dependency-Upgrades in dieser Phase; diese werden in die naechste Entwicklungsphase verschoben.
--   Fuer Dependency-Sweeps vor dem geplanten Upstream-Merge (`easyappointments` 1.6.0): den `roave/security-advisories`-Konflikt nicht isoliert aufloesen; stattdessen nur produktionsrelevante Security-Hotfixes (z. B. `firebase/php-jwt`) umsetzen und `roave` erst nach dem Upstream-Merge neu bewerten.
--   Nach Deployment ist ein Zeitfenster von ca. 6 Monaten bis zum naechsten Major-Update vorgesehen; dort werden Major-Upgrades geplant, getestet und gebuendelt umgesetzt.
--   `phpmailer/phpmailer` hat aktuell die niedrigste Prioritaet:
-    In Produktion werden keine E-Mails versendet, und in der Entwicklung fehlen derzeit die benoetigten E-Mail-Testfaehigkeiten. Entsprechende Upgrades erst in der naechsten Major-Phase bewerten.
+- Fokus nach dem Release: kontrollierte Dependency-, Upstream- und Gate-Nachpflege in kleinen, mergebaren PRs.
+- Pro Kampagnen-PR genau ein klar abgegrenzter Slice: entweder Dependency-Update, Upstream-Nachpflege oder Gate-/Governance-Dokumentation; keine Mischung mit fachlichen Produkt-Aenderungen.
+- Reine Docs-/Governance-PRs bleiben docs-only und validieren ueber inhaltliche Konsistenzpruefung sowie Gegenlesen aller genannten Kommandos, Skripte und Gate-Namen gegen die aktuelle Repo-Struktur.
+- Dependency-/Gate-PRs starten mit dem schmalsten passenden lokalen Check; bevor sie `ready for review` werden, bleiben die einschlaegigen Blocking-Gates inklusive `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` massgeblich.
+- Die Kampagne bleibt strikt sequentiell: immer nur ein aktiver Upgrade-PR; der naechste Slice startet erst nach gruener CI, geklaerten Findings und abgeschlossenem Merge des vorherigen PRs.
+- Blocking-Gates bleiben auch in der Kampagne blocking; temporaere Advisory-Ausnahmen sind nur bei nachweisbaren False-Positives zulaessig und brauchen ein Follow-up-Issue mit Rueckkehrfrist von hoechstens 14 Tagen.
+- Keine Major-Dependency-Upgrades in dieser Phase; diese werden in die naechste Entwicklungsphase verschoben.
+- Fuer Dependency-Sweeps vor dem geplanten Upstream-Merge (`easyappointments` 1.6.0): den `roave/security-advisories`-Konflikt nicht isoliert aufloesen; stattdessen nur produktionsrelevante Security-Hotfixes (z. B. `firebase/php-jwt`) umsetzen und `roave` erst nach dem Upstream-Merge neu bewerten.
+- Nach Deployment ist ein Zeitfenster von ca. 6 Monaten bis zum naechsten Major-Update vorgesehen; dort werden Major-Upgrades geplant, getestet und gebuendelt umgesetzt.
+- `phpmailer/phpmailer` hat aktuell die niedrigste Prioritaet:
+  In Produktion werden keine E-Mails versendet, und in der Entwicklung fehlen derzeit die benoetigten E-Mail-Testfaehigkeiten. Entsprechende Upgrades erst in der naechsten Major-Phase bewerten.
 
 ## Domaenen-Invariante (derzeit)
 
--   `services.attendants_number` ist aktuell hart auf `1` begrenzt.
--   Reviews/Fixes fuer `attendants_number > 1` nur umsetzen, wenn der Produktentscheid explizit auf Multi-Attendant geaendert wird.
+- `services.attendants_number` ist aktuell hart auf `1` begrenzt.
+- Reviews/Fixes fuer `attendants_number > 1` nur umsetzen, wenn der Produktentscheid explizit auf Multi-Attendant geaendert wird.

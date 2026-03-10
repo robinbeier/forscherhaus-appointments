@@ -28,6 +28,7 @@ jobs:
       deep_bootstrap_required: ${{ steps.filter.outputs.deep_bootstrap_required }}
       coverage_required: ${{ steps.filter.outputs.coverage_required }}
       heavy_job_trends_required: ${{ steps.filter.outputs.heavy_job_trends_required }}
+      pdf_renderer_latency_required: ${{ steps.filter.outputs.pdf_renderer_latency_required }}
       api_contract: ${{ steps.filter.outputs.api_contract }}
       booking_flows: ${{ steps.filter.outputs.booking_flows }}
       integration_smoke: ${{ steps.filter.outputs.integration_smoke }}
@@ -230,6 +231,12 @@ jobs:
               - 'scripts/ci/config/heavy_job_duration_trend_policy.php'
               - 'tests/Unit/Scripts/HeavyJobDurationTrendTest.php'
               - 'composer.json'
+              - '.github/workflows/ci.yml'
+            pdf_renderer_latency_required:
+              - 'pdf-renderer/**'
+              - 'scripts/ci/check_pdf_renderer_latency.php'
+              - 'scripts/ci/config/pdf_renderer_latency_policy.php'
+              - 'tests/Unit/Scripts/PdfRendererLatencyGateTest.php'
               - '.github/workflows/ci.yml'
             api_contract:
               - 'application/controllers/api/**'
@@ -971,6 +978,62 @@ jobs:
       - name: Diagnostics (heavy job trend report)
         if: always()
         run: cat storage/logs/ci/heavy-job-duration-trends-latest.json || true
+
+  pdf-renderer-latency:
+    needs:
+      - changes
+    if: >
+      always() &&
+      needs.changes.outputs.pdf_renderer_latency_required == 'true' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v4
+      - name: Start PDF renderer service
+        run: docker compose up -d pdf-renderer
+      - name: Wait for PDF renderer health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3003/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "pdf-renderer health check timed out" >&2
+          docker compose logs pdf-renderer || true
+          exit 1
+      - name: Evaluate PDF renderer latency
+        run: |
+          set +e
+          php scripts/ci/check_pdf_renderer_latency.php \
+            --base-url=http://localhost:3003 \
+            --output-json=storage/logs/ci/pdf-renderer-latency-latest.json
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::pdf-renderer-latency exited with status ${status}; see storage/logs/ci/pdf-renderer-latency-latest.json."
+          fi
+      - name: Upload PDF renderer latency artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-renderer-latency-artifacts
+          path: storage/logs/ci/pdf-renderer-latency-latest.json
+          if-no-files-found: warn
+      - name: Diagnostics (PDF renderer latency report)
+        if: always()
+        run: cat storage/logs/ci/pdf-renderer-latency-latest.json || true
+      - name: Tear down PDF renderer service
+        if: always()
+        run: docker compose down --remove-orphans
 
   architecture-ownership-map:
     runs-on: ubuntu-latest

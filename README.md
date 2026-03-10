@@ -6,14 +6,14 @@ This repository prioritizes stable, low-risk delivery for school operations and 
 
 ## Scope
 
--   Fork base: Easy!Appointments (`v1.5.2` lineage)
--   Stack: PHP `>=8.1` (8.2+ recommended), CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
--   Primary goal: school-specific scheduling workflows and operational reliability
+- Fork base: Easy!Appointments (`v1.5.2` lineage)
+- Stack: PHP `>=8.1` (8.2+ recommended), CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
+- Primary goal: school-specific scheduling workflows and operational reliability
 
 ## Fork Invariants
 
--   `services.attendants_number` is intentionally restricted to `1`.
--   Do not implement multi-attendant behavior unless product scope changes explicitly.
+- `services.attendants_number` is intentionally restricted to `1`.
+- Do not implement multi-attendant behavior unless product scope changes explicitly.
 
 ## Quickstart (Recommended)
 
@@ -115,6 +115,11 @@ docker compose run --rm php-fpm composer check:coverage:delta
 GITHUB_TOKEN="$(gh auth token)" php scripts/ci/check_heavy_job_duration_trends.php \
   --repo=robinbeier/forscherhaus-appointments \
   --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
+
+# optional pdf-renderer latency signal (deterministic fixture, p50/p95 report)
+php scripts/ci/check_pdf_renderer_latency.php \
+  --base-url=http://localhost:3003 \
+  --output-json=storage/logs/ci/pdf-renderer-latency-latest.json
 ```
 
 ## Release Gates
@@ -138,19 +143,19 @@ composer release:gate:booking-confirmation-pdf -- --help
 
 References:
 
--   [Zero-surprise restore-dump replay](docs/release-gate-zero-surprise.md)
--   [Zero-surprise automated pre-deploy replay + post-deploy canary + rollback trigger](docs/release-gate-zero-surprise.md)
--   [Dashboard release gate](docs/release-gate-dashboard.md)
--   [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
+- [Zero-surprise restore-dump replay](docs/release-gate-zero-surprise.md)
+- [Zero-surprise automated pre-deploy replay + post-deploy canary + rollback trigger](docs/release-gate-zero-surprise.md)
+- [Dashboard release gate](docs/release-gate-dashboard.md)
+- [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
 
 ## Local Services (Docker)
 
--   App: `http://localhost`
--   phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
--   Mailpit: `http://localhost:8025`
--   PDF renderer: `http://localhost:3003`
--   Baikal (CalDAV): `http://localhost:8100`
--   phpLDAPadmin: `http://localhost:8200`
+- App: `http://localhost`
+- phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
+- Mailpit: `http://localhost:8025`
+- PDF renderer: `http://localhost:3003`
+- Baikal (CalDAV): `http://localhost:8100`
+- phpLDAPadmin: `http://localhost:8200`
 
 If you run PHP on host with Docker PDF renderer, set:
 
@@ -171,26 +176,26 @@ This prevents mixed container mounts across worktrees.
 
 ## Documentation Map
 
--   [Project runbook and contributor guardrails](AGENTS.md)
--   [Write-path CI contracts](docs/ci-write-contracts.md)
--   [Architecture map](docs/architecture-map.md)
--   [Ownership map](docs/ownership-map.md)
--   [Installation guide](docs/installation-guide.md)
--   [Docker guide](docs/docker.md)
--   [Console commands](docs/console.md)
--   [REST API](docs/rest-api.md)
--   [Google Calendar sync](docs/google-calendar-sync.md)
--   [CalDAV sync](docs/caldav-calendar-sync.md)
--   [LDAP](docs/ldap.md)
--   [Provider room feature](docs/feature-provider-room.md)
--   [FAQ](docs/faq.md)
+- [Project runbook and contributor guardrails](AGENTS.md)
+- [Write-path CI contracts](docs/ci-write-contracts.md)
+- [Architecture map](docs/architecture-map.md)
+- [Ownership map](docs/ownership-map.md)
+- [Installation guide](docs/installation-guide.md)
+- [Docker guide](docs/docker.md)
+- [Console commands](docs/console.md)
+- [REST API](docs/rest-api.md)
+- [Google Calendar sync](docs/google-calendar-sync.md)
+- [CalDAV sync](docs/caldav-calendar-sync.md)
+- [LDAP](docs/ldap.md)
+- [Provider room feature](docs/feature-provider-room.md)
+- [FAQ](docs/faq.md)
 
 ## Contribution Rules (Short)
 
--   Keep production code changes inside `application/`.
--   Do not modify `system/` unless applying an explicit upstream patch.
--   Use CodeIgniter migrations for all DB schema changes (with rollback path).
--   Keep `config.php` out of version control; update `config-sample.php` only with safe defaults.
+- Keep production code changes inside `application/`.
+- Do not modify `system/` unless applying an explicit upstream patch.
+- Use CodeIgniter migrations for all DB schema changes (with rollback path).
+- Keep `config.php` out of version control; update `config-sample.php` only with safe defaults.
 
 ## Testing Before PR
 
@@ -260,6 +265,8 @@ CI note: `coverage-delta` current policy thresholds are baseline `22.45%`, absol
 CI note: coverage artifacts are written to `storage/logs/ci/coverage-shard-unit.phpcov`, `storage/logs/ci/coverage-shard-integration.phpcov`, `storage/logs/ci/coverage-unit-clover.xml`, `storage/logs/ci/coverage-merge-latest.json`, and `storage/logs/ci/coverage-delta-latest.json`.
 CI note: `heavy-job-duration-trends` is a non-blocking push-to-`main` signal that compares the latest heavy-job median against an older successful-run baseline and emits warnings plus the artifact `heavy-job-duration-trends-artifacts`.
 CI note: heavy-job trend reports are written to `storage/logs/ci/heavy-job-duration-trends-latest.json`; review the GitHub step summary or uploaded artifact when a regression warning appears.
+CI note: `pdf-renderer-latency` is a non-blocking signal job that runs for relevant `pdf-renderer`/latency-guard changes, emits warning annotations on threshold breaches, and uploads `pdf-renderer-latency-artifacts`.
+CI note: PDF latency reports are written to `storage/logs/ci/pdf-renderer-latency-latest.json`.
 CI note: `architecture-boundaries` artifacts are written to `storage/logs/ci/deptrac-changed-gate.json`, `storage/logs/ci/deptrac-github-actions.log`, and `storage/logs/ci/component-boundary-latest.json`.
 CI note: `write-contract-booking` artifacts are written to `storage/logs/ci/booking-write-contract-<UTC>.json`.
 CI note: `write-contract-api` artifacts are written to `storage/logs/ci/api-openapi-write-contract-<UTC>.json`.
@@ -275,7 +282,7 @@ SKIP_PRECOMMIT=1 git commit -m "Your message"
 
 This is a maintained fork of:
 
--   [alextselegidis/easyappointments](https://github.com/alextselegidis/easyappointments)
+- [alextselegidis/easyappointments](https://github.com/alextselegidis/easyappointments)
 
 Upstream merges are done selectively and scheduled according to release risk.
 

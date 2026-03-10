@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'node:fs';
 import puppeteer from 'puppeteer';
 
 const app = express();
@@ -11,10 +12,28 @@ const launchArgs = [
     '--font-render-hinting=medium',
     '--disable-dev-shm-usage',
 ];
+const chromeExecutableCandidates = [process.env.PUPPETEER_EXECUTABLE_PATH, '/usr/bin/google-chrome'].filter(Boolean);
+
+function resolveExecutablePath() {
+    for (const candidate of chromeExecutableCandidates) {
+        if (typeof candidate === 'string' && fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+
+    return undefined;
+}
 
 async function getBrowser() {
     if (!browser) {
-        browser = await puppeteer.launch({args: launchArgs});
+        const launchOptions = {args: launchArgs};
+        const executablePath = resolveExecutablePath();
+
+        if (executablePath) {
+            launchOptions.executablePath = executablePath;
+        }
+
+        browser = await puppeteer.launch(launchOptions);
     }
     return browser;
 }

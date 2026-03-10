@@ -73,6 +73,7 @@
         "deptrac:analyze": "deptrac analyse --config-file=deptrac.yaml",
         "check:coverage:delta": "php scripts/ci/check_coverage_delta.php --clover=storage/logs/ci/coverage-unit-clover.xml --policy=scripts/ci/config/coverage_delta_policy.php --output-json=storage/logs/ci/coverage-delta-latest.json",
         "check:heavy-job-duration-trends": "php scripts/ci/check_heavy_job_duration_trends.php --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json",
+        "check:pdf-renderer-latency": "php scripts/ci/check_pdf_renderer_latency.php --output-json=storage/logs/ci/pdf-renderer-latency-latest.json",
         "check:request-contract-adoption": "php scripts/ci/check_request_contract_adoption.php",
         "check:typed-request-contracts": [
             "@phpstan:request-contracts:l1",
