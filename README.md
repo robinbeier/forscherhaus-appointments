@@ -20,6 +20,10 @@ This repository prioritizes stable, low-risk delivery for school operations and 
 ```bash
 ./scripts/setup-worktree.sh
 docker compose up -d
+
+# when you need deterministic LDAP fixtures for search/import/SSO work
+bash ./scripts/ldap/reset_directory.sh
+bash ./scripts/ldap/smoke.sh
 ```
 
 Smoke-check:
@@ -156,6 +160,13 @@ References:
 - PDF renderer: `http://localhost:3003`
 - Baikal (CalDAV): `http://localhost:8100`
 - phpLDAPadmin: `http://localhost:8200`
+
+For deterministic LDAP fixtures, reset and smoke the local directory with:
+
+```bash
+bash ./scripts/ldap/reset_directory.sh
+bash ./scripts/ldap/smoke.sh
+```
 
 If you run PHP on host with Docker PDF renderer, set:
 
