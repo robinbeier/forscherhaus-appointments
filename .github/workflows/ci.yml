@@ -727,7 +727,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4.1"
           coverage: xdebug
           extensions: gd
       - name: Download deep-check dependencies artifact
@@ -850,7 +850,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4.1"
           coverage: none
       - name: Download coverage shard unit artifacts
         uses: actions/download-artifact@v4
@@ -923,7 +923,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4.1"
           coverage: none
       - name: Evaluate heavy job duration trends
         env:
