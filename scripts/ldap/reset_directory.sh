@@ -10,7 +10,6 @@ LDAP_ADMIN_PASSWORD="${LDAP_ADMIN_PASSWORD:-admin}"
 LDAP_URI="${LDAP_URI:-ldap://localhost:389}"
 LDAP_COMPOSE_PROJECT_NAME="${LDAP_COMPOSE_PROJECT_NAME:-}"
 LDAP_SERVICE_NAME="${LDAP_SERVICE_NAME:-openldap}"
-LDAP_SKIP_SEED_APPLY="${LDAP_SKIP_SEED_APPLY:-0}"
 
 compose_cmd=(docker compose)
 
@@ -47,8 +46,20 @@ default_config_dir() {
     esac
 }
 
+default_skip_seed_apply() {
+    case "${LDAP_SERVICE_NAME}" in
+        openldap-parallel)
+            echo "1"
+            ;;
+        *)
+            echo "0"
+            ;;
+    esac
+}
+
 LDAP_DATABASE_DIR="${LDAP_DATABASE_DIR:-$(default_database_dir)}"
 LDAP_CONFIG_DIR="${LDAP_CONFIG_DIR:-$(default_config_dir)}"
+LDAP_SKIP_SEED_APPLY="${LDAP_SKIP_SEED_APPLY:-$(default_skip_seed_apply)}"
 
 wait_for_openldap() {
     local attempt
