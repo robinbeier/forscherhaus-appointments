@@ -81,6 +81,8 @@ docker compose exec -T php-fpm composer contract-test:write-path -- \
   --retry-count=1 --booking-search-days=14
 
 # optional deep runtime suite producer + verdict flow (same topology as CI)
+# make sure the stack includes OpenLDAP because integration-smoke now covers LDAP search + SSO paths
+# docker compose up -d mysql php-fpm nginx openldap
 docker compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
   --suites=api-contract-openapi,write-contract-booking,write-contract-api,booking-controller-flows,integration-smoke \
   --base-url=http://nginx --index-page=index.php --openapi-spec=/var/www/html/openapi.yml \

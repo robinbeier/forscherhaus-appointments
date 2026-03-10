@@ -697,7 +697,7 @@ jobs:
         env:
           EA_SKIP_NPM_BOOTSTRAP: "1"
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm nginx
+        run: docker compose up -d mysql php-fpm nginx openldap
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Install deterministic seed instance

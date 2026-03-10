@@ -68,7 +68,7 @@ GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/ch
 
 echo_section "Start integration stack"
 trap cleanup_stack EXIT
-ci_docker_compose up -d mysql php-fpm nginx
+ci_docker_compose up -d mysql php-fpm nginx openldap
 ci_docker_wait_for_mysql_readiness "pre-pr-full"
 ci_docker_install_seed_instance "pre-pr-full" exec -T php-fpm php index.php console install
 

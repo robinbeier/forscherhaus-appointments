@@ -65,6 +65,22 @@ class DeepRuntimeSuiteTest extends TestCase
         self::assertSame($this->tmpDir . '/write-contract-api.log', $definitions[1]['log_path']);
     }
 
+    public function testIntegrationSmokeSuiteIncludesLdapGuardrailChecks(): void
+    {
+        $config = deepRuntimeSuiteDefaultConfig();
+        $config['suites_raw'] = 'integration-smoke';
+        $config['report_dir'] = $this->tmpDir;
+        $config['manifest_path'] = $this->tmpDir . '/manifest.json';
+
+        $definitions = buildDeepRuntimeSuiteDefinitions($config);
+        $command = $definitions[0]['command'];
+
+        self::assertStringContainsString('ldap_settings_search', $command);
+        self::assertStringContainsString('ldap_settings_search_missing_keyword', $command);
+        self::assertStringContainsString('ldap_sso_success', $command);
+        self::assertStringContainsString('ldap_sso_wrong_password', $command);
+    }
+
     public function testRunConfiguredDeepRuntimeSuitesContinuesAfterFailuresAndBuildsManifest(): void
     {
         $suiteDefinitions = [

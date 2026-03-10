@@ -27,14 +27,11 @@ $csrfDefaults = GateCliSupport::resolveCsrfNamesFromConfig($repoRoot . '/applica
 try {
     $config = parseCliOptions($csrfDefaults);
 
-    $client = new GateHttpClient(
-        $config['base_url'],
-        $config['index_page'],
-        $config['http_timeout'],
-        'dashboard-booking-api-integration-smoke/1.0',
-        $config['csrf_cookie_name'],
-        $config['csrf_token_name'],
-    );
+    if (dashboardIntegrationSmokeRequiresLdapFixture($config)) {
+        $config = array_merge($config, dashboardIntegrationSmokePrepareLdapAppGuardrailFixture($repoRoot));
+    }
+
+    $client = dashboardIntegrationSmokeCreateClient($config);
 
     $bookingPageHtml = null;
     $bookingBootstrap = null;
@@ -113,6 +110,133 @@ try {
             return [
                 'http_status' => $response->statusCode,
                 'url' => $response->url,
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'ldap_settings_search')) {
+        $runCheck('ldap_settings_search', static function () use ($client, $config): array {
+            $response = $client->post(
+                'ldap_settings/search',
+                ['keyword' => $config['ldap_search_keyword']],
+                $config['http_timeout'],
+                true,
+            );
+
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /ldap_settings/search');
+            $payload = GateAssertions::decodeJson($response->body, 'POST /ldap_settings/search');
+
+            if (!is_array($payload) || !array_is_list($payload)) {
+                throw new GateAssertionException('POST /ldap_settings/search payload must be a JSON array.');
+            }
+
+            $entry = dashboardIntegrationSmokeFindLdapEntryByDn($payload, $config['ldap_expected_dn']);
+            dashboardIntegrationSmokeAssertLdapGuardrailEntry($entry, $config);
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'results' => count($payload),
+                'matched_dn' => $entry['dn'],
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'ldap_settings_search_missing_keyword')) {
+        $runCheck('ldap_settings_search_missing_keyword', static function () use ($client, $config): array {
+            $response = $client->post(
+                'ldap_settings/search',
+                ['keyword' => $config['ldap_missing_keyword']],
+                $config['http_timeout'],
+                true,
+            );
+
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /ldap_settings/search (missing keyword)');
+            $payload = GateAssertions::decodeJson($response->body, 'POST /ldap_settings/search (missing keyword)');
+
+            if (!is_array($payload) || !array_is_list($payload)) {
+                throw new GateAssertionException(
+                    'POST /ldap_settings/search (missing keyword) payload must be a JSON array.',
+                );
+            }
+
+            if ($payload !== []) {
+                throw new GateAssertionException(
+                    'POST /ldap_settings/search (missing keyword) returned unexpected LDAP entries.',
+                );
+            }
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'results' => 0,
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'ldap_sso_success')) {
+        $runCheck('ldap_sso_success', static function () use ($config): array {
+            $ldapClient = dashboardIntegrationSmokeCreateClient($config);
+            dashboardIntegrationSmokeWarmLoginCsrf($ldapClient, $config);
+
+            $response = $ldapClient->post(
+                'login/validate',
+                [
+                    'username' => $config['ldap_guardrail_username'],
+                    'password' => $config['ldap_guardrail_directory_password'],
+                ],
+                $config['http_timeout'],
+                true,
+            );
+
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /login/validate (LDAP SSO)');
+            $payload = GateAssertions::decodeJson($response->body, 'POST /login/validate (LDAP SSO)');
+            GateAssertions::assertLoginPayload($payload);
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'username' => $config['ldap_guardrail_username'],
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'ldap_sso_wrong_password')) {
+        $runCheck('ldap_sso_wrong_password', static function () use ($config): array {
+            $ldapClient = dashboardIntegrationSmokeCreateClient($config);
+            dashboardIntegrationSmokeWarmLoginCsrf($ldapClient, $config);
+
+            $response = $ldapClient->post(
+                'login/validate',
+                [
+                    'username' => $config['ldap_guardrail_username'],
+                    'password' => $config['ldap_guardrail_wrong_password'],
+                ],
+                $config['http_timeout'],
+                true,
+            );
+
+            GateAssertions::assertStatus($response->statusCode, 500, 'POST /login/validate (LDAP SSO wrong password)');
+            $payload = GateAssertions::decodeJson($response->body, 'POST /login/validate (LDAP SSO wrong password)');
+
+            if (!is_array($payload)) {
+                throw new GateAssertionException('LDAP wrong-password login payload must be an object.');
+            }
+
+            if (($payload['success'] ?? null) !== false) {
+                throw new GateAssertionException('LDAP wrong-password login must return {"success": false}.');
+            }
+
+            $message = trim((string) ($payload['message'] ?? ''));
+
+            if ($message === '') {
+                throw new GateAssertionException('LDAP wrong-password login response must include a message.');
+            }
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'message' => $message,
             ];
         });
     }
@@ -563,6 +687,10 @@ function integrationSmokeSupportedCheckIds(): array
     return [
         'readiness_login_page',
         'auth_login_validate',
+        'ldap_settings_search',
+        'ldap_settings_search_missing_keyword',
+        'ldap_sso_success',
+        'ldap_sso_wrong_password',
         'dashboard_metrics',
         'booking_page_readiness',
         'booking_extract_bootstrap',
@@ -582,6 +710,10 @@ function integrationSmokeCheckDependencies(): array
     return [
         'readiness_login_page' => [],
         'auth_login_validate' => ['readiness_login_page'],
+        'ldap_settings_search' => ['auth_login_validate'],
+        'ldap_settings_search_missing_keyword' => ['auth_login_validate'],
+        'ldap_sso_success' => [],
+        'ldap_sso_wrong_password' => [],
         'dashboard_metrics' => ['auth_login_validate'],
         'booking_page_readiness' => [],
         'booking_extract_bootstrap' => ['booking_page_readiness'],
@@ -607,6 +739,264 @@ function shouldRunConfiguredCheck(array $config, string $checkId): bool
 function selectionReasonForConfiguredCheck(array $config, string $checkId): string
 {
     return (string) ($config['selection_reason_by_check'][$checkId] ?? 'requested');
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function dashboardIntegrationSmokeRequiresLdapFixture(array $config): bool
+{
+    foreach (dashboardIntegrationSmokeLdapGuardrailCheckIds() as $checkId) {
+        if (shouldRunConfiguredCheck($config, $checkId)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @return array<int, string>
+ */
+function dashboardIntegrationSmokeLdapGuardrailCheckIds(): array
+{
+    return [
+        'ldap_settings_search',
+        'ldap_settings_search_missing_keyword',
+        'ldap_sso_success',
+        'ldap_sso_wrong_password',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function dashboardIntegrationSmokeCreateClient(array $config): GateHttpClient
+{
+    return new GateHttpClient(
+        $config['base_url'],
+        $config['index_page'],
+        $config['http_timeout'],
+        'dashboard-booking-api-integration-smoke/1.0',
+        $config['csrf_cookie_name'],
+        $config['csrf_token_name'],
+    );
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function dashboardIntegrationSmokeWarmLoginCsrf(GateHttpClient $client, array $config): void
+{
+    $response = $client->get('login', [], $config['http_timeout']);
+    GateAssertions::assertStatus($response->statusCode, 200, 'GET /login (LDAP guardrail)');
+
+    $csrfCookie = $client->getCookie($config['csrf_cookie_name']);
+
+    if ($csrfCookie === null || $csrfCookie === '') {
+        throw new GateAssertionException(
+            'GET /login (LDAP guardrail) did not set cookie "' . $config['csrf_cookie_name'] . '".',
+        );
+    }
+}
+
+/**
+ * @param array<int, mixed> $entries
+ * @return array<string, mixed>
+ */
+function dashboardIntegrationSmokeFindLdapEntryByDn(array $entries, string $expectedDn): array
+{
+    foreach ($entries as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        if (($entry['dn'] ?? null) === $expectedDn) {
+            return $entry;
+        }
+    }
+
+    throw new GateAssertionException('LDAP search did not return the expected guardrail DN: ' . $expectedDn);
+}
+
+/**
+ * @param array<string, mixed> $entry
+ * @param array<string, mixed> $config
+ */
+function dashboardIntegrationSmokeAssertLdapGuardrailEntry(array $entry, array $config): void
+{
+    $expectedFields = [
+        'dn' => $config['ldap_expected_dn'],
+        'cn' => $config['ldap_expected_cn'],
+        'givenname' => $config['ldap_expected_given_name'],
+        'sn' => $config['ldap_expected_sn'],
+        'mail' => $config['ldap_expected_mail'],
+        'telephonenumber' => $config['ldap_expected_phone'],
+    ];
+
+    foreach ($expectedFields as $field => $expectedValue) {
+        $actualValue = trim((string) ($entry[$field] ?? ''));
+
+        if ($actualValue === '') {
+            throw new GateAssertionException('LDAP guardrail entry misses field "' . $field . '".');
+        }
+
+        if ($actualValue !== $expectedValue) {
+            throw new GateAssertionException(
+                sprintf(
+                    'LDAP guardrail entry field "%s" mismatch: expected "%s", got "%s".',
+                    $field,
+                    $expectedValue,
+                    $actualValue,
+                ),
+            );
+        }
+    }
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoot): array
+{
+    $CI = dashboardIntegrationSmokeBootstrapApplication($repoRoot);
+
+    $CI->load->helper('setting');
+    $CI->load->model('admins_model');
+
+    $fieldMapping = json_encode(
+        LDAP_DEFAULT_FIELD_MAPPING,
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+    );
+
+    setting([
+        'ldap_is_active' => '1',
+        'ldap_host' => 'openldap',
+        'ldap_port' => '389',
+        'ldap_user_dn' => 'cn=admin,dc=example,dc=org',
+        'ldap_password' => 'admin',
+        'ldap_base_dn' => 'dc=example,dc=org',
+        'ldap_filter' => LDAP_DEFAULT_FILTER,
+        'ldap_field_mapping' => $fieldMapping,
+    ]);
+
+    $guardrailUsername = 'ada-ldap-guardrail';
+    $guardrailLocalPassword = 'guardrail-local-password';
+    $guardrailExpectedDn = 'uid=ada,ou=people,dc=example,dc=org';
+    $guardrailExpectedMail = 'ada.lovelace@example.org';
+
+    $existingUser = $CI->db
+        ->select('users.id, roles.slug AS role_slug')
+        ->from('user_settings')
+        ->join('users', 'users.id = user_settings.id_users', 'inner')
+        ->join('roles', 'roles.id = users.id_roles', 'inner')
+        ->where('user_settings.username', $guardrailUsername)
+        ->get()
+        ->row_array();
+
+    if (!empty($existingUser) && ($existingUser['role_slug'] ?? null) !== DB_SLUG_ADMIN) {
+        throw new RuntimeException(
+            'LDAP guardrail username "' . $guardrailUsername . '" is already used by a non-admin account.',
+        );
+    }
+
+    $admin = [
+        'first_name' => 'Ada',
+        'last_name' => 'Lovelace',
+        'email' => $guardrailExpectedMail,
+        'phone_number' => '+49 30 1234567',
+        'mobile_number' => '+49 30 1234567',
+        'ldap_dn' => $guardrailExpectedDn,
+        'settings' => [
+            'username' => $guardrailUsername,
+            'password' => $guardrailLocalPassword,
+        ],
+    ];
+
+    if (!empty($existingUser)) {
+        $admin['id'] = (int) $existingUser['id'];
+    }
+
+    $CI->admins_model->save($admin);
+
+    return [
+        'ldap_search_keyword' => 'ada',
+        'ldap_missing_keyword' => 'missing-ldap-guardrail-user',
+        'ldap_guardrail_username' => $guardrailUsername,
+        'ldap_guardrail_directory_password' => 'ada-local-pass',
+        'ldap_guardrail_wrong_password' => 'definitely-wrong-password',
+        'ldap_expected_dn' => $guardrailExpectedDn,
+        'ldap_expected_cn' => 'ada',
+        'ldap_expected_given_name' => 'Ada',
+        'ldap_expected_sn' => 'Lovelace',
+        'ldap_expected_mail' => $guardrailExpectedMail,
+        'ldap_expected_phone' => '+49 30 1234567',
+    ];
+}
+
+function dashboardIntegrationSmokeBootstrapApplication(string $repoRoot): CI_Controller
+{
+    static $bootstrappedController = null;
+
+    if ($bootstrappedController !== null) {
+        return $bootstrappedController;
+    }
+
+    $serverKeys = ['argv', 'argc', 'REQUEST_METHOD', 'REQUEST_URI', 'SCRIPT_NAME', 'SCRIPT_FILENAME', 'HTTP_HOST'];
+    $originalServer = [];
+
+    foreach ($serverKeys as $key) {
+        $originalServer[$key] = $_SERVER[$key] ?? null;
+    }
+
+    $originalGet = $_GET ?? [];
+    $originalPost = $_POST ?? [];
+    $originalCookie = $_COOKIE ?? [];
+    $originalRequest = $_REQUEST ?? [];
+
+    $_SERVER['argv'] = [$_SERVER['argv'][0] ?? 'dashboard_integration_smoke.php', 'healthz'];
+    $_SERVER['argc'] = count($_SERVER['argv']);
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+    $_SERVER['REQUEST_URI'] = '/healthz';
+    $_SERVER['SCRIPT_NAME'] = '/index.php';
+    $_SERVER['SCRIPT_FILENAME'] = $repoRoot . '/index.php';
+    $_SERVER['HTTP_HOST'] = 'localhost';
+    $_GET = [];
+    $_POST = [];
+    $_COOKIE = [];
+    $_REQUEST = [];
+
+    ob_start();
+    require_once $repoRoot . '/index.php';
+    $bootstrapOutput = ob_get_clean();
+
+    foreach ($serverKeys as $key) {
+        if ($originalServer[$key] === null) {
+            unset($_SERVER[$key]);
+            continue;
+        }
+
+        $_SERVER[$key] = $originalServer[$key];
+    }
+
+    $_GET = $originalGet;
+    $_POST = $originalPost;
+    $_COOKIE = $originalCookie;
+    $_REQUEST = $originalRequest;
+
+    $bootstrappedController = &get_instance();
+
+    if (!($bootstrappedController instanceof CI_Controller)) {
+        throw new RuntimeException('Failed to bootstrap CodeIgniter for LDAP guardrail preparation.');
+    }
+
+    if (isset($bootstrappedController->output)) {
+        $bootstrappedController->output->set_output('');
+    }
+
+    unset($bootstrapOutput);
+
+    return $bootstrappedController;
 }
 
 /**
