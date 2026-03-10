@@ -26,29 +26,35 @@ compose() {
 
 default_database_dir() {
     case "${LDAP_SERVICE_NAME}" in
-        openldap-parallel)
-            echo "${REPO_ROOT}/docker/openldap-parallel/var"
+        openldap)
+            echo "${REPO_ROOT}/docker/openldap/var"
+            ;;
+        openldap-legacy)
+            echo "${REPO_ROOT}/docker/openldap-legacy/slapd/database"
             ;;
         *)
-            echo "${REPO_ROOT}/docker/openldap/slapd/database"
+            echo "${REPO_ROOT}/docker/openldap/var"
             ;;
     esac
 }
 
 default_config_dir() {
     case "${LDAP_SERVICE_NAME}" in
-        openldap-parallel)
-            echo "${REPO_ROOT}/docker/openldap-parallel/etc"
+        openldap)
+            echo "${REPO_ROOT}/docker/openldap/etc"
+            ;;
+        openldap-legacy)
+            echo "${REPO_ROOT}/docker/openldap-legacy/slapd/config"
             ;;
         *)
-            echo "${REPO_ROOT}/docker/openldap/slapd/config"
+            echo "${REPO_ROOT}/docker/openldap/etc"
             ;;
     esac
 }
 
 default_skip_seed_apply() {
     case "${LDAP_SERVICE_NAME}" in
-        openldap-parallel)
+        openldap)
             echo "1"
             ;;
         *)
@@ -77,7 +83,7 @@ wait_for_openldap() {
         sleep 1
     done
 
-    echo "OpenLDAP did not become ready after 60 seconds." >&2
+    echo "LDAP service ${LDAP_SERVICE_NAME} did not become ready after 60 seconds." >&2
 
     return 1
 }

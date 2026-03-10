@@ -65,22 +65,21 @@ services:
             - ./docker/baikal/data:/var/www/baikal/Specific
 
     openldap:
-        image: osixia/openldap:1.5.0
+        image: vegardit/openldap@sha256:efa7cff027fa2ac503b073161849f93e4ccaaa1b9ac0a9788814865032952564
         hostname: openldap
         ports:
             - '389:389'
             - '636:636'
         volumes:
-            - ./docker/openldap/certificates:/container/service/slapd/assets/certs
-            - ./docker/openldap/slapd/database:/var/lib/ldap
-            - ./docker/openldap/slapd/config:/etc/ldap/slapd.d
+            - ./docker/ldap/vegardit/init_org_tree.ldif:/opt/ldifs/init_org_tree.ldif:ro
+            - ./docker/ldap/vegardit/init_org_entries.ldif:/opt/ldifs/init_org_entries.ldif:ro
+            - ./docker/openldap/var:/var/lib/ldap
+            - ./docker/openldap/etc:/etc/ldap/slapd.d
         environment:
-            - LDAP_ORGANISATION=example
-            - LDAP_DOMAIN=example.org
-            - LDAP_ADMIN_USERNAME=admin
-            - LDAP_ADMIN_PASSWORD=admin
-            - LDAP_CONFIG_PASSWORD=config_pass
-            - 'LDAP_BASE_DN=dc=example,dc=org'
+            - LDAP_INIT_ORG_DN=dc=example,dc=org
+            - LDAP_INIT_ORG_NAME=example
+            - LDAP_INIT_ROOT_USER_DN=cn=admin,dc=example,dc=org
+            - LDAP_INIT_ROOT_USER_PW=admin
 
     phpldapadmin:
         image: osixia/phpldapadmin:0.9.0
@@ -93,24 +92,25 @@ services:
         depends_on:
             - openldap
 
-    openldap-parallel:
+    openldap-legacy:
         profiles:
-            - ldap-parallel
-        image: vegardit/openldap@sha256:efa7cff027fa2ac503b073161849f93e4ccaaa1b9ac0a9788814865032952564
-        hostname: openldap-parallel
+            - ldap-legacy
+        image: osixia/openldap:1.5.0
+        hostname: openldap-legacy
         ports:
             - '1389:389'
             - '1636:636'
         volumes:
-            - ./docker/ldap/vegardit/init_org_tree.ldif:/opt/ldifs/init_org_tree.ldif:ro
-            - ./docker/ldap/vegardit/init_org_entries.ldif:/opt/ldifs/init_org_entries.ldif:ro
-            - ./docker/openldap-parallel/var:/var/lib/ldap
-            - ./docker/openldap-parallel/etc:/etc/ldap/slapd.d
+            - ./docker/openldap-legacy/certificates:/container/service/slapd/assets/certs
+            - ./docker/openldap-legacy/slapd/database:/var/lib/ldap
+            - ./docker/openldap-legacy/slapd/config:/etc/ldap/slapd.d
         environment:
-            - LDAP_INIT_ORG_DN=dc=example,dc=org
-            - LDAP_INIT_ORG_NAME=example
-            - LDAP_INIT_ROOT_USER_DN=cn=admin,dc=example,dc=org
-            - LDAP_INIT_ROOT_USER_PW=admin
+            - LDAP_ORGANISATION=example
+            - LDAP_DOMAIN=example.org
+            - LDAP_ADMIN_USERNAME=admin
+            - LDAP_ADMIN_PASSWORD=admin
+            - LDAP_CONFIG_PASSWORD=config_pass
+            - 'LDAP_BASE_DN=dc=example,dc=org'
 
     pdf-renderer:
         platform: linux/amd64
