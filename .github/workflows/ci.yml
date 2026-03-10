@@ -234,6 +234,7 @@ jobs:
               - '.github/workflows/ci.yml'
             pdf_renderer_latency_required:
               - 'pdf-renderer/**'
+              - 'docker-compose.yml'
               - 'scripts/ci/check_pdf_renderer_latency.php'
               - 'scripts/ci/config/pdf_renderer_latency_policy.php'
               - 'tests/Unit/Scripts/PdfRendererLatencyGateTest.php'

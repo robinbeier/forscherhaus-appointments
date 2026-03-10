@@ -180,6 +180,22 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testPdfRendererLatencyFilterIncludesComposeRuntimeChanges(): void
+    {
+        $matches = $this->applyFilters(['docker-compose.yml']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertFalse($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertTrue($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertFalse($matches['booking_flows']);
+        self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['write_contract_booking']);
+        self::assertFalse($matches['write_contract_api']);
+    }
+
     /**
      * @param array<int, string> $changedPaths
      * @return array<string, bool>
