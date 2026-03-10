@@ -10,8 +10,6 @@ LDAP_ADMIN_PASSWORD="${LDAP_ADMIN_PASSWORD:-admin}"
 LDAP_URI="${LDAP_URI:-ldap://localhost:389}"
 LDAP_COMPOSE_PROJECT_NAME="${LDAP_COMPOSE_PROJECT_NAME:-}"
 LDAP_SERVICE_NAME="${LDAP_SERVICE_NAME:-openldap}"
-LDAP_DATABASE_DIR="${LDAP_DATABASE_DIR:-${REPO_ROOT}/docker/openldap/slapd/database}"
-LDAP_CONFIG_DIR="${LDAP_CONFIG_DIR:-${REPO_ROOT}/docker/openldap/slapd/config}"
 LDAP_SKIP_SEED_APPLY="${LDAP_SKIP_SEED_APPLY:-0}"
 
 compose_cmd=(docker compose)
@@ -26,6 +24,31 @@ compose() {
         "${compose_cmd[@]}" "$@"
     )
 }
+
+default_database_dir() {
+    case "${LDAP_SERVICE_NAME}" in
+        openldap-parallel)
+            echo "${REPO_ROOT}/docker/openldap-parallel/var"
+            ;;
+        *)
+            echo "${REPO_ROOT}/docker/openldap/slapd/database"
+            ;;
+    esac
+}
+
+default_config_dir() {
+    case "${LDAP_SERVICE_NAME}" in
+        openldap-parallel)
+            echo "${REPO_ROOT}/docker/openldap-parallel/etc"
+            ;;
+        *)
+            echo "${REPO_ROOT}/docker/openldap/slapd/config"
+            ;;
+    esac
+}
+
+LDAP_DATABASE_DIR="${LDAP_DATABASE_DIR:-$(default_database_dir)}"
+LDAP_CONFIG_DIR="${LDAP_CONFIG_DIR:-$(default_config_dir)}"
 
 wait_for_openldap() {
     local attempt

@@ -35,8 +35,6 @@ Reset the parallel candidate from a clean data path:
 
 ```bash
 LDAP_SERVICE_NAME=openldap-parallel \
-LDAP_DATABASE_DIR="$PWD/docker/openldap-parallel/var" \
-LDAP_CONFIG_DIR="$PWD/docker/openldap-parallel/etc" \
 LDAP_SKIP_SEED_APPLY=1 \
 bash ./scripts/ldap/reset_directory.sh
 ```
