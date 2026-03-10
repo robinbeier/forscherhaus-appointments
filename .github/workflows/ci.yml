@@ -349,10 +349,16 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx gulp compile
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPUnit Tests
@@ -399,10 +405,16 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx gulp compile
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPStan Application
@@ -424,10 +436,16 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx gulp compile
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPStan Request DTO
@@ -461,10 +479,16 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Frontend compile
         run: npx gulp compile
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: PHPStan Request Contracts L1
@@ -516,7 +540,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: Archive deep-check dependencies
@@ -727,7 +751,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4.1"
           coverage: xdebug
           extensions: gd
       - name: Download deep-check dependencies artifact
@@ -850,7 +874,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4.1"
           coverage: none
       - name: Download coverage shard unit artifacts
         uses: actions/download-artifact@v4
@@ -923,7 +947,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4.1"
           coverage: none
       - name: Evaluate heavy job duration trends
         env:
@@ -983,10 +1007,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          php_version: 8.3
+          php_version: 8.4
           php_extensions: gd
           version: 2
       - name: Check generated CODEOWNERS
