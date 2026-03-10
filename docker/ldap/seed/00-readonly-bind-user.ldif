@@ -1,0 +1,6 @@
+dn: cn=user,dc=example,dc=org
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: user
+description: LDAP read only user
+userPassword: password

@@ -86,6 +86,13 @@ Openldap is configured to run through `openldap` container and ports `389` and `
 
 Phpldapadmin, an admin portal for openldap is available on `http://localhost:8200` (credentials are `cn=admin,dc=example,dc=org` / `admin`).
 
+The deterministic local LDAP fixture now comes from the versioned seed files in `docker/ldap/seed`. Recreate and verify the directory with:
+
+```bash
+bash ./scripts/ldap/reset_directory.sh
+bash ./scripts/ldap/smoke.sh
+```
+
 ## Restoring a Server Dump Locally
 
 Use this workflow when you want your local setup to run with a database dump from production/staging.

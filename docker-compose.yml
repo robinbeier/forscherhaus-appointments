@@ -81,9 +81,6 @@ services:
             - LDAP_ADMIN_PASSWORD=admin
             - LDAP_CONFIG_PASSWORD=config_pass
             - 'LDAP_BASE_DN=dc=example,dc=org'
-            - LDAP_READONLY_USER=true
-            - LDAP_READONLY_USER_USERNAME=user
-            - LDAP_READONLY_USER_PASSWORD=password
 
     phpldapadmin:
         image: osixia/phpldapadmin:0.9.0
