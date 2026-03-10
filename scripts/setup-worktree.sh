@@ -19,6 +19,7 @@ require_cmd composer
 require_cmd node
 require_cmd npm
 require_cmd npx
+bash ./scripts/ci/require_node_minimum.sh 20.19.0 setup
 
 # Prevent noisy permission-only diffs in Docker workflows.
 git config core.fileMode false || true

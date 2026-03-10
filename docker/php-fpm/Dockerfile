@@ -14,7 +14,7 @@ RUN apt-get update \
     && rm -f /tmp/install-php-extensions \
     && docker-php-ext-enable xdebug \
     && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
-    && curl -sLS https://deb.nodesource.com/setup_18.x | bash - \
+    && curl -sLS https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && npm install -g npm \
     && apt-get install -q -y ssmtp mailutils \

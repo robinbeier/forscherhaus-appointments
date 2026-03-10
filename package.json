@@ -21,7 +21,7 @@
         "url": "https://github.com/alextselegidis/easyappointments/issues"
     },
     "engines": {
-        "node": ">=18"
+        "node": ">=20.19.0"
     },
     "dependencies": {
         "@fortawesome/fontawesome-free": "^7.2.0",
@@ -47,10 +47,12 @@
     "devDependencies": {
         "@babel/core": "^7.29.0",
         "@babel/preset-env": "^7.29.0",
+        "@eslint/eslintrc": "^3.3.5",
+        "@eslint/js": "^10.0.1",
         "@prettier/plugin-php": "^0.24.0",
         "babel-preset-minify": "^0.5.2",
         "del": "^8.0.1",
-        "eslint": "^9.39.4",
+        "eslint": "^10.0.3",
         "fs-extra": "^11.3.4",
         "gulp": "^5.0.1",
         "gulp-babel": "^8.0.0",
