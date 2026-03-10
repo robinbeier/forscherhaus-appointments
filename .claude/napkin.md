@@ -2,11 +2,11 @@
 
 ## Curation Rules
 
--   Re-prioritize on every read.
--   Keep recurring, high-value notes only.
--   Max 10 items per category.
--   Each item includes date + "Do instead".
--   Keep items sorted by execution risk first.
+- Re-prioritize on every read.
+- Keep recurring, high-value notes only.
+- Max 10 items per category.
+- Each item includes date + "Do instead".
+- Keep items sorted by execution risk first.
 
 ## Execution & Validation (Highest Priority)
 
@@ -48,24 +48,24 @@
 
 ## Shell & Command Reliability
 
-1. **[2026-03-06] Invoke Symphony workflow hook scripts through `bash`**
+1. **[2026-03-10] Validate OpenClaw OAuth with `models status --check`, not JSON alone**
+   Do instead: when OpenClaw reports `OAuth token refresh failed`, run `openclaw models status --check` because `--json` can still label an expired OAuth profile as `ok` while `--check` surfaces the real provider response such as `refresh_token_reused`.
+2. **[2026-03-09] Run Symphony tests without `tsx` IPC in sandboxed workers**
+   Do instead: when `npm --prefix tools/symphony test` fails with `listen EPERM` on `tsx` pipes, run `npm --prefix tools/symphony run build` and execute `node --test tools/symphony/dist/orchestrator.test.js` for deterministic local verification.
+3. **[2026-03-06] Invoke Symphony workflow hook scripts through `bash`**
    Do instead: configure `before_run`/`before_remove` entries as `bash $SYMPHONY_REPO_ROOT/.../script.sh` so pilot runs do not depend on the executable bit surviving checkout or local file-mode settings.
-2. **[2026-03-05] Pin pre-PR gate context explicitly for non-main targets**
+4. **[2026-03-05] Pin pre-PR gate context explicitly for non-main targets**
    Do instead: set `PRE_PR_BASE_REF=<target-base>` for `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh`, or managed pre-push runs; add `PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=1` when strict local request-contracts L2 blocking is required.
-3. **[2026-03-03] Run Deptrac via Docker for stable local output**
+5. **[2026-03-03] Run Deptrac via Docker for stable local output**
    Do instead: use `docker compose run --rm php-fpm composer deptrac:analyze` because newer host PHP runtimes can emit vendor-level deprecation noise.
-4. **[2026-03-08] Keep pre-PR diff checks worktree-safe inside Symphony workers**
+6. **[2026-03-08] Keep pre-PR diff checks worktree-safe inside Symphony workers**
    Do instead: avoid hard `git fetch` writes from worker worktrees whose git common dir lives outside the writable workspace; fall back to existing `origin/*` refs or a local `HEAD~1...HEAD` diff range so quick/full gates stay usable under `workspace-write`, make sure no host stack is still binding the worktree's expected MySQL/HTTP ports before commit or pre-push hooks run, and re-check support containers before treating frontend/browser failures as code regressions because a stopped branch-local MySQL or app stack can mimic a broken dependency spike.
-5. **[2026-03-08] Run lockfile-refresh gates from a committed lockfile baseline**
+7. **[2026-03-08] Run lockfile-refresh gates from a committed lockfile baseline**
    Do instead: for branches whose main change is `package-lock.json`, commit the converged lockfile before running `pre_pr_quick` or `pre_pr_full`; the quick gate intentionally re-runs `npm install --package-lock-only` and compares the result to `HEAD`, so running it before the lockfile commit produces a false drift failure.
-6. **[2026-03-08] Use containerized Playwright when host browser permissions are noisy**
+8. **[2026-03-08] Use containerized Playwright when host browser permissions are noisy**
    Do instead: if host Playwright/Chrome fails with Crashpad permission errors or Firefox SIGABRT, run a targeted browser smoke from `mcr.microsoft.com/playwright` against the branch-local stack via `host.docker.internal`; that gives real-browser evidence without depending on the host browser sandbox.
-7. **[2026-02-26] Detect iCloud duplicate placeholders before release rsync**
-   Do instead: check for `* 2.*`/`* 3.*` files (especially in `assets/vendor` and `vendor`) and remove/rehydrate them before `./build_release.sh`, because `rsync` can stall on FileProvider `compressed,dataless` entries.
-8. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
+9. **[2026-03-01] Fix MySQL InnoDB startup failures caused by FileProvider offload**
    Do instead: when logs show OS error 35 on `./#innodb_redo/*`, inspect `docker/mysql` with `ls -lO@`; rehydrate `compressed,dataless` files (for example `dd if='<file>' of=/dev/null bs=512 count=1`) and restart MySQL, or reset `docker/mysql` if recovery fails.
-9. **[2026-02-25] Keep deploy archive ID aligned with `deploy_ea.sh --rel`**
-   Do instead: build/upload `${REL}.tar.gz` (for example via `./build_release.sh --rel "$REL"`) before deploy; do not confuse DB rollback dumps like `predeploy-db-...sql.gz` with deploy archives.
 10. **[2026-02-23] Use unique Compose project names per worktree**
     Do instead: start Docker with `docker compose -p <unique-name> ...` in each worktree and verify mounts via `docker inspect` before smoke-tests.
 
