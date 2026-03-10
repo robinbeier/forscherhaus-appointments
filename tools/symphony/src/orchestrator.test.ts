@@ -815,7 +815,7 @@ test('publish turn does not treat In Review as a successful handoff without push
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(stopCalls, 0);
+    assert.equal(stopCalls, 1);
     assert.equal(snapshot.codex_totals.completed, 1);
     assert.equal(snapshot.codex_totals.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
@@ -836,6 +836,119 @@ test('publish turn does not treat In Review as a successful handoff without push
             (entry) => entry.eventType === 'turn/review_handoff_checkpoint',
         ),
         false,
+    );
+});
+
+test('publish turn treats PR mutation evidence as a successful review handoff without branch push', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'review-handoff-pr-mutation-only-1',
+        identifier: 'ROB-65-REVIEW-HANDOFF-PR-MUTATION-ONLY',
+        priority: 1,
+        createdAt: '2026-03-10T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-65-review-handoff-pr-mutation-only';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-65-review-handoff-pr-mutation-only'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-65-review-handoff-pr-mutation-only'},
+    ];
+    const firstDispatch = createDeferred<{
+        status: 'completed' | 'input_required';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let stopCalls = 0;
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-review-pr-mutation',
+                    turnId: 'turn-review-pr-mutation',
+                    sessionId: 'thread-review-pr-mutation-turn-review-pr-mutation',
+                });
+                tracker.statesByIssueId.set(issue.id, 'In Review');
+                emitEvent({
+                    type: 'raw_event',
+                    payload: {
+                        method: 'codex/event/exec_command_end',
+                        params: {
+                            msg: {
+                                command: "gh pr edit --title 'Review-ready PR'",
+                                exitCode: 0,
+                            },
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'trace',
+                    category: 'tool',
+                    eventType: 'tool/call/responded',
+                    message: 'Dynamic tool response sent for linear_graphql.',
+                    details: {
+                        tool: 'linear_graphql',
+                        success: true,
+                    },
+                });
+
+                return firstDispatch.promise;
+            },
+            stop: async () => {
+                stopCalls += 1;
+                firstDispatch.reject(
+                    new AppServerClientError(
+                        'turn_cancelled',
+                        'App-server session was cancelled after review handoff.',
+                    ),
+                );
+            },
+        }),
+    });
+
+    await orchestrator.runTick();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await orchestrator.shutdown();
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.ok(stopCalls >= 1);
+    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.retrying.length, 0);
+    assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
+        {
+            identifier: 'ROB-65-REVIEW-HANDOFF-PR-MUTATION-ONLY',
+            stateName: 'In Review',
+        },
+    ]);
+    assert.deepEqual(workspace.cleanupCalls, [
+        {
+            workspacePath: '/tmp/symphony-workspaces/ROB-65-REVIEW-HANDOFF-PR-MUTATION-ONLY',
+            options: {
+                closeOpenPrs: false,
+                reason: 'review_handoff',
+            },
+        },
+    ]);
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-65-REVIEW-HANDOFF-PR-MUTATION-ONLY');
+    assert.ok(issueDetails);
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(
+        (trace.recent as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'turn/review_handoff_checkpoint',
+        ),
     );
 });
 

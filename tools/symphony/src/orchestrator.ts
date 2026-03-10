@@ -2689,7 +2689,7 @@ export class SymphonyOrchestrator {
             attempts: {
                 restart_count: args.retryEntry
                     ? Math.max(args.retryEntry.attempt - 1, 0)
-                    : args.runningEntry?.attempt ?? 0,
+                    : (args.runningEntry?.attempt ?? 0),
                 current_retry_attempt: args.retryEntry?.attempt ?? args.runningEntry?.attempt ?? null,
             },
             running:
@@ -3222,24 +3222,16 @@ export class SymphonyOrchestrator {
                 stateName: currentState,
             };
 
-            if (runningEntry.trackerClient.syncIssueWorkpadToState) {
-                try {
-                    runningEntry.issue = await runningEntry.trackerClient.syncIssueWorkpadToState(runningEntry.issue);
-                } catch (error) {
-                    const classified = this.classifyError(error);
-                    this.logger.warn('Failed to synchronize issue workpad during publish-state checkpoint.', {
-                        ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
-                        errorClass: classified.errorClass,
-                        error: classified.message,
-                        currentState,
-                    });
-                }
-            }
-
             if (
                 normalizedCurrentState === normalizedReviewState &&
                 isSuccessfulReviewHandoff(currentState, runningEntry.reviewStateName, runningEntry)
             ) {
+                runningEntry.issue = await this.syncIssueWorkpadToStateBestEffort({
+                    tracker: runningEntry.trackerClient,
+                    issue: runningEntry.issue,
+                    sessionId: runningEntry.sessionId,
+                    warningMessage: 'Failed to synchronize issue workpad during publish-state checkpoint.',
+                });
                 this.logger.info('Stopping publish turn immediately after issue entered review state.', {
                     ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                     currentState,
@@ -3263,6 +3255,28 @@ export class SymphonyOrchestrator {
                 return;
             }
 
+            if (normalizedCurrentState === normalizedReviewState) {
+                this.recordTrace(
+                    runningEntry,
+                    'turn',
+                    'turn/review_handoff_skipped_missing_evidence',
+                    `Issue entered ${currentState} without concrete publish evidence; continuing the publish turn.`,
+                    {
+                        current_state: currentState,
+                        observed_open_pull_request: runningEntry.observedOpenPullRequest,
+                        observed_pull_request_mutation: runningEntry.observedPullRequestMutation,
+                        observed_branch_push: runningEntry.observedBranchPush,
+                    },
+                );
+                return;
+            }
+
+            runningEntry.issue = await this.syncIssueWorkpadToStateBestEffort({
+                tracker: runningEntry.trackerClient,
+                issue: runningEntry.issue,
+                sessionId: runningEntry.sessionId,
+                warningMessage: 'Failed to synchronize issue workpad during publish-state checkpoint.',
+            });
             this.logger.info('Stopping publish turn immediately after issue reached a terminal state.', {
                 ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
                 currentState,
