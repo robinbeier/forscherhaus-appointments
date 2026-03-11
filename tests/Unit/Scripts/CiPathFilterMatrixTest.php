@@ -20,6 +20,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
     }
@@ -36,6 +37,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
     }
@@ -52,6 +54,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
     }
@@ -68,6 +71,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertTrue($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertTrue($matches['write_contract_booking']);
         self::assertTrue($matches['write_contract_api']);
     }
@@ -84,6 +88,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertTrue($matches['integration_smoke']);
+        self::assertTrue($matches['ldap_guardrail_required']);
         self::assertTrue($matches['write_contract_booking']);
         self::assertTrue($matches['write_contract_api']);
     }
@@ -100,6 +105,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
     }
@@ -116,6 +122,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertTrue($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertTrue($matches['write_contract_booking']);
         self::assertTrue($matches['write_contract_api']);
     }
@@ -160,6 +167,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
     }
@@ -176,6 +184,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
     }
@@ -192,6 +201,24 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
         self::assertFalse($matches['integration_smoke']);
+        self::assertTrue($matches['ldap_guardrail_required']);
+        self::assertFalse($matches['write_contract_booking']);
+        self::assertFalse($matches['write_contract_api']);
+    }
+
+    public function testLdapSmokeScriptChangeTriggersLdapGuardrailFilter(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/dashboard_integration_smoke.php']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertFalse($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertTrue($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
     }
@@ -272,6 +299,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertArrayHasKey('coverage_required', $filters);
         self::assertArrayHasKey('heavy_job_trends_required', $filters);
         self::assertArrayHasKey('pdf_renderer_latency_required', $filters);
+        self::assertArrayHasKey('ldap_guardrail_required', $filters);
 
         return $filters;
     }

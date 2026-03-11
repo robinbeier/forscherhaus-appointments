@@ -32,6 +32,7 @@ jobs:
       api_contract: ${{ steps.filter.outputs.api_contract }}
       booking_flows: ${{ steps.filter.outputs.booking_flows }}
       integration_smoke: ${{ steps.filter.outputs.integration_smoke }}
+      ldap_guardrail_required: ${{ steps.filter.outputs.ldap_guardrail_required }}
       write_contract_booking: ${{ steps.filter.outputs.write_contract_booking }}
       write_contract_api: ${{ steps.filter.outputs.write_contract_api }}
 
@@ -290,6 +291,25 @@ jobs:
               - 'composer.lock'
               - 'index.php'
               - 'openapi.yml'
+              - '.github/workflows/ci.yml'
+            ldap_guardrail_required:
+              - 'application/controllers/Login.php'
+              - 'application/controllers/Ldap_settings.php'
+              - 'application/libraries/Ldap_client.php'
+              - 'application/models/Admins_model.php'
+              - 'application/models/Customers_model.php'
+              - 'application/models/Providers_model.php'
+              - 'application/models/Users_model.php'
+              - 'application/views/pages/ldap_settings.php'
+              - 'application/views/components/ldap_import_modal.php'
+              - 'application/migrations/057_add_ldap_rows_to_settings_table.php'
+              - 'application/migrations/058_add_ldap_dn_column_to_users_table.php'
+              - 'docker/ldap/**'
+              - 'docker/openldap/**'
+              - 'scripts/ldap/**'
+              - 'scripts/ci/dashboard_integration_smoke.php'
+              - 'scripts/ci/run_deep_runtime_suite.php'
+              - 'docker-compose.yml'
               - '.github/workflows/ci.yml'
             write_contract_booking:
               - 'application/controllers/Booking*.php'
@@ -693,11 +713,32 @@ jobs:
           {
             echo "requested=$(IFS=,; echo "${suites[*]}")"
           } >> "$GITHUB_OUTPUT"
+      - name: Resolve LDAP guardrail scope
+        id: ldap_guardrail
+        run: |
+          include_ldap="false"
+
+          if [[ "${{ needs.changes.outputs.integration_smoke }}" == "true" ]]; then
+            if [[ "${{ github.event_name }}" == "push" || "${{ needs.changes.outputs.ldap_guardrail_required }}" == "true" ]]; then
+              include_ldap="true"
+            fi
+          fi
+
+          {
+            echo "include_ldap=${include_ldap}"
+          } >> "$GITHUB_OUTPUT"
       - name: Start deep runtime services
         env:
           EA_SKIP_NPM_BOOTSTRAP: "1"
           EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm nginx openldap
+        run: |
+          services=(mysql php-fpm nginx)
+
+          if [[ "${{ steps.ldap_guardrail.outputs.include_ldap }}" == "true" ]]; then
+            services+=(openldap)
+          fi
+
+          docker compose up -d "${services[@]}"
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Install deterministic seed instance
@@ -720,6 +761,7 @@ jobs:
           --username=administrator --password=administrator
           --booking-search-days=14 --retry-count=1
           --start-date=2026-01-01 --end-date=2026-01-31
+          --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
           --report-dir=storage/logs/ci/deep-runtime-suite
       - name: Upload deep runtime suite artifacts
         if: always()
