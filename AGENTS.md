@@ -49,6 +49,12 @@ Hinweis: `README.md` bleibt bewusst kompakter. Die vollstaendige Kommandomatrix
 lebt hier in `AGENTS.md`; der kurze Routing-Einstieg steht in
 `docs/agent-harness-index.md`.
 
+Hinweis: Die kanonische Ownership-Quelle `docs/maps/component_ownership_map.json`
+kann Komponenten explizit als `single-owner` und `manual_approval_required`
+markieren. Behandle solche Komponenten konservativ: gruene Checks ersetzen dort
+keine explizite menschliche Produktsteuerung bei unklaren oder risikobehafteten
+Intent-Aenderungen.
+
 ```bash
 # Entwicklung (Assets watch & rebuild)
 npm start
