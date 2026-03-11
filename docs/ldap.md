@@ -7,10 +7,10 @@ Easy!Appointments.
 
 ## Canonical Local Workflow
 
-The canonical local workflow is fixture-driven, not phpLDAPadmin-driven:
+The canonical local workflow is fixture-driven and does not depend on a bundled LDAP admin UI:
 
 ```bash
-docker compose up -d openldap phpldapadmin
+docker compose up -d openldap
 bash ./scripts/ldap/reset_directory.sh
 bash ./scripts/ldap/smoke.sh
 ```
@@ -30,24 +30,18 @@ LDAP_SERVICE_NAME=openldap-legacy bash ./scripts/ldap/smoke.sh
 ```
 
 By default, OpenLDAP is configured to run on `localhost:389`, so it can be accessed on the host machine from this
-address.
+address. In the internal Docker Compose network the equivalent address is `openldap:389`.
 
-In the internal Docker Compose network the equivalent address would be openldap:389. 
-
-Similarly, phpLDAPadmin is accessible in the host environment via `localhost:8200`, so it can be accessed on the host
-machine from this address.
-
-phpLDAPadmin is optional and should be treated as an inspection/debugging tool. The seeded CLI workflow is the source
-of truth for local LDAP state.
+The seeded CLI workflow is the source of truth for local LDAP state. The default Docker stack no longer ships
+`phpLDAPadmin`; if you need ad-hoc inspection, use LDAP-native tooling against the deterministic fixture instead of a
+repo-managed UI sidecar.
 
 ## Local Bind Contract
 
-Once the local Docker environment is running, you can log in to phpLDAPadmin with the default admin user, by using the
-following credentials:
+The deterministic admin bind for local inspection and app configuration is:
 
-- URL: http://localhost:8200
-- User DN: cn=admin,dc=example,dc=org
-- Password: admin
+- User DN: `cn=admin,dc=example,dc=org`
+- Password: `admin`
 
 The deterministic readonly bind used by the local smoke is:
 

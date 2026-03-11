@@ -161,7 +161,6 @@ References:
 - Mailpit: `http://localhost:8025`
 - PDF renderer: `http://localhost:3003`
 - Baikal (CalDAV): `http://localhost:8100`
-- phpLDAPadmin: `http://localhost:8200`
 
 For deterministic LDAP fixtures, reset and smoke the local directory with:
 
