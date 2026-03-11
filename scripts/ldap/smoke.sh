@@ -31,6 +31,15 @@ compose() {
     )
 }
 
+ensure_ldap_service_exists() {
+    if ! compose config --services | grep -Fxq "${LDAP_SERVICE_NAME}"; then
+        echo "[FAIL] Unknown LDAP service: ${LDAP_SERVICE_NAME}" >&2
+        echo "Available services:" >&2
+        compose config --services >&2
+        return 1
+    fi
+}
+
 run_ldap() {
     compose exec -T "${LDAP_SERVICE_NAME}" "$@"
 }
@@ -51,7 +60,7 @@ wait_for_openldap() {
         sleep 1
     done
 
-    echo "[FAIL] openldap readiness timeout" >&2
+    echo "[FAIL] LDAP service ${LDAP_SERVICE_NAME} readiness timeout" >&2
 
     return 1
 }
@@ -75,6 +84,8 @@ main() {
     local readonly_whoami
     local base_search
     local user_search
+
+    ensure_ldap_service_exists
 
     compose up -d "${LDAP_SERVICE_NAME}" >/dev/null
     wait_for_openldap
