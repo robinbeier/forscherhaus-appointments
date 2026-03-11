@@ -122,7 +122,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
         self::assertTrue($matches['integration_smoke']);
-        self::assertFalse($matches['ldap_guardrail_required']);
+        self::assertTrue($matches['ldap_guardrail_required']);
         self::assertTrue($matches['write_contract_booking']);
         self::assertTrue($matches['write_contract_api']);
     }
