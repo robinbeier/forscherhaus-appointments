@@ -81,26 +81,6 @@ services:
             - LDAP_INIT_ROOT_USER_DN=cn=admin,dc=example,dc=org
             - LDAP_INIT_ROOT_USER_PW=admin
 
-    openldap-legacy:
-        profiles:
-            - ldap-legacy
-        image: osixia/openldap:1.5.0
-        hostname: openldap-legacy
-        ports:
-            - '1389:389'
-            - '1636:636'
-        volumes:
-            - ./docker/openldap-legacy/certificates:/container/service/slapd/assets/certs
-            - ./docker/openldap-legacy/slapd/database:/var/lib/ldap
-            - ./docker/openldap-legacy/slapd/config:/etc/ldap/slapd.d
-        environment:
-            - LDAP_ORGANISATION=example
-            - LDAP_DOMAIN=example.org
-            - LDAP_ADMIN_USERNAME=admin
-            - LDAP_ADMIN_PASSWORD=admin
-            - LDAP_CONFIG_PASSWORD=config_pass
-            - 'LDAP_BASE_DN=dc=example,dc=org'
-
     pdf-renderer:
         platform: linux/amd64
         build: ./pdf-renderer

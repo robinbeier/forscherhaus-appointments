@@ -3,6 +3,11 @@
 This document captures the `ROB-92` parallel replacement validation that was promoted to the default helper stack in
 `ROB-93`.
 
+Archived status:
+
+- Since `ROB-112`, the temporary `openldap-legacy` fallback has been removed from the active repository path.
+- The commands and comparisons below are retained only as historical validation context for the cutover.
+
 ## Candidate
 
 - Preferred replacement image: `vegardit/openldap@sha256:efa7cff027fa2ac503b073161849f93e4ccaaa1b9ac0a9788814865032952564`
@@ -44,9 +49,12 @@ Current default smoke command:
 bash ./scripts/ldap/smoke.sh
 ```
 
-Legacy fallback reference path after the cutover:
+Historical fallback reference path before `ROB-112` removal:
 
-```bash
+Do not use these commands for the current local setup; they describe the retired fallback as it existed during the
+transition period.
+
+```text
 docker compose --profile ldap-legacy up -d openldap-legacy
 LDAP_SERVICE_NAME=openldap-legacy bash ./scripts/ldap/reset_directory.sh
 LDAP_SERVICE_NAME=openldap-legacy bash ./scripts/ldap/smoke.sh
@@ -60,8 +68,8 @@ ldapsearch -x -H ldap://127.0.0.1:1389 \
   -b 'dc=example,dc=org' '(uid=ada)' cn uid mail -LLL
 ```
 
-The original parallel-only service from `ROB-92` has now been folded into the default `openldap` path. The documented
-rollback/reference path is the profiled legacy stack above.
+The original parallel-only service from `ROB-92` has now been folded into the default `openldap` path. The temporary
+legacy fallback shown above is archived historical context only and is no longer part of the active Docker stack.
 
 Host-port caveat during the validation phase:
 

@@ -18,23 +18,15 @@ bash ./scripts/ldap/smoke.sh
 The default helper stack now uses the versioned `docker/ldap/vegardit` bootstrap fixtures, while the generated runtime
 state under `docker/openldap/{var,etc}` remains local-only and disposable.
 
-For the replacement validation that led to this default cutover, see [LDAP parallel replacement spike](ldap-parallel-spike.md).
-
-If you need the old reference stack temporarily, start the profiled fallback and target it explicitly from the helper
-scripts:
-
-```bash
-docker compose --profile ldap-legacy up -d openldap-legacy
-LDAP_SERVICE_NAME=openldap-legacy bash ./scripts/ldap/reset_directory.sh
-LDAP_SERVICE_NAME=openldap-legacy bash ./scripts/ldap/smoke.sh
-```
+For the replacement validation that led to this default cutover, see the archived
+[LDAP parallel replacement spike](ldap-parallel-spike.md).
 
 By default, OpenLDAP is configured to run on `localhost:389`, so it can be accessed on the host machine from this
 address. In the internal Docker Compose network the equivalent address is `openldap:389`.
 
 The seeded CLI workflow is the source of truth for local LDAP state. The default Docker stack no longer ships
-`phpLDAPadmin`; if you need ad-hoc inspection, use LDAP-native tooling against the deterministic fixture instead of a
-repo-managed UI sidecar.
+`phpLDAPadmin`, and the repo no longer carries an `openldap-legacy` fallback profile. If you need ad-hoc inspection,
+use LDAP-native tooling against the deterministic fixture instead of a repo-managed sidecar or legacy image path.
 
 ## Local Bind Contract
 
