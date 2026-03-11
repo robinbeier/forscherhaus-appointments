@@ -28,11 +28,15 @@ test('ensure_issue_worktree accepts a git worktree repo root with a .git file', 
     await mkdir(workspacePath, {recursive: true});
     await mkdir(fakeBin, {recursive: true});
     await mkdir(path.join(fakeGitDir, 'info'), {recursive: true});
-    await mkdir(path.join(repoRoot, '.codex', 'skills', 'land'), {recursive: true});
+    await mkdir(path.join(repoRoot, '.codex', 'skills', 'land', 'agents'), {recursive: true});
     await mkdir(path.join(repoRoot, '.claude'), {recursive: true});
     await writeFile(
         path.join(repoRoot, '.codex', 'skills', 'land', 'SKILL.md'),
         '---\nname: land\ndescription: ok\n---\n',
+    );
+    await writeFile(
+        path.join(repoRoot, '.codex', 'skills', 'land', 'agents', 'openai.yaml'),
+        "interface:\n    display_name: 'Land PR'\n",
     );
     await writeFile(path.join(repoRoot, '.claude', 'napkin.md'), '# Napkin\n');
     const workspaceRealPath = await realpath(workspacePath);
@@ -82,9 +86,13 @@ if [[ "$*" == *"checkout -B feature/rob-44 origin/feature/rob-44"* ]]; then
 fi
 if [[ "$*" == *"ls-files .codex/skills .claude/napkin.md"* ]]; then
     printf '.codex/skills/land/SKILL.md\n'
+    printf '.codex/skills/land/agents/openai.yaml\n'
     exit 0
 fi
 if [[ "$*" == *"update-index --assume-unchanged -- .codex/skills/land/SKILL.md"* ]]; then
+    exit 0
+fi
+if [[ "$*" == *"update-index --assume-unchanged -- .codex/skills/land/agents/openai.yaml"* ]]; then
     exit 0
 fi
 if [[ "$*" == *"worktree add -b codex/symphony-rob-44"* ]]; then
@@ -115,12 +123,18 @@ exit 99
         assert.match(gitLog, /rev-parse --git-dir/);
         assert.match(gitLog, /checkout -B feature\/rob-44 origin\/feature\/rob-44/);
         assert.match(gitLog, /update-index --assume-unchanged -- \.codex\/skills\/land\/SKILL\.md/);
+        assert.match(gitLog, /update-index --assume-unchanged -- \.codex\/skills\/land\/agents\/openai\.yaml/);
         assert.match(gitLog, /worktree add -b codex\/symphony-rob-44 .* HEAD/);
 
         const syncedSkill = await readFile(path.join(workspacePath, '.codex', 'skills', 'land', 'SKILL.md'), 'utf8');
+        const syncedOpenAiMetadata = await readFile(
+            path.join(workspacePath, '.codex', 'skills', 'land', 'agents', 'openai.yaml'),
+            'utf8',
+        );
         const syncedNapkin = await readFile(path.join(workspacePath, '.claude', 'napkin.md'), 'utf8');
         const excludeContents = await readFile(excludePath, 'utf8');
         assert.match(syncedSkill, /name: land/);
+        assert.match(syncedOpenAiMetadata, /display_name: 'Land PR'/);
         assert.match(syncedNapkin, /# Napkin/);
         assert.match(excludeContents, /\/\.codex\/skills\/\*/);
         assert.match(excludeContents, /\/\.codex\/skills\/\*\*/);

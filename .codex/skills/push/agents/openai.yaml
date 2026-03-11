@@ -1,0 +1,11 @@
+interface:
+    display_name: 'Publish PR'
+    short_description: 'Push the branch, publish the PR, and sync Linear'
+    default_prompt: 'Push the current issue branch, publish or update the GitHub pull request, link it back to Linear, and move the issue into the correct review state once the relevant validation for the current diff is already green.'
+policy:
+    allow_implicit_invocation: false
+dependencies:
+    tools:
+        - type: 'mcp'
+          value: 'linear'
+          description: 'Linear MCP server access for issue state, workpad, and PR linkage updates'

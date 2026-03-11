@@ -1,0 +1,11 @@
+interface:
+    display_name: 'Land PR'
+    short_description: 'Shepherd a ready PR through checks, reviews, and merge'
+    default_prompt: 'Land the current pull request from Ready to Merge: keep it mergeable against origin/main, monitor CI and review signals, fix valid issues if they appear, and merge only once the PR is green, review-clean, and explicitly mergeable.'
+policy:
+    allow_implicit_invocation: false
+dependencies:
+    tools:
+        - type: 'mcp'
+          value: 'linear'
+          description: 'Linear MCP server access for rework, merge, and final workpad state transitions'
