@@ -4,8 +4,13 @@ declare(strict_types=1);
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateCliSupport.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
+require_once __DIR__ . '/lib/BrowserRuntimeEvidence.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 
+use function CiRuntimeEvidence\buildDefaultBrowserRuntimeEvidenceArtifactsDir;
+use function CiRuntimeEvidence\collectBookingPageBrowserEvidence;
+use function CiRuntimeEvidence\parseBrowserRuntimeEvidenceMode;
+use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidence;
 use CiContract\CheckSelection;
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
@@ -20,12 +25,13 @@ $checks = [];
 $failure = null;
 $exitCode = INTEGRATION_SMOKE_EXIT_SUCCESS;
 $reportPath = null;
+$browserEvidence = null;
 
 $repoRoot = dirname(__DIR__, 2);
 $csrfDefaults = GateCliSupport::resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
 
 try {
-    $config = parseCliOptions($csrfDefaults);
+    $config = parseCliOptions($csrfDefaults, $repoRoot);
 
     if (dashboardIntegrationSmokeRequiresLdapFixture($config)) {
         $config = array_merge($config, dashboardIntegrationSmokePrepareLdapAppGuardrailFixture($repoRoot));
@@ -471,8 +477,46 @@ try {
     ];
 }
 
+if (
+    isset($config) &&
+    is_array($config) &&
+    shouldCollectBrowserRuntimeEvidence(
+        (string) ($config['browser_evidence_mode'] ?? 'off'),
+        $exitCode !== INTEGRATION_SMOKE_EXIT_SUCCESS,
+    )
+) {
+    try {
+        $browserEvidence = collectBookingPageBrowserEvidence([
+            'repo_root' => $repoRoot,
+            'base_url' => (string) $config['base_url'],
+            'index_page' => (string) $config['index_page'],
+            'artifacts_dir' => (string) $config['browser_evidence_dir'],
+            'pwcli_path' => (string) $config['browser_pwcli_path'],
+            'bootstrap_timeout' => (int) $config['browser_bootstrap_timeout'],
+            'open_timeout' => (int) $config['browser_open_timeout'],
+            'headed' => (bool) $config['browser_headed'],
+            'mode' => (string) $config['browser_evidence_mode'],
+        ]);
+    } catch (Throwable $e) {
+        $browserEvidence = [
+            'status' => 'runtime_error',
+            'mode' => (string) ($config['browser_evidence_mode'] ?? 'off'),
+            'target_url' => null,
+            'artifacts_dir' => (string) ($config['browser_evidence_dir'] ?? ''),
+            'summary_path' => null,
+            'steps' => [],
+            'artifacts' => [],
+            'failure' => [
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+            ],
+            'cleanup_warnings' => [],
+        ];
+    }
+}
+
 try {
-    $reportPath = writeReport($config ?? [], $checks, $failure);
+    $reportPath = writeReport($config ?? [], $checks, $failure, $browserEvidence);
 } catch (Throwable $e) {
     fwrite(STDERR, '[WARN] Failed to write integration smoke report: ' . $e->getMessage() . PHP_EOL);
 }
@@ -489,6 +533,10 @@ if ($exitCode === INTEGRATION_SMOKE_EXIT_SUCCESS) {
 
 if ($reportPath !== null) {
     fwrite(STDOUT, '[INFO] Report: ' . $reportPath . PHP_EOL);
+}
+
+if (is_array($browserEvidence) && !empty($browserEvidence['summary_path'])) {
+    fwrite(STDOUT, '[INFO] Browser evidence: ' . $browserEvidence['summary_path'] . PHP_EOL);
 }
 
 exit($exitCode);
@@ -509,13 +557,19 @@ exit($exitCode);
  *   csrf_token_name:string,
  *   csrf_cookie_name:string,
  *   output_json:string,
+ *   browser_evidence_mode:string,
+ *   browser_evidence_dir:string,
+ *   browser_pwcli_path:string,
+ *   browser_bootstrap_timeout:int,
+ *   browser_open_timeout:int,
+ *   browser_headed:bool,
  *   requested_checks:array<int, string>,
  *   effective_checks:array<int, string>,
  *   selection_reason_by_check:array<string, string>,
  *   effective_check_lookup:array<string, bool>
  * }
  */
-function parseCliOptions(array $csrfDefaults): array
+function parseCliOptions(array $csrfDefaults, string $repoRoot): array
 {
     $options = getopt('', [
         'base-url:',
@@ -530,6 +584,12 @@ function parseCliOptions(array $csrfDefaults): array
         'booking-search-days::',
         'http-timeout::',
         'output-json::',
+        'browser-evidence::',
+        'browser-evidence-dir::',
+        'browser-pwcli-path::',
+        'browser-bootstrap-timeout::',
+        'browser-open-timeout::',
+        'browser-headed::',
         'checks::',
         'help::',
     ]);
@@ -555,6 +615,36 @@ function parseCliOptions(array $csrfDefaults): array
         getOptionalOption($options, 'booking-search-days', 14),
         'booking-search-days',
     );
+    $browserEvidenceMode = parseBrowserRuntimeEvidenceMode(getOptionalOption($options, 'browser-evidence', null));
+    $browserEvidenceDir = resolvePath(
+        trim(
+            (string) getOptionalOption(
+                $options,
+                'browser-evidence-dir',
+                buildDefaultBrowserRuntimeEvidenceArtifactsDir($repoRoot),
+            ),
+        ),
+        $repoRoot,
+    );
+    $browserPwcliPath = resolvePath(
+        trim(
+            (string) getOptionalOption(
+                $options,
+                'browser-pwcli-path',
+                $repoRoot . '/scripts/release-gate/playwright/playwright_cli.sh',
+            ),
+        ),
+        $repoRoot,
+    );
+    $browserBootstrapTimeout = parsePositiveInt(
+        getOptionalOption($options, 'browser-bootstrap-timeout', 90),
+        'browser-bootstrap-timeout',
+    );
+    $browserOpenTimeout = parsePositiveInt(
+        getOptionalOption($options, 'browser-open-timeout', 20),
+        'browser-open-timeout',
+    );
+    $browserHeaded = parseBooleanOption(getOptionalOption($options, 'browser-headed', null));
 
     if ($baseUrl === '') {
         throw new InvalidArgumentException('Option --base-url must not be empty.');
@@ -602,6 +692,12 @@ function parseCliOptions(array $csrfDefaults): array
         'csrf_token_name' => $csrfDefaults['csrf_token_name'],
         'csrf_cookie_name' => $csrfDefaults['csrf_cookie_name'],
         'output_json' => (string) getOptionalOption($options, 'output-json', ''),
+        'browser_evidence_mode' => $browserEvidenceMode,
+        'browser_evidence_dir' => $browserEvidenceDir,
+        'browser_pwcli_path' => $browserPwcliPath,
+        'browser_bootstrap_timeout' => $browserBootstrapTimeout,
+        'browser_open_timeout' => $browserOpenTimeout,
+        'browser_headed' => $browserHeaded,
         'requested_checks' => $selection['requested_checks'],
         'effective_checks' => $selection['effective_checks'],
         'selection_reason_by_check' => $selection['selection_reason_by_check'],
@@ -629,6 +725,12 @@ function printHelpAndExit(): void
       --booking-search-days=14
       --http-timeout=15
       --output-json=PATH
+      --browser-evidence=off|on-failure|always
+      --browser-evidence-dir=PATH
+      --browser-pwcli-path=scripts/release-gate/playwright/playwright_cli.sh
+      --browser-bootstrap-timeout=90
+      --browser-open-timeout=20
+      --browser-headed
       --checks=id1,id2
     TXT;
 
@@ -640,8 +742,9 @@ function printHelpAndExit(): void
  * @param array<string, mixed> $config
  * @param array<int, array<string, mixed>> $checks
  * @param array<string, mixed>|null $failure
+ * @param array<string, mixed>|null $browserEvidence
  */
-function writeReport(array $config, array $checks, ?array $failure): string
+function writeReport(array $config, array $checks, ?array $failure, ?array $browserEvidence): string
 {
     $outputPath = trim((string) ($config['output_json'] ?? ''));
     if ($outputPath === '') {
@@ -671,6 +774,7 @@ function writeReport(array $config, array $checks, ?array $failure): string
         ],
         'checks' => $checks,
         'failure' => $failure,
+        'browser_evidence' => $browserEvidence,
     ];
 
     $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -1046,6 +1150,47 @@ function parsePositiveInt(mixed $value, string $name): int
     }
 
     return $parsed;
+}
+
+function parseBooleanOption(mixed $raw): bool
+{
+    if ($raw === null) {
+        return false;
+    }
+
+    if ($raw === false) {
+        return true;
+    }
+
+    if (is_bool($raw)) {
+        return $raw;
+    }
+
+    $value = is_array($raw) ? end($raw) : $raw;
+    $normalized = strtolower(trim((string) $value));
+
+    if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+        return true;
+    }
+
+    if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+        return false;
+    }
+
+    throw new InvalidArgumentException('Boolean option value is invalid: ' . $normalized);
+}
+
+function resolvePath(string $path, string $repoRoot): string
+{
+    if ($path === '') {
+        throw new InvalidArgumentException('Path option must not be empty.');
+    }
+
+    if (str_starts_with($path, '/')) {
+        return $path;
+    }
+
+    return rtrim($repoRoot, '/') . '/' . ltrim($path, '/');
 }
 
 function validateDate(string $value, string $name): void

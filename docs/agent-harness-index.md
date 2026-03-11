@@ -46,6 +46,7 @@ This file stays intentionally short. It is a map, not a second runbook.
   - `composer check:harness-report-dates`
 - Scope-specific checks:
   - write-path contracts: `docs/ci-write-contracts.md`
+  - integration smoke browser evidence: `docs/release-gate-dashboard.md`
   - architecture boundaries: `AGENTS.md`
   - Symphony pilot checks: `AGENTS.md`, `tools/symphony/README.md`
 

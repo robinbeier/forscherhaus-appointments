@@ -91,6 +91,12 @@ class DeepRuntimeSuiteTest extends TestCase
             ],
             $checks,
         );
+        self::assertStringContainsString("--browser-evidence='on-failure'", $definitions[0]['command']);
+        self::assertStringContainsString(
+            "--browser-evidence-dir='" . $this->tmpDir . "/integration-smoke-browser'",
+            $definitions[0]['command'],
+        );
+        self::assertSame($this->tmpDir . '/integration-smoke-browser', $definitions[0]['artifacts_dir']);
     }
 
     public function testIntegrationSmokeSuiteIncludesLdapGuardrailChecksWhenEnabled(): void
@@ -153,6 +159,7 @@ class DeepRuntimeSuiteTest extends TestCase
         self::assertSame(1, $manifest['suites']['api-contract-openapi']['exit_code']);
         self::assertSame('pass', $manifest['suites']['booking-controller-flows']['status']);
         self::assertSame(0, $manifest['suites']['booking-controller-flows']['exit_code']);
+        self::assertArrayHasKey('artifacts_dir', $manifest['suites']['api-contract-openapi']);
         self::assertNotSame('', $manifest['completed_at_utc']);
     }
 
@@ -161,6 +168,8 @@ class DeepRuntimeSuiteTest extends TestCase
         file_put_contents($this->tmpDir . '/manifest.json', '{}');
         file_put_contents($this->tmpDir . '/api-contract-openapi.json', '{}');
         file_put_contents($this->tmpDir . '/write-contract-booking.log', 'stale');
+        mkdir($this->tmpDir . '/integration-smoke-browser', 0777, true);
+        file_put_contents($this->tmpDir . '/integration-smoke-browser/summary.json', '{}');
         file_put_contents($this->tmpDir . '/keep-me.txt', 'keep');
 
         prepareDeepRuntimeReportDirectory($this->tmpDir);
@@ -168,6 +177,7 @@ class DeepRuntimeSuiteTest extends TestCase
         self::assertFileDoesNotExist($this->tmpDir . '/manifest.json');
         self::assertFileDoesNotExist($this->tmpDir . '/api-contract-openapi.json');
         self::assertFileDoesNotExist($this->tmpDir . '/write-contract-booking.log');
+        self::assertDirectoryDoesNotExist($this->tmpDir . '/integration-smoke-browser');
         self::assertFileExists($this->tmpDir . '/keep-me.txt');
     }
 
