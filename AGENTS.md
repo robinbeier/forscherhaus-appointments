@@ -173,6 +173,14 @@ GITHUB_TOKEN="$(gh auth token)" php scripts/ci/check_heavy_job_duration_trends.p
   --repo=robinbeier/forscherhaus-appointments \
   --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
 
+# Optional: Agent harness readiness score + report date sanity
+composer check:agent-harness-readiness
+composer check:harness-report-dates
+php scripts/ci/check_agent_harness_readiness.php \
+  --output-json=storage/logs/ci/agent-harness-readiness-latest.json
+php scripts/ci/check_harness_report_dates.php \
+  --output-json=storage/logs/ci/harness-report-date-sanity-latest.json
+
 # Optional: PDF renderer latency trend signal (deterministic fixture, p50/p95)
 composer check:pdf-renderer-latency
 php scripts/ci/check_pdf_renderer_latency.php \
@@ -325,6 +333,7 @@ docker compose down -v --remove-orphans
 ```
 
 Hinweis: `dashboard_integration_smoke.php`, `booking_write_contract_smoke.php` und `api_openapi_write_contract_smoke.php` akzeptieren optional `--checks=id1,id2`; Vorbedingungen werden automatisch transitiv ergänzt, die Ausführung bleibt aber in fester Registry-/Matrix-Reihenfolge.
+Hinweis: Das Hygiene-Workflow `.github/workflows/hygiene.yml` fuehrt leichte Harness-/Drift-Checks wiederkehrend aus und schreibt standardmaessig nach `storage/logs/ci/agent-harness-readiness-latest.json` sowie `storage/logs/ci/harness-report-date-sanity-latest.json`.
 
 Hinweis: `composer test` erstellt `config.php` automatisch aus `config-sample.php`, falls sie fehlt. `DB_HOST='mysql'` ist Compose-DNS. Host-`composer test` funktioniert nur mit host-kompatibler `config.php`.
 Hinweis: `composer deptrac:analyze` kann auf neueren Host-PHP-Versionen (z. B. 8.5) zusaetzliche Vendor-Deprecation-Ausgaben zeigen; fuer CI-paritaer rauschfreie Ausgaben den Docker-Run `docker compose run --rm php-fpm composer deptrac:analyze` verwenden.

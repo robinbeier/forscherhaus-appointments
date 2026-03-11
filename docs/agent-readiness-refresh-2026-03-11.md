@@ -1,7 +1,7 @@
-# Agent Readiness Refresh - 2026-03-18
+# Agent Readiness Refresh - 2026-03-11
 
 ## Scope
-This document is the final delta-refresh and re-baselining snapshot for agent-native readiness as of **2026-03-18**.
+This document is the final delta-refresh and re-baselining snapshot for agent-native readiness as of **2026-03-11**.
 
 ## Executive Summary
 - Overall readiness is now **4.62/5.00** and clears the hard target `>= 4.5`.
@@ -27,7 +27,7 @@ Baseline for delta comparison in this refresh: **4.20** (hardening kickoff basel
 
 ## CI Contract: Vorher vs Nachher
 
-| Gate | Vorher (Rollout) | Nachher (Stand 2026-03-18) | Evidence |
+| Gate | Vorher (Rollout) | Nachher (Stand 2026-03-11) | Evidence |
 | --- | --- | --- | --- |
 | `coverage-delta` | Warn-only (`continue-on-error: true`) during rollout. | Blocking (no job-level `continue-on-error`). | `f0ad4210:.github/workflows/ci.yml` (contains `continue-on-error` for `coverage-delta`), `.github/workflows/ci.yml:299` |
 | `write-contract-booking` | Warn-only rollout until streak target. | Blocking (rollout precondition met). | `6ac1ddbf^:.github/workflows/ci.yml` (contains `continue-on-error`), `.github/workflows/ci.yml:536`, `README.md:210` |

@@ -40,10 +40,26 @@ This file stays intentionally short. It is a map, not a second runbook.
   - `bash ./scripts/ci/pre_pr_quick.sh`
 - Full review-ready gate:
   - `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
+- Harness readiness score:
+  - `composer check:agent-harness-readiness`
+- Report date sanity:
+  - `composer check:harness-report-dates`
 - Scope-specific checks:
   - write-path contracts: `docs/ci-write-contracts.md`
   - architecture boundaries: `AGENTS.md`
   - Symphony pilot checks: `AGENTS.md`, `tools/symphony/README.md`
+
+## Scheduled Hygiene
+
+- Scheduled lightweight hygiene lives in `.github/workflows/hygiene.yml`.
+- `agent-harness-readiness-latest.json` is the machine-readable scorecard; use it
+  for the current readiness snapshot, not older narrative docs alone.
+- `harness-report-date-sanity-latest.json` verifies that dated readiness/audit
+  artifacts are not future-dated or internally mismatched.
+- Reaction model:
+  - `pass`: the harness signals and supporting docs are internally consistent.
+  - `fail`: fix the listed drift or date violations before trusting the score as
+    the current repo state.
 
 ## Editing Rules
 
