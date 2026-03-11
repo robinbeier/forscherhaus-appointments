@@ -12,7 +12,7 @@ services:
             - './docker/php-fpm/php-ini-overrides.ini:/usr/local/etc/php/conf.d/99-overrides.ini'
 
     nginx:
-        image: 'nginx:1.29.5-alpine'
+        image: 'nginx:1.29.6-alpine'
         working_dir: /var/www/html
         volumes:
             - '.:/var/www/html'
@@ -41,7 +41,7 @@ services:
             - 'UPLOAD_LIMIT=102400K'
 
     mailpit:
-        image: 'axllent/mailpit:v1.29'
+        image: 'axllent/mailpit:v1.29.3'
         ports:
             - '8025:8025'
             - '1025:1025'
