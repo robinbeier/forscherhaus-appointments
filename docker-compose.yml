@@ -81,17 +81,6 @@ services:
             - LDAP_INIT_ROOT_USER_DN=cn=admin,dc=example,dc=org
             - LDAP_INIT_ROOT_USER_PW=admin
 
-    phpldapadmin:
-        image: osixia/phpldapadmin:0.9.0
-        hostname: phpldapadmin
-        ports:
-            - '8200:80'
-        environment:
-            - PHPLDAPADMIN_LDAP_HOSTS=openldap
-            - PHPLDAPADMIN_HTTPS=false
-        depends_on:
-            - openldap
-
     openldap-legacy:
         profiles:
             - ldap-legacy

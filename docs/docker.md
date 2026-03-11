@@ -82,11 +82,12 @@ Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integrati
 
 While activating CalDAV sync with the local Docker-based Baikal, you will need to first create a new Baikal user and then the credentials you defined along with the http://baikal/dav.php URL
 
-Openldap is configured to run through `openldap` container and ports `389` and `636`. 
+Openldap is configured to run through the `openldap` container and ports `389` and `636`.
 
-Phpldapadmin, an admin portal for openldap is available on `http://localhost:8200` (credentials are `cn=admin,dc=example,dc=org` / `admin`).
+The default Docker stack no longer bundles phpLDAPadmin. Use the deterministic LDAP reset/smoke helpers and standard
+LDAP clients against the local fixture instead.
 
-The deterministic local LDAP fixture now comes from the versioned seed files in `docker/ldap/seed`. Recreate and verify the directory with:
+The deterministic local LDAP fixture is versioned in the repository. Recreate and verify the directory with:
 
 ```bash
 bash ./scripts/ldap/reset_directory.sh
