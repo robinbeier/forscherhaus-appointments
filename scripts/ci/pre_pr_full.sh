@@ -33,6 +33,71 @@ cleanup_stack() {
     ci_docker_cleanup_stack
 }
 
+pre_pr_full_should_include_ldap_guardrail() {
+    local diff_range changed_paths
+
+    if [[ "${PRE_PR_INCLUDE_LDAP_GUARDRAIL:-}" == "1" ]]; then
+        return 0
+    fi
+
+    if [[ "${PRE_PR_INCLUDE_LDAP_GUARDRAIL:-}" == "0" ]]; then
+        return 1
+    fi
+
+    if [[ "$BASE_REF" == origin/* ]]; then
+        diff_range="${BASE_REF}...HEAD"
+    else
+        diff_range="origin/${BASE_REF}...HEAD"
+    fi
+
+    if ! changed_paths="$(git diff --name-only "$diff_range" 2>/dev/null)"; then
+        changed_paths="$(git diff --name-only HEAD~1...HEAD 2>/dev/null || true)"
+    fi
+
+    while IFS= read -r path; do
+        case "$path" in
+            application/controllers/Login.php|\
+            application/controllers/Ldap_settings.php|\
+            application/libraries/Ldap_client.php|\
+            application/models/Admins_model.php|\
+            application/models/Customers_model.php|\
+            application/models/Providers_model.php|\
+            application/models/Settings_model.php|\
+            application/models/Users_model.php|\
+            application/helpers/*|\
+            application/helpers/*/*|\
+            application/helpers/*/*/*|\
+            application/libraries/Accounts.php|\
+            application/libraries/Integrations_request_dto_factory.php|\
+            application/libraries/Auth_request_dto_factory.php|\
+            application/views/pages/ldap_settings.php|\
+            application/views/components/ldap_import_modal.php|\
+            application/config/constants.php|\
+            application/helpers/setting_helper.php|\
+            application/migrations/057_add_ldap_rows_to_settings_table.php|\
+            application/migrations/058_add_ldap_dn_column_to_users_table.php|\
+            docker/ldap/*|\
+            docker/ldap/*/*|\
+            docker/ldap/*/*/*|\
+            docker/openldap/*|\
+            docker/openldap/*/*|\
+            docker/openldap/*/*/*|\
+            scripts/ldap/*|\
+            scripts/ci/dashboard_integration_smoke.php|\
+            scripts/ci/run_deep_runtime_suite.php|\
+            scripts/ci/lib/CheckSelection.php|\
+            tests/Unit/Scripts/DeepRuntimeSuiteTest.php|\
+            tests/Unit/Scripts/CiPathFilterMatrixTest.php|\
+            docker-compose.yml|\
+            .github/workflows/ci.yml)
+                return 0
+                ;;
+        esac
+    done <<< "$changed_paths"
+
+    return 1
+}
+
 bash ./scripts/ci/ensure_local_deps.sh
 
 require_cmd git
@@ -68,7 +133,14 @@ GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/ch
 
 echo_section "Start integration stack"
 trap cleanup_stack EXIT
-ci_docker_compose up -d mysql php-fpm nginx openldap
+INTEGRATION_SMOKE_INCLUDE_LDAP=0
+STACK_SERVICES=(mysql php-fpm nginx)
+if pre_pr_full_should_include_ldap_guardrail; then
+    INTEGRATION_SMOKE_INCLUDE_LDAP=1
+    STACK_SERVICES+=(openldap)
+fi
+echo "[pre-pr-full] LDAP guardrail checks enabled: ${INTEGRATION_SMOKE_INCLUDE_LDAP}"
+ci_docker_compose up -d "${STACK_SERVICES[@]}"
 ci_docker_wait_for_mysql_readiness "pre-pr-full"
 ci_docker_install_seed_instance "pre-pr-full" exec -T php-fpm php index.php console install
 
@@ -92,6 +164,7 @@ ci_docker_compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
     --username=administrator --password=administrator \
     --booking-search-days=14 --retry-count=1 \
     --start-date=2026-01-01 --end-date=2026-01-31 \
+    --integration-smoke-include-ldap="${INTEGRATION_SMOKE_INCLUDE_LDAP}" \
     --report-dir=storage/logs/ci/deep-runtime-suite
 
 echo_section "Deep runtime verdicts"

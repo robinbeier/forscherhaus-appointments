@@ -65,18 +65,44 @@ class DeepRuntimeSuiteTest extends TestCase
         self::assertSame($this->tmpDir . '/write-contract-api.log', $definitions[1]['log_path']);
     }
 
-    public function testIntegrationSmokeSuiteIncludesLdapGuardrailChecks(): void
+    public function testIntegrationSmokeSuiteIncludesOnlyBaseChecksWhenLdapGuardrailIsDisabled(): void
     {
         $config = deepRuntimeSuiteDefaultConfig();
         $config['suites_raw'] = 'integration-smoke';
+        $config['integration_smoke_include_ldap'] = false;
         $config['report_dir'] = $this->tmpDir;
         $config['manifest_path'] = $this->tmpDir . '/manifest.json';
 
         $definitions = buildDeepRuntimeSuiteDefinitions($config);
-        $command = $definitions[0]['command'];
+        $checks = $this->extractIntegrationChecks($definitions[0]['command']);
 
-        self::assertMatchesRegularExpression("/--checks='([^']+)'/", $command);
-        preg_match("/--checks='([^']+)'/", $command, $matches);
+        self::assertSame(
+            [
+                'readiness_login_page',
+                'auth_login_validate',
+                'dashboard_metrics',
+                'booking_page_readiness',
+                'booking_extract_bootstrap',
+                'booking_available_hours',
+                'booking_unavailable_dates',
+                'api_unauthorized_guard',
+                'api_appointments_index',
+                'api_availabilities',
+            ],
+            $checks,
+        );
+    }
+
+    public function testIntegrationSmokeSuiteIncludesLdapGuardrailChecksWhenEnabled(): void
+    {
+        $config = deepRuntimeSuiteDefaultConfig();
+        $config['suites_raw'] = 'integration-smoke';
+        $config['integration_smoke_include_ldap'] = true;
+        $config['report_dir'] = $this->tmpDir;
+        $config['manifest_path'] = $this->tmpDir . '/manifest.json';
+
+        $definitions = buildDeepRuntimeSuiteDefinitions($config);
+        $checks = $this->extractIntegrationChecks($definitions[0]['command']);
 
         self::assertSame(
             [
@@ -95,7 +121,7 @@ class DeepRuntimeSuiteTest extends TestCase
                 'api_appointments_index',
                 'api_availabilities',
             ],
-            explode(',', $matches[1]),
+            $checks,
         );
     }
 
@@ -172,5 +198,16 @@ class DeepRuntimeSuiteTest extends TestCase
         }
 
         @rmdir($directory);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractIntegrationChecks(string $command): array
+    {
+        self::assertMatchesRegularExpression("/--checks='([^']+)'/", $command);
+        preg_match("/--checks='([^']+)'/", $command, $matches);
+
+        return explode(',', $matches[1]);
     }
 }

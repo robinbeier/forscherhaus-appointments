@@ -67,6 +67,7 @@ function deepRuntimeSuiteUsage(): string
         '  --retry-count=N        Write-contract retry count (default: 1).',
         '  --start-date=DATE      Dashboard/integration smoke start date.',
         '  --end-date=DATE        Dashboard/integration smoke end date.',
+        '  --integration-smoke-include-ldap=BOOL  Include LDAP guardrail checks in integration-smoke (default: true).',
         '  --report-dir=PATH      Output directory for suite manifest/reports.',
         '  --help                 Show this help text.',
         '',
@@ -85,6 +86,7 @@ function deepRuntimeSuiteUsage(): string
  *   retry_count:int,
  *   start_date:string,
  *   end_date:string,
+ *   integration_smoke_include_ldap:bool,
  *   report_dir:string,
  *   manifest_path:string,
  *   help:bool
@@ -106,6 +108,7 @@ function deepRuntimeSuiteDefaultConfig(): array
         'retry_count' => 1,
         'start_date' => '2026-01-01',
         'end_date' => '2026-01-31',
+        'integration_smoke_include_ldap' => true,
         'report_dir' => $reportDir,
         'manifest_path' => $reportDir . '/manifest.json',
         'help' => false,
@@ -174,6 +177,11 @@ function parseDeepRuntimeSuiteCliOptions(array $argv, array &$config): void
             continue;
         }
 
+        if (str_starts_with($arg, '--integration-smoke-include-ldap=')) {
+            $config['integration_smoke_include_ldap'] = parseBooleanCliOption($arg, '--integration-smoke-include-ldap');
+            continue;
+        }
+
         if (str_starts_with($arg, '--report-dir=')) {
             $config['report_dir'] = requireNonEmptyCliValue($arg, '--report-dir');
             $config['manifest_path'] = rtrim($config['report_dir'], '/') . '/manifest.json';
@@ -215,6 +223,17 @@ function parseNonNegativeIntCliOption(string $arg, string $option): int
     }
 
     return (int) $value;
+}
+
+function parseBooleanCliOption(string $arg, string $option): bool
+{
+    $value = strtolower(requireNonEmptyCliValue($arg, $option));
+
+    return match ($value) {
+        '1', 'true', 'yes', 'on' => true,
+        '0', 'false', 'no', 'off' => false,
+        default => throw new RuntimeException('CLI option ' . $option . ' requires a boolean value (true/false/1/0).'),
+    };
 }
 
 /**
@@ -304,7 +323,10 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
                     escapeshellarg((string) $config['start_date']),
                     escapeshellarg((string) $config['end_date']),
                     escapeshellarg(
-                        'readiness_login_page,auth_login_validate,ldap_settings_search,ldap_settings_search_missing_keyword,ldap_sso_success,ldap_sso_wrong_password,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities',
+                        implode(
+                            ',',
+                            deepRuntimeIntegrationSmokeChecks((bool) $config['integration_smoke_include_ldap']),
+                        ),
                     ),
                     escapeshellarg($reportDir . '/integration-smoke.json'),
                 ),
@@ -371,6 +393,38 @@ function deepRuntimeSuiteOrder(): array
         'booking-controller-flows',
         'integration-smoke',
     ];
+}
+
+/**
+ * @return array<int, string>
+ */
+function deepRuntimeIntegrationSmokeChecks(bool $includeLdapGuardrail): array
+{
+    $checks = [
+        'readiness_login_page',
+        'auth_login_validate',
+        'dashboard_metrics',
+        'booking_page_readiness',
+        'booking_extract_bootstrap',
+        'booking_available_hours',
+        'booking_unavailable_dates',
+        'api_unauthorized_guard',
+        'api_appointments_index',
+        'api_availabilities',
+    ];
+
+    if (!$includeLdapGuardrail) {
+        return $checks;
+    }
+
+    array_splice($checks, 2, 0, [
+        'ldap_settings_search',
+        'ldap_settings_search_missing_keyword',
+        'ldap_sso_success',
+        'ldap_sso_wrong_password',
+    ]);
+
+    return $checks;
 }
 
 /**
