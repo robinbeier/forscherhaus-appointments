@@ -154,6 +154,9 @@ CI note:
 - `deep-runtime-suite` is the shared producer for `api-contract-openapi`,
   `write-contract-booking`, `write-contract-api`,
   `booking-controller-flows`, and `integration-smoke`.
+- `integration-smoke` now captures a narrow browser evidence bundle on failure
+  under `storage/logs/ci/deep-runtime-suite/integration-smoke-browser/`
+  (`summary.json`, screenshot, snapshot, trace, network log).
 - `phpstan-application`, `js-lint-changed`, `architecture-ownership-map`,
   `architecture-boundaries`, `typed-request-dto`,
   `typed-request-contracts`, `api-contract-openapi`,

@@ -315,7 +315,7 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
             'integration-smoke' => [
                 'id' => $suiteId,
                 'command' => sprintf(
-                    'php scripts/ci/dashboard_integration_smoke.php --base-url=%s --index-page=%s --username=%s --password=%s --start-date=%s --end-date=%s --checks=%s --output-json=%s',
+                    'php scripts/ci/dashboard_integration_smoke.php --base-url=%s --index-page=%s --username=%s --password=%s --start-date=%s --end-date=%s --checks=%s --browser-evidence=%s --browser-evidence-dir=%s --output-json=%s',
                     escapeshellarg((string) $config['base_url']),
                     escapeshellarg((string) $config['index_page']),
                     escapeshellarg((string) $config['username']),
@@ -328,10 +328,13 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
                             deepRuntimeIntegrationSmokeChecks((bool) $config['integration_smoke_include_ldap']),
                         ),
                     ),
+                    escapeshellarg('on-failure'),
+                    escapeshellarg($reportDir . '/integration-smoke-browser'),
                     escapeshellarg($reportDir . '/integration-smoke.json'),
                 ),
                 'log_path' => $logPath,
                 'report_path' => $reportDir . '/integration-smoke.json',
+                'artifacts_dir' => $reportDir . '/integration-smoke-browser',
                 'failure_status' => 'contract_failure',
             ],
             default => throw new RuntimeException('Unsupported deep runtime suite: ' . $suiteId),
@@ -456,6 +459,7 @@ function runConfiguredDeepRuntimeSuites(array $suiteDefinitions, callable $runne
             'duration_seconds' => $durationSeconds,
             'report_path' => $suite['report_path'],
             'log_path' => $suite['log_path'],
+            'artifacts_dir' => $suite['artifacts_dir'] ?? null,
         ];
 
         $stream = $status === 'pass' ? STDOUT : STDERR;
@@ -535,5 +539,41 @@ function prepareDeepRuntimeReportDirectory(string $reportDir): void
         if (is_file($path) && !unlink($path)) {
             throw new RuntimeException('Failed to remove stale deep runtime artifact: ' . $path);
         }
+    }
+
+    $integrationSmokeBrowserArtifactsDir = rtrim($reportDir, '/') . '/integration-smoke-browser';
+
+    if (is_dir($integrationSmokeBrowserArtifactsDir)) {
+        deepRuntimeRemoveDirectory($integrationSmokeBrowserArtifactsDir);
+    }
+}
+
+function deepRuntimeRemoveDirectory(string $directory): void
+{
+    $items = scandir($directory);
+
+    if ($items === false) {
+        throw new RuntimeException('Failed to list directory: ' . $directory);
+    }
+
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+
+        $path = $directory . '/' . $item;
+
+        if (is_dir($path)) {
+            deepRuntimeRemoveDirectory($path);
+            continue;
+        }
+
+        if (!unlink($path)) {
+            throw new RuntimeException('Failed to remove stale deep runtime artifact: ' . $path);
+        }
+    }
+
+    if (!rmdir($directory)) {
+        throw new RuntimeException('Failed to remove stale deep runtime directory: ' . $directory);
     }
 }

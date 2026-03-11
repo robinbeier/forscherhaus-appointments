@@ -107,3 +107,31 @@ Smoke exit codes:
 - `0`: All smoke checks passed.
 - `1`: Assertion failure (behavioral regression).
 - `2`: Runtime/configuration/infrastructure error.
+
+## Agent-Friendly Browser Evidence
+
+`dashboard_integration_smoke.php` supports a narrow Playwright-backed evidence
+path for the public booking page:
+
+- `--browser-evidence=off|on-failure|always`
+- `--browser-evidence-dir=/path/to/artifacts`
+- `--browser-pwcli-path=scripts/release-gate/playwright/playwright_cli.sh`
+- `--browser-bootstrap-timeout=90`
+- `--browser-open-timeout=20`
+- `--browser-headed`
+
+Recommended CI/deep-runtime mode is `--browser-evidence=on-failure`. On an
+integration-smoke failure the script attempts to collect:
+
+- `summary.json` with step-by-step outcome and artifact references
+- `page.png` or `failure.png`
+- `snapshot.txt`
+- `trace.trace`
+- `network.log`
+
+The deep-runtime suite stores these artifacts under:
+
+- `storage/logs/ci/deep-runtime-suite/integration-smoke-browser/`
+
+This keeps the runtime/UI evidence path reproducible and narrow while giving
+agents visual and trace artifacts for CI triage and rework.

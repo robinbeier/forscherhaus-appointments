@@ -130,6 +130,7 @@ jobs:
               - 'scripts/ci/booking_write_contract_smoke.php'
               - 'scripts/ci/api_openapi_write_contract_smoke.php'
               - 'scripts/ci/dashboard_integration_smoke.php'
+              - 'scripts/ci/lib/BrowserRuntimeEvidence.php'
               - 'scripts/ci/check_coverage_delta.php'
               - 'scripts/ci/merge_coverage_shards.php'
               - 'scripts/ci/wait_for_mysql_readiness.sh'
@@ -285,6 +286,7 @@ jobs:
               - 'scripts/ci/run_deep_runtime_suite.php'
               - 'scripts/ci/assert_deep_runtime_suite.php'
               - 'scripts/ci/dashboard_integration_smoke.php'
+              - 'scripts/ci/lib/BrowserRuntimeEvidence.php'
               - 'scripts/ci/lib/CheckSelection.php'
               - 'scripts/release-gate/**'
               - 'composer.json'
@@ -1312,3 +1314,4 @@ jobs:
           cat storage/logs/ci/deep-runtime-suite/manifest.json || true
           cat storage/logs/ci/deep-runtime-suite/integration-smoke.log || true
           cat storage/logs/ci/deep-runtime-suite/integration-smoke.json || true
+          cat storage/logs/ci/deep-runtime-suite/integration-smoke-browser/summary.json || true
