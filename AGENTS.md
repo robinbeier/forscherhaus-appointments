@@ -215,6 +215,7 @@ bash ./scripts/symphony/stop_pilot.sh
 
 # Hinweis: Dieses Repo nutzt fuer Symphony die Linear-States `In Progress -> In Review -> Ready to Merge -> Done`.
 # Hinweis: `In Review` bedeutet PR publiziert und Symphony stoppt; `Ready to Merge` ist der explizite Resume-State fuer `land`/`$Babysit PR`.
+# Hinweis: Symphony darf `In Review -> Ready to Merge` nur konservativ und signalgetrieben synchronisieren: nur fuer publizierte, mergeable PRs mit gruener terminaler CI und ohne frische vertrauenswuerdige Review-Findings.
 # Hinweis: Ernste frische Symphony-Pilotchecks nur von `origin/main` oder mit explizitem `SYMPHONY_WORKTREE_BASE_REF` fahren, damit Worker nicht auf veraltetem Runtime-/Skill-Kontext starten.
 # Hinweis: Repo-lokale Worker-Abhaengigkeiten unter `.codex/skills/` und `.claude/napkin.md` muessen versioniert, YAML-gueltig und worktree-tauglich bleiben.
 # Hinweis: Ein Symphony-Pilot ist erst dann fachlich sauber, wenn der finale Merge-Diff die Ticket-Akzeptanzkriterien exakt trifft und der letzte `## Codex Workpad`-Status den echten PR-/Merge-Zustand widerspiegelt; `PR erstellt/gemerged` und korrekter Linear-State allein reichen nicht.

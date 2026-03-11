@@ -1400,6 +1400,8 @@ export class SymphonyOrchestrator {
                         projectSlug: config.tracker.projectSlug,
                         activeStates: config.tracker.activeStates,
                         terminalStates: config.tracker.terminalStates,
+                        reviewStateName: config.tracker.reviewStateName,
+                        mergeStateName: config.tracker.mergeStateName,
                         apiUrl: config.tracker.endpoint,
                     },
                 }));
@@ -1426,6 +1428,8 @@ export class SymphonyOrchestrator {
                                   projectSlug: factoryArgs.config.tracker.projectSlug,
                                   activeStates: factoryArgs.config.tracker.activeStates,
                                   terminalStates: factoryArgs.config.tracker.terminalStates,
+                                  reviewStateName: factoryArgs.config.tracker.reviewStateName,
+                                  mergeStateName: factoryArgs.config.tracker.mergeStateName,
                                   apiUrl: factoryArgs.config.tracker.endpoint,
                               },
                           })

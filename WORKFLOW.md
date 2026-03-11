@@ -185,7 +185,9 @@ Use the states as follows:
 - `Todo`: ready to start, no implementation has begun yet.
 - `In Progress`: active implementation and local validation.
 - `In Review`: PR exists; waiting on human review, CI completion, or explicit
-  merge intent. Symphony should not work in this state.
+  merge intent. Symphony should not work in this state except for conservative
+  tracker-driven promotion into `Ready to Merge` when the published PR is
+  already merge-clean.
 - `Rework`: active response to PR review feedback, CI failures, or requested
   follow-up on the same PR.
 - `Ready to Merge`: active final landing phase. Symphony should babysit the PR, fix
@@ -314,6 +316,10 @@ When the branch is ready to publish:
   immediately
 - update the workpad with validation status, merge/review posture, and what
   would reactivate the issue
+- once parked in `In Review`, Symphony may later promote the issue to
+  `Ready to Merge` only when the repo-local PR watcher sees an open,
+  non-draft, mergeable PR with green terminal checks and no fresh trusted
+  review feedback
 - after the issue is in `In Review`, stop the active Symphony run; do not
   keep burning context in the same publish turn
 
@@ -350,7 +356,7 @@ This is an explicit resume point. The normal pilot flow is:
 
 `In Progress` publish -> `In Review` stop
 
-human moves issue -> `Ready to Merge`
+human or conservative tracker policy moves issue -> `Ready to Merge`
 
 Symphony resumes -> `land` / `babysit-pr` loop -> merge -> `Done`
 
