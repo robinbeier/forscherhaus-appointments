@@ -1,4 +1,9 @@
 import {parse} from 'graphql';
+import {
+    GitHubPrAutoResumePolicyClient,
+    type PullRequestAutoResumeDecision,
+    type PullRequestAutoResumePolicy,
+} from './github-pr-auto-resume.js';
 
 export type LinearTrackerErrorClass =
     | 'linear_api_status'
@@ -180,6 +185,8 @@ export interface LinearTrackerConfig {
     projectSlug: string;
     activeStates: string[];
     terminalStates?: string[];
+    reviewStateName?: string;
+    mergeStateName?: string;
     apiUrl?: string;
     timeoutMs?: number;
     pageSize?: number;
@@ -215,6 +222,7 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 interface LinearTrackerAdapterArgs {
     config: LinearTrackerConfig;
     fetchImpl?: FetchLike;
+    pullRequestPolicyClient?: PullRequestAutoResumePolicy;
 }
 
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
@@ -363,6 +371,32 @@ function compareCommentsByUpdatedAtDescending(left: GraphQlCommentNode, right: G
 
 function normalizeHeadingName(value: string): string {
     return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeTerminalStates(values: string[]): Set<string> {
+    return new Set(values.map((value) => normalizeHeadingName(value)).filter((value) => value.length > 0));
+}
+
+function hasOutstandingBlockers(
+    issue: Pick<TrackedIssue, 'blockedBy'>,
+    terminalStates: Set<string>,
+): Array<{id: string | null; identifier: string | null; state: string | null}> {
+    return issue.blockedBy.filter((blocker) => {
+        const hasIdentity =
+            (typeof blocker.id === 'string' && blocker.id.trim().length > 0) ||
+            (typeof blocker.identifier === 'string' && blocker.identifier.trim().length > 0);
+
+        if (!hasIdentity) {
+            return false;
+        }
+
+        const normalizedBlockerState = normalizeHeadingName(blocker.state ?? '');
+        if (normalizedBlockerState.length === 0) {
+            return true;
+        }
+
+        return !terminalStates.has(normalizedBlockerState);
+    });
 }
 
 function parseDescriptionSections(description: string | null): Map<string, string[]> {
@@ -588,22 +622,30 @@ function buildStateSynchronizedWorkpad(issue: TrackedIssue, terminalStateNames: 
           ? `The PR is published and ${issue.identifier} is cleared for \`${issue.stateName}\`.`
           : `${issue.identifier} is complete in \`${issue.stateName}\`.`;
     const nextLine = isReviewState
-        ? 'Move the issue to `Ready to Merge` when the PR is green, review-clean, and approved for landing.'
+        ? 'Symphony may move the issue to `Ready to Merge` automatically when the published PR is open, green, mergeable, and free of fresh trusted review feedback; otherwise wait for explicit human steering.'
         : isReadyToMergeState
           ? 'Resume the land flow now and merge once the final PR watch stays green.'
           : 'None.';
     const planItems = isReviewState
         ? [
-              'Wait for reviewer feedback or explicit merge authorization.',
-              'Resume the land flow when the issue moves to `Ready to Merge`.',
+              'Keep the PR parked while CI and review signals settle.',
+              'Resume the land flow when policy signals or explicit human steering move the issue to `Ready to Merge`.',
           ]
         : isReadyToMergeState
           ? ['Re-enter the land flow from the current PR state.', 'Merge the PR and move the issue to `Done`.']
           : ['No further action.'];
     const validationItems = isReviewState
-        ? [`Issue state is now \`${issue.stateName}\`.`, 'PR publish and review handoff completed.']
+        ? [
+              `Issue state is now \`${issue.stateName}\`.`,
+              'PR publish and review handoff completed.',
+              'Automatic resume requires a merge-clean PR watcher snapshot.',
+          ]
         : isReadyToMergeState
-          ? [`Issue state is now \`${issue.stateName}\`.`, 'PR is already published and waiting for the land flow.']
+          ? [
+                `Issue state is now \`${issue.stateName}\`.`,
+                'PR is already published and waiting for the land flow.',
+                'PR watcher signals are green enough to resume landing.',
+            ]
           : [`Issue state is now \`${issue.stateName}\`.`, 'Merge/closure handoff completed.'];
 
     return [
@@ -757,6 +799,7 @@ function normalizeLinearGraphQlToolInput(rawArguments: unknown):
 export class LinearTrackerAdapter {
     private readonly config: Required<LinearTrackerConfig>;
     private readonly fetchImpl: FetchLike;
+    private readonly pullRequestPolicyClient: PullRequestAutoResumePolicy;
 
     public constructor(args: LinearTrackerAdapterArgs) {
         this.config = {
@@ -767,12 +810,23 @@ export class LinearTrackerAdapter {
             projectSlug: args.config.projectSlug,
             activeStates: args.config.activeStates,
             terminalStates: args.config.terminalStates ?? DEFAULT_TERMINAL_STATES,
+            reviewStateName: args.config.reviewStateName ?? 'In Review',
+            mergeStateName: args.config.mergeStateName ?? 'Ready to Merge',
         };
         this.fetchImpl = args.fetchImpl ?? fetch;
+        this.pullRequestPolicyClient = args.pullRequestPolicyClient ?? new GitHubPrAutoResumePolicyClient();
     }
 
     public async fetchCandidateIssues(): Promise<TrackedIssue[]> {
-        return this.fetchIssuesByStates(this.config.activeStates, this.config.projectSlug);
+        const activeIssues = await this.fetchIssuesByStates(this.config.activeStates, this.config.projectSlug);
+        const promotedIssues = await this.autoPromoteReviewReadyIssues();
+        const issuesById = new Map<string, TrackedIssue>();
+
+        for (const issue of [...activeIssues, ...promotedIssues]) {
+            issuesById.set(issue.id, issue);
+        }
+
+        return Array.from(issuesById.values());
     }
 
     public async prepareIssueForRun(issue: TrackedIssue): Promise<TrackedIssue> {
@@ -1241,6 +1295,47 @@ export class LinearTrackerAdapter {
         );
 
         return page.issues.nodes.map((node) => normalizeIssue(node, this.config.projectSlug));
+    }
+
+    private async autoPromoteReviewReadyIssues(): Promise<TrackedIssue[]> {
+        const normalizedReviewState = this.config.reviewStateName.trim().toLowerCase();
+        const normalizedMergeState = this.config.mergeStateName.trim().toLowerCase();
+        if (
+            normalizedReviewState.length === 0 ||
+            normalizedMergeState.length === 0 ||
+            normalizedReviewState === normalizedMergeState
+        ) {
+            return [];
+        }
+
+        const reviewIssues = await this.fetchIssuesByStates([this.config.reviewStateName], this.config.projectSlug);
+        const promotedIssues: TrackedIssue[] = [];
+        const terminalStates = normalizeTerminalStates(this.config.terminalStates);
+
+        for (const reviewIssue of reviewIssues) {
+            if (hasOutstandingBlockers(reviewIssue, terminalStates).length > 0) {
+                continue;
+            }
+
+            let decision: PullRequestAutoResumeDecision;
+            try {
+                decision = await this.pullRequestPolicyClient.evaluateAutoResume({
+                    identifier: reviewIssue.identifier,
+                    branchName: reviewIssue.branchName,
+                });
+            } catch {
+                continue;
+            }
+
+            if (!decision.shouldPromote) {
+                continue;
+            }
+
+            const promotedIssue = await this.moveIssueToStateByName(reviewIssue, this.config.mergeStateName);
+            promotedIssues.push(await this.syncIssueWorkpadToState(promotedIssue));
+        }
+
+        return promotedIssues;
     }
 
     private async fetchIssueRunContext(issueId: string): Promise<GraphQlIssueRunContext> {

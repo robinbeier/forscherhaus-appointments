@@ -107,6 +107,268 @@ test('fetchCandidateIssues uses configured project/state filters and normalizes 
     assert.deepEqual(body.variables.stateNames, ['In Progress', 'Todo']);
 });
 
+test('fetchCandidateIssues auto-promotes merge-clean review issues into Ready to Merge', async () => {
+    const calls: MockFetchCall[] = [];
+
+    const adapter = new LinearTrackerAdapter({
+        config: {
+            apiKey: 'linear-token',
+            projectSlug: 'forscherhaus',
+            activeStates: ['In Progress', 'Ready to Merge'],
+            reviewStateName: 'In Review',
+            mergeStateName: 'Ready to Merge',
+        },
+        pullRequestPolicyClient: {
+            evaluateAutoResume: async () => ({
+                shouldPromote: true,
+                reason: 'ready_to_merge',
+                prNumber: 118,
+                prUrl: 'https://github.com/robinbeier/forscherhaus-appointments/pull/118',
+                snapshot: null,
+            }),
+        },
+        fetchImpl: async (url, init) => {
+            calls.push({url, init});
+            const body = JSON.parse(String(init?.body));
+            const query = String(body.query ?? '');
+
+            if (query.includes('query FetchIssuesByState')) {
+                if (body.variables.stateNames.includes('Ready to Merge')) {
+                    return jsonResponse({
+                        data: {
+                            issues: {
+                                nodes: [],
+                                pageInfo: {
+                                    hasNextPage: false,
+                                    endCursor: null,
+                                },
+                            },
+                        },
+                    });
+                }
+
+                if (body.variables.stateNames.includes('In Review')) {
+                    return jsonResponse({
+                        data: {
+                            issues: {
+                                nodes: [
+                                    {
+                                        id: 'issue-id-118',
+                                        identifier: 'ROB-118',
+                                        title: 'Auto resume tracker policy',
+                                        description: '## Goal\n\nPromote merge-clean PRs.',
+                                        branchName: 'codex/rob-118-auto-resume-policy',
+                                        url: 'https://linear.app/forscherhaus/issue/ROB-118',
+                                        createdAt: '2026-03-11T08:00:00.000Z',
+                                        updatedAt: '2026-03-11T08:05:00.000Z',
+                                        priority: null,
+                                        state: {id: 'state-review', name: 'In Review', type: 'unstarted'},
+                                        labels: {nodes: []},
+                                        relations: {nodes: []},
+                                        inverseRelations: {nodes: []},
+                                        project: {slugId: 'forscherhaus'},
+                                    },
+                                ],
+                                pageInfo: {
+                                    hasNextPage: false,
+                                    endCursor: null,
+                                },
+                            },
+                        },
+                    });
+                }
+            }
+
+            if (query.includes('query FetchIssueRunContext')) {
+                return jsonResponse({
+                    data: {
+                        issue: {
+                            id: 'issue-id-118',
+                            identifier: 'ROB-118',
+                            title: 'Auto resume tracker policy',
+                            description: '## Goal\n\nPromote merge-clean PRs.',
+                            branchName: 'codex/rob-118-auto-resume-policy',
+                            url: 'https://linear.app/forscherhaus/issue/ROB-118',
+                            createdAt: '2026-03-11T08:00:00.000Z',
+                            updatedAt: '2026-03-11T08:05:00.000Z',
+                            priority: null,
+                            state: {id: 'state-review', name: 'In Review', type: 'unstarted'},
+                            labels: {nodes: []},
+                            relations: {nodes: []},
+                            inverseRelations: {nodes: []},
+                            project: {slugId: 'forscherhaus'},
+                            comments: {
+                                nodes: [
+                                    {
+                                        id: 'comment-118',
+                                        body: '## Codex Workpad\n\nOld body',
+                                        url: 'https://linear.app/comment-118',
+                                        updatedAt: '2026-03-11T08:04:00.000Z',
+                                    },
+                                ],
+                            },
+                            team: {
+                                states: {
+                                    nodes: [
+                                        {id: 'state-review', name: 'In Review', type: 'unstarted'},
+                                        {id: 'state-ready', name: 'Ready to Merge', type: 'started'},
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            if (query.includes('mutation UpdateIssueState')) {
+                assert.equal(body.variables.id, 'issue-id-118');
+                assert.equal(body.variables.stateId, 'state-ready');
+                return jsonResponse({
+                    data: {
+                        issueUpdate: {
+                            success: true,
+                            issue: {
+                                id: 'issue-id-118',
+                                updatedAt: '2026-03-11T08:06:00.000Z',
+                                state: {
+                                    id: 'state-ready',
+                                    name: 'Ready to Merge',
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            if (query.includes('mutation UpdateComment')) {
+                assert.equal(body.variables.id, 'comment-118');
+                assert.match(String(body.variables.body), /cleared for `Ready to Merge`/);
+                assert.match(String(body.variables.body), /PR watcher signals are green enough to resume landing\./);
+                return jsonResponse({
+                    data: {
+                        commentUpdate: {
+                            success: true,
+                            comment: {
+                                id: 'comment-118',
+                                body: body.variables.body,
+                                url: 'https://linear.app/comment-118',
+                            },
+                        },
+                    },
+                });
+            }
+
+            throw new Error(`Unexpected query: ${query}`);
+        },
+    });
+
+    const issues = await adapter.fetchCandidateIssues();
+
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].stateName, 'Ready to Merge');
+    assert.match(issues[0].workpadCommentBody ?? '', /cleared for `Ready to Merge`/);
+    assert.equal(calls.length, 6);
+});
+
+test('fetchCandidateIssues does not auto-promote review issues with non-terminal blockers', async () => {
+    let policyCallCount = 0;
+
+    const adapter = new LinearTrackerAdapter({
+        config: {
+            apiKey: 'linear-token',
+            projectSlug: 'forscherhaus',
+            activeStates: ['In Progress', 'Ready to Merge'],
+            reviewStateName: 'In Review',
+            mergeStateName: 'Ready to Merge',
+            terminalStates: ['Done'],
+        },
+        pullRequestPolicyClient: {
+            evaluateAutoResume: async () => {
+                policyCallCount += 1;
+                return {
+                    shouldPromote: true,
+                    reason: 'ready_to_merge',
+                    prNumber: 118,
+                    prUrl: 'https://github.com/robinbeier/forscherhaus-appointments/pull/118',
+                    snapshot: null,
+                };
+            },
+        },
+        fetchImpl: async (_url, init) => {
+            const body = JSON.parse(String(init?.body));
+            const query = String(body.query ?? '');
+
+            if (query.includes('query FetchIssuesByState') && body.variables.stateNames.includes('Ready to Merge')) {
+                return jsonResponse({
+                    data: {
+                        issues: {
+                            nodes: [],
+                            pageInfo: {
+                                hasNextPage: false,
+                                endCursor: null,
+                            },
+                        },
+                    },
+                });
+            }
+
+            if (query.includes('query FetchIssuesByState') && body.variables.stateNames.includes('In Review')) {
+                return jsonResponse({
+                    data: {
+                        issues: {
+                            nodes: [
+                                {
+                                    id: 'issue-id-118',
+                                    identifier: 'ROB-118',
+                                    title: 'Blocked auto resume tracker policy',
+                                    description: '## Goal\n\nDo not promote blocked review issues.',
+                                    branchName: 'codex/rob-118-auto-resume-policy',
+                                    url: 'https://linear.app/forscherhaus/issue/ROB-118',
+                                    createdAt: '2026-03-11T08:00:00.000Z',
+                                    updatedAt: '2026-03-11T08:05:00.000Z',
+                                    priority: null,
+                                    state: {id: 'state-review', name: 'In Review', type: 'unstarted'},
+                                    labels: {nodes: []},
+                                    relations: {nodes: []},
+                                    inverseRelations: {
+                                        nodes: [
+                                            {
+                                                type: 'blocks',
+                                                issue: {
+                                                    id: 'issue-id-117',
+                                                    identifier: 'ROB-117',
+                                                    state: {name: 'In Progress'},
+                                                },
+                                                relatedIssue: {
+                                                    id: 'issue-id-118',
+                                                    identifier: 'ROB-118',
+                                                    state: {name: 'In Review'},
+                                                },
+                                            },
+                                        ],
+                                    },
+                                    project: {slugId: 'forscherhaus'},
+                                },
+                            ],
+                            pageInfo: {
+                                hasNextPage: false,
+                                endCursor: null,
+                            },
+                        },
+                    },
+                });
+            }
+
+            throw new Error(`Unexpected query: ${query}`);
+        },
+    });
+
+    const issues = await adapter.fetchCandidateIssues();
+
+    assert.deepEqual(issues, []);
+    assert.equal(policyCallCount, 0);
+});
+
 test('fetchIssueStatesByIds returns id -> state map', async () => {
     const adapter = new LinearTrackerAdapter({
         config: {
