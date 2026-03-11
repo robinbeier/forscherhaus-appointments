@@ -34,39 +34,26 @@ ensure_ldap_service_exists() {
 }
 
 default_database_dir() {
-    case "${LDAP_SERVICE_NAME}" in
-        openldap)
-            echo "${REPO_ROOT}/docker/openldap/var"
-            ;;
-        openldap-legacy)
-            echo "${REPO_ROOT}/docker/openldap-legacy/slapd/database"
-            ;;
-    esac
+    echo "${REPO_ROOT}/docker/openldap/var"
 }
 
 default_config_dir() {
-    case "${LDAP_SERVICE_NAME}" in
-        openldap)
-            echo "${REPO_ROOT}/docker/openldap/etc"
-            ;;
-        openldap-legacy)
-            echo "${REPO_ROOT}/docker/openldap-legacy/slapd/config"
-            ;;
-    esac
+    echo "${REPO_ROOT}/docker/openldap/etc"
 }
 
 default_skip_seed_apply() {
-    case "${LDAP_SERVICE_NAME}" in
-        openldap)
-            echo "1"
-            ;;
-        openldap-legacy)
-            echo "0"
-            ;;
-    esac
+    echo "1"
 }
 
 configure_ldap_runtime_state() {
+    if [[ "${LDAP_SERVICE_NAME}" != "openldap" ]]; then
+        if [[ -z "${LDAP_DATABASE_DIR:-}" || -z "${LDAP_CONFIG_DIR:-}" || -z "${LDAP_SKIP_SEED_APPLY:-}" ]]; then
+            echo "Unsupported LDAP service defaults: ${LDAP_SERVICE_NAME}" >&2
+            echo "Set LDAP_DATABASE_DIR, LDAP_CONFIG_DIR, and LDAP_SKIP_SEED_APPLY explicitly for non-default services." >&2
+            exit 1
+        fi
+    fi
+
     LDAP_DATABASE_DIR="${LDAP_DATABASE_DIR:-$(default_database_dir)}"
     LDAP_CONFIG_DIR="${LDAP_CONFIG_DIR:-$(default_config_dir)}"
     LDAP_SKIP_SEED_APPLY="${LDAP_SKIP_SEED_APPLY:-$(default_skip_seed_apply)}"
