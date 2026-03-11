@@ -1,0 +1,9 @@
+interface:
+    display_name: 'Linear Sync'
+    short_description: 'Read or update the Linear issue and Codex workpad'
+    default_prompt: 'Use the Linear skill to read the current issue, keep the single persistent Codex Workpad comment up to date, and sync the issue state or PR linkage without creating duplicate comments.'
+dependencies:
+    tools:
+        - type: 'mcp'
+          value: 'linear'
+          description: 'Linear MCP server access for issue, comment, and state mutations'
