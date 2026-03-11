@@ -1,0 +1,68 @@
+name: Harness Hygiene
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: harness-hygiene-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install PHP dependencies
+        uses: php-actions/composer@v6
+        with:
+          php_version: 8.4
+          php_extensions: gd
+          version: 2
+      - name: Generate harness readiness report
+        run: |
+          php scripts/ci/check_agent_harness_readiness.php \
+            --output-json=storage/logs/ci/agent-harness-readiness-latest.json \
+            --output-summary=storage/logs/ci/agent-harness-readiness-summary.md
+      - name: Run report date sanity check
+        run: |
+          php scripts/ci/check_harness_report_dates.php \
+            --output-json=storage/logs/ci/harness-report-date-sanity-latest.json
+      - name: Check generated architecture/ownership docs
+        run: python3 scripts/docs/generate_architecture_ownership_docs.py --check
+      - name: Validate architecture/ownership map
+        run: python3 scripts/ci/check_architecture_ownership_map.py
+      - name: Check generated CODEOWNERS
+        run: python3 scripts/docs/generate_codeowners_from_map.py --check
+      - name: Upload hygiene artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: harness-hygiene-artifacts
+          path: |
+            storage/logs/ci/agent-harness-readiness-latest.json
+            storage/logs/ci/agent-harness-readiness-summary.md
+            storage/logs/ci/harness-report-date-sanity-latest.json
+          if-no-files-found: warn
+      - name: Diagnostics (hygiene reports)
+        if: failure()
+        run: |
+          cat storage/logs/ci/agent-harness-readiness-latest.json || true
+          cat storage/logs/ci/harness-report-date-sanity-latest.json || true
+          cat storage/logs/ci/agent-harness-readiness-summary.md || true
