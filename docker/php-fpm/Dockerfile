@@ -1,4 +1,4 @@
-FROM php:8.4.17-fpm-bookworm
+FROM php:8.4.18-fpm-bookworm
 
 WORKDIR "/var/www/html"
 
