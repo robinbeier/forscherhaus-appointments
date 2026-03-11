@@ -110,7 +110,7 @@ docker compose exec -T php-fpm composer contract-test:write-path -- \
 docker compose down -v --remove-orphans
 
 # Optional: Deep runtime suite producer + verdicts (shared CI topology for deep runtime gates)
-docker compose up -d mysql php-fpm nginx
+docker compose up -d mysql php-fpm nginx openldap
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
 for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
@@ -161,9 +161,14 @@ GITHUB_TOKEN="$(gh auth token)" php scripts/ci/check_heavy_job_duration_trends.p
   --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json
 
 # Optional: PDF renderer latency trend signal (deterministic fixture, p50/p95)
+composer check:pdf-renderer-latency
 php scripts/ci/check_pdf_renderer_latency.php \
   --base-url=http://localhost:3003 \
   --output-json=storage/logs/ci/pdf-renderer-latency-latest.json
+
+# Optional: Deterministic LDAP fixtures fuer Search/Import/SSO
+bash ./scripts/ldap/reset_directory.sh
+bash ./scripts/ldap/smoke.sh
 
 # Optional: Lokale Pre-PR Gates (schnell/voll)
 bash ./scripts/ci/pre_pr_quick.sh
@@ -294,7 +299,7 @@ composer release:gate:booking-confirmation-pdf -- --help
 composer release:gate:zero-surprise -- --help
 
 # Optional: CI Dashboard+Booking+API Integration Smoke (lokaler Repro, read-only)
-docker compose up -d mysql php-fpm nginx
+docker compose up -d mysql php-fpm nginx openldap
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 until docker compose exec -T mysql mysql -uuser -ppassword -e "USE easyappointments; SELECT 1;" >/dev/null 2>&1; do sleep 2; done
 for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console install && break; [ "$attempt" -eq 3 ] && exit 1; sleep 3; done
@@ -302,7 +307,7 @@ docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
   --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
   --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD \
-  --checks=readiness_login_page,auth_login_validate,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities
+  --checks=readiness_login_page,auth_login_validate,dashboard_metrics,booking_page_readiness,booking_extract_bootstrap,booking_available_hours,booking_unavailable_dates,api_unauthorized_guard,api_appointments_index,api_availabilities,ldap_settings_search,ldap_settings_search_missing_keyword,ldap_sso_success,ldap_sso_wrong_password
 docker compose down -v --remove-orphans
 ```
 
