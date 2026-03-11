@@ -111,6 +111,52 @@ class HarnessReportDateSanityTest extends TestCase
         self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
     }
 
+    public function testAcceptsAbsolutePathOutsideRepoRoot(): void
+    {
+        $externalDir = sys_get_temp_dir() . '/harness-report-date-sanity-external-' . uniqid('', true);
+        self::assertTrue(mkdir($externalDir, 0777, true) || is_dir($externalDir));
+
+        try {
+            $externalPath = $externalDir . '/doc-review-2026-03-09.md';
+            file_put_contents($externalPath, "# Documentation Drift Review - 2026-03-09\n");
+
+            $evaluation = evaluateHarnessReportDateSanity(
+                $this->tmpDir,
+                new DateTimeImmutable('2026-03-11', new DateTimeZone('UTC')),
+                0,
+                [$externalPath],
+            );
+
+            self::assertSame('pass', $evaluation['status']);
+            self::assertSame($externalPath, $evaluation['files'][0]['file']);
+        } finally {
+            $this->removeDirectory($externalDir);
+        }
+    }
+
+    public function testRecordsMalformedOpeningDatesAsViolationsWithoutCrashing(): void
+    {
+        $invalidPath = $this->tmpDir . '/docs/reports/doc-review-2026-03-09.md';
+        $validPath = $this->tmpDir . '/docs/reports/doc-review-2026-03-10.md';
+        file_put_contents($invalidPath, "# Documentation Drift Review - 2026-02-31\n");
+        file_put_contents($validPath, "# Documentation Drift Review - 2026-03-10\n");
+
+        $evaluation = evaluateHarnessReportDateSanity(
+            $this->tmpDir,
+            new DateTimeImmutable('2026-03-11', new DateTimeZone('UTC')),
+            0,
+        );
+
+        self::assertSame('fail', $evaluation['status']);
+        self::assertCount(2, $evaluation['files']);
+        self::assertSame('opening_date_invalid', $evaluation['violations'][0]['source']);
+        self::assertStringContainsString(
+            'opening date must be a valid ISO date',
+            $evaluation['violations'][0]['message'],
+        );
+        self::assertSame('pass', $evaluation['files'][1]['status']);
+    }
+
     /**
      * @return array<string, mixed>
      */

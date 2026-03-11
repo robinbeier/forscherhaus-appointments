@@ -208,13 +208,13 @@ function evaluateHarnessReportDateSanity(
     $messages = [];
     $allowedUntil = $today->modify('+' . $maxFutureDays . ' days');
 
-    foreach ($files as $relativePath) {
-        $absolutePath = harnessReportDateSanityToAbsolutePath($root, $relativePath);
+    foreach ($files as $path) {
+        $absolutePath = harnessReportDateSanityToAbsolutePath($root, $path);
         $content = @file_get_contents($absolutePath);
 
         if ($content === false) {
             $violations[] = [
-                'file' => $relativePath,
+                'file' => $path,
                 'source' => 'filesystem',
                 'message' => 'Failed to read report file.',
             ];
@@ -222,43 +222,69 @@ function evaluateHarnessReportDateSanity(
         }
 
         $openingDates = harnessReportDateSanityExtractOpeningDates($content);
-        $filenameDate = harnessReportDateSanityExtractFilenameDate($relativePath);
+        $filenameDate = harnessReportDateSanityExtractFilenameDate($path);
         $fileViolations = [];
 
-        if ($filenameDate !== null && $filenameDate > $allowedUntil) {
+        if (($filenameDate['error'] ?? null) !== null) {
             $fileViolations[] = [
-                'file' => $relativePath,
+                'file' => $path,
+                'source' => 'filename_date_invalid',
+                'date' => $filenameDate['value'],
+                'message' => $filenameDate['error'],
+            ];
+        }
+
+        if (($filenameDate['date'] ?? null) instanceof DateTimeImmutable && $filenameDate['date'] > $allowedUntil) {
+            $fileViolations[] = [
+                'file' => $path,
                 'source' => 'filename',
-                'date' => $filenameDate->format('Y-m-d'),
+                'date' => $filenameDate['date']->format('Y-m-d'),
                 'message' => sprintf(
                     'Filename date %s exceeds allowed future window ending %s.',
-                    $filenameDate->format('Y-m-d'),
+                    $filenameDate['date']->format('Y-m-d'),
                     $allowedUntil->format('Y-m-d'),
                 ),
             ];
         }
 
-        if ($filenameDate !== null && $openingDates !== []) {
-            $firstOpeningDate = $openingDates[0]['date'];
-            if ($firstOpeningDate->format('Y-m-d') !== $filenameDate->format('Y-m-d')) {
+        $validOpeningDates = [];
+
+        foreach ($openingDates as $openingDate) {
+            if (($openingDate['error'] ?? null) !== null) {
                 $fileViolations[] = [
-                    'file' => $relativePath,
+                    'file' => $path,
+                    'source' => 'opening_date_invalid',
+                    'date' => $openingDate['value'],
+                    'line' => $openingDate['line'],
+                    'message' => $openingDate['error'],
+                ];
+                continue;
+            }
+
+            $validOpeningDates[] = $openingDate;
+        }
+
+        if (($filenameDate['date'] ?? null) instanceof DateTimeImmutable && $validOpeningDates !== []) {
+            $firstOpeningDate = $validOpeningDates[0]['date'];
+            if ($firstOpeningDate->format('Y-m-d') !== $filenameDate['date']->format('Y-m-d')) {
+                $fileViolations[] = [
+                    'file' => $path,
                     'source' => 'header_mismatch',
                     'date' => $firstOpeningDate->format('Y-m-d'),
-                    'line' => $openingDates[0]['line'],
+                    'line' => $validOpeningDates[0]['line'],
                     'message' => sprintf(
                         'Opening header date %s does not match filename date %s.',
                         $firstOpeningDate->format('Y-m-d'),
-                        $filenameDate->format('Y-m-d'),
+                        $filenameDate['date']->format('Y-m-d'),
                     ),
                 ];
             }
         }
 
-        foreach ($openingDates as $openingDate) {
+        foreach ($validOpeningDates as $openingDate) {
             if ($openingDate['date'] > $allowedUntil) {
                 $fileViolations[] = [
-                    'file' => $relativePath,
+                    'file' => $path,
                     'source' => 'opening_lines',
                     'date' => $openingDate['date']->format('Y-m-d'),
                     'line' => $openingDate['line'],
@@ -273,14 +299,14 @@ function evaluateHarnessReportDateSanity(
 
         $violations = array_merge($violations, $fileViolations);
         $fileReports[] = [
-            'file' => $relativePath,
-            'filename_date' => $filenameDate?->format('Y-m-d'),
+            'file' => $path,
+            'filename_date' => $filenameDate['date']?->format('Y-m-d'),
             'opening_dates' => array_map(
                 static fn(array $entry): array => [
                     'date' => $entry['date']->format('Y-m-d'),
                     'line' => $entry['line'],
                 ],
-                $openingDates,
+                $validOpeningDates,
             ),
             'status' => $fileViolations === [] ? 'pass' : 'fail',
         ];
@@ -355,7 +381,7 @@ function harnessReportDateSanityResolveFiles(string $root, array $paths): array
 }
 
 /**
- * @return array<int, array{date:DateTimeImmutable,line:int}>
+ * @return array<int, array{date:?DateTimeImmutable,error:?string,line:int,value:string}>
  */
 function harnessReportDateSanityExtractOpeningDates(string $content): array
 {
@@ -372,23 +398,27 @@ function harnessReportDateSanityExtractOpeningDates(string $content): array
         }
 
         foreach ($matches[0] as $match) {
-            $results[] = [
-                'date' => harnessReportDateSanityParseIsoDate($match, 'opening date'),
-                'line' => $index + 1,
-            ];
+            $results[] = harnessReportDateSanityBuildDateProbe($match, 'opening date', $index + 1);
         }
     }
 
     return $results;
 }
 
-function harnessReportDateSanityExtractFilenameDate(string $path): ?DateTimeImmutable
+/**
+ * @return array{date:?DateTimeImmutable,error:?string,value:?string}
+ */
+function harnessReportDateSanityExtractFilenameDate(string $path): array
 {
     if (!preg_match('/(20\d{2}-\d{2}-\d{2})/', basename($path), $matches)) {
-        return null;
+        return [
+            'date' => null,
+            'error' => null,
+            'value' => null,
+        ];
     }
 
-    return harnessReportDateSanityParseIsoDate($matches[1], 'filename date');
+    return harnessReportDateSanityBuildDateProbe($matches[1], 'filename date');
 }
 
 function harnessReportDateSanityParseIsoDate(string $value, string $fieldName): DateTimeImmutable
@@ -440,7 +470,37 @@ function harnessReportDateSanityNormalizeRelativePath(string $root, string $path
         return substr($normalizedPath, strlen($normalizedRoot) + 1);
     }
 
-    return ltrim($normalizedPath, '/');
+    if (str_starts_with($normalizedPath, '/')) {
+        return $normalizedPath;
+    }
+
+    return ltrim($normalizedPath, './');
+}
+
+/**
+ * @return array{date:?DateTimeImmutable,error:?string,line?:int,value:string}
+ */
+function harnessReportDateSanityBuildDateProbe(string $value, string $fieldName, ?int $line = null): array
+{
+    try {
+        $probe = [
+            'date' => harnessReportDateSanityParseIsoDate($value, $fieldName),
+            'error' => null,
+            'value' => $value,
+        ];
+    } catch (InvalidArgumentException $e) {
+        $probe = [
+            'date' => null,
+            'error' => $e->getMessage(),
+            'value' => $value,
+        ];
+    }
+
+    if ($line !== null) {
+        $probe['line'] = $line;
+    }
+
+    return $probe;
 }
 
 /**
