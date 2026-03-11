@@ -44,7 +44,12 @@ pre_pr_full_should_include_ldap_guardrail() {
         return 1
     fi
 
-    diff_range="origin/${BASE_REF}...HEAD"
+    if [[ "$BASE_REF" == origin/* ]]; then
+        diff_range="${BASE_REF}...HEAD"
+    else
+        diff_range="origin/${BASE_REF}...HEAD"
+    fi
+
     if ! changed_paths="$(git diff --name-only "$diff_range" 2>/dev/null)"; then
         changed_paths="$(git diff --name-only HEAD~1...HEAD 2>/dev/null || true)"
     fi
@@ -58,6 +63,7 @@ pre_pr_full_should_include_ldap_guardrail() {
             application/models/Customers_model.php|\
             application/models/Providers_model.php|\
             application/models/Users_model.php|\
+            application/libraries/Accounts.php|\
             application/libraries/Integrations_request_dto_factory.php|\
             application/libraries/Auth_request_dto_factory.php|\
             application/views/pages/ldap_settings.php|\
