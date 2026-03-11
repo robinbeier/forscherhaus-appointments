@@ -225,6 +225,14 @@ function evaluateHarnessReportDateSanity(
         $filenameDate = harnessReportDateSanityExtractFilenameDate($path);
         $fileViolations = [];
 
+        if (($filenameDate['date'] ?? null) === null && ($filenameDate['error'] ?? null) === null) {
+            $fileViolations[] = [
+                'file' => $path,
+                'source' => 'filename_date_missing',
+                'message' => 'Report filename must include a YYYY-MM-DD date token.',
+            ];
+        }
+
         if (($filenameDate['error'] ?? null) !== null) {
             $fileViolations[] = [
                 'file' => $path,

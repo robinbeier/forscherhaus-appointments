@@ -157,6 +157,26 @@ class HarnessReportDateSanityTest extends TestCase
         self::assertSame('pass', $evaluation['files'][1]['status']);
     }
 
+    public function testRejectsUndatedReportFilenames(): void
+    {
+        $path = $this->tmpDir . '/docs/reports/doc-review-latest.md';
+        file_put_contents($path, "# Documentation Drift Review\n");
+
+        $evaluation = evaluateHarnessReportDateSanity(
+            $this->tmpDir,
+            new DateTimeImmutable('2026-03-11', new DateTimeZone('UTC')),
+            0,
+            [$path],
+        );
+
+        self::assertSame('fail', $evaluation['status']);
+        self::assertSame('filename_date_missing', $evaluation['violations'][0]['source']);
+        self::assertStringContainsString(
+            'must include a YYYY-MM-DD date token',
+            $evaluation['violations'][0]['message'],
+        );
+    }
+
     /**
      * @return array<string, mixed>
      */
