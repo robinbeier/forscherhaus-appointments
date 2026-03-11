@@ -140,6 +140,10 @@ This document defines the operational delivery workflow for
 - Use CodeIgniter migrations for DB changes and keep rollback paths complete.
 - Run CI-parity checks through Docker for merge-sensitive changes.
 - For multi-PR work, land one PR completely before starting the next.
+- When `docs/maps/component_ownership_map.json` marks a component as
+  `single-owner` or `manual_approval_required`, keep agent changes narrow and
+  conservative; green CI is not permission to reinterpret ambiguous product
+  intent or broaden scope silently.
 - Preserve the current invariant: `services.attendants_number == 1` unless the
   product scope changes explicitly.
 - During the current release window, prefer low-risk stability and performance

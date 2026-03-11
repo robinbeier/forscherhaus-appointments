@@ -2,24 +2,26 @@
 
 Canonical source: `docs/maps/component_ownership_map.json`
 
-Ownership model: Role + Handles (primary/secondary).
+Ownership model: Role + Handles plus explicit single-owner risk metadata.
+
+Note: in `single-owner` mode, identical primary/secondary handles are intentional compatibility placeholders for tooling and do not imply an independent human fallback.
 
 ## Ownership Table
 
-| Component | Role | Primary | Secondary |
-|---|---|---|---|
-| `auth-session` | Access & Session | @robinbeier | @robinbeier |
-| `installation-bootstrap` | Installation & Bootstrap | @robinbeier | @robinbeier |
-| `booking-public` | Public Booking | @robinbeier | @robinbeier |
-| `booking-lifecycle` | Booking Confirmation/Cancellation | @robinbeier | @robinbeier |
-| `scheduling-backoffice` | Calendar & Scheduling | @robinbeier | @robinbeier |
-| `dashboard-exports` | Dashboard & Exports | @robinbeier | @robinbeier |
-| `people-services-admin` | People, Providers, Services | @robinbeier | @robinbeier |
-| `settings-compliance` | Settings & Compliance | @robinbeier | @robinbeier |
-| `integrations-sync` | Integrations & Sync | @robinbeier | @robinbeier |
-| `api-v1` | REST API v1 | @robinbeier | @robinbeier |
-| `shared-core` | Shared Core | @robinbeier | @robinbeier |
-| `platform-quality-tooling` | Platform, CI, Release Gates | @robinbeier | @robinbeier |
+| Component | Role | Primary | Secondary | Ownership | Bus Factor | Agent Policy | Manual Approval |
+|---|---|---|---|---|---:|---|---|
+| `auth-session` | Access & Session | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `installation-bootstrap` | Installation & Bootstrap | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `booking-public` | Public Booking | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `booking-lifecycle` | Booking Confirmation/Cancellation | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `scheduling-backoffice` | Calendar & Scheduling | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `dashboard-exports` | Dashboard & Exports | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `people-services-admin` | People, Providers, Services | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `settings-compliance` | Settings & Compliance | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `integrations-sync` | Integrations & Sync | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `api-v1` | REST API v1 | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `shared-core` | Shared Core | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
+| `platform-quality-tooling` | Platform, CI, Release Gates | @robinbeier | @robinbeier | single-owner | 1 | conservative | yes |
 
 ## Ownership Scope by Component
 
@@ -28,6 +30,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Access & Session
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Login.php`
   - `application/controllers/Recovery.php`
@@ -52,6 +59,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Installation & Bootstrap
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Installation.php`
   - `application/views/pages/installation.php`
@@ -66,6 +78,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Public Booking
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Booking.php`
   - `application/views/pages/booking.php`
@@ -85,6 +102,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Booking Confirmation/Cancellation
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Booking_confirmation.php`
   - `application/controllers/Booking_cancellation.php`
@@ -101,6 +123,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Calendar & Scheduling
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Calendar.php`
   - `application/models/Appointments_model.php`
@@ -129,6 +156,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Dashboard & Exports
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Dashboard.php`
   - `application/libraries/Dashboard_metrics.php`
@@ -151,6 +183,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: People, Providers, Services
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Providers.php`
   - `application/models/Services_model.php`
@@ -186,6 +223,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Settings & Compliance
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Business_settings.php`
   - `application/controllers/Legal_settings.php`
@@ -222,6 +264,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Integrations & Sync
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Integrations.php`
   - `application/libraries/Synchronization.php`
@@ -250,6 +297,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: REST API v1
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/api/v1/Appointments_api_v1.php`
   - `application/controllers/api/v1/Availabilities_api_v1.php`
@@ -266,6 +318,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Shared Core
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/libraries/Request_normalizer.php`
   - `application/libraries/Accounts.php`
@@ -283,6 +340,11 @@ Ownership model: Role + Handles (primary/secondary).
 - Role: Platform, CI, Release Gates
 - Primary: @robinbeier
 - Secondary: @robinbeier
+- Ownership mode: single-owner
+- Human bus factor: 1
+- Agent policy: conservative
+- Manual approval required: yes
+- Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `.github/workflows/ci.yml`
   - `scripts/ci/dashboard_integration_smoke.php`

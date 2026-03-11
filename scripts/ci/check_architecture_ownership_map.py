@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -19,12 +20,19 @@ GENERATOR_CHECK_CMD = [
     "--check",
 ]
 HANDLE_RE = re.compile(r"^@[A-Za-z0-9-]+$")
+OWNERSHIP_MODES = {"single-owner", "multi-owner"}
+AGENT_POLICIES = {"conservative", "standard"}
 REQUIRED_COMPONENT_FIELDS = {
     "component_id",
     "role",
     "summary",
     "primary_handle",
     "secondary_handle",
+    "ownership_mode",
+    "human_bus_factor",
+    "agent_policy",
+    "manual_approval_required",
+    "ownership_notes",
     "folder_prefixes",
     "key_files",
     "depends_on",
@@ -52,8 +60,8 @@ def get_tracked_files() -> set[str]:
     return files
 
 
-def load_map() -> dict[str, Any]:
-    with MAP_PATH.open("r", encoding="utf-8") as fh:
+def load_map(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
 
     if not isinstance(data, dict):
@@ -111,10 +119,51 @@ def validate_structure(data: dict[str, Any], tracked_files: set[str]) -> list[st
                     f"{component_id}.{handle_key} must match pattern {HANDLE_RE.pattern}; got {handle!r}",
                 )
 
-        for text_key in ["role", "summary"]:
+        for text_key in ["role", "summary", "ownership_notes"]:
             value = component[text_key]
             if not isinstance(value, str) or not value.strip():
                 errors.append(f"{component_id}.{text_key} must be a non-empty string")
+
+        ownership_mode = component["ownership_mode"]
+        if not isinstance(ownership_mode, str) or ownership_mode not in OWNERSHIP_MODES:
+            errors.append(
+                f"{component_id}.ownership_mode must be one of {sorted(OWNERSHIP_MODES)}; got {ownership_mode!r}",
+            )
+
+        human_bus_factor = component["human_bus_factor"]
+        if not isinstance(human_bus_factor, int) or human_bus_factor < 1:
+            errors.append(f"{component_id}.human_bus_factor must be an integer >= 1")
+
+        agent_policy = component["agent_policy"]
+        if not isinstance(agent_policy, str) or agent_policy not in AGENT_POLICIES:
+            errors.append(
+                f"{component_id}.agent_policy must be one of {sorted(AGENT_POLICIES)}; got {agent_policy!r}",
+            )
+
+        manual_approval_required = component["manual_approval_required"]
+        if not isinstance(manual_approval_required, bool):
+            errors.append(f"{component_id}.manual_approval_required must be a boolean")
+
+        if ownership_mode == "single-owner":
+            if component["primary_handle"] != component["secondary_handle"]:
+                errors.append(
+                    f"{component_id} uses single-owner mode and must keep identical primary/secondary handles",
+                )
+            if human_bus_factor != 1:
+                errors.append(f"{component_id} uses single-owner mode and must declare human_bus_factor = 1")
+            if agent_policy != "conservative":
+                errors.append(f"{component_id} uses single-owner mode and must declare agent_policy = 'conservative'")
+            if manual_approval_required is not True:
+                errors.append(
+                    f"{component_id} uses single-owner mode and must set manual_approval_required = true",
+                )
+        elif ownership_mode == "multi-owner":
+            if component["primary_handle"] == component["secondary_handle"]:
+                errors.append(
+                    f"{component_id} uses multi-owner mode and must not duplicate primary/secondary handles",
+                )
+            if human_bus_factor < 2:
+                errors.append(f"{component_id} uses multi-owner mode and must declare human_bus_factor >= 2")
 
         folder_prefixes = component["folder_prefixes"]
         if not isinstance(folder_prefixes, list) or not folder_prefixes:
@@ -249,18 +298,35 @@ def validate_generated_docs() -> list[str]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--map", default=str(MAP_PATH), help="Path to component ownership map JSON.")
+    parser.add_argument(
+        "--skip-diff-coverage",
+        action="store_true",
+        help="Skip validating changed-file coverage against the current diff range.",
+    )
+    parser.add_argument(
+        "--skip-generated-docs-check",
+        action="store_true",
+        help="Skip checking generated architecture/ownership docs for custom-map validation flows.",
+    )
+    args = parser.parse_args()
+
     tracked_files = get_tracked_files()
+    map_path = (ROOT / args.map).resolve() if not Path(args.map).is_absolute() else Path(args.map)
 
     try:
-        data = load_map()
+        data = load_map(map_path)
     except Exception as exc:  # noqa: BLE001
         print(f"[ERROR] Failed to load map: {exc}")
         return 1
 
     errors: list[str] = []
     errors.extend(validate_structure(data, tracked_files))
-    errors.extend(validate_changed_file_coverage(data))
-    errors.extend(validate_generated_docs())
+    if not args.skip_diff_coverage:
+        errors.extend(validate_changed_file_coverage(data))
+    if not args.skip_generated_docs_check:
+        errors.extend(validate_generated_docs())
 
     if errors:
         print("[ERROR] Architecture/ownership map validation failed:")
