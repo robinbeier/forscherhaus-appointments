@@ -17,6 +17,8 @@ RUN apt-get install -y --no-install-recommends \
 
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev || npm install --omit=dev
+# Install the browser revision required by the locked Puppeteer package.
+RUN PUPPETEER_CACHE_DIR=/home/pptruser/.cache/puppeteer npx puppeteer browsers install chrome
 
 COPY server.js ./
 
