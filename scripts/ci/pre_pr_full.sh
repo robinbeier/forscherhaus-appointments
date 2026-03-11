@@ -73,6 +73,7 @@ pre_pr_full_should_include_ldap_guardrail() {
             scripts/ldap/*|\
             scripts/ci/dashboard_integration_smoke.php|\
             scripts/ci/run_deep_runtime_suite.php|\
+            scripts/ci/lib/CheckSelection.php|\
             tests/Unit/Scripts/DeepRuntimeSuiteTest.php|\
             tests/Unit/Scripts/CiPathFilterMatrixTest.php|\
             docker-compose.yml|\

@@ -257,6 +257,23 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testCheckSelectionLibraryChangeTriggersLdapGuardrailFilter(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/lib/CheckSelection.php']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertTrue($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertTrue($matches['ldap_guardrail_required']);
+        self::assertTrue($matches['write_contract_booking']);
+        self::assertTrue($matches['write_contract_api']);
+    }
+
     /**
      * @param array<int, string> $changedPaths
      * @return array<string, bool>

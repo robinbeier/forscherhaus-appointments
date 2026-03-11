@@ -311,6 +311,7 @@ jobs:
               - 'scripts/ldap/**'
               - 'scripts/ci/dashboard_integration_smoke.php'
               - 'scripts/ci/run_deep_runtime_suite.php'
+              - 'scripts/ci/lib/CheckSelection.php'
               - 'docker-compose.yml'
               - '.github/workflows/ci.yml'
             write_contract_booking:
