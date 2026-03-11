@@ -302,6 +302,7 @@ jobs:
               - 'application/models/Users_model.php'
               - 'application/views/pages/ldap_settings.php'
               - 'application/views/components/ldap_import_modal.php'
+              - 'application/config/constants.php'
               - 'application/migrations/057_add_ldap_rows_to_settings_table.php'
               - 'application/migrations/058_add_ldap_dn_column_to_users_table.php'
               - 'docker/ldap/**'
