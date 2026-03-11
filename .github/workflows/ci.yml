@@ -508,7 +508,7 @@ jobs:
         run: composer phpstan:request-contracts:l2
       - name: Upload request-contract artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: request-contracts-artifacts
           path: |
@@ -554,7 +554,7 @@ jobs:
           mkdir -p .ci-artifacts
           tar -czf .ci-artifacts/deep-check-deps.tar.gz vendor
       - name: Upload deep-check dependencies artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deep-check-deps
           path: .ci-artifacts/deep-check-deps.tar.gz
@@ -578,7 +578,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-check-deps
           path: .ci-artifacts
@@ -608,7 +608,7 @@ jobs:
       - name: Export deterministic seed snapshot
         run: bash scripts/ci/export_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
       - name: Upload deterministic seed snapshot artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deep-check-seed-snapshot
           path: .ci-artifacts/deep-check-seed.sql.gz
@@ -646,7 +646,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-check-deps
           path: .ci-artifacts
@@ -723,7 +723,7 @@ jobs:
           --report-dir=storage/logs/ci/deep-runtime-suite
       - name: Upload deep runtime suite artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deep-runtime-suite-artifacts
           path: storage/logs/ci/deep-runtime-suite
@@ -761,7 +761,7 @@ jobs:
           coverage: xdebug
           extensions: gd
       - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-check-deps
           path: .ci-artifacts
@@ -774,7 +774,7 @@ jobs:
         run: composer test:coverage:unit-shard
       - name: Upload coverage shard unit artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-shard-unit-artifacts
           path: |
@@ -805,12 +805,12 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-check-deps
           path: .ci-artifacts
       - name: Download deterministic seed snapshot artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-check-seed-snapshot
           path: .ci-artifacts
@@ -832,7 +832,7 @@ jobs:
         run: docker compose exec -T php-fpm composer test:coverage:integration-shard
       - name: Upload coverage shard integration artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-shard-integration-artifacts
           path: |
@@ -868,7 +868,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-check-deps
           path: .ci-artifacts
@@ -883,12 +883,12 @@ jobs:
           php-version: "8.4.1"
           coverage: none
       - name: Download coverage shard unit artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-shard-unit-artifacts
           path: storage/logs/ci
       - name: Download coverage shard integration artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-shard-integration-artifacts
           path: storage/logs/ci
@@ -909,7 +909,7 @@ jobs:
           --output-json=storage/logs/ci/coverage-delta-latest.json
       - name: Upload coverage delta artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-delta-artifacts
           path: |
@@ -971,7 +971,7 @@ jobs:
           fi
       - name: Upload heavy job trend artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: heavy-job-duration-trends-artifacts
           path: storage/logs/ci/heavy-job-duration-trends-latest.json
@@ -1024,7 +1024,7 @@ jobs:
           fi
       - name: Upload PDF renderer latency artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pdf-renderer-latency-artifacts
           path: storage/logs/ci/pdf-renderer-latency-latest.json
@@ -1093,7 +1093,7 @@ jobs:
         run: python3 scripts/ci/check_component_boundaries.py
       - name: Upload architecture boundary artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: architecture-boundaries-artifacts
           path: |
@@ -1125,7 +1125,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-runtime-suite-artifacts
           path: storage/logs/ci/deep-runtime-suite
@@ -1157,7 +1157,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-runtime-suite-artifacts
           path: storage/logs/ci/deep-runtime-suite
@@ -1189,7 +1189,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-runtime-suite-artifacts
           path: storage/logs/ci/deep-runtime-suite
@@ -1220,7 +1220,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-runtime-suite-artifacts
           path: storage/logs/ci/deep-runtime-suite
@@ -1250,7 +1250,7 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v4
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-runtime-suite-artifacts
           path: storage/logs/ci/deep-runtime-suite
