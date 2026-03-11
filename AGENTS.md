@@ -2,6 +2,15 @@
 
 Ziel: Merge-faehige, konsistente Beitraege fuer das Schul-Terminbuchungssystem.
 
+## Kanonische Harness-Quellen
+
+- `README.md` - Operator-Onboarding, Quickstart, lokale Services.
+- `WORKFLOW.md` - Agent-Runtime, Workpad-Regeln, Ticket-zu-Merge-Statusmodell.
+- `docs/agent-harness-index.md` - Routing zwischen Onboarding, Runtime,
+  CI/Gates, Architektur, Ownership und Symphony.
+- `AGENTS.md` - vollstaendige lokale/CI-Kommandomatrix, Repo-Guardrails und
+  Beitraegsregeln.
+
 ## Projektueberblick (Kurz)
 
 - **Stack:** PHP (>= 8.1; bevorzugt 8.2+), CodeIgniter (MVC), MySQL; Frontend: JavaScript/jQuery/Bootstrap/FullCalendar; Build: npm + Gulp.
@@ -35,6 +44,10 @@ Leitplanke: Kein Produktionscode ausserhalb von `application/`. Keine direkten A
 Hinweis: `./scripts/setup-worktree.sh` fuehrt u. a. `composer install`, `npm ci`/`npm install` und `npx gulp vendor` aus. `npm install` triggert zudem `npm run assets:refresh` via `postinstall`.
 
 ## Dev-/Build-/Test-Befehle
+
+Hinweis: `README.md` bleibt bewusst kompakter. Die vollstaendige Kommandomatrix
+lebt hier in `AGENTS.md`; der kurze Routing-Einstieg steht in
+`docs/agent-harness-index.md`.
 
 ```bash
 # Entwicklung (Assets watch & rebuild)
