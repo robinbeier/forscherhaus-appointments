@@ -274,6 +274,40 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['write_contract_api']);
     }
 
+    public function testIntegrationsRequestDtoFactoryChangeTriggersLdapGuardrailFilter(): void
+    {
+        $matches = $this->applyFilters(['application/libraries/Integrations_request_dto_factory.php']);
+
+        self::assertTrue($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertTrue($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertTrue($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertTrue($matches['ldap_guardrail_required']);
+        self::assertTrue($matches['write_contract_booking']);
+        self::assertTrue($matches['write_contract_api']);
+    }
+
+    public function testAuthRequestDtoFactoryChangeTriggersLdapGuardrailFilter(): void
+    {
+        $matches = $this->applyFilters(['application/libraries/Auth_request_dto_factory.php']);
+
+        self::assertTrue($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertTrue($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertTrue($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertTrue($matches['ldap_guardrail_required']);
+        self::assertTrue($matches['write_contract_booking']);
+        self::assertTrue($matches['write_contract_api']);
+    }
+
     /**
      * @param array<int, string> $changedPaths
      * @return array<string, bool>
