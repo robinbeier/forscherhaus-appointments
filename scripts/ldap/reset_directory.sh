@@ -24,6 +24,15 @@ compose() {
     )
 }
 
+ensure_ldap_service_exists() {
+    if ! compose config --services | grep -Fxq "${LDAP_SERVICE_NAME}"; then
+        echo "Unknown LDAP service: ${LDAP_SERVICE_NAME}" >&2
+        echo "Available services:" >&2
+        compose config --services >&2
+        return 1
+    fi
+}
+
 default_database_dir() {
     case "${LDAP_SERVICE_NAME}" in
         openldap)
@@ -31,9 +40,6 @@ default_database_dir() {
             ;;
         openldap-legacy)
             echo "${REPO_ROOT}/docker/openldap-legacy/slapd/database"
-            ;;
-        *)
-            echo "${REPO_ROOT}/docker/openldap/var"
             ;;
     esac
 }
@@ -46,9 +52,6 @@ default_config_dir() {
         openldap-legacy)
             echo "${REPO_ROOT}/docker/openldap-legacy/slapd/config"
             ;;
-        *)
-            echo "${REPO_ROOT}/docker/openldap/etc"
-            ;;
     esac
 }
 
@@ -57,15 +60,17 @@ default_skip_seed_apply() {
         openldap)
             echo "1"
             ;;
-        *)
+        openldap-legacy)
             echo "0"
             ;;
     esac
 }
 
-LDAP_DATABASE_DIR="${LDAP_DATABASE_DIR:-$(default_database_dir)}"
-LDAP_CONFIG_DIR="${LDAP_CONFIG_DIR:-$(default_config_dir)}"
-LDAP_SKIP_SEED_APPLY="${LDAP_SKIP_SEED_APPLY:-$(default_skip_seed_apply)}"
+configure_ldap_runtime_state() {
+    LDAP_DATABASE_DIR="${LDAP_DATABASE_DIR:-$(default_database_dir)}"
+    LDAP_CONFIG_DIR="${LDAP_CONFIG_DIR:-$(default_config_dir)}"
+    LDAP_SKIP_SEED_APPLY="${LDAP_SKIP_SEED_APPLY:-$(default_skip_seed_apply)}"
+}
 
 wait_for_openldap() {
     local attempt
@@ -119,6 +124,9 @@ main() {
         echo "Missing seed directory: ${SEED_DIR}" >&2
         exit 1
     fi
+
+    ensure_ldap_service_exists
+    configure_ldap_runtime_state
 
     compose stop "${LDAP_SERVICE_NAME}" >/dev/null 2>&1 || true
     compose rm -f -s "${LDAP_SERVICE_NAME}" >/dev/null 2>&1 || true
