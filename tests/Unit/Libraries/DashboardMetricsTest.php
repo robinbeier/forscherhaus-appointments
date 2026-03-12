@@ -125,6 +125,8 @@ class DashboardMetricsTest extends TestCase
 
         $this->assertSame(5, $metricsByProvider[10]['booked']);
         $this->assertSame(13, $metricsByProvider[11]['booked']);
+        $this->assertSame(58, $metricsByProvider[10]['slots_planned']);
+        $this->assertFalse($metricsByProvider[10]['has_capacity_gap']);
         $this->assertTrue($metricsByProvider[10]['after_15_evaluable']);
         $this->assertSame(29, $metricsByProvider[10]['after_15_slots']);
         $this->assertSame(58, $metricsByProvider[10]['total_offered_slots']);
@@ -213,6 +215,8 @@ class DashboardMetricsTest extends TestCase
         ]);
 
         $this->assertCount(1, $metrics);
+        $this->assertSame(5, $metrics[0]['slots_planned']);
+        $this->assertTrue($metrics[0]['has_capacity_gap']);
         $this->assertSame(2, $metrics[0]['after_15_slots']);
         $this->assertSame(5, $metrics[0]['total_offered_slots']);
         $this->assertEqualsWithDelta(0.4, $metrics[0]['after_15_ratio'], 0.0001);
@@ -278,6 +282,8 @@ class DashboardMetricsTest extends TestCase
         ]);
 
         $this->assertCount(1, $metrics);
+        $this->assertNull($metrics[0]['slots_planned']);
+        $this->assertFalse($metrics[0]['has_capacity_gap']);
         $this->assertNull($metrics[0]['after_15_slots']);
         $this->assertNull($metrics[0]['total_offered_slots']);
         $this->assertNull($metrics[0]['after_15_ratio']);
@@ -343,6 +349,8 @@ class DashboardMetricsTest extends TestCase
         ]);
 
         $this->assertCount(1, $metrics);
+        $this->assertNull($metrics[0]['slots_planned']);
+        $this->assertFalse($metrics[0]['has_capacity_gap']);
         $this->assertNull($metrics[0]['after_15_slots']);
         $this->assertNull($metrics[0]['total_offered_slots']);
         $this->assertNull($metrics[0]['after_15_ratio']);
@@ -419,6 +427,8 @@ class DashboardMetricsTest extends TestCase
         ]);
 
         $this->assertCount(1, $metrics);
+        $this->assertSame(0, $metrics[0]['slots_planned']);
+        $this->assertTrue($metrics[0]['has_capacity_gap']);
         $this->assertSame(0, $metrics[0]['after_15_slots']);
         $this->assertSame(0, $metrics[0]['total_offered_slots']);
         $this->assertNull($metrics[0]['after_15_ratio']);
@@ -533,9 +543,12 @@ class DashboardMetricsTest extends TestCase
 
         $this->assertSame(1, $metricsByProvider[10]['after_15_slots']);
         $this->assertSame(2, $metricsByProvider[10]['total_offered_slots']);
+        $this->assertSame(2, $metricsByProvider[10]['slots_planned']);
         $this->assertSame(50.0, $metricsByProvider[10]['after_15_percent']);
         $this->assertTrue($metricsByProvider[10]['after_15_evaluable']);
 
+        $this->assertNull($metricsByProvider[11]['slots_planned']);
+        $this->assertFalse($metricsByProvider[11]['has_capacity_gap']);
         $this->assertNull($metricsByProvider[11]['after_15_slots']);
         $this->assertNull($metricsByProvider[11]['total_offered_slots']);
         $this->assertNull($metricsByProvider[11]['after_15_ratio']);
