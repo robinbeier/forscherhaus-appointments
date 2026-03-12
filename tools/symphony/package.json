@@ -13,7 +13,7 @@
         "dev": "tsx src/cli.ts",
         "pr-body-check": "tsx src/pr-body-check.ts",
         "test": "tsx --test src/**/*.test.ts",
-        "test:conformance": "tsx --test src/workflow-config.test.ts src/template.test.ts src/pr-body-check.test.ts src/skills-metadata.test.ts src/install-git-hooks.test.ts src/docker-compose-helpers.test.ts src/pre-commit-hook.test.ts src/ensure-issue-worktree-hook.test.ts src/remove-issue-worktree-hook.test.ts src/workspace-manager.test.ts src/orchestrator.test.ts src/cli.test.ts src/state-presenter.test.ts src/state-tui.test.ts src/state-server.test.ts src/app-server-client.test.ts src/test-profiles.test.ts"
+        "test:conformance": "tsx --test src/workflow-config.test.ts src/template.test.ts src/pr-body-check.test.ts src/skills-metadata.test.ts src/install-git-hooks.test.ts src/docker-compose-helpers.test.ts src/pre-commit-hook.test.ts src/ensure-issue-worktree-hook.test.ts src/remove-issue-worktree-hook.test.ts src/workspace-manager.test.ts src/orchestrator.test.ts src/logger.test.ts src/cli.test.ts src/state-presenter.test.ts src/state-tui.test.ts src/state-server.test.ts src/app-server-client.test.ts src/test-profiles.test.ts"
     },
     "dependencies": {
         "graphql": "^16.13.1",

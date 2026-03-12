@@ -69,8 +69,16 @@ python3 ./scripts/symphony/run_soak_gate.py \
 
 ## Operator Status Surface Quick Check
 
+For local operator triage you can use either the browser dashboard or the
+optional read-only terminal view:
+
+```bash
+# Terminal-first (requires interactive TTY)
+npm --prefix tools/symphony run dev -- --tui --port 8787
+```
+
 When the optional HTTP surface is enabled, use the dashboard and JSON endpoints
-as a fast operator triage path:
+as the fallback or parallel verification path:
 
 ```bash
 # Visit http://127.0.0.1:8787/ in a browser for the human-readable dashboard
@@ -93,6 +101,9 @@ Interpretation:
   trace entries, useful for incident triage and pilot soak monitoring.
 - the HTML dashboard at `/` is intentionally read-only and renders only from
   in-memory orchestrator state.
+- in `--tui` mode, info logs are intentionally suppressed to keep the terminal
+  surface stable; warnings and errors remain visible as structured `stderr`
+  lines.
 
 Wichtige Abgrenzung:
 
@@ -130,6 +141,8 @@ Pilot guardrails im Startskript:
 - `--port <port>` or `--port=<port>`: enable the HTTP state API on the given
   loopback-bound port. This takes precedence over `server.port` in
   `WORKFLOW.md`.
+- `--tui`: enable an optional read-only terminal status surface (interactive
+  TTY required when not running with `--check`).
 - `--check`: validate bootstrap/configuration and exit.
 
 When no workflow path is supplied, the CLI defaults to:
@@ -259,6 +272,11 @@ Key behavior:
     - `GET /api/v1/state`
     - `GET /api/v1/<issue_identifier>`
     - `POST /api/v1/refresh`
+- optional `--tui` mode renders the same snapshot presenter fields in a
+  terminal-first read-only layout (status header, running table, backoff
+  queue); mode is observability-only and does not change orchestration logic
+- in `--tui` mode, info-level logs are suppressed to avoid tearing the live
+  terminal surface, while warn/error logs continue on `stderr`
 - state API config precedence is `--port` CLI override, then
   `server.port` in `WORKFLOW.md`, then the legacy
   `SYMPHONY_STATE_API_ENABLED` / `SYMPHONY_STATE_API_PORT` env fallback

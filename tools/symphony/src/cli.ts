@@ -15,14 +15,28 @@ export function validateCliRuntimeOptions(args: {
     }
 }
 
+export function resolveLoggerMode(args: {tui: boolean; checkOnly: boolean}): 'default' | 'tui' {
+    if (args.tui && !args.checkOnly) {
+        return 'tui';
+    }
+
+    return 'default';
+}
+
 async function run(argv: string[]): Promise<void> {
-    const logger = createLogger();
     const options = parseCliOptions(argv);
 
     validateCliRuntimeOptions({
         tui: options.tui,
         checkOnly: options.checkOnly,
         stdoutIsTTY: process.stdout.isTTY,
+    });
+
+    const logger = createLogger({
+        mode: resolveLoggerMode({
+            tui: options.tui,
+            checkOnly: options.checkOnly,
+        }),
     });
 
     const moduleDir = path.dirname(fileURLToPath(import.meta.url));
