@@ -60,11 +60,13 @@ export function resolveStateApiConfig(args: {
     env: NodeJS.ProcessEnv;
     cliStateApiPort?: number;
 }): ResolvedStateApiConfig {
+    const workflowHost = args.workflowConfig.server.host ?? DEFAULT_STATE_API_HOST;
+    const cliHost = args.workflowConfig.server.host ?? args.env.SYMPHONY_STATE_API_HOST ?? DEFAULT_STATE_API_HOST;
     const cliPort = sanitizeStateApiPort(args.cliStateApiPort);
     if (cliPort !== undefined) {
         return {
             enabled: true,
-            host: args.workflowConfig.server.host ?? DEFAULT_STATE_API_HOST,
+            host: cliHost,
             port: cliPort,
             source: 'cli',
         };
@@ -74,7 +76,7 @@ export function resolveStateApiConfig(args: {
     if (workflowPort !== undefined) {
         return {
             enabled: true,
-            host: args.workflowConfig.server.host ?? DEFAULT_STATE_API_HOST,
+            host: workflowHost,
             port: workflowPort,
             source: 'workflow',
         };
