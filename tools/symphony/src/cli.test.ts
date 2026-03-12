@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {validateCliRuntimeOptions} from './cli.js';
+import {resolveLoggerMode, validateCliRuntimeOptions} from './cli.js';
 
 test('validateCliRuntimeOptions rejects --tui in non-interactive runtime mode', () => {
     assert.throws(
@@ -22,4 +22,10 @@ test('validateCliRuntimeOptions allows --tui with --check in non-interactive mod
             stdoutIsTTY: false,
         }),
     );
+});
+
+test('resolveLoggerMode only enables tui logger mode for non-check tui runs', () => {
+    assert.equal(resolveLoggerMode({tui: true, checkOnly: false}), 'tui');
+    assert.equal(resolveLoggerMode({tui: true, checkOnly: true}), 'default');
+    assert.equal(resolveLoggerMode({tui: false, checkOnly: false}), 'default');
 });

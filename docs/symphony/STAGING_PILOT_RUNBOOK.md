@@ -18,6 +18,7 @@ a 24h soak gate before any production release decision.
      per-issue worktrees stay isolated from the operator's local `HEAD`.
 3. `WORKFLOW.md` uses pilot-safe settings (`max_concurrent: 1` or `2`).
 4. Rollback owner and incident owner are named before start.
+5. For local terminal-first runs with `--tui`, use an interactive TTY.
 
 ## Deterministic Baseline vs Live Boot
 
@@ -66,6 +67,15 @@ Binding precedence for the optional HTTP surface:
 Default binding remains `127.0.0.1`, and changing host/port settings requires
 restarting Symphony.
 
+Optional local operator route:
+
+```bash
+npm --prefix tools/symphony run dev -- --tui --port 8787
+```
+
+In `--tui` mode, info logs are suppressed to preserve readability of the live
+terminal surface; warn/error events still emit as structured `stderr` lines.
+
 ## Quick Local Health Check
 
 Use this quick check to confirm the operator surface is reachable, exposes
@@ -81,6 +91,16 @@ curl -fsS -X POST http://127.0.0.1:8787/api/v1/refresh
 ```
 
 Also visit `http://127.0.0.1:8787/` in a browser during pilot bring-up.
+
+Manual `--tui` smoke path:
+
+1. Start Symphony with `--tui` in a real terminal.
+2. Confirm the screen shows `SYMPHONY STATUS`, `RUNNING`, and `BACKOFF QUEUE`.
+3. Trigger one refresh via `POST /api/v1/refresh` and verify the view redraws.
+4. Trigger one synthetic warning/error path (or observe an existing one) and
+   confirm the warning/error is visible without permanently corrupting the TUI
+   layout on the next refresh.
+5. Stop with `Ctrl+C`.
 
 Expected operator signals:
 
