@@ -160,6 +160,8 @@ interface RunningEntry {
 }
 
 interface TokenUsageSummary {
+    inputTokens: number | null;
+    outputTokens: number | null;
     totalTokens: number | null;
     lastTurnTokens: number | null;
     contextWindowTokens: number | null;
@@ -205,7 +207,18 @@ class OrchestratorGuardrailError extends Error {
 }
 
 export interface OrchestratorSnapshot {
+    generated_at: string;
     lastTickAtIso?: string;
+    counts: {
+        running: number;
+        retrying: number;
+        completed: number;
+        input_required: number;
+        failed: number;
+        response_timeouts: number;
+        turn_timeouts: number;
+        launch_failures: number;
+    };
     running: Array<{
         issueId: string;
         issueIdentifier: string;
@@ -237,12 +250,10 @@ export interface OrchestratorSnapshot {
         errorClass?: string;
     }>;
     codex_totals: {
-        completed: number;
-        inputRequired: number;
-        failed: number;
-        responseTimeouts: number;
-        turnTimeouts: number;
-        launchFailures: number;
+        input_tokens: number;
+        output_tokens: number;
+        total_tokens: number;
+        seconds_running: number;
     };
     rate_limits: Record<string, unknown>;
 }
@@ -1063,6 +1074,36 @@ function summarizeTokenUsage(payload?: Record<string, unknown>): TokenUsageSumma
         return null;
     }
 
+    const inputTokens =
+        firstFiniteNumber(payload, [
+            ['input'],
+            ['inputTokens'],
+            ['input_tokens'],
+            ['total', 'input'],
+            ['total', 'inputTokens'],
+            ['total', 'input_tokens'],
+            ['totalTokenUsage', 'input'],
+            ['totalTokenUsage', 'inputTokens'],
+            ['totalTokenUsage', 'input_tokens'],
+            ['total_token_usage', 'input'],
+            ['total_token_usage', 'inputTokens'],
+            ['total_token_usage', 'input_tokens'],
+        ]) ?? null;
+    const outputTokens =
+        firstFiniteNumber(payload, [
+            ['output'],
+            ['outputTokens'],
+            ['output_tokens'],
+            ['total', 'output'],
+            ['total', 'outputTokens'],
+            ['total', 'output_tokens'],
+            ['totalTokenUsage', 'output'],
+            ['totalTokenUsage', 'outputTokens'],
+            ['totalTokenUsage', 'output_tokens'],
+            ['total_token_usage', 'output'],
+            ['total_token_usage', 'outputTokens'],
+            ['total_token_usage', 'output_tokens'],
+        ]) ?? null;
     const totalTokens =
         firstFiniteNumber(payload, [
             ['total'],
@@ -1077,7 +1118,7 @@ function summarizeTokenUsage(payload?: Record<string, unknown>): TokenUsageSumma
             ['total_token_usage'],
             ['total_token_usage', 'totalTokens'],
             ['total_token_usage', 'total_tokens'],
-        ]) ?? null;
+        ]) ?? (inputTokens !== null || outputTokens !== null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
     const lastTurnTokens =
         firstFiniteNumber(payload, [
             ['last'],
@@ -1109,7 +1150,13 @@ function summarizeTokenUsage(payload?: Record<string, unknown>): TokenUsageSumma
             ['total_token_usage', 'model_context_window'],
         ]) ?? null;
 
-    if (totalTokens === null && lastTurnTokens === null && contextWindowTokens === null) {
+    if (
+        inputTokens === null &&
+        outputTokens === null &&
+        totalTokens === null &&
+        lastTurnTokens === null &&
+        contextWindowTokens === null
+    ) {
         return null;
     }
 
@@ -1121,6 +1168,8 @@ function summarizeTokenUsage(payload?: Record<string, unknown>): TokenUsageSumma
             : null;
 
     return {
+        inputTokens,
+        outputTokens,
         totalTokens,
         lastTurnTokens,
         contextWindowTokens,
@@ -1144,6 +1193,12 @@ function describeTokenUsage(summary: TokenUsageSummary | null): string {
         );
     } else if (summary.totalTokens !== null) {
         parts.push(`Total tokens ${formatTokenCount(summary.totalTokens)}`);
+    }
+
+    if (summary.inputTokens !== null || summary.outputTokens !== null) {
+        const formattedInput = summary.inputTokens !== null ? formatTokenCount(summary.inputTokens) : 'n/a';
+        const formattedOutput = summary.outputTokens !== null ? formatTokenCount(summary.outputTokens) : 'n/a';
+        parts.push(`input ${formattedInput}, output ${formattedOutput}`);
     }
 
     if (summary.lastTurnTokens !== null) {
@@ -1373,7 +1428,7 @@ export class SymphonyOrchestrator {
     private lastTickAtIso?: string;
     private lastRateLimits: Record<string, unknown> = {};
     private startupCleanupCompleted = false;
-    private codexTotals = {
+    private lifecycleCounts = {
         completed: 0,
         inputRequired: 0,
         failed: 0,
@@ -1582,13 +1637,16 @@ export class SymphonyOrchestrator {
     }
 
     public getSnapshot(): OrchestratorSnapshot {
-        return {
-            lastTickAtIso: this.lastTickAtIso,
-            running: Array.from(this.runningByIssueId.values())
-                .map((entry) => {
-                    const activity = this.buildRunningActivity(entry);
+        const snapshotNowMs = this.nowMs();
+        const snapshotGeneratedAt = new Date(snapshotNowMs).toISOString();
+        const runningEntriesWithActivity = Array.from(this.runningByIssueId.values())
+            .map((entry) => {
+                const activity = this.buildRunningActivity(entry, snapshotNowMs);
 
-                    return {
+                return {
+                    entry,
+                    activity,
+                    snapshotEntry: {
                         issueId: entry.issue.id,
                         issueIdentifier: entry.issue.identifier,
                         attempt: entry.attempt,
@@ -1609,20 +1667,56 @@ export class SymphonyOrchestrator {
                         contextHeadroomTokens: activity.tokenUsage?.contextHeadroomTokens ?? null,
                         contextUtilizationPercent: activity.tokenUsage?.contextUtilizationPercent ?? null,
                         traceTail: entry.traceEntries.slice(-SNAPSHOT_TRACE_TAIL_ENTRIES),
-                    };
-                })
-                .sort((left, right) => left.issueIdentifier.localeCompare(right.issueIdentifier)),
-            retrying: Array.from(this.retryByIssueId.values())
-                .map((entry) => ({
-                    issueId: entry.issue.id,
-                    issueIdentifier: entry.issue.identifier,
-                    attempt: entry.attempt,
-                    reason: entry.reason,
-                    availableAtIso: new Date(entry.availableAtMs).toISOString(),
-                    errorClass: entry.errorClass,
-                }))
-                .sort((left, right) => left.availableAtIso.localeCompare(right.availableAtIso)),
-            codex_totals: {...this.codexTotals},
+                    },
+                };
+            })
+            .sort((left, right) =>
+                left.snapshotEntry.issueIdentifier.localeCompare(right.snapshotEntry.issueIdentifier),
+            );
+        const running = runningEntriesWithActivity.map((item) => item.snapshotEntry);
+        const retrying = Array.from(this.retryByIssueId.values())
+            .map((entry) => ({
+                issueId: entry.issue.id,
+                issueIdentifier: entry.issue.identifier,
+                attempt: entry.attempt,
+                reason: entry.reason,
+                availableAtIso: new Date(entry.availableAtMs).toISOString(),
+                errorClass: entry.errorClass,
+            }))
+            .sort((left, right) => left.availableAtIso.localeCompare(right.availableAtIso));
+        const codexTotals = runningEntriesWithActivity.reduce(
+            (aggregate, item) => {
+                const tokenUsage = item.activity.tokenUsage;
+                aggregate.input_tokens += Math.max(0, tokenUsage?.inputTokens ?? 0);
+                aggregate.output_tokens += Math.max(0, tokenUsage?.outputTokens ?? 0);
+                aggregate.total_tokens += Math.max(0, tokenUsage?.totalTokens ?? 0);
+                aggregate.seconds_running += Math.max(0, item.activity.runtimeSeconds);
+                return aggregate;
+            },
+            {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                seconds_running: 0,
+            },
+        );
+
+        return {
+            generated_at: snapshotGeneratedAt,
+            lastTickAtIso: this.lastTickAtIso,
+            counts: {
+                running: running.length,
+                retrying: retrying.length,
+                completed: this.lifecycleCounts.completed,
+                input_required: this.lifecycleCounts.inputRequired,
+                failed: this.lifecycleCounts.failed,
+                response_timeouts: this.lifecycleCounts.responseTimeouts,
+                turn_timeouts: this.lifecycleCounts.turnTimeouts,
+                launch_failures: this.lifecycleCounts.launchFailures,
+            },
+            running,
+            retrying,
+            codex_totals: codexTotals,
             rate_limits: {...this.lastRateLimits},
         };
     }
@@ -2141,7 +2235,7 @@ export class SymphonyOrchestrator {
                 runningEntry.sessionId = turnResult.sessionId;
 
                 if (turnResult.status === 'input_required') {
-                    this.codexTotals.inputRequired += 1;
+                    this.lifecycleCounts.inputRequired += 1;
                     const inputRequiredSummary = turnResult.inputRequiredPayload
                         ? summarizeRawEvent(turnResult.inputRequiredPayload)
                         : undefined;
@@ -2312,7 +2406,7 @@ export class SymphonyOrchestrator {
                 }
             }
 
-            this.codexTotals.completed += 1;
+            this.lifecycleCounts.completed += 1;
             this.retryByIssueId.delete(runningEntry.issue.id);
 
             if (shouldScheduleContinuationRetry && !runningEntry.suppressRetry) {
@@ -2406,17 +2500,17 @@ export class SymphonyOrchestrator {
             }
 
             if (cancelledAfterMergeCompletion || cancelledAfterReviewHandoff) {
-                this.codexTotals.completed += 1;
+                this.lifecycleCounts.completed += 1;
             } else if (!cancelledByReconciliation && !cancelledForPostDiffCheckpoint) {
-                this.codexTotals.failed += 1;
+                this.lifecycleCounts.failed += 1;
             }
 
             if (classified.errorClass === 'response_timeout') {
-                this.codexTotals.responseTimeouts += 1;
+                this.lifecycleCounts.responseTimeouts += 1;
             } else if (classified.errorClass === 'turn_timeout') {
-                this.codexTotals.turnTimeouts += 1;
+                this.lifecycleCounts.turnTimeouts += 1;
             } else if (classified.errorClass === 'launch_failed') {
-                this.codexTotals.launchFailures += 1;
+                this.lifecycleCounts.launchFailures += 1;
             }
 
             if (cancelledByReconciliation) {
@@ -2648,15 +2742,16 @@ export class SymphonyOrchestrator {
         });
     }
 
-    private buildRunningActivity(runningEntry: RunningEntry): {
+    private buildRunningActivity(
+        runningEntry: RunningEntry,
+        nowMs = this.nowMs(),
+    ): {
         startedAtIso: string;
         runtimeSeconds: number;
         lastActivityAtIso: string;
         idleSeconds: number;
         tokenUsage: TokenUsageSummary | null;
     } {
-        const nowMs = this.nowMs();
-
         return {
             startedAtIso: new Date(runningEntry.startedAtMs).toISOString(),
             runtimeSeconds: Math.max(0, Math.floor((nowMs - runningEntry.startedAtMs) / 1000)),
