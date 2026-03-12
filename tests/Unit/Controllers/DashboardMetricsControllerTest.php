@@ -55,6 +55,12 @@ class DashboardMetricsControllerTest extends TestCase
                 'fill_rate' => 0.6667,
                 'has_explicit_target' => true,
                 'has_plan' => true,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 19,
+                'after_15_ratio' => 0.2105,
+                'after_15_percent' => 21.1,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
             ],
         ];
 
@@ -188,9 +194,7 @@ class DashboardMetricsControllerTest extends TestCase
             public string $persistStartDate = '';
             public string $persistEndDate = '';
 
-            public function __construct()
-            {
-            }
+            public function __construct() {}
 
             protected function persistProviderDashboardRange(
                 int $provider_id,

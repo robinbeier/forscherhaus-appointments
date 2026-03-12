@@ -12,7 +12,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 3 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 7 | 4 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 17 | 3 |
+| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 18 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice | 25 | 3 |
@@ -138,6 +138,7 @@ Path prefixes:
 - `application/controllers/Unavailabilities.php`
 - `application/controllers/Backend.php`
 - `application/controllers/Backend_api.php`
+- `application/libraries/Booking_slot_analytics.php`
 - `application/libraries/Backoffice_request_dto_factory.php`
 - `application/libraries/Calendar_request_dto_factory.php`
 - `application/models/Appointments_model.php`

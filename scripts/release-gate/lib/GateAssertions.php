@@ -7,15 +7,11 @@ namespace ReleaseGate;
 use JsonException;
 use RuntimeException;
 
-final class GateAssertionException extends RuntimeException
-{
-}
+final class GateAssertionException extends RuntimeException {}
 
 final class GateAssertions
 {
-    private function __construct()
-    {
-    }
+    private function __construct() {}
 
     /**
      * @param int|int[] $expected
@@ -97,6 +93,12 @@ final class GateAssertions
                 'slots_planned',
                 'slots_required',
                 'has_capacity_gap',
+                'after_15_slots',
+                'total_offered_slots',
+                'after_15_ratio',
+                'after_15_percent',
+                'after_15_target_met',
+                'after_15_evaluable',
             ];
 
             foreach ($requiredKeys as $key) {
@@ -122,6 +124,7 @@ final class GateAssertions
             $slotsPlanned = self::toNonNegativeInt($row['slots_planned'], $context . '.slots_planned');
             $slotsRequired = self::toNonNegativeInt($row['slots_required'], $context . '.slots_required');
             $hasCapacityGap = self::toBool($row['has_capacity_gap'], $context . '.has_capacity_gap');
+            $after15Evaluable = self::toBool($row['after_15_evaluable'], $context . '.after_15_evaluable');
 
             $expectedOpen = $target > 0 ? max($target - $booked, 0) : 0;
             if ($open !== $expectedOpen) {
@@ -149,6 +152,8 @@ final class GateAssertions
                 );
             }
 
+            self::assertAfter15Metrics($row, $context, $after15Evaluable);
+
             $bookedTotal += $booked;
         }
 
@@ -156,6 +161,122 @@ final class GateAssertions
             'providers' => count($payload),
             'booked_total' => $bookedTotal,
         ];
+    }
+
+    private static function assertAfter15Metrics(array $row, string $context, bool $after15Evaluable): void
+    {
+        $after15Slots = self::normalizeOptionalNonNegativeInt($row['after_15_slots'], $context . '.after_15_slots');
+        $totalOfferedSlots = self::normalizeOptionalNonNegativeInt(
+            $row['total_offered_slots'],
+            $context . '.total_offered_slots',
+        );
+        $after15Ratio = self::normalizeOptionalNonNegativeFloat($row['after_15_ratio'], $context . '.after_15_ratio');
+        $after15Percent = self::normalizeOptionalNonNegativeFloat(
+            $row['after_15_percent'],
+            $context . '.after_15_percent',
+        );
+        $after15TargetMet = self::normalizeOptionalBool($row['after_15_target_met'], $context . '.after_15_target_met');
+
+        if ($after15Evaluable) {
+            if (
+                $after15Slots === null ||
+                $totalOfferedSlots === null ||
+                $after15Ratio === null ||
+                $after15Percent === null
+            ) {
+                throw new GateAssertionException(
+                    $context . ' evaluable after-15 metrics must include slot counts, ratio, and percent.',
+                );
+            }
+
+            if ($after15TargetMet === null) {
+                throw new GateAssertionException(
+                    $context . ' evaluable after-15 metrics must include after_15_target_met.',
+                );
+            }
+
+            if ($totalOfferedSlots <= 0) {
+                throw new GateAssertionException(
+                    $context . '.total_offered_slots must be > 0 when after_15_evaluable is true.',
+                );
+            }
+
+            if ($after15Slots > $totalOfferedSlots) {
+                throw new GateAssertionException(
+                    sprintf(
+                        '%s.after_15_slots mismatch: %d cannot exceed total_offered_slots %d.',
+                        $context,
+                        $after15Slots,
+                        $totalOfferedSlots,
+                    ),
+                );
+            }
+
+            $expectedRatio = $after15Slots / $totalOfferedSlots;
+            if (abs($after15Ratio - $expectedRatio) > 0.0001) {
+                throw new GateAssertionException(
+                    sprintf(
+                        '%s.after_15_ratio mismatch: expected %.6f, got %.6f.',
+                        $context,
+                        $expectedRatio,
+                        $after15Ratio,
+                    ),
+                );
+            }
+
+            $expectedPercent = round($expectedRatio * 100, 1);
+            if (abs($after15Percent - $expectedPercent) > 0.0001) {
+                throw new GateAssertionException(
+                    sprintf(
+                        '%s.after_15_percent mismatch: expected %.1f, got %.6f.',
+                        $context,
+                        $expectedPercent,
+                        $after15Percent,
+                    ),
+                );
+            }
+
+            $expectedTargetMet = $expectedRatio >= 0.3;
+            if ($after15TargetMet !== $expectedTargetMet) {
+                throw new GateAssertionException(
+                    sprintf(
+                        '%s.after_15_target_met mismatch: expected %s, got %s.',
+                        $context,
+                        $expectedTargetMet ? 'true' : 'false',
+                        $after15TargetMet ? 'true' : 'false',
+                    ),
+                );
+            }
+
+            return;
+        }
+
+        if ($after15Ratio !== null || $after15Percent !== null || $after15TargetMet !== null) {
+            throw new GateAssertionException(
+                $context . ' non-evaluable after-15 metrics must leave ratio, percent, and target state null.',
+            );
+        }
+
+        if ($after15Slots === null && $totalOfferedSlots === null) {
+            return;
+        }
+
+        if ($after15Slots === null || $totalOfferedSlots === null) {
+            throw new GateAssertionException(
+                $context . ' non-evaluable after-15 metrics must provide both slot counts together or neither.',
+            );
+        }
+
+        if ($after15Slots !== 0 || $totalOfferedSlots !== 0) {
+            throw new GateAssertionException(
+                sprintf(
+                    '%s non-evaluable after-15 metrics must use null/null or 0/0 slot counts, got %d/%d.',
+                    $context,
+                    $after15Slots,
+                    $totalOfferedSlots,
+                ),
+            );
+        }
     }
 
     /**
@@ -438,5 +559,32 @@ final class GateAssertions
         }
 
         throw new GateAssertionException($context . ' must be a boolean-like value.');
+    }
+
+    private static function normalizeOptionalNonNegativeInt(mixed $value, string $context): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return self::toNonNegativeInt($value, $context);
+    }
+
+    private static function normalizeOptionalNonNegativeFloat(mixed $value, string $context): ?float
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return self::toNonNegativeFloat($value, $context);
+    }
+
+    private static function normalizeOptionalBool(mixed $value, string $context): ?bool
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return self::toBool($value, $context);
     }
 }

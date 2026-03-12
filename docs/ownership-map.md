@@ -139,6 +139,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Unavailabilities.php`
   - `application/controllers/Backend.php`
   - `application/controllers/Backend_api.php`
+  - `application/libraries/Booking_slot_analytics.php`
   - `application/libraries/Backoffice_request_dto_factory.php`
   - `application/libraries/Calendar_request_dto_factory.php`
   - `application/models/Appointments_model.php`

@@ -25,6 +25,12 @@ class DashboardReleaseGateAssertionsTest extends TestCase
                 'slots_planned' => 18,
                 'slots_required' => 20,
                 'has_capacity_gap' => true,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 19,
+                'after_15_ratio' => 4 / 19,
+                'after_15_percent' => 21.1,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
             ],
         ];
 
@@ -49,6 +55,12 @@ class DashboardReleaseGateAssertionsTest extends TestCase
                 'slots_planned' => 20,
                 'slots_required' => 20,
                 'has_capacity_gap' => false,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 19,
+                'after_15_ratio' => 4 / 19,
+                'after_15_percent' => 21.1,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
             ],
         ];
 
@@ -73,6 +85,12 @@ class DashboardReleaseGateAssertionsTest extends TestCase
                 'slots_planned' => 12,
                 'slots_required' => 20,
                 'has_capacity_gap' => false,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 19,
+                'after_15_ratio' => 4 / 19,
+                'after_15_percent' => 21.1,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
             ],
         ];
 
@@ -97,11 +115,126 @@ class DashboardReleaseGateAssertionsTest extends TestCase
                 'slots_planned' => 12,
                 'slots_required' => 20,
                 'has_capacity_gap' => true,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 19,
+                'after_15_ratio' => 4 / 19,
+                'after_15_percent' => 21.1,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
             ],
         ];
 
         $this->expectException(GateAssertionException::class);
         $this->expectExceptionMessage('provider_id must be an integer');
+
+        GateAssertions::assertMetricsPayload($payload, false);
+    }
+
+    public function testAssertMetricsPayloadRejectsAfter15PercentMismatch(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 44,
+                'provider_name' => 'Katherine Johnson',
+                'target' => 20,
+                'booked' => 12,
+                'open' => 8,
+                'fill_rate' => 0.6,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 20,
+                'slots_required' => 20,
+                'has_capacity_gap' => false,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 19,
+                'after_15_ratio' => 4 / 19,
+                'after_15_percent' => 22.0,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
+            ],
+        ];
+
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('after_15_percent mismatch');
+
+        GateAssertions::assertMetricsPayload($payload, false);
+    }
+
+    public function testAssertMetricsPayloadAcceptsNeutralAfter15Metrics(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 55,
+                'provider_name' => 'Barbara Liskov',
+                'target' => 20,
+                'booked' => 12,
+                'open' => 8,
+                'fill_rate' => 0.6,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 20,
+                'slots_required' => 20,
+                'has_capacity_gap' => false,
+                'after_15_slots' => null,
+                'total_offered_slots' => null,
+                'after_15_ratio' => null,
+                'after_15_percent' => null,
+                'after_15_target_met' => null,
+                'after_15_evaluable' => false,
+            ],
+            [
+                'provider_id' => 56,
+                'provider_name' => 'Margaret Hamilton',
+                'target' => 20,
+                'booked' => 12,
+                'open' => 8,
+                'fill_rate' => 0.6,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 20,
+                'slots_required' => 20,
+                'has_capacity_gap' => false,
+                'after_15_slots' => 0,
+                'total_offered_slots' => 0,
+                'after_15_ratio' => null,
+                'after_15_percent' => null,
+                'after_15_target_met' => null,
+                'after_15_evaluable' => false,
+            ],
+        ];
+
+        $summary = GateAssertions::assertMetricsPayload($payload, true);
+
+        $this->assertSame(2, $summary['providers']);
+        $this->assertSame(24, $summary['booked_total']);
+    }
+
+    public function testAssertMetricsPayloadRejectsPositiveAfter15CountsWhenNonEvaluable(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 57,
+                'provider_name' => 'Joan Clarke',
+                'target' => 20,
+                'booked' => 12,
+                'open' => 8,
+                'fill_rate' => 0.6,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 20,
+                'slots_required' => 20,
+                'has_capacity_gap' => false,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 10,
+                'after_15_ratio' => null,
+                'after_15_percent' => null,
+                'after_15_target_met' => null,
+                'after_15_evaluable' => false,
+            ],
+        ];
+
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('must use null/null or 0/0 slot counts');
 
         GateAssertions::assertMetricsPayload($payload, false);
     }

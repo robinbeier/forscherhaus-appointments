@@ -20,6 +20,10 @@
  */
 class Dashboard_metrics
 {
+    protected const AFTER_15_CUTOFF = '15:00';
+
+    protected const AFTER_15_TARGET_RATIO = 0.3;
+
     /**
      * @var EA_Controller|CI_Controller
      */
@@ -31,6 +35,15 @@ class Dashboard_metrics
 
     protected Provider_utilization $provider_utilization;
 
+    protected Services_model $services_model;
+
+    protected Booking_slot_analytics $booking_slot_analytics;
+
+    /**
+     * @var array<int, array|null>
+     */
+    protected array $service_cache = [];
+
     /**
      * Dashboard_metrics constructor.
      */
@@ -38,6 +51,8 @@ class Dashboard_metrics
         ?Providers_model $providers_model = null,
         ?Appointments_model $appointments_model = null,
         ?Provider_utilization $provider_utilization = null,
+        ?Services_model $services_model = null,
+        ?Booking_slot_analytics $booking_slot_analytics = null,
     ) {
         $this->CI = &get_instance();
 
@@ -60,6 +75,20 @@ class Dashboard_metrics
         } else {
             $this->CI->load->library('provider_utilization');
             $this->provider_utilization = $this->CI->provider_utilization;
+        }
+
+        if ($services_model) {
+            $this->services_model = $services_model;
+        } else {
+            $this->CI->load->model('services_model');
+            $this->services_model = $this->CI->services_model;
+        }
+
+        if ($booking_slot_analytics) {
+            $this->booking_slot_analytics = $booking_slot_analytics;
+        } else {
+            $this->CI->load->library('booking_slot_analytics');
+            $this->booking_slot_analytics = $this->CI->booking_slot_analytics;
         }
     }
 
@@ -128,6 +157,7 @@ class Dashboard_metrics
             [$target, $is_fallback] = $this->resolveTarget($provider, $summary, $class_size_default);
 
             $booked_for_metrics = $this->resolveBookedMetric($summary, $booked_count, $is_fallback);
+            $after_15_metrics = $this->calculateAfter15Metrics($provider, $start, $end, $service_id);
 
             $metrics[] = $this->formatRow(
                 $provider,
@@ -137,6 +167,7 @@ class Dashboard_metrics
                 $threshold,
                 $is_fallback,
                 $class_size_default,
+                $after_15_metrics,
             );
         }
 
@@ -310,6 +341,147 @@ class Dashboard_metrics
         return $booked / $target;
     }
 
+    protected function calculateAfter15Metrics(
+        array $provider,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        ?int $selected_service_id,
+    ): array {
+        $service = $this->resolveDashboardService($provider, $selected_service_id);
+
+        if (!$service) {
+            return $this->buildNeutralAfter15Metrics();
+        }
+
+        $total_offered_slots = 0;
+        $after_15_slots = 0;
+        $day = $start;
+
+        try {
+            $offered_hours_by_date = $this->booking_slot_analytics->get_offered_hours_by_date_for_analysis(
+                $start->format('Y-m-d'),
+                $end->format('Y-m-d'),
+                $service,
+                $provider,
+            );
+
+            while ($day <= $end) {
+                $offered_hours = $offered_hours_by_date[$day->format('Y-m-d')] ?? [];
+
+                foreach ($offered_hours as $offered_hour) {
+                    if (!is_string($offered_hour) || !preg_match('/^\d{2}:\d{2}$/', $offered_hour)) {
+                        continue;
+                    }
+
+                    $total_offered_slots++;
+
+                    if ($offered_hour >= self::AFTER_15_CUTOFF) {
+                        $after_15_slots++;
+                    }
+                }
+
+                $day = $day->add(new DateInterval('P1D'));
+            }
+        } catch (Throwable $exception) {
+            $this->logAfter15MetricsFailure($provider, $service, $exception);
+
+            return $this->buildNeutralAfter15Metrics();
+        }
+
+        if ($total_offered_slots === 0) {
+            return [
+                'after_15_slots' => 0,
+                'total_offered_slots' => 0,
+                'after_15_ratio' => null,
+                'after_15_percent' => null,
+                'after_15_target_met' => null,
+                'after_15_evaluable' => false,
+            ];
+        }
+
+        $after_15_ratio = $after_15_slots / $total_offered_slots;
+
+        return [
+            'after_15_slots' => $after_15_slots,
+            'total_offered_slots' => $total_offered_slots,
+            'after_15_ratio' => $after_15_ratio,
+            'after_15_percent' => round($after_15_ratio * 100, 1),
+            'after_15_target_met' => $after_15_ratio >= self::AFTER_15_TARGET_RATIO,
+            'after_15_evaluable' => true,
+        ];
+    }
+
+    protected function resolveDashboardService(array $provider, ?int $selected_service_id): ?array
+    {
+        if ($selected_service_id !== null) {
+            return $this->getServiceById($selected_service_id);
+        }
+
+        $provider_service_ids = array_values(
+            array_unique(
+                array_filter(
+                    array_map('intval', $provider['services'] ?? []),
+                    static fn(int $service_id): bool => $service_id > 0,
+                ),
+            ),
+        );
+
+        if (count($provider_service_ids) !== 1) {
+            return null;
+        }
+
+        return $this->getServiceById($provider_service_ids[0]);
+    }
+
+    protected function getServiceById(int $service_id): ?array
+    {
+        if ($service_id <= 0) {
+            return null;
+        }
+
+        if (array_key_exists($service_id, $this->service_cache)) {
+            return $this->service_cache[$service_id];
+        }
+
+        $services = $this->services_model->get(['id' => $service_id], 1);
+        $service = $services[0] ?? null;
+        $this->service_cache[$service_id] = $service;
+
+        return $service;
+    }
+
+    protected function buildNeutralAfter15Metrics(): array
+    {
+        return [
+            'after_15_slots' => null,
+            'total_offered_slots' => null,
+            'after_15_ratio' => null,
+            'after_15_percent' => null,
+            'after_15_target_met' => null,
+            'after_15_evaluable' => false,
+        ];
+    }
+
+    protected function logAfter15MetricsFailure(array $provider, array $service, Throwable $exception): void
+    {
+        if (!function_exists('log_message')) {
+            return;
+        }
+
+        $provider_id = (int) ($provider['id'] ?? 0);
+        $service_id = (int) ($service['id'] ?? 0);
+
+        log_message(
+            'error',
+            sprintf(
+                'Dashboard after-15 metric skipped for provider %d and service %d: %s',
+                $provider_id,
+                $service_id,
+                $exception->getMessage(),
+            ),
+        );
+    }
+
     protected function formatRow(
         array $provider,
         array $summary,
@@ -318,6 +490,7 @@ class Dashboard_metrics
         float $threshold,
         bool $is_fallback,
         ?int $class_size_default,
+        array $after_15_metrics,
     ): array {
         $total_slots = $this->extractTotalSlots($summary);
         $open = $target > 0 ? max($target - $booked, 0) : 0;
@@ -347,6 +520,12 @@ class Dashboard_metrics
             'is_target_fallback' => $is_fallback,
             'class_size_default' => $class_size_default,
             'has_explicit_target' => $class_size_default !== null,
+            'after_15_slots' => $after_15_metrics['after_15_slots'] ?? null,
+            'total_offered_slots' => $after_15_metrics['total_offered_slots'] ?? null,
+            'after_15_ratio' => $after_15_metrics['after_15_ratio'] ?? null,
+            'after_15_percent' => $after_15_metrics['after_15_percent'] ?? null,
+            'after_15_target_met' => $after_15_metrics['after_15_target_met'] ?? null,
+            'after_15_evaluable' => (bool) ($after_15_metrics['after_15_evaluable'] ?? false),
         ];
     }
 
