@@ -51,6 +51,8 @@ bash ./scripts/ci/pre_pr_quick.sh
 - With host PHP and Docker PDF renderer, set `PDF_RENDERER_URL=http://localhost:3003`.
 - Use a unique Docker Compose project name per worktree.
 - Prefer `docker compose run --rm php-fpm composer deptrac:analyze` over host `composer deptrac:analyze`.
+- `./scripts/setup-worktree.sh` installs managed hooks; refresh with `./scripts/install-git-hooks.sh` (or replace older custom hooks with `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh`).
+- For deterministic LDAP fixtures, run `bash ./scripts/ldap/reset_directory.sh` and `bash ./scripts/ldap/smoke.sh`.
 
 ## Validation Expectations
 
