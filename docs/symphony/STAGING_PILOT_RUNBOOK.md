@@ -12,7 +12,8 @@ a 24h soak gate before any production release decision.
    - `SYMPHONY_LINEAR_API_KEY`
    - `SYMPHONY_LINEAR_PROJECT_SLUG`
    - `SYMPHONY_CODEX_COMMAND`
-   - `SYMPHONY_STATE_API_ENABLED=1`
+   - either `server.port` in `WORKFLOW.md`, or `--port <port>` on the
+     Symphony CLI, or the legacy fallback `SYMPHONY_STATE_API_ENABLED=1`
    - For local pilot runs, set `SYMPHONY_WORKTREE_BASE_REF=origin/main` so
      per-issue worktrees stay isolated from the operator's local `HEAD`.
 3. `WORKFLOW.md` uses pilot-safe settings (`max_concurrent: 1` or `2`).
@@ -29,6 +30,15 @@ The service exposes optional state endpoints when enabled:
 
 - `GET /api/v1/state`
 - `POST /api/v1/refresh`
+
+Binding precedence for the optional HTTP surface:
+
+1. `--port <port>` on the Symphony CLI
+2. `server.port` in `WORKFLOW.md`
+3. legacy `SYMPHONY_STATE_API_ENABLED` / `SYMPHONY_STATE_API_PORT`
+
+Default binding remains `127.0.0.1`, and changing host/port settings requires
+restarting Symphony.
 
 ## Quick Local Health Check
 

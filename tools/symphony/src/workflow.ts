@@ -18,6 +18,7 @@ interface MutableRecord {
 interface WorkflowFrontMatter {
     tracker: MutableRecord;
     polling: MutableRecord;
+    server: MutableRecord;
     workspace: MutableRecord;
     hooks: MutableRecord;
     agent: MutableRecord;
@@ -79,6 +80,11 @@ export interface WorkspaceConfig {
     keepTerminalWorkspaces: boolean;
 }
 
+export interface ServerConfig {
+    host?: string;
+    port?: number;
+}
+
 export interface HookConfig {
     timeoutMs: number;
     afterCreate: string[];
@@ -114,6 +120,7 @@ export interface WorkflowConfig {
     promptTemplate: string;
     tracker: TrackerConfig;
     polling: PollingConfig;
+    server: ServerConfig;
     workspace: WorkspaceConfig;
     hooks: HookConfig;
     agent: AgentConfig;
@@ -281,6 +288,17 @@ function pickNumber(config: MutableRecord, keys: string[], fallback: number): nu
     return fallback;
 }
 
+function pickOptionalNumber(config: MutableRecord, keys: string[]): number | undefined {
+    for (const key of keys) {
+        const value = asNumber(config[key]);
+        if (value !== undefined) {
+            return value;
+        }
+    }
+
+    return undefined;
+}
+
 function pickBoolean(config: MutableRecord, keys: string[], fallback: boolean): boolean {
     for (const key of keys) {
         const value = asBoolean(config[key]);
@@ -331,6 +349,19 @@ function sanitizePositiveInteger(value: number, fallback: number): number {
     }
 
     return Math.floor(value);
+}
+
+function sanitizePort(value: number | undefined): number | undefined {
+    if (value === undefined || !Number.isFinite(value)) {
+        return undefined;
+    }
+
+    const port = Math.floor(value);
+    if (port < 1 || port > 65535) {
+        return undefined;
+    }
+
+    return port;
 }
 
 function pickValue(config: MutableRecord, keys: string[]): unknown {
@@ -454,6 +485,7 @@ function splitFrontMatter(contents: string): {frontMatter: WorkflowFrontMatter; 
             frontMatter: {
                 tracker: {},
                 polling: {},
+                server: {},
                 workspace: {},
                 hooks: {},
                 agent: {},
@@ -486,6 +518,7 @@ function splitFrontMatter(contents: string): {frontMatter: WorkflowFrontMatter; 
         frontMatter: {
             tracker: asRecord(record.tracker),
             polling: asRecord(record.polling),
+            server: asRecord(record.server),
             workspace: asRecord(record.workspace),
             hooks: asRecord(record.hooks),
             agent: asRecord(record.agent),
@@ -617,6 +650,8 @@ export function parseWorkflowConfig(args: ParseWorkflowConfigArgs): LoadedWorkfl
         3600000,
     );
     const stallTimeoutMs = pickNumber(resolvedFrontMatter.codex, ['stallTimeoutMs', 'stall_timeout_ms'], 300000);
+    const serverHost = pickString(resolvedFrontMatter.server, ['host'], '');
+    const serverPort = sanitizePort(pickOptionalNumber(resolvedFrontMatter.server, ['port']));
 
     const config: LoadedWorkflowConfig = {
         workflowPath: args.workflowPath,
@@ -660,6 +695,10 @@ export function parseWorkflowConfig(args: ParseWorkflowConfigArgs): LoadedWorkfl
         polling: {
             intervalMs: pickNumber(resolvedFrontMatter.polling, ['intervalMs', 'interval_ms'], 30000),
             maxCandidates: pickNumber(resolvedFrontMatter.polling, ['maxCandidates', 'max_candidates'], 20),
+        },
+        server: {
+            host: serverHost.length > 0 ? serverHost : undefined,
+            port: serverPort,
         },
         workspace: {
             root: path.isAbsolute(workspaceRoot) ? workspaceRoot : workspaceRoot,
