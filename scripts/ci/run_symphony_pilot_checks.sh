@@ -3,10 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
-source ./scripts/ci/docker_compose_helpers.sh
 
 RUN_FULL_GATE=0
-CI_DOCKER_LOG_PREFIX="symphony-pilot-checks"
 
 usage() {
     cat <<'USAGE'
@@ -43,21 +41,31 @@ echo_section() {
     echo "== $*"
 }
 
-cleanup_stack() {
-    ci_docker_cleanup_stack
-}
+SOAK_OUTPUT_JSON="$(mktemp -t symphony-soak-gate-baseline)"
 
 echo_section "Symphony pilot baseline checks"
-echo "[symphony-pilot-checks] deterministic order: composer test -> optional full pre-pr gate"
+echo "[symphony-pilot-checks] deterministic order: build -> conformance -> workflow check -> sample soak gate -> optional full pre-pr gate"
+echo "[symphony-pilot-checks] note: this baseline proves Symphony pilot readiness only; start_pilot bootability and repo-wide PHPUnit remain separate signals."
 
-trap cleanup_stack EXIT
+echo_section "Build Symphony"
+npm --prefix tools/symphony run build
 
-echo_section "Start MySQL service"
-ci_docker_compose up -d mysql
-ci_docker_wait_for_mysql_readiness "symphony-pilot-checks"
+echo_section "Symphony conformance"
+npm --prefix tools/symphony run test:conformance
 
-echo_section "Composer test (CI parity)"
-ci_docker_compose run --rm php-fpm composer test
+echo_section "Workflow preflight (pilot-safe env)"
+SYMPHONY_LINEAR_API_KEY=fake \
+SYMPHONY_LINEAR_PROJECT_SLUG=fake \
+SYMPHONY_CODEX_COMMAND='codex app-server' \
+SYMPHONY_REPO_ROOT="$ROOT_DIR" \
+    npm --prefix tools/symphony run dev -- --check --workflow "$ROOT_DIR/WORKFLOW.md"
+
+echo_section "State snapshot sample soak gate"
+python3 ./scripts/symphony/run_soak_gate.py \
+    --sample-file ./tools/symphony/fixtures/state-snapshot.sample.json \
+    --duration-seconds 1 \
+    --poll-seconds 1 \
+    --output-json "$SOAK_OUTPUT_JSON"
 
 if [[ "$RUN_FULL_GATE" -eq 1 ]]; then
     echo_section "Full pre-PR gate (coverage enabled)"
@@ -66,9 +74,6 @@ else
     echo
     echo "[symphony-pilot-checks] Skipping full pre-pr gate. Use --with-full-gate to include it."
 fi
-
-cleanup_stack
-trap - EXIT
 
 echo
 echo "[symphony-pilot-checks] All requested checks passed."

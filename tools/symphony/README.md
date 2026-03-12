@@ -51,6 +51,13 @@ cp .env.symphony.pilot.example .env.symphony.pilot
 # 3) Pilot starten (foreground, Ctrl+C beendet und raeumt Stack auf)
 bash ./scripts/symphony/start_pilot.sh
 
+# Deterministische lokale Pilot-Readiness-Baseline
+# (Symphony build + conformance + workflow preflight + sample soak gate)
+bash ./scripts/ci/run_symphony_pilot_checks.sh
+
+# Optional: baseline plus repo-weites Vollgate
+bash ./scripts/ci/run_symphony_pilot_checks.sh --with-full-gate
+
 # Optional: Stack getrennt stoppen
 bash ./scripts/symphony/stop_pilot.sh
 
@@ -59,6 +66,16 @@ python3 ./scripts/symphony/run_soak_gate.py \
   --state-url http://127.0.0.1:8787/api/v1/state \
   --duration-seconds 86400 --poll-seconds 60
 ```
+
+Wichtige Abgrenzung:
+
+- `bash ./scripts/symphony/start_pilot.sh` prueft die live Bootability des
+  Pilots mit echter Env/Infra.
+- `bash ./scripts/ci/run_symphony_pilot_checks.sh` ist die deterministische
+  lokale Readiness-Baseline fuer Symphony selbst und schliesst bewusst keine
+  fachfremden repo-weiten PHPUnit-Pfade ein.
+- `--with-full-gate` haengt das repo-weite `pre_pr_full` wieder explizit an,
+  wenn zusaetzlich die gesamte Review-/Release-Baseline gebraucht wird.
 
 Pilot guardrails im Startskript:
 

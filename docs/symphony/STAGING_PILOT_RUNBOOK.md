@@ -19,6 +19,30 @@ a 24h soak gate before any production release decision.
 3. `WORKFLOW.md` uses pilot-safe settings (`max_concurrent: 1` or `2`).
 4. Rollback owner and incident owner are named before start.
 
+## Deterministic Baseline vs Live Boot
+
+These commands answer different questions and should not be conflated:
+
+```bash
+# Deterministic Symphony pilot readiness baseline
+bash ./scripts/ci/run_symphony_pilot_checks.sh
+
+# Optional: add the full repo review/release gate on top
+bash ./scripts/ci/run_symphony_pilot_checks.sh --with-full-gate
+
+# Live pilot boot smoke with real env + local dependencies
+bash ./scripts/symphony/start_pilot.sh
+```
+
+Interpretation:
+
+- `run_symphony_pilot_checks.sh` proves Symphony-local pilot readiness:
+  build, conformance, workflow preflight, and a sample-backed soak-gate path.
+- `start_pilot.sh` proves bootability of the live pilot path with real
+  operator env and local services.
+- repo-wide PHPUnit or other non-Symphony checks belong to the optional
+  `--with-full-gate` path, not to the deterministic Symphony baseline.
+
 ## Start Pilot
 
 ```bash
