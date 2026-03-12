@@ -12,6 +12,8 @@
 
 1. **[2026-03-07] Parse Symphony wrapper events from nested Codex payloads**
    Do instead: when debugging Symphony first-turn behavior, extract agent text from `params.msg.payload.*` and command text from `params.msg.{command,parsed_cmd}`, merge streaming deltas with overlap detection because Codex wrapper updates may be cumulative rather than purely incremental, and sanity-check derived helper fields like `first_repo_target_path` before trusting them because slashy package identifiers can be misclassified as file targets.
+1. **[2026-03-12] Treat Symphony status-surface scoring as optional unless operator minimums are unmet**
+   Do instead: when re-scoring against the upstream SPEC, read the current section numbering and verify whether the status surface is explicitly optional before treating it as a `9.5/10` blocker; structured logs plus the machine-readable state API can satisfy Point 2's observability minimum even when `/` has no human-readable dashboard yet.
 1. **[2026-03-07] End Symphony publish turns immediately after the review handoff**
    Do instead: once PR creation, Linear attachment, workpad sync, and the state transition to `In Review` are complete, stop the active turn immediately; a publish turn that keeps running after the review handoff is a regression and wastes context, and the resulting `reconciliation_non_active` / `turn_cancelled` stop is an expected success-path handoff, not a failure.
 1. **[2026-03-07] Align fresh Symphony issue worktrees with the Linear branch context**
