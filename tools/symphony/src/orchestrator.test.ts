@@ -80,6 +80,7 @@ function createWorkflowConfig(): LoadedWorkflowConfig {
             intervalMs: 1000,
             maxCandidates: 20,
         },
+        server: {},
         workspace: {
             root: '/tmp/symphony-workspaces',
             keepTerminalWorkspaces: false,

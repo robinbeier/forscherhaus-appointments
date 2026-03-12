@@ -73,6 +73,50 @@ Issue {{issue.identifier}}
     assert.deepEqual(config.agent.commitRequiredStates, ['Todo', 'In Progress']);
 });
 
+test('parseWorkflowConfig accepts optional server port and host', () => {
+    const config = parseWorkflowConfig({
+        workflowPath: '/repo/WORKFLOW.md',
+        contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+server:
+  host: 127.0.0.1
+  port: 9797
+codex:
+  command: codex app-server
+---
+Issue {{issue.identifier}}
+`,
+        env: {},
+        homeDir: '/home/robin',
+    });
+
+    assert.equal(config.server.host, '127.0.0.1');
+    assert.equal(config.server.port, 9797);
+});
+
+test('parseWorkflowConfig ignores invalid optional server port values', () => {
+    const config = parseWorkflowConfig({
+        workflowPath: '/repo/WORKFLOW.md',
+        contents: `---
+tracker:
+  api_key: token
+  project_slug: school-appointments
+server:
+  port: 70000
+codex:
+  command: codex app-server
+---
+Issue {{issue.identifier}}
+`,
+        env: {},
+        homeDir: '/home/robin',
+    });
+
+    assert.equal(config.server.port, undefined);
+});
+
 test('parseWorkflowConfig accepts future non-empty codex approval and sandbox strings', () => {
     const config = parseWorkflowConfig({
         workflowPath: '/repo/WORKFLOW.md',

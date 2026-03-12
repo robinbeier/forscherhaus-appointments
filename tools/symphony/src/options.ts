@@ -1,6 +1,21 @@
 export interface CliOptions {
     checkOnly: boolean;
     workflowPath?: string;
+    stateApiPort?: number;
+}
+
+function parsePortValue(rawValue: string, optionName: string): number {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) {
+        throw new Error(`Invalid value for ${optionName}: ${rawValue}`);
+    }
+
+    const port = Math.floor(parsed);
+    if (port < 1 || port > 65535) {
+        throw new Error(`Invalid value for ${optionName}: ${rawValue}`);
+    }
+
+    return port;
 }
 
 export function parseCliOptions(argv: string[]): CliOptions {
@@ -43,6 +58,25 @@ export function parseCliOptions(argv: string[]): CliOptions {
                 throw new Error('Missing value for --workflow');
             }
             options.workflowPath = value;
+            continue;
+        }
+
+        if (token === '--port') {
+            const value = argv[index + 1];
+            if (!value || value.startsWith('-')) {
+                throw new Error('Missing value for --port');
+            }
+            options.stateApiPort = parsePortValue(value, '--port');
+            index += 1;
+            continue;
+        }
+
+        if (token.startsWith('--port=')) {
+            const value = token.slice('--port='.length);
+            if (!value) {
+                throw new Error('Missing value for --port');
+            }
+            options.stateApiPort = parsePortValue(value, '--port');
             continue;
         }
 

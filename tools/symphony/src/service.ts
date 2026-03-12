@@ -2,16 +2,24 @@ import type {Logger} from './logger.js';
 import type {OrchestratorSnapshot} from './orchestrator.js';
 import {SymphonyOrchestrator} from './orchestrator.js';
 import {SymphonyStateServer} from './state-server.js';
-import type {WorkflowConfigStore} from './workflow.js';
+import type {LoadedWorkflowConfig, WorkflowConfigStore} from './workflow.js';
 
 interface SymphonyServiceArgs {
     logger: Logger;
     workflowConfigStore: WorkflowConfigStore;
+    cliStateApiPort?: number;
 }
 
 const MIN_POLL_INTERVAL_MS = 1000;
 const DEFAULT_STATE_API_HOST = '127.0.0.1';
 const DEFAULT_STATE_API_PORT = 8787;
+
+export interface ResolvedStateApiConfig {
+    enabled: boolean;
+    host: string;
+    port: number;
+    source: 'disabled' | 'cli' | 'workflow' | 'env';
+}
 
 function sanitizePollInterval(intervalMs: number): number {
     if (!Number.isFinite(intervalMs)) {
@@ -29,42 +37,103 @@ function parseStateApiEnabled(rawValue: string | undefined): boolean {
     return rawValue === '1' || rawValue.toLowerCase() === 'true';
 }
 
-function sanitizeStateApiPort(rawValue: string | undefined): number {
+function sanitizeStateApiPort(rawValue: number | string | undefined): number | undefined {
+    if (rawValue === undefined) {
+        return undefined;
+    }
+
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) {
-        return DEFAULT_STATE_API_PORT;
+        return undefined;
     }
 
-    const integerPort = Math.floor(parsed);
-    if (integerPort < 1 || integerPort > 65535) {
-        return DEFAULT_STATE_API_PORT;
+    const port = Math.floor(parsed);
+    if (port < 1 || port > 65535) {
+        return undefined;
     }
 
-    return integerPort;
+    return port;
+}
+
+export function resolveStateApiConfig(args: {
+    workflowConfig: LoadedWorkflowConfig;
+    env: NodeJS.ProcessEnv;
+    cliStateApiPort?: number;
+}): ResolvedStateApiConfig {
+    const cliPort = sanitizeStateApiPort(args.cliStateApiPort);
+    if (cliPort !== undefined) {
+        return {
+            enabled: true,
+            host: args.workflowConfig.server.host ?? DEFAULT_STATE_API_HOST,
+            port: cliPort,
+            source: 'cli',
+        };
+    }
+
+    const workflowPort = sanitizeStateApiPort(args.workflowConfig.server.port);
+    if (workflowPort !== undefined) {
+        return {
+            enabled: true,
+            host: args.workflowConfig.server.host ?? DEFAULT_STATE_API_HOST,
+            port: workflowPort,
+            source: 'workflow',
+        };
+    }
+
+    const envEnabled = parseStateApiEnabled(args.env.SYMPHONY_STATE_API_ENABLED);
+    if (envEnabled) {
+        return {
+            enabled: true,
+            host: args.env.SYMPHONY_STATE_API_HOST ?? DEFAULT_STATE_API_HOST,
+            port: sanitizeStateApiPort(args.env.SYMPHONY_STATE_API_PORT) ?? DEFAULT_STATE_API_PORT,
+            source: 'env',
+        };
+    }
+
+    return {
+        enabled: false,
+        host: args.workflowConfig.server.host ?? DEFAULT_STATE_API_HOST,
+        port:
+            sanitizeStateApiPort(args.workflowConfig.server.port) ??
+            sanitizeStateApiPort(args.env.SYMPHONY_STATE_API_PORT) ??
+            DEFAULT_STATE_API_PORT,
+        source: 'disabled',
+    };
 }
 
 export class SymphonyService {
     private readonly logger: Logger;
     private readonly workflowConfigStore: WorkflowConfigStore;
     private readonly orchestrator: SymphonyOrchestrator;
+    private readonly cliStateApiPort?: number;
+    private readonly stateApiConfig: ResolvedStateApiConfig;
     private readonly stateServer: SymphonyStateServer;
     private running = false;
     private pollTimer?: NodeJS.Timeout;
     private pollInFlight?: Promise<void>;
+    private loggedStateApiReloadWarning = false;
 
     public constructor(args: SymphonyServiceArgs) {
         this.logger = args.logger;
         this.workflowConfigStore = args.workflowConfigStore;
+        this.cliStateApiPort = args.cliStateApiPort;
         this.orchestrator = new SymphonyOrchestrator({
             logger: args.logger,
             workflowConfigStore: args.workflowConfigStore,
         });
 
+        const currentConfig = this.workflowConfigStore.getCurrentConfig();
+        this.stateApiConfig = resolveStateApiConfig({
+            workflowConfig: currentConfig,
+            env: process.env,
+            cliStateApiPort: this.cliStateApiPort,
+        });
+
         this.stateServer = new SymphonyStateServer({
-            enabled: parseStateApiEnabled(process.env.SYMPHONY_STATE_API_ENABLED),
+            enabled: this.stateApiConfig.enabled,
             logger: args.logger,
-            host: process.env.SYMPHONY_STATE_API_HOST ?? DEFAULT_STATE_API_HOST,
-            port: sanitizeStateApiPort(process.env.SYMPHONY_STATE_API_PORT),
+            host: this.stateApiConfig.host,
+            port: this.stateApiConfig.port,
             getSnapshot: () => this.getSnapshot(),
             getIssueDetails: (issueIdentifier) => this.orchestrator.getIssueDetails(issueIdentifier),
             refresh: async () => this.refreshNow(),
@@ -82,6 +151,8 @@ export class SymphonyService {
         this.logger.info('Symphony service started', {
             workflowPath: currentConfig.workflowPath,
             pid: process.pid,
+            stateApiSource: this.stateApiConfig.source,
+            stateApiEnabled: this.stateApiConfig.enabled,
         });
 
         try {
@@ -163,6 +234,7 @@ export class SymphonyService {
         }
 
         const reloadedConfig = this.workflowConfigStore.getCurrentConfig();
+        this.logStateApiReloadRequirementIfNeeded(reloadedConfig);
         const snapshot = this.orchestrator.getSnapshot();
         this.logger.info('Symphony service heartbeat', {
             workflowPath: reloadedConfig.workflowPath,
@@ -171,5 +243,32 @@ export class SymphonyService {
         });
 
         this.scheduleNextTick(sanitizePollInterval(reloadedConfig.polling.intervalMs));
+    }
+
+    private logStateApiReloadRequirementIfNeeded(workflowConfig: LoadedWorkflowConfig): void {
+        if (this.loggedStateApiReloadWarning) {
+            return;
+        }
+
+        const reloadedStateApiConfig = resolveStateApiConfig({
+            workflowConfig,
+            env: process.env,
+            cliStateApiPort: this.cliStateApiPort,
+        });
+
+        if (
+            reloadedStateApiConfig.enabled === this.stateApiConfig.enabled &&
+            reloadedStateApiConfig.host === this.stateApiConfig.host &&
+            reloadedStateApiConfig.port === this.stateApiConfig.port &&
+            reloadedStateApiConfig.source === this.stateApiConfig.source
+        ) {
+            return;
+        }
+
+        this.loggedStateApiReloadWarning = true;
+        this.logger.warn('State API configuration changed; restart Symphony to apply the new binding.', {
+            current: this.stateApiConfig,
+            requested: reloadedStateApiConfig,
+        });
     }
 }

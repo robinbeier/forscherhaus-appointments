@@ -74,7 +74,8 @@ Pilot guardrails im Startskript:
   Defaults, wenn `codex.approval_policy`, `codex.thread_sandbox` oder
   `codex.turn_sandbox_policy` im Workflow fehlen.
 - Optionale Observability API per `.env.symphony.pilot`:
-    - `SYMPHONY_STATE_API_ENABLED=1`
+    - `SYMPHONY_STATE_API_ENABLED=1` (legacy fallback when neither CLI nor
+      `server.port` is configured)
     - `SYMPHONY_STATE_API_HOST=127.0.0.1`
     - `SYMPHONY_STATE_API_PORT=8787`
 
@@ -82,6 +83,9 @@ Pilot guardrails im Startskript:
 
 - `<path>`: positional custom workflow file path.
 - `--workflow <path>` or `--workflow=<path>`: custom workflow file path.
+- `--port <port>` or `--port=<port>`: enable the HTTP state API on the given
+  loopback-bound port. This takes precedence over `server.port` in
+  `WORKFLOW.md`.
 - `--check`: validate bootstrap/configuration and exit.
 
 When no workflow path is supplied, the CLI defaults to:
@@ -115,6 +119,8 @@ tracker:
 polling:
     interval_ms: 5000
     max_candidates: 20
+server:
+    port: 8787
 workspace:
     root: /tmp/symphony_workspaces
     keep_terminal_workspaces: false
@@ -148,6 +154,7 @@ Key front matter fields beyond the minimal scaffold:
 - `tracker.active_states`, `tracker.terminal_states`
 - `tracker.kind`, `tracker.endpoint`
 - `polling.interval_ms`, `polling.max_candidates`
+- `server.port` (optional HTTP state API enablement)
 - `workspace.root`, `workspace.keep_terminal_workspaces`
 - `hooks.timeout_ms`, `hooks.after_create`, `hooks.before_run`,
   `hooks.after_run`, `hooks.before_remove`
@@ -202,6 +209,11 @@ Key behavior:
     - `GET /api/v1/state`
     - `GET /api/v1/<issue_identifier>`
     - `POST /api/v1/refresh`
+- state API config precedence is `--port` CLI override, then
+  `server.port` in `WORKFLOW.md`, then the legacy
+  `SYMPHONY_STATE_API_ENABLED` / `SYMPHONY_STATE_API_PORT` env fallback
+- state API binds to `127.0.0.1` by default; if the workflow or env host/port
+  changes after startup, restart Symphony to apply the new listener binding
 - startup cleanup removes local workspaces for issues already in configured
   terminal tracker states
 - reconciliation actively stops running sessions when issues leave active

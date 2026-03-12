@@ -25,6 +25,21 @@ test('parseCliOptions parses positional workflow path', () => {
     assert.equal(options.checkOnly, true);
 });
 
+test('parseCliOptions parses --port value', () => {
+    const options = parseCliOptions(['--port', '9797']);
+    assert.equal(options.stateApiPort, 9797);
+});
+
+test('parseCliOptions parses --port=value', () => {
+    const options = parseCliOptions(['--port=9797']);
+    assert.equal(options.stateApiPort, 9797);
+});
+
+test('parseCliOptions rejects invalid --port values', () => {
+    assert.throws(() => parseCliOptions(['--port', '0']), /Invalid value for --port/);
+    assert.throws(() => parseCliOptions(['--port=70000']), /Invalid value for --port/);
+});
+
 test('parseCliOptions rejects unknown options', () => {
     assert.throws(() => parseCliOptions(['--unknown']), /Unknown argument/);
 });

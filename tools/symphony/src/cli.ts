@@ -71,7 +71,11 @@ async function run(argv: string[]): Promise<void> {
         return;
     }
 
-    const service = new SymphonyService({logger, workflowConfigStore});
+    const service = new SymphonyService({
+        logger,
+        workflowConfigStore,
+        cliStateApiPort: options.stateApiPort,
+    });
     await service.start();
 
     logger.info('Symphony service is running. Press Ctrl+C to stop.');
