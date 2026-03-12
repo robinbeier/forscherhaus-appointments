@@ -304,6 +304,38 @@ class AvailabilityAnalyticsTest extends TestCase
         );
     }
 
+    public function testIndexEventsByDateClipsLongEventsToAnalysisWindow(): void
+    {
+        $availability = new class (
+            $this->createMock(Appointments_model::class),
+            $this->createMock(Unavailabilities_model::class),
+            $this->createMock(Blocked_periods_model::class),
+        ) extends Availability {
+            public function exposeIndexEventsByDate(
+                array $events,
+                \DateTimeImmutable $rangeStart,
+                \DateTimeImmutable $rangeEnd,
+            ): array {
+                return $this->index_events_by_date($events, $rangeStart, $rangeEnd);
+            }
+        };
+
+        $eventsByDate = $availability->exposeIndexEventsByDate(
+            [
+                [
+                    'start_datetime' => '2025-01-01 00:00:00',
+                    'end_datetime' => '2027-12-31 23:59:59',
+                ],
+            ],
+            new \DateTimeImmutable('2026-02-18'),
+            new \DateTimeImmutable('2026-02-19'),
+        );
+
+        $this->assertSame(['2026-02-18', '2026-02-19'], array_keys($eventsByDate));
+        $this->assertCount(1, $eventsByDate['2026-02-18']);
+        $this->assertCount(1, $eventsByDate['2026-02-19']);
+    }
+
     private function createAppointmentsQueryBuilder(array $rows): CI_DB_query_builder
     {
         $builder = $this->createMock(CI_DB_query_builder::class);

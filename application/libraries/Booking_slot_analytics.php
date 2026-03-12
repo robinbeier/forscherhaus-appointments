@@ -147,8 +147,8 @@ class Booking_slot_analytics
             ),
         );
         $blocked_periods = $this->get_blocked_periods_for_analysis_range($range_start, $range_end);
-        $appointments_by_date = $this->index_events_by_date($appointments);
-        $blocked_periods_by_date = $this->index_events_by_date($blocked_periods);
+        $appointments_by_date = $this->index_events_by_date($appointments, $range_start, $range_end);
+        $blocked_periods_by_date = $this->index_events_by_date($blocked_periods, $range_start, $range_end);
         $offered_hours_by_date = [];
         $day = $range_start;
 
@@ -653,11 +653,16 @@ class Booking_slot_analytics
      * Group overlapping events by date for reuse across analytical range calculations.
      *
      * @param array $events Event rows containing start/end datetime fields.
+     * @param DateTimeImmutable|null $range_start Inclusive clip start for analytical windows.
+     * @param DateTimeImmutable|null $range_end Inclusive clip end for analytical windows.
      *
      * @return array<string, array<int, array>>
      */
-    protected function index_events_by_date(array $events): array
-    {
+    protected function index_events_by_date(
+        array $events,
+        ?DateTimeImmutable $range_start = null,
+        ?DateTimeImmutable $range_end = null,
+    ): array {
         $events_by_date = [];
 
         foreach ($events as $event) {
@@ -670,6 +675,24 @@ class Booking_slot_analytics
 
             $day = $start->setTime(0, 0, 0);
             $last_day = $end->setTime(0, 0, 0);
+
+            if ($range_start) {
+                $clipped_start = $range_start->setTime(0, 0, 0);
+                if ($day < $clipped_start) {
+                    $day = $clipped_start;
+                }
+            }
+
+            if ($range_end) {
+                $clipped_end = $range_end->setTime(0, 0, 0);
+                if ($last_day > $clipped_end) {
+                    $last_day = $clipped_end;
+                }
+            }
+
+            if ($last_day < $day) {
+                continue;
+            }
 
             while ($day <= $last_day) {
                 $events_by_date[$day->format('Y-m-d')][] = $event;
