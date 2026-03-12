@@ -61,6 +61,7 @@ class DashboardMetricsControllerTest extends TestCase
                 'after_15_percent' => 21.1,
                 'after_15_target_met' => false,
                 'after_15_evaluable' => true,
+                'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
             ],
         ];
 

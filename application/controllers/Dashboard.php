@@ -381,6 +381,7 @@ class Dashboard extends EA_Controller
             $this->normalizeOptionalMetricInt(is_array($metric) ? $metric['slots_required'] ?? $target : $target) ??
             max($target, 0);
         $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
+        $status_reasons = $this->normalizeStatusReasons(is_array($metric) ? $metric['status_reasons'] ?? [] : []);
 
         $progress_base = max($target, 1);
         $booked_percent = $progress_base > 0 ? max(0, min(100, (int) round(($booked / $progress_base) * 100))) : 0;
@@ -417,6 +418,7 @@ class Dashboard extends EA_Controller
                 'slots_required' => $slots_required,
                 'slots_required_formatted' => $this->formatNumber($slots_required),
                 'has_capacity_gap' => $has_capacity_gap,
+                'status_reasons' => $status_reasons,
             ],
             'appointments' => $this->loadProviderAppointments($provider_id, $start, $end),
         ];
@@ -659,6 +661,37 @@ class Dashboard extends EA_Controller
         }
 
         return max(0, (int) round((float) $value));
+    }
+
+    /**
+     * Normalize ordered dashboard status reasons.
+     *
+     * @param mixed $status_reasons
+     *
+     * @return array<int, string>
+     */
+    protected function normalizeStatusReasons(mixed $status_reasons): array
+    {
+        if (!is_array($status_reasons)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($status_reasons as $status_reason) {
+            if (!is_string($status_reason)) {
+                continue;
+            }
+
+            $trimmed = trim($status_reason);
+            if ($trimmed === '') {
+                continue;
+            }
+
+            $normalized[] = $trimmed;
+        }
+
+        return array_values(array_unique($normalized));
     }
 
     /**

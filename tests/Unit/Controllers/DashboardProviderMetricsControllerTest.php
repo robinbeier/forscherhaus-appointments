@@ -252,6 +252,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
                 'slots_required' => 16,
                 'has_capacity_gap' => false,
                 'class_size_default' => 16,
+                'status_reasons' => ['after_15_goal_missed'],
             ],
         ];
 
@@ -265,6 +266,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
         $this->assertSame('—', $payload['metrics']['slots_planned_formatted']);
         $this->assertSame(16, $payload['metrics']['slots_required']);
         $this->assertFalse($payload['metrics']['has_capacity_gap']);
+        $this->assertSame(['after_15_goal_missed'], $payload['metrics']['status_reasons']);
     }
 
     public function testBuildProviderDashboardPayloadUsesBookingOfferedPlannedSlots(): void
@@ -324,6 +326,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
                 'slots_required' => 16,
                 'has_capacity_gap' => false,
                 'class_size_default' => 16,
+                'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
             ],
         ];
 
@@ -337,6 +340,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
         $this->assertSame('19', $payload['metrics']['slots_planned_formatted']);
         $this->assertSame(16, $payload['metrics']['slots_required']);
         $this->assertFalse($payload['metrics']['has_capacity_gap']);
+        $this->assertSame(['booking_goal_missed', 'after_15_goal_missed'], $payload['metrics']['status_reasons']);
     }
 
     private function createControllerWithoutConstructor(): object
