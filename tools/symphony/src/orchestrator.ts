@@ -177,6 +177,24 @@ interface TraceEntry {
     details?: Record<string, unknown>;
 }
 
+interface SnapshotRecentEvent extends TraceEntry {
+    issue_id: string;
+    issue_identifier: string;
+}
+
+interface SnapshotHealthIndicator {
+    status: 'ok' | 'warning' | 'error';
+    code: string;
+    message: string;
+    issue_identifier?: string | null;
+    error_class?: string | null;
+}
+
+interface SnapshotHealth {
+    overall: 'ok' | 'warning' | 'error';
+    indicators: SnapshotHealthIndicator[];
+}
+
 interface RawEventSummary {
     eventType: string;
     category: OrchestratorTraceCategory;
@@ -292,6 +310,8 @@ export interface OrchestratorSnapshot {
     retrying: OrchestratorSnapshotRetryEntry[];
     totals: OrchestratorSnapshotTotals;
     codex_totals: LegacyCodexTotals;
+    health: SnapshotHealth;
+    recent_events: SnapshotRecentEvent[];
     rate_limits: Record<string, unknown>;
 }
 
@@ -313,6 +333,7 @@ const FIRST_AGENT_MESSAGE_MAX_CHARS = 1200;
 const TRACE_MAX_ENTRIES = 40;
 const FIRST_TURN_TRACE_MAX_ENTRIES = 20;
 const SNAPSHOT_TRACE_TAIL_ENTRIES = 5;
+const SNAPSHOT_RECENT_EVENT_ENTRIES = 12;
 
 function normalizeStateName(value: string | undefined): string {
     return (value ?? '').trim().toLowerCase();
@@ -1459,6 +1480,7 @@ export class SymphonyOrchestrator {
     private readonly runningByIssueId = new Map<string, RunningEntry>();
     private readonly retryByIssueId = new Map<string, RetryEntry>();
     private readonly terminalIssueDetailsByIdentifier = new Map<string, Record<string, unknown>>();
+    private readonly recentEvents: SnapshotRecentEvent[] = [];
     private readonly claimedIssueVersions = new Map<string, string>();
     private readonly runningDispatches = new Set<Promise<void>>();
 
@@ -1783,6 +1805,11 @@ export class SymphonyOrchestrator {
                 total_tokens: totals.total_tokens,
                 seconds_running: totals.runtime_seconds,
             },
+            health: this.buildSnapshotHealth({
+                running,
+                retrying,
+            }),
+            recent_events: this.recentEvents.slice(-SNAPSHOT_RECENT_EVENT_ENTRIES).reverse(),
             rate_limits: {...this.lastRateLimits},
         };
     }
@@ -1817,6 +1844,8 @@ export class SymphonyOrchestrator {
                 retry: payload.retry,
                 terminal: terminalIssueDetails.terminal ?? payload.terminal,
                 trace: terminalIssueDetails.trace ?? payload.trace,
+                recent_events: terminalIssueDetails.recent_events ?? payload.recent_events,
+                health: payload.health,
                 error_class: terminalIssueDetails.error_class ?? payload.error_class,
                 error: terminalIssueDetails.error ?? payload.error,
                 input_required: terminalIssueDetails.input_required ?? payload.input_required,
@@ -2948,7 +2977,168 @@ export class SymphonyOrchestrator {
                           payload: args.inputRequiredPayload ?? null,
                       }
                     : null,
+            health: this.buildIssueHealth({
+                issueIdentifier: args.issue.identifier,
+                status: args.status,
+                runningEntry: args.runningEntry,
+                retryEntry: args.retryEntry,
+                errorClass: args.errorClass,
+                inputRequiredType: args.inputRequiredType,
+            }),
+            recent_events: args.runningEntry
+                ? args.runningEntry.traceEntries.slice(-SNAPSHOT_RECENT_EVENT_ENTRIES).reverse()
+                : [],
             rate_limits: Object.keys(this.lastRateLimits).length > 0 ? this.lastRateLimits : null,
+        };
+    }
+
+    private buildSnapshotHealth(args: {
+        running: OrchestratorSnapshotRunningEntry[];
+        retrying: OrchestratorSnapshotRetryEntry[];
+    }): SnapshotHealth {
+        const indicators: SnapshotHealthIndicator[] = [];
+
+        if (this.lifecycleCounts.failed > 0) {
+            indicators.push({
+                status: 'error',
+                code: 'failed_runs',
+                message: `${this.lifecycleCounts.failed} run(s) ended in failure.`,
+            });
+        }
+
+        if (this.lifecycleCounts.responseTimeouts > 0) {
+            indicators.push({
+                status: 'error',
+                code: 'response_timeouts',
+                message: `${this.lifecycleCounts.responseTimeouts} run(s) hit the response timeout.`,
+            });
+        }
+
+        if (this.lifecycleCounts.turnTimeouts > 0) {
+            indicators.push({
+                status: 'error',
+                code: 'turn_timeouts',
+                message: `${this.lifecycleCounts.turnTimeouts} run(s) exceeded the turn timeout.`,
+            });
+        }
+
+        if (this.lifecycleCounts.launchFailures > 0) {
+            indicators.push({
+                status: 'error',
+                code: 'launch_failures',
+                message: `${this.lifecycleCounts.launchFailures} run(s) failed before launch completed.`,
+            });
+        }
+
+        if (this.lifecycleCounts.inputRequired > 0) {
+            indicators.push({
+                status: 'warning',
+                code: 'input_required',
+                message: `${this.lifecycleCounts.inputRequired} run(s) require operator input.`,
+            });
+        }
+
+        for (const retry of args.retrying) {
+            indicators.push({
+                status: classifyErrorSeverity(retry.error_class),
+                code: 'retrying_issue',
+                message: `${retry.issue_identifier} is queued for retry (${retry.reason}).`,
+                issue_identifier: retry.issue_identifier,
+                error_class: retry.error_class ?? null,
+            });
+        }
+
+        for (const entry of args.running) {
+            if ((entry.context_utilization_percent ?? 0) >= 85) {
+                indicators.push({
+                    status: 'warning',
+                    code: 'high_context_utilization',
+                    message: `${entry.issue_identifier} is using ${formatPercentForHealth(entry.context_utilization_percent)} of the context window.`,
+                    issue_identifier: entry.issue_identifier,
+                });
+            }
+        }
+
+        const rateLimitIndicator = buildRateLimitIndicator(this.lastRateLimits);
+        if (rateLimitIndicator) {
+            indicators.push(rateLimitIndicator);
+        }
+
+        if (indicators.length === 0) {
+            indicators.push({
+                status: 'ok',
+                code: 'healthy',
+                message: 'No active health warnings or errors.',
+            });
+        }
+
+        return {
+            overall: determineHealthOverall(indicators),
+            indicators,
+        };
+    }
+
+    private buildIssueHealth(args: {
+        issueIdentifier: string;
+        status: string;
+        runningEntry?: RunningEntry;
+        retryEntry?: RetryEntry;
+        errorClass?: string;
+        inputRequiredType?: string;
+    }): SnapshotHealth {
+        const indicators: SnapshotHealthIndicator[] = [];
+
+        if (args.retryEntry) {
+            indicators.push({
+                status: classifyErrorSeverity(args.retryEntry.errorClass),
+                code: 'retry_pending',
+                message: `Retry attempt ${args.retryEntry.attempt} is scheduled (${args.retryEntry.reason}).`,
+                issue_identifier: args.issueIdentifier,
+                error_class: args.retryEntry.errorClass ?? null,
+            });
+        }
+
+        if (args.errorClass) {
+            indicators.push({
+                status: classifyErrorSeverity(args.errorClass),
+                code: 'error_state',
+                message: describeHealthError(args.errorClass),
+                issue_identifier: args.issueIdentifier,
+                error_class: args.errorClass,
+            });
+        }
+
+        if (args.inputRequiredType) {
+            indicators.push({
+                status: 'warning',
+                code: 'operator_input_required',
+                message: 'Operator input is required before this issue can continue.',
+                issue_identifier: args.issueIdentifier,
+            });
+        }
+
+        const tokenUsage = summarizeTokenUsage(args.runningEntry?.lastTokenUsage);
+        if ((tokenUsage?.contextUtilizationPercent ?? 0) >= 85) {
+            indicators.push({
+                status: 'warning',
+                code: 'high_context_utilization',
+                message: `Context utilization is ${formatPercentForHealth(tokenUsage?.contextUtilizationPercent)}.`,
+                issue_identifier: args.issueIdentifier,
+            });
+        }
+
+        if (indicators.length === 0) {
+            indicators.push({
+                status: args.status === 'completed' || args.status === 'running' ? 'ok' : 'warning',
+                code: 'status_visible',
+                message: `Issue is currently ${args.status}.`,
+                issue_identifier: args.issueIdentifier,
+            });
+        }
+
+        return {
+            overall: determineHealthOverall(indicators),
+            indicators,
         };
     }
 
@@ -3926,6 +4116,19 @@ export class SymphonyOrchestrator {
             runningEntry.traceEntries.splice(0, runningEntry.traceEntries.length - TRACE_MAX_ENTRIES);
         }
 
+        this.recentEvents.push({
+            issue_id: runningEntry.issue.id,
+            issue_identifier: runningEntry.issue.identifier,
+            atIso: entry.atIso,
+            category: entry.category,
+            eventType: entry.eventType,
+            message: entry.message,
+            details: entry.details,
+        });
+        if (this.recentEvents.length > TRACE_MAX_ENTRIES) {
+            this.recentEvents.splice(0, this.recentEvents.length - TRACE_MAX_ENTRIES);
+        }
+
         if (runningEntry.turnCount === 0) {
             runningEntry.firstTurnTraceEntries.push(entry);
             if (runningEntry.firstTurnTraceEntries.length > FIRST_TURN_TRACE_MAX_ENTRIES) {
@@ -4001,4 +4204,89 @@ export class SymphonyOrchestrator {
             message: String(error),
         };
     }
+}
+
+function determineHealthOverall(indicators: SnapshotHealthIndicator[]): 'ok' | 'warning' | 'error' {
+    if (indicators.some((indicator) => indicator.status === 'error')) {
+        return 'error';
+    }
+
+    if (indicators.some((indicator) => indicator.status === 'warning')) {
+        return 'warning';
+    }
+
+    return 'ok';
+}
+
+function classifyErrorSeverity(errorClass: string | null | undefined): 'warning' | 'error' {
+    if (!errorClass) {
+        return 'warning';
+    }
+
+    if (
+        errorClass === 'approval_required' ||
+        errorClass === 'turn_input_required' ||
+        errorClass === 'workspace_first_repo_step_plan_only'
+    ) {
+        return 'warning';
+    }
+
+    return 'error';
+}
+
+function describeHealthError(errorClass: string): string {
+    if (errorClass === 'response_timeout') {
+        return 'The issue hit the response timeout.';
+    }
+
+    if (errorClass === 'turn_timeout') {
+        return 'The issue exceeded the turn timeout.';
+    }
+
+    if (errorClass === 'approval_required') {
+        return 'The issue is waiting on an approval-gated action.';
+    }
+
+    if (errorClass === 'turn_input_required') {
+        return 'The issue is blocked on required operator input.';
+    }
+
+    return `The issue reported ${errorClass}.`;
+}
+
+function formatPercentForHealth(value: number | null | undefined): string {
+    if (value === null || value === undefined || !Number.isFinite(value)) {
+        return 'n/a';
+    }
+
+    return `${value.toFixed(1)}%`;
+}
+
+function buildRateLimitIndicator(rateLimits: Record<string, unknown>): SnapshotHealthIndicator | null {
+    const candidates = ['remaining', 'requests_remaining', 'request_remaining', 'tokens_remaining'];
+
+    for (const key of candidates) {
+        const value = rateLimits[key];
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+            continue;
+        }
+
+        if (value <= 1) {
+            return {
+                status: 'error',
+                code: 'rate_limits_critical',
+                message: `Rate-limit signal ${key} is critically low (${Math.floor(value)} remaining).`,
+            };
+        }
+
+        if (value <= 5) {
+            return {
+                status: 'warning',
+                code: 'rate_limits_low',
+                message: `Rate-limit signal ${key} is getting low (${Math.floor(value)} remaining).`,
+            };
+        }
+    }
+
+    return null;
 }

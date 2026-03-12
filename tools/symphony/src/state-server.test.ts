@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {Logger} from './logger.js';
+import type {OrchestratorSnapshot} from './orchestrator.js';
 import {SymphonyStateServer} from './state-server.js';
 
 function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
@@ -17,6 +18,50 @@ function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
     };
 }
 
+function createSnapshot(overrides: Partial<OrchestratorSnapshot> = {}): OrchestratorSnapshot {
+    return {
+        generated_at: '2026-03-06T11:00:00.000Z',
+        last_tick_at: '2026-03-06T11:00:00.000Z',
+        counts: {
+            running: 0,
+            retrying: 0,
+            completed: 0,
+            input_required: 0,
+            failed: 0,
+            response_timeouts: 0,
+            turn_timeouts: 0,
+            launch_failures: 0,
+        },
+        running: [],
+        retrying: [],
+        totals: {
+            runtime_seconds: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+        },
+        codex_totals: {
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            seconds_running: 0,
+        },
+        health: {
+            overall: 'ok',
+            indicators: [
+                {
+                    status: 'ok',
+                    code: 'healthy',
+                    message: 'No active health warnings or errors.',
+                },
+            ],
+        },
+        recent_events: [],
+        rate_limits: {},
+        ...overrides,
+    };
+}
+
 test('state server exposes human-readable dashboard at GET / and JSON snapshot at GET /api/v1/state', async () => {
     const logRecords: Array<Record<string, unknown>> = [];
     const server = new SymphonyStateServer({
@@ -24,106 +69,129 @@ test('state server exposes human-readable dashboard at GET / and JSON snapshot a
         logger: createLoggerStub(logRecords),
         host: '127.0.0.1',
         port: 0,
-        getSnapshot: () => ({
-            generated_at: '2026-03-06T11:00:42.000Z',
-            last_tick_at: '2026-03-06T11:00:00.000Z',
-            lastTickAtIso: '2026-03-06T11:00:00.000Z',
-            counts: {
-                running: 1,
-                retrying: 0,
-                completed: 1,
-                input_required: 0,
-                failed: 0,
-                response_timeouts: 0,
-                turn_timeouts: 0,
-                launch_failures: 0,
-            },
-            running: [
-                {
-                    issue_id: 'issue-1',
-                    issue_identifier: 'ROB-42',
-                    issueId: 'issue-1',
-                    issueIdentifier: 'ROB-42',
-                    attempt: null,
-                    source: 'candidate',
-                    started_at: '2026-03-06T11:00:00.000Z',
-                    startedAtIso: '2026-03-06T11:00:00.000Z',
+        getSnapshot: () =>
+            createSnapshot({
+                generated_at: '2026-03-06T11:00:42.000Z',
+                last_tick_at: '2026-03-06T11:00:00.000Z',
+                lastTickAtIso: '2026-03-06T11:00:00.000Z',
+                counts: {
+                    running: 1,
+                    retrying: 0,
+                    completed: 1,
+                    input_required: 0,
+                    failed: 0,
+                    response_timeouts: 0,
+                    turn_timeouts: 0,
+                    launch_failures: 0,
+                },
+                running: [
+                    {
+                        issue_id: 'issue-1',
+                        issue_identifier: 'ROB-42',
+                        issueId: 'issue-1',
+                        issueIdentifier: 'ROB-42',
+                        attempt: null,
+                        source: 'candidate',
+                        started_at: '2026-03-06T11:00:00.000Z',
+                        startedAtIso: '2026-03-06T11:00:00.000Z',
+                        runtime_seconds: 42,
+                        runtimeSeconds: 42,
+                        last_activity_at: '2026-03-06T11:00:30.000Z',
+                        lastActivityAtIso: '2026-03-06T11:00:30.000Z',
+                        idle_seconds: 12,
+                        idleSeconds: 12,
+                        suppress_retry: false,
+                        suppressRetry: false,
+                        session_id: 'thread-1-turn-1',
+                        sessionId: 'thread-1-turn-1',
+                        thread_id: 'thread-1',
+                        threadId: 'thread-1',
+                        turn_count: 0,
+                        turnCount: 0,
+                        last_event: 'item/agentMessage/delta',
+                        lastEvent: 'item/agentMessage/delta',
+                        last_activity: 'Codex is streaming a response. <script>alert(1)</script>',
+                        lastActivity: 'Codex is streaming a response. <script>alert(1)</script>',
+                        total_tokens: 193468,
+                        totalTokens: 193468,
+                        last_turn_tokens: 1440,
+                        lastTurnTokens: 1440,
+                        context_window_tokens: 258400,
+                        contextWindowTokens: 258400,
+                        context_headroom_tokens: 64932,
+                        contextHeadroomTokens: 64932,
+                        context_utilization_percent: 74.9,
+                        contextUtilizationPercent: 74.9,
+                        trace_tail: [
+                            {
+                                atIso: '2026-03-06T11:00:20.000Z',
+                                category: 'runtime',
+                                eventType: 'session/started',
+                                message: 'Session started.',
+                            },
+                        ],
+                        traceTail: [
+                            {
+                                atIso: '2026-03-06T11:00:20.000Z',
+                                category: 'runtime',
+                                eventType: 'session/started',
+                                message: 'Session started.',
+                            },
+                        ],
+                    },
+                ],
+                retrying: [
+                    {
+                        issue_id: 'issue-2',
+                        issue_identifier: 'ROB-43',
+                        issueId: 'issue-2',
+                        issueIdentifier: 'ROB-43',
+                        attempt: 2,
+                        reason: 'dispatch_failed',
+                        available_at: '2026-03-06T11:01:00.000Z',
+                        availableAtIso: '2026-03-06T11:01:00.000Z',
+                        error_class: 'approval_required',
+                        errorClass: 'approval_required',
+                    },
+                ],
+                totals: {
                     runtime_seconds: 42,
-                    runtimeSeconds: 42,
-                    last_activity_at: '2026-03-06T11:00:30.000Z',
-                    lastActivityAtIso: '2026-03-06T11:00:30.000Z',
-                    idle_seconds: 12,
-                    idleSeconds: 12,
-                    suppress_retry: false,
-                    suppressRetry: false,
-                    session_id: 'thread-1-turn-1',
-                    sessionId: 'thread-1-turn-1',
-                    thread_id: 'thread-1',
-                    threadId: 'thread-1',
-                    turn_count: 0,
-                    turnCount: 0,
-                    last_event: 'item/agentMessage/delta',
-                    lastEvent: 'item/agentMessage/delta',
-                    last_activity: 'Codex is streaming a response. <script>alert(1)</script>',
-                    lastActivity: 'Codex is streaming a response. <script>alert(1)</script>',
+                    input_tokens: 121000,
+                    output_tokens: 72468,
                     total_tokens: 193468,
-                    totalTokens: 193468,
-                    last_turn_tokens: 1440,
-                    lastTurnTokens: 1440,
-                    context_window_tokens: 258400,
-                    contextWindowTokens: 258400,
-                    context_headroom_tokens: 64932,
-                    contextHeadroomTokens: 64932,
-                    context_utilization_percent: 74.9,
-                    contextUtilizationPercent: 74.9,
-                    trace_tail: [
+                },
+                codex_totals: {
+                    input_tokens: 121000,
+                    output_tokens: 72468,
+                    total_tokens: 193468,
+                    seconds_running: 42,
+                },
+                health: {
+                    overall: 'warning',
+                    indicators: [
                         {
-                            atIso: '2026-03-06T11:00:20.000Z',
-                            category: 'runtime',
-                            eventType: 'session/started',
-                            message: 'Session started.',
-                        },
-                    ],
-                    traceTail: [
-                        {
-                            atIso: '2026-03-06T11:00:20.000Z',
-                            category: 'runtime',
-                            eventType: 'session/started',
-                            message: 'Session started.',
+                            status: 'warning',
+                            code: 'retrying_issue',
+                            message: 'ROB-43 is queued for retry (dispatch_failed).',
+                            issue_identifier: 'ROB-43',
+                            error_class: 'approval_required',
                         },
                     ],
                 },
-            ],
-            retrying: [
-                {
-                    issue_id: 'issue-2',
-                    issue_identifier: 'ROB-43',
-                    issueId: 'issue-2',
-                    issueIdentifier: 'ROB-43',
-                    attempt: 2,
-                    reason: 'dispatch_failed',
-                    available_at: '2026-03-06T11:01:00.000Z',
-                    availableAtIso: '2026-03-06T11:01:00.000Z',
-                    error_class: 'approval_required',
-                    errorClass: 'approval_required',
+                recent_events: [
+                    {
+                        issue_id: 'issue-2',
+                        issue_identifier: 'ROB-43',
+                        atIso: '2026-03-06T11:00:31.000Z',
+                        category: 'runtime',
+                        eventType: 'dispatch/failed',
+                        message: 'Approval is required.',
+                    },
+                ],
+                rate_limits: {
+                    remaining: 12,
                 },
-            ],
-            totals: {
-                runtime_seconds: 42,
-                input_tokens: 121000,
-                output_tokens: 72468,
-                total_tokens: 193468,
-            },
-            codex_totals: {
-                input_tokens: 121000,
-                output_tokens: 72468,
-                total_tokens: 193468,
-                seconds_running: 42,
-            },
-            rate_limits: {
-                remaining: 12,
-            },
-        }),
+            }),
         getIssueDetails: () => undefined,
         refresh: async () => undefined,
     });
@@ -142,6 +210,8 @@ test('state server exposes human-readable dashboard at GET / and JSON snapshot a
     assert.match(dashboardHtml, /193,468/);
     assert.match(dashboardHtml, /42s/);
     assert.match(dashboardHtml, /approval_required/);
+    assert.match(dashboardHtml, /Overall warning/);
+    assert.match(dashboardHtml, /dispatch\/failed/);
     assert.match(dashboardHtml, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.doesNotMatch(dashboardHtml, /<script>alert\(1\)<\/script>/);
 
@@ -164,6 +234,13 @@ test('state server exposes human-readable dashboard at GET / and JSON snapshot a
         codex_totals: {
             total_tokens: number;
         };
+        health: {
+            overall: string;
+        };
+        recent_events: Array<{
+            issue_identifier: string;
+            eventType: string;
+        }>;
         running: Array<{
             issue_identifier: string;
             last_activity: string;
@@ -185,6 +262,9 @@ test('state server exposes human-readable dashboard at GET / and JSON snapshot a
     assert.equal(snapshot.totals.total_tokens, 193468);
     assert.equal(snapshot.totals.runtime_seconds, 42);
     assert.equal(snapshot.codex_totals.total_tokens, 193468);
+    assert.equal(snapshot.health.overall, 'warning');
+    assert.equal(snapshot.recent_events[0]?.issue_identifier, 'ROB-43');
+    assert.equal(snapshot.recent_events[0]?.eventType, 'dispatch/failed');
     assert.equal(snapshot.running[0]?.issue_identifier, 'ROB-42');
     assert.equal(snapshot.running[0]?.last_activity, 'Codex is streaming a response. <script>alert(1)</script>');
     assert.equal(snapshot.running[0]?.context_headroom_tokens, 64932);
@@ -204,35 +284,7 @@ test('state server handles POST /api/v1/refresh asynchronously', async () => {
         logger: createLoggerStub([]),
         host: '127.0.0.1',
         port: 0,
-        getSnapshot: () => ({
-            generated_at: '2026-03-06T11:00:00.000Z',
-            last_tick_at: '2026-03-06T11:00:00.000Z',
-            counts: {
-                running: 0,
-                retrying: 0,
-                completed: 0,
-                input_required: 0,
-                failed: 0,
-                response_timeouts: 0,
-                turn_timeouts: 0,
-                launch_failures: 0,
-            },
-            running: [],
-            retrying: [],
-            totals: {
-                runtime_seconds: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-            },
-            codex_totals: {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                seconds_running: 0,
-            },
-            rate_limits: {},
-        }),
+        getSnapshot: () => createSnapshot(),
         getIssueDetails: () => undefined,
         refresh: async () => {
             refreshCallCount += 1;
@@ -260,35 +312,7 @@ test('state server returns 404 for unknown routes and no-op when disabled', asyn
         logger: createLoggerStub([]),
         host: '127.0.0.1',
         port: 0,
-        getSnapshot: () => ({
-            generated_at: '2026-03-06T11:00:00.000Z',
-            last_tick_at: '2026-03-06T11:00:00.000Z',
-            counts: {
-                running: 0,
-                retrying: 0,
-                completed: 0,
-                input_required: 0,
-                failed: 0,
-                response_timeouts: 0,
-                turn_timeouts: 0,
-                launch_failures: 0,
-            },
-            running: [],
-            retrying: [],
-            totals: {
-                runtime_seconds: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-            },
-            codex_totals: {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                seconds_running: 0,
-            },
-            rate_limits: {},
-        }),
+        getSnapshot: () => createSnapshot(),
         getIssueDetails: () => undefined,
         refresh: async () => undefined,
     });
@@ -306,35 +330,7 @@ test('state server returns 404 for unknown routes and no-op when disabled', asyn
         logger: createLoggerStub([]),
         host: '127.0.0.1',
         port: 8787,
-        getSnapshot: () => ({
-            generated_at: '2026-03-06T11:00:00.000Z',
-            last_tick_at: '2026-03-06T11:00:00.000Z',
-            counts: {
-                running: 0,
-                retrying: 0,
-                completed: 0,
-                input_required: 0,
-                failed: 0,
-                response_timeouts: 0,
-                turn_timeouts: 0,
-                launch_failures: 0,
-            },
-            running: [],
-            retrying: [],
-            totals: {
-                runtime_seconds: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-            },
-            codex_totals: {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                seconds_running: 0,
-            },
-            rate_limits: {},
-        }),
+        getSnapshot: () => createSnapshot(),
         getIssueDetails: () => undefined,
         refresh: async () => undefined,
     });
@@ -350,40 +346,30 @@ test('state server exposes GET /api/v1/<issue_identifier> issue debug payload an
         logger: createLoggerStub([]),
         host: '127.0.0.1',
         port: 0,
-        getSnapshot: () => ({
-            generated_at: '2026-03-06T11:00:00.000Z',
-            last_tick_at: '2026-03-06T11:00:00.000Z',
-            counts: {
-                running: 0,
-                retrying: 0,
-                completed: 0,
-                input_required: 0,
-                failed: 0,
-                response_timeouts: 0,
-                turn_timeouts: 0,
-                launch_failures: 0,
-            },
-            running: [],
-            retrying: [],
-            totals: {
-                runtime_seconds: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-            },
-            codex_totals: {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                seconds_running: 0,
-            },
-            rate_limits: {},
-        }),
+        getSnapshot: () => createSnapshot(),
         getIssueDetails: (issueIdentifier) =>
             issueIdentifier === 'ROB-42'
                 ? {
                       issue_identifier: 'ROB-42',
                       status: 'running',
+                      health: {
+                          overall: 'warning',
+                          indicators: [
+                              {
+                                  status: 'warning',
+                                  code: 'high_context_utilization',
+                                  message: 'Context utilization is 92.0%.',
+                              },
+                          ],
+                      },
+                      recent_events: [
+                          {
+                              atIso: '2026-03-06T11:00:20.000Z',
+                              category: 'runtime',
+                              eventType: 'session/started',
+                              message: 'Session started.',
+                          },
+                      ],
                   }
                 : undefined,
         refresh: async () => undefined,
@@ -397,6 +383,11 @@ test('state server exposes GET /api/v1/<issue_identifier> issue debug payload an
     assert.equal(issueResponse.status, 200);
     const issuePayload = (await issueResponse.json()) as Record<string, unknown>;
     assert.equal(issuePayload.issue_identifier, 'ROB-42');
+    assert.equal((issuePayload.health as Record<string, unknown>).overall, 'warning');
+    assert.equal(
+        ((issuePayload.recent_events as Array<Record<string, unknown>>)[0] ?? {}).eventType,
+        'session/started',
+    );
 
     const missingResponse = await fetch(`http://127.0.0.1:${port}/api/v1/ROB-404`);
     assert.equal(missingResponse.status, 404);

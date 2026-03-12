@@ -221,10 +221,12 @@ Key behavior:
 - structured issue logs include `issue_id`, `issue_identifier`, `session_id`
 - runtime snapshot model includes `generated_at`, `last_tick_at`, `counts`,
   `running`, `retrying`, aggregate `totals` (`runtime_seconds`,
-  `input_tokens`, `output_tokens`, `total_tokens`), `rate_limits`, plus
-  per-runner runtime seconds, idle seconds, last humanized activity, and
-  context-window headroom derived from token updates; `/api/v1/state` keeps
-  legacy aliases such as `lastTickAtIso` and `codex_totals` during migration
+  `input_tokens`, `output_tokens`, `total_tokens`), top-level `health`,
+  `recent_events`, and `rate_limits`, plus per-runner runtime seconds, idle
+  seconds, last humanized activity, and context-window headroom derived from
+  token updates; `/api/v1/<issue_identifier>` also surfaces issue-local
+  `health` and `recent_events`, and `/api/v1/state` keeps legacy aliases such
+  as `lastTickAtIso` and `codex_totals` during migration
 - optional state endpoints:
     - `GET /` human-readable operator dashboard for live local debugging
     - `GET /api/v1/state`

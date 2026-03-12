@@ -90,6 +90,16 @@ function renderMetricCard(label: string, value: string, hint: string): string {
     return `<article class="metric-card"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd><p>${escapeHtml(hint)}</p></article>`;
 }
 
+function renderHealthIndicator(indicator: OrchestratorSnapshot['health']['indicators'][number]): string {
+    return `<li class="health-item health-item--${escapeHtml(indicator.status)}">
+        <span class="pill pill--${escapeHtml(indicator.status)}">${escapeHtml(indicator.status)}</span>
+        <div>
+            <strong>${escapeHtml(indicator.code)}</strong>
+            <p>${escapeHtml(indicator.message)}</p>
+        </div>
+    </li>`;
+}
+
 function renderRunningEntry(entry: OrchestratorSnapshot['running'][number]): string {
     const traceItems =
         entry.trace_tail.length > 0
@@ -136,8 +146,21 @@ function renderRetryEntry(entry: OrchestratorSnapshot['retrying'][number]): stri
     </tr>`;
 }
 
+function renderRecentEvent(event: OrchestratorSnapshot['recent_events'][number]): string {
+    return `<li class="event-item">
+        <div class="event-item__meta">
+            <a href="/api/v1/${encodeURIComponent(event.issue_identifier)}">${escapeHtml(event.issue_identifier)}</a>
+            <span>${escapeHtml(formatTimestamp(event.atIso))}</span>
+        </div>
+        <p><strong>${escapeHtml(event.eventType)}</strong> ${escapeHtml(event.message)}</p>
+    </li>`;
+}
+
 export function renderDashboard(snapshot: OrchestratorSnapshot): string {
     const rateLimitItems = Object.entries(snapshot.rate_limits);
+    const healthMarkup = `<ul class="health-list">${snapshot.health.indicators
+        .map((indicator) => renderHealthIndicator(indicator))
+        .join('')}</ul>`;
     const runningMarkup =
         snapshot.running.length > 0
             ? snapshot.running.map((entry) => renderRunningEntry(entry)).join('')
@@ -157,6 +180,10 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
                   )
                   .join('')}</dl>`
             : '<p class="empty-state">No rate-limit data reported.</p>';
+    const recentEventMarkup =
+        snapshot.recent_events.length > 0
+            ? `<ol class="event-list">${snapshot.recent_events.map((event) => renderRecentEvent(event)).join('')}</ol>`
+            : '<p class="empty-state">No recent events captured yet.</p>';
 
     return `<!doctype html>
 <html lang="en">
@@ -289,10 +316,40 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
             font: 600 0.82rem/1.1 system-ui, sans-serif;
             text-transform: capitalize;
         }
+        .pill--warning {
+            background: #fff1c2;
+            color: #8a5800;
+        }
+        .pill--error {
+            background: #ffe2df;
+            color: #9f1d18;
+        }
         .entry-grid, .rate-limit-list, .meta-card dl {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
             gap: 12px;
+        }
+        .health-list, .event-list {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+        .health-item, .event-item {
+            display: grid;
+            gap: 10px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .health-item {
+            grid-template-columns: auto 1fr;
+            align-items: start;
+        }
+        .event-item__meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            color: var(--muted);
+            font-size: 0.92rem;
         }
         .trace-list {
             margin: 0;
@@ -370,6 +427,22 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
             </div>
         </section>
         <div class="stack">
+            <div class="secondary-grid">
+                <section class="panel">
+                    <div class="section-header">
+                        <h2>Health</h2>
+                        <p class="muted">Overall ${escapeHtml(snapshot.health.overall)}</p>
+                    </div>
+                    ${healthMarkup}
+                </section>
+                <section class="panel">
+                    <div class="section-header">
+                        <h2>Recent Events</h2>
+                        <p class="muted">${escapeHtml(formatInteger(snapshot.recent_events.length))} newest entries</p>
+                    </div>
+                    ${recentEventMarkup}
+                </section>
+            </div>
             <section class="panel">
                 <div class="section-header">
                     <h2>Running Issues</h2>

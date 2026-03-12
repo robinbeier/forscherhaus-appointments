@@ -1552,6 +1552,8 @@ test('turn_timeout in review state is not misclassified as a successful review h
     const issueDetails = orchestrator.getIssueDetails(issue.identifier);
     assert.ok(issueDetails);
     assert.equal(issueDetails?.status, 'retrying');
+    const health = issueDetails?.health as Record<string, unknown>;
+    assert.equal(health.overall, 'error');
     assert.ok(
         logRecords.some(
             (record) =>
@@ -2348,6 +2350,8 @@ test('running snapshot surfaces humanized activity and context headroom', async 
     assert.equal(snapshot.codex_totals.output_tokens, 72468);
     assert.equal(snapshot.codex_totals.total_tokens, 193468);
     assert.equal(snapshot.codex_totals.seconds_running, 42);
+    assert.equal(snapshot.health.overall, 'ok');
+    assert.equal(snapshot.recent_events[0]?.issue_identifier, 'ROB-13-TELEMETRY');
     assert.ok(Array.isArray(snapshot.running[0].traceTail));
     assert.ok(snapshot.running[0].traceTail.some((entry) => entry.eventType === 'session/started'));
 
@@ -2364,6 +2368,12 @@ test('running snapshot surfaces humanized activity and context headroom', async 
     assert.equal(running.context_window_tokens, 258400);
     assert.equal(running.context_headroom_tokens, 64932);
     assert.equal(running.context_utilization_percent, 74.9);
+    const health = issueDetails?.health as Record<string, unknown>;
+    assert.equal(health.overall, 'ok');
+    assert.equal(
+        ((issueDetails?.recent_events as Array<Record<string, unknown>>)[0] ?? {}).issue_identifier,
+        'ROB-13-TELEMETRY',
+    );
     const trace = issueDetails?.trace as Record<string, unknown>;
     assert.ok(Array.isArray(trace.recent));
     assert.ok((trace.recent as Array<Record<string, unknown>>).some((entry) => entry.eventType === 'session/started'));
@@ -2527,6 +2537,9 @@ test('issue details preserve terminal input_required payload for debugging after
             question: 'Should I continue?',
         },
     });
+    const health = issueDetails?.health as Record<string, unknown>;
+    assert.equal(health.overall, 'warning');
+    assert.equal(((health.indicators as Array<Record<string, unknown>>)[0] ?? {}).code, 'error_state');
 });
 
 test('first-turn trace captures pre-edit command execution details without forcing an early retry', async () => {
