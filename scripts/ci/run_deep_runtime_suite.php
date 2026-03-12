@@ -68,6 +68,8 @@ function deepRuntimeSuiteUsage(): string
         '  --start-date=DATE      Dashboard/integration smoke start date.',
         '  --end-date=DATE        Dashboard/integration smoke end date.',
         '  --integration-smoke-include-ldap=BOOL  Include LDAP guardrail checks in integration-smoke (default: true).',
+        '  --integration-smoke-browser-evidence=MODE  Browser evidence mode for integration-smoke (default: on-failure).',
+        '  --integration-smoke-browser-evidence-on-failure-checks=LIST  Check IDs that trigger evidence in on-failure mode.',
         '  --report-dir=PATH      Output directory for suite manifest/reports.',
         '  --help                 Show this help text.',
         '',
@@ -87,6 +89,8 @@ function deepRuntimeSuiteUsage(): string
  *   start_date:string,
  *   end_date:string,
  *   integration_smoke_include_ldap:bool,
+ *   integration_smoke_browser_evidence_mode:string,
+ *   integration_smoke_browser_evidence_on_failure_checks:array<int, string>,
  *   report_dir:string,
  *   manifest_path:string,
  *   help:bool
@@ -109,6 +113,8 @@ function deepRuntimeSuiteDefaultConfig(): array
         'start_date' => '2026-01-01',
         'end_date' => '2026-01-31',
         'integration_smoke_include_ldap' => true,
+        'integration_smoke_browser_evidence_mode' => 'on-failure',
+        'integration_smoke_browser_evidence_on_failure_checks' => deepRuntimeDefaultBrowserEvidenceOnFailureChecks(),
         'report_dir' => $reportDir,
         'manifest_path' => $reportDir . '/manifest.json',
         'help' => false,
@@ -182,6 +188,22 @@ function parseDeepRuntimeSuiteCliOptions(array $argv, array &$config): void
             continue;
         }
 
+        if (str_starts_with($arg, '--integration-smoke-browser-evidence=')) {
+            $config['integration_smoke_browser_evidence_mode'] = parseBrowserEvidenceModeCliOption(
+                $arg,
+                '--integration-smoke-browser-evidence',
+            );
+            continue;
+        }
+
+        if (str_starts_with($arg, '--integration-smoke-browser-evidence-on-failure-checks=')) {
+            $config['integration_smoke_browser_evidence_on_failure_checks'] = parseBrowserEvidenceChecksCliOption(
+                $arg,
+                '--integration-smoke-browser-evidence-on-failure-checks',
+            );
+            continue;
+        }
+
         if (str_starts_with($arg, '--report-dir=')) {
             $config['report_dir'] = requireNonEmptyCliValue($arg, '--report-dir');
             $config['manifest_path'] = rtrim($config['report_dir'], '/') . '/manifest.json';
@@ -234,6 +256,41 @@ function parseBooleanCliOption(string $arg, string $option): bool
         '0', 'false', 'no', 'off' => false,
         default => throw new RuntimeException('CLI option ' . $option . ' requires a boolean value (true/false/1/0).'),
     };
+}
+
+function parseBrowserEvidenceModeCliOption(string $arg, string $option): string
+{
+    $value = strtolower(requireNonEmptyCliValue($arg, $option));
+
+    return match ($value) {
+        'off', 'on-failure', 'always' => $value,
+        default => throw new RuntimeException('CLI option ' . $option . ' requires one of: off, on-failure, always.'),
+    };
+}
+
+/**
+ * @return array<int, string>
+ */
+function parseBrowserEvidenceChecksCliOption(string $arg, string $option): array
+{
+    $raw = requireNonEmptyCliValue($arg, $option);
+    $allowedLookup = array_fill_keys(deepRuntimeIntegrationSmokeChecks(true), true);
+    $resolved = [];
+
+    foreach (explode(',', $raw) as $candidate) {
+        $checkId = trim($candidate);
+        if ($checkId === '') {
+            continue;
+        }
+
+        if (!isset($allowedLookup[$checkId])) {
+            throw new RuntimeException('CLI option ' . $option . ' includes unsupported check ID: ' . $checkId . '.');
+        }
+
+        $resolved[$checkId] = true;
+    }
+
+    return array_keys($resolved);
 }
 
 /**
@@ -315,7 +372,7 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
             'integration-smoke' => [
                 'id' => $suiteId,
                 'command' => sprintf(
-                    'php scripts/ci/dashboard_integration_smoke.php --base-url=%s --index-page=%s --username=%s --password=%s --start-date=%s --end-date=%s --checks=%s --browser-evidence=%s --browser-evidence-dir=%s --output-json=%s',
+                    'php scripts/ci/dashboard_integration_smoke.php --base-url=%s --index-page=%s --username=%s --password=%s --start-date=%s --end-date=%s --checks=%s --browser-evidence=%s --browser-evidence-on-failure-checks=%s --browser-evidence-dir=%s --output-json=%s',
                     escapeshellarg((string) $config['base_url']),
                     escapeshellarg((string) $config['index_page']),
                     escapeshellarg((string) $config['username']),
@@ -328,7 +385,10 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
                             deepRuntimeIntegrationSmokeChecks((bool) $config['integration_smoke_include_ldap']),
                         ),
                     ),
-                    escapeshellarg('on-failure'),
+                    escapeshellarg((string) $config['integration_smoke_browser_evidence_mode']),
+                    escapeshellarg(
+                        implode(',', (array) $config['integration_smoke_browser_evidence_on_failure_checks']),
+                    ),
                     escapeshellarg($reportDir . '/integration-smoke-browser'),
                     escapeshellarg($reportDir . '/integration-smoke.json'),
                 ),
@@ -428,6 +488,14 @@ function deepRuntimeIntegrationSmokeChecks(bool $includeLdapGuardrail): array
     ]);
 
     return $checks;
+}
+
+/**
+ * @return array<int, string>
+ */
+function deepRuntimeDefaultBrowserEvidenceOnFailureChecks(): array
+{
+    return ['booking_page_readiness', 'booking_extract_bootstrap'];
 }
 
 /**

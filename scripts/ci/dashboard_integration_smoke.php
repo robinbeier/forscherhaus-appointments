@@ -10,7 +10,7 @@ require_once __DIR__ . '/lib/CheckSelection.php';
 use function CiRuntimeEvidence\buildDefaultBrowserRuntimeEvidenceArtifactsDir;
 use function CiRuntimeEvidence\collectBookingPageBrowserEvidence;
 use function CiRuntimeEvidence\parseBrowserRuntimeEvidenceMode;
-use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidence;
+use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidenceForChecks;
 use CiContract\CheckSelection;
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
@@ -480,9 +480,11 @@ try {
 if (
     isset($config) &&
     is_array($config) &&
-    shouldCollectBrowserRuntimeEvidence(
+    shouldCollectBrowserRuntimeEvidenceForChecks(
         (string) ($config['browser_evidence_mode'] ?? 'off'),
         $exitCode !== INTEGRATION_SMOKE_EXIT_SUCCESS,
+        dashboardIntegrationSmokeFailedCheckIds($checks),
+        (array) ($config['browser_evidence_on_failure_checks'] ?? []),
     )
 ) {
     try {
@@ -563,6 +565,7 @@ exit($exitCode);
  *   browser_bootstrap_timeout:int,
  *   browser_open_timeout:int,
  *   browser_headed:bool,
+ *   browser_evidence_on_failure_checks:array<int, string>,
  *   requested_checks:array<int, string>,
  *   effective_checks:array<int, string>,
  *   selection_reason_by_check:array<string, string>,
@@ -586,6 +589,7 @@ function parseCliOptions(array $csrfDefaults, string $repoRoot): array
         'output-json::',
         'browser-evidence::',
         'browser-evidence-dir::',
+        'browser-evidence-on-failure-checks::',
         'browser-pwcli-path::',
         'browser-bootstrap-timeout::',
         'browser-open-timeout::',
@@ -645,6 +649,10 @@ function parseCliOptions(array $csrfDefaults, string $repoRoot): array
         'browser-open-timeout',
     );
     $browserHeaded = parseBooleanOption(getOptionalOption($options, 'browser-headed', null));
+    $browserEvidenceOnFailureChecks = parseBrowserEvidenceOnFailureChecks(
+        getOptionalOption($options, 'browser-evidence-on-failure-checks', null),
+        integrationSmokeSupportedCheckIds(),
+    );
 
     if ($baseUrl === '') {
         throw new InvalidArgumentException('Option --base-url must not be empty.');
@@ -698,6 +706,7 @@ function parseCliOptions(array $csrfDefaults, string $repoRoot): array
         'browser_bootstrap_timeout' => $browserBootstrapTimeout,
         'browser_open_timeout' => $browserOpenTimeout,
         'browser_headed' => $browserHeaded,
+        'browser_evidence_on_failure_checks' => $browserEvidenceOnFailureChecks,
         'requested_checks' => $selection['requested_checks'],
         'effective_checks' => $selection['effective_checks'],
         'selection_reason_by_check' => $selection['selection_reason_by_check'],
@@ -727,6 +736,7 @@ function printHelpAndExit(): void
       --output-json=PATH
       --browser-evidence=off|on-failure|always
       --browser-evidence-dir=PATH
+      --browser-evidence-on-failure-checks=id1,id2
       --browser-pwcli-path=scripts/release-gate/playwright/playwright_cli.sh
       --browser-bootstrap-timeout=90
       --browser-open-timeout=20
@@ -807,6 +817,14 @@ function integrationSmokeSupportedCheckIds(): array
 }
 
 /**
+ * @return array<int, string>
+ */
+function integrationSmokeBrowserEvidenceOnFailureCheckIds(): array
+{
+    return ['booking_page_readiness', 'booking_extract_bootstrap'];
+}
+
+/**
  * @return array<string, array<int, string>>
  */
 function integrationSmokeCheckDependencies(): array
@@ -843,6 +861,30 @@ function shouldRunConfiguredCheck(array $config, string $checkId): bool
 function selectionReasonForConfiguredCheck(array $config, string $checkId): string
 {
     return (string) ($config['selection_reason_by_check'][$checkId] ?? 'requested');
+}
+
+/**
+ * @param array<int, array<string, mixed>> $checks
+ * @return array<int, string>
+ */
+function dashboardIntegrationSmokeFailedCheckIds(array $checks): array
+{
+    $failedCheckIds = [];
+
+    foreach ($checks as $check) {
+        if (($check['status'] ?? null) !== 'fail') {
+            continue;
+        }
+
+        $checkId = trim((string) ($check['name'] ?? ''));
+        if ($checkId === '') {
+            continue;
+        }
+
+        $failedCheckIds[] = $checkId;
+    }
+
+    return $failedCheckIds;
 }
 
 /**
@@ -1178,6 +1220,43 @@ function parseBooleanOption(mixed $raw): bool
     }
 
     throw new InvalidArgumentException('Boolean option value is invalid: ' . $normalized);
+}
+
+/**
+ * @param array<int, string> $supportedCheckIds
+ * @return array<int, string>
+ */
+function parseBrowserEvidenceOnFailureChecks(mixed $raw, array $supportedCheckIds): array
+{
+    if ($raw === null || $raw === false) {
+        return integrationSmokeBrowserEvidenceOnFailureCheckIds();
+    }
+
+    $value = is_array($raw) ? end($raw) : $raw;
+    $parsedValue = trim((string) $value);
+
+    if ($parsedValue === '') {
+        return integrationSmokeBrowserEvidenceOnFailureCheckIds();
+    }
+
+    $supportedLookup = array_fill_keys($supportedCheckIds, true);
+    $resolved = [];
+
+    foreach (explode(',', $parsedValue) as $candidate) {
+        $checkId = trim($candidate);
+
+        if ($checkId === '') {
+            continue;
+        }
+
+        if (!isset($supportedLookup[$checkId])) {
+            throw new InvalidArgumentException('Unsupported browser evidence on-failure check ID: ' . $checkId . '.');
+        }
+
+        $resolved[$checkId] = true;
+    }
+
+    return array_keys($resolved);
 }
 
 function resolvePath(string $path, string $repoRoot): string
