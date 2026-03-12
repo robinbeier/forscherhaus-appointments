@@ -506,6 +506,9 @@ App.Pages.Dashboard = (function () {
     const initialThreshold = parseFloat(vars('dashboard_conflict_threshold'));
     const savedRangeStart = vars('dashboard_saved_range_start') || '';
     const savedRangeEnd = vars('dashboard_saved_range_end') || '';
+    const locale = vars('language_code') || 'de-DE';
+    const countFormatter = new Intl.NumberFormat(locale, {maximumFractionDigits: 0});
+    const percentFormatter = new Intl.NumberFormat(locale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
 
     let threshold = Number.isFinite(initialThreshold) ? initialThreshold : 0.9;
     let thresholdModal;
@@ -1115,6 +1118,8 @@ App.Pages.Dashboard = (function () {
 
             $fillCell.appendTo($row);
 
+            buildAfter15Cell(item).appendTo($row);
+
             const $statusCell = $('<td/>');
 
             if (!item.has_plan) {
@@ -1139,6 +1144,34 @@ App.Pages.Dashboard = (function () {
         });
     }
 
+    function buildAfter15Cell(item) {
+        const $cell = $('<td/>');
+        const after15Percent = formatAfter15Percent(item?.after_15_percent);
+        const mainText = item?.after_15_evaluable && after15Percent !== null ? `${after15Percent} %` : '—';
+        const badge = resolveAfter15Badge(item);
+
+        $('<div/>', {
+            class: item?.after_15_evaluable ? 'fw-semibold' : 'text-muted',
+            text: mainText,
+        }).appendTo($cell);
+
+        $('<div/>', {
+            class: 'small text-muted mt-1',
+            text: formatAfter15SlotsSummary(item),
+        }).appendTo($cell);
+
+        const $badgeWrapper = $('<div/>', {class: 'mt-2'});
+
+        $('<span/>', {
+            class: `badge ${badge.className}`,
+            text: badge.text,
+        }).appendTo($badgeWrapper);
+
+        $badgeWrapper.appendTo($cell);
+
+        return $cell;
+    }
+
     function formatSlotsSummary(item) {
         const fallback = lang('dashboard_slots_summary_fallback') || 'Slots: —';
         const placeholder = '—';
@@ -1156,6 +1189,60 @@ App.Pages.Dashboard = (function () {
         const pattern = lang('dashboard_slots_summary') || 'Slots: %planned% / %required%';
 
         return pattern.replace('%planned%', plannedText).replace('%required%', requiredText);
+    }
+
+    function formatAfter15SlotsSummary(item) {
+        const after15Slots = parseSlotValue(item?.after_15_slots, {allowZero: true});
+        const totalOfferedSlots = parseSlotValue(item?.total_offered_slots, {allowZero: true});
+
+        if (after15Slots === 0 && totalOfferedSlots === 0) {
+            return buildAfter15SlotsSummary(after15Slots, totalOfferedSlots);
+        }
+
+        if (after15Slots === null || totalOfferedSlots === null) {
+            return shouldPromptAfter15ServiceSelection()
+                ? lang('dashboard_after_15_service_choose')
+                : lang('dashboard_after_15_summary_neutral');
+        }
+
+        return buildAfter15SlotsSummary(after15Slots, totalOfferedSlots);
+    }
+
+    function buildAfter15SlotsSummary(after15Slots, totalOfferedSlots) {
+        const pattern = lang('dashboard_after_15_slots_summary') || '%after_15% / %total% Slots';
+
+        return pattern
+            .replace('%after_15%', countFormatter.format(after15Slots))
+            .replace('%total%', countFormatter.format(totalOfferedSlots));
+    }
+
+    function formatAfter15Percent(value) {
+        const numeric = Number(value);
+
+        if (!Number.isFinite(numeric)) {
+            return null;
+        }
+
+        return percentFormatter.format(numeric);
+    }
+
+    function resolveAfter15Badge(item) {
+        if (item?.after_15_evaluable) {
+            return item.after_15_target_met
+                ? {className: 'bg-success', text: lang('dashboard_after_15_status_ok')}
+                : {className: 'bg-danger', text: lang('dashboard_after_15_status_fail')};
+        }
+
+        return {
+            className: 'bg-secondary',
+            text: lang('dashboard_after_15_status_neutral'),
+        };
+    }
+
+    function shouldPromptAfter15ServiceSelection() {
+        const selectedServiceId = String($service.val() || '').trim();
+
+        return selectedServiceId === '';
     }
 
     function parseSlotValue(value, options = {}) {
