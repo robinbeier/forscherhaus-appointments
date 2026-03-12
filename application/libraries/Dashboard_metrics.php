@@ -358,12 +358,15 @@ class Dashboard_metrics
         $day = $start;
 
         try {
+            $offered_hours_by_date = $this->booking_slot_analytics->get_offered_hours_by_date_for_analysis(
+                $start->format('Y-m-d'),
+                $end->format('Y-m-d'),
+                $service,
+                $provider,
+            );
+
             while ($day <= $end) {
-                $offered_hours = $this->booking_slot_analytics->get_offered_hours_for_analysis(
-                    $day->format('Y-m-d'),
-                    $service,
-                    $provider,
-                );
+                $offered_hours = $offered_hours_by_date[$day->format('Y-m-d')] ?? [];
 
                 foreach ($offered_hours as $offered_hour) {
                     if (!is_string($offered_hour) || !preg_match('/^\d{2}:\d{2}$/', $offered_hour)) {

@@ -96,6 +96,81 @@ class Booking_slot_analytics
     }
 
     /**
+     * Get offered hours for each date in a selected range without time-relative booking filters.
+     *
+     * @param string $start_date Range start date (Y-m-d).
+     * @param string $end_date Range end date (Y-m-d).
+     * @param array $service Service data.
+     * @param array $provider Provider data.
+     * @param int|null $exclude_appointment_id Exclude an appointment from the availability generation.
+     *
+     * @return array<string, array<int, string>>
+     *
+     * @throws Exception
+     */
+    public function get_offered_hours_by_date_for_analysis(
+        string $start_date,
+        string $end_date,
+        array $service,
+        array $provider,
+        ?int $exclude_appointment_id = null,
+    ): array {
+        $range_start = new DateTimeImmutable($start_date);
+        $range_end = new DateTimeImmutable($end_date);
+
+        if ($range_end < $range_start) {
+            return [];
+        }
+
+        if (($service['attendants_number'] ?? 1) > 1) {
+            return $this->get_offered_hours_by_date_using_daily_fallback(
+                $range_start,
+                $range_end,
+                $service,
+                $provider,
+                $exclude_appointment_id,
+            );
+        }
+
+        $appointments = array_merge(
+            $this->get_provider_appointments_for_period(
+                (int) ($provider['id'] ?? 0),
+                $start_date,
+                $end_date,
+                $exclude_appointment_id,
+            ),
+            $this->get_provider_unavailabilities_for_period(
+                (int) ($provider['id'] ?? 0),
+                $start_date,
+                $end_date,
+                $exclude_appointment_id,
+            ),
+        );
+        $blocked_periods = $this->CI->blocked_periods_model->get_for_period($start_date, $end_date);
+        $appointments_by_date = $this->index_events_by_date($appointments);
+        $blocked_periods_by_date = $this->index_events_by_date($blocked_periods);
+        $offered_hours_by_date = [];
+        $day = $range_start;
+
+        while ($day <= $range_end) {
+            $date = $day->format('Y-m-d');
+            $available_periods = $this->get_available_periods_from_events(
+                $date,
+                $provider,
+                $appointments_by_date[$date] ?? [],
+                $blocked_periods_by_date[$date] ?? [],
+            );
+
+            $offered_hours_by_date[$date] = array_values(
+                $this->generate_available_hours($date, $service, $available_periods),
+            );
+            $day = $day->add(new DateInterval('P1D'));
+        }
+
+        return $offered_hours_by_date;
+    }
+
+    /**
      * Get multiple attendants hours.
      *
      * This method will add the additional appointment hours whenever a service accepts multiple attendants.
@@ -330,19 +405,38 @@ class Booking_slot_analytics
      */
     public function get_available_periods(string $date, array $provider, ?int $exclude_appointment_id = null): array
     {
+        $appointments = array_values(
+            array_merge(
+                $this->get_provider_appointments_for_date((int) $provider['id'], $date, $exclude_appointment_id),
+                $this->get_provider_unavailabilities_for_date((int) $provider['id'], $date, $exclude_appointment_id),
+            ),
+        );
+        $blocked_periods = $this->CI->blocked_periods_model->get_for_period($date, $date);
+
+        return $this->get_available_periods_from_events($date, $provider, $appointments, $blocked_periods);
+    }
+
+    /**
+     * Build available periods for a date from already loaded overlapping events.
+     *
+     * @param string $date Selected date (Y-m-d).
+     * @param array $provider Provider data.
+     * @param array $appointments Appointment and unavailability rows overlapping the selected date.
+     * @param array $blocked_periods Blocked-period rows overlapping the selected date.
+     *
+     * @return array<int, array{start: string, end: string}>
+     */
+    protected function get_available_periods_from_events(
+        string $date,
+        array $provider,
+        array $appointments,
+        array $blocked_periods,
+    ): array {
         $working_plan = json_decode($provider['settings']['working_plan'], true);
         $working_plan_exceptions_json = $provider['settings']['working_plan_exceptions'];
         $working_plan_exceptions = $working_plan_exceptions_json
             ? json_decode($provider['settings']['working_plan_exceptions'], true)
             : [];
-
-        $appointments = array_values(
-            array_merge(
-                $this->get_provider_appointments_for_date((int) $provider['id'], $date, $exclude_appointment_id),
-                $this->get_provider_unavailabilities_for_date((int) $provider['id'], $date, $exclude_appointment_id),
-                $this->CI->blocked_periods_model->get_for_period($date, $date),
-            ),
-        );
 
         $working_day = strtolower(date('l', strtotime($date)));
         $date_working_plan = $working_plan[$working_day] ?? null;
@@ -420,7 +514,9 @@ class Booking_slot_analytics
         $day_end = new DateTimeImmutable($date . ' 23:59:59');
         $period_ranges = $this->normalize_period_ranges($date, $periods);
         $appointment_ranges = $this->normalize_appointment_ranges($appointments, $day_start, $day_end);
+        $blocked_period_ranges = $this->normalize_appointment_ranges($blocked_periods, $day_start, $day_end);
         $period_ranges = $this->subtract_ranges($period_ranges, $appointment_ranges);
+        $period_ranges = $this->subtract_ranges($period_ranges, $blocked_period_ranges);
 
         return $this->format_period_ranges($period_ranges);
     }
@@ -439,12 +535,31 @@ class Booking_slot_analytics
         string $date,
         ?int $exclude_appointment_id = null,
     ): array {
+        return $this->get_provider_appointments_for_period($provider_id, $date, $date, $exclude_appointment_id);
+    }
+
+    /**
+     * Load provider appointments that overlap a selected date range.
+     *
+     * @param int $provider_id Provider ID.
+     * @param string $start_date Range start date (Y-m-d).
+     * @param string $end_date Range end date (Y-m-d).
+     * @param int|null $exclude_appointment_id Appointment ID to exclude from the result set.
+     *
+     * @return array
+     */
+    protected function get_provider_appointments_for_period(
+        int $provider_id,
+        string $start_date,
+        string $end_date,
+        ?int $exclude_appointment_id = null,
+    ): array {
         if ($provider_id <= 0) {
             return [];
         }
 
-        $day_start = $date . ' 00:00:00';
-        $day_end = $date . ' 23:59:59';
+        $day_start = $start_date . ' 00:00:00';
+        $day_end = $end_date . ' 23:59:59';
 
         $query = $this->CI->appointments_model
             ->query()
@@ -485,12 +600,31 @@ class Booking_slot_analytics
         string $date,
         ?int $exclude_appointment_id = null,
     ): array {
+        return $this->get_provider_unavailabilities_for_period($provider_id, $date, $date, $exclude_appointment_id);
+    }
+
+    /**
+     * Load provider unavailabilities that overlap a selected date range.
+     *
+     * @param int $provider_id Provider ID.
+     * @param string $start_date Range start date (Y-m-d).
+     * @param string $end_date Range end date (Y-m-d).
+     * @param int|null $exclude_appointment_id Appointment ID to exclude from the result set.
+     *
+     * @return array
+     */
+    protected function get_provider_unavailabilities_for_period(
+        int $provider_id,
+        string $start_date,
+        string $end_date,
+        ?int $exclude_appointment_id = null,
+    ): array {
         if ($provider_id <= 0) {
             return [];
         }
 
-        $day_start = $date . ' 00:00:00';
-        $day_end = $date . ' 23:59:59';
+        $day_start = $start_date . ' 00:00:00';
+        $day_end = $end_date . ' 23:59:59';
 
         $query = $this->CI->unavailabilities_model
             ->query()
@@ -513,6 +647,74 @@ class Booking_slot_analytics
         }
 
         return $unavailabilities;
+    }
+
+    /**
+     * Group overlapping events by date for reuse across analytical range calculations.
+     *
+     * @param array $events Event rows containing start/end datetime fields.
+     *
+     * @return array<string, array<int, array>>
+     */
+    protected function index_events_by_date(array $events): array
+    {
+        $events_by_date = [];
+
+        foreach ($events as $event) {
+            $start = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', (string) ($event['start_datetime'] ?? ''));
+            $end = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', (string) ($event['end_datetime'] ?? ''));
+
+            if (!$start || !$end || $end <= $start) {
+                continue;
+            }
+
+            $day = $start->setTime(0, 0, 0);
+            $last_day = $end->setTime(0, 0, 0);
+
+            while ($day <= $last_day) {
+                $events_by_date[$day->format('Y-m-d')][] = $event;
+                $day = $day->add(new DateInterval('P1D'));
+            }
+        }
+
+        return $events_by_date;
+    }
+
+    /**
+     * Reuse the daily path for multi-attendant services until that product scope changes.
+     *
+     * @param DateTimeImmutable $range_start
+     * @param DateTimeImmutable $range_end
+     * @param array $service
+     * @param array $provider
+     * @param int|null $exclude_appointment_id
+     *
+     * @return array<string, array<int, string>>
+     *
+     * @throws Exception
+     */
+    protected function get_offered_hours_by_date_using_daily_fallback(
+        DateTimeImmutable $range_start,
+        DateTimeImmutable $range_end,
+        array $service,
+        array $provider,
+        ?int $exclude_appointment_id = null,
+    ): array {
+        $offered_hours_by_date = [];
+        $day = $range_start;
+
+        while ($day <= $range_end) {
+            $date = $day->format('Y-m-d');
+            $offered_hours_by_date[$date] = $this->get_offered_hours_for_analysis(
+                $date,
+                $service,
+                $provider,
+                $exclude_appointment_id,
+            );
+            $day = $day->add(new DateInterval('P1D'));
+        }
+
+        return $offered_hours_by_date;
     }
 
     /**

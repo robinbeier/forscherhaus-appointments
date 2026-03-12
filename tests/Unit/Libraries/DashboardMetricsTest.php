@@ -88,9 +88,21 @@ class DashboardMetricsTest extends TestCase
         /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
-            ->expects($this->exactly(58))
-            ->method('get_offered_hours_for_analysis')
-            ->willReturn(['09:00', '15:00']);
+            ->expects($this->exactly(2))
+            ->method('get_offered_hours_by_date_for_analysis')
+            ->willReturnCallback(function (
+                string $startDate,
+                string $endDate,
+                array $resolvedService,
+                array $provider,
+            ) use ($providers, $service): array {
+                TestCase::assertSame('2024-02-01', $startDate);
+                TestCase::assertSame('2024-02-29', $endDate);
+                TestCase::assertSame($service, $resolvedService);
+                TestCase::assertTrue(in_array($provider, $providers, true));
+
+                return $this->buildDailyHoursMap('2024-02-01', '2024-02-29', ['09:00', '15:00']);
+            });
 
         $library = new Dashboard_metrics(
             $providersModel,
@@ -169,26 +181,22 @@ class DashboardMetricsTest extends TestCase
 
         /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
-        $expectedCalls = [
-            ['2024-04-15', $selectedService, $providers[0]],
-            ['2024-04-16', $selectedService, $providers[0]],
-        ];
-        $invocation = 0;
         $bookingSlotAnalytics
-            ->expects($this->exactly(2))
-            ->method('get_offered_hours_for_analysis')
-            ->willReturnCallback(function (string $date, array $service, array $provider) use (
-                $expectedCalls,
-                &$invocation,
+            ->expects($this->once())
+            ->method('get_offered_hours_by_date_for_analysis')
+            ->willReturnCallback(function (string $startDate, string $endDate, array $service, array $provider) use (
+                $selectedService,
+                $providers,
             ): array {
-                TestCase::assertLessThan(count($expectedCalls), $invocation);
-                TestCase::assertSame($expectedCalls[$invocation][0], $date);
-                TestCase::assertSame($expectedCalls[$invocation][1], $service);
-                TestCase::assertSame($expectedCalls[$invocation][2], $provider);
+                TestCase::assertSame('2024-04-15', $startDate);
+                TestCase::assertSame('2024-04-16', $endDate);
+                TestCase::assertSame($selectedService, $service);
+                TestCase::assertSame($providers[0], $provider);
 
-                $responses = [['09:00', '10:00', '15:00'], ['08:00', '15:30']];
-
-                return $responses[$invocation++];
+                return [
+                    '2024-04-15' => ['09:00', '10:00', '15:00'],
+                    '2024-04-16' => ['08:00', '15:30'],
+                ];
             });
 
         $library = new Dashboard_metrics(
@@ -255,7 +263,7 @@ class DashboardMetricsTest extends TestCase
 
         /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
-        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_for_analysis');
+        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_by_date_for_analysis');
 
         $library = new Dashboard_metrics(
             $providersModel,
@@ -320,7 +328,7 @@ class DashboardMetricsTest extends TestCase
 
         /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
-        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_for_analysis');
+        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_by_date_for_analysis');
 
         $library = new Dashboard_metrics(
             $providersModel,
@@ -391,9 +399,12 @@ class DashboardMetricsTest extends TestCase
         /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
-            ->expects($this->exactly(2))
-            ->method('get_offered_hours_for_analysis')
-            ->willReturnOnConsecutiveCalls([], []);
+            ->expects($this->once())
+            ->method('get_offered_hours_by_date_for_analysis')
+            ->willReturn([
+                '2024-04-15' => [],
+                '2024-04-16' => [],
+            ]);
 
         $library = new Dashboard_metrics(
             $providersModel,
@@ -483,18 +494,22 @@ class DashboardMetricsTest extends TestCase
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
             ->expects($this->exactly(2))
-            ->method('get_offered_hours_for_analysis')
-            ->willReturnCallback(static function (string $date, array $resolvedService, array $provider) use (
-                $service,
-            ): array {
-                TestCase::assertSame('2024-04-15', $date);
+            ->method('get_offered_hours_by_date_for_analysis')
+            ->willReturnCallback(static function (
+                string $startDate,
+                string $endDate,
+                array $resolvedService,
+                array $provider,
+            ) use ($service): array {
+                TestCase::assertSame('2024-04-15', $startDate);
+                TestCase::assertSame('2024-04-15', $endDate);
                 TestCase::assertSame($service, $resolvedService);
 
                 if ((int) $provider['id'] === 11) {
                     throw new \RuntimeException('malformed provider plan');
                 }
 
-                return ['09:00', '15:00'];
+                return ['2024-04-15' => ['09:00', '15:00']];
             });
 
         $library = new Dashboard_metrics(
@@ -548,5 +563,22 @@ class DashboardMetricsTest extends TestCase
             'buffer_after' => 0,
             'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
         ];
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    private function buildDailyHoursMap(string $startDate, string $endDate, array $hours): array
+    {
+        $map = [];
+        $day = new \DateTimeImmutable($startDate);
+        $end = new \DateTimeImmutable($endDate);
+
+        while ($day <= $end) {
+            $map[$day->format('Y-m-d')] = $hours;
+            $day = $day->add(new \DateInterval('P1D'));
+        }
+
+        return $map;
     }
 }
