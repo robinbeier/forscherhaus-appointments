@@ -115,6 +115,24 @@ test('resolveStateApiConfig preserves env-driven fallback when workflow is unset
     });
 });
 
+test('resolveStateApiConfig falls back to default port when env enablement is set with an invalid port', () => {
+    const config = resolveStateApiConfig({
+        workflowConfig: createWorkflowConfig(),
+        env: {
+            SYMPHONY_STATE_API_ENABLED: 'true',
+            SYMPHONY_STATE_API_HOST: '0.0.0.0',
+            SYMPHONY_STATE_API_PORT: 'invalid',
+        },
+    });
+
+    assert.deepEqual(config, {
+        enabled: true,
+        host: '0.0.0.0',
+        port: 8787,
+        source: 'env',
+    });
+});
+
 test('resolveStateApiConfig stays disabled when neither CLI, workflow, nor env enablement is set', () => {
     const config = resolveStateApiConfig({
         workflowConfig: createWorkflowConfig(),
