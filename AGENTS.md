@@ -50,11 +50,13 @@ bash ./scripts/ci/pre_pr_quick.sh
 - `DB_HOST='mysql'` is the Docker-default path; host-side PHP needs host-compatible DB config.
 - With host PHP and Docker PDF renderer, set `PDF_RENDERER_URL=http://localhost:3003`.
 - Use a unique Docker Compose project name per worktree.
+- `./scripts/setup-worktree.sh` installs the managed `pre-commit` and `pre-push` hooks; use `./scripts/install-git-hooks.sh` to refresh them, or `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` to replace older custom hooks intentionally.
 - Prefer `docker compose run --rm php-fpm composer deptrac:analyze` over host `composer deptrac:analyze`.
 
 ## Validation Expectations
 
 - Before review, run the narrowest relevant checks plus the full pre-PR gate for review-ready changes.
+- For deterministic LDAP fixtures before LDAP/search/import/SSO work, run `bash ./scripts/ldap/reset_directory.sh` and `bash ./scripts/ldap/smoke.sh`.
 - Bei Bugfixes nach Moeglichkeit einen passenden Regressionstest ergaenzen.
 - Update docs when setup, behavior, validation expectations, or routing change.
 - CI truth lives in `.github/workflows/ci.yml`; do not duplicate long job lists here.
