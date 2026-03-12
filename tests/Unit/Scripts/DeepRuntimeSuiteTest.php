@@ -93,6 +93,10 @@ class DeepRuntimeSuiteTest extends TestCase
         );
         self::assertStringContainsString("--browser-evidence='on-failure'", $definitions[0]['command']);
         self::assertStringContainsString(
+            "--browser-evidence-on-failure-checks='booking_page_readiness,booking_extract_bootstrap'",
+            $definitions[0]['command'],
+        );
+        self::assertStringContainsString(
             "--browser-evidence-dir='" . $this->tmpDir . "/integration-smoke-browser'",
             $definitions[0]['command'],
         );
@@ -131,6 +135,25 @@ class DeepRuntimeSuiteTest extends TestCase
         );
     }
 
+    public function testIntegrationSmokeSuiteAllowsBrowserEvidenceModeOverrides(): void
+    {
+        $config = deepRuntimeSuiteDefaultConfig();
+        $config['suites_raw'] = 'integration-smoke';
+        $config['integration_smoke_include_ldap'] = false;
+        $config['integration_smoke_browser_evidence_mode'] = 'always';
+        $config['integration_smoke_browser_evidence_on_failure_checks'] = ['booking_page_readiness'];
+        $config['report_dir'] = $this->tmpDir;
+        $config['manifest_path'] = $this->tmpDir . '/manifest.json';
+
+        $definitions = buildDeepRuntimeSuiteDefinitions($config);
+
+        self::assertStringContainsString("--browser-evidence='always'", $definitions[0]['command']);
+        self::assertStringContainsString(
+            "--browser-evidence-on-failure-checks='booking_page_readiness'",
+            $definitions[0]['command'],
+        );
+    }
+
     public function testRunConfiguredDeepRuntimeSuitesContinuesAfterFailuresAndBuildsManifest(): void
     {
         $suiteDefinitions = [
@@ -161,6 +184,44 @@ class DeepRuntimeSuiteTest extends TestCase
         self::assertSame(0, $manifest['suites']['booking-controller-flows']['exit_code']);
         self::assertArrayHasKey('artifacts_dir', $manifest['suites']['api-contract-openapi']);
         self::assertNotSame('', $manifest['completed_at_utc']);
+    }
+
+    public function testParseDeepRuntimeSuiteCliOptionsSupportsBrowserEvidenceOverrides(): void
+    {
+        $config = deepRuntimeSuiteDefaultConfig();
+
+        parseDeepRuntimeSuiteCliOptions(
+            [
+                'run_deep_runtime_suite.php',
+                '--suites=integration-smoke',
+                '--integration-smoke-browser-evidence=always',
+                '--integration-smoke-browser-evidence-on-failure-checks=booking_page_readiness,booking_extract_bootstrap',
+            ],
+            $config,
+        );
+
+        self::assertSame('always', $config['integration_smoke_browser_evidence_mode']);
+        self::assertSame(
+            ['booking_page_readiness', 'booking_extract_bootstrap'],
+            $config['integration_smoke_browser_evidence_on_failure_checks'],
+        );
+    }
+
+    public function testParseDeepRuntimeSuiteCliOptionsRejectsUnsupportedBrowserEvidenceCheckId(): void
+    {
+        $config = deepRuntimeSuiteDefaultConfig();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('unsupported check ID');
+
+        parseDeepRuntimeSuiteCliOptions(
+            [
+                'run_deep_runtime_suite.php',
+                '--suites=integration-smoke',
+                '--integration-smoke-browser-evidence-on-failure-checks=unknown_check',
+            ],
+            $config,
+        );
     }
 
     public function testPrepareDeepRuntimeReportDirectoryRemovesStaleSuiteArtifacts(): void

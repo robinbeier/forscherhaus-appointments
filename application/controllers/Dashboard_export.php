@@ -26,7 +26,7 @@ class Dashboard_export extends EA_Controller
 
     protected const STATUS_REASON_CAPACITY_GAP = 'capacity_gap';
 
-    protected const PRINCIPAL_PDF_FIRST_PAGE_TEACHERS = 5;
+    protected const PRINCIPAL_PDF_FIRST_PAGE_TEACHERS = 3;
 
     protected const PRINCIPAL_PDF_CONTINUATION_PAGE_TEACHERS = 13;
 

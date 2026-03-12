@@ -378,8 +378,8 @@ class Dashboard extends EA_Controller
 
         $slots_planned = $this->normalizeOptionalMetricInt(is_array($metric) ? $metric['slots_planned'] ?? null : null);
         $slots_required =
-            $this->normalizeOptionalMetricInt(is_array($metric) ? $metric['slots_required'] ?? $target : $target) ??
-            max($target, 0);
+            $this->normalizeOptionalMetricInt(is_array($metric) ? $metric['slots_required'] ?? null : null) ??
+            $this->resolveRequiredSlots($target, $class_size);
         $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
         $status_reasons = $this->normalizeStatusReasons(is_array($metric) ? $metric['status_reasons'] ?? [] : []);
 
@@ -633,6 +633,21 @@ class Dashboard extends EA_Controller
         $target = is_array($metric) ? $metric['target'] ?? 0 : 0;
 
         return max(0, (int) $target);
+    }
+
+    protected function resolveRequiredSlots(int $target, ?int $class_size): int
+    {
+        if ($class_size === null) {
+            return max($target, 0);
+        }
+
+        $normalized_class_size = max($class_size, 0);
+
+        if ($normalized_class_size < 25) {
+            return min($normalized_class_size + 2, 25);
+        }
+
+        return $normalized_class_size;
     }
 
     /**

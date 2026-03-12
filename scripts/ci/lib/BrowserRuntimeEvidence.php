@@ -347,6 +347,56 @@ function shouldCollectBrowserRuntimeEvidence(string $mode, bool $suiteFailed): b
     };
 }
 
+/**
+ * @param array<int, string> $failedCheckIds
+ * @param array<int, string> $onFailureCheckIds
+ */
+function shouldCollectBrowserRuntimeEvidenceForChecks(
+    string $mode,
+    bool $suiteFailed,
+    array $failedCheckIds,
+    array $onFailureCheckIds,
+): bool {
+    if (!shouldCollectBrowserRuntimeEvidence($mode, $suiteFailed)) {
+        return false;
+    }
+
+    if ($mode !== 'on-failure') {
+        return true;
+    }
+
+    if ($onFailureCheckIds === []) {
+        return true;
+    }
+
+    $failedLookup = [];
+    foreach ($failedCheckIds as $checkId) {
+        $normalizedCheckId = trim((string) $checkId);
+        if ($normalizedCheckId === '') {
+            continue;
+        }
+
+        $failedLookup[$normalizedCheckId] = true;
+    }
+
+    if ($failedLookup === []) {
+        return false;
+    }
+
+    foreach ($onFailureCheckIds as $checkId) {
+        $normalizedCheckId = trim((string) $checkId);
+        if ($normalizedCheckId === '') {
+            continue;
+        }
+
+        if (isset($failedLookup[$normalizedCheckId])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function parseBrowserRuntimeEvidenceMode(mixed $raw): string
 {
     if ($raw === null) {

@@ -343,6 +343,76 @@ class DashboardProviderMetricsControllerTest extends TestCase
         $this->assertSame(['booking_goal_missed', 'after_15_goal_missed'], $payload['metrics']['status_reasons']);
     }
 
+    public function testBuildProviderDashboardPayloadFallsBackToCappedCapacityRequirementForSmallClasses(): void
+    {
+        $provider = [
+            'id' => 42,
+            'first_name' => 'Adina',
+            'last_name' => 'Rossmeisl',
+            'email' => 'adina@example.org',
+            'class_size_default' => 18,
+        ];
+
+        $providersModel = $this->createMock(\Providers_model::class);
+        $providersModel->expects($this->once())->method('find')->with(42)->willReturn($provider);
+
+        $controller = new class ($providersModel) extends Dashboard {
+            public array $metrics = [];
+
+            public function __construct($providersModel)
+            {
+                $this->providers_model = $providersModel;
+            }
+
+            public function callBuildProviderDashboardPayload(
+                int $providerId,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return $this->buildProviderDashboardPayload($providerId, $start, $end);
+            }
+
+            protected function collectProviderMetrics(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return $this->metrics;
+            }
+
+            protected function loadProviderAppointments(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return [];
+            }
+        };
+
+        $controller->metrics = [
+            [
+                'provider_id' => 42,
+                'provider_name' => 'Adina Rossmeisl',
+                'target' => 18,
+                'booked' => 0,
+                'open' => 18,
+                'slots_planned' => 19,
+                'class_size_default' => 18,
+                'status_reasons' => ['booking_goal_missed', 'capacity_gap'],
+            ],
+        ];
+
+        $payload = $controller->callBuildProviderDashboardPayload(
+            42,
+            new DateTimeImmutable('2026-04-15'),
+            new DateTimeImmutable('2026-04-16'),
+        );
+
+        $this->assertSame(19, $payload['metrics']['slots_planned']);
+        $this->assertSame(20, $payload['metrics']['slots_required']);
+        $this->assertTrue($payload['metrics']['has_capacity_gap']);
+    }
+
     private function createControllerWithoutConstructor(): object
     {
         return new class extends Dashboard {

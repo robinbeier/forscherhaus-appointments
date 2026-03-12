@@ -146,15 +146,15 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame([], $pages[0]);
     }
 
-    public function testBuildPrincipalPagesKeepsFiveMetricsOnFirstPage(): void
+    public function testBuildPrincipalPagesKeepsThreeMetricsOnFirstPage(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
-        $metrics = $this->createPrincipalMetrics(5);
+        $metrics = $this->createPrincipalMetrics(3);
 
         $pages = $controller->callBuildPrincipalPages($metrics);
 
         $this->assertCount(1, $pages);
-        $this->assertCount(5, $pages[0]);
+        $this->assertCount(3, $pages[0]);
     }
 
     public function testBuildPrincipalPagesUsesTwoPagesForSixteenMetrics(): void
@@ -165,8 +165,8 @@ class DashboardExportControllerTest extends TestCase
         $pages = $controller->callBuildPrincipalPages($metrics);
 
         $this->assertCount(2, $pages);
-        $this->assertCount(5, $pages[0]);
-        $this->assertCount(11, $pages[1]);
+        $this->assertCount(3, $pages[0]);
+        $this->assertCount(13, $pages[1]);
     }
 
     public function testBuildPrincipalPagesUsesThreePagesForTwentyMetrics(): void
@@ -177,9 +177,9 @@ class DashboardExportControllerTest extends TestCase
         $pages = $controller->callBuildPrincipalPages($metrics);
 
         $this->assertCount(3, $pages);
-        $this->assertCount(5, $pages[0]);
+        $this->assertCount(3, $pages[0]);
         $this->assertCount(13, $pages[1]);
-        $this->assertCount(2, $pages[2]);
+        $this->assertCount(4, $pages[2]);
     }
 
     public function testBuildPrincipalOverviewPrecomputesCountersAndTopAttention(): void

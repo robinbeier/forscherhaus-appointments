@@ -772,6 +772,7 @@ jobs:
           --booking-search-days=14 --retry-count=1
           --start-date=2026-01-01 --end-date=2026-01-31
           --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
+          --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }}
           --report-dir=storage/logs/ci/deep-runtime-suite
       - name: Upload deep runtime suite artifacts
         if: always()

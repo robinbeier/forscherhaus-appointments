@@ -14,6 +14,7 @@ use function CiRuntimeEvidence\parseBrowserRuntimeEvidenceMode;
 use function CiRuntimeEvidence\resolveBookingPageTargetUrl;
 use function CiRuntimeEvidence\resolvePlaywrightArtifactPath;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidence;
+use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidenceForChecks;
 
 class BrowserRuntimeEvidenceTest extends TestCase
 {
@@ -40,6 +41,30 @@ class BrowserRuntimeEvidenceTest extends TestCase
         self::assertFalse(shouldCollectBrowserRuntimeEvidence('on-failure', false));
         self::assertTrue(shouldCollectBrowserRuntimeEvidence('on-failure', true));
         self::assertTrue(shouldCollectBrowserRuntimeEvidence('always', false));
+    }
+
+    public function testShouldCollectBrowserRuntimeEvidenceForChecksUsesFailedCheckIntersection(): void
+    {
+        self::assertTrue(
+            shouldCollectBrowserRuntimeEvidenceForChecks(
+                'on-failure',
+                true,
+                ['booking_extract_bootstrap'],
+                ['booking_page_readiness', 'booking_extract_bootstrap'],
+            ),
+        );
+        self::assertFalse(
+            shouldCollectBrowserRuntimeEvidenceForChecks(
+                'on-failure',
+                true,
+                ['api_appointments_index'],
+                ['booking_page_readiness', 'booking_extract_bootstrap'],
+            ),
+        );
+        self::assertFalse(
+            shouldCollectBrowserRuntimeEvidenceForChecks('on-failure', true, [], ['booking_page_readiness']),
+        );
+        self::assertTrue(shouldCollectBrowserRuntimeEvidenceForChecks('always', false, [], ['booking_page_readiness']));
     }
 
     public function testResolveBookingPageTargetUrlRespectsIndexPage(): void
