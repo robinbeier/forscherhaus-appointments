@@ -1,8 +1,9 @@
 # Symphony SPEC Audit Report (2026-03-07)
 
-Note (2026-03-12): parts of this report are now historical rather than
-current. For the current gap matrix, stale-finding corrections, and the
-`9.5/10` closeout criteria, read
+Note (2026-03-12): this report is now historical rather than current. For the
+current final audit and re-score, read
+`docs/symphony/SPEC_AUDIT_REPORT_2026-03-12.md`. For the intermediate frozen
+gap matrix that guided the closeout sequence, read
 `docs/symphony/SPEC_GAP_SCORECARD_2026-03-12.md`.
 
 Basis:
