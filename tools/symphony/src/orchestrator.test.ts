@@ -2371,8 +2371,8 @@ test('running snapshot surfaces humanized activity and context headroom', async 
     const health = issueDetails?.health as Record<string, unknown>;
     assert.equal(health.overall, 'ok');
     assert.equal(
-        ((issueDetails?.recent_events as Array<Record<string, unknown>>)[0] ?? {}).issue_identifier,
-        'ROB-13-TELEMETRY',
+        ((issueDetails?.recent_events as Array<Record<string, unknown>>)[0] ?? {}).eventType,
+        'session/started',
     );
     const trace = issueDetails?.trace as Record<string, unknown>;
     assert.ok(Array.isArray(trace.recent));

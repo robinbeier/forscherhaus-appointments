@@ -10,8 +10,8 @@ Basis:
 
 ## Executive Summary
 
-Aktueller Stand: **nahe an einer idealen Symphony-Portierung, mit kleiner
-bewusster Restabweichung im optionalen Status-Surface-Bereich**.
+Aktueller Stand: **nahe an einer idealen Symphony-Portierung, mit nur noch
+kleinen bewussten Restabweichungen ausserhalb des Core-Conformance-Pfads**.
 
 Aktuelle Gesamtbewertung: **`9.5/10`**.
 
@@ -27,12 +27,11 @@ wurden:
    Symphony-Readiness zugeschnitten, statt von repo-weiten PHPUnit-/DB-Problemen
    abzuhaengen.
 
-Die verbleibende sichtbare Luecke ist eine **human-readable Status-Surface unter
-`/`**. Die Upstream-SPEC markiert diese aber in `3.1.7` ausdruecklich als
-**optional**. Punkt 2 verlangt operator-visible observability mit mindestens
-structured logs, und diese Basis ist lokal bereits vorhanden. Deshalb blockiert
-die fehlende HTML-/Dashboard-Oberflaeche die `9.5/10`-Bewertung nicht mehr,
-wohl aber die `10/10`-Naehestufe.
+Die frueher sichtbare Luecke rund um die **human-readable Status-Surface unter
+`/`** ist inzwischen geschlossen: Dashboard, Snapshot-Health, issue-lokale
+Health-Signale und `recent_events` sind vorhanden, dokumentiert und
+deterministisch testbar. Die verbleibenden Abweichungen liegen jetzt vor allem
+in optionalen Randthemen wie Multi-Sink-Logging oder breiterer Template-Flexibilitaet.
 
 ## Evidence Refresh
 
@@ -50,6 +49,8 @@ Supporting implementation evidence:
   `tools/symphony/src/workflow.ts`
 - snapshot telemetry totals in `tools/symphony/src/orchestrator.ts`
 - issue and state API semantics in `tools/symphony/src/state-server.ts`
+- human-readable dashboard rendering in `tools/symphony/src/state-dashboard.ts`
+- deterministic status-surface proof in `tools/symphony/src/state-server.test.ts`
 - deterministic pilot-readiness baseline in
   `scripts/ci/run_symphony_pilot_checks.sh`
 
@@ -90,21 +91,28 @@ Gegen die Kernbereiche aus Punkt 3 ergibt sich aktuell diese Einordnung:
 | Orchestrator + scheduler | `9.5/10` | Tick order, bounded concurrency, per-state limits, continuation, stall detection, active stopping, startup cleanup und retries sind vorhanden. |
 | Workspace manager | `9.5/10` | Deterministische issue workspaces, path safety, hook lifecycle und best-effort `before_remove` sind SPEC-nah. |
 | Agent runner / app-server protocol | `9.0/10` | Handshake, same-thread continuation, token extraction und policy propagation sind stark; Restabweichungen sind klein und nicht operator-kritisch. |
-| Observability | `8.5/10` | Structured logs, `/api/v1/state`, `/api/v1/<issue_identifier>`, refresh trigger und richer telemetry sind da; die human-readable Surface unter `/` fehlt noch. |
+| Observability | `9.5/10` | Structured logs, `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, refresh trigger, health indicators und `recent_events` sind operator-sichtbar und deterministisch testbar. |
 
-### 3. Warum die fehlende Status Surface nicht mehr blockiert
+### 3. Warum die Status Surface jetzt als geschlossen gilt
 
 Die fruehere Gap-Matrix behandelte die fehlende dashboardartige Surface noch als
-`9.5/10`-Blocker. Gegen die Upstream-SPEC ist das zu streng:
+`9.5/10`-Blocker. Gegen die Upstream-SPEC war das bereits zu streng; inzwischen
+ist die Surface aber auch praktisch geliefert:
 
 - `3.1.7 Status Surface` ist als **optional** formuliert.
 - Punkt 2 verlangt fuer Observability nur eine operator-sichtbare Form, mit
   structured logs als Minimum.
-- Die lokale Implementation liefert bereits structured JSON logs und eine
-  zweckmaessige JSON-State-API fuer Incident-Triage.
+- Die lokale Implementation liefert jetzt zusaetzlich:
+  - ein read-only Dashboard unter `/`
+  - Snapshot-Health und globale `recent_events`
+  - issue-lokale Health- und Event-Sichten unter `/api/v1/<issue_identifier>`
+  - pilot-nahe Operator-Doku in `tools/symphony/README.md` und
+    `docs/symphony/STAGING_PILOT_RUNBOOK.md`
+  - deterministische Testabdeckung in `src/state-server.test.ts`, eingebunden in
+    `npm --prefix tools/symphony run test:conformance`
 
-Damit bleibt die fehlende HTML-Surface ein sinnvoller Follow-up fuer bessere
-Operator-UX, aber **kein Core-Conformance-Blocker** mehr.
+Damit ist die Status Surface nicht nur kein Core-Conformance-Blocker mehr,
+sondern auch als optionaler Operator-UX-Track sauber abgeschlossen.
 
 ## Delta Zur Historischen Audit-Fassung (2026-03-07)
 
@@ -124,12 +132,12 @@ Die folgenden damaligen Kernaussagen gelten nicht mehr:
 
 Die verbleibenden Restpunkte sind bewusst **nicht mehr 9.5-blocking**:
 
-1. Human-readable Status Surface unter `/`
-2. Reichere Operator-UX fuer Recent Events und Health-Indikatoren
-3. Allgemeine Politur der Observability-Darstellung
+1. Multi-Sink-Logging beziehungsweise explizite Sink-Fallback-Strategien
+2. Breitere Template-Flexibilitaet ueber die aktuellen strikten Roots hinaus
+3. Allgemeine Politur ausserhalb der nun vorhandenen Status-Surface
 
-Diese Restpunkte sind gute Kandidaten fuer `ROB-127` bis `ROB-131`, aendern aber
-nicht die aktuelle Bewertung der Core-Conformance.
+Diese Restpunkte bleiben optionale spaetere Verbesserungen und aendern nicht die
+aktuelle Bewertung der Core-Conformance.
 
 ## Final Assessment
 
@@ -141,6 +149,6 @@ Begruendung:
   operativer Pilot-Baseline sind geschlossen.
 - Die Punkt-2-Ziele der SPEC sind lokal jetzt sowohl technisch als auch
   operativ belastbar nachgewiesen.
-- Die verbleibende groesste Luecke liegt in einer explizit optionalen
-  Status-Surface-UX und rechtfertigt deshalb einen kleinen, aber nicht
-  blockierenden Abzug statt einer Rueckstufung auf `7.5/10`.
+- Die vormals groesste Luecke in der Status-Surface ist inzwischen geschlossen;
+  die Restabweichungen liegen in engeren optionalen Randthemen und rechtfertigen
+  daher nur noch einen kleinen, nicht blockierenden Abzug.

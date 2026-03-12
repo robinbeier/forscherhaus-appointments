@@ -22,6 +22,12 @@ npm run test:conformance
 
 ## Notes
 
--   The matrix intentionally references deterministic tests only.
--   `src/test-profiles.ts` provides reusable fake Linear/Codex profiles for future
-    conformance and regression scenarios.
+- The matrix intentionally references deterministic tests only.
+- `src/test-profiles.ts` provides reusable fake Linear/Codex profiles for future
+  conformance and regression scenarios.
+
+## Supplemental Status Surface Proof
+
+- `src/state-server.test.ts` deterministically covers `GET /`,
+  `GET /api/v1/state`, `GET /api/v1/<issue_identifier>`, and
+  `POST /api/v1/refresh` without requiring a live pilot.

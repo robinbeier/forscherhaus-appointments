@@ -52,7 +52,9 @@ bash ./scripts/symphony/start_pilot.sh
 
 The service exposes optional state endpoints when enabled:
 
+- `GET /`
 - `GET /api/v1/state`
+- `GET /api/v1/<issue_identifier>`
 - `POST /api/v1/refresh`
 
 Binding precedence for the optional HTTP surface:
@@ -66,13 +68,30 @@ restarting Symphony.
 
 ## Quick Local Health Check
 
-Use this quick check to confirm the local state API is reachable and can refresh
-once on demand:
+Use this quick check to confirm the operator surface is reachable, exposes
+health and recent events, and can refresh once on demand:
 
 ```bash
-curl -fsS http://127.0.0.1:8787/api/v1/state | jq
+curl -fsS http://127.0.0.1:8787/api/v1/state \
+  | jq '{health: .health, recent_events: .recent_events[:5], counts: .counts}'
+ISSUE_IDENTIFIER=ROB-123
+curl -fsS "http://127.0.0.1:8787/api/v1/${ISSUE_IDENTIFIER}" \
+  | jq '{status, health: .health, recent_events: .recent_events[:5]}'
 curl -fsS -X POST http://127.0.0.1:8787/api/v1/refresh
 ```
+
+Also visit `http://127.0.0.1:8787/` in a browser during pilot bring-up.
+
+Expected operator signals:
+
+- `/` shows overall health, rate limits, running/retrying counts, and recent
+  events without requiring JSON inspection.
+- `/api/v1/state` returns top-level `health` and `recent_events`.
+- `/api/v1/<issue_identifier>` returns issue-local `health` and
+  `recent_events` for the selected issue.
+- The status surface remains observability-only; if it disagrees with behavior,
+  debug the underlying orchestration state instead of treating the dashboard as
+  a source of truth.
 
 ## 24h Soak Gate
 
@@ -119,16 +138,22 @@ Rollback actions:
 
 1. Capture current state:
    ```bash
-   curl -fsS http://127.0.0.1:8787/api/v1/state
+   curl -fsS http://127.0.0.1:8787/api/v1/state | jq
    ```
-2. Trigger one manual refresh:
+2. Inspect the human-readable dashboard and the relevant issue payload:
+   ```bash
+   ISSUE_IDENTIFIER=ROB-123
+   curl -fsS "http://127.0.0.1:8787/api/v1/${ISSUE_IDENTIFIER}" | jq
+   ```
+   Also inspect `http://127.0.0.1:8787/` in a browser.
+3. Trigger one manual refresh:
    ```bash
    curl -fsS -X POST http://127.0.0.1:8787/api/v1/refresh
    ```
-3. Collect latest soak report + Symphony logs.
-4. Classify incident:
+4. Collect latest soak report + Symphony logs.
+5. Classify incident:
    - tracker/API issue
    - Codex runtime issue
    - workspace/hook issue
    - orchestration/retry issue
-5. Decide: continue pilot, rollback, or pause for fix.
+6. Decide: continue pilot, rollback, or pause for fix.
