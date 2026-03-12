@@ -1648,6 +1648,7 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
     assert.deepEqual(attempts, [null]);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].attempt, 1);
+    assert.equal(snapshot.retrying[0].available_at, new Date(now + 10000).toISOString());
     assert.equal(snapshot.retrying[0].availableAtIso, new Date(now + 10000).toISOString());
 
     await orchestrator.runTick();
@@ -1662,6 +1663,7 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
     assert.deepEqual(attempts, [null, 1]);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].attempt, 2);
+    assert.equal(snapshot.retrying[0].available_at, new Date(now + 20000).toISOString());
     assert.equal(snapshot.retrying[0].availableAtIso, new Date(now + 20000).toISOString());
 
     now += 20000;
@@ -2309,9 +2311,24 @@ test('running snapshot surfaces humanized activity and context headroom', async 
 
     const snapshot = orchestrator.getSnapshot();
     assert.equal(snapshot.generated_at, '2026-03-06T09:00:42.000Z');
+    assert.equal(snapshot.last_tick_at, '2026-03-06T09:00:00.000Z');
+    assert.equal(snapshot.lastTickAtIso, '2026-03-06T09:00:00.000Z');
     assert.equal(snapshot.counts.running, 1);
     assert.equal(snapshot.counts.retrying, 0);
     assert.equal(snapshot.running.length, 1);
+    assert.equal(snapshot.running[0].issue_identifier, 'ROB-13-TELEMETRY');
+    assert.equal(snapshot.running[0].thread_id, 'thread-ctx');
+    assert.equal(snapshot.running[0].last_event, 'item/agentMessage/delta');
+    assert.equal(snapshot.running[0].last_activity, 'Codex is streaming a response.');
+    assert.equal(snapshot.running[0].runtime_seconds, 42);
+    assert.equal(snapshot.running[0].idle_seconds, 42);
+    assert.equal(snapshot.running[0].total_tokens, 193468);
+    assert.equal(snapshot.running[0].last_turn_tokens, 1440);
+    assert.equal(snapshot.running[0].context_window_tokens, 258400);
+    assert.equal(snapshot.running[0].context_headroom_tokens, 64932);
+    assert.equal(snapshot.running[0].context_utilization_percent, 74.9);
+    assert.ok(Array.isArray(snapshot.running[0].trace_tail));
+    assert.ok(snapshot.running[0].trace_tail.some((entry) => entry.eventType === 'session/started'));
     assert.equal(snapshot.running[0].issueIdentifier, 'ROB-13-TELEMETRY');
     assert.equal(snapshot.running[0].threadId, 'thread-ctx');
     assert.equal(snapshot.running[0].lastEvent, 'item/agentMessage/delta');
@@ -2323,6 +2340,10 @@ test('running snapshot surfaces humanized activity and context headroom', async 
     assert.equal(snapshot.running[0].contextWindowTokens, 258400);
     assert.equal(snapshot.running[0].contextHeadroomTokens, 64932);
     assert.equal(snapshot.running[0].contextUtilizationPercent, 74.9);
+    assert.equal(snapshot.totals.input_tokens, 121000);
+    assert.equal(snapshot.totals.output_tokens, 72468);
+    assert.equal(snapshot.totals.total_tokens, 193468);
+    assert.equal(snapshot.totals.runtime_seconds, 42);
     assert.equal(snapshot.codex_totals.input_tokens, 121000);
     assert.equal(snapshot.codex_totals.output_tokens, 72468);
     assert.equal(snapshot.codex_totals.total_tokens, 193468);
@@ -2429,6 +2450,10 @@ test('snapshot codex_totals uses the latest cumulative token update per run with
     now += 11000;
 
     const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.totals.input_tokens, 320);
+    assert.equal(snapshot.totals.output_tokens, 80);
+    assert.equal(snapshot.totals.total_tokens, 400);
+    assert.equal(snapshot.totals.runtime_seconds, 11);
     assert.equal(snapshot.codex_totals.input_tokens, 320);
     assert.equal(snapshot.codex_totals.output_tokens, 80);
     assert.equal(snapshot.codex_totals.total_tokens, 400);

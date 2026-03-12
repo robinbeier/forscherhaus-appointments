@@ -2,6 +2,7 @@
     "status": "ok",
     "snapshot": {
         "generated_at": "2026-03-06T12:00:05.000Z",
+        "last_tick_at": "2026-03-06T12:00:00.000Z",
         "lastTickAtIso": "2026-03-06T12:00:00.000Z",
         "counts": {
             "running": 0,
@@ -15,6 +16,12 @@
         },
         "running": [],
         "retrying": [],
+        "totals": {
+            "runtime_seconds": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+        },
         "codex_totals": {
             "input_tokens": 0,
             "output_tokens": 0,
