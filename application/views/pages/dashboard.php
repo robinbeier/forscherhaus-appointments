@@ -136,12 +136,13 @@
                                     <th><?= lang('booked') ?></th>
                                     <th><?= lang('open') ?></th>
                                     <th><?= lang('fill_rate') ?></th>
+                                    <th><?= lang('dashboard_after_15_heading') ?></th>
                                     <th><?= lang('status') ?></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr id="dashboard-table-empty" class="text-muted">
-                                    <td colspan="6" class="text-center">
+                                    <td colspan="7" class="text-center">
                                         <?= lang('no_records_found') ?>
                                     </td>
                                 </tr>
