@@ -22,9 +22,12 @@ Current scoring rule:
 - `9.5/10` is achieved.
 - The previously must-close gaps from `ROB-122`, `ROB-124`, and `ROB-125` are
   now closed with green evidence.
-- The remaining status-surface work stays valuable, but does not block
-  `9.5/10`, because upstream `3.1.7 Status Surface` is explicitly optional and
-  Point 2 only requires operator-visible observability with structured logs as a
+- The former status-surface follow-ups from `ROB-127` to `ROB-131` are now
+  landed as optional operator-UX improvements on top of the already-green
+  core-conformance baseline.
+- The remaining gaps are now narrower optional polish items, not score blockers,
+  because upstream `3.1.7 Status Surface` is explicitly optional and Point 2
+  only requires operator-visible observability with structured logs as a
   minimum.
 
 ## Evidence Refresh
@@ -36,6 +39,13 @@ Evidence refreshed on 2026-03-12:
 - `bash ./scripts/ci/run_symphony_pilot_checks.sh`
 - `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
 - `SYMPHONY_LINEAR_API_KEY=fake SYMPHONY_LINEAR_PROJECT_SLUG=fake SYMPHONY_CODEX_COMMAND='codex app-server' npm --prefix tools/symphony run dev -- --check --workflow "$(git rev-parse --show-toplevel)/WORKFLOW.md"`
+
+Status-surface closeout reflected in this refresh:
+
+- `ROB-129` added the human-readable dashboard at `/`.
+- `ROB-130` added snapshot and issue-level health indicators plus `recent_events`.
+- `ROB-131` folds `src/state-server.test.ts` into the deterministic conformance
+  matrix and updates operator/pilot docs to match the delivered surface.
 
 ## Historical Findings That Are Now Stale
 
@@ -58,15 +68,20 @@ The following 2026-03-07 conclusions should no longer be treated as current:
 | 2 | Snapshot aggregate contract | Closed | Snapshot now exposes `generated_at`, `counts`, and token/runtime `codex_totals` with double-counting protection via `ROB-124`. | None for score closeout. |
 | 3 | Operational readiness proof | Closed | `run_symphony_pilot_checks.sh` is now a green, deterministic Symphony-readiness baseline, with `--with-full-gate` preserving the broader repo gate via `ROB-125`. | None for score closeout. |
 
-## Can-Close Later Without Blocking 9.5/10
+## Optional Gaps Still Open After Status-Surface Closeout
 
 | Gap | Why it is not a 9.5 blocker today | Suggested follow-up shape |
 | --- | --- | --- |
-| Human-readable status surface at `/` | Upstream `3.1.7 Status Surface` is optional; structured logs plus the JSON state API already satisfy Point 2's minimum observability intent. | Deliver through `ROB-127` to `ROB-131` as operator-UX improvements. |
-| Richer status-surface debugging depth | Per-issue JSON debug data already exists; richer health/event presentation is useful but not required for core conformance. | Add health indicators, recent-event views, and `/` dashboard polish later. |
 | Multi-sink logging / sink-failure fallback | Structured operator-visible logging already exists; we are not yet running configurable multi-sink logging. | Add only if operator needs clearly outweigh the extra complexity. |
-| Richer humanized event presentation | Helpful for operations, but not required for correctness if dashboard/API remain clear. | Fold into later UX polish after core closeout. |
 | Broader template filter support beyond current strict roots | Worth documenting, but not currently the highest-value operator or conformance gap in this repo. | Revisit only if upstream skills or prompts require it. |
+
+## Optional Follow-Ups Closed By ROB-127 To ROB-131
+
+| Optional follow-up | Current status | Evidence |
+| --- | --- | --- |
+| Human-readable status surface at `/` | Closed | `tools/symphony/src/state-dashboard.ts`, `tools/symphony/src/state-server.test.ts`, `docs/symphony/STAGING_PILOT_RUNBOOK.md` |
+| Richer status-surface debugging depth | Closed | `tools/symphony/src/orchestrator.ts`, `tools/symphony/src/orchestrator.test.ts`, `tools/symphony/src/state-server.test.ts` |
+| Richer humanized event presentation | Closed | `tools/symphony/src/state-dashboard.ts`, `tools/symphony/README.md` |
 
 ## Acceptance Rule For The Re-Score
 
@@ -90,6 +105,9 @@ Completed closeout sequence:
 4. `ROB-125` closed the bootability-vs-readiness gap.
 5. `ROB-126` publishes the refreshed audit and final score.
 
-Remaining optional follow-up sequence:
+Optional status-surface follow-up sequence:
 
-1. `ROB-127` to `ROB-131` deliver the human-readable status surface in small PR slices.
+1. `ROB-127` normalized the snapshot contract for the status surface.
+2. `ROB-129` landed the human-readable dashboard at `/`.
+3. `ROB-130` surfaced health indicators and `recent_events`.
+4. `ROB-131` closed docs, conformance and pilot verification for the status surface.

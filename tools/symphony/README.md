@@ -33,7 +33,7 @@ npm run start
 # Tests
 npm test
 
-# Core conformance matrix (SPEC 17.1 - 17.5)
+# Core conformance matrix (SPEC 17.1 - 17.5 + deterministic status-surface proof)
 npm run test:conformance
 ```
 
@@ -66,6 +66,33 @@ python3 ./scripts/symphony/run_soak_gate.py \
   --state-url http://127.0.0.1:8787/api/v1/state \
   --duration-seconds 86400 --poll-seconds 60
 ```
+
+## Operator Status Surface Quick Check
+
+When the optional HTTP surface is enabled, use the dashboard and JSON endpoints
+as a fast operator triage path:
+
+```bash
+# Visit http://127.0.0.1:8787/ in a browser for the human-readable dashboard
+
+# Snapshot-level health + newest events
+curl -fsS http://127.0.0.1:8787/api/v1/state \
+  | jq '{health: .health, recent_events: .recent_events[:5], counts: .counts}'
+
+# Per-issue debug payload for the currently interesting issue
+ISSUE_IDENTIFIER=ROB-123
+curl -fsS "http://127.0.0.1:8787/api/v1/${ISSUE_IDENTIFIER}" \
+  | jq '{status, health: .health, recent_events: .recent_events[:5], trace: .trace.recent}'
+```
+
+Interpretation:
+
+- `health.overall=ok|warning|error` summarizes the current operator-visible
+  state without affecting orchestration correctness.
+- `recent_events` is a reverse-chronological ring buffer derived from existing
+  trace entries, useful for incident triage and pilot soak monitoring.
+- the HTML dashboard at `/` is intentionally read-only and renders only from
+  in-memory orchestrator state.
 
 Wichtige Abgrenzung:
 
