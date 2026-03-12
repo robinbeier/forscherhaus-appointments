@@ -33,7 +33,7 @@ Evidence refreshed on 2026-03-11 / 2026-03-12:
 
 - `npm --prefix tools/symphony run build`
 - `npm --prefix tools/symphony run test:conformance`
-- `SYMPHONY_LINEAR_API_KEY=fake SYMPHONY_LINEAR_PROJECT_SLUG=fake SYMPHONY_CODEX_COMMAND='codex app-server' npm --prefix tools/symphony run dev -- --check --workflow \"$(git rev-parse --show-toplevel)/WORKFLOW.md\"`
+- `SYMPHONY_LINEAR_API_KEY=fake SYMPHONY_LINEAR_PROJECT_SLUG=fake SYMPHONY_CODEX_COMMAND='codex app-server' npm --prefix tools/symphony run dev -- --check --workflow "$(git rev-parse --show-toplevel)/WORKFLOW.md"`
 - Deterministic fake tracker / fake codex orchestrator run (local ad-hoc check)
 - `bash ./scripts/ci/run_symphony_pilot_checks.sh` currently red in the repo-wide
   PHPUnit path, which affects operational readiness but not the `tools/symphony`
