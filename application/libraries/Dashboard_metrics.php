@@ -319,6 +319,21 @@ class Dashboard_metrics
         return [$fallback, true];
     }
 
+    protected function resolveRequiredSlots(int $target, ?int $class_size_default): int
+    {
+        if ($class_size_default === null) {
+            return max($target, 0);
+        }
+
+        $class_size = max($class_size_default, 0);
+
+        if ($class_size < 25) {
+            return min($class_size + 2, 25);
+        }
+
+        return $class_size;
+    }
+
     protected function resolveBookedMetric(array $summary, int $appointment_count, bool $is_fallback): int
     {
         if ($is_fallback) {
@@ -501,7 +516,7 @@ class Dashboard_metrics
         $open = $target > 0 ? max($target - $booked, 0) : 0;
         $fill_rate = $this->computeFillRate($booked, $target);
         $needs_attention = $target > 0 && $fill_rate < $threshold;
-        $slots_required = max($target, 0);
+        $slots_required = $this->resolveRequiredSlots($target, $class_size_default);
         $slots_planned = $this->resolvePlannedSlots($after_15_metrics);
         $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
         $has_plan = (bool) ($summary['has_plan'] ?? false);
