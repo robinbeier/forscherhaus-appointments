@@ -3,7 +3,7 @@
 namespace Tests\Unit\Libraries;
 
 use Appointments_model;
-use Availability;
+use Booking_slot_analytics;
 use CI_DB_query_builder;
 use CI_DB_result;
 use Dashboard_metrics;
@@ -16,7 +16,7 @@ use Tests\TestCase;
 require_once APPPATH . 'core/EA_Model.php';
 require_once APPPATH . 'models/Providers_model.php';
 require_once APPPATH . 'models/Services_model.php';
-require_once APPPATH . 'libraries/Availability.php';
+require_once APPPATH . 'libraries/Booking_slot_analytics.php';
 require_once APPPATH . 'libraries/Provider_utilization.php';
 require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
@@ -85,9 +85,9 @@ class DashboardMetricsTest extends TestCase
             ->with(['id' => 1], 1)
             ->willReturn([$service]);
 
-        /** @var Availability&MockObject $availability */
-        $availability = $this->createMock(Availability::class);
-        $availability
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
+        $bookingSlotAnalytics
             ->expects($this->exactly(58))
             ->method('get_offered_hours_for_analysis')
             ->willReturn(['09:00', '15:00']);
@@ -97,7 +97,7 @@ class DashboardMetricsTest extends TestCase
             $appointmentsModel,
             $providerUtilization,
             $servicesModel,
-            $availability,
+            $bookingSlotAnalytics,
         );
 
         $metrics = $library->collect(new \DateTimeImmutable('2024-02-01'), new \DateTimeImmutable('2024-02-29'), [
@@ -167,14 +167,14 @@ class DashboardMetricsTest extends TestCase
             ->with(['id' => 5], 1)
             ->willReturn([$selectedService]);
 
-        /** @var Availability&MockObject $availability */
-        $availability = $this->createMock(Availability::class);
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $expectedCalls = [
             ['2024-04-15', $selectedService, $providers[0]],
             ['2024-04-16', $selectedService, $providers[0]],
         ];
         $invocation = 0;
-        $availability
+        $bookingSlotAnalytics
             ->expects($this->exactly(2))
             ->method('get_offered_hours_for_analysis')
             ->willReturnCallback(function (string $date, array $service, array $provider) use (
@@ -196,7 +196,7 @@ class DashboardMetricsTest extends TestCase
             $appointmentsModel,
             $providerUtilization,
             $servicesModel,
-            $availability,
+            $bookingSlotAnalytics,
         );
 
         $metrics = $library->collect(new \DateTimeImmutable('2024-04-15'), new \DateTimeImmutable('2024-04-16'), [
@@ -253,16 +253,16 @@ class DashboardMetricsTest extends TestCase
         $servicesModel = $this->createMock(Services_model::class);
         $servicesModel->expects($this->never())->method('get');
 
-        /** @var Availability&MockObject $availability */
-        $availability = $this->createMock(Availability::class);
-        $availability->expects($this->never())->method('get_offered_hours_for_analysis');
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
+        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_for_analysis');
 
         $library = new Dashboard_metrics(
             $providersModel,
             $appointmentsModel,
             $providerUtilization,
             $servicesModel,
-            $availability,
+            $bookingSlotAnalytics,
         );
 
         $metrics = $library->collect(new \DateTimeImmutable('2024-04-15'), new \DateTimeImmutable('2024-04-16'), [
@@ -318,16 +318,16 @@ class DashboardMetricsTest extends TestCase
         $servicesModel = $this->createMock(Services_model::class);
         $servicesModel->expects($this->never())->method('get');
 
-        /** @var Availability&MockObject $availability */
-        $availability = $this->createMock(Availability::class);
-        $availability->expects($this->never())->method('get_offered_hours_for_analysis');
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
+        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_for_analysis');
 
         $library = new Dashboard_metrics(
             $providersModel,
             $appointmentsModel,
             $providerUtilization,
             $servicesModel,
-            $availability,
+            $bookingSlotAnalytics,
         );
 
         $metrics = $library->collect(new \DateTimeImmutable('2024-04-15'), new \DateTimeImmutable('2024-04-16'), [
@@ -388,9 +388,9 @@ class DashboardMetricsTest extends TestCase
             ->with(['id' => 1], 1)
             ->willReturn([$service]);
 
-        /** @var Availability&MockObject $availability */
-        $availability = $this->createMock(Availability::class);
-        $availability
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
+        $bookingSlotAnalytics
             ->expects($this->exactly(2))
             ->method('get_offered_hours_for_analysis')
             ->willReturnOnConsecutiveCalls([], []);
@@ -400,7 +400,7 @@ class DashboardMetricsTest extends TestCase
             $appointmentsModel,
             $providerUtilization,
             $servicesModel,
-            $availability,
+            $bookingSlotAnalytics,
         );
 
         $metrics = $library->collect(new \DateTimeImmutable('2024-04-15'), new \DateTimeImmutable('2024-04-16'), [

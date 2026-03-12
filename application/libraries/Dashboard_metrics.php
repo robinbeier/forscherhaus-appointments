@@ -37,7 +37,7 @@ class Dashboard_metrics
 
     protected Services_model $services_model;
 
-    protected Availability $availability;
+    protected Booking_slot_analytics $booking_slot_analytics;
 
     /**
      * @var array<int, array|null>
@@ -52,7 +52,7 @@ class Dashboard_metrics
         ?Appointments_model $appointments_model = null,
         ?Provider_utilization $provider_utilization = null,
         ?Services_model $services_model = null,
-        ?Availability $availability = null,
+        ?Booking_slot_analytics $booking_slot_analytics = null,
     ) {
         $this->CI = &get_instance();
 
@@ -84,11 +84,11 @@ class Dashboard_metrics
             $this->services_model = $this->CI->services_model;
         }
 
-        if ($availability) {
-            $this->availability = $availability;
+        if ($booking_slot_analytics) {
+            $this->booking_slot_analytics = $booking_slot_analytics;
         } else {
-            $this->CI->load->library('availability');
-            $this->availability = $this->CI->availability;
+            $this->CI->load->library('booking_slot_analytics');
+            $this->booking_slot_analytics = $this->CI->booking_slot_analytics;
         }
     }
 
@@ -358,7 +358,7 @@ class Dashboard_metrics
         $day = $start;
 
         while ($day <= $end) {
-            $offered_hours = $this->availability->get_offered_hours_for_analysis(
+            $offered_hours = $this->booking_slot_analytics->get_offered_hours_for_analysis(
                 $day->format('Y-m-d'),
                 $service,
                 $provider,

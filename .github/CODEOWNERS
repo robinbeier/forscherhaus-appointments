@@ -48,6 +48,7 @@
 /application/libraries/Availability.php @robinbeier
 /application/libraries/Backoffice_request_dto_factory.php @robinbeier
 /application/libraries/Booking_request_dto_factory.php @robinbeier
+/application/libraries/Booking_slot_analytics.php @robinbeier
 /application/libraries/Caldav_sync.php @robinbeier
 /application/libraries/Calendar_request_dto_factory.php @robinbeier
 /application/libraries/Dashboard_heatmap.php @robinbeier
