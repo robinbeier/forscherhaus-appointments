@@ -20,6 +20,12 @@
  */
 class Dashboard_export extends EA_Controller
 {
+    protected const STATUS_REASON_BOOKING_GOAL_MISSED = 'booking_goal_missed';
+
+    protected const STATUS_REASON_AFTER_15_GOAL_MISSED = 'after_15_goal_missed';
+
+    protected const STATUS_REASON_CAPACITY_GAP = 'capacity_gap';
+
     protected const PRINCIPAL_PDF_FIRST_PAGE_TEACHERS = 5;
 
     protected const PRINCIPAL_PDF_CONTINUATION_PAGE_TEACHERS = 13;
@@ -533,12 +539,12 @@ class Dashboard_export extends EA_Controller
 
             if ($is_under_target) {
                 $status_variant = 'warn';
-                $status_label = 'Unter Ziel';
+                $status_label = lang('dashboard_booking_goal_missed') ?: 'Buchungsziel verfehlt';
             }
 
             if ($is_zero_target) {
                 $status_variant = 'muted';
-                $status_label = 'Kein Ziel gepflegt';
+                $status_label = lang('dashboard_no_target') ?: 'Kein Ziel';
             }
 
             return [
@@ -583,7 +589,7 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
-     * Sort principal metrics by urgency (missing-to-threshold first).
+     * Sort principal metrics by action priority for the principal report.
      *
      * @param array $metrics
      *
@@ -593,14 +599,27 @@ class Dashboard_export extends EA_Controller
     {
         $sorted_metrics = array_values($metrics);
 
-        usort($sorted_metrics, static function (array $left, array $right): int {
+        usort($sorted_metrics, function (array $left, array $right): int {
+            $priority_sort =
+                $this->resolvePrincipalActionPriority($left) <=> $this->resolvePrincipalActionPriority($right);
+
+            if ($priority_sort !== 0) {
+                return $priority_sort;
+            }
+
             $gap_sort = ((int) ($right['gap_to_threshold'] ?? 0)) <=> ((int) ($left['gap_to_threshold'] ?? 0));
 
             if ($gap_sort !== 0) {
                 return $gap_sort;
             }
 
-            return ((float) ($left['fill_ratio'] ?? 0)) <=> ((float) ($right['fill_ratio'] ?? 0));
+            $after_15_sort = $this->resolveAfter15SortValue($left) <=> $this->resolveAfter15SortValue($right);
+
+            if ($after_15_sort !== 0) {
+                return $after_15_sort;
+            }
+
+            return strcasecmp((string) ($left['provider_name'] ?? ''), (string) ($right['provider_name'] ?? ''));
         });
 
         return $sorted_metrics;
@@ -646,34 +665,64 @@ class Dashboard_export extends EA_Controller
     {
         $teachers_total = count($metrics);
         $below_count = 0;
+        $after_15_goal_missed_count = 0;
+        $capacity_gap_count = 0;
         $gap_total = 0;
         $top_attention = [];
+        $attention_count = 0;
+        $in_target_count = 0;
 
         foreach ($metrics as $metric) {
             $gap = max(0, (int) ($metric['gap_to_threshold'] ?? 0));
+            $status_reasons = $this->normalizeStatusReasons($metric['status_reasons'] ?? []);
+            $booking_goal_missed = in_array(self::STATUS_REASON_BOOKING_GOAL_MISSED, $status_reasons, true);
+            $after_15_goal_missed = in_array(self::STATUS_REASON_AFTER_15_GOAL_MISSED, $status_reasons, true);
+            $capacity_gap = in_array(self::STATUS_REASON_CAPACITY_GAP, $status_reasons, true);
+            $is_booking_goal_evaluable =
+                !empty($metric['has_plan']) &&
+                !empty($metric['has_explicit_target']) &&
+                empty($metric['is_zero_target']);
 
-            if ($gap <= 0) {
-                continue;
+            if ($booking_goal_missed) {
+                $below_count++;
+                $gap_total += $gap;
             }
 
-            $below_count++;
-            $gap_total += $gap;
+            if ($after_15_goal_missed) {
+                $after_15_goal_missed_count++;
+            }
 
-            if (count($top_attention) < 5) {
+            if ($capacity_gap) {
+                $capacity_gap_count++;
+            }
+
+            $has_attention = $this->hasPrincipalAttention($metric);
+
+            if ($has_attention) {
+                $attention_count++;
+            }
+
+            if ($is_booking_goal_evaluable && !$booking_goal_missed) {
+                $in_target_count++;
+            }
+
+            if ($has_attention && count($top_attention) < 5) {
                 $top_attention[] = $metric;
             }
         }
 
-        $in_target_count = max($teachers_total - $below_count, 0);
-
         return [
             'teachers_total' => $teachers_total,
             'below_count' => $below_count,
+            'booking_goal_missed_count' => $below_count,
+            'after_15_goal_missed_count' => $after_15_goal_missed_count,
+            'capacity_gap_count' => $capacity_gap_count,
+            'attention_count' => $attention_count,
             'in_target_count' => $in_target_count,
             'gap_total' => $gap_total,
             'gap_total_formatted' => $this->formatNumber($gap_total),
             'in_target_label' => sprintf(
-                '%s / %s Lehrkräfte über Ziel',
+                '%s / %s Lehrkräfte im Buchungsziel',
                 $this->formatNumber($in_target_count),
                 $this->formatNumber($teachers_total),
             ),
@@ -750,6 +799,75 @@ class Dashboard_export extends EA_Controller
         }
 
         return 'Kapazitätslücke';
+    }
+
+    /**
+     * Resolve the principal export action-priority bucket for a metric.
+     *
+     * Lower values are shown first.
+     *
+     * @param array $metric
+     *
+     * @return int
+     */
+    protected function resolvePrincipalActionPriority(array $metric): int
+    {
+        $status_reasons = $this->normalizeStatusReasons($metric['status_reasons'] ?? []);
+        $booking_goal_missed = in_array(self::STATUS_REASON_BOOKING_GOAL_MISSED, $status_reasons, true);
+        $after_15_goal_missed = in_array(self::STATUS_REASON_AFTER_15_GOAL_MISSED, $status_reasons, true);
+        $capacity_gap = in_array(self::STATUS_REASON_CAPACITY_GAP, $status_reasons, true);
+
+        if ($booking_goal_missed && $after_15_goal_missed) {
+            return 0;
+        }
+
+        if ($booking_goal_missed) {
+            return 1;
+        }
+
+        if ($after_15_goal_missed) {
+            return 2;
+        }
+
+        if ($capacity_gap) {
+            return 3;
+        }
+
+        return 4;
+    }
+
+    /**
+     * Determine whether the metric contributes to the principal attention list.
+     *
+     * @param array $metric
+     *
+     * @return bool
+     */
+    protected function hasPrincipalAttention(array $metric): bool
+    {
+        return !empty($this->normalizeStatusReasons($metric['status_reasons'] ?? []));
+    }
+
+    /**
+     * Resolve the after-15 metric for sorting; non-evaluable rows go last.
+     *
+     * @param array $metric
+     *
+     * @return float
+     */
+    protected function resolveAfter15SortValue(array $metric): float
+    {
+        if (empty($metric['after_15_evaluable']) || !array_key_exists('after_15_percent', $metric)) {
+            return INF;
+        }
+
+        $after_15_percent = $metric['after_15_percent'];
+
+        if ($after_15_percent === null) {
+            return INF;
+        }
+
+        return (float) $after_15_percent;
     }
 
     /**

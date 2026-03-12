@@ -60,6 +60,7 @@ body{margin:0;color:var(--ink);font-family:"Inter",system-ui,-apple-system,"Sego
 .callout p{margin:0;font-size:9.5pt;}
 .callout ul{margin:6pt 0 0 18pt;padding:0;font-size:9.3pt;list-style:disc;}
 .callout li{margin:0 0 4pt 0;padding-left:2pt;}
+.callout__section-title{margin-top:6pt;font-size:9.1pt;font-weight:600;color:var(--ink);}
 
 /* Pill */
 .pill{display:inline-flex;align-items:center;gap:4pt;padding:1pt 8pt;border-radius:999px;font-size:8.8pt;font-weight:600;border:1px solid transparent;}
@@ -77,13 +78,13 @@ tbody tr:last-child td{border-bottom:none;}
 .col-size{width:10%;}
 .col-booked{width:12%;}
 .col-fill{width:14%;}
+.col-after-15{width:12%;white-space:nowrap;}
 .col-gap{width:10%;white-space:nowrap;}
-.col-status{width:23%; text-align:center;}
+.col-status{width:24%;}
 .nowrap{white-space:nowrap;}
 .provider{margin:0;font-weight:600;}
 .provider__meta{margin:2pt 0 0 0;color:var(--ink-muted);font-size:8.8pt;display:flex;gap:6pt;align-items:center;flex-wrap:wrap;}
 .provider__slots{color:inherit;}
-.provider__badge{font-size:7.8pt;padding:1pt 6pt;}
 
 /* Balken */
 .bar{margin-top:6pt;height:8px;background:#F3F4F6;border-radius:999px;overflow:hidden;}
@@ -92,8 +93,10 @@ tbody tr:last-child td{border-bottom:none;}
 /* Badges */
 .badge{display:inline-flex;align-items:center;gap:6pt;padding:2pt 8pt;border-radius:9999px;font-size:9pt;font-weight:600;border:1px solid var(--border);}
 .badge--warn{color:var(--warn);background:var(--warn-bg);border-color:rgba(180,83,9,.4);}
+.badge--risk{color:var(--risk);background:var(--risk-bg);border-color:rgba(185,28,28,.3);}
 .badge--neutral{color:var(--ink);background:#F3F4F6;border-color:var(--border);}
-.col-status .badge{white-space:nowrap;}
+.status-list{display:flex;flex-direction:column;gap:4pt;align-items:flex-start;}
+.status-list .badge{white-space:normal;justify-content:flex-start;text-align:left;}
 
 .footer{display:flex;justify-content:space-between;align-items:center;font-size:8.6pt;color:var(--ink-muted);padding:6pt 8pt 0;border-top:1px solid rgba(17,24,39,.12);}
 
@@ -143,6 +146,93 @@ $formatSlotsSummary = static function (array $metric) use ($formatNumber): strin
     }
 
     return str_replace(['%planned%', '%required%'], [$planned, $required], $template);
+};
+
+$formatAfter15Percent = static function (array $metric): string {
+    if (empty($metric['after_15_evaluable']) || !array_key_exists('after_15_percent', $metric)) {
+        return '—';
+    }
+
+    $after15Percent = $metric['after_15_percent'];
+
+    if ($after15Percent === null) {
+        return '—';
+    }
+
+    return number_format((float) $after15Percent, 1, ',', '.') . ' %';
+};
+
+$hasStatusReason = static function (array $metric, string $statusReason): bool {
+    $statusReasons = $metric['status_reasons'] ?? null;
+
+    if (!is_array($statusReasons)) {
+        return false;
+    }
+
+    return in_array($statusReason, $statusReasons, true);
+};
+
+$resolveStatusBadges = static function (array $metric): array {
+    $statusReasons =
+        isset($metric['status_reasons']) && is_array($metric['status_reasons'])
+            ? array_values(
+                array_filter(
+                    $metric['status_reasons'],
+                    static fn($reason): bool => is_string($reason) && $reason !== '',
+                ),
+            )
+            : [];
+
+    $badges = [];
+
+    foreach ($statusReasons as $statusReason) {
+        if ($statusReason === 'booking_goal_missed') {
+            $badges[] = [
+                'class' => 'badge--risk',
+                'label' => lang('dashboard_booking_goal_missed') ?: 'Buchungsziel verfehlt',
+            ];
+            continue;
+        }
+
+        if ($statusReason === 'after_15_goal_missed') {
+            $badges[] = [
+                'class' => 'badge--warn',
+                'label' => lang('dashboard_after_15_goal_missed') ?: '15-Uhr-Vorgabe verfehlt',
+            ];
+            continue;
+        }
+
+        if ($statusReason === 'capacity_gap') {
+            $badges[] = [
+                'class' => 'badge--warn',
+                'label' => lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke',
+            ];
+        }
+    }
+
+    if (!empty($badges)) {
+        return $badges;
+    }
+
+    if (empty($metric['has_plan'])) {
+        return [
+            [
+                'class' => 'badge--neutral',
+                'label' => lang('no_plan_in_period') ?: 'Kein Arbeitsplan im Zeitraum',
+            ],
+        ];
+    }
+
+    if (empty($metric['has_explicit_target']) || !empty($metric['is_zero_target'])) {
+        return [
+            [
+                'class' => 'badge--neutral',
+                'label' => lang('dashboard_no_target') ?: 'Kein Ziel',
+            ],
+        ];
+    }
+
+    return [];
 };
 
 $normalizeMetric = static function (array $metric) use ($thresholdRatio, $formatNumber): array {
@@ -276,7 +366,7 @@ $inTargetLabel =
         number_format($inTargetCount, 0, ',', '.') .
             ' / ' .
             number_format($teachersTotal, 0, ',', '.') .
-            ' Lehrkräfte über Ziel');
+            ' Lehrkräfte im Buchungsziel');
 
 if (isset($principalOverview['top_attention']) && is_array($principalOverview['top_attention'])) {
     $topAttention = array_values(
@@ -285,13 +375,30 @@ if (isset($principalOverview['top_attention']) && is_array($principalOverview['t
 } else {
     $needsAttentionMetrics = array_filter(
         $preparedMetrics,
-        static fn(array $metric): bool => (int) ($metric['gap_to_threshold'] ?? 0) > 0,
+        static fn(array $metric): bool => !empty($metric['status_reasons']),
     );
     $topAttention = array_slice($needsAttentionMetrics, 0, 5);
 }
 
 $capacityGapLabel =
     (string) ($principalOverview['capacity_gap_label'] ?? (lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke'));
+$bookingGoalMissedCount = isset($principalOverview['booking_goal_missed_count'])
+    ? max(0, (int) $principalOverview['booking_goal_missed_count'])
+    : $belowCount;
+$after15GoalMissedCount = isset($principalOverview['after_15_goal_missed_count'])
+    ? max(0, (int) $principalOverview['after_15_goal_missed_count'])
+    : count(
+        array_filter(
+            $preparedMetrics,
+            static fn(array $metric): bool => $hasStatusReason($metric, 'after_15_goal_missed'),
+        ),
+    );
+$capacityGapCount = isset($principalOverview['capacity_gap_count'])
+    ? max(0, (int) $principalOverview['capacity_gap_count'])
+    : count(array_filter($preparedMetrics, static fn(array $metric): bool => !empty($metric['has_capacity_gap'])));
+$attentionCount = isset($principalOverview['attention_count'])
+    ? max(0, (int) $principalOverview['attention_count'])
+    : count(array_filter($preparedMetrics, static fn(array $metric): bool => !empty($metric['status_reasons'])));
 ?>
 <?php foreach ($preparedPrincipalPages as $pageIndex => $pageMetrics):
 
@@ -340,7 +447,7 @@ $capacityGapLabel =
             </article>
 
             <article class="card" aria-label="Lehrkräfte im Ziel">
-              <h3>Lehrkräfte ≥ <?= html_escape($thresholdPercent) ?></h3>
+              <h3><?= html_escape(lang('dashboard_principal_in_booking_goal') ?: 'Lehrkräfte im Buchungsziel') ?></h3>
               <div class="donut">
                 <?php if ($inTargetDonutImage): ?>
                   <div class="donut__figure">
@@ -363,7 +470,9 @@ $capacityGapLabel =
             </article>
 
             <article class="card" aria-label="Fehlende Eltern bis Schwelle">
-              <h3>Fehlend bis <?= html_escape($thresholdPercent) ?></h3>
+              <h3><?= html_escape(
+                  lang('dashboard_principal_missing_until_booking_goal') ?: 'Fehlend bis Buchungsziel',
+              ) ?></h3>
               <div class="kpi">
                 <span>Fehlende Eltern:</span>
                 <strong><?= html_escape($gapTotalFormatted) ?></strong>
@@ -377,26 +486,46 @@ $capacityGapLabel =
           <?php if ($teachersTotal === 0): ?>
             <p>Keine Daten für die ausgewählten Filter vorhanden.</p>
           <?php else: ?>
-            <p><?= html_escape(number_format($belowCount, 0, ',', '.')) ?> von <?= html_escape(
+            <p><?= html_escape(number_format($attentionCount, 0, ',', '.')) ?> von <?= html_escape(
      number_format($teachersTotal, 0, ',', '.'),
- ) ?> Lehrkräften liegen unter <?= html_escape($thresholdPercent) ?>.</p>
+ ) ?> Lehrkräften brauchen aktuell Nachsteuerung.</p>
+            <ul>
+              <li><?= html_escape(number_format($bookingGoalMissedCount, 0, ',', '.')) ?> Lehrkräfte: <?= html_escape(
+     lang('dashboard_booking_goal_missed') ?: 'Buchungsziel verfehlt',
+ ) ?></li>
+              <li><?= html_escape(number_format($after15GoalMissedCount, 0, ',', '.')) ?> Lehrkräfte: <?= html_escape(
+     lang('dashboard_after_15_goal_missed') ?: '15-Uhr-Vorgabe verfehlt',
+ ) ?></li>
+              <li><?= html_escape(number_format($capacityGapCount, 0, ',', '.')) ?> Lehrkräfte: <?= html_escape(
+     $capacityGapLabel,
+ ) ?></li>
+            </ul>
           <?php endif; ?>
           <?php if ($topAttention): ?>
+            <div class="callout__section-title">Priorisierte Fälle</div>
             <ul>
               <?php foreach ($topAttention as $metric): ?>
                 <li>
                   <?= html_escape($metric['provider_name'] ?? '') ?>
-                  – <strong><?= html_escape($metric['gap_to_threshold_formatted'] ?? '0') ?></strong> offen
-                  <?php if (!empty($metric['has_capacity_gap'])): ?>
-                    , <?= html_escape($capacityGapLabel) ?>
+                  <?php if ($hasStatusReason($metric, 'booking_goal_missed')): ?>
+                    – <strong><?= html_escape($metric['gap_to_threshold_formatted'] ?? '0') ?></strong> bis Buchungsziel
+                  <?php endif; ?>
+                  <?php if ($hasStatusReason($metric, 'after_15_goal_missed')): ?>
+                    <?php if ($hasStatusReason($metric, 'booking_goal_missed')): ?>,<?php else: ?>–<?php endif; ?>
+                    <?= html_escape($formatAfter15Percent($metric)) ?> nach 15:00
+                  <?php endif; ?>
+                  <?php if ($hasStatusReason($metric, 'capacity_gap')): ?>
+                    <?php if (
+                        $hasStatusReason($metric, 'booking_goal_missed') ||
+                        $hasStatusReason($metric, 'after_15_goal_missed')
+                    ): ?>,<?php else: ?>–<?php endif; ?>
+                    <?= html_escape($capacityGapLabel) ?>
                   <?php endif; ?>
                 </li>
               <?php endforeach; ?>
             </ul>
-          <?php elseif ($teachersTotal > 0): ?>
-            <p>Alle Klassenleitungen haben mit mehr als <?= html_escape(
-                $thresholdPercent,
-            ) ?> ihrer Eltern ein Termin gemacht.</p>
+          <?php elseif ($teachersTotal > 0 && $inTargetCount === $teachersTotal): ?>
+            <p>Alle Klassenleitungen liegen aktuell im Buchungsziel.</p>
           <?php endif; ?>
         </aside>
       </section>
@@ -411,7 +540,12 @@ $capacityGapLabel =
               <th class="col-right col-size">Klassengröße</th>
               <th class="col-right col-booked">Gebucht</th>
               <th class="col-fill">Auslastung</th>
-              <th class="col-right col-gap">bis <?= $escapeNoBreak($thresholdPercent) ?></th>
+              <th class="col-right col-after-15"><?= html_escape(
+                  lang('dashboard_principal_after_15_heading') ?: 'Nach 15:00',
+              ) ?></th>
+              <th class="col-right col-gap"><?= html_escape(
+                  lang('dashboard_principal_until_booking_goal') ?: 'bis Buchungsziel',
+              ) ?></th>
               <th class="col-status">Status</th>
             </tr>
           </thead>
@@ -419,19 +553,14 @@ $capacityGapLabel =
             <?php foreach ($pageMetrics as $metric):
 
                 $fillPercent = (int) max(0, min(100, (int) ($metric['fill_rate_percent_value'] ?? 0)));
-                $isUnderThreshold = (int) ($metric['gap_to_threshold'] ?? 0) > 0;
-                $badgeClass = $isUnderThreshold ? 'badge--warn' : 'badge--neutral';
                 $slotSummary = $formatSlotsSummary($metric);
-                $hasCapacityGap = !empty($metric['has_capacity_gap']);
+                $statusBadges = $resolveStatusBadges($metric);
                 ?>
             <tr>
               <td>
                 <p class="provider"><?= html_escape($metric['provider_name'] ?? '') ?></p>
                 <div class="provider__meta">
                   <span class="provider__slots"><?= html_escape($slotSummary) ?></span>
-                  <?php if ($hasCapacityGap): ?>
-                    <span class="pill pill--warn provider__badge"><?= html_escape($capacityGapLabel) ?></span>
-                  <?php endif; ?>
                 </div>
               </td>
               <td class="col-right col-size">
@@ -446,6 +575,7 @@ $capacityGapLabel =
                 <span><?= html_escape($metric['fill_rate_percent'] ?? $fillPercent . ' %') ?></span>
                 <div class="bar"><div class="bar__fill" style="width: <?= $fillPercent ?>%;"></div></div>
               </td>
+              <td class="col-right nowrap col-after-15"><?= $escapeNoBreak($formatAfter15Percent($metric)) ?></td>
               <td class="col-right nowrap col-gap">
                 <?= (int) ($metric['gap_to_threshold'] ?? 0) > 0
                     ? $escapeNoBreak(
@@ -453,9 +583,19 @@ $capacityGapLabel =
                     )
                     : '&mdash;' ?>
               </td>
-              <td class="col-status"><span class="badge <?= $badgeClass ?>"><?= html_escape(
-    $metric['status_label'] ?? '',
-) ?></span></td>
+              <td class="col-status">
+                <?php if (!empty($statusBadges)): ?>
+                  <div class="status-list">
+                    <?php foreach ($statusBadges as $statusBadge): ?>
+                      <span class="badge <?= html_escape($statusBadge['class']) ?>"><?= html_escape(
+    $statusBadge['label'],
+) ?></span>
+                    <?php endforeach; ?>
+                  </div>
+                <?php else: ?>
+                  &mdash;
+                <?php endif; ?>
+              </td>
             </tr>
             <?php
             endforeach; ?>
