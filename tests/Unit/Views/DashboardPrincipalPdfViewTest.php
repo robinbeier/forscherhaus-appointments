@@ -67,11 +67,14 @@ class DashboardPrincipalPdfViewTest extends TestCase
         include APPPATH . 'views/exports/dashboard_principal_pdf.php';
         $output = (string) ob_get_clean();
 
-        $this->assertStringContainsString('Nach 15:00', $output);
-        $this->assertStringContainsString('bis Buchungsziel', $output);
-        $this->assertStringContainsString('Buchungsziel verfehlt', $output);
-        $this->assertStringContainsString('15-Uhr-Vorgabe verfehlt', $output);
-        $this->assertStringContainsString('Kapazitätslücke', $output);
+        $this->assertStringContainsString(lang('dashboard_principal_after_15_heading') ?: 'Nach 15:00', $output);
+        $this->assertStringContainsString(
+            lang('dashboard_principal_until_booking_goal') ?: 'bis Buchungsziel',
+            $output,
+        );
+        $this->assertStringContainsString(lang('dashboard_booking_goal_missed') ?: 'Buchungsziel verfehlt', $output);
+        $this->assertStringContainsString(lang('dashboard_after_15_goal_missed') ?: '15-Uhr-Vorgabe verfehlt', $output);
+        $this->assertStringContainsString(lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke', $output);
         $this->assertStringContainsString('11,8&nbsp;%', $output);
         $this->assertStringContainsString('status-list', $output);
         $this->assertStringNotContainsString('provider__badge', $output);
