@@ -226,6 +226,7 @@ Key behavior:
   context-window headroom derived from token updates; `/api/v1/state` keeps
   legacy aliases such as `lastTickAtIso` and `codex_totals` during migration
 - optional state endpoints:
+    - `GET /` human-readable operator dashboard for live local debugging
     - `GET /api/v1/state`
     - `GET /api/v1/<issue_identifier>`
     - `POST /api/v1/refresh`

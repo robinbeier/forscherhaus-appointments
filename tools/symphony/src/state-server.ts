@@ -2,6 +2,7 @@ import http from 'node:http';
 import type {AddressInfo} from 'node:net';
 import type {Logger} from './logger.js';
 import type {OrchestratorSnapshot} from './orchestrator.js';
+import {renderDashboard} from './state-dashboard.js';
 
 interface SymphonyStateServerArgs {
     enabled: boolean;
@@ -91,6 +92,18 @@ export class SymphonyStateServer {
             const requestUrl = request.url ?? '/';
             const {pathname} = new URL(requestUrl, `http://${this.host}:${this.port}`);
 
+            if (pathname === '/') {
+                if (method !== 'GET') {
+                    this.respondJson(response, 405, {
+                        status: 'method_not_allowed',
+                    });
+                    return;
+                }
+
+                this.respondHtml(response, 200, renderDashboard(this.getSnapshot()));
+                return;
+            }
+
             if (pathname === '/api/v1/state') {
                 if (method !== 'GET') {
                     this.respondJson(response, 405, {
@@ -164,5 +177,11 @@ export class SymphonyStateServer {
         response.statusCode = statusCode;
         response.setHeader('Content-Type', 'application/json; charset=utf-8');
         response.end(JSON.stringify(payload));
+    }
+
+    private respondHtml(response: http.ServerResponse, statusCode: number, payload: string): void {
+        response.statusCode = statusCode;
+        response.setHeader('Content-Type', 'text/html; charset=utf-8');
+        response.end(payload);
     }
 }
