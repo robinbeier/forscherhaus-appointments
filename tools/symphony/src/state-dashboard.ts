@@ -1,4 +1,11 @@
 import type {OrchestratorSnapshot} from './orchestrator.js';
+import {
+    presentStateSnapshot,
+    type PresentedHealthIndicator,
+    type PresentedRecentEvent,
+    type PresentedRetryEntry,
+    type PresentedRunningEntry,
+} from './state-presenter.js';
 
 function escapeHtml(value: string): string {
     return value
@@ -9,88 +16,11 @@ function escapeHtml(value: string): string {
         .replaceAll("'", '&#39;');
 }
 
-function formatInteger(value: number | null | undefined): string {
-    if (value === null || value === undefined || !Number.isFinite(value)) {
-        return 'n/a';
-    }
-
-    return new Intl.NumberFormat('en-US').format(Math.floor(value));
-}
-
-function formatDecimal(value: number | null | undefined, maximumFractionDigits = 1): string {
-    if (value === null || value === undefined || !Number.isFinite(value)) {
-        return 'n/a';
-    }
-
-    return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits,
-    }).format(value);
-}
-
-function formatPercent(value: number | null | undefined): string {
-    if (value === null || value === undefined || !Number.isFinite(value)) {
-        return 'n/a';
-    }
-
-    return `${formatDecimal(value)}%`;
-}
-
-function formatDuration(seconds: number | null | undefined): string {
-    if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) {
-        return 'n/a';
-    }
-
-    const totalSeconds = Math.max(0, Math.floor(seconds));
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const remainingSeconds = totalSeconds % 60;
-
-    if (hours > 0) {
-        return `${hours}h ${minutes}m ${remainingSeconds}s`;
-    }
-
-    if (minutes > 0) {
-        return `${minutes}m ${remainingSeconds}s`;
-    }
-
-    return `${remainingSeconds}s`;
-}
-
-function formatTimestamp(value: string | undefined): string {
-    if (!value) {
-        return 'Never';
-    }
-
-    const parsed = Date.parse(value);
-    if (Number.isNaN(parsed)) {
-        return value;
-    }
-
-    return new Date(parsed).toISOString().replace('.000Z', 'Z');
-}
-
-function formatRateLimitValue(value: unknown): string {
-    if (typeof value === 'number') {
-        return formatDecimal(value, 2);
-    }
-
-    if (typeof value === 'string' || typeof value === 'boolean') {
-        return String(value);
-    }
-
-    if (value === null || value === undefined) {
-        return 'n/a';
-    }
-
-    return JSON.stringify(value);
-}
-
 function renderMetricCard(label: string, value: string, hint: string): string {
     return `<article class="metric-card"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd><p>${escapeHtml(hint)}</p></article>`;
 }
 
-function renderHealthIndicator(indicator: OrchestratorSnapshot['health']['indicators'][number]): string {
+function renderHealthIndicator(indicator: PresentedHealthIndicator): string {
     return `<li class="health-item health-item--${escapeHtml(indicator.status)}">
         <span class="pill pill--${escapeHtml(indicator.status)}">${escapeHtml(indicator.status)}</span>
         <div>
@@ -100,10 +30,10 @@ function renderHealthIndicator(indicator: OrchestratorSnapshot['health']['indica
     </li>`;
 }
 
-function renderRunningEntry(entry: OrchestratorSnapshot['running'][number]): string {
+function renderRunningEntry(entry: PresentedRunningEntry): string {
     const traceItems =
-        entry.trace_tail.length > 0
-            ? `<ul class="trace-list">${entry.trace_tail
+        entry.traceTail.length > 0
+            ? `<ul class="trace-list">${entry.traceTail
                   .map(
                       (trace) =>
                           `<li><strong>${escapeHtml(trace.eventType)}</strong> <span>${escapeHtml(trace.message)}</span></li>`,
@@ -114,20 +44,20 @@ function renderRunningEntry(entry: OrchestratorSnapshot['running'][number]): str
     return `<article class="entry-card">
         <header class="entry-card__header">
             <div>
-                <h3><a href="/api/v1/${encodeURIComponent(entry.issue_identifier)}">${escapeHtml(entry.issue_identifier)}</a></h3>
-                <p>${escapeHtml(entry.last_activity ?? 'No recent activity message.')}</p>
+                <h3><a href="${entry.issuePath}">${escapeHtml(entry.issueIdentifier)}</a></h3>
+                <p>${escapeHtml(entry.lastActivityMessage)}</p>
             </div>
             <span class="pill">${escapeHtml(entry.source)}</span>
         </header>
         <dl class="entry-grid">
-            <div><dt>Runtime</dt><dd>${escapeHtml(formatDuration(entry.runtime_seconds))}</dd></div>
-            <div><dt>Idle</dt><dd>${escapeHtml(formatDuration(entry.idle_seconds))}</dd></div>
-            <div><dt>Total tokens</dt><dd>${escapeHtml(formatInteger(entry.total_tokens))}</dd></div>
-            <div><dt>Last turn</dt><dd>${escapeHtml(formatInteger(entry.last_turn_tokens))}</dd></div>
-            <div><dt>Context headroom</dt><dd>${escapeHtml(formatInteger(entry.context_headroom_tokens))}</dd></div>
-            <div><dt>Utilization</dt><dd>${escapeHtml(formatPercent(entry.context_utilization_percent))}</dd></div>
-            <div><dt>Last activity</dt><dd>${escapeHtml(formatTimestamp(entry.last_activity_at))}</dd></div>
-            <div><dt>Session</dt><dd>${escapeHtml(entry.session_id ?? 'n/a')}</dd></div>
+            <div><dt>Runtime</dt><dd>${escapeHtml(entry.runtime)}</dd></div>
+            <div><dt>Idle</dt><dd>${escapeHtml(entry.idle)}</dd></div>
+            <div><dt>Total tokens</dt><dd>${escapeHtml(entry.totalTokens)}</dd></div>
+            <div><dt>Last turn</dt><dd>${escapeHtml(entry.lastTurnTokens)}</dd></div>
+            <div><dt>Context headroom</dt><dd>${escapeHtml(entry.contextHeadroom)}</dd></div>
+            <div><dt>Utilization</dt><dd>${escapeHtml(entry.utilization)}</dd></div>
+            <div><dt>Last activity</dt><dd>${escapeHtml(entry.lastActivityAt)}</dd></div>
+            <div><dt>Session</dt><dd>${escapeHtml(entry.session)}</dd></div>
         </dl>
         <section>
             <h4>Recent trace</h4>
@@ -136,53 +66,50 @@ function renderRunningEntry(entry: OrchestratorSnapshot['running'][number]): str
     </article>`;
 }
 
-function renderRetryEntry(entry: OrchestratorSnapshot['retrying'][number]): string {
+function renderRetryEntry(entry: PresentedRetryEntry): string {
     return `<tr>
-        <td><a href="/api/v1/${encodeURIComponent(entry.issue_identifier)}">${escapeHtml(entry.issue_identifier)}</a></td>
-        <td>${escapeHtml(String(entry.attempt))}</td>
+        <td><a href="${entry.issuePath}">${escapeHtml(entry.issueIdentifier)}</a></td>
+        <td>${escapeHtml(entry.attempt)}</td>
         <td>${escapeHtml(entry.reason)}</td>
-        <td>${escapeHtml(formatTimestamp(entry.available_at))}</td>
-        <td>${escapeHtml(entry.error_class ?? 'n/a')}</td>
+        <td>${escapeHtml(entry.retryAt)}</td>
+        <td>${escapeHtml(entry.errorClass)}</td>
     </tr>`;
 }
 
-function renderRecentEvent(event: OrchestratorSnapshot['recent_events'][number]): string {
+function renderRecentEvent(event: PresentedRecentEvent): string {
     return `<li class="event-item">
         <div class="event-item__meta">
-            <a href="/api/v1/${encodeURIComponent(event.issue_identifier)}">${escapeHtml(event.issue_identifier)}</a>
-            <span>${escapeHtml(formatTimestamp(event.atIso))}</span>
+            <a href="${event.issuePath}">${escapeHtml(event.issueIdentifier)}</a>
+            <span>${escapeHtml(event.at)}</span>
         </div>
         <p><strong>${escapeHtml(event.eventType)}</strong> ${escapeHtml(event.message)}</p>
     </li>`;
 }
 
 export function renderDashboard(snapshot: OrchestratorSnapshot): string {
-    const rateLimitItems = Object.entries(snapshot.rate_limits);
-    const healthMarkup = `<ul class="health-list">${snapshot.health.indicators
+    const presented = presentStateSnapshot(snapshot);
+    const healthMarkup = `<ul class="health-list">${presented.health.indicators
         .map((indicator) => renderHealthIndicator(indicator))
         .join('')}</ul>`;
     const runningMarkup =
-        snapshot.running.length > 0
-            ? snapshot.running.map((entry) => renderRunningEntry(entry)).join('')
+        presented.running.length > 0
+            ? presented.running.map((entry) => renderRunningEntry(entry)).join('')
             : '<p class="empty-state">No issues are currently running.</p>';
     const retryMarkup =
-        snapshot.retrying.length > 0
-            ? `<table class="retry-table"><thead><tr><th>Issue</th><th>Attempt</th><th>Reason</th><th>Retry at</th><th>Error</th></tr></thead><tbody>${snapshot.retrying
+        presented.retrying.length > 0
+            ? `<table class="retry-table"><thead><tr><th>Issue</th><th>Attempt</th><th>Reason</th><th>Retry at</th><th>Error</th></tr></thead><tbody>${presented.retrying
                   .map((entry) => renderRetryEntry(entry))
                   .join('')}</tbody></table>`
             : '<p class="empty-state">No retry queue entries.</p>';
     const rateLimitMarkup =
-        rateLimitItems.length > 0
-            ? `<dl class="rate-limit-list">${rateLimitItems
-                  .map(
-                      ([key, value]) =>
-                          `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(formatRateLimitValue(value))}</dd></div>`,
-                  )
+        presented.rateLimits.length > 0
+            ? `<dl class="rate-limit-list">${presented.rateLimits
+                  .map((entry) => `<div><dt>${escapeHtml(entry.key)}</dt><dd>${escapeHtml(entry.value)}</dd></div>`)
                   .join('')}</dl>`
             : '<p class="empty-state">No rate-limit data reported.</p>';
     const recentEventMarkup =
-        snapshot.recent_events.length > 0
-            ? `<ol class="event-list">${snapshot.recent_events.map((event) => renderRecentEvent(event)).join('')}</ol>`
+        presented.recentEvents.length > 0
+            ? `<ol class="event-list">${presented.recentEvents.map((event) => renderRecentEvent(event)).join('')}</ol>`
             : '<p class="empty-state">No recent events captured yet.</p>';
 
     return `<!doctype html>
@@ -398,7 +325,7 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
                     <h1>Symphony Dashboard</h1>
                     <p>Operator-facing status surface for live pilot runs. This page auto-refreshes every 15 seconds and stays independent from orchestration correctness.</p>
                 </div>
-                <div class="pill">Generated ${escapeHtml(formatTimestamp(snapshot.generated_at))}</div>
+                <div class="pill">Generated ${escapeHtml(presented.generatedAt)}</div>
             </div>
             <div class="hero-links">
                 <a href="/api/v1/state">Snapshot JSON</a>
@@ -406,24 +333,21 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
             <div class="meta-strip">
                 <section class="meta-card">
                     <dl>
-                        <div><dt>Last tick</dt><dd>${escapeHtml(formatTimestamp(snapshot.last_tick_at))}</dd></div>
-                        <div><dt>Running</dt><dd>${escapeHtml(formatInteger(snapshot.counts.running))}</dd></div>
-                        <div><dt>Retrying</dt><dd>${escapeHtml(formatInteger(snapshot.counts.retrying))}</dd></div>
+                        <div><dt>Last tick</dt><dd>${escapeHtml(presented.lastTickAt)}</dd></div>
+                        <div><dt>Running</dt><dd>${escapeHtml(presented.counts.running)}</dd></div>
+                        <div><dt>Retrying</dt><dd>${escapeHtml(presented.counts.retrying)}</dd></div>
                     </dl>
                 </section>
                 <section class="meta-card">
                     <dl>
-                        <div><dt>Completed</dt><dd>${escapeHtml(formatInteger(snapshot.counts.completed))}</dd></div>
-                        <div><dt>Input required</dt><dd>${escapeHtml(formatInteger(snapshot.counts.input_required))}</dd></div>
-                        <div><dt>Failed</dt><dd>${escapeHtml(formatInteger(snapshot.counts.failed))}</dd></div>
+                        <div><dt>Completed</dt><dd>${escapeHtml(presented.counts.completed)}</dd></div>
+                        <div><dt>Input required</dt><dd>${escapeHtml(presented.counts.inputRequired)}</dd></div>
+                        <div><dt>Failed</dt><dd>${escapeHtml(presented.counts.failed)}</dd></div>
                     </dl>
                 </section>
             </div>
             <div class="metric-grid">
-                ${renderMetricCard('Runtime total', formatDuration(snapshot.totals.runtime_seconds), 'Aggregate runtime across active entries.')}
-                ${renderMetricCard('Input tokens', formatInteger(snapshot.totals.input_tokens), 'Prompt and context consumption observed so far.')}
-                ${renderMetricCard('Output tokens', formatInteger(snapshot.totals.output_tokens), 'Model output produced across active entries.')}
-                ${renderMetricCard('Total tokens', formatInteger(snapshot.totals.total_tokens), 'Combined live token spend across active entries.')}
+                ${presented.metricCards.map((card) => renderMetricCard(card.label, card.value, card.hint)).join('')}
             </div>
         </section>
         <div class="stack">
@@ -431,14 +355,14 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
                 <section class="panel">
                     <div class="section-header">
                         <h2>Health</h2>
-                        <p class="muted">Overall ${escapeHtml(snapshot.health.overall)}</p>
+                        <p class="muted">Overall ${escapeHtml(presented.health.overall)}</p>
                     </div>
                     ${healthMarkup}
                 </section>
                 <section class="panel">
                     <div class="section-header">
                         <h2>Recent Events</h2>
-                        <p class="muted">${escapeHtml(formatInteger(snapshot.recent_events.length))} newest entries</p>
+                        <p class="muted">${escapeHtml(presented.counts.recentEvents)} newest entries</p>
                     </div>
                     ${recentEventMarkup}
                 </section>
@@ -446,7 +370,7 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
             <section class="panel">
                 <div class="section-header">
                     <h2>Running Issues</h2>
-                    <p class="muted">${escapeHtml(formatInteger(snapshot.running.length))} active</p>
+                    <p class="muted">${escapeHtml(presented.counts.runningEntries)} active</p>
                 </div>
                 <div class="running-grid">${runningMarkup}</div>
             </section>
@@ -454,7 +378,7 @@ export function renderDashboard(snapshot: OrchestratorSnapshot): string {
                 <section class="panel">
                     <div class="section-header">
                         <h2>Retry Queue</h2>
-                        <p class="muted">${escapeHtml(formatInteger(snapshot.retrying.length))} waiting</p>
+                        <p class="muted">${escapeHtml(presented.counts.retryingEntries)} waiting</p>
                     </div>
                     ${retryMarkup}
                 </section>
