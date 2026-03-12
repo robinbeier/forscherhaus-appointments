@@ -195,12 +195,154 @@ class DashboardProviderMetricsControllerTest extends TestCase
         $this->assertSame([['provider_id' => 77]], $result);
     }
 
+    public function testBuildProviderDashboardPayloadPreservesNeutralPlannedSlots(): void
+    {
+        $provider = [
+            'id' => 42,
+            'first_name' => 'Rebecca',
+            'last_name' => 'Schleupner',
+            'email' => 'rebecca@example.org',
+            'class_size_default' => 16,
+        ];
+
+        $providersModel = $this->createMock(\Providers_model::class);
+        $providersModel->expects($this->once())->method('find')->with(42)->willReturn($provider);
+
+        $controller = new class ($providersModel) extends Dashboard {
+            public array $metrics = [];
+
+            public function __construct($providersModel)
+            {
+                $this->providers_model = $providersModel;
+            }
+
+            public function callBuildProviderDashboardPayload(
+                int $providerId,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return $this->buildProviderDashboardPayload($providerId, $start, $end);
+            }
+
+            protected function collectProviderMetrics(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return $this->metrics;
+            }
+
+            protected function loadProviderAppointments(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return [];
+            }
+        };
+
+        $controller->metrics = [
+            [
+                'provider_id' => 42,
+                'provider_name' => 'Rebecca Schleupner',
+                'target' => 16,
+                'booked' => 0,
+                'open' => 16,
+                'slots_planned' => null,
+                'slots_required' => 16,
+                'has_capacity_gap' => false,
+                'class_size_default' => 16,
+            ],
+        ];
+
+        $payload = $controller->callBuildProviderDashboardPayload(
+            42,
+            new DateTimeImmutable('2026-04-15'),
+            new DateTimeImmutable('2026-04-16'),
+        );
+
+        $this->assertNull($payload['metrics']['slots_planned']);
+        $this->assertSame('—', $payload['metrics']['slots_planned_formatted']);
+        $this->assertSame(16, $payload['metrics']['slots_required']);
+        $this->assertFalse($payload['metrics']['has_capacity_gap']);
+    }
+
+    public function testBuildProviderDashboardPayloadUsesBookingOfferedPlannedSlots(): void
+    {
+        $provider = [
+            'id' => 42,
+            'first_name' => 'Rebecca',
+            'last_name' => 'Schleupner',
+            'email' => 'rebecca@example.org',
+            'class_size_default' => 16,
+        ];
+
+        $providersModel = $this->createMock(\Providers_model::class);
+        $providersModel->expects($this->once())->method('find')->with(42)->willReturn($provider);
+
+        $controller = new class ($providersModel) extends Dashboard {
+            public array $metrics = [];
+
+            public function __construct($providersModel)
+            {
+                $this->providers_model = $providersModel;
+            }
+
+            public function callBuildProviderDashboardPayload(
+                int $providerId,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return $this->buildProviderDashboardPayload($providerId, $start, $end);
+            }
+
+            protected function collectProviderMetrics(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return $this->metrics;
+            }
+
+            protected function loadProviderAppointments(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return [];
+            }
+        };
+
+        $controller->metrics = [
+            [
+                'provider_id' => 42,
+                'provider_name' => 'Rebecca Schleupner',
+                'target' => 16,
+                'booked' => 0,
+                'open' => 16,
+                'slots_planned' => 19,
+                'slots_required' => 16,
+                'has_capacity_gap' => false,
+                'class_size_default' => 16,
+            ],
+        ];
+
+        $payload = $controller->callBuildProviderDashboardPayload(
+            42,
+            new DateTimeImmutable('2026-04-15'),
+            new DateTimeImmutable('2026-04-16'),
+        );
+
+        $this->assertSame(19, $payload['metrics']['slots_planned']);
+        $this->assertSame('19', $payload['metrics']['slots_planned_formatted']);
+        $this->assertSame(16, $payload['metrics']['slots_required']);
+        $this->assertFalse($payload['metrics']['has_capacity_gap']);
+    }
+
     private function createControllerWithoutConstructor(): object
     {
         return new class extends Dashboard {
-            public function __construct()
-            {
-            }
+            public function __construct() {}
 
             public function callCollectProviderMetrics(
                 int $providerId,

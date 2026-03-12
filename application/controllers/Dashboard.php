@@ -376,9 +376,11 @@ class Dashboard extends EA_Controller
                 ? max(0, (int) $metric['open'])
                 : max($target - $booked, 0);
 
-        $slots_planned = $this->normalizeMetricInt(is_array($metric) ? $metric['slots_planned'] ?? 0 : 0);
-        $slots_required = $this->normalizeMetricInt(is_array($metric) ? $metric['slots_required'] ?? $target : $target);
-        $has_capacity_gap = $slots_required > 0 && $slots_planned < $slots_required;
+        $slots_planned = $this->normalizeOptionalMetricInt(is_array($metric) ? $metric['slots_planned'] ?? null : null);
+        $slots_required =
+            $this->normalizeOptionalMetricInt(is_array($metric) ? $metric['slots_required'] ?? $target : $target) ??
+            max($target, 0);
+        $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
 
         $progress_base = max($target, 1);
         $booked_percent = $progress_base > 0 ? max(0, min(100, (int) round(($booked / $progress_base) * 100))) : 0;
@@ -411,7 +413,7 @@ class Dashboard extends EA_Controller
                 'open' => $open,
                 'open_formatted' => $this->formatNumber($open),
                 'slots_planned' => $slots_planned,
-                'slots_planned_formatted' => $this->formatNumber($slots_planned),
+                'slots_planned_formatted' => $slots_planned !== null ? $this->formatNumber($slots_planned) : '—',
                 'slots_required' => $slots_required,
                 'slots_required_formatted' => $this->formatNumber($slots_required),
                 'has_capacity_gap' => $has_capacity_gap,
@@ -638,6 +640,22 @@ class Dashboard extends EA_Controller
     {
         if (!is_numeric($value)) {
             return 0;
+        }
+
+        return max(0, (int) round((float) $value));
+    }
+
+    /**
+     * Normalize optional metric integer values.
+     */
+    protected function normalizeOptionalMetricInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (!is_numeric($value)) {
+            return null;
         }
 
         return max(0, (int) round((float) $value));

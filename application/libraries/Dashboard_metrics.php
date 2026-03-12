@@ -492,13 +492,12 @@ class Dashboard_metrics
         ?int $class_size_default,
         array $after_15_metrics,
     ): array {
-        $total_slots = $this->extractTotalSlots($summary);
         $open = $target > 0 ? max($target - $booked, 0) : 0;
         $fill_rate = $this->computeFillRate($booked, $target);
         $needs_attention = $target > 0 && $fill_rate < $threshold;
         $slots_required = max($target, 0);
-        $slots_planned = $total_slots;
-        $has_capacity_gap = $slots_required > 0 && $slots_planned < $slots_required;
+        $slots_planned = $this->resolvePlannedSlots($after_15_metrics);
+        $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
         $display_name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
 
         if ($display_name === '') {
@@ -529,20 +528,23 @@ class Dashboard_metrics
         ];
     }
 
-    protected function extractTotalSlots(array $summary): int
+    /**
+     * Use the same booking-offered slot count that backs the after-15 KPI.
+     */
+    protected function resolvePlannedSlots(array $after_15_metrics): ?int
     {
-        if (!array_key_exists('total', $summary)) {
-            return 0;
+        if (!array_key_exists('total_offered_slots', $after_15_metrics)) {
+            return null;
         }
 
-        $total = $summary['total'];
+        $total_offered_slots = $after_15_metrics['total_offered_slots'];
 
-        if (!is_numeric($total)) {
-            return 0;
+        if ($total_offered_slots === null || !is_numeric($total_offered_slots)) {
+            return null;
         }
 
-        $int_total = (int) round($total);
+        $planned_slots = (int) round((float) $total_offered_slots);
 
-        return $int_total > 0 ? $int_total : 0;
+        return $planned_slots >= 0 ? $planned_slots : null;
     }
 }

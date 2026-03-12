@@ -121,7 +121,7 @@ final class GateAssertions
             $booked = self::toNonNegativeInt($row['booked'], $context . '.booked');
             $open = self::toNonNegativeInt($row['open'], $context . '.open');
             $fillRate = self::toNonNegativeFloat($row['fill_rate'], $context . '.fill_rate');
-            $slotsPlanned = self::toNonNegativeInt($row['slots_planned'], $context . '.slots_planned');
+            $slotsPlanned = self::normalizeOptionalNonNegativeInt($row['slots_planned'], $context . '.slots_planned');
             $slotsRequired = self::toNonNegativeInt($row['slots_required'], $context . '.slots_required');
             $hasCapacityGap = self::toBool($row['has_capacity_gap'], $context . '.has_capacity_gap');
             $after15Evaluable = self::toBool($row['after_15_evaluable'], $context . '.after_15_evaluable');
@@ -140,7 +140,7 @@ final class GateAssertions
                 );
             }
 
-            $expectedGap = $slotsRequired > 0 && $slotsPlanned < $slotsRequired;
+            $expectedGap = $slotsPlanned !== null && $slotsRequired > 0 && $slotsPlanned < $slotsRequired;
             if ($hasCapacityGap !== $expectedGap) {
                 throw new GateAssertionException(
                     sprintf(
