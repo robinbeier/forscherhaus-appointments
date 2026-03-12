@@ -146,7 +146,7 @@ class Booking_slot_analytics
                 $exclude_appointment_id,
             ),
         );
-        $blocked_periods = $this->CI->blocked_periods_model->get_for_period($start_date, $end_date);
+        $blocked_periods = $this->get_blocked_periods_for_analysis_range($range_start, $range_end);
         $appointments_by_date = $this->index_events_by_date($appointments);
         $blocked_periods_by_date = $this->index_events_by_date($blocked_periods);
         $offered_hours_by_date = [];
@@ -715,6 +715,21 @@ class Booking_slot_analytics
         }
 
         return $offered_hours_by_date;
+    }
+
+    /**
+     * Expand blocked-period loading by one day on each side so range analytics keep the daily overlap semantics.
+     *
+     * @return array
+     */
+    protected function get_blocked_periods_for_analysis_range(
+        DateTimeImmutable $range_start,
+        DateTimeImmutable $range_end,
+    ): array {
+        $query_start = $range_start->sub(new DateInterval('P1D'))->format('Y-m-d');
+        $query_end = $range_end->add(new DateInterval('P1D'))->format('Y-m-d');
+
+        return $this->CI->blocked_periods_model->get_for_period($query_start, $query_end);
     }
 
     /**

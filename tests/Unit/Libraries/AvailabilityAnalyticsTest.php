@@ -175,7 +175,7 @@ class AvailabilityAnalyticsTest extends TestCase
         $blockedPeriodsModel
             ->expects($this->once())
             ->method('get_for_period')
-            ->with('2026-02-18', '2026-02-19')
+            ->with('2026-02-17', '2026-02-20')
             ->willReturn([
                 [
                     'start_datetime' => '2026-02-19 09:30:00',
@@ -223,6 +223,82 @@ class AvailabilityAnalyticsTest extends TestCase
             [
                 '2026-02-18' => ['08:00', '09:00', '09:30'],
                 '2026-02-19' => ['08:30', '09:00'],
+            ],
+            $hoursByDate,
+        );
+    }
+
+    public function testGetOfferedHoursByDateForAnalysisKeepsBlockedPeriodBoundaryOverlaps(): void
+    {
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel
+            ->expects($this->once())
+            ->method('query')
+            ->willReturn($this->createAppointmentsQueryBuilder([]));
+
+        $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
+        $unavailabilitiesModel
+            ->expects($this->once())
+            ->method('query')
+            ->willReturn($this->createAppointmentsQueryBuilder([]));
+        $unavailabilitiesModel->expects($this->never())->method('cast');
+
+        $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
+        $blockedPeriodsModel
+            ->expects($this->once())
+            ->method('get_for_period')
+            ->with('2026-02-17', '2026-02-20')
+            ->willReturn([
+                [
+                    'start_datetime' => '2026-02-17 23:30:00',
+                    'end_datetime' => '2026-02-18 08:30:00',
+                ],
+                [
+                    'start_datetime' => '2026-02-19 09:30:00',
+                    'end_datetime' => '2026-02-20 00:30:00',
+                ],
+            ]);
+
+        $availability = new Availability($appointmentsModel, $unavailabilitiesModel, $blockedPeriodsModel);
+
+        $service = [
+            'duration' => 30,
+            'attendants_number' => 1,
+            'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            'buffer_before' => 0,
+            'buffer_after' => 0,
+        ];
+        $provider = [
+            'id' => 1,
+            'timezone' => 'Europe/Berlin',
+            'settings' => [
+                'working_plan' => json_encode([
+                    'wednesday' => [
+                        'start' => '08:00',
+                        'end' => '10:00',
+                        'breaks' => [],
+                    ],
+                    'thursday' => [
+                        'start' => '08:00',
+                        'end' => '10:00',
+                        'breaks' => [],
+                    ],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $hoursByDate = $availability->get_offered_hours_by_date_for_analysis(
+            '2026-02-18',
+            '2026-02-19',
+            $service,
+            $provider,
+        );
+
+        $this->assertSame(
+            [
+                '2026-02-18' => ['08:30', '09:00', '09:30'],
+                '2026-02-19' => ['08:00', '08:30', '09:00'],
             ],
             $hoursByDate,
         );
