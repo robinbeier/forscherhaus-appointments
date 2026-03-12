@@ -92,6 +92,67 @@ class AvailabilityBufferTest extends TestCase
         $this->assertSame(['13:15', '13:30'], $hours);
     }
 
+    public function testGetAvailableHoursDelegatesToAnalyticalMethodBeforeApplyingFilters(): void
+    {
+        $availability = new class extends Availability {
+            public array $calls = [];
+
+            public function __construct() {}
+
+            public function get_offered_hours_for_analysis(
+                string $date,
+                array $service,
+                array $provider,
+                ?int $exclude_appointment_id = null,
+            ): array {
+                $this->calls[] = ['method' => 'raw', 'date' => $date, 'exclude' => $exclude_appointment_id];
+
+                return ['09:00'];
+            }
+
+            protected function consider_book_advance_timeout(
+                string $date,
+                array $available_hours,
+                array $provider,
+            ): array {
+                $this->calls[] = ['method' => 'advance', 'hours' => $available_hours];
+
+                return ['09:15'];
+            }
+
+            protected function consider_future_booking_limit(
+                string $selected_date,
+                array $available_hours,
+                array $provider,
+            ): array {
+                $this->calls[] = ['method' => 'future', 'hours' => $available_hours];
+
+                return ['09:30'];
+            }
+        };
+
+        $service = [
+            'duration' => 30,
+            'attendants_number' => 1,
+            'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            'buffer_before' => 0,
+            'buffer_after' => 0,
+        ];
+        $provider = ['timezone' => 'Europe/Berlin'];
+
+        $result = $availability->get_available_hours('2026-02-18', $service, $provider, 77);
+
+        $this->assertSame(['09:30'], $result);
+        $this->assertSame(
+            [
+                ['method' => 'raw', 'date' => '2026-02-18', 'exclude' => 77],
+                ['method' => 'advance', 'hours' => ['09:00']],
+                ['method' => 'future', 'hours' => ['09:15']],
+            ],
+            $availability->calls,
+        );
+    }
+
     public function test_subtract_ranges_splits_periods_around_blocked_windows(): void
     {
         $availability_reflection = new ReflectionClass(Availability::class);
