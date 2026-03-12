@@ -521,6 +521,15 @@ class Dashboard_export extends EA_Controller
 
             $status_variant = 'ok';
             $status_label = 'Ok';
+            $status_reasons = $this->normalizeStatusReasons($metric['status_reasons'] ?? []);
+            $after_15_percent =
+                array_key_exists('after_15_percent', $metric) && $metric['after_15_percent'] !== null
+                    ? round((float) $metric['after_15_percent'], 1)
+                    : null;
+            $after_15_target_met = array_key_exists('after_15_target_met', $metric)
+                ? $metric['after_15_target_met']
+                : null;
+            $after_15_evaluable = !empty($metric['after_15_evaluable']);
 
             if ($is_under_target) {
                 $status_variant = 'warn';
@@ -559,11 +568,15 @@ class Dashboard_export extends EA_Controller
                 'fill_ratio' => $fill_rate,
                 'status_variant' => $status_variant,
                 'status_label' => $status_label,
+                'status_reasons' => $status_reasons,
                 'slots_planned_raw' => $slots_planned,
                 'slots_planned_formatted' => $slots_planned !== null ? $this->formatNumber($slots_planned) : null,
                 'slots_required_raw' => $slots_required,
                 'slots_required_formatted' => $slots_required !== null ? $this->formatNumber($slots_required) : null,
                 'has_capacity_gap' => !empty($metric['has_capacity_gap']),
+                'after_15_percent' => $after_15_percent,
+                'after_15_target_met' => $after_15_target_met,
+                'after_15_evaluable' => $after_15_evaluable,
                 'provider_id' => (int) ($metric['provider_id'] ?? 0),
             ];
         }, $metrics);
@@ -737,6 +750,37 @@ class Dashboard_export extends EA_Controller
         }
 
         return 'Kapazitätslücke';
+    }
+
+    /**
+     * Normalize the ordered dashboard/export status-reason list.
+     *
+     * @param mixed $status_reasons
+     *
+     * @return array<int, string>
+     */
+    protected function normalizeStatusReasons(mixed $status_reasons): array
+    {
+        if (!is_array($status_reasons)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($status_reasons as $status_reason) {
+            if (!is_string($status_reason)) {
+                continue;
+            }
+
+            $trimmed = trim($status_reason);
+            if ($trimmed === '') {
+                continue;
+            }
+
+            $normalized[] = $trimmed;
+        }
+
+        return array_values(array_unique($normalized));
     }
 
     /**
@@ -1418,10 +1462,7 @@ class Dashboard_export extends EA_Controller
             $query->where('appointments.id_services', $service_id);
         }
 
-        $rows = $query
-            ->order_by('appointments.start_datetime', 'ASC')
-            ->get()
-            ->result_array();
+        $rows = $query->order_by('appointments.start_datetime', 'ASC')->get()->result_array();
 
         $grouped = [];
 

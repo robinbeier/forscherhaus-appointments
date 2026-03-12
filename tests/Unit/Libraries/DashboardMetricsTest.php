@@ -133,6 +133,10 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(0.5, $metricsByProvider[10]['after_15_ratio']);
         $this->assertSame(50.0, $metricsByProvider[10]['after_15_percent']);
         $this->assertTrue($metricsByProvider[10]['after_15_target_met']);
+        $this->assertSame(
+            [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED],
+            $metricsByProvider[10]['status_reasons'],
+        );
     }
 
     public function testCollectUsesSelectedServiceForAfter15Metrics(): void
@@ -223,6 +227,10 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(40.0, $metrics[0]['after_15_percent']);
         $this->assertTrue($metrics[0]['after_15_target_met']);
         $this->assertTrue($metrics[0]['after_15_evaluable']);
+        $this->assertSame(
+            [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED, Dashboard_metrics::STATUS_REASON_CAPACITY_GAP],
+            $metrics[0]['status_reasons'],
+        );
     }
 
     public function testCollectLeavesAfter15MetricsNeutralWithoutUniqueService(): void
@@ -290,6 +298,7 @@ class DashboardMetricsTest extends TestCase
         $this->assertNull($metrics[0]['after_15_percent']);
         $this->assertNull($metrics[0]['after_15_target_met']);
         $this->assertFalse($metrics[0]['after_15_evaluable']);
+        $this->assertSame([Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED], $metrics[0]['status_reasons']);
     }
 
     public function testCollectLeavesAfter15MetricsNeutralWithoutAnyService(): void
@@ -357,6 +366,7 @@ class DashboardMetricsTest extends TestCase
         $this->assertNull($metrics[0]['after_15_percent']);
         $this->assertNull($metrics[0]['after_15_target_met']);
         $this->assertFalse($metrics[0]['after_15_evaluable']);
+        $this->assertSame([Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED], $metrics[0]['status_reasons']);
     }
 
     public function testCollectLeavesAfter15MetricsNeutralWhenUniqueServiceHasZeroOfferedSlots(): void
@@ -435,6 +445,10 @@ class DashboardMetricsTest extends TestCase
         $this->assertNull($metrics[0]['after_15_percent']);
         $this->assertNull($metrics[0]['after_15_target_met']);
         $this->assertFalse($metrics[0]['after_15_evaluable']);
+        $this->assertSame(
+            [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED, Dashboard_metrics::STATUS_REASON_CAPACITY_GAP],
+            $metrics[0]['status_reasons'],
+        );
     }
 
     public function testCollectKeepsOtherProvidersWhenAfter15AnalyticsFailsForOneProvider(): void
@@ -544,8 +558,13 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(1, $metricsByProvider[10]['after_15_slots']);
         $this->assertSame(2, $metricsByProvider[10]['total_offered_slots']);
         $this->assertSame(2, $metricsByProvider[10]['slots_planned']);
+        $this->assertTrue($metricsByProvider[10]['has_capacity_gap']);
         $this->assertSame(50.0, $metricsByProvider[10]['after_15_percent']);
         $this->assertTrue($metricsByProvider[10]['after_15_evaluable']);
+        $this->assertSame(
+            [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED, Dashboard_metrics::STATUS_REASON_CAPACITY_GAP],
+            $metricsByProvider[10]['status_reasons'],
+        );
 
         $this->assertNull($metricsByProvider[11]['slots_planned']);
         $this->assertFalse($metricsByProvider[11]['has_capacity_gap']);
@@ -555,6 +574,10 @@ class DashboardMetricsTest extends TestCase
         $this->assertNull($metricsByProvider[11]['after_15_percent']);
         $this->assertNull($metricsByProvider[11]['after_15_target_met']);
         $this->assertFalse($metricsByProvider[11]['after_15_evaluable']);
+        $this->assertSame(
+            [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED],
+            $metricsByProvider[11]['status_reasons'],
+        );
     }
 
     private function createCountResult(array $rows): CI_DB_result

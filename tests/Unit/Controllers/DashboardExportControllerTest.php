@@ -233,9 +233,7 @@ class DashboardExportControllerTest extends TestCase
         $controller = new class extends Dashboard_export {
             public int $formatterFactoryCalls = 0;
 
-            public function __construct()
-            {
-            }
+            public function __construct() {}
 
             public function callFormatDate(DateTimeImmutable $date): string
             {
@@ -291,6 +289,40 @@ class DashboardExportControllerTest extends TestCase
         );
     }
 
+    public function testMapMetricsForViewPreservesSharedStatusReasonsAndAfter15Fields(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapMetricsForView(
+            [
+                [
+                    'provider_id' => 42,
+                    'provider_name' => 'Rebecca Schleupner',
+                    'target' => 16,
+                    'booked' => 0,
+                    'open' => 16,
+                    'fill_rate' => 0.0,
+                    'has_plan' => true,
+                    'has_explicit_target' => true,
+                    'slots_planned' => 19,
+                    'slots_required' => 16,
+                    'has_capacity_gap' => false,
+                    'after_15_percent' => 21.1,
+                    'after_15_target_met' => false,
+                    'after_15_evaluable' => true,
+                    'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertCount(1, $mapped);
+        $this->assertSame(['booking_goal_missed', 'after_15_goal_missed'], $mapped[0]['status_reasons']);
+        $this->assertSame(21.1, $mapped[0]['after_15_percent']);
+        $this->assertFalse($mapped[0]['after_15_target_met']);
+        $this->assertTrue($mapped[0]['after_15_evaluable']);
+    }
+
     private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
     {
         return new class ($configuredThreshold, $pdfDebugDumpFlag) extends Dashboard_export {
@@ -327,6 +359,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildPdfStreamOptions(string $debugDumpPath): array
             {
                 return $this->buildPdfStreamOptions($debugDumpPath);
+            }
+
+            public function callMapMetricsForView(array $metrics, float $threshold): array
+            {
+                return $this->mapMetricsForView($metrics, $threshold);
             }
 
             public function callBuildPrincipalOverview(array $metrics, array $summary): array

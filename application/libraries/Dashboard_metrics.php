@@ -24,6 +24,12 @@ class Dashboard_metrics
 
     protected const AFTER_15_TARGET_RATIO = 0.3;
 
+    public const STATUS_REASON_BOOKING_GOAL_MISSED = 'booking_goal_missed';
+
+    public const STATUS_REASON_AFTER_15_GOAL_MISSED = 'after_15_goal_missed';
+
+    public const STATUS_REASON_CAPACITY_GAP = 'capacity_gap';
+
     /**
      * @var EA_Controller|CI_Controller
      */
@@ -498,6 +504,15 @@ class Dashboard_metrics
         $slots_required = max($target, 0);
         $slots_planned = $this->resolvePlannedSlots($after_15_metrics);
         $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
+        $has_plan = (bool) ($summary['has_plan'] ?? false);
+        $has_explicit_target = $class_size_default !== null;
+        $status_reasons = $this->buildStatusReasons(
+            $has_plan,
+            $has_explicit_target,
+            $needs_attention,
+            $after_15_metrics,
+            $has_capacity_gap,
+        );
         $display_name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
 
         if ($display_name === '') {
@@ -512,13 +527,14 @@ class Dashboard_metrics
             'open' => $open,
             'fill_rate' => $fill_rate,
             'needs_attention' => $needs_attention,
-            'has_plan' => (bool) ($summary['has_plan'] ?? false),
+            'has_plan' => $has_plan,
             'slots_planned' => $slots_planned,
             'slots_required' => $slots_required,
             'has_capacity_gap' => $has_capacity_gap,
             'is_target_fallback' => $is_fallback,
             'class_size_default' => $class_size_default,
-            'has_explicit_target' => $class_size_default !== null,
+            'has_explicit_target' => $has_explicit_target,
+            'status_reasons' => $status_reasons,
             'after_15_slots' => $after_15_metrics['after_15_slots'] ?? null,
             'total_offered_slots' => $after_15_metrics['total_offered_slots'] ?? null,
             'after_15_ratio' => $after_15_metrics['after_15_ratio'] ?? null,
@@ -526,6 +542,40 @@ class Dashboard_metrics
             'after_15_target_met' => $after_15_metrics['after_15_target_met'] ?? null,
             'after_15_evaluable' => (bool) ($after_15_metrics['after_15_evaluable'] ?? false),
         ];
+    }
+
+    /**
+     * Build the ordered status reasons shared by dashboard consumers.
+     */
+    protected function buildStatusReasons(
+        bool $has_plan,
+        bool $has_explicit_target,
+        bool $needs_attention,
+        array $after_15_metrics,
+        bool $has_capacity_gap,
+    ): array {
+        if (!$has_plan) {
+            return [];
+        }
+
+        $status_reasons = [];
+
+        if ($has_explicit_target && $needs_attention) {
+            $status_reasons[] = self::STATUS_REASON_BOOKING_GOAL_MISSED;
+        }
+
+        $after_15_evaluable = (bool) ($after_15_metrics['after_15_evaluable'] ?? false);
+        $after_15_target_met = $after_15_metrics['after_15_target_met'] ?? null;
+
+        if ($after_15_evaluable && $after_15_target_met === false) {
+            $status_reasons[] = self::STATUS_REASON_AFTER_15_GOAL_MISSED;
+        }
+
+        if ($has_capacity_gap) {
+            $status_reasons[] = self::STATUS_REASON_CAPACITY_GAP;
+        }
+
+        return $status_reasons;
     }
 
     /**
