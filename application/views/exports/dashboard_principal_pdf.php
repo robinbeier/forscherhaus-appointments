@@ -524,7 +524,7 @@ $attentionCount = isset($principalOverview['attention_count'])
                 </li>
               <?php endforeach; ?>
             </ul>
-          <?php elseif ($teachersTotal > 0): ?>
+          <?php elseif ($teachersTotal > 0 && $inTargetCount === $teachersTotal): ?>
             <p>Alle Klassenleitungen liegen aktuell im Buchungsziel.</p>
           <?php endif; ?>
         </aside>

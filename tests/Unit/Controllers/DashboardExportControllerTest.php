@@ -190,6 +190,7 @@ class DashboardExportControllerTest extends TestCase
                 'provider_name' => 'Teacher A',
                 'gap_to_threshold' => 4,
                 'has_capacity_gap' => true,
+                'has_plan' => true,
                 'has_explicit_target' => true,
                 'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed', 'capacity_gap'],
             ],
@@ -197,6 +198,7 @@ class DashboardExportControllerTest extends TestCase
                 'provider_name' => 'Teacher B',
                 'gap_to_threshold' => 0,
                 'has_capacity_gap' => false,
+                'has_plan' => true,
                 'has_explicit_target' => true,
                 'status_reasons' => ['after_15_goal_missed'],
             ],
@@ -204,6 +206,7 @@ class DashboardExportControllerTest extends TestCase
                 'provider_name' => 'Teacher C',
                 'gap_to_threshold' => 0,
                 'has_capacity_gap' => true,
+                'has_plan' => true,
                 'has_explicit_target' => true,
                 'status_reasons' => ['capacity_gap'],
             ],
@@ -211,6 +214,15 @@ class DashboardExportControllerTest extends TestCase
                 'provider_name' => 'Teacher D',
                 'gap_to_threshold' => 0,
                 'has_capacity_gap' => false,
+                'has_plan' => true,
+                'has_explicit_target' => true,
+                'status_reasons' => [],
+            ],
+            [
+                'provider_name' => 'Teacher E',
+                'gap_to_threshold' => 0,
+                'has_capacity_gap' => false,
+                'has_plan' => false,
                 'has_explicit_target' => true,
                 'status_reasons' => [],
             ],
@@ -223,7 +235,7 @@ class DashboardExportControllerTest extends TestCase
 
         $overview = $controller->callBuildPrincipalOverview($metrics, $summary);
 
-        $this->assertSame(4, $overview['teachers_total']);
+        $this->assertSame(5, $overview['teachers_total']);
         $this->assertSame(1, $overview['below_count']);
         $this->assertSame(1, $overview['booking_goal_missed_count']);
         $this->assertSame(2, $overview['after_15_goal_missed_count']);
@@ -232,7 +244,7 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(3, $overview['in_target_count']);
         $this->assertSame(4, $overview['gap_total']);
         $this->assertSame('4', $overview['gap_total_formatted']);
-        $this->assertSame('3 / 4 Lehrkräfte im Buchungsziel', $overview['in_target_label']);
+        $this->assertSame('3 / 5 Lehrkräfte im Buchungsziel', $overview['in_target_label']);
         $this->assertSame('10', $overview['booked_distinct_formatted']);
         $this->assertSame('24', $overview['target_total_formatted']);
         $this->assertSame(0.42, $overview['fill_rate_value']);

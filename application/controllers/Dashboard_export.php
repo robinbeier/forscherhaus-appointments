@@ -678,6 +678,10 @@ class Dashboard_export extends EA_Controller
             $booking_goal_missed = in_array(self::STATUS_REASON_BOOKING_GOAL_MISSED, $status_reasons, true);
             $after_15_goal_missed = in_array(self::STATUS_REASON_AFTER_15_GOAL_MISSED, $status_reasons, true);
             $capacity_gap = in_array(self::STATUS_REASON_CAPACITY_GAP, $status_reasons, true);
+            $is_booking_goal_evaluable =
+                !empty($metric['has_plan']) &&
+                !empty($metric['has_explicit_target']) &&
+                empty($metric['is_zero_target']);
 
             if ($booking_goal_missed) {
                 $below_count++;
@@ -698,7 +702,7 @@ class Dashboard_export extends EA_Controller
                 $attention_count++;
             }
 
-            if (!$booking_goal_missed && !empty($metric['has_explicit_target']) && empty($metric['is_zero_target'])) {
+            if ($is_booking_goal_evaluable && !$booking_goal_missed) {
                 $in_target_count++;
             }
 
