@@ -149,13 +149,14 @@ class Booking_slot_analytics
         $blocked_periods = $this->get_blocked_periods_for_analysis_range($range_start, $range_end);
         $appointments_by_date = $this->index_events_by_date($appointments, $range_start, $range_end);
         $blocked_periods_by_date = $this->index_events_by_date($blocked_periods, $range_start, $range_end);
+        $entirely_blocked_dates = $this->index_entirely_blocked_dates($blocked_periods_by_date);
         $offered_hours_by_date = [];
         $day = $range_start;
 
         while ($day <= $range_end) {
             $date = $day->format('Y-m-d');
 
-            if ($this->CI->blocked_periods_model->is_entire_date_blocked($date)) {
+            if (isset($entirely_blocked_dates[$date])) {
                 $offered_hours_by_date[$date] = [];
                 $day = $day->add(new DateInterval('P1D'));
                 continue;
@@ -708,6 +709,26 @@ class Booking_slot_analytics
         }
 
         return $events_by_date;
+    }
+
+    /**
+     * Mirror Blocked_periods_model::is_entire_date_blocked semantics without re-querying per day.
+     *
+     * @param array<string, array<int, array>> $blocked_periods_by_date
+     *
+     * @return array<string, true>
+     */
+    protected function index_entirely_blocked_dates(array $blocked_periods_by_date): array
+    {
+        $entirely_blocked_dates = [];
+
+        foreach ($blocked_periods_by_date as $date => $blocked_periods) {
+            if (count($blocked_periods) > 1) {
+                $entirely_blocked_dates[$date] = true;
+            }
+        }
+
+        return $entirely_blocked_dates;
     }
 
     /**
