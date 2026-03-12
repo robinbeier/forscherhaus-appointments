@@ -51,6 +51,9 @@ CHANGE_SCOPE_PREFIXES = [
 
 
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+    if cmd and cmd[0] == "git":
+        cmd = ["git", "-c", f"safe.directory={ROOT}"] + cmd[1:]
+
     return subprocess.run(cmd, cwd=ROOT, check=check, text=True, capture_output=True)
 
 

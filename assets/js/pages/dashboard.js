@@ -1044,7 +1044,6 @@ App.Pages.Dashboard = (function () {
 
         visibleMetrics.forEach((item) => {
             const fillPercentage = item.target > 0 ? (item.fill_rate * 100).toFixed(1) : '0.0';
-            const hasConflict = item.has_explicit_target && item.target > 0 && item.fill_rate < threshold;
             const remaining = item.target > 0 ? item.open : '—';
             const explicitTarget =
                 typeof item.class_size_default === 'number' && item.class_size_default > 0
@@ -1070,14 +1069,6 @@ App.Pages.Dashboard = (function () {
                 class: 'dashboard-provider-slots',
                 text: formatSlotsSummary(item),
             }).appendTo($meta);
-
-            if (item.has_capacity_gap) {
-                $('<span/>', {
-                    class: 'badge bg-warning text-dark dashboard-capacity-gap-badge',
-                    text: lang('dashboard_slots_gap_badge'),
-                    title: lang('dashboard_slots_gap_hint'),
-                }).appendTo($meta);
-            }
 
             $meta.appendTo($providerCell);
             $providerCell.appendTo($row);
@@ -1120,26 +1111,7 @@ App.Pages.Dashboard = (function () {
 
             buildAfter15Cell(item).appendTo($row);
 
-            const $statusCell = $('<td/>');
-
-            if (!item.has_plan) {
-                $('<span/>', {
-                    class: 'text-muted',
-                    text: lang('no_plan_in_period'),
-                }).appendTo($statusCell);
-            } else if (!item.has_explicit_target) {
-                $('<span/>', {
-                    class: 'badge bg-secondary utilization-badge',
-                    text: lang('dashboard_no_target'),
-                }).appendTo($statusCell);
-            } else if (hasConflict) {
-                $('<span/>', {
-                    class: 'badge bg-danger utilization-badge',
-                    text: lang('expectation_conflict'),
-                }).appendTo($statusCell);
-            }
-
-            $statusCell.appendTo($row);
+            buildStatusCell(item).appendTo($row);
             $row.appendTo($tableBody);
         });
     }
@@ -1155,6 +1127,102 @@ App.Pages.Dashboard = (function () {
         }).appendTo($cell);
 
         return $cell;
+    }
+
+    function buildStatusCell(item) {
+        const $cell = $('<td/>');
+
+        if (!item?.has_plan) {
+            $('<span/>', {
+                class: 'text-muted',
+                text: lang('no_plan_in_period'),
+            }).appendTo($cell);
+
+            return $cell;
+        }
+
+        if (!item?.has_explicit_target) {
+            $('<span/>', {
+                class: 'badge bg-secondary utilization-badge',
+                text: lang('dashboard_no_target'),
+            }).appendTo($cell);
+
+            return $cell;
+        }
+
+        const statusReasons = getRenderableStatusReasons(item?.status_reasons);
+
+        if (!statusReasons.length) {
+            $('<span/>', {
+                class: 'text-muted',
+                text: '—',
+            }).appendTo($cell);
+
+            return $cell;
+        }
+
+        const $badges = $('<div/>', {class: 'd-flex flex-wrap gap-1'});
+
+        statusReasons.forEach((statusReason) => {
+            buildStatusBadge(statusReason).appendTo($badges);
+        });
+
+        $badges.appendTo($cell);
+
+        return $cell;
+    }
+
+    function getRenderableStatusReasons(statusReasons) {
+        if (!Array.isArray(statusReasons)) {
+            return [];
+        }
+
+        const knownStatusReasons = new Set(['booking_goal_missed', 'after_15_goal_missed', 'capacity_gap']);
+        const renderableStatusReasons = [];
+
+        statusReasons.forEach((statusReason) => {
+            if (knownStatusReasons.has(statusReason) && !renderableStatusReasons.includes(statusReason)) {
+                renderableStatusReasons.push(statusReason);
+            }
+        });
+
+        return renderableStatusReasons;
+    }
+
+    function buildStatusBadge(statusReason) {
+        const badgeConfig = {
+            booking_goal_missed: {
+                className: 'badge bg-danger utilization-badge',
+                text: lang('dashboard_booking_goal_missed'),
+            },
+            after_15_goal_missed: {
+                className: 'badge bg-warning text-dark utilization-badge',
+                text: lang('dashboard_after_15_goal_missed'),
+            },
+            capacity_gap: {
+                className: 'badge bg-warning text-dark utilization-badge',
+                text: lang('dashboard_slots_gap_badge'),
+                title: lang('dashboard_slots_gap_hint'),
+            },
+        }[statusReason];
+
+        if (!badgeConfig) {
+            return $('<span/>', {
+                class: 'badge bg-secondary utilization-badge',
+                text: statusReason,
+            });
+        }
+
+        const badgeAttributes = {
+            class: badgeConfig.className,
+            text: badgeConfig.text,
+        };
+
+        if (badgeConfig.title) {
+            badgeAttributes.title = badgeConfig.title;
+        }
+
+        return $('<span/>', badgeAttributes);
     }
 
     function formatSlotsSummary(item) {
