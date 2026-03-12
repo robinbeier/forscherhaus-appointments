@@ -190,16 +190,29 @@ class DashboardExportControllerTest extends TestCase
                 'provider_name' => 'Teacher A',
                 'gap_to_threshold' => 4,
                 'has_capacity_gap' => true,
+                'has_explicit_target' => true,
+                'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed', 'capacity_gap'],
             ],
             [
                 'provider_name' => 'Teacher B',
                 'gap_to_threshold' => 0,
                 'has_capacity_gap' => false,
+                'has_explicit_target' => true,
+                'status_reasons' => ['after_15_goal_missed'],
             ],
             [
                 'provider_name' => 'Teacher C',
-                'gap_to_threshold' => 1,
+                'gap_to_threshold' => 0,
                 'has_capacity_gap' => true,
+                'has_explicit_target' => true,
+                'status_reasons' => ['capacity_gap'],
+            ],
+            [
+                'provider_name' => 'Teacher D',
+                'gap_to_threshold' => 0,
+                'has_capacity_gap' => false,
+                'has_explicit_target' => true,
+                'status_reasons' => [],
             ],
         ];
         $summary = [
@@ -210,18 +223,92 @@ class DashboardExportControllerTest extends TestCase
 
         $overview = $controller->callBuildPrincipalOverview($metrics, $summary);
 
-        $this->assertSame(3, $overview['teachers_total']);
-        $this->assertSame(2, $overview['below_count']);
-        $this->assertSame(1, $overview['in_target_count']);
-        $this->assertSame(5, $overview['gap_total']);
-        $this->assertSame('5', $overview['gap_total_formatted']);
-        $this->assertSame('1 / 3 Lehrkräfte über Ziel', $overview['in_target_label']);
+        $this->assertSame(4, $overview['teachers_total']);
+        $this->assertSame(1, $overview['below_count']);
+        $this->assertSame(1, $overview['booking_goal_missed_count']);
+        $this->assertSame(2, $overview['after_15_goal_missed_count']);
+        $this->assertSame(2, $overview['capacity_gap_count']);
+        $this->assertSame(3, $overview['attention_count']);
+        $this->assertSame(3, $overview['in_target_count']);
+        $this->assertSame(4, $overview['gap_total']);
+        $this->assertSame('4', $overview['gap_total_formatted']);
+        $this->assertSame('3 / 4 Lehrkräfte im Buchungsziel', $overview['in_target_label']);
         $this->assertSame('10', $overview['booked_distinct_formatted']);
         $this->assertSame('24', $overview['target_total_formatted']);
         $this->assertSame(0.42, $overview['fill_rate_value']);
-        $this->assertCount(2, $overview['top_attention']);
+        $this->assertCount(3, $overview['top_attention']);
         $this->assertSame('Teacher A', $overview['top_attention'][0]['provider_name']);
         $this->assertSame($controller->callResolveCapacityGapLabel(), $overview['capacity_gap_label']);
+    }
+
+    public function testSortPrincipalMetricsForReportPrioritizesSharedStatusReasonsAndSeverity(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $sorted = $controller->callSortPrincipalMetricsForReport([
+            [
+                'provider_name' => 'Capacity Only',
+                'gap_to_threshold' => 8,
+                'after_15_percent' => null,
+                'after_15_evaluable' => false,
+                'status_reasons' => ['capacity_gap'],
+            ],
+            [
+                'provider_name' => 'After 15 High',
+                'gap_to_threshold' => 0,
+                'after_15_percent' => 31.0,
+                'after_15_evaluable' => true,
+                'status_reasons' => ['after_15_goal_missed'],
+            ],
+            [
+                'provider_name' => 'Booking Only',
+                'gap_to_threshold' => 3,
+                'after_15_percent' => 45.0,
+                'after_15_evaluable' => true,
+                'status_reasons' => ['booking_goal_missed'],
+            ],
+            [
+                'provider_name' => 'Combined Low Gap',
+                'gap_to_threshold' => 2,
+                'after_15_percent' => 12.0,
+                'after_15_evaluable' => true,
+                'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
+            ],
+            [
+                'provider_name' => 'Combined High Gap',
+                'gap_to_threshold' => 5,
+                'after_15_percent' => 24.0,
+                'after_15_evaluable' => true,
+                'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
+            ],
+            [
+                'provider_name' => 'After 15 Low',
+                'gap_to_threshold' => 0,
+                'after_15_percent' => 11.0,
+                'after_15_evaluable' => true,
+                'status_reasons' => ['after_15_goal_missed'],
+            ],
+            [
+                'provider_name' => 'All Good',
+                'gap_to_threshold' => 0,
+                'after_15_percent' => 40.0,
+                'after_15_evaluable' => true,
+                'status_reasons' => [],
+            ],
+        ]);
+
+        $this->assertSame(
+            [
+                'Combined High Gap',
+                'Combined Low Gap',
+                'Booking Only',
+                'After 15 Low',
+                'After 15 High',
+                'Capacity Only',
+                'All Good',
+            ],
+            array_column($sorted, 'provider_name'),
+        );
     }
 
     public function testFormatDateCachesWeekdayFormatterPerLocaleAndTimezone(): void
@@ -369,6 +456,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildPrincipalOverview(array $metrics, array $summary): array
             {
                 return $this->buildPrincipalOverview($metrics, $summary);
+            }
+
+            public function callSortPrincipalMetricsForReport(array $metrics): array
+            {
+                return $this->sortPrincipalMetricsForReport($metrics);
             }
 
             public function callResolveCapacityGapLabel(): string
