@@ -9,8 +9,8 @@ This file stays intentionally short. It is a map, not a second runbook.
 
 - If you need local setup or service endpoints: read `README.md`.
 - If you are an agent executing an issue end-to-end: read `WORKFLOW.md`.
-- If you need the exhaustive local/CI command matrix and repo guardrails: read
-  `AGENTS.md`.
+- If you need the compact repo guardrails and the extended local/CI command
+  matrix: read `AGENTS.md`.
 - If you need architecture and ownership scope: read `docs/architecture-map.md`
   and `docs/ownership-map.md`.
 - If you need Symphony runtime and pilot behavior: read
@@ -22,7 +22,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | --- | --- | --- |
 | Local onboarding and quickstart | `README.md` | Operator-first entry point. |
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
-| Full local command matrix | `AGENTS.md` | Exhaustive commands, guardrails, and repo conventions. |
+| Extended local command matrix + compact guardrails | `AGENTS.md` | Cross-topic command hub without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |
@@ -47,8 +47,8 @@ This file stays intentionally short. It is a map, not a second runbook.
 - Scope-specific checks:
   - write-path contracts: `docs/ci-write-contracts.md`
   - integration smoke browser evidence: `docs/release-gate-dashboard.md`
-  - architecture boundaries: `AGENTS.md`
-  - Symphony pilot checks: `AGENTS.md`, `tools/symphony/README.md`
+  - architecture boundaries entry points: `AGENTS.md`
+  - Symphony pilot entry points: `AGENTS.md`, `tools/symphony/README.md`
 
 ## Scheduled Hygiene
 
@@ -68,8 +68,8 @@ This file stays intentionally short. It is a map, not a second runbook.
   usage changes.
 - Change `WORKFLOW.md` when the agent state machine, workpad policy, or
   ticket-to-merge behavior changes.
-- Change `AGENTS.md` when the repo guardrails or exhaustive command matrix
-  changes.
+- Change `AGENTS.md` when the compact repo guardrails, command entry points, or
+  extended local/CI command matrix change.
 - Change `.github/workflows/ci.yml` when CI truth changes; then update
   summaries in `README.md` or `AGENTS.md` only as needed.
 - Change `docs/maps/component_ownership_map.json` when architecture or

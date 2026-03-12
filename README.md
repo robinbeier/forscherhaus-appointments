@@ -40,7 +40,7 @@ Need the shortest route to the right steering source?
 - [Agent Harness Index](docs/agent-harness-index.md): routing across onboarding,
   agent runtime, CI, architecture, ownership, and Symphony
 - [WORKFLOW.md](WORKFLOW.md): agent runtime and ticket-to-merge rules
-- [AGENTS.md](AGENTS.md): full local/CI command matrix and repo guardrails
+- [AGENTS.md](AGENTS.md): compact repo guardrails plus the extended local/CI command matrix
 
 ## Core Commands
 
@@ -58,7 +58,7 @@ PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 
 For optional smoke tests, write-path contracts, deep runtime suites, release
 gates, and CI-only signals, use [Agent Harness Index](docs/agent-harness-index.md)
-as the routing map and [AGENTS.md](AGENTS.md) as the exhaustive command matrix.
+as the routing map and [AGENTS.md](AGENTS.md) as the compact command-and-guardrail hub.
 
 ## Release Gates
 
@@ -104,7 +104,7 @@ This prevents mixed container mounts across worktrees.
 ## Documentation Map
 
 - [Agent harness index](docs/agent-harness-index.md)
-- [Project runbook and contributor guardrails](AGENTS.md)
+- [Compact guardrails and extended command matrix](AGENTS.md)
 - [Write-path CI contracts](docs/ci-write-contracts.md)
 - [Architecture map](docs/architecture-map.md)
 - [Ownership map](docs/ownership-map.md)
@@ -164,9 +164,10 @@ CI note:
   `booking-controller-flows`, and `coverage-delta` are blocking.
 - `heavy-job-duration-trends` and `pdf-renderer-latency` are non-blocking
   signal jobs.
-- Full job wiring, artifact paths, and rollback notes live in
-  [Agent Harness Index](docs/agent-harness-index.md),
-  [AGENTS.md](AGENTS.md), and `.github/workflows/ci.yml`.
+- Full job wiring lives in `.github/workflows/ci.yml`; the compact local
+  command map and cross-links live in [AGENTS.md](AGENTS.md); specialized
+  runtime details stay in the topic docs linked from
+  [Agent Harness Index](docs/agent-harness-index.md).
 
 For doc-only/meta commits in constrained environments:
 
