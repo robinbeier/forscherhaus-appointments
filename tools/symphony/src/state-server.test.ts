@@ -17,7 +17,7 @@ function createLoggerStub(records: Array<Record<string, unknown>>): Logger {
     };
 }
 
-test('state server exposes GET /api/v1/state snapshot payload', async () => {
+test('state server exposes human-readable dashboard at GET / and JSON snapshot at GET /api/v1/state', async () => {
     const logRecords: Array<Record<string, unknown>> = [];
     const server = new SymphonyStateServer({
         enabled: true,
@@ -64,8 +64,8 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
                     turnCount: 0,
                     last_event: 'item/agentMessage/delta',
                     lastEvent: 'item/agentMessage/delta',
-                    last_activity: 'Codex is streaming a response.',
-                    lastActivity: 'Codex is streaming a response.',
+                    last_activity: 'Codex is streaming a response. <script>alert(1)</script>',
+                    lastActivity: 'Codex is streaming a response. <script>alert(1)</script>',
                     total_tokens: 193468,
                     totalTokens: 193468,
                     last_turn_tokens: 1440,
@@ -94,7 +94,20 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
                     ],
                 },
             ],
-            retrying: [],
+            retrying: [
+                {
+                    issue_id: 'issue-2',
+                    issue_identifier: 'ROB-43',
+                    issueId: 'issue-2',
+                    issueIdentifier: 'ROB-43',
+                    attempt: 2,
+                    reason: 'dispatch_failed',
+                    available_at: '2026-03-06T11:01:00.000Z',
+                    availableAtIso: '2026-03-06T11:01:00.000Z',
+                    error_class: 'approval_required',
+                    errorClass: 'approval_required',
+                },
+            ],
             totals: {
                 runtime_seconds: 42,
                 input_tokens: 121000,
@@ -118,6 +131,19 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
     await server.start();
     const port = server.getListeningPort();
     assert.ok(port);
+
+    const dashboardResponse = await fetch(`http://127.0.0.1:${port}/`);
+    assert.equal(dashboardResponse.status, 200);
+    assert.match(dashboardResponse.headers.get('content-type') ?? '', /text\/html/);
+    const dashboardHtml = await dashboardResponse.text();
+    assert.match(dashboardHtml, /Symphony Dashboard/);
+    assert.match(dashboardHtml, /ROB-42/);
+    assert.match(dashboardHtml, /ROB-43/);
+    assert.match(dashboardHtml, /193,468/);
+    assert.match(dashboardHtml, /42s/);
+    assert.match(dashboardHtml, /approval_required/);
+    assert.match(dashboardHtml, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.doesNotMatch(dashboardHtml, /<script>alert\(1\)<\/script>/);
 
     const response = await fetch(`http://127.0.0.1:${port}/api/v1/state`);
     assert.equal(response.status, 200);
@@ -160,11 +186,11 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
     assert.equal(snapshot.totals.runtime_seconds, 42);
     assert.equal(snapshot.codex_totals.total_tokens, 193468);
     assert.equal(snapshot.running[0]?.issue_identifier, 'ROB-42');
-    assert.equal(snapshot.running[0]?.last_activity, 'Codex is streaming a response.');
+    assert.equal(snapshot.running[0]?.last_activity, 'Codex is streaming a response. <script>alert(1)</script>');
     assert.equal(snapshot.running[0]?.context_headroom_tokens, 64932);
     assert.equal(snapshot.running[0]?.trace_tail[0]?.eventType, 'session/started');
     assert.equal(snapshot.running[0]?.issueIdentifier, 'ROB-42');
-    assert.equal(snapshot.running[0]?.lastActivity, 'Codex is streaming a response.');
+    assert.equal(snapshot.running[0]?.lastActivity, 'Codex is streaming a response. <script>alert(1)</script>');
     assert.equal(snapshot.running[0]?.contextHeadroomTokens, 64932);
     assert.equal(snapshot.running[0]?.traceTail[0]?.eventType, 'session/started');
 
