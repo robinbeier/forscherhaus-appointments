@@ -1148,26 +1148,11 @@ App.Pages.Dashboard = (function () {
         const $cell = $('<td/>');
         const after15Percent = formatAfter15Percent(item?.after_15_percent);
         const mainText = item?.after_15_evaluable && after15Percent !== null ? `${after15Percent} %` : '—';
-        const badge = resolveAfter15Badge(item);
 
         $('<div/>', {
             class: item?.after_15_evaluable ? 'fw-semibold' : 'text-muted',
             text: mainText,
         }).appendTo($cell);
-
-        $('<div/>', {
-            class: 'small text-muted mt-1',
-            text: formatAfter15SlotsSummary(item),
-        }).appendTo($cell);
-
-        const $badgeWrapper = $('<div/>', {class: 'mt-2'});
-
-        $('<span/>', {
-            class: `badge ${badge.className}`,
-            text: badge.text,
-        }).appendTo($badgeWrapper);
-
-        $badgeWrapper.appendTo($cell);
 
         return $cell;
     }
@@ -1191,31 +1176,6 @@ App.Pages.Dashboard = (function () {
         return pattern.replace('%planned%', plannedText).replace('%required%', requiredText);
     }
 
-    function formatAfter15SlotsSummary(item) {
-        const after15Slots = parseSlotValue(item?.after_15_slots, {allowZero: true});
-        const totalOfferedSlots = parseSlotValue(item?.total_offered_slots, {allowZero: true});
-
-        if (after15Slots === 0 && totalOfferedSlots === 0) {
-            return buildAfter15SlotsSummary(after15Slots, totalOfferedSlots);
-        }
-
-        if (after15Slots === null || totalOfferedSlots === null) {
-            return shouldPromptAfter15ServiceSelection()
-                ? lang('dashboard_after_15_service_choose')
-                : lang('dashboard_after_15_summary_neutral');
-        }
-
-        return buildAfter15SlotsSummary(after15Slots, totalOfferedSlots);
-    }
-
-    function buildAfter15SlotsSummary(after15Slots, totalOfferedSlots) {
-        const pattern = lang('dashboard_after_15_slots_summary') || '%after_15% / %total% Slots';
-
-        return pattern
-            .replace('%after_15%', countFormatter.format(after15Slots))
-            .replace('%total%', countFormatter.format(totalOfferedSlots));
-    }
-
     function formatAfter15Percent(value) {
         const numeric = Number(value);
 
@@ -1224,25 +1184,6 @@ App.Pages.Dashboard = (function () {
         }
 
         return percentFormatter.format(numeric);
-    }
-
-    function resolveAfter15Badge(item) {
-        if (item?.after_15_evaluable) {
-            return item.after_15_target_met
-                ? {className: 'bg-success', text: lang('dashboard_after_15_status_ok')}
-                : {className: 'bg-danger', text: lang('dashboard_after_15_status_fail')};
-        }
-
-        return {
-            className: 'bg-secondary',
-            text: lang('dashboard_after_15_status_neutral'),
-        };
-    }
-
-    function shouldPromptAfter15ServiceSelection() {
-        const selectedServiceId = String($service.val() || '').trim();
-
-        return selectedServiceId === '';
     }
 
     function parseSlotValue(value, options = {}) {
