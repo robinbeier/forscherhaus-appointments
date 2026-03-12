@@ -357,26 +357,32 @@ class Dashboard_metrics
         $after_15_slots = 0;
         $day = $start;
 
-        while ($day <= $end) {
-            $offered_hours = $this->booking_slot_analytics->get_offered_hours_for_analysis(
-                $day->format('Y-m-d'),
-                $service,
-                $provider,
-            );
+        try {
+            while ($day <= $end) {
+                $offered_hours = $this->booking_slot_analytics->get_offered_hours_for_analysis(
+                    $day->format('Y-m-d'),
+                    $service,
+                    $provider,
+                );
 
-            foreach ($offered_hours as $offered_hour) {
-                if (!is_string($offered_hour) || !preg_match('/^\d{2}:\d{2}$/', $offered_hour)) {
-                    continue;
+                foreach ($offered_hours as $offered_hour) {
+                    if (!is_string($offered_hour) || !preg_match('/^\d{2}:\d{2}$/', $offered_hour)) {
+                        continue;
+                    }
+
+                    $total_offered_slots++;
+
+                    if ($offered_hour >= self::AFTER_15_CUTOFF) {
+                        $after_15_slots++;
+                    }
                 }
 
-                $total_offered_slots++;
-
-                if ($offered_hour >= self::AFTER_15_CUTOFF) {
-                    $after_15_slots++;
-                }
+                $day = $day->add(new DateInterval('P1D'));
             }
+        } catch (Throwable $exception) {
+            $this->logAfter15MetricsFailure($provider, $service, $exception);
 
-            $day = $day->add(new DateInterval('P1D'));
+            return $this->buildNeutralAfter15Metrics();
         }
 
         if ($total_offered_slots === 0) {
@@ -451,6 +457,26 @@ class Dashboard_metrics
             'after_15_target_met' => null,
             'after_15_evaluable' => false,
         ];
+    }
+
+    protected function logAfter15MetricsFailure(array $provider, array $service, Throwable $exception): void
+    {
+        if (!function_exists('log_message')) {
+            return;
+        }
+
+        $provider_id = (int) ($provider['id'] ?? 0);
+        $service_id = (int) ($service['id'] ?? 0);
+
+        log_message(
+            'error',
+            sprintf(
+                'Dashboard after-15 metric skipped for provider %d and service %d: %s',
+                $provider_id,
+                $service_id,
+                $exception->getMessage(),
+            ),
+        );
     }
 
     protected function formatRow(
