@@ -303,7 +303,7 @@ if (!empty($principalPages)) {
 if (empty($preparedPrincipalPages)) {
     $metricRows = array_values(array_filter($metrics, static fn($metric): bool => is_array($metric)));
     $preparedMetrics = array_map($normalizeMetric, $metricRows);
-    $firstPageSize = 5;
+    $firstPageSize = 3;
     $continuationPageSize = 13;
     $remainingMetrics = $preparedMetrics;
 
