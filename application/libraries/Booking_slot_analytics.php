@@ -154,6 +154,13 @@ class Booking_slot_analytics
 
         while ($day <= $range_end) {
             $date = $day->format('Y-m-d');
+
+            if ($this->CI->blocked_periods_model->is_entire_date_blocked($date)) {
+                $offered_hours_by_date[$date] = [];
+                $day = $day->add(new DateInterval('P1D'));
+                continue;
+            }
+
             $available_periods = $this->get_available_periods_from_events(
                 $date,
                 $provider,
