@@ -3652,6 +3652,23 @@ export class SymphonyOrchestrator {
                 reason: 'reconciliation_terminal',
                 currentState,
             });
+        } catch (error) {
+            const classified = this.classifyError(error);
+            this.logger.warn('Publish-state checkpoint failed.', {
+                ...issueLogFields(runningEntry.issue, runningEntry.sessionId),
+                errorClass: classified.errorClass,
+                error: classified.message,
+            });
+            this.recordTrace(
+                runningEntry,
+                'turn',
+                'turn/publish_state_checkpoint_failed',
+                'Publish-state checkpoint failed; continuing the active turn.',
+                {
+                    error_class: classified.errorClass,
+                    error: classified.message,
+                },
+            );
         } finally {
             runningEntry.publishStateCheckpointInFlight = false;
         }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {AppServerClientError} from './app-server-client.js';
 import {type TrackerClient, SymphonyOrchestrator, type WorkspaceClient} from './orchestrator.js';
-import type {TrackedIssue} from './linear-tracker.js';
+import {LinearTrackerError, type TrackedIssue} from './linear-tracker.js';
 import type {Logger} from './logger.js';
 import type {LoadedWorkflowConfig} from './workflow.js';
 import {WorkspaceManagerError, type WorkspaceCleanupOptions, type WorkspaceStateSnapshot} from './workspace-manager.js';
@@ -153,12 +153,19 @@ class TrackerStub implements TrackerClient {
     public prepareIssueForRunCalls: string[] = [];
     public moveIssueToStateByNameCalls: Array<{identifier: string; stateName: string}> = [];
     public syncIssueWorkpadToStateCalls: Array<{identifier: string; stateName: string}> = [];
+    public fetchIssueStatesError: Error | null = null;
+    public fetchIssueStatesErrorRemaining = Number.POSITIVE_INFINITY;
 
     public async fetchCandidateIssues(): Promise<TrackedIssue[]> {
         return this.candidates;
     }
 
     public async fetchIssueStatesByIds(issueIds: string[]): Promise<Map<string, string>> {
+        if (this.fetchIssueStatesError && this.fetchIssueStatesErrorRemaining > 0) {
+            this.fetchIssueStatesErrorRemaining -= 1;
+            throw this.fetchIssueStatesError;
+        }
+
         const mapped = new Map<string, string>();
         for (const issueId of issueIds) {
             mapped.set(issueId, this.statesByIssueId.get(issueId) ?? 'In Progress');
@@ -837,6 +844,100 @@ test('publish turn does not treat In Review as a successful handoff without push
             (entry) => entry.eventType === 'turn/review_handoff_checkpoint',
         ),
         false,
+    );
+});
+
+test('publish-state checkpoint network failures are logged without aborting the turn', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'publish-checkpoint-network-failure-1',
+        identifier: 'ROB-135-PUBLISH-CHECKPOINT-NETWORK-FAILURE',
+        priority: 1,
+        createdAt: '2026-03-12T08:00:00.000Z',
+    });
+    issue.branchName = 'beierrobin/rob-135-publish-checkpoint-network-failure';
+    tracker.candidates = [issue];
+    tracker.statesByIssueId.set(issue.id, 'In Progress');
+    tracker.fetchIssueStatesError = new LinearTrackerError('linear_network', 'Linear GraphQL request failed.', {
+        reason: 'fetch failed',
+    });
+    tracker.fetchIssueStatesErrorRemaining = 1;
+
+    const logRecords: Array<Record<string, unknown>> = [];
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    workspace.stateSnapshots = [
+        {headSha: 'head-before', statusText: '', branchName: 'beierrobin/rob-135-publish-checkpoint-network-failure'},
+        {headSha: 'head-after', statusText: '', branchName: 'beierrobin/rob-135-publish-checkpoint-network-failure'},
+    ];
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub(logRecords),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-publish-network-failure',
+                    turnId: 'turn-publish-network-failure',
+                    sessionId: 'thread-publish-network-failure-turn-publish-network-failure',
+                });
+                tracker.statesByIssueId.set(issue.id, 'In Review');
+                emitEvent({
+                    type: 'trace',
+                    category: 'tool',
+                    eventType: 'tool/call/responded',
+                    message: 'Dynamic tool response sent for linear_graphql.',
+                    details: {
+                        tool: 'linear_graphql',
+                        success: true,
+                    },
+                });
+                for (let attempt = 0; attempt < 20; attempt += 1) {
+                    if (
+                        logRecords.some(
+                            (entry) => entry.level === 'warn' && entry.message === 'Publish-state checkpoint failed.',
+                        )
+                    ) {
+                        break;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 10));
+                }
+
+                return {
+                    status: 'completed',
+                    outputText: 'continued after publish-state checkpoint failure',
+                    threadId: 'thread-publish-network-failure',
+                    turnId: 'turn-publish-network-failure',
+                    sessionId: 'thread-publish-network-failure-turn-publish-network-failure',
+                };
+            },
+            stop: async () => undefined,
+        }),
+    });
+
+    await orchestrator.runTick();
+    await orchestrator.shutdown();
+
+    assert.ok(
+        logRecords.some(
+            (entry) =>
+                entry.level === 'warn' &&
+                entry.message === 'Publish-state checkpoint failed.' &&
+                entry.errorClass === 'linear_network' &&
+                entry.error === 'Linear GraphQL request failed.',
+        ),
+    );
+
+    const issueDetails = orchestrator.getIssueDetails('ROB-135-PUBLISH-CHECKPOINT-NETWORK-FAILURE');
+    assert.ok(issueDetails);
+    const trace = issueDetails?.trace as Record<string, unknown>;
+    assert.ok(
+        (trace.recent as Array<Record<string, unknown>>).some(
+            (entry) => entry.eventType === 'turn/publish_state_checkpoint_failed',
+        ),
     );
 });
 
