@@ -5,9 +5,26 @@ import {parseCliOptions} from './options.js';
 import {SymphonyService} from './service.js';
 import {resolveWorkflowPath, WorkflowConfigStore} from './workflow.js';
 
+export function validateCliRuntimeOptions(args: {
+    tui: boolean;
+    checkOnly: boolean;
+    stdoutIsTTY: boolean | undefined;
+}): void {
+    if (args.tui && !args.checkOnly && !args.stdoutIsTTY) {
+        throw new Error('The --tui mode requires an interactive TTY terminal.');
+    }
+}
+
 async function run(argv: string[]): Promise<void> {
     const logger = createLogger();
     const options = parseCliOptions(argv);
+
+    validateCliRuntimeOptions({
+        tui: options.tui,
+        checkOnly: options.checkOnly,
+        stdoutIsTTY: process.stdout.isTTY,
+    });
+
     const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
     const workflowPath = resolveWorkflowPath({
@@ -75,6 +92,7 @@ async function run(argv: string[]): Promise<void> {
         logger,
         workflowConfigStore,
         cliStateApiPort: options.stateApiPort,
+        cliEnableTui: options.tui,
     });
     await service.start();
 

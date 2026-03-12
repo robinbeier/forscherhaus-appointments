@@ -30,6 +30,7 @@ export interface PresentedRunningEntry {
     utilization: string;
     lastActivityAt: string;
     session: string;
+    turnCount: string;
     traceTail: PresentedRunningTraceEntry[];
 }
 
@@ -250,6 +251,7 @@ export function presentStateSnapshot(snapshot: OrchestratorSnapshot): PresentedS
             utilization: formatPercent(entry.context_utilization_percent),
             lastActivityAt: formatTimestamp(entry.last_activity_at),
             session: entry.session_id ?? 'n/a',
+            turnCount: formatInteger(entry.turn_count),
             traceTail: entry.trace_tail.map((trace) => ({
                 eventType: trace.eventType,
                 message: trace.message,

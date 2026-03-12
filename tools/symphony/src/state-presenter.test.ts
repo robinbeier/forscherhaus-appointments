@@ -156,6 +156,7 @@ test('presentStateSnapshot builds formatted dashboard-facing fields from snapsho
     assert.equal(presented.running[0]?.utilization, '74.9%');
     assert.equal(presented.running[0]?.lastActivityAt, '2026-03-06T11:00:30Z');
     assert.equal(presented.running[0]?.session, 'thread-1-turn-1');
+    assert.equal(presented.running[0]?.turnCount, '1');
     assert.equal(presented.running[0]?.traceTail[0]?.eventType, 'session/started');
 
     assert.equal(presented.retrying[0]?.issueIdentifier, 'ROB-43');
@@ -243,6 +244,7 @@ test('presentStateSnapshot applies stable fallbacks for missing or non-finite va
     assert.equal(presented.running[0]?.utilization, 'n/a');
     assert.equal(presented.running[0]?.lastActivityAt, 'Never');
     assert.equal(presented.running[0]?.session, 'n/a');
+    assert.equal(presented.running[0]?.turnCount, '0');
 
     assert.equal(presented.retrying[0]?.retryAt, 'not-a-date');
     assert.equal(presented.retrying[0]?.errorClass, 'n/a');

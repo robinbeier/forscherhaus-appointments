@@ -1,5 +1,6 @@
 export interface CliOptions {
     checkOnly: boolean;
+    tui: boolean;
     workflowPath?: string;
     stateApiPort?: number;
 }
@@ -21,6 +22,7 @@ function parsePortValue(rawValue: string, optionName: string): number {
 export function parseCliOptions(argv: string[]): CliOptions {
     const options: CliOptions = {
         checkOnly: false,
+        tui: false,
     };
     let positionalWorkflowPathConsumed = false;
 
@@ -39,6 +41,11 @@ export function parseCliOptions(argv: string[]): CliOptions {
 
         if (token === '--check') {
             options.checkOnly = true;
+            continue;
+        }
+
+        if (token === '--tui') {
+            options.tui = true;
             continue;
         }
 
