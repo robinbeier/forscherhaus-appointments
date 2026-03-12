@@ -858,11 +858,9 @@ test('publish-state checkpoint network failures are logged without aborting the 
     issue.branchName = 'beierrobin/rob-135-publish-checkpoint-network-failure';
     tracker.candidates = [issue];
     tracker.statesByIssueId.set(issue.id, 'In Progress');
-    tracker.fetchIssueStatesError = new LinearTrackerError(
-        'linear_network',
-        'Linear GraphQL request failed.',
-        {reason: 'fetch failed'},
-    );
+    tracker.fetchIssueStatesError = new LinearTrackerError('linear_network', 'Linear GraphQL request failed.', {
+        reason: 'fetch failed',
+    });
     tracker.fetchIssueStatesErrorRemaining = 1;
 
     const logRecords: Array<Record<string, unknown>> = [];
@@ -900,8 +898,7 @@ test('publish-state checkpoint network failures are logged without aborting the 
                 for (let attempt = 0; attempt < 20; attempt += 1) {
                     if (
                         logRecords.some(
-                            (entry) =>
-                                entry.level === 'warn' && entry.message === 'Publish-state checkpoint failed.',
+                            (entry) => entry.level === 'warn' && entry.message === 'Publish-state checkpoint failed.',
                         )
                     ) {
                         break;
