@@ -209,6 +209,36 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         $this->assertSame(24, $summary['booked_total']);
     }
 
+    public function testAssertMetricsPayloadRejectsPositiveAfter15CountsWhenNonEvaluable(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 57,
+                'provider_name' => 'Joan Clarke',
+                'target' => 20,
+                'booked' => 12,
+                'open' => 8,
+                'fill_rate' => 0.6,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 20,
+                'slots_required' => 20,
+                'has_capacity_gap' => false,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 10,
+                'after_15_ratio' => null,
+                'after_15_percent' => null,
+                'after_15_target_met' => null,
+                'after_15_evaluable' => false,
+            ],
+        ];
+
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('must use null/null or 0/0 slot counts');
+
+        GateAssertions::assertMetricsPayload($payload, false);
+    }
+
     public function testAssertHeatmapPayloadRejectsInvalidWeekday(): void
     {
         $payload = [

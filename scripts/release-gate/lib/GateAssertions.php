@@ -267,10 +267,10 @@ final class GateAssertions
             );
         }
 
-        if ($after15Slots > $totalOfferedSlots) {
+        if ($after15Slots !== 0 || $totalOfferedSlots !== 0) {
             throw new GateAssertionException(
                 sprintf(
-                    '%s.after_15_slots mismatch: %d cannot exceed total_offered_slots %d.',
+                    '%s non-evaluable after-15 metrics must use null/null or 0/0 slot counts, got %d/%d.',
                     $context,
                     $after15Slots,
                     $totalOfferedSlots,
