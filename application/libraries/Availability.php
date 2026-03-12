@@ -28,18 +28,36 @@ class Availability
     /**
      * Availability constructor.
      */
-    public function __construct()
-    {
+    public function __construct(
+        ?Appointments_model $appointments_model = null,
+        ?Unavailabilities_model $unavailabilities_model = null,
+        ?Blocked_periods_model $blocked_periods_model = null,
+    ) {
         $this->CI = &get_instance();
 
         $this->CI->load->model('admins_model');
-        $this->CI->load->model('appointments_model');
         $this->CI->load->model('providers_model');
         $this->CI->load->model('secretaries_model');
         $this->CI->load->model('secretaries_model');
         $this->CI->load->model('settings_model');
-        $this->CI->load->model('unavailabilities_model');
-        $this->CI->load->model('blocked_periods_model');
+
+        if ($appointments_model) {
+            $this->CI->appointments_model = $appointments_model;
+        } else {
+            $this->CI->load->model('appointments_model');
+        }
+
+        if ($unavailabilities_model) {
+            $this->CI->unavailabilities_model = $unavailabilities_model;
+        } else {
+            $this->CI->load->model('unavailabilities_model');
+        }
+
+        if ($blocked_periods_model) {
+            $this->CI->blocked_periods_model = $blocked_periods_model;
+        } else {
+            $this->CI->load->model('blocked_periods_model');
+        }
 
         $this->CI->load->library('ics_file');
     }
@@ -62,6 +80,30 @@ class Availability
         array $provider,
         ?int $exclude_appointment_id = null,
     ): array {
+        $available_hours = $this->get_offered_hours_for_analysis($date, $service, $provider, $exclude_appointment_id);
+        $available_hours = $this->consider_book_advance_timeout($date, $available_hours, $provider);
+
+        return $this->consider_future_booking_limit($date, $available_hours, $provider);
+    }
+
+    /**
+     * Get the offered hours for analytics without time-relative booking filters.
+     *
+     * @param string $date Selected date (Y-m-d).
+     * @param array $service Service data.
+     * @param array $provider Provider data.
+     * @param int|null $exclude_appointment_id Exclude an appointment from the availability generation.
+     *
+     * @return array
+     *
+     * @throws Exception
+     */
+    public function get_offered_hours_for_analysis(
+        string $date,
+        array $service,
+        array $provider,
+        ?int $exclude_appointment_id = null,
+    ): array {
         if ($this->CI->blocked_periods_model->is_entire_date_blocked($date)) {
             return [];
         }
@@ -74,9 +116,7 @@ class Availability
             $available_hours = $this->generate_available_hours($date, $service, $available_periods);
         }
 
-        $available_hours = $this->consider_book_advance_timeout($date, $available_hours, $provider);
-
-        return $this->consider_future_booking_limit($date, $available_hours, $provider);
+        return array_values($available_hours);
     }
 
     /**
