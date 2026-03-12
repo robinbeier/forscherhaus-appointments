@@ -141,7 +141,6 @@ class AvailabilityAnalyticsTest extends TestCase
 
     public function testGetOfferedHoursByDateForAnalysisBatchesRangeQueriesAndSplitsSlotsPerDay(): void
     {
-        $entireDateBlockedCalls = [];
         $appointmentsModel = $this->createMock(Appointments_model::class);
         $appointmentsModel
             ->expects($this->once())
@@ -173,14 +172,6 @@ class AvailabilityAnalyticsTest extends TestCase
             ->with($this->callback(static fn($value): bool => is_array($value)));
 
         $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
-        $blockedPeriodsModel
-            ->expects($this->exactly(2))
-            ->method('is_entire_date_blocked')
-            ->willReturnCallback(function (string $date) use (&$entireDateBlockedCalls): bool {
-                $entireDateBlockedCalls[] = $date;
-
-                return false;
-            });
         $blockedPeriodsModel
             ->expects($this->once())
             ->method('get_for_period')
@@ -235,12 +226,10 @@ class AvailabilityAnalyticsTest extends TestCase
             ],
             $hoursByDate,
         );
-        $this->assertSame(['2026-02-18', '2026-02-19'], $entireDateBlockedCalls);
     }
 
     public function testGetOfferedHoursByDateForAnalysisKeepsBlockedPeriodBoundaryOverlaps(): void
     {
-        $entireDateBlockedCalls = [];
         $appointmentsModel = $this->createMock(Appointments_model::class);
         $appointmentsModel
             ->expects($this->once())
@@ -255,14 +244,6 @@ class AvailabilityAnalyticsTest extends TestCase
         $unavailabilitiesModel->expects($this->never())->method('cast');
 
         $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
-        $blockedPeriodsModel
-            ->expects($this->exactly(2))
-            ->method('is_entire_date_blocked')
-            ->willReturnCallback(function (string $date) use (&$entireDateBlockedCalls): bool {
-                $entireDateBlockedCalls[] = $date;
-
-                return false;
-            });
         $blockedPeriodsModel
             ->expects($this->once())
             ->method('get_for_period')
@@ -321,7 +302,6 @@ class AvailabilityAnalyticsTest extends TestCase
             ],
             $hoursByDate,
         );
-        $this->assertSame(['2026-02-18', '2026-02-19'], $entireDateBlockedCalls);
     }
 
     public function testIndexEventsByDateClipsLongEventsToAnalysisWindow(): void
@@ -358,7 +338,6 @@ class AvailabilityAnalyticsTest extends TestCase
 
     public function testGetOfferedHoursByDateForAnalysisRespectsEntireDateBlocks(): void
     {
-        $entireDateBlockedCalls = [];
         $appointmentsModel = $this->createMock(Appointments_model::class);
         $appointmentsModel
             ->expects($this->once())
@@ -374,18 +353,19 @@ class AvailabilityAnalyticsTest extends TestCase
 
         $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
         $blockedPeriodsModel
-            ->expects($this->exactly(2))
-            ->method('is_entire_date_blocked')
-            ->willReturnCallback(function (string $date) use (&$entireDateBlockedCalls): bool {
-                $entireDateBlockedCalls[] = $date;
-
-                return $date === '2026-02-18';
-            });
-        $blockedPeriodsModel
             ->expects($this->once())
             ->method('get_for_period')
             ->with('2026-02-17', '2026-02-20')
-            ->willReturn([]);
+            ->willReturn([
+                [
+                    'start_datetime' => '2026-02-18 00:00:00',
+                    'end_datetime' => '2026-02-18 23:59:59',
+                ],
+                [
+                    'start_datetime' => '2026-02-18 08:00:00',
+                    'end_datetime' => '2026-02-18 09:00:00',
+                ],
+            ]);
 
         $availability = new Availability($appointmentsModel, $unavailabilitiesModel, $blockedPeriodsModel);
 
@@ -430,7 +410,6 @@ class AvailabilityAnalyticsTest extends TestCase
             ],
             $hoursByDate,
         );
-        $this->assertSame(['2026-02-18', '2026-02-19'], $entireDateBlockedCalls);
     }
 
     private function createAppointmentsQueryBuilder(array $rows): CI_DB_query_builder
