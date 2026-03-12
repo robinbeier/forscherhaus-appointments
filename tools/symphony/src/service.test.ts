@@ -79,6 +79,23 @@ test('resolveStateApiConfig prefers CLI port over workflow and env settings', ()
     });
 });
 
+test('resolveStateApiConfig keeps env host fallback when CLI port enables state API', () => {
+    const config = resolveStateApiConfig({
+        workflowConfig: createWorkflowConfig(),
+        env: {
+            SYMPHONY_STATE_API_HOST: '0.0.0.0',
+        },
+        cliStateApiPort: 9797,
+    });
+
+    assert.deepEqual(config, {
+        enabled: true,
+        host: '0.0.0.0',
+        port: 9797,
+        source: 'cli',
+    });
+});
+
 test('resolveStateApiConfig enables state API from workflow server port', () => {
     const config = resolveStateApiConfig({
         workflowConfig: createWorkflowConfig({
@@ -87,6 +104,26 @@ test('resolveStateApiConfig enables state API from workflow server port', () => 
             },
         }),
         env: {},
+    });
+
+    assert.deepEqual(config, {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 8788,
+        source: 'workflow',
+    });
+});
+
+test('resolveStateApiConfig keeps workflow host default when only env host is set', () => {
+    const config = resolveStateApiConfig({
+        workflowConfig: createWorkflowConfig({
+            server: {
+                port: 8788,
+            },
+        }),
+        env: {
+            SYMPHONY_STATE_API_HOST: '0.0.0.0',
+        },
     });
 
     assert.deepEqual(config, {
