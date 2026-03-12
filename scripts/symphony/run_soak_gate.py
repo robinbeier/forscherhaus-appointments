@@ -86,8 +86,9 @@ def main() -> int:
     findings: list[str] = []
     samples: list[dict[str, Any]] = []
 
-    first_totals: dict[str, int] | None = None
-    last_totals: dict[str, int] | None = None
+    first_counts: dict[str, int] | None = None
+    last_counts: dict[str, int] | None = None
+    max_codex_totals: dict[str, int] = {}
 
     sample_path = Path(args.sample_file) if args.sample_file else None
     if sample_path and not sample_path.is_file():
@@ -109,9 +110,15 @@ def main() -> int:
         snapshot = payload.get("snapshot", {})
         running = snapshot.get("running", [])
         retrying = snapshot.get("retrying", [])
+        counts = snapshot.get("counts", {})
         codex_totals = snapshot.get("codex_totals", {})
 
-        if not isinstance(running, list) or not isinstance(retrying, list) or not isinstance(codex_totals, dict):
+        if (
+            not isinstance(running, list)
+            or not isinstance(retrying, list)
+            or not isinstance(counts, dict)
+            or not isinstance(codex_totals, dict)
+        ):
             findings.append("invalid_snapshot_shape")
             break
 
@@ -140,16 +147,20 @@ def main() -> int:
             stats.stuck_detected = True
             findings.append(f"stuck_sessions_detected: {','.join(sorted(stuck_now))}")
 
-        if first_totals is None:
-            first_totals = {k: int(v) for k, v in codex_totals.items() if isinstance(v, int)}
-        last_totals = {k: int(v) for k, v in codex_totals.items() if isinstance(v, int)}
+        if first_counts is None:
+            first_counts = {k: int(v) for k, v in counts.items() if isinstance(v, int)}
+        last_counts = {k: int(v) for k, v in counts.items() if isinstance(v, int)}
+        current_codex_totals = {k: int(v) for k, v in codex_totals.items() if isinstance(v, int)}
+        for key, value in current_codex_totals.items():
+            max_codex_totals[key] = max(max_codex_totals.get(key, 0), value)
 
         samples.append(
             {
                 "polledAtIso": polled_at_iso,
                 "runningCount": len(running),
                 "retryingCount": len(retrying),
-                "codexTotals": last_totals,
+                "counts": last_counts,
+                "codexTotals": current_codex_totals,
             }
         )
 
@@ -167,11 +178,11 @@ def main() -> int:
     if stats.max_retrying > args.max_retrying:
         findings.append(f"max_retrying_exceeded: observed={stats.max_retrying} allowed={args.max_retrying}")
 
-    totals_delta: dict[str, int] = {}
-    if first_totals is not None and last_totals is not None:
-        all_keys = set(first_totals.keys()) | set(last_totals.keys())
+    counts_delta: dict[str, int] = {}
+    if first_counts is not None and last_counts is not None:
+        all_keys = set(first_counts.keys()) | set(last_counts.keys())
         for key in sorted(all_keys):
-            totals_delta[key] = last_totals.get(key, 0) - first_totals.get(key, 0)
+            counts_delta[key] = last_counts.get(key, 0) - first_counts.get(key, 0)
 
     verdict = "pass" if not findings else "fail"
 
@@ -191,7 +202,8 @@ def main() -> int:
             "maxRunning": stats.max_running,
             "maxRetrying": stats.max_retrying,
             "stuckDetected": stats.stuck_detected,
-            "codexTotalsDelta": totals_delta,
+            "countsDelta": counts_delta,
+            "maxCodexTotalsObserved": max_codex_totals,
         },
         "findings": findings,
         "samples": samples,

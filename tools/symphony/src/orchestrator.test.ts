@@ -409,7 +409,7 @@ test('worker reuses the same thread across continuation turns and only retries a
     assert.match(requests[1].prompt, /continuation turn 2 of 2/i);
     assert.match(requests[1].prompt, /do not end the turn while the issue stays active unless you are truly blocked/i);
     assert.equal(snapshot.retrying.length, 0);
-    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.counts.completed, 1);
     assert.equal(workspace.cleanedPaths.length, 1);
 });
 
@@ -499,8 +499,8 @@ test('completed run without committed workspace changes is retried and not count
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(snapshot.codex_totals.completed, 0);
-    assert.equal(snapshot.codex_totals.failed, 1);
+    assert.equal(snapshot.counts.completed, 0);
+    assert.equal(snapshot.counts.failed, 1);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].errorClass, 'workspace_no_committed_output');
     assert.equal(workspace.cleanedPaths.length, 0);
@@ -545,8 +545,8 @@ test('state transition out of commit-required states counts as success without l
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 0);
 });
@@ -619,8 +619,8 @@ test('successful publish turn moves issue to In Review and stops the active run'
             stateName: 'In Review',
         },
     ]);
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
     assert.deepEqual(workspace.cleanupCalls, [
@@ -719,8 +719,8 @@ test('successful Linear review handoff during a publish turn stops immediately a
 
     const snapshot = orchestrator.getSnapshot();
     assert.ok(stopCalls >= 1);
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
     assert.deepEqual(workspace.cleanupCalls, [
@@ -817,8 +817,8 @@ test('publish turn does not treat In Review as a successful handoff without push
 
     const snapshot = orchestrator.getSnapshot();
     assert.equal(stopCalls, 1);
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 0);
     assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
@@ -924,8 +924,8 @@ test('publish turn treats PR mutation evidence as a successful review handoff wi
 
     const snapshot = orchestrator.getSnapshot();
     assert.ok(stopCalls >= 1);
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.deepEqual(tracker.syncIssueWorkpadToStateCalls, [
         {
@@ -1024,8 +1024,8 @@ test('review handoff stays successful when workpad sync fails after moving to In
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.deepEqual(tracker.moveIssueToStateByNameCalls, [
         {
@@ -1163,8 +1163,8 @@ test('helper-repo publish handoff stops on the real workspace and cleans tempora
 
         const snapshot = orchestrator.getSnapshot();
         assert.ok(stopCalls >= 1);
-        assert.equal(snapshot.codex_totals.completed, 1);
-        assert.equal(snapshot.codex_totals.failed, 0);
+        assert.equal(snapshot.counts.completed, 1);
+        assert.equal(snapshot.counts.failed, 0);
         assert.equal(snapshot.retrying.length, 0);
         await assert.rejects(() => access(helperRepoPath));
 
@@ -1465,8 +1465,8 @@ test('non-commit merge states can continue without local commit output', async (
 
     const snapshot = orchestrator.getSnapshot();
     assert.deepEqual(attempts, [null]);
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].reason, 'continuation');
 });
@@ -1501,9 +1501,9 @@ test('turn_timeout preserves workspace for debugging and schedules a retry', asy
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(snapshot.codex_totals.completed, 0);
-    assert.equal(snapshot.codex_totals.failed, 1);
-    assert.equal(snapshot.codex_totals.turnTimeouts, 1);
+    assert.equal(snapshot.counts.completed, 0);
+    assert.equal(snapshot.counts.failed, 1);
+    assert.equal(snapshot.counts.turn_timeouts, 1);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(snapshot.retrying[0].errorClass, 'turn_timeout');
     assert.equal(workspace.cleanedPaths.length, 0);
@@ -1543,9 +1543,9 @@ test('turn_timeout in review state is not misclassified as a successful review h
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(snapshot.codex_totals.completed, 0);
-    assert.equal(snapshot.codex_totals.failed, 1);
-    assert.equal(snapshot.codex_totals.turnTimeouts, 1);
+    assert.equal(snapshot.counts.completed, 0);
+    assert.equal(snapshot.counts.failed, 1);
+    assert.equal(snapshot.counts.turn_timeouts, 1);
     assert.equal(snapshot.retrying.length, 1);
     assert.equal(workspace.cleanedPaths.length, 0);
 
@@ -1595,7 +1595,7 @@ test('approval_required preserves workspace and does not schedule a retry', asyn
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(snapshot.codex_totals.failed, 1);
+    assert.equal(snapshot.counts.failed, 1);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 0);
 });
@@ -1671,8 +1671,8 @@ test('retry queue uses continuation delay first and exponential backoff afterwar
     snapshot = orchestrator.getSnapshot();
     assert.deepEqual(attempts, [null, 1, 2]);
     assert.equal(snapshot.retrying.length, 0);
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 2);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 2);
 });
 
 test('first-turn repo diffs do not trigger a synthetic checkpoint retry', async () => {
@@ -1755,8 +1755,8 @@ test('first-turn repo diffs do not trigger a synthetic checkpoint retry', async 
     await orchestrator.shutdown();
 
     const snapshot = orchestrator.getSnapshot();
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.ok(
         !logRecords.some(
@@ -2090,8 +2090,8 @@ test('reconciliation stops a running issue that moved to a terminal state and cl
 
     const snapshot = orchestrator.getSnapshot();
     assert.ok(stopCalls >= 1);
-    assert.equal(snapshot.codex_totals.completed, 0);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 0);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
 });
@@ -2170,8 +2170,8 @@ test('merge-triggered terminal reconciliation is treated as a successful complet
 
     const snapshot = orchestrator.getSnapshot();
     assert.ok(stopCalls >= 1);
-    assert.equal(snapshot.codex_totals.completed, 1);
-    assert.equal(snapshot.codex_totals.failed, 0);
+    assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.counts.failed, 0);
     assert.equal(snapshot.retrying.length, 0);
     assert.equal(workspace.cleanedPaths.length, 1);
 
@@ -2278,6 +2278,8 @@ test('running snapshot surfaces humanized activity and context headroom', async 
                     type: 'token_usage',
                     payload: {
                         total: {
+                            inputTokens: 121000,
+                            outputTokens: 72468,
                             totalTokens: 193468,
                         },
                         last: {
@@ -2306,6 +2308,9 @@ test('running snapshot surfaces humanized activity and context headroom', async 
     now += 42000;
 
     const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.generated_at, '2026-03-06T09:00:42.000Z');
+    assert.equal(snapshot.counts.running, 1);
+    assert.equal(snapshot.counts.retrying, 0);
     assert.equal(snapshot.running.length, 1);
     assert.equal(snapshot.running[0].issueIdentifier, 'ROB-13-TELEMETRY');
     assert.equal(snapshot.running[0].threadId, 'thread-ctx');
@@ -2318,6 +2323,10 @@ test('running snapshot surfaces humanized activity and context headroom', async 
     assert.equal(snapshot.running[0].contextWindowTokens, 258400);
     assert.equal(snapshot.running[0].contextHeadroomTokens, 64932);
     assert.equal(snapshot.running[0].contextUtilizationPercent, 74.9);
+    assert.equal(snapshot.codex_totals.input_tokens, 121000);
+    assert.equal(snapshot.codex_totals.output_tokens, 72468);
+    assert.equal(snapshot.codex_totals.total_tokens, 193468);
+    assert.equal(snapshot.codex_totals.seconds_running, 42);
     assert.ok(Array.isArray(snapshot.running[0].traceTail));
     assert.ok(snapshot.running[0].traceTail.some((entry) => entry.eventType === 'session/started'));
 
@@ -2350,6 +2359,90 @@ test('running snapshot surfaces humanized activity and context headroom', async 
     await orchestrator.shutdown();
 
     assert.equal(workspace.cleanedPaths.length, 1);
+});
+
+test('snapshot codex_totals uses the latest cumulative token update per run without double-counting', async () => {
+    const tracker = new TrackerStub();
+    const issue = createIssue({
+        id: 'snapshot-double-count-1',
+        identifier: 'ROB-13-SNAPSHOT-DOUBLE',
+        priority: 1,
+        createdAt: '2026-03-06T08:00:00.000Z',
+    });
+    tracker.candidates = [issue];
+
+    const workflowStore = new WorkflowStoreStub(createWorkflowConfig());
+    const workspace = new WorkspaceStub();
+    const firstDispatch = createDeferred<{
+        status: 'completed';
+        outputText: string;
+        threadId: string;
+        turnId: string;
+        sessionId: string;
+    }>();
+    let now = Date.parse('2026-03-06T09:30:00.000Z');
+
+    const orchestrator = new SymphonyOrchestrator({
+        logger: createLoggerStub([]),
+        workflowConfigStore: workflowStore,
+        trackerFactory: () => tracker,
+        workspaceFactory: () => workspace,
+        appServerFactory: ({emitEvent}) => ({
+            runTurn: async () => {
+                emitEvent({
+                    type: 'session',
+                    threadId: 'thread-double-count',
+                    turnId: 'turn-1',
+                    sessionId: 'thread-double-count-turn-1',
+                });
+                emitEvent({
+                    type: 'token_usage',
+                    payload: {
+                        total: {
+                            inputTokens: 100,
+                            outputTokens: 25,
+                            totalTokens: 125,
+                        },
+                    },
+                });
+                emitEvent({
+                    type: 'token_usage',
+                    payload: {
+                        total: {
+                            inputTokens: 320,
+                            outputTokens: 80,
+                            totalTokens: 400,
+                        },
+                    },
+                });
+
+                return firstDispatch.promise;
+            },
+            stop: async () => undefined,
+        }),
+        nowMs: () => now,
+    });
+
+    await orchestrator.runTick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    now += 11000;
+
+    const snapshot = orchestrator.getSnapshot();
+    assert.equal(snapshot.codex_totals.input_tokens, 320);
+    assert.equal(snapshot.codex_totals.output_tokens, 80);
+    assert.equal(snapshot.codex_totals.total_tokens, 400);
+    assert.equal(snapshot.codex_totals.seconds_running, 11);
+
+    tracker.statesByIssueId.set(issue.id, 'Done');
+    firstDispatch.resolve({
+        status: 'completed',
+        outputText: 'ok',
+        threadId: 'thread-double-count',
+        turnId: 'turn-1',
+        sessionId: 'thread-double-count-turn-1',
+    });
+    await orchestrator.shutdown();
 });
 
 test('issue details preserve terminal input_required payload for debugging after dispatch failure', async () => {
@@ -2491,7 +2584,7 @@ test('first-turn trace captures pre-edit command execution details without forci
 
     const snapshot = orchestrator.getSnapshot();
     assert.equal(snapshot.retrying.length, 0);
-    assert.equal(snapshot.codex_totals.completed, 1);
+    assert.equal(snapshot.counts.completed, 1);
 
     const issueDetails = orchestrator.getIssueDetails('ROB-13-COMMAND-TRACE');
     assert.ok(issueDetails);

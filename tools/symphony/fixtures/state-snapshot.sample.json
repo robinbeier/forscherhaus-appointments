@@ -1,16 +1,25 @@
 {
     "status": "ok",
     "snapshot": {
+        "generated_at": "2026-03-06T12:00:05.000Z",
         "lastTickAtIso": "2026-03-06T12:00:00.000Z",
+        "counts": {
+            "running": 0,
+            "retrying": 0,
+            "completed": 0,
+            "input_required": 0,
+            "failed": 0,
+            "response_timeouts": 0,
+            "turn_timeouts": 0,
+            "launch_failures": 0
+        },
         "running": [],
         "retrying": [],
         "codex_totals": {
-            "completed": 0,
-            "inputRequired": 0,
-            "failed": 0,
-            "responseTimeouts": 0,
-            "turnTimeouts": 0,
-            "launchFailures": 0
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "seconds_running": 0
         },
         "rate_limits": {
             "remaining": 100
