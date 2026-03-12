@@ -219,11 +219,12 @@ Key behavior:
   `workspaceWrite` turn sandbox rooted at the current issue workspace with
   `readOnlyAccess=fullAccess`, `networkAccess=false`, and default tmp flags
 - structured issue logs include `issue_id`, `issue_identifier`, `session_id`
-- runtime snapshot model includes `generated_at`, `counts`, `running`,
-  `retrying`, aggregate `codex_totals` (`input_tokens`, `output_tokens`,
-  `total_tokens`, `seconds_running`), `rate_limits`, plus per-runner runtime
-  seconds, idle seconds, last humanized activity, and context-window
-  headroom derived from token updates
+- runtime snapshot model includes `generated_at`, `last_tick_at`, `counts`,
+  `running`, `retrying`, aggregate `totals` (`runtime_seconds`,
+  `input_tokens`, `output_tokens`, `total_tokens`), `rate_limits`, plus
+  per-runner runtime seconds, idle seconds, last humanized activity, and
+  context-window headroom derived from token updates; `/api/v1/state` keeps
+  legacy aliases such as `lastTickAtIso` and `codex_totals` during migration
 - optional state endpoints:
     - `GET /api/v1/state`
     - `GET /api/v1/<issue_identifier>`

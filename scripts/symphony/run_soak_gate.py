@@ -88,7 +88,7 @@ def main() -> int:
 
     first_counts: dict[str, int] | None = None
     last_counts: dict[str, int] | None = None
-    max_codex_totals: dict[str, int] = {}
+    max_totals_observed: dict[str, int] = {}
 
     sample_path = Path(args.sample_file) if args.sample_file else None
     if sample_path and not sample_path.is_file():
@@ -111,13 +111,13 @@ def main() -> int:
         running = snapshot.get("running", [])
         retrying = snapshot.get("retrying", [])
         counts = snapshot.get("counts", {})
-        codex_totals = snapshot.get("codex_totals", {})
+        totals = snapshot.get("totals", snapshot.get("codex_totals", {}))
 
         if (
             not isinstance(running, list)
             or not isinstance(retrying, list)
             or not isinstance(counts, dict)
-            or not isinstance(codex_totals, dict)
+            or not isinstance(totals, dict)
         ):
             findings.append("invalid_snapshot_shape")
             break
@@ -129,7 +129,7 @@ def main() -> int:
         running_ids = []
         for entry in running:
             if isinstance(entry, dict):
-                issue_identifier = str(entry.get("issueIdentifier") or "").strip()
+                issue_identifier = str(entry.get("issue_identifier") or entry.get("issueIdentifier") or "").strip()
                 if issue_identifier:
                     running_ids.append(issue_identifier)
 
@@ -150,9 +150,11 @@ def main() -> int:
         if first_counts is None:
             first_counts = {k: int(v) for k, v in counts.items() if isinstance(v, int)}
         last_counts = {k: int(v) for k, v in counts.items() if isinstance(v, int)}
-        current_codex_totals = {k: int(v) for k, v in codex_totals.items() if isinstance(v, int)}
-        for key, value in current_codex_totals.items():
-            max_codex_totals[key] = max(max_codex_totals.get(key, 0), value)
+        current_totals = {k: int(v) for k, v in totals.items() if isinstance(v, int)}
+        if "runtime_seconds" in current_totals and "seconds_running" not in current_totals:
+            current_totals["seconds_running"] = current_totals["runtime_seconds"]
+        for key, value in current_totals.items():
+            max_totals_observed[key] = max(max_totals_observed.get(key, 0), value)
 
         samples.append(
             {
@@ -160,7 +162,8 @@ def main() -> int:
                 "runningCount": len(running),
                 "retryingCount": len(retrying),
                 "counts": last_counts,
-                "codexTotals": current_codex_totals,
+                "totals": current_totals,
+                "codexTotals": current_totals,
             }
         )
 
@@ -203,7 +206,8 @@ def main() -> int:
             "maxRetrying": stats.max_retrying,
             "stuckDetected": stats.stuck_detected,
             "countsDelta": counts_delta,
-            "maxCodexTotalsObserved": max_codex_totals,
+            "maxTotalsObserved": max_totals_observed,
+            "maxCodexTotalsObserved": max_totals_observed,
         },
         "findings": findings,
         "samples": samples,

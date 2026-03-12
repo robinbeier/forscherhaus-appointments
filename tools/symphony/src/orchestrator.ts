@@ -206,8 +206,77 @@ class OrchestratorGuardrailError extends Error {
     }
 }
 
+interface OrchestratorSnapshotTotals {
+    runtime_seconds: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+}
+
+interface LegacyCodexTotals {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    seconds_running: number;
+}
+
+interface OrchestratorSnapshotRunningEntry {
+    issue_id: string;
+    issue_identifier: string;
+    attempt: number | null;
+    source: DispatchSource;
+    started_at: string;
+    runtime_seconds: number;
+    last_activity_at: string;
+    idle_seconds: number;
+    suppress_retry: boolean;
+    session_id: string | null;
+    thread_id: string | null;
+    turn_count: number;
+    last_event: string | null;
+    last_activity: string | null;
+    total_tokens: number | null;
+    last_turn_tokens: number | null;
+    context_window_tokens: number | null;
+    context_headroom_tokens: number | null;
+    context_utilization_percent: number | null;
+    trace_tail: TraceEntry[];
+    issueId?: string;
+    issueIdentifier?: string;
+    startedAtIso?: string;
+    runtimeSeconds?: number;
+    lastActivityAtIso?: string;
+    idleSeconds?: number;
+    suppressRetry?: boolean;
+    sessionId?: string | null;
+    threadId?: string | null;
+    turnCount?: number;
+    lastEvent?: string | null;
+    lastActivity?: string | null;
+    totalTokens?: number | null;
+    lastTurnTokens?: number | null;
+    contextWindowTokens?: number | null;
+    contextHeadroomTokens?: number | null;
+    contextUtilizationPercent?: number | null;
+    traceTail?: TraceEntry[];
+}
+
+interface OrchestratorSnapshotRetryEntry {
+    issue_id: string;
+    issue_identifier: string;
+    attempt: number;
+    reason: RetryReason;
+    available_at: string;
+    error_class?: string;
+    issueId?: string;
+    issueIdentifier?: string;
+    availableAtIso?: string;
+    errorClass?: string;
+}
+
 export interface OrchestratorSnapshot {
     generated_at: string;
+    last_tick_at?: string;
     lastTickAtIso?: string;
     counts: {
         running: number;
@@ -219,42 +288,10 @@ export interface OrchestratorSnapshot {
         turn_timeouts: number;
         launch_failures: number;
     };
-    running: Array<{
-        issueId: string;
-        issueIdentifier: string;
-        attempt: number | null;
-        source: DispatchSource;
-        startedAtIso: string;
-        runtimeSeconds: number;
-        lastActivityAtIso: string;
-        idleSeconds: number;
-        suppressRetry: boolean;
-        sessionId: string | null;
-        threadId: string | null;
-        turnCount: number;
-        lastEvent: string | null;
-        lastActivity: string | null;
-        totalTokens: number | null;
-        lastTurnTokens: number | null;
-        contextWindowTokens: number | null;
-        contextHeadroomTokens: number | null;
-        contextUtilizationPercent: number | null;
-        traceTail: TraceEntry[];
-    }>;
-    retrying: Array<{
-        issueId: string;
-        issueIdentifier: string;
-        attempt: number;
-        reason: RetryReason;
-        availableAtIso: string;
-        errorClass?: string;
-    }>;
-    codex_totals: {
-        input_tokens: number;
-        output_tokens: number;
-        total_tokens: number;
-        seconds_running: number;
-    };
+    running: OrchestratorSnapshotRunningEntry[];
+    retrying: OrchestratorSnapshotRetryEntry[];
+    totals: OrchestratorSnapshotTotals;
+    codex_totals: LegacyCodexTotals;
     rate_limits: Record<string, unknown>;
 }
 
@@ -1647,15 +1684,33 @@ export class SymphonyOrchestrator {
                     entry,
                     activity,
                     snapshotEntry: {
-                        issueId: entry.issue.id,
-                        issueIdentifier: entry.issue.identifier,
+                        issue_id: entry.issue.id,
+                        issue_identifier: entry.issue.identifier,
                         attempt: entry.attempt,
                         source: entry.source,
+                        started_at: activity.startedAtIso,
+                        runtime_seconds: activity.runtimeSeconds,
+                        last_activity_at: activity.lastActivityAtIso,
+                        idle_seconds: activity.idleSeconds,
+                        suppress_retry: entry.suppressRetry,
+                        suppressRetry: entry.suppressRetry,
+                        session_id: entry.sessionId ?? null,
+                        thread_id: entry.threadId ?? null,
+                        turn_count: entry.turnCount,
+                        last_event: entry.lastEventType ?? null,
+                        last_activity: entry.lastEventMessage ?? null,
+                        total_tokens: activity.tokenUsage?.totalTokens ?? null,
+                        last_turn_tokens: activity.tokenUsage?.lastTurnTokens ?? null,
+                        context_window_tokens: activity.tokenUsage?.contextWindowTokens ?? null,
+                        context_headroom_tokens: activity.tokenUsage?.contextHeadroomTokens ?? null,
+                        context_utilization_percent: activity.tokenUsage?.contextUtilizationPercent ?? null,
+                        trace_tail: entry.traceEntries.slice(-SNAPSHOT_TRACE_TAIL_ENTRIES),
+                        issueId: entry.issue.id,
+                        issueIdentifier: entry.issue.identifier,
                         startedAtIso: activity.startedAtIso,
                         runtimeSeconds: activity.runtimeSeconds,
                         lastActivityAtIso: activity.lastActivityAtIso,
                         idleSeconds: activity.idleSeconds,
-                        suppressRetry: entry.suppressRetry,
                         sessionId: entry.sessionId ?? null,
                         threadId: entry.threadId ?? null,
                         turnCount: entry.turnCount,
@@ -1671,38 +1726,43 @@ export class SymphonyOrchestrator {
                 };
             })
             .sort((left, right) =>
-                left.snapshotEntry.issueIdentifier.localeCompare(right.snapshotEntry.issueIdentifier),
+                left.snapshotEntry.issue_identifier.localeCompare(right.snapshotEntry.issue_identifier),
             );
         const running = runningEntriesWithActivity.map((item) => item.snapshotEntry);
         const retrying = Array.from(this.retryByIssueId.values())
             .map((entry) => ({
-                issueId: entry.issue.id,
-                issueIdentifier: entry.issue.identifier,
+                issue_id: entry.issue.id,
+                issue_identifier: entry.issue.identifier,
                 attempt: entry.attempt,
                 reason: entry.reason,
+                available_at: new Date(entry.availableAtMs).toISOString(),
+                error_class: entry.errorClass,
+                issueId: entry.issue.id,
+                issueIdentifier: entry.issue.identifier,
                 availableAtIso: new Date(entry.availableAtMs).toISOString(),
                 errorClass: entry.errorClass,
             }))
-            .sort((left, right) => left.availableAtIso.localeCompare(right.availableAtIso));
-        const codexTotals = runningEntriesWithActivity.reduce(
+            .sort((left, right) => left.available_at.localeCompare(right.available_at));
+        const totals = runningEntriesWithActivity.reduce(
             (aggregate, item) => {
                 const tokenUsage = item.activity.tokenUsage;
                 aggregate.input_tokens += Math.max(0, tokenUsage?.inputTokens ?? 0);
                 aggregate.output_tokens += Math.max(0, tokenUsage?.outputTokens ?? 0);
                 aggregate.total_tokens += Math.max(0, tokenUsage?.totalTokens ?? 0);
-                aggregate.seconds_running += Math.max(0, item.activity.runtimeSeconds);
+                aggregate.runtime_seconds += Math.max(0, item.activity.runtimeSeconds);
                 return aggregate;
             },
             {
+                runtime_seconds: 0,
                 input_tokens: 0,
                 output_tokens: 0,
                 total_tokens: 0,
-                seconds_running: 0,
             },
         );
 
         return {
             generated_at: snapshotGeneratedAt,
+            last_tick_at: this.lastTickAtIso,
             lastTickAtIso: this.lastTickAtIso,
             counts: {
                 running: running.length,
@@ -1716,7 +1776,13 @@ export class SymphonyOrchestrator {
             },
             running,
             retrying,
-            codex_totals: codexTotals,
+            totals,
+            codex_totals: {
+                input_tokens: totals.input_tokens,
+                output_tokens: totals.output_tokens,
+                total_tokens: totals.total_tokens,
+                seconds_running: totals.runtime_seconds,
+            },
             rate_limits: {...this.lastRateLimits},
         };
     }

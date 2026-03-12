@@ -26,6 +26,7 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
         port: 0,
         getSnapshot: () => ({
             generated_at: '2026-03-06T11:00:42.000Z',
+            last_tick_at: '2026-03-06T11:00:00.000Z',
             lastTickAtIso: '2026-03-06T11:00:00.000Z',
             counts: {
                 running: 1,
@@ -39,25 +40,50 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
             },
             running: [
                 {
+                    issue_id: 'issue-1',
+                    issue_identifier: 'ROB-42',
                     issueId: 'issue-1',
                     issueIdentifier: 'ROB-42',
                     attempt: null,
                     source: 'candidate',
+                    started_at: '2026-03-06T11:00:00.000Z',
                     startedAtIso: '2026-03-06T11:00:00.000Z',
+                    runtime_seconds: 42,
                     runtimeSeconds: 42,
+                    last_activity_at: '2026-03-06T11:00:30.000Z',
                     lastActivityAtIso: '2026-03-06T11:00:30.000Z',
+                    idle_seconds: 12,
                     idleSeconds: 12,
+                    suppress_retry: false,
                     suppressRetry: false,
+                    session_id: 'thread-1-turn-1',
                     sessionId: 'thread-1-turn-1',
+                    thread_id: 'thread-1',
                     threadId: 'thread-1',
+                    turn_count: 0,
                     turnCount: 0,
+                    last_event: 'item/agentMessage/delta',
                     lastEvent: 'item/agentMessage/delta',
+                    last_activity: 'Codex is streaming a response.',
                     lastActivity: 'Codex is streaming a response.',
+                    total_tokens: 193468,
                     totalTokens: 193468,
+                    last_turn_tokens: 1440,
                     lastTurnTokens: 1440,
+                    context_window_tokens: 258400,
                     contextWindowTokens: 258400,
+                    context_headroom_tokens: 64932,
                     contextHeadroomTokens: 64932,
+                    context_utilization_percent: 74.9,
                     contextUtilizationPercent: 74.9,
+                    trace_tail: [
+                        {
+                            atIso: '2026-03-06T11:00:20.000Z',
+                            category: 'runtime',
+                            eventType: 'session/started',
+                            message: 'Session started.',
+                        },
+                    ],
                     traceTail: [
                         {
                             atIso: '2026-03-06T11:00:20.000Z',
@@ -69,6 +95,12 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
                 },
             ],
             retrying: [],
+            totals: {
+                runtime_seconds: 42,
+                input_tokens: 121000,
+                output_tokens: 72468,
+                total_tokens: 193468,
+            },
             codex_totals: {
                 input_tokens: 121000,
                 output_tokens: 72468,
@@ -95,13 +127,24 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
     assert.ok(payload.snapshot);
     const snapshot = payload.snapshot as {
         generated_at: string;
+        last_tick_at: string;
         counts: {
             completed: number;
+        };
+        totals: {
+            total_tokens: number;
+            runtime_seconds: number;
         };
         codex_totals: {
             total_tokens: number;
         };
         running: Array<{
+            issue_identifier: string;
+            last_activity: string;
+            context_headroom_tokens: number;
+            trace_tail: Array<{
+                eventType: string;
+            }>;
             issueIdentifier: string;
             lastActivity: string;
             contextHeadroomTokens: number;
@@ -111,8 +154,15 @@ test('state server exposes GET /api/v1/state snapshot payload', async () => {
         }>;
     };
     assert.equal(snapshot.generated_at, '2026-03-06T11:00:42.000Z');
+    assert.equal(snapshot.last_tick_at, '2026-03-06T11:00:00.000Z');
     assert.equal(snapshot.counts.completed, 1);
+    assert.equal(snapshot.totals.total_tokens, 193468);
+    assert.equal(snapshot.totals.runtime_seconds, 42);
     assert.equal(snapshot.codex_totals.total_tokens, 193468);
+    assert.equal(snapshot.running[0]?.issue_identifier, 'ROB-42');
+    assert.equal(snapshot.running[0]?.last_activity, 'Codex is streaming a response.');
+    assert.equal(snapshot.running[0]?.context_headroom_tokens, 64932);
+    assert.equal(snapshot.running[0]?.trace_tail[0]?.eventType, 'session/started');
     assert.equal(snapshot.running[0]?.issueIdentifier, 'ROB-42');
     assert.equal(snapshot.running[0]?.lastActivity, 'Codex is streaming a response.');
     assert.equal(snapshot.running[0]?.contextHeadroomTokens, 64932);
@@ -130,6 +180,7 @@ test('state server handles POST /api/v1/refresh asynchronously', async () => {
         port: 0,
         getSnapshot: () => ({
             generated_at: '2026-03-06T11:00:00.000Z',
+            last_tick_at: '2026-03-06T11:00:00.000Z',
             counts: {
                 running: 0,
                 retrying: 0,
@@ -142,6 +193,12 @@ test('state server handles POST /api/v1/refresh asynchronously', async () => {
             },
             running: [],
             retrying: [],
+            totals: {
+                runtime_seconds: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+            },
             codex_totals: {
                 input_tokens: 0,
                 output_tokens: 0,
@@ -179,6 +236,7 @@ test('state server returns 404 for unknown routes and no-op when disabled', asyn
         port: 0,
         getSnapshot: () => ({
             generated_at: '2026-03-06T11:00:00.000Z',
+            last_tick_at: '2026-03-06T11:00:00.000Z',
             counts: {
                 running: 0,
                 retrying: 0,
@@ -191,6 +249,12 @@ test('state server returns 404 for unknown routes and no-op when disabled', asyn
             },
             running: [],
             retrying: [],
+            totals: {
+                runtime_seconds: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+            },
             codex_totals: {
                 input_tokens: 0,
                 output_tokens: 0,
@@ -218,6 +282,7 @@ test('state server returns 404 for unknown routes and no-op when disabled', asyn
         port: 8787,
         getSnapshot: () => ({
             generated_at: '2026-03-06T11:00:00.000Z',
+            last_tick_at: '2026-03-06T11:00:00.000Z',
             counts: {
                 running: 0,
                 retrying: 0,
@@ -230,6 +295,12 @@ test('state server returns 404 for unknown routes and no-op when disabled', asyn
             },
             running: [],
             retrying: [],
+            totals: {
+                runtime_seconds: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+            },
             codex_totals: {
                 input_tokens: 0,
                 output_tokens: 0,
@@ -255,6 +326,7 @@ test('state server exposes GET /api/v1/<issue_identifier> issue debug payload an
         port: 0,
         getSnapshot: () => ({
             generated_at: '2026-03-06T11:00:00.000Z',
+            last_tick_at: '2026-03-06T11:00:00.000Z',
             counts: {
                 running: 0,
                 retrying: 0,
@@ -267,6 +339,12 @@ test('state server exposes GET /api/v1/<issue_identifier> issue debug payload an
             },
             running: [],
             retrying: [],
+            totals: {
+                runtime_seconds: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+            },
             codex_totals: {
                 input_tokens: 0,
                 output_tokens: 0,
