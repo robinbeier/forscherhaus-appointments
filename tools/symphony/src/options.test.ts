@@ -7,6 +7,7 @@ import {resolveWorkflowPath} from './workflow.js';
 test('parseCliOptions parses --check', () => {
     const options = parseCliOptions(['--check']);
     assert.equal(options.checkOnly, true);
+    assert.equal(options.tui, false);
 });
 
 test('parseCliOptions parses --workflow value', () => {
@@ -33,6 +34,12 @@ test('parseCliOptions parses --port value', () => {
 test('parseCliOptions parses --port=value', () => {
     const options = parseCliOptions(['--port=9797']);
     assert.equal(options.stateApiPort, 9797);
+});
+
+test('parseCliOptions parses --tui', () => {
+    const options = parseCliOptions(['--tui', '--check']);
+    assert.equal(options.tui, true);
+    assert.equal(options.checkOnly, true);
 });
 
 test('parseCliOptions rejects invalid --port values', () => {

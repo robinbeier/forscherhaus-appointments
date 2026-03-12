@@ -2,12 +2,14 @@ import type {Logger} from './logger.js';
 import type {OrchestratorSnapshot} from './orchestrator.js';
 import {SymphonyOrchestrator} from './orchestrator.js';
 import {SymphonyStateServer} from './state-server.js';
+import {SymphonyStateTui} from './state-tui.js';
 import type {LoadedWorkflowConfig, WorkflowConfigStore} from './workflow.js';
 
 interface SymphonyServiceArgs {
     logger: Logger;
     workflowConfigStore: WorkflowConfigStore;
     cliStateApiPort?: number;
+    cliEnableTui?: boolean;
 }
 
 const MIN_POLL_INTERVAL_MS = 1000;
@@ -108,8 +110,10 @@ export class SymphonyService {
     private readonly workflowConfigStore: WorkflowConfigStore;
     private readonly orchestrator: SymphonyOrchestrator;
     private readonly cliStateApiPort?: number;
+    private readonly cliEnableTui: boolean;
     private readonly stateApiConfig: ResolvedStateApiConfig;
     private readonly stateServer: SymphonyStateServer;
+    private readonly stateTui?: SymphonyStateTui;
     private running = false;
     private pollTimer?: NodeJS.Timeout;
     private pollInFlight?: Promise<void>;
@@ -119,6 +123,7 @@ export class SymphonyService {
         this.logger = args.logger;
         this.workflowConfigStore = args.workflowConfigStore;
         this.cliStateApiPort = args.cliStateApiPort;
+        this.cliEnableTui = args.cliEnableTui ?? false;
         this.orchestrator = new SymphonyOrchestrator({
             logger: args.logger,
             workflowConfigStore: args.workflowConfigStore,
@@ -140,6 +145,10 @@ export class SymphonyService {
             getIssueDetails: (issueIdentifier) => this.orchestrator.getIssueDetails(issueIdentifier),
             refresh: async () => this.refreshNow(),
         });
+
+        if (this.cliEnableTui) {
+            this.stateTui = new SymphonyStateTui();
+        }
     }
 
     public async start(): Promise<void> {
@@ -165,6 +174,7 @@ export class SymphonyService {
         }
 
         await this.orchestrator.runStartupCleanup();
+        this.stateTui?.start(this.orchestrator.getSnapshot(), this.buildTuiOptions(currentConfig));
         this.scheduleNextTick(0);
     }
 
@@ -192,6 +202,8 @@ export class SymphonyService {
             const message = error instanceof Error ? error.message : String(error);
             this.logger.error('State API failed to stop cleanly.', {error: message});
         }
+
+        this.stateTui?.stop();
 
         this.logger.info('Symphony service stopped', {reason});
     }
@@ -243,6 +255,7 @@ export class SymphonyService {
             runningCount: snapshot.running.length,
             retryCount: snapshot.retrying.length,
         });
+        this.stateTui?.render(snapshot, this.buildTuiOptions(reloadedConfig));
 
         this.scheduleNextTick(sanitizePollInterval(reloadedConfig.polling.intervalMs));
     }
@@ -272,5 +285,21 @@ export class SymphonyService {
             current: this.stateApiConfig,
             requested: reloadedStateApiConfig,
         });
+    }
+
+    private buildTuiOptions(workflowConfig: LoadedWorkflowConfig): {
+        dashboardUrl?: string;
+        nextRefreshSeconds?: number;
+        projectSlug?: string;
+    } {
+        const stateApiUrl = this.stateApiConfig.enabled
+            ? `http://${this.stateApiConfig.host}:${this.stateApiConfig.port}/`
+            : undefined;
+
+        return {
+            dashboardUrl: stateApiUrl,
+            nextRefreshSeconds: sanitizePollInterval(workflowConfig.polling.intervalMs) / 1000,
+            projectSlug: workflowConfig.tracker.projectSlug,
+        };
     }
 }
