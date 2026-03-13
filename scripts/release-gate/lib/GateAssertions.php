@@ -223,21 +223,34 @@ final class GateAssertions
                 );
             }
 
-            $expectedRatio =
+            $expectedRatios =
                 $isTargetFallback === true
-                    ? $after15Slots / $totalOfferedSlots
-                    : min($after15Slots / $slotsRequired, 1.0);
-            if (abs($after15Ratio - $expectedRatio) > 0.0001) {
+                    ? [$after15Slots / $totalOfferedSlots, min($after15Slots / $slotsRequired, 1.0)]
+                    : [min($after15Slots / $slotsRequired, 1.0)];
+
+            $matchesExpectedRatio = false;
+            foreach ($expectedRatios as $expectedRatio) {
+                if (abs($after15Ratio - $expectedRatio) <= 0.0001) {
+                    $matchesExpectedRatio = true;
+                    break;
+                }
+            }
+
+            if (!$matchesExpectedRatio) {
                 throw new GateAssertionException(
                     sprintf(
-                        '%s.after_15_ratio mismatch: expected %.6f, got %.6f.',
+                        '%s.after_15_ratio mismatch: expected one of [%s], got %.6f.',
                         $context,
-                        $expectedRatio,
+                        implode(
+                            ', ',
+                            array_map(static fn(float $ratio): string => sprintf('%.6f', $ratio), $expectedRatios),
+                        ),
                         $after15Ratio,
                     ),
                 );
             }
 
+            $expectedRatio = $after15Ratio;
             $expectedPercent = round($expectedRatio * 100, 1);
             if (abs($after15Percent - $expectedPercent) > 0.0001) {
                 throw new GateAssertionException(

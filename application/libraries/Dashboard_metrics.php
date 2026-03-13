@@ -164,6 +164,11 @@ class Dashboard_metrics
 
             $booked_for_metrics = $this->resolveBookedMetric($summary, $booked_count, $is_fallback);
             $after_15_metrics = $this->calculateAfter15Metrics($provider, $start, $end, $service_id);
+            $normalize_after_15_to_required = $this->shouldNormalizeAfter15MetricsToRequired(
+                $provider,
+                $service_id,
+                $is_fallback,
+            );
 
             $metrics[] = $this->formatRow(
                 $provider,
@@ -174,6 +179,7 @@ class Dashboard_metrics
                 $is_fallback,
                 $class_size_default,
                 $after_15_metrics,
+                $normalize_after_15_to_required,
             );
         }
 
@@ -471,6 +477,97 @@ class Dashboard_metrics
         return $service;
     }
 
+    protected function shouldNormalizeAfter15MetricsToRequired(
+        array $provider,
+        ?int $selected_service_id,
+        bool $is_fallback,
+    ): bool {
+        if (!$is_fallback) {
+            return true;
+        }
+
+        $service = $this->resolveDashboardService($provider, $selected_service_id);
+
+        if (!$service) {
+            return false;
+        }
+
+        return $this->determineProviderSlotSize($provider) === $this->determineServiceSlotSize($service);
+    }
+
+    protected function determineProviderSlotSize(array $provider): int
+    {
+        $durations = [];
+
+        foreach (array_map('intval', $provider['services'] ?? []) as $service_id) {
+            $service = $this->getServiceById($service_id);
+
+            if (!$service) {
+                continue;
+            }
+
+            foreach ($this->extractServiceSlotDurations($service) as $duration) {
+                $durations[] = $duration;
+            }
+        }
+
+        return $this->determineSlotSizeFromDurations($durations);
+    }
+
+    protected function determineServiceSlotSize(array $service): int
+    {
+        return $this->determineSlotSizeFromDurations($this->extractServiceSlotDurations($service));
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    protected function extractServiceSlotDurations(array $service): array
+    {
+        $durations = [];
+        $duration = (int) ($service['duration'] ?? 0);
+
+        if ($duration > 0) {
+            $durations[] = $duration;
+        }
+
+        if (($service['availabilities_type'] ?? null) === AVAILABILITIES_TYPE_FLEXIBLE) {
+            $durations[] = 15;
+        }
+
+        return $durations;
+    }
+
+    /**
+     * @param array<int, int> $durations
+     */
+    protected function determineSlotSizeFromDurations(array $durations): int
+    {
+        if (empty($durations)) {
+            return 15;
+        }
+
+        $slot_size = abs((int) array_shift($durations));
+
+        foreach ($durations as $duration) {
+            $slot_size = $this->greatestCommonDivisor($slot_size, (int) $duration);
+        }
+
+        return max(1, $slot_size);
+    }
+
+    protected function greatestCommonDivisor(int $left, int $right): int
+    {
+        $left = abs($left);
+        $right = abs($right);
+
+        if ($right === 0) {
+            return $left;
+        }
+
+        return $this->greatestCommonDivisor($right, $left % $right);
+    }
+
     protected function buildNeutralAfter15Metrics(): array
     {
         return [
@@ -512,13 +609,18 @@ class Dashboard_metrics
         bool $is_fallback,
         ?int $class_size_default,
         array $after_15_metrics,
+        bool $normalize_after_15_to_required,
     ): array {
         $open = $target > 0 ? max($target - $booked, 0) : 0;
         $fill_rate = $this->computeFillRate($booked, $target);
         $needs_attention = $target > 0 && $fill_rate < $threshold;
         $has_explicit_target = $class_size_default !== null;
         $slots_required = $this->resolveRequiredSlots($target, $class_size_default);
-        $after_15_metrics = $this->normalizeAfter15Metrics($after_15_metrics, $slots_required, $has_explicit_target);
+        $after_15_metrics = $this->normalizeAfter15Metrics(
+            $after_15_metrics,
+            $slots_required,
+            $normalize_after_15_to_required,
+        );
         $slots_planned = $this->resolvePlannedSlots($after_15_metrics);
         $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
         $has_plan = (bool) ($summary['has_plan'] ?? false);
