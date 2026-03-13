@@ -51,7 +51,9 @@ bash ./scripts/ci/pre_pr_quick.sh
 - With host PHP and Docker PDF renderer, set `PDF_RENDERER_URL=http://localhost:3003`.
 - Use a unique Docker Compose project name per worktree.
 - Prefer `docker compose run --rm php-fpm composer deptrac:analyze` over host `composer deptrac:analyze`.
+- For Symphony pilot readiness, run `bash ./scripts/ci/run_symphony_pilot_checks.sh`; append `--with-full-gate` only when you also need the repo-wide pre-PR baseline.
 - `./scripts/setup-worktree.sh` installs managed hooks; refresh with `./scripts/install-git-hooks.sh` (or replace older custom hooks with `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh`).
+- `bash ./scripts/ci/pre_pr_full.sh` enables LDAP guardrails only when LDAP/runtime paths changed; override explicitly via `PRE_PR_INCLUDE_LDAP_GUARDRAIL=1` or `0`.
 - For deterministic LDAP fixtures, run `bash ./scripts/ldap/reset_directory.sh` and `bash ./scripts/ldap/smoke.sh`.
 
 ## Validation Expectations
