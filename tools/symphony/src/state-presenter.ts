@@ -87,6 +87,38 @@ export interface PresentedStateSnapshot {
     rateLimits: PresentedRateLimitEntry[];
 }
 
+let integerFormatter: Intl.NumberFormat | undefined;
+const decimalFormatters = new Map<number, Intl.NumberFormat>();
+
+function getIntegerFormatter(): Intl.NumberFormat {
+    if (!integerFormatter) {
+        integerFormatter = new Intl.NumberFormat('en-US');
+    }
+
+    return integerFormatter;
+}
+
+function getDecimalFormatter(maximumFractionDigits: number): Intl.NumberFormat {
+    const cached = decimalFormatters.get(maximumFractionDigits);
+    if (cached) {
+        return cached;
+    }
+
+    const formatter = new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits,
+    });
+    decimalFormatters.set(maximumFractionDigits, formatter);
+
+    return formatter;
+}
+
+export function resetNumberFormattersForTests(): void {
+    // Test hook: keep formatter cache deterministic across assertions.
+    integerFormatter = undefined;
+    decimalFormatters.clear();
+}
+
 function asFiniteNumber(value: number | null | undefined): number | null {
     if (value === null || value === undefined || !Number.isFinite(value)) {
         return null;
@@ -101,7 +133,7 @@ export function formatInteger(value: number | null | undefined): string {
         return 'n/a';
     }
 
-    return new Intl.NumberFormat('en-US').format(Math.floor(normalized));
+    return getIntegerFormatter().format(Math.floor(normalized));
 }
 
 export function formatDecimal(value: number | null | undefined, maximumFractionDigits = 1): string {
@@ -110,10 +142,7 @@ export function formatDecimal(value: number | null | undefined, maximumFractionD
         return 'n/a';
     }
 
-    return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits,
-    }).format(normalized);
+    return getDecimalFormatter(maximumFractionDigits).format(normalized);
 }
 
 export function formatPercent(value: number | null | undefined): string {

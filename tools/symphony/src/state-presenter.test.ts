@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {OrchestratorSnapshot} from './orchestrator.js';
-import {presentStateSnapshot} from './state-presenter.js';
+import {presentStateSnapshot, resetNumberFormattersForTests} from './state-presenter.js';
 
 function createSnapshot(overrides: Partial<OrchestratorSnapshot> = {}): OrchestratorSnapshot {
     return {
@@ -254,4 +254,89 @@ test('presentStateSnapshot applies stable fallbacks for missing or non-finite va
         {key: 'details', value: '{"window":"60s"}'},
         {key: 'non_serializable', value: 'n/a'},
     ]);
+});
+
+test('presentStateSnapshot reuses number formatters across repeated renders', {concurrency: false}, () => {
+    resetNumberFormattersForTests();
+
+    const originalNumberFormat = Intl.NumberFormat;
+    let constructorCalls = 0;
+
+    class CountingNumberFormat extends originalNumberFormat {
+        public constructor(...args: ConstructorParameters<typeof Intl.NumberFormat>) {
+            super(...args);
+            constructorCalls++;
+        }
+    }
+
+    Object.defineProperty(Intl, 'NumberFormat', {
+        configurable: true,
+        writable: true,
+        value: CountingNumberFormat,
+    });
+
+    try {
+        const snapshot = createSnapshot({
+            counts: {
+                running: 2,
+                retrying: 1,
+                completed: 4,
+                input_required: 0,
+                failed: 0,
+                response_timeouts: 0,
+                turn_timeouts: 0,
+                launch_failures: 0,
+            },
+            totals: {
+                runtime_seconds: 2048,
+                input_tokens: 150000,
+                output_tokens: 75000,
+                total_tokens: 225000,
+            },
+            running: [
+                {
+                    issue_id: 'issue-a',
+                    issue_identifier: 'ROB-157',
+                    attempt: null,
+                    source: 'candidate',
+                    started_at: '2026-03-06T11:00:00.000Z',
+                    runtime_seconds: 300,
+                    last_activity_at: '2026-03-06T11:04:00.000Z',
+                    idle_seconds: 5,
+                    suppress_retry: false,
+                    session_id: 'thread-a',
+                    thread_id: 'thread-a',
+                    turn_count: 3,
+                    last_event: 'item/agentMessage/delta',
+                    last_activity: 'Streaming update.',
+                    total_tokens: 50000,
+                    last_turn_tokens: 1000,
+                    context_window_tokens: 258400,
+                    context_headroom_tokens: 100000,
+                    context_utilization_percent: 61.3,
+                    trace_tail: [],
+                },
+            ],
+            rate_limits: {
+                burst_fraction: 0.125,
+            },
+        });
+
+        for (let index = 0; index < 100; index += 1) {
+            presentStateSnapshot(snapshot);
+        }
+    } finally {
+        Object.defineProperty(Intl, 'NumberFormat', {
+            configurable: true,
+            writable: true,
+            value: originalNumberFormat,
+        });
+        resetNumberFormattersForTests();
+    }
+
+    assert.equal(
+        constructorCalls,
+        3,
+        'Expected formatter cache to construct exactly integer, decimal(1), and decimal(2) formatters.',
+    );
 });
