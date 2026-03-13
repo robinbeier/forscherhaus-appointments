@@ -253,6 +253,61 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame($controller->callResolveCapacityGapLabel(), $overview['capacity_gap_label']);
     }
 
+    public function testBuildSummaryTracksFallbackTargetAndThresholdCounters(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $summary = $controller->callBuildSummary(
+            [
+                [
+                    'target' => 10,
+                    'booked' => 6,
+                    'open' => 4,
+                    'needs_attention' => true,
+                    'is_target_fallback' => true,
+                    'has_explicit_target' => false,
+                    'has_plan' => true,
+                ],
+                [
+                    'target' => 8,
+                    'booked' => 8,
+                    'open' => 0,
+                    'needs_attention' => false,
+                    'is_target_fallback' => false,
+                    'has_explicit_target' => true,
+                    'has_plan' => true,
+                ],
+                [
+                    'target' => 0,
+                    'booked' => 0,
+                    'open' => 0,
+                    'needs_attention' => false,
+                    'is_target_fallback' => false,
+                    'has_explicit_target' => false,
+                    'has_plan' => false,
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertSame(3, $summary['provider_count']);
+        $this->assertSame(18, $summary['target_total']);
+        $this->assertSame('18', $summary['target_total_formatted']);
+        $this->assertSame(14, $summary['booked_total']);
+        $this->assertSame('14', $summary['booked_total_formatted']);
+        $this->assertSame(4, $summary['open_total']);
+        $this->assertSame('4', $summary['open_total_formatted']);
+        $this->assertSame(1, $summary['attention_count']);
+        $this->assertSame(1, $summary['fallback_count']);
+        $this->assertSame(1, $summary['explicit_target_count']);
+        $this->assertSame(2, $summary['without_target_count']);
+        $this->assertSame(2, $summary['with_plan_count']);
+        $this->assertSame(3, $summary['missing_to_threshold_total']);
+        $this->assertSame('3', $summary['missing_to_threshold_total_formatted']);
+        $this->assertSame(1, $summary['providers_below_threshold']);
+        $this->assertEqualsWithDelta(14 / 18, $summary['fill_rate'], 0.0001);
+    }
+
     public function testSortPrincipalMetricsForReportPrioritizesSharedStatusReasonsAndSeverity(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -422,6 +477,44 @@ class DashboardExportControllerTest extends TestCase
         $this->assertTrue($mapped[0]['after_15_evaluable']);
     }
 
+    public function testMapMetricsForViewLabelsFallbackTargetOrigin(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapMetricsForView(
+            [
+                [
+                    'provider_id' => 42,
+                    'provider_name' => 'Fallback Teacher',
+                    'target' => 12,
+                    'booked' => 9,
+                    'open' => 3,
+                    'fill_rate' => 0.75,
+                    'has_plan' => true,
+                    'has_explicit_target' => false,
+                    'is_target_fallback' => true,
+                ],
+                [
+                    'provider_id' => 43,
+                    'provider_name' => 'Explicit Teacher',
+                    'target' => 12,
+                    'booked' => 12,
+                    'open' => 0,
+                    'fill_rate' => 1.0,
+                    'has_plan' => true,
+                    'has_explicit_target' => true,
+                    'is_target_fallback' => false,
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertTrue($mapped[0]['is_target_fallback']);
+        $this->assertSame('Automatische Zielgröße', $mapped[0]['target_origin_label']);
+        $this->assertFalse($mapped[1]['is_target_fallback']);
+        $this->assertSame('Klassengröße', $mapped[1]['target_origin_label']);
+    }
+
     private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
     {
         return new class ($configuredThreshold, $pdfDebugDumpFlag) extends Dashboard_export {
@@ -458,6 +551,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildPdfStreamOptions(string $debugDumpPath): array
             {
                 return $this->buildPdfStreamOptions($debugDumpPath);
+            }
+
+            public function callBuildSummary(array $metrics, float $threshold): array
+            {
+                return $this->buildSummary($metrics, $threshold);
             }
 
             public function callMapMetricsForView(array $metrics, float $threshold): array
