@@ -379,7 +379,7 @@ class Dashboard_metrics
         $day = $start;
 
         try {
-            $offered_hours_by_date = $this->booking_slot_analytics->get_offered_hours_by_date_for_analysis(
+            $offered_hours_by_date = $this->booking_slot_analytics->get_planned_hours_by_date_for_analysis(
                 $start->format('Y-m-d'),
                 $end->format('Y-m-d'),
                 $service,
@@ -517,6 +517,7 @@ class Dashboard_metrics
         $fill_rate = $this->computeFillRate($booked, $target);
         $needs_attention = $target > 0 && $fill_rate < $threshold;
         $slots_required = $this->resolveRequiredSlots($target, $class_size_default);
+        $after_15_metrics = $this->normalizeAfter15Metrics($after_15_metrics, $slots_required);
         $slots_planned = $this->resolvePlannedSlots($after_15_metrics);
         $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
         $has_plan = (bool) ($summary['has_plan'] ?? false);
@@ -559,6 +560,29 @@ class Dashboard_metrics
         ];
     }
 
+    protected function normalizeAfter15Metrics(array $after_15_metrics, int $slots_required): array
+    {
+        $after_15_evaluable = (bool) ($after_15_metrics['after_15_evaluable'] ?? false);
+
+        if (!$after_15_evaluable || $slots_required <= 0) {
+            return $after_15_metrics;
+        }
+
+        $after_15_slots = $after_15_metrics['after_15_slots'] ?? null;
+
+        if (!is_numeric($after_15_slots)) {
+            return $after_15_metrics;
+        }
+
+        $after_15_ratio = min(((float) $after_15_slots) / $slots_required, 1.0);
+
+        $after_15_metrics['after_15_ratio'] = $after_15_ratio;
+        $after_15_metrics['after_15_percent'] = round($after_15_ratio * 100, 1);
+        $after_15_metrics['after_15_target_met'] = $after_15_ratio >= self::AFTER_15_TARGET_RATIO;
+
+        return $after_15_metrics;
+    }
+
     /**
      * Build the ordered status reasons shared by dashboard consumers.
      */
@@ -594,7 +618,7 @@ class Dashboard_metrics
     }
 
     /**
-     * Use the same booking-offered slot count that backs the after-15 KPI.
+     * Use the same planned-slot count that backs the after-15 KPI.
      */
     protected function resolvePlannedSlots(array $after_15_metrics): ?int
     {

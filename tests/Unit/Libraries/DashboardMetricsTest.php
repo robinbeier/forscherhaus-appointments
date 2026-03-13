@@ -89,7 +89,7 @@ class DashboardMetricsTest extends TestCase
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
             ->expects($this->exactly(2))
-            ->method('get_offered_hours_by_date_for_analysis')
+            ->method('get_planned_hours_by_date_for_analysis')
             ->willReturnCallback(function (
                 string $startDate,
                 string $endDate,
@@ -130,8 +130,8 @@ class DashboardMetricsTest extends TestCase
         $this->assertTrue($metricsByProvider[10]['after_15_evaluable']);
         $this->assertSame(29, $metricsByProvider[10]['after_15_slots']);
         $this->assertSame(58, $metricsByProvider[10]['total_offered_slots']);
-        $this->assertSame(0.5, $metricsByProvider[10]['after_15_ratio']);
-        $this->assertSame(50.0, $metricsByProvider[10]['after_15_percent']);
+        $this->assertSame(1.0, $metricsByProvider[10]['after_15_ratio']);
+        $this->assertSame(100.0, $metricsByProvider[10]['after_15_percent']);
         $this->assertTrue($metricsByProvider[10]['after_15_target_met']);
         $this->assertSame(
             [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED],
@@ -189,7 +189,7 @@ class DashboardMetricsTest extends TestCase
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
             ->expects($this->once())
-            ->method('get_offered_hours_by_date_for_analysis')
+            ->method('get_planned_hours_by_date_for_analysis')
             ->willReturnCallback(function (string $startDate, string $endDate, array $service, array $provider) use (
                 $selectedService,
                 $providers,
@@ -224,12 +224,16 @@ class DashboardMetricsTest extends TestCase
         $this->assertTrue($metrics[0]['has_capacity_gap']);
         $this->assertSame(2, $metrics[0]['after_15_slots']);
         $this->assertSame(5, $metrics[0]['total_offered_slots']);
-        $this->assertEqualsWithDelta(0.4, $metrics[0]['after_15_ratio'], 0.0001);
-        $this->assertSame(40.0, $metrics[0]['after_15_percent']);
-        $this->assertTrue($metrics[0]['after_15_target_met']);
+        $this->assertEqualsWithDelta(2 / 22, $metrics[0]['after_15_ratio'], 0.0001);
+        $this->assertSame(9.1, $metrics[0]['after_15_percent']);
+        $this->assertFalse($metrics[0]['after_15_target_met']);
         $this->assertTrue($metrics[0]['after_15_evaluable']);
         $this->assertSame(
-            [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED, Dashboard_metrics::STATUS_REASON_CAPACITY_GAP],
+            [
+                Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED,
+                Dashboard_metrics::STATUS_REASON_AFTER_15_GOAL_MISSED,
+                Dashboard_metrics::STATUS_REASON_CAPACITY_GAP,
+            ],
             $metrics[0]['status_reasons'],
         );
     }
@@ -283,7 +287,7 @@ class DashboardMetricsTest extends TestCase
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
             ->expects($this->once())
-            ->method('get_offered_hours_by_date_for_analysis')
+            ->method('get_planned_hours_by_date_for_analysis')
             ->willReturn(['2024-04-15' => ['09:00', '10:00', '11:00', '12:00']]);
 
         $library = new Dashboard_metrics(
@@ -347,7 +351,7 @@ class DashboardMetricsTest extends TestCase
 
         /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
-        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_by_date_for_analysis');
+        $bookingSlotAnalytics->expects($this->never())->method('get_planned_hours_by_date_for_analysis');
 
         $library = new Dashboard_metrics(
             $providersModel,
@@ -415,7 +419,7 @@ class DashboardMetricsTest extends TestCase
 
         /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
-        $bookingSlotAnalytics->expects($this->never())->method('get_offered_hours_by_date_for_analysis');
+        $bookingSlotAnalytics->expects($this->never())->method('get_planned_hours_by_date_for_analysis');
 
         $library = new Dashboard_metrics(
             $providersModel,
@@ -490,7 +494,7 @@ class DashboardMetricsTest extends TestCase
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
             ->expects($this->once())
-            ->method('get_offered_hours_by_date_for_analysis')
+            ->method('get_planned_hours_by_date_for_analysis')
             ->willReturn([
                 '2024-04-15' => [],
                 '2024-04-16' => [],
@@ -590,7 +594,7 @@ class DashboardMetricsTest extends TestCase
         $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
         $bookingSlotAnalytics
             ->expects($this->exactly(2))
-            ->method('get_offered_hours_by_date_for_analysis')
+            ->method('get_planned_hours_by_date_for_analysis')
             ->willReturnCallback(static function (
                 string $startDate,
                 string $endDate,
@@ -631,10 +635,14 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(2, $metricsByProvider[10]['total_offered_slots']);
         $this->assertSame(2, $metricsByProvider[10]['slots_planned']);
         $this->assertTrue($metricsByProvider[10]['has_capacity_gap']);
-        $this->assertSame(50.0, $metricsByProvider[10]['after_15_percent']);
+        $this->assertSame(4.5, $metricsByProvider[10]['after_15_percent']);
         $this->assertTrue($metricsByProvider[10]['after_15_evaluable']);
         $this->assertSame(
-            [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED, Dashboard_metrics::STATUS_REASON_CAPACITY_GAP],
+            [
+                Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED,
+                Dashboard_metrics::STATUS_REASON_AFTER_15_GOAL_MISSED,
+                Dashboard_metrics::STATUS_REASON_CAPACITY_GAP,
+            ],
             $metricsByProvider[10]['status_reasons'],
         );
 
@@ -649,6 +657,140 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(
             [Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED],
             $metricsByProvider[11]['status_reasons'],
+        );
+    }
+
+    public function testCollectUsesPlannedSlotsForAfter15ThresholdDecisions(): void
+    {
+        $providers = [
+            [
+                'id' => 10,
+                'first_name' => 'Adina',
+                'last_name' => 'Rossmeisl',
+                'email' => 'adina@example.org',
+                'services' => [1],
+                'class_size_default' => 19,
+            ],
+            [
+                'id' => 11,
+                'first_name' => 'Christopher',
+                'last_name' => 'Fink',
+                'email' => 'christopher@example.org',
+                'services' => [1],
+                'class_size_default' => 13,
+            ],
+            [
+                'id' => 12,
+                'first_name' => 'Rebecca',
+                'last_name' => 'Schleupner',
+                'email' => 'rebecca@example.org',
+                'services' => [1],
+                'class_size_default' => 16,
+            ],
+        ];
+        $service = $this->makeService(1);
+
+        /** @var Providers_model&MockObject $providersModel */
+        $providersModel = $this->createMock(Providers_model::class);
+        $providersModel->expects($this->once())->method('get_available_providers')->with(false)->willReturn($providers);
+
+        /** @var Provider_utilization&MockObject $providerUtilization */
+        $providerUtilization = $this->createMock(Provider_utilization::class);
+        $providerUtilization
+            ->expects($this->exactly(3))
+            ->method('calculate')
+            ->willReturnOnConsecutiveCalls(
+                ['total' => 19, 'booked' => 19, 'has_plan' => true],
+                ['total' => 13, 'booked' => 13, 'has_plan' => true],
+                ['total' => 16, 'booked' => 16, 'has_plan' => true],
+            );
+
+        /** @var CI_DB_query_builder&MockObject $builder */
+        $builder = $this->createMock(CI_DB_query_builder::class);
+        $builder->method('select')->willReturnSelf();
+        $builder->method('where')->willReturnSelf();
+        $builder->method('where_in')->willReturnSelf();
+        $builder->method('group_by')->willReturnSelf();
+        $builder
+            ->method('get')
+            ->willReturn(
+                $this->createCountResult([
+                    ['id_users_provider' => 10, 'aggregate' => 19],
+                    ['id_users_provider' => 11, 'aggregate' => 13],
+                    ['id_users_provider' => 12, 'aggregate' => 16],
+                ]),
+            );
+
+        /** @var Appointments_model&MockObject $appointmentsModel */
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->expects($this->once())->method('query')->willReturn($builder);
+
+        /** @var Services_model&MockObject $servicesModel */
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel
+            ->expects($this->once())
+            ->method('get')
+            ->with(['id' => 1], 1)
+            ->willReturn([$service]);
+
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
+        $bookingSlotAnalytics
+            ->expects($this->exactly(3))
+            ->method('get_planned_hours_by_date_for_analysis')
+            ->willReturnCallback(function (
+                string $startDate,
+                string $endDate,
+                array $resolvedService,
+                array $provider,
+            ) use ($service): array {
+                TestCase::assertSame('2024-04-15', $startDate);
+                TestCase::assertSame('2024-04-15', $endDate);
+                TestCase::assertSame($service, $resolvedService);
+
+                return match ((int) $provider['id']) {
+                    10 => ['2024-04-15' => $this->buildThresholdHours(14, 7)],
+                    11 => ['2024-04-15' => $this->buildThresholdHours(10, 5)],
+                    12 => ['2024-04-15' => $this->buildThresholdHours(14, 4)],
+                };
+            });
+
+        $library = new Dashboard_metrics(
+            $providersModel,
+            $appointmentsModel,
+            $providerUtilization,
+            $servicesModel,
+            $bookingSlotAnalytics,
+        );
+
+        $metrics = $library->collect(new \DateTimeImmutable('2024-04-15'), new \DateTimeImmutable('2024-04-15'), [
+            'statuses' => ['Booked'],
+        ]);
+
+        $metricsByProvider = [];
+        foreach ($metrics as $metric) {
+            $metricsByProvider[(int) $metric['provider_id']] = $metric;
+        }
+
+        $this->assertSame(33.3, $metricsByProvider[10]['after_15_percent']);
+        $this->assertTrue($metricsByProvider[10]['after_15_target_met']);
+        $this->assertNotContains(
+            Dashboard_metrics::STATUS_REASON_AFTER_15_GOAL_MISSED,
+            $metricsByProvider[10]['status_reasons'],
+        );
+
+        $this->assertSame(33.3, $metricsByProvider[11]['after_15_percent']);
+        $this->assertTrue($metricsByProvider[11]['after_15_target_met']);
+        $this->assertNotContains(
+            Dashboard_metrics::STATUS_REASON_AFTER_15_GOAL_MISSED,
+            $metricsByProvider[11]['status_reasons'],
+        );
+
+        $this->assertSame(22.2, $metricsByProvider[12]['after_15_percent']);
+        $this->assertFalse($metricsByProvider[12]['after_15_target_met']);
+        $this->assertContains(
+            Dashboard_metrics::STATUS_REASON_AFTER_15_GOAL_MISSED,
+            $metricsByProvider[12]['status_reasons'],
         );
     }
 
@@ -688,5 +830,13 @@ class DashboardMetricsTest extends TestCase
         }
 
         return $map;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function buildThresholdHours(int $before15Slots, int $after15Slots): array
+    {
+        return array_merge(array_fill(0, $before15Slots, '09:00'), array_fill(0, $after15Slots, '15:00'));
     }
 }

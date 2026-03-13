@@ -176,6 +176,7 @@ final class GateAssertions
             $context . '.after_15_percent',
         );
         $after15TargetMet = self::normalizeOptionalBool($row['after_15_target_met'], $context . '.after_15_target_met');
+        $slotsRequired = self::toNonNegativeInt($row['slots_required'] ?? 0, $context . '.slots_required');
 
         if ($after15Evaluable) {
             if (
@@ -212,7 +213,13 @@ final class GateAssertions
                 );
             }
 
-            $expectedRatio = $after15Slots / $totalOfferedSlots;
+            if ($slotsRequired <= 0) {
+                throw new GateAssertionException(
+                    $context . '.slots_required must be > 0 when after_15_evaluable is true.',
+                );
+            }
+
+            $expectedRatio = min($after15Slots / $slotsRequired, 1.0);
             if (abs($after15Ratio - $expectedRatio) > 0.0001) {
                 throw new GateAssertionException(
                     sprintf(

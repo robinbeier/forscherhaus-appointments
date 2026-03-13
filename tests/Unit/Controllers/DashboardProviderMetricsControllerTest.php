@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Tests\TestCase;
 
 require_once APPPATH . 'controllers/Dashboard.php';
+require_once APPPATH . 'models/Providers_model.php';
 require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
 class DashboardProviderMetricsControllerTest extends TestCase
