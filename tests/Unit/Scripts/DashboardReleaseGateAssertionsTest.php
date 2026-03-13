@@ -70,6 +70,68 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         GateAssertions::assertMetricsPayload($payload, false);
     }
 
+    public function testAssertMetricsPayloadAcceptsFallbackAfter15RatiosBasedOnPlannedSlots(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 23,
+                'provider_name' => 'Alan Turing',
+                'target' => 8,
+                'booked' => 4,
+                'open' => 4,
+                'fill_rate' => 0.5,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 5,
+                'slots_required' => 8,
+                'has_capacity_gap' => true,
+                'is_target_fallback' => true,
+                'after_15_slots' => 2,
+                'total_offered_slots' => 5,
+                'after_15_ratio' => 0.4,
+                'after_15_percent' => 40.0,
+                'after_15_target_met' => true,
+                'after_15_evaluable' => true,
+            ],
+        ];
+
+        $summary = GateAssertions::assertMetricsPayload($payload, true);
+
+        $this->assertSame(1, $summary['providers']);
+        $this->assertSame(4, $summary['booked_total']);
+    }
+
+    public function testAssertMetricsPayloadAcceptsFallbackAfter15RatiosBasedOnRequiredSlots(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 24,
+                'provider_name' => 'Donald Knuth',
+                'target' => 8,
+                'booked' => 4,
+                'open' => 4,
+                'fill_rate' => 0.5,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 5,
+                'slots_required' => 8,
+                'has_capacity_gap' => true,
+                'is_target_fallback' => true,
+                'after_15_slots' => 2,
+                'total_offered_slots' => 5,
+                'after_15_ratio' => 2 / 8,
+                'after_15_percent' => 25.0,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
+            ],
+        ];
+
+        $summary = GateAssertions::assertMetricsPayload($payload, true);
+
+        $this->assertSame(1, $summary['providers']);
+        $this->assertSame(4, $summary['booked_total']);
+    }
+
     public function testAssertMetricsPayloadRejectsCapacityGapMismatch(): void
     {
         $payload = [
