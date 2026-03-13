@@ -149,18 +149,11 @@ class Booking_slot_analytics
         $blocked_periods = $this->get_blocked_periods_for_analysis_range($range_start, $range_end);
         $appointments_by_date = $this->index_events_by_date($appointments, $range_start, $range_end);
         $blocked_periods_by_date = $this->index_events_by_date($blocked_periods, $range_start, $range_end);
-        $entirely_blocked_dates = $this->index_entirely_blocked_dates($blocked_periods_by_date);
         $offered_hours_by_date = [];
         $day = $range_start;
 
         while ($day <= $range_end) {
             $date = $day->format('Y-m-d');
-
-            if (isset($entirely_blocked_dates[$date])) {
-                $offered_hours_by_date[$date] = [];
-                $day = $day->add(new DateInterval('P1D'));
-                continue;
-            }
 
             $available_periods = $this->get_available_periods_from_events(
                 $date,
@@ -176,6 +169,63 @@ class Booking_slot_analytics
         }
 
         return $offered_hours_by_date;
+    }
+
+    /**
+     * Get planned hours for each date in a selected range without subtracting booked appointments.
+     *
+     * @param string $start_date Range start date (Y-m-d).
+     * @param string $end_date Range end date (Y-m-d).
+     * @param array $service Service data.
+     * @param array $provider Provider data.
+     * @param int|null $exclude_appointment_id Exclude an appointment from the availability generation.
+     *
+     * @return array<string, array<int, string>>
+     *
+     * @throws Exception
+     */
+    public function get_planned_hours_by_date_for_analysis(
+        string $start_date,
+        string $end_date,
+        array $service,
+        array $provider,
+        ?int $exclude_appointment_id = null,
+    ): array {
+        $range_start = new DateTimeImmutable($start_date);
+        $range_end = new DateTimeImmutable($end_date);
+
+        if ($range_end < $range_start) {
+            return [];
+        }
+
+        $unavailabilities = $this->get_provider_unavailabilities_for_period(
+            (int) ($provider['id'] ?? 0),
+            $start_date,
+            $end_date,
+            $exclude_appointment_id,
+        );
+        $blocked_periods = $this->get_blocked_periods_for_analysis_range($range_start, $range_end);
+        $unavailabilities_by_date = $this->index_events_by_date($unavailabilities, $range_start, $range_end);
+        $blocked_periods_by_date = $this->index_events_by_date($blocked_periods, $range_start, $range_end);
+        $planned_hours_by_date = [];
+        $day = $range_start;
+
+        while ($day <= $range_end) {
+            $date = $day->format('Y-m-d');
+            $available_periods = $this->get_available_periods_from_events(
+                $date,
+                $provider,
+                $unavailabilities_by_date[$date] ?? [],
+                $blocked_periods_by_date[$date] ?? [],
+            );
+
+            $planned_hours_by_date[$date] = array_values(
+                $this->generate_available_hours($date, $service, $available_periods),
+            );
+            $day = $day->add(new DateInterval('P1D'));
+        }
+
+        return $planned_hours_by_date;
     }
 
     /**
@@ -453,67 +503,69 @@ class Booking_slot_analytics
             $date_working_plan = $working_plan_exceptions[$date];
         }
 
-        if (!$date_working_plan) {
+        if (
+            !$date_working_plan ||
+            !is_array($date_working_plan) ||
+            empty($date_working_plan['start']) ||
+            empty($date_working_plan['end'])
+        ) {
             return [];
         }
 
-        $periods = [];
-
-        if (isset($date_working_plan['breaks'])) {
-            $periods[] = [
+        $periods = [
+            [
                 'start' => $date_working_plan['start'],
                 'end' => $date_working_plan['end'],
-            ];
+            ],
+        ];
+        $day_start = new DateTime($date_working_plan['start']);
+        $day_end = new DateTime($date_working_plan['end']);
 
-            $day_start = new DateTime($date_working_plan['start']);
-            $day_end = new DateTime($date_working_plan['end']);
+        foreach ($date_working_plan['breaks'] ?? [] as $break) {
+            $break_start = new DateTime($break['start']);
+            $break_end = new DateTime($break['end']);
 
-            foreach ($date_working_plan['breaks'] as $break) {
-                $break_start = new DateTime($break['start']);
-                $break_end = new DateTime($break['end']);
+            if ($break_start < $day_start) {
+                $break_start = $day_start;
+            }
 
-                if ($break_start < $day_start) {
-                    $break_start = $day_start;
+            if ($break_end > $day_end) {
+                $break_end = $day_end;
+            }
+
+            if ($break_start >= $break_end) {
+                continue;
+            }
+
+            foreach ($periods as $key => $period) {
+                $period_start = new DateTime($period['start']);
+                $period_end = new DateTime($period['end']);
+                $remove_current_period = false;
+
+                if ($break_start > $period_start && $break_start < $period_end && $break_end > $period_start) {
+                    $periods[] = [
+                        'start' => $period_start->format('H:i'),
+                        'end' => $break_start->format('H:i'),
+                    ];
+
+                    $remove_current_period = true;
                 }
 
-                if ($break_end > $day_end) {
-                    $break_end = $day_end;
+                if ($break_start < $period_end && $break_end > $period_start && $break_end < $period_end) {
+                    $periods[] = [
+                        'start' => $break_end->format('H:i'),
+                        'end' => $period_end->format('H:i'),
+                    ];
+
+                    $remove_current_period = true;
                 }
 
-                if ($break_start >= $break_end) {
-                    continue;
+                if ($break_start == $period_start && $break_end == $period_end) {
+                    $remove_current_period = true;
                 }
 
-                foreach ($periods as $key => $period) {
-                    $period_start = new DateTime($period['start']);
-                    $period_end = new DateTime($period['end']);
-                    $remove_current_period = false;
-
-                    if ($break_start > $period_start && $break_start < $period_end && $break_end > $period_start) {
-                        $periods[] = [
-                            'start' => $period_start->format('H:i'),
-                            'end' => $break_start->format('H:i'),
-                        ];
-
-                        $remove_current_period = true;
-                    }
-
-                    if ($break_start < $period_end && $break_end > $period_start && $break_end < $period_end) {
-                        $periods[] = [
-                            'start' => $break_end->format('H:i'),
-                            'end' => $period_end->format('H:i'),
-                        ];
-
-                        $remove_current_period = true;
-                    }
-
-                    if ($break_start == $period_start && $break_end == $period_end) {
-                        $remove_current_period = true;
-                    }
-
-                    if ($remove_current_period) {
-                        unset($periods[$key]);
-                    }
+                if ($remove_current_period) {
+                    unset($periods[$key]);
                 }
             }
         }
@@ -709,26 +761,6 @@ class Booking_slot_analytics
         }
 
         return $events_by_date;
-    }
-
-    /**
-     * Mirror Blocked_periods_model::is_entire_date_blocked semantics without re-querying per day.
-     *
-     * @param array<string, array<int, array>> $blocked_periods_by_date
-     *
-     * @return array<string, true>
-     */
-    protected function index_entirely_blocked_dates(array $blocked_periods_by_date): array
-    {
-        $entirely_blocked_dates = [];
-
-        foreach ($blocked_periods_by_date as $date => $blocked_periods) {
-            if (count($blocked_periods) > 1) {
-                $entirely_blocked_dates[$date] = true;
-            }
-        }
-
-        return $entirely_blocked_dates;
     }
 
     /**
