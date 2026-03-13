@@ -516,12 +516,12 @@ class Dashboard_metrics
         $open = $target > 0 ? max($target - $booked, 0) : 0;
         $fill_rate = $this->computeFillRate($booked, $target);
         $needs_attention = $target > 0 && $fill_rate < $threshold;
+        $has_explicit_target = $class_size_default !== null;
         $slots_required = $this->resolveRequiredSlots($target, $class_size_default);
-        $after_15_metrics = $this->normalizeAfter15Metrics($after_15_metrics, $slots_required);
+        $after_15_metrics = $this->normalizeAfter15Metrics($after_15_metrics, $slots_required, $has_explicit_target);
         $slots_planned = $this->resolvePlannedSlots($after_15_metrics);
         $has_capacity_gap = $slots_planned !== null && $slots_required > 0 && $slots_planned < $slots_required;
         $has_plan = (bool) ($summary['has_plan'] ?? false);
-        $has_explicit_target = $class_size_default !== null;
         $status_reasons = $this->buildStatusReasons(
             $has_plan,
             $has_explicit_target,
@@ -560,11 +560,14 @@ class Dashboard_metrics
         ];
     }
 
-    protected function normalizeAfter15Metrics(array $after_15_metrics, int $slots_required): array
-    {
+    protected function normalizeAfter15Metrics(
+        array $after_15_metrics,
+        int $slots_required,
+        bool $normalize_to_required,
+    ): array {
         $after_15_evaluable = (bool) ($after_15_metrics['after_15_evaluable'] ?? false);
 
-        if (!$after_15_evaluable || $slots_required <= 0) {
+        if (!$after_15_evaluable || !$normalize_to_required || $slots_required <= 0) {
             return $after_15_metrics;
         }
 

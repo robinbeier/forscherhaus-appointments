@@ -238,6 +238,99 @@ class DashboardMetricsTest extends TestCase
         );
     }
 
+    public function testCollectKeepsServiceSpecificAfter15RatioForFallbackTargets(): void
+    {
+        $providers = [
+            [
+                'id' => 10,
+                'first_name' => 'Ada',
+                'last_name' => 'Lovelace',
+                'email' => 'ada@example.org',
+                'services' => [1, 5],
+            ],
+        ];
+        $selectedService = $this->makeService(5);
+
+        /** @var Providers_model&MockObject $providersModel */
+        $providersModel = $this->createMock(Providers_model::class);
+        $providersModel->method('get_available_providers')->with(false)->willReturn($providers);
+
+        /** @var Provider_utilization&MockObject $providerUtilization */
+        $providerUtilization = $this->createMock(Provider_utilization::class);
+        $providerUtilization
+            ->expects($this->once())
+            ->method('calculate')
+            ->with($providers[0], '2024-04-15', '2024-04-16', ['Booked'], 5)
+            ->willReturn(['total' => 8, 'booked' => 4, 'has_plan' => true]);
+
+        /** @var CI_DB_query_builder&MockObject $builder */
+        $builder = $this->createMock(CI_DB_query_builder::class);
+        $builder->method('select')->willReturnSelf();
+        $builder->method('where')->willReturnSelf();
+        $builder->method('where_in')->willReturnSelf();
+        $builder->method('group_by')->willReturnSelf();
+        $builder->method('get')->willReturn($this->createCountResult([['id_users_provider' => 10, 'aggregate' => 99]]));
+
+        /** @var Appointments_model&MockObject $appointmentsModel */
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->method('query')->willReturn($builder);
+
+        /** @var Services_model&MockObject $servicesModel */
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel
+            ->expects($this->once())
+            ->method('get')
+            ->with(['id' => 5], 1)
+            ->willReturn([$selectedService]);
+
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
+        $bookingSlotAnalytics
+            ->expects($this->once())
+            ->method('get_planned_hours_by_date_for_analysis')
+            ->willReturnCallback(function (string $startDate, string $endDate, array $service, array $provider) use (
+                $selectedService,
+                $providers,
+            ): array {
+                TestCase::assertSame('2024-04-15', $startDate);
+                TestCase::assertSame('2024-04-16', $endDate);
+                TestCase::assertSame($selectedService, $service);
+                TestCase::assertSame($providers[0], $provider);
+
+                return [
+                    '2024-04-15' => ['09:00', '10:00', '15:00'],
+                    '2024-04-16' => ['08:00', '15:30'],
+                ];
+            });
+
+        $library = new Dashboard_metrics(
+            $providersModel,
+            $appointmentsModel,
+            $providerUtilization,
+            $servicesModel,
+            $bookingSlotAnalytics,
+        );
+
+        $metrics = $library->collect(new \DateTimeImmutable('2024-04-15'), new \DateTimeImmutable('2024-04-16'), [
+            'statuses' => ['Booked'],
+            'service_id' => 5,
+        ]);
+
+        $this->assertCount(1, $metrics);
+        $this->assertSame(8, $metrics[0]['target']);
+        $this->assertTrue($metrics[0]['is_target_fallback']);
+        $this->assertSame(5, $metrics[0]['slots_planned']);
+        $this->assertSame(8, $metrics[0]['slots_required']);
+        $this->assertTrue($metrics[0]['has_capacity_gap']);
+        $this->assertSame(2, $metrics[0]['after_15_slots']);
+        $this->assertSame(5, $metrics[0]['total_offered_slots']);
+        $this->assertEqualsWithDelta(0.4, $metrics[0]['after_15_ratio'], 0.0001);
+        $this->assertSame(40.0, $metrics[0]['after_15_percent']);
+        $this->assertTrue($metrics[0]['after_15_target_met']);
+        $this->assertTrue($metrics[0]['after_15_evaluable']);
+        $this->assertSame([Dashboard_metrics::STATUS_REASON_CAPACITY_GAP], $metrics[0]['status_reasons']);
+    }
+
     public function testCollectCapsCapacityRequirementAtTwentyFiveForSmallClasses(): void
     {
         $providers = [
