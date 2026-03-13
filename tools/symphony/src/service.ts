@@ -23,6 +23,17 @@ export interface ResolvedStateApiConfig {
     source: 'disabled' | 'cli' | 'workflow' | 'env';
 }
 
+export function resolveTuiDashboardUrl(args: {
+    stateApiConfig: ResolvedStateApiConfig;
+    stateApiOnline: boolean;
+}): string | undefined {
+    if (!args.stateApiConfig.enabled || !args.stateApiOnline) {
+        return undefined;
+    }
+
+    return `http://${args.stateApiConfig.host}:${args.stateApiConfig.port}/`;
+}
+
 function sanitizePollInterval(intervalMs: number): number {
     if (!Number.isFinite(intervalMs)) {
         return MIN_POLL_INTERVAL_MS;
@@ -114,6 +125,7 @@ export class SymphonyService {
     private readonly stateApiConfig: ResolvedStateApiConfig;
     private readonly stateServer: SymphonyStateServer;
     private readonly stateTui?: SymphonyStateTui;
+    private stateApiOnline = false;
     private running = false;
     private pollTimer?: NodeJS.Timeout;
     private pollInFlight?: Promise<void>;
@@ -168,7 +180,9 @@ export class SymphonyService {
 
         try {
             await this.stateServer.start();
+            this.stateApiOnline = this.stateApiConfig.enabled;
         } catch (error) {
+            this.stateApiOnline = false;
             const message = error instanceof Error ? error.message : String(error);
             this.logger.error('State API failed to start. Continuing without state API.', {error: message});
         }
@@ -202,6 +216,7 @@ export class SymphonyService {
             const message = error instanceof Error ? error.message : String(error);
             this.logger.error('State API failed to stop cleanly.', {error: message});
         }
+        this.stateApiOnline = false;
 
         this.stateTui?.stop();
 
@@ -292,12 +307,11 @@ export class SymphonyService {
         nextRefreshSeconds?: number;
         projectSlug?: string;
     } {
-        const stateApiUrl = this.stateApiConfig.enabled
-            ? `http://${this.stateApiConfig.host}:${this.stateApiConfig.port}/`
-            : undefined;
-
         return {
-            dashboardUrl: stateApiUrl,
+            dashboardUrl: resolveTuiDashboardUrl({
+                stateApiConfig: this.stateApiConfig,
+                stateApiOnline: this.stateApiOnline,
+            }),
             nextRefreshSeconds: sanitizePollInterval(workflowConfig.polling.intervalMs) / 1000,
             projectSlug: workflowConfig.tracker.projectSlug,
         };

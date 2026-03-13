@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {resolveStateApiConfig} from './service.js';
+import {resolveStateApiConfig, resolveTuiDashboardUrl} from './service.js';
 import type {LoadedWorkflowConfig} from './workflow.js';
 
 function createWorkflowConfig(overrides?: Partial<LoadedWorkflowConfig>): LoadedWorkflowConfig {
@@ -182,4 +182,43 @@ test('resolveStateApiConfig stays disabled when neither CLI, workflow, nor env e
         port: 8787,
         source: 'disabled',
     });
+});
+
+test('resolveTuiDashboardUrl returns URL only when state API is enabled and online', () => {
+    assert.equal(
+        resolveTuiDashboardUrl({
+            stateApiConfig: {
+                enabled: true,
+                host: '127.0.0.1',
+                port: 8787,
+                source: 'workflow',
+            },
+            stateApiOnline: true,
+        }),
+        'http://127.0.0.1:8787/',
+    );
+    assert.equal(
+        resolveTuiDashboardUrl({
+            stateApiConfig: {
+                enabled: true,
+                host: '127.0.0.1',
+                port: 8787,
+                source: 'workflow',
+            },
+            stateApiOnline: false,
+        }),
+        undefined,
+    );
+    assert.equal(
+        resolveTuiDashboardUrl({
+            stateApiConfig: {
+                enabled: false,
+                host: '127.0.0.1',
+                port: 8787,
+                source: 'disabled',
+            },
+            stateApiOnline: true,
+        }),
+        undefined,
+    );
 });
