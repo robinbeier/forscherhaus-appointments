@@ -7,10 +7,12 @@ require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
 require_once __DIR__ . '/lib/OpenApiContractValidator.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
+require_once __DIR__ . '/lib/BookedSlotMatcher.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
+use CiContract\BookedSlotMatcher;
 use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
 use CiContract\DeterministicFixtureFactory;
@@ -787,31 +789,7 @@ function countBookedAppointmentsForSlot(
                 continue;
             }
 
-            $start = trim((string) ($appointment['start'] ?? ''));
-            $end = trim((string) ($appointment['end'] ?? ''));
-            $status = trim((string) ($appointment['status'] ?? ''));
-            $appointmentProviderId = resolveOptionalPositiveInt(
-                $appointment['providerId'] ?? ($appointment['id_users_provider'] ?? null),
-            );
-            $appointmentServiceId = resolveOptionalPositiveInt(
-                $appointment['serviceId'] ?? ($appointment['id_services'] ?? null),
-            );
-            $isUnavailabilityRaw = $appointment['isUnavailability'] ?? false;
-            $isUnavailability = $isUnavailabilityRaw === true || (int) $isUnavailabilityRaw === 1;
-
-            if ($start !== $startDateTime || $end !== $endDateTime) {
-                continue;
-            }
-
-            if ($appointmentProviderId !== $providerId || $appointmentServiceId !== $serviceId) {
-                continue;
-            }
-
-            if ($status !== 'Booked') {
-                continue;
-            }
-
-            if ($isUnavailability) {
+            if (!BookedSlotMatcher::matches($appointment, $providerId, $serviceId, $startDateTime)) {
                 continue;
             }
 
@@ -827,27 +805,6 @@ function countBookedAppointmentsForSlot(
 
     return $count;
 }
-
-function resolveOptionalPositiveInt(mixed $value): ?int
-{
-    if (is_int($value)) {
-        return $value > 0 ? $value : null;
-    }
-
-    if (!is_string($value)) {
-        return null;
-    }
-
-    $normalized = trim($value);
-    if ($normalized === '' || preg_match('/^\\d+$/', $normalized) !== 1) {
-        return null;
-    }
-
-    $parsed = (int) $normalized;
-
-    return $parsed > 0 ? $parsed : null;
-}
-
 /**
  * @param array<string, mixed> $config
  * @param int[] $expectedStatuses

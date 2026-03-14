@@ -49,7 +49,15 @@ class Privacy extends EA_Controller
                 throw new InvalidArgumentException('Invalid customer token value provided.');
             }
 
-            $customer_id = $this->cache->get('customer-token-' . $customer_token);
+            $cache = $this->customerTokenCache();
+
+            if (!is_object($cache) || !method_exists($cache, 'get')) {
+                throw new RuntimeException(
+                    'Customer token cache is unavailable, please reload the page and try again.',
+                );
+            }
+
+            $customer_id = $cache->get('customer-token-' . $customer_token);
 
             if (empty($customer_id)) {
                 throw new InvalidArgumentException(
@@ -89,5 +97,37 @@ class Privacy extends EA_Controller
         $this->auth_request_dto_factory = $CI->auth_request_dto_factory;
 
         return $this->auth_request_dto_factory;
+    }
+
+    private function customerTokenCache(): ?object
+    {
+        $CI = &get_instance();
+        $cache = $this->cache ?? ($CI->cache ?? null);
+
+        if (is_object($cache) && method_exists($cache, 'get')) {
+            $this->cache = $cache;
+
+            return $cache;
+        }
+
+        try {
+            $this->load->driver('cache', ['adapter' => 'file']);
+        } catch (Throwable $e) {
+            log_message('error', 'Privacy: cache bootstrap failed - ' . $e->getMessage());
+
+            return null;
+        }
+
+        $cache = $this->cache ?? ($CI->cache ?? null);
+
+        if (is_object($cache) && method_exists($cache, 'get')) {
+            $this->cache = $cache;
+
+            return $cache;
+        }
+
+        log_message('error', 'Privacy: cache driver did not expose get() after bootstrap.');
+
+        return null;
     }
 }

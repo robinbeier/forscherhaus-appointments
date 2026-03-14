@@ -19,8 +19,7 @@ final class DeterministicFixtureFactory
         private readonly string $runId,
         private readonly int $bookingSearchDays = 14,
         private readonly string $timezone = 'UTC',
-    ) {
-    }
+    ) {}
 
     public static function create(int $bookingSearchDays = 14): self
     {
@@ -368,9 +367,10 @@ final class DeterministicFixtureFactory
 
     private function markerEmail(string $marker): string
     {
-        $local = preg_replace('/[^a-z0-9]+/', '-', strtolower($marker)) ?: 'ci-write';
+        $normalized = preg_replace('/[^a-z0-9]+/', '-', strtolower($marker)) ?: 'ci-write';
+        $local = 'ci-' . substr(hash('sha256', $normalized), 0, 20);
 
-        return $local . '@example.test';
+        return $local . '@example.org';
     }
 
     private function nextMarker(string $prefix): string
@@ -398,17 +398,32 @@ final class DeterministicFixtureFactory
         int $serviceId,
         string $date,
     ): array {
-        $response = $client->post(
-            'booking/get_available_hours',
-            [
-                'provider_id' => $providerId,
-                'service_id' => $serviceId,
-                'selected_date' => $date,
-                'manage_mode' => 0,
-            ],
-            $httpTimeout,
-            true,
-        );
+        $maxAttempts = 3;
+        $response = null;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $response = $client->post(
+                'booking/get_available_hours',
+                [
+                    'provider_id' => $providerId,
+                    'service_id' => $serviceId,
+                    'selected_date' => $date,
+                    'manage_mode' => 0,
+                ],
+                $httpTimeout,
+                true,
+            );
+
+            if (!self::shouldRetryAvailableHoursStatus($response->statusCode, $attempt, $maxAttempts)) {
+                break;
+            }
+
+            usleep(500000);
+        }
+
+        if ($response === null) {
+            throw new GateAssertionException('POST /booking/get_available_hours did not produce a response.');
+        }
 
         GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking/get_available_hours');
         $decoded = GateAssertions::decodeJson($response->body, 'POST /booking/get_available_hours');
@@ -429,6 +444,11 @@ final class DeterministicFixtureFactory
         }
 
         return $hours;
+    }
+
+    private static function shouldRetryAvailableHoursStatus(int $statusCode, int $attempt, int $maxAttempts): bool
+    {
+        return $statusCode === 429 && $attempt < $maxAttempts;
     }
 
     private function toPositiveInt(mixed $value, string $context): int
