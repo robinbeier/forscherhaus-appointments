@@ -12,6 +12,29 @@
  * ---------------------------------------------------------------------------- */
 
 if (!function_exists('rate_limit')) {
+    function rate_limit_is_local_loopback_request(string $ip, ?string $host = null): bool
+    {
+        $normalizedIp = trim($ip);
+
+        if (!in_array($normalizedIp, ['127.0.0.1', '::1'], true)) {
+            return false;
+        }
+
+        $normalizedHost = strtolower(trim((string) $host));
+
+        if (in_array($normalizedHost, ['localhost', '127.0.0.1', '::1'], true)) {
+            return true;
+        }
+
+        if (preg_match('/^\[(.+)\](?::\d+)?$/', $normalizedHost, $matches) === 1) {
+            $normalizedHost = $matches[1];
+        } else {
+            $normalizedHost = preg_replace('/:\d+$/', '', $normalizedHost) ?? $normalizedHost;
+        }
+
+        return in_array($normalizedHost, ['localhost', '127.0.0.1', '::1'], true);
+    }
+
     /**
      * Rate-limit the application requests.
      *
@@ -32,7 +55,11 @@ if (!function_exists('rate_limit')) {
 
         $rate_limiting = $CI->config->item('rate_limiting');
 
-        if (!$rate_limiting || is_cli()) {
+        if (
+            !$rate_limiting ||
+            is_cli() ||
+            rate_limit_is_local_loopback_request($ip, $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? null))
+        ) {
             return;
         }
 

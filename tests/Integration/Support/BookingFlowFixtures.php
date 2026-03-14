@@ -119,7 +119,7 @@ class BookingFlowFixtures
             [
                 'first_name' => 'Booking',
                 'last_name' => 'Flow-' . $uniq,
-                'email' => 'booking-flow-' . $uniq . '@example.test',
+                'email' => 'booking-flow-' . $uniq . '@example.org',
                 'phone_number' => '',
                 'address' => '',
                 'city' => '',
@@ -189,10 +189,7 @@ class BookingFlowFixtures
 
     public function countAppointmentsByHash(string $hash): int
     {
-        return (int) $this->CI->db
-            ->from('appointments')
-            ->where('hash', $hash)
-            ->count_all_results();
+        return (int) $this->CI->db->from('appointments')->where('hash', $hash)->count_all_results();
     }
 
     public function customerExistsByEmail(string $email): bool
@@ -220,35 +217,25 @@ class BookingFlowFixtures
     public static function createNoopSynchronization(): object
     {
         return new class {
-            public function sync_appointment_saved(...$args): void
-            {
-            }
+            public function sync_appointment_saved(...$args): void {}
 
-            public function sync_appointment_deleted(...$args): void
-            {
-            }
+            public function sync_appointment_deleted(...$args): void {}
         };
     }
 
     public static function createNoopNotifications(): object
     {
         return new class {
-            public function notify_appointment_saved(...$args): void
-            {
-            }
+            public function notify_appointment_saved(...$args): void {}
 
-            public function notify_appointment_deleted(...$args): void
-            {
-            }
+            public function notify_appointment_deleted(...$args): void {}
         };
     }
 
     public static function createNoopWebhooksClient(): object
     {
         return new class {
-            public function trigger(...$args): void
-            {
-            }
+            public function trigger(...$args): void {}
         };
     }
 

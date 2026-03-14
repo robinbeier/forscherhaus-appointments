@@ -56,7 +56,7 @@ class BookingControllerFlowTest extends TestCase
     public function testRegisterSuccessCreatesAppointmentAndReturnsHash(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
-        $customerEmail = 'register-success-' . bin2hex(random_bytes(4)) . '@example.test';
+        $customerEmail = 'register-success-' . bin2hex(random_bytes(4)) . '@example.org';
         $startAt = new DateTimeImmutable('tomorrow 09:00:00');
         $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
 
@@ -107,7 +107,7 @@ class BookingControllerFlowTest extends TestCase
     public function testRegisterManageModeUpdatesExistingAppointment(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
-        $customerEmail = 'register-manage-' . bin2hex(random_bytes(4)) . '@example.test';
+        $customerEmail = 'register-manage-' . bin2hex(random_bytes(4)) . '@example.org';
 
         $customerId = $this->fixtures->createCustomer([
             'first_name' => 'Manage',
@@ -175,7 +175,7 @@ class BookingControllerFlowTest extends TestCase
     public function testRegisterReturnsErrorWhenDateTimeUnavailable(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
-        $customerEmail = 'register-unavailable-' . bin2hex(random_bytes(4)) . '@example.test';
+        $customerEmail = 'register-unavailable-' . bin2hex(random_bytes(4)) . '@example.org';
         $startAt = new DateTimeImmutable('tomorrow 10:00:00');
         $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
 
@@ -252,6 +252,29 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($customerId, (int) $customerData['id']);
     }
 
+    public function testRescheduleBootstrapsCacheWhenRateLimitBypassSkippedIt(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer();
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('+2 days 11:00:00'),
+        );
+
+        $appointment = $this->fixtures->findAppointmentById($appointmentId);
+        $this->assertNotNull($appointment);
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id'], false);
+        $controller->reschedule($appointment['hash']);
+
+        $this->assertTrue((bool) script_vars('manage_mode'));
+        $this->assertTrue((bool) html_vars('manage_mode'));
+        $this->assertIsString(script_vars('customer_token'));
+        $this->assertNotSame('', trim((string) script_vars('customer_token')));
+    }
+
     public function testRescheduleShowsLockedMessageWhenInsideAdvanceTimeout(): void
     {
         $this->fixtures->setSetting('book_advance_timeout', '120');
@@ -276,7 +299,7 @@ class BookingControllerFlowTest extends TestCase
         $this->assertStringContainsString('02:00', (string) html_vars('message_text'));
     }
 
-    private function createBookingControllerWithForcedAvailability(?int $providerId): Booking
+    private function createBookingControllerWithForcedAvailability(?int $providerId, bool $injectCache = true): Booking
     {
         $controller = new class ($providerId) extends Booking {
             private ?int $forcedProviderId;
@@ -292,7 +315,7 @@ class BookingControllerFlowTest extends TestCase
             }
         };
 
-        $this->wireBookingDependencies($controller);
+        $this->wireBookingDependencies($controller, $injectCache);
 
         $controller->synchronization = BookingFlowFixtures::createNoopSynchronization();
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
@@ -301,7 +324,7 @@ class BookingControllerFlowTest extends TestCase
         return $controller;
     }
 
-    private function wireBookingDependencies(Booking $controller): void
+    private function wireBookingDependencies(Booking $controller, bool $injectCache = true): void
     {
         $CI = &get_instance();
         $CI->load->model('appointments_model');
@@ -319,12 +342,14 @@ class BookingControllerFlowTest extends TestCase
         $controller->load = $CI->load;
         $controller->input = $CI->input;
         $controller->output = $CI->output;
-        $controller->cache = new class {
-            public function save(...$args): bool
-            {
-                return true;
-            }
-        };
+        if ($injectCache) {
+            $controller->cache = new class {
+                public function save(...$args): bool
+                {
+                    return true;
+                }
+            };
+        }
         $controller->appointments_model = $CI->appointments_model;
         $controller->providers_model = $CI->providers_model;
         $controller->admins_model = $CI->admins_model;

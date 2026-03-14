@@ -243,10 +243,7 @@ class Booking extends EA_Controller
             $appointment = $results[0];
             $provider = $this->providers_model->find($appointment['id_users_provider']);
             $customer = $this->customers_model->find($appointment['id_users_customer']);
-            $customer_token = md5(uniqid(mt_rand(), true));
-
-            // Cache the token for 10 minutes.
-            $this->cache->save('customer-token-' . $customer_token, $customer['id'], 600);
+            $customer_token = $this->createCustomerToken((int) $customer['id']);
         } else {
             $manage_mode = false;
             $customer_token = false;
@@ -476,6 +473,58 @@ class Booking extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function createCustomerToken(int $customer_id): string|bool
+    {
+        $customer_token = md5(uniqid(mt_rand(), true));
+        $cache = $this->customerTokenCache();
+
+        if (!is_object($cache) || !method_exists($cache, 'save')) {
+            log_message('error', 'Booking: customer token cache unavailable during reschedule flow.');
+
+            return false;
+        }
+
+        if (!$cache->save('customer-token-' . $customer_token, $customer_id, 600)) {
+            log_message('error', 'Booking: failed to persist customer token during reschedule flow.');
+
+            return false;
+        }
+
+        return $customer_token;
+    }
+
+    private function customerTokenCache(): ?object
+    {
+        $CI = &get_instance();
+        $cache = $this->cache ?? ($CI->cache ?? null);
+
+        if (is_object($cache) && method_exists($cache, 'save')) {
+            $this->cache = $cache;
+
+            return $cache;
+        }
+
+        try {
+            $this->load->driver('cache', ['adapter' => 'file']);
+        } catch (Throwable $e) {
+            log_message('error', 'Booking: cache bootstrap failed - ' . $e->getMessage());
+
+            return null;
+        }
+
+        $cache = $this->cache ?? ($CI->cache ?? null);
+
+        if (is_object($cache) && method_exists($cache, 'save')) {
+            $this->cache = $cache;
+
+            return $cache;
+        }
+
+        log_message('error', 'Booking: cache driver did not expose save() after bootstrap.');
+
+        return null;
     }
 
     /**
