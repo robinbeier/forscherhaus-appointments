@@ -98,6 +98,35 @@ bash ./scripts/ldap/smoke.sh
 
 Use this workflow when you want your local setup to run with a database dump from production/staging.
 
+Recommended path for the current production host:
+
+```bash
+bash ./scripts/import_prod_backup.sh
+```
+
+The script will:
+
+- create a fresh backup on `root@188.245.244.123`
+- download the dump plus metadata to `/tmp`
+- create a safety archive of the current local `docker/mysql` directory
+- reset the local MySQL data directory
+- import the production dump into the local `easyappointments` database
+- run `php index.php console migrate`
+- start the remaining Docker services again without pulling new images
+
+Useful options:
+
+```bash
+# reuse an existing remote backup directory
+bash ./scripts/import_prod_backup.sh \
+  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z
+
+# leave only mysql/php-fpm/nginx running after the import
+bash ./scripts/import_prod_backup.sh --core-services-only
+```
+
+Manual fallback:
+
 ```bash
 cd /path/to/forscherhaus-appointments
 
@@ -118,8 +147,12 @@ docker compose up -d mysql php-fpm nginx
 # Wait until MySQL is ready.
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 
-# Import the dump file.
-gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret
+# Recreate the target DB and import the dump file.
+docker compose exec -T mysql mysql -uroot -psecret -e "
+DROP DATABASE IF EXISTS easyappointments;
+CREATE DATABASE easyappointments CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+"
+gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret easyappointments
 
 # Run migrations to bring schema/settings to current code level.
 docker compose exec -T php-fpm php index.php console migrate
