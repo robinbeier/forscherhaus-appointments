@@ -3,106 +3,137 @@
 namespace Tests\Unit\Libraries;
 
 use Pdf_renderer;
+use RuntimeException;
+use Sentry\Event;
+use Sentry\SentrySdk;
+use Sentry\State\Hub;
+use Sentry\Transport\Result;
+use Sentry\Transport\ResultStatus;
+use Sentry\Transport\TransportInterface;
+use Throwable;
 use Tests\TestCase;
 
+require_once dirname(__DIR__, 3) . '/application/bootstrap/SentryBootstrap.php';
 require_once APPPATH . 'libraries/Pdf_renderer.php';
 
 class PdfRendererTest extends TestCase
 {
-    public function testResolveEndpointsKeepsLocalhostFallbackOutsideLocalEnvironment(): void
+    public function testResolveEndpointsPreferHostLoopbackOutsideContainerRuntime(): void
     {
-        $hadLoopbackFallback = array_key_exists('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', $_ENV);
-        $loopbackFallback = $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] ?? null;
+        $renderer = $this->createRenderer(false, false);
+        $endpoints = $renderer->callResolveEndpoints([
+            'fallback_urls' => [],
+        ]);
+
+        $this->assertSame(['http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'], $endpoints);
+    }
+
+    public function testResolveEndpointsPreferServiceNameInsideContainerRuntime(): void
+    {
+        $renderer = $this->createRenderer(false, true);
+        $endpoints = $renderer->callResolveEndpoints([
+            'fallback_urls' => [],
+        ]);
+
+        $this->assertSame(['http://pdf-renderer:3000', 'http://localhost:3003'], $endpoints);
+    }
+
+    public function testResolveEndpointsKeepConfiguredEndpointFirstAndRuntimeAwareFallbacksAfterwards(): void
+    {
+        $renderer = $this->createRenderer(false, false);
+        $endpoints = $renderer->callResolveEndpoints([
+            'base_url' => 'http://example.com:3000/',
+            'fallback_urls' => [],
+        ]);
+
+        $this->assertSame(
+            ['http://example.com:3000', 'http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'],
+            $endpoints,
+        );
+    }
+
+    public function testRenderHtmlCapturesSentryEventWhenAllEndpointsFail(): void
+    {
+        $transport = new class implements TransportInterface {
+            public ?Event $event = null;
+
+            public function send(Event $event): Result
+            {
+                $this->event = $event;
+
+                return new Result(ResultStatus::success(), $event);
+            }
+
+            public function close(?int $timeout = null): Result
+            {
+                return new Result(ResultStatus::success(), $this->event);
+            }
+        };
+
+        \Sentry\init([
+            'dsn' => 'https://examplePublicKey@o0.ingest.sentry.io/1',
+            'default_integrations' => false,
+            'transport' => $transport,
+        ]);
+
+        $renderer = new class extends Pdf_renderer {
+            public function __construct()
+            {
+                $this->endpoints = ['http://127.0.0.1:3003', 'http://localhost:3003'];
+                $this->defaultPaper = 'A4';
+                $this->defaultOrientation = 'portrait';
+                $this->defaultMargin = [];
+                $this->defaultWaitFor = null;
+            }
+
+            protected function callRenderer(string $endpoint, array $payload): string
+            {
+                throw new RuntimeException('renderer down at ' . $endpoint);
+            }
+
+            protected function logRendererFailure(string $endpoint, Throwable $exception): void {}
+        };
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('PDF rendering failed for all configured endpoints.');
 
         try {
-            unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
-
-            $renderer = $this->createRenderer(false);
-            $endpoints = $renderer->callResolveEndpoints([
-                'base_url' => 'http://example.com:3000/',
-                'fallback_urls' => [],
-            ]);
-
-            $this->assertSame(
-                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
-                $endpoints,
-            );
+            $renderer->render_html('<html><body>test</body></html>');
         } finally {
-            if ($hadLoopbackFallback) {
-                $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = $loopbackFallback;
-            } else {
-                unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
-            }
+            \Sentry\flush();
+
+            $this->assertNotNull($transport->event);
+            $this->assertSame('pdf_renderer', $transport->event->getTags()['area'] ?? null);
+            $this->assertSame('render_html', $transport->event->getTags()['operation'] ?? null);
+            $this->assertSame(
+                ['http://127.0.0.1:3003', 'http://localhost:3003'],
+                $transport->event->getExtra()['endpoints'] ?? null,
+            );
+
+            SentrySdk::setCurrentHub(new Hub());
         }
     }
 
-    public function testResolveEndpointsAllowsImplicitLocalhostFallbackWhenOptedIn(): void
+    private function createRenderer(bool $isLocalEnvironment, bool $isContainerRuntime): object
     {
-        $hadLoopbackFallback = array_key_exists('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', $_ENV);
-        $loopbackFallback = $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] ?? null;
-
-        try {
-            $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = 'true';
-
-            $renderer = $this->createRenderer(false);
-            $endpoints = $renderer->callResolveEndpoints([
-                'base_url' => 'http://example.com:3000/',
-                'fallback_urls' => [],
-            ]);
-
-            $this->assertSame(
-                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
-                $endpoints,
-            );
-        } finally {
-            if ($hadLoopbackFallback) {
-                $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = $loopbackFallback;
-            } else {
-                unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
-            }
-        }
-    }
-
-    public function testResolveEndpointsKeepsLocalhostFallbackInLocalEnvironment(): void
-    {
-        $hadLoopbackFallback = array_key_exists('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', $_ENV);
-        $loopbackFallback = $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] ?? null;
-
-        try {
-            unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
-
-            $renderer = $this->createRenderer(true);
-            $endpoints = $renderer->callResolveEndpoints([
-                'base_url' => 'http://example.com:3000/',
-                'fallback_urls' => [],
-            ]);
-
-            $this->assertSame(
-                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
-                $endpoints,
-            );
-        } finally {
-            if ($hadLoopbackFallback) {
-                $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = $loopbackFallback;
-            } else {
-                unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
-            }
-        }
-    }
-
-    private function createRenderer(bool $isLocalEnvironment): object
-    {
-        return new class ($isLocalEnvironment) extends Pdf_renderer {
+        return new class ($isLocalEnvironment, $isContainerRuntime) extends Pdf_renderer {
             private bool $isLocalEnvironment;
+            private bool $isContainerRuntime;
 
-            public function __construct(bool $isLocalEnvironment)
+            public function __construct(bool $isLocalEnvironment, bool $isContainerRuntime)
             {
                 $this->isLocalEnvironment = $isLocalEnvironment;
+                $this->isContainerRuntime = $isContainerRuntime;
             }
 
             protected function isLocalEnvironment(): bool
             {
                 return $this->isLocalEnvironment;
+            }
+
+            protected function isContainerRuntime(): bool
+            {
+                return $this->isContainerRuntime;
             }
 
             public function callResolveEndpoints(array $config): array
