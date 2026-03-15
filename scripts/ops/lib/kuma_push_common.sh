@@ -12,6 +12,13 @@ kuma_push_load_env_file() {
   source "$env_file"
 }
 
+kuma_push_source_if_exists() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  # shellcheck disable=SC1090
+  source "$env_file"
+}
+
 kuma_push_require_env() {
   local var_name="$1"
   [[ -n "${!var_name:-}" ]] || kuma_push_die "$var_name missing in configured environment"
@@ -50,4 +57,37 @@ kuma_push_trim() {
   fi
 
   printf '%s' "${text:0:max_len}"
+}
+
+kuma_push_stat_dev_inode() {
+  local path="$1"
+
+  if stat -c '%d:%i' "$path" >/dev/null 2>&1; then
+    stat -c '%d:%i' "$path"
+    return 0
+  fi
+
+  stat -f '%d:%i' "$path"
+}
+
+kuma_push_stat_size() {
+  local path="$1"
+
+  if stat -c '%s' "$path" >/dev/null 2>&1; then
+    stat -c '%s' "$path"
+    return 0
+  fi
+
+  stat -f '%z' "$path"
+}
+
+kuma_push_date_days_ago() {
+  local days="$1"
+
+  if date -u -d "-${days} days" +%F >/dev/null 2>&1; then
+    date -u -d "-${days} days" +%F
+    return 0
+  fi
+
+  date -u -v-"${days}"d +%F
 }

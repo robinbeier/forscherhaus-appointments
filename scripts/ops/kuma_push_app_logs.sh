@@ -36,8 +36,8 @@ if [[ ! -f "$LOG_FILE" ]]; then
   exit 0
 fi
 
-current_inode="$(stat -c '%d:%i' "$LOG_FILE")"
-current_size="$(stat -c '%s' "$LOG_FILE")"
+current_inode="$(kuma_push_stat_dev_inode "$LOG_FILE")"
+current_size="$(kuma_push_stat_size "$LOG_FILE")"
 
 if [[ ! -f "$STATE_FILE" ]]; then
   printf '%s|%s|%s\n' "$LOG_FILE" "$current_inode" "$current_size" > "$STATE_FILE"
