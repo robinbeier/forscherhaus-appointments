@@ -2,13 +2,18 @@ services:
   mysql:
     volumes:
       - zero_surprise_mysql_data:/var/lib/mysql
-    ports: []
+    ports: !reset []
+
+  php-fpm:
+    environment:
+      EA_SKIP_NPM_BOOTSTRAP: "1"
+      EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
 
   nginx:
-    ports: []
+    ports: !reset []
 
   pdf-renderer:
-    ports: []
+    ports: !reset []
 
 volumes:
   zero_surprise_mysql_data:

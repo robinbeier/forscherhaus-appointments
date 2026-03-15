@@ -19,205 +19,213 @@ $timestamp = gmdate('Ymd\THis\Z');
 $defaultOutputPath = $repoRoot . '/storage/logs/release-gate/zero-surprise-' . $timestamp . '.json';
 $defaultProfile = 'school-day-default';
 
-$report = null;
-$exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
-$composeProject = null;
-$config = [];
+if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
+    $report = null;
+    $exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
+    $composeProject = null;
+    $config = [];
 
-try {
-    $config = parseCliOptions($defaultOutputPath, $defaultProfile);
+    try {
+        $config = parseCliOptions($defaultOutputPath, $defaultProfile);
 
-    if (($config['help'] ?? false) === true) {
-        printUsage();
-        exit(ZERO_SURPRISE_EXIT_SUCCESS);
-    }
-
-    $composeProject = buildComposeProjectName($config['release_id']);
-
-    $bookingReportPath = 'storage/logs/release-gate/zero-surprise-booking-' . $timestamp . '.json';
-    $dashboardReportPath = 'storage/logs/release-gate/zero-surprise-dashboard-' . $timestamp . '.json';
-
-    $report = new ZeroSurpriseReport(
-        $config['release_id'],
-        $composeProject,
-        [
-            'dump_file' => $config['dump_file'],
-            'credentials_file' => $config['credentials_file'],
-            'profile_name' => $config['profile_name'],
-            'profile_window' => $config['profile_window'],
-            'base_url' => $config['base_url'],
-            'index_page' => $config['index_page'],
-            'start_date' => $config['start_date'],
-            'end_date' => $config['end_date'],
-            'booking_search_days' => $config['booking_search_days'],
-            'retry_count' => $config['retry_count'],
-            'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
-            'timezone' => $config['timezone'],
-            'output_json' => $config['output_json'],
-        ],
-        $config['output_json'],
-    );
-
-    $composePrefix = composePrefix($composeProject);
-
-    $restoreStep = runRestoreDumpStep($repoRoot, $composePrefix, $config);
-    $report->addStep('restore_dump', $restoreStep['status'], $restoreStep['exit_code'], $restoreStep['duration_ms'], [
-        'details' => $restoreStep['details'],
-    ]);
-
-    $bookingReport = null;
-    $dashboardReport = null;
-
-    if ($restoreStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
-        $bookingCommand = composeCommand($composePrefix, [
-            'exec',
-            '-T',
-            'php-fpm',
-            'php',
-            'scripts/ci/booking_write_contract_smoke.php',
-            '--base-url=' . $config['base_url'],
-            '--index-page=' . $config['index_page'],
-            '--username=' . $config['username'],
-            '--password=' . $config['password'],
-            '--booking-search-days=' . $config['booking_search_days'],
-            '--retry-count=' . $config['retry_count'],
-            '--run-id=' . buildRunId($config['release_id']),
-            '--timezone=' . $config['timezone'],
-            '--output-json=' . $bookingReportPath,
-        ]);
-
-        $bookingStep = runExternalStep($bookingCommand, $repoRoot, 900);
-        $report->addStep(
-            'booking_write_replay',
-            $bookingStep['status'],
-            $bookingStep['exit_code'],
-            $bookingStep['duration_ms'],
-            [
-                'child_report' => $bookingReportPath,
-                'command' => $bookingStep['command'],
-                'timed_out' => $bookingStep['timed_out'],
-                'stdout_tail' => $bookingStep['stdout_tail'],
-                'stderr_tail' => $bookingStep['stderr_tail'],
-            ],
-        );
-
-        $dashboardCommand = composeCommand($composePrefix, [
-            'exec',
-            '-T',
-            'php-fpm',
-            'php',
-            'scripts/release-gate/dashboard_release_gate.php',
-            '--base-url=' . $config['base_url'],
-            '--index-page=' . $config['index_page'],
-            '--username=' . $config['username'],
-            '--password=' . $config['password'],
-            '--start-date=' . $config['start_date'],
-            '--end-date=' . $config['end_date'],
-            '--max-pdf-duration-ms=' . $config['max_pdf_duration_ms'],
-            '--output-json=' . $dashboardReportPath,
-        ]);
-
-        $dashboardStep = runExternalStep($dashboardCommand, $repoRoot, 900);
-        $report->addStep(
-            'dashboard_replay',
-            $dashboardStep['status'],
-            $dashboardStep['exit_code'],
-            $dashboardStep['duration_ms'],
-            [
-                'child_report' => $dashboardReportPath,
-                'command' => $dashboardStep['command'],
-                'timed_out' => $dashboardStep['timed_out'],
-                'stdout_tail' => $dashboardStep['stdout_tail'],
-                'stderr_tail' => $dashboardStep['stderr_tail'],
-            ],
-        );
-
-        $bookingReport = readJsonFile($repoRoot . '/' . $bookingReportPath);
-        $dashboardReport = readJsonFile($repoRoot . '/' . $dashboardReportPath);
-    } else {
-        $report->setFailure(
-            'restore_dump failed, subsequent replay steps were skipped.',
-            RuntimeException::class,
-            'runtime_error',
-        );
-    }
-
-    foreach (collectInvariants($bookingReport, $dashboardReport) as $name => $invariant) {
-        $report->addInvariant($name, $invariant['status'], $invariant['details']);
-    }
-
-    $exitCode = $report->determineExitCode();
-} catch (Throwable $e) {
-    if ($report === null) {
-        $fallbackProject = $composeProject ?? 'zs-uninitialized';
-        $fallbackConfig = [
-            'output_json' => $defaultOutputPath,
-        ];
-
-        if ($config !== []) {
-            $fallbackConfig = array_merge($fallbackConfig, [
-                'dump_file' => $config['dump_file'] ?? null,
-                'base_url' => $config['base_url'] ?? null,
-                'index_page' => $config['index_page'] ?? null,
-                'start_date' => $config['start_date'] ?? null,
-                'end_date' => $config['end_date'] ?? null,
-            ]);
+        if (($config['help'] ?? false) === true) {
+            printUsage();
+            exit(ZERO_SURPRISE_EXIT_SUCCESS);
         }
 
+        $composeProject = buildComposeProjectName($config['release_id']);
+
+        $bookingReportPath = 'storage/logs/release-gate/zero-surprise-booking-' . $timestamp . '.json';
+        $dashboardReportPath = 'storage/logs/release-gate/zero-surprise-dashboard-' . $timestamp . '.json';
+
         $report = new ZeroSurpriseReport(
-            (string) ($config['release_id'] ?? 'unknown-release'),
-            $fallbackProject,
-            $fallbackConfig,
-            (string) ($config['output_json'] ?? $defaultOutputPath),
+            $config['release_id'],
+            $composeProject,
+            [
+                'dump_file' => $config['dump_file'],
+                'credentials_file' => $config['credentials_file'],
+                'profile_name' => $config['profile_name'],
+                'profile_window' => $config['profile_window'],
+                'base_url' => $config['base_url'],
+                'index_page' => $config['index_page'],
+                'start_date' => $config['start_date'],
+                'end_date' => $config['end_date'],
+                'booking_search_days' => $config['booking_search_days'],
+                'retry_count' => $config['retry_count'],
+                'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
+                'timezone' => $config['timezone'],
+                'output_json' => $config['output_json'],
+            ],
+            $config['output_json'],
         );
-    }
 
-    $report->setFailure($e->getMessage(), get_class($e), 'runtime_error');
-    $exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
-}
+        $composePrefix = composePrefix($composeProject);
 
-if ($composeProject !== null) {
-    $downCommand = composeCommand(composePrefix($composeProject), ['down', '-v', '--remove-orphans']);
+        $restoreStep = runRestoreDumpStep($repoRoot, $composePrefix, $config);
+        $report->addStep(
+            'restore_dump',
+            $restoreStep['status'],
+            $restoreStep['exit_code'],
+            $restoreStep['duration_ms'],
+            [
+                'details' => $restoreStep['details'],
+            ],
+        );
 
-    $downResult = GateProcessRunner::run($downCommand, $repoRoot, null, 180);
+        $bookingReport = null;
+        $dashboardReport = null;
 
-    if ((int) $downResult['exit_code'] !== 0) {
-        $message = 'Failed to cleanup zero-surprise compose stack: ' . trim((string) $downResult['stderr']);
+        if ($restoreStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
+            $bookingCommand = composeCommand($composePrefix, [
+                'exec',
+                '-T',
+                'php-fpm',
+                'php',
+                'scripts/ci/booking_write_contract_smoke.php',
+                '--base-url=' . $config['base_url'],
+                '--index-page=' . $config['index_page'],
+                '--username=' . $config['username'],
+                '--password=' . $config['password'],
+                '--booking-search-days=' . $config['booking_search_days'],
+                '--retry-count=' . $config['retry_count'],
+                '--run-id=' . buildRunId($config['release_id']),
+                '--timezone=' . $config['timezone'],
+                '--output-json=' . $bookingReportPath,
+            ]);
 
-        if ($report !== null) {
+            $bookingStep = runExternalStep($bookingCommand, $repoRoot, 900);
+            $report->addStep(
+                'booking_write_replay',
+                $bookingStep['status'],
+                $bookingStep['exit_code'],
+                $bookingStep['duration_ms'],
+                [
+                    'child_report' => $bookingReportPath,
+                    'command' => $bookingStep['command'],
+                    'timed_out' => $bookingStep['timed_out'],
+                    'stdout_tail' => $bookingStep['stdout_tail'],
+                    'stderr_tail' => $bookingStep['stderr_tail'],
+                ],
+            );
+
+            $dashboardCommand = composeCommand($composePrefix, [
+                'exec',
+                '-T',
+                'php-fpm',
+                'php',
+                'scripts/release-gate/dashboard_release_gate.php',
+                '--base-url=' . $config['base_url'],
+                '--index-page=' . $config['index_page'],
+                '--username=' . $config['username'],
+                '--password=' . $config['password'],
+                '--start-date=' . $config['start_date'],
+                '--end-date=' . $config['end_date'],
+                '--max-pdf-duration-ms=' . $config['max_pdf_duration_ms'],
+                '--output-json=' . $dashboardReportPath,
+            ]);
+
+            $dashboardStep = runExternalStep($dashboardCommand, $repoRoot, 900);
+            $report->addStep(
+                'dashboard_replay',
+                $dashboardStep['status'],
+                $dashboardStep['exit_code'],
+                $dashboardStep['duration_ms'],
+                [
+                    'child_report' => $dashboardReportPath,
+                    'command' => $dashboardStep['command'],
+                    'timed_out' => $dashboardStep['timed_out'],
+                    'stdout_tail' => $dashboardStep['stdout_tail'],
+                    'stderr_tail' => $dashboardStep['stderr_tail'],
+                ],
+            );
+
+            $bookingReport = readJsonFile($repoRoot . '/' . $bookingReportPath);
+            $dashboardReport = readJsonFile($repoRoot . '/' . $dashboardReportPath);
+        } else {
             $report->setFailure(
-                $message !== '' ? $message : 'Failed to cleanup zero-surprise compose stack.',
+                'restore_dump failed, subsequent replay steps were skipped.',
                 RuntimeException::class,
                 'runtime_error',
             );
         }
 
+        foreach (collectInvariants($bookingReport, $dashboardReport) as $name => $invariant) {
+            $report->addInvariant($name, $invariant['status'], $invariant['details']);
+        }
+
+        $exitCode = $report->determineExitCode();
+    } catch (Throwable $e) {
+        if ($report === null) {
+            $fallbackProject = $composeProject ?? 'zs-uninitialized';
+            $fallbackConfig = [
+                'output_json' => $defaultOutputPath,
+            ];
+
+            if ($config !== []) {
+                $fallbackConfig = array_merge($fallbackConfig, [
+                    'dump_file' => $config['dump_file'] ?? null,
+                    'base_url' => $config['base_url'] ?? null,
+                    'index_page' => $config['index_page'] ?? null,
+                    'start_date' => $config['start_date'] ?? null,
+                    'end_date' => $config['end_date'] ?? null,
+                ]);
+            }
+
+            $report = new ZeroSurpriseReport(
+                (string) ($config['release_id'] ?? 'unknown-release'),
+                $fallbackProject,
+                $fallbackConfig,
+                (string) ($config['output_json'] ?? $defaultOutputPath),
+            );
+        }
+
+        $report->setFailure($e->getMessage(), get_class($e), 'runtime_error');
         $exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
     }
+
+    if ($composeProject !== null) {
+        $downCommand = composeCommand(composePrefix($composeProject), ['down', '-v', '--remove-orphans']);
+
+        $downResult = GateProcessRunner::run($downCommand, $repoRoot, null, 180);
+
+        if ((int) $downResult['exit_code'] !== 0) {
+            $message = 'Failed to cleanup zero-surprise compose stack: ' . trim((string) $downResult['stderr']);
+
+            if ($report !== null) {
+                $report->setFailure(
+                    $message !== '' ? $message : 'Failed to cleanup zero-surprise compose stack.',
+                    RuntimeException::class,
+                    'runtime_error',
+                );
+            }
+
+            $exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
+        }
+    }
+
+    if ($report === null) {
+        fwrite(STDERR, '[FAIL] Zero-surprise replay failed before report initialization.' . PHP_EOL);
+        exit(ZERO_SURPRISE_EXIT_RUNTIME_ERROR);
+    }
+
+    $path = '';
+    try {
+        $path = $report->write();
+    } catch (Throwable $e) {
+        fwrite(STDERR, '[FAIL] Could not write zero-surprise report: ' . $e->getMessage() . PHP_EOL);
+        exit(ZERO_SURPRISE_EXIT_RUNTIME_ERROR);
+    }
+
+    $exitCode = $report->determineExitCode();
+
+    if ($exitCode === ZERO_SURPRISE_EXIT_SUCCESS) {
+        fwrite(STDOUT, '[PASS] Zero-surprise replay passed -> ' . $path . PHP_EOL);
+    } else {
+        fwrite(STDERR, '[FAIL] Zero-surprise replay failed (exit ' . $exitCode . ') -> ' . $path . PHP_EOL);
+    }
+
+    exit($exitCode);
 }
-
-if ($report === null) {
-    fwrite(STDERR, '[FAIL] Zero-surprise replay failed before report initialization.' . PHP_EOL);
-    exit(ZERO_SURPRISE_EXIT_RUNTIME_ERROR);
-}
-
-$path = '';
-try {
-    $path = $report->write();
-} catch (Throwable $e) {
-    fwrite(STDERR, '[FAIL] Could not write zero-surprise report: ' . $e->getMessage() . PHP_EOL);
-    exit(ZERO_SURPRISE_EXIT_RUNTIME_ERROR);
-}
-
-$exitCode = $report->determineExitCode();
-
-if ($exitCode === ZERO_SURPRISE_EXIT_SUCCESS) {
-    fwrite(STDOUT, '[PASS] Zero-surprise replay passed -> ' . $path . PHP_EOL);
-} else {
-    fwrite(STDERR, '[FAIL] Zero-surprise replay failed (exit ' . $exitCode . ') -> ' . $path . PHP_EOL);
-}
-
-exit($exitCode);
 
 /**
  * @return array<string, mixed>
@@ -653,6 +661,50 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
         ];
     }
 
+    $gateAccountResult = ensureReplayGateAccount($composePrefix, $repoRoot, $config);
+    $substeps[] = summarizeSubstep('ensure_gate_account', $gateAccountResult);
+
+    if ((int) $gateAccountResult['exit_code'] !== 0) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+            'details' => [
+                'failed_substep' => 'ensure_gate_account',
+                'substeps' => $substeps,
+            ],
+        ];
+    }
+
+    $httpReady = waitForHttpReadiness(
+        composeCommand($composePrefix, [
+            'exec',
+            '-T',
+            'php-fpm',
+            'curl',
+            '-fsS',
+            '-o',
+            '/dev/null',
+            '-w',
+            '%{http_code}',
+            buildAppReadinessUrl($config),
+        ]),
+        $repoRoot,
+    );
+    $substeps[] = $httpReady;
+
+    if ($httpReady['status'] === ZeroSurpriseReport::STATUS_FAIL) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+            'details' => [
+                'failed_substep' => 'app_http_readiness',
+                'substeps' => $substeps,
+            ],
+        ];
+    }
+
     return [
         'status' => ZeroSurpriseReport::STATUS_PASS,
         'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
@@ -669,7 +721,7 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
 function runDumpImport(array $composePrefix, string $repoRoot, string $dumpFile): array
 {
     $composeShell = toShellCommand($composePrefix);
-    $mysqlImportShell = $composeShell . ' exec -T mysql mysql -uroot -psecret';
+    $mysqlImportShell = $composeShell . ' exec -T mysql mysql -uroot -psecret easyappointments';
 
     if (str_ends_with($dumpFile, '.sql.gz')) {
         $command = [
@@ -684,6 +736,139 @@ function runDumpImport(array $composePrefix, string $repoRoot, string $dumpFile)
     $command = ['bash', '-lc', 'set -euo pipefail; cat ' . escapeshellarg($dumpFile) . ' | ' . $mysqlImportShell];
 
     return GateProcessRunner::run($command, $repoRoot, null, 900);
+}
+
+/**
+ * @param array<int, string> $composePrefix
+ * @param array<string, mixed> $config
+ */
+function ensureReplayGateAccount(array $composePrefix, string $repoRoot, array $config): array
+{
+    $command = composeCommand($composePrefix, [
+        'exec',
+        '-T',
+        'mysql',
+        'mysql',
+        '-uroot',
+        '-psecret',
+        'easyappointments',
+        '-e',
+        buildReplayGateSeedSql($config),
+    ]);
+
+    return GateProcessRunner::run($command, $repoRoot, null, 120);
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function buildReplayGateSeedSql(array $config): string
+{
+    $username = trim((string) ($config['username'] ?? ''));
+    $password = (string) ($config['password'] ?? '');
+
+    if ($username === '' || $password === '') {
+        throw new InvalidArgumentException('Replay gate account sync requires non-empty username and password.');
+    }
+
+    $releaseId = trim((string) ($config['release_id'] ?? 'zero-surprise'));
+    $timezone = trim((string) ($config['timezone'] ?? 'Europe/Berlin'));
+    $language = 'german';
+    $emailLocalPart = preg_replace('/[^a-z0-9._+-]+/i', '-', $username) ?: 'release-gate';
+    $email = sprintf('zs+%s@gate.invalid', strtolower($emailLocalPart));
+    $salt = buildReplayGateSalt($releaseId, $username);
+    $passwordHash = hashReplayGatePassword($salt, $password);
+
+    $quotedUsername = mysqlQuote($username);
+    $quotedPasswordHash = mysqlQuote($passwordHash);
+    $quotedSalt = mysqlQuote($salt);
+    $quotedTimezone = mysqlQuote($timezone);
+    $quotedLanguage = mysqlQuote($language);
+    $quotedEmail = mysqlQuote($email);
+
+    return <<<SQL
+    SET @zs_now = UTC_TIMESTAMP();
+    SET @zs_username = {$quotedUsername};
+    SET @zs_password_hash = {$quotedPasswordHash};
+    SET @zs_salt = {$quotedSalt};
+    SET @zs_timezone = {$quotedTimezone};
+    SET @zs_language = {$quotedLanguage};
+    SET @zs_email = {$quotedEmail};
+    SET @zs_user_id = (SELECT id_users FROM ea_user_settings WHERE username = @zs_username LIMIT 1);
+    INSERT INTO ea_users (
+        create_datetime,
+        update_datetime,
+        first_name,
+        last_name,
+        email,
+        id_roles,
+        timezone,
+        language
+    )
+    SELECT
+        @zs_now,
+        @zs_now,
+        'Release',
+        'Gate',
+        @zs_email,
+        1,
+        @zs_timezone,
+        @zs_language
+    WHERE @zs_user_id IS NULL;
+    SET @zs_user_id = COALESCE(@zs_user_id, LAST_INSERT_ID());
+    UPDATE ea_users
+    SET
+        update_datetime = @zs_now,
+        id_roles = 1,
+        timezone = COALESCE(NULLIF(timezone, ''), @zs_timezone),
+        language = COALESCE(NULLIF(language, ''), @zs_language)
+    WHERE id = @zs_user_id;
+    INSERT INTO ea_user_settings (
+        id_users,
+        username,
+        password,
+        salt,
+        notifications,
+        calendar_view
+    )
+    VALUES (
+        @zs_user_id,
+        @zs_username,
+        @zs_password_hash,
+        @zs_salt,
+        0,
+        'default'
+    )
+    ON DUPLICATE KEY UPDATE
+        id_users = VALUES(id_users),
+        password = VALUES(password),
+        salt = VALUES(salt),
+        calendar_view = COALESCE(NULLIF(calendar_view, ''), VALUES(calendar_view));
+    SQL;
+}
+
+function buildReplayGateSalt(string $releaseId, string $username): string
+{
+    return substr(hash('sha256', $releaseId . '|' . $username . '|zero-surprise-replay-gate'), 0, 64);
+}
+
+function hashReplayGatePassword(string $salt, string $password): string
+{
+    $half = (int) (strlen($salt) / 2);
+    $hash = hash('sha256', substr($salt, 0, $half) . $password . substr($salt, $half));
+
+    for ($i = 0; $i < 100000; $i++) {
+        $hash = hash('sha256', $hash);
+    }
+
+    return $hash;
+}
+
+function mysqlQuote(string $value): string
+{
+    return "'" .
+        str_replace(['\\', "\0", "\n", "\r", "\x1a", "'"], ['\\\\', "\\0", "\\n", "\\r", '\\Z', "\\'"], $value) .
+        "'";
 }
 
 /**
@@ -717,6 +902,56 @@ function waitForMySqlReadiness(array $command, string $repoRoot, string $name = 
         'attempts' => $maxAttempts,
         'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
     ];
+}
+
+/**
+ * @param array<int, string> $command
+ * @return array<string, mixed>
+ */
+function waitForHttpReadiness(array $command, string $repoRoot, string $name = 'app_http_readiness'): array
+{
+    $maxAttempts = 60;
+    $startedAt = microtime(true);
+
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+        $result = GateProcessRunner::run($command, $repoRoot, null, 15);
+        $statusCode = trim((string) ($result['stdout'] ?? ''));
+
+        if ((int) ($result['exit_code'] ?? 1) === 0 && $statusCode === '200') {
+            return [
+                'name' => $name,
+                'status' => ZeroSurpriseReport::STATUS_PASS,
+                'attempts' => $attempt,
+                'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+                'stdout_tail' => tailText($statusCode, 50),
+                'stderr_tail' => tailText((string) ($result['stderr'] ?? ''), 300),
+            ];
+        }
+
+        sleep(2);
+    }
+
+    return [
+        'name' => $name,
+        'status' => ZeroSurpriseReport::STATUS_FAIL,
+        'attempts' => $maxAttempts,
+        'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+    ];
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function buildAppReadinessUrl(array $config): string
+{
+    $baseUrl = rtrim((string) ($config['base_url'] ?? ''), '/');
+    $indexPage = trim((string) ($config['index_page'] ?? ''), '/');
+
+    if ($indexPage === '') {
+        return $baseUrl . '/login';
+    }
+
+    return $baseUrl . '/' . $indexPage . '/login';
 }
 
 /**

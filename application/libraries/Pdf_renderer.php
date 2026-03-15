@@ -439,11 +439,7 @@ class Pdf_renderer
             $fallbacks = [$fallbacks];
         }
 
-        $defaults = ['http://pdf-renderer:3000'];
-
-        if ($this->isLocalEnvironment() || $this->shouldAllowNonLocalLoopbackFallback()) {
-            $defaults[] = 'http://localhost:3003';
-        }
+        $defaults = ['http://pdf-renderer:3000', 'http://localhost:3003'];
 
         $candidates = array_merge($candidates, $fallbacks, $defaults);
 

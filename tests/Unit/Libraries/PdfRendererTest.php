@@ -9,7 +9,7 @@ require_once APPPATH . 'libraries/Pdf_renderer.php';
 
 class PdfRendererTest extends TestCase
 {
-    public function testResolveEndpointsSkipsImplicitLocalhostFallbackOutsideLocalEnvironment(): void
+    public function testResolveEndpointsKeepsLocalhostFallbackOutsideLocalEnvironment(): void
     {
         $hadLoopbackFallback = array_key_exists('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', $_ENV);
         $loopbackFallback = $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] ?? null;
@@ -23,7 +23,10 @@ class PdfRendererTest extends TestCase
                 'fallback_urls' => [],
             ]);
 
-            $this->assertSame(['http://example.com:3000', 'http://pdf-renderer:3000'], $endpoints);
+            $this->assertSame(
+                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
+                $endpoints,
+            );
         } finally {
             if ($hadLoopbackFallback) {
                 $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = $loopbackFallback;

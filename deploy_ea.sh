@@ -43,6 +43,8 @@ ZERO_SURPRISE_INCIDENT_TIMEOUT=10
 
 RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
+DEEP_HEALTH_RETRIES=10
+DEEP_HEALTH_SLEEP_SECONDS=2
 
 EXIT_ROLLBACK_SUCCESS=30
 EXIT_ROLLBACK_FAILED=31
@@ -60,7 +62,7 @@ Core options:
   --app PATH                   Live app path                     [default: /var/www/html/easyappointments]
   --src DIR                    Directory with release archive     [default: /root/releases]
   --user WEBUSER               Web user for ownership/actions     [default: www-data]
-  --reload LIST                Services to reload (CSV)           [default: apache2,php8.2-fpm]
+  --reload LIST                Services to reload (CSV)           [default: apache2,<detected php-fpm>]
   --dry-run                    Print actions only
   --no-mark                    Skip writing _RELEASE marker
 
@@ -190,6 +192,36 @@ systemctl_run() {
   "${SYSTEMCTL_BASE[@]}" "$action" "$@"
 }
 
+detect_php_fpm_reload_service() {
+  local unit
+
+  while read -r unit _; do
+    [[ "$unit" =~ ^php[0-9.]+-fpm\.service$ ]] || continue
+    printf '%s\n' "${unit%.service}"
+    return 0
+  done < <(/bin/systemctl list-units --type=service --all 'php*-fpm.service' --no-legend 2>/dev/null || true)
+
+  while read -r unit _; do
+    [[ "$unit" =~ ^php[0-9.]+-fpm\.service$ ]] || continue
+    printf '%s\n' "${unit%.service}"
+    return 0
+  done < <(/bin/systemctl list-unit-files 'php*-fpm.service' --type=service --no-legend 2>/dev/null || true)
+
+  return 1
+}
+
+resolve_reload_services() {
+  local default_reload="apache2,php8.2-fpm"
+  local detected_php_fpm
+
+  [[ "$RELOAD_SERVICES" == "$default_reload" ]] || return 0
+
+  detected_php_fpm="$(detect_php_fpm_reload_service || true)"
+  [[ -n "$detected_php_fpm" ]] || return 0
+
+  RELOAD_SERVICES="apache2,${detected_php_fpm}"
+}
+
 reload_services() {
   local s
   local s_trim
@@ -209,25 +241,42 @@ reload_services() {
 prepare_renderer_state_dir() {
   local state_home="${RENDERER_STATE_DIR}/home"
   local npm_cache="${RENDERER_STATE_DIR}/npm-cache"
-  local puppeteer_cache="${RENDERER_STATE_DIR}/puppeteer-cache"
+  local xdg_config="${RENDERER_STATE_DIR}/config"
+  local xdg_cache="${RENDERER_STATE_DIR}/cache"
+  local xdg_data="${RENDERER_STATE_DIR}/data"
+  local tmp_dir="${RENDERER_STATE_DIR}/tmp"
+  local puppeteer_cache="${xdg_cache}/puppeteer"
 
   if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] mkdir -p '$state_home' '$npm_cache' '$puppeteer_cache'"
+    echo "[DRY-RUN] mkdir -p '$state_home' '$npm_cache' '$xdg_config' '$xdg_cache' '$xdg_data' '$tmp_dir' '$puppeteer_cache'"
     echo "[DRY-RUN] chown -R '$WEBUSER':'$WEBUSER' '$RENDERER_STATE_DIR'"
-    echo "[DRY-RUN] chmod 0750 '$RENDERER_STATE_DIR' '$state_home' '$npm_cache' '$puppeteer_cache'"
+    echo "[DRY-RUN] chmod 0750 '$RENDERER_STATE_DIR' '$state_home' '$npm_cache' '$xdg_config' '$xdg_cache' '$xdg_data' '$tmp_dir' '$puppeteer_cache'"
     return 0
   fi
 
-  mkdir -p "$state_home" "$npm_cache" "$puppeteer_cache"
+  mkdir -p "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache"
   chown -R "$WEBUSER":"$WEBUSER" "$RENDERER_STATE_DIR"
-  chmod 0750 "$RENDERER_STATE_DIR" "$state_home" "$npm_cache" "$puppeteer_cache"
+  chmod 0750 "$RENDERER_STATE_DIR" "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache"
+}
+
+restore_runtime_script_permissions() {
+  local ops_dir="${STAGE_ROOT}/scripts/ops"
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] restore executable bits for '$ops_dir' shell scripts when present"
+    return 0
+  fi
+
+  [[ -d "$ops_dir" ]] || return 0
+
+  find "$ops_dir" -type f -name '*.sh' -exec chmod 755 {} \;
 }
 
 install_renderer_dependencies() {
   local renderer_dir="${STAGE_ROOT}/pdf-renderer"
   local state_home="${RENDERER_STATE_DIR}/home"
   local npm_cache="${RENDERER_STATE_DIR}/npm-cache"
-  local puppeteer_cache="${RENDERER_STATE_DIR}/puppeteer-cache"
+  local puppeteer_cache="${RENDERER_STATE_DIR}/cache/puppeteer"
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] runuser -u '$WEBUSER' -- env HOME='$state_home' NPM_CONFIG_CACHE='$npm_cache' PUPPETEER_CACHE_DIR='$puppeteer_cache' bash -lc \"cd '$renderer_dir' && npm ci --omit=dev --no-audit --no-fund\""
@@ -290,48 +339,56 @@ probe_deep_health_contract() {
   local token
   local body_file
   local http_code
+  local attempt
 
   if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] deep health probe: $DEEP_HEALTH_URL with header X-Health-Token:<redacted> and contract status=ok + checks.pdf_renderer.ok=true"
+    echo "[DRY-RUN] deep health probe: $DEEP_HEALTH_URL with header X-Health-Token:<redacted> and contract status=ok + checks.pdf_renderer.ok=true (${DEEP_HEALTH_RETRIES}x, ${DEEP_HEALTH_SLEEP_SECONDS}s)"
     return 0
   fi
 
   token="$(read_healthz_token)" || return 1
-  body_file="$(mktemp)"
-  http_code="$(curl -sS -o "$body_file" -w '%{http_code}' -H "X-Health-Token: $token" "$DEEP_HEALTH_URL" || echo 000)"
 
-  if [[ "$http_code" != "200" ]]; then
-    echo "[!] Deep health failed: HTTP $http_code from $DEEP_HEALTH_URL"
+  for ((attempt = 1; attempt <= DEEP_HEALTH_RETRIES; attempt++)); do
+    body_file="$(mktemp)"
+    http_code="$(curl -sS -o "$body_file" -w '%{http_code}' -H "X-Health-Token: $token" "$DEEP_HEALTH_URL" || echo 000)"
+
+    if [[ "$http_code" != "200" ]]; then
+      echo "[i] Deep health pending: HTTP $http_code from $DEEP_HEALTH_URL (attempt $attempt/$DEEP_HEALTH_RETRIES)"
+      rm -f "$body_file"
+      sleep "$DEEP_HEALTH_SLEEP_SECONDS"
+      continue
+    fi
+
+    if php -r '
+      $raw = @file_get_contents($argv[1]);
+      if ($raw === false) {
+          fwrite(STDERR, "deep health body read failed" . PHP_EOL);
+          exit(2);
+      }
+      $json = json_decode($raw, true);
+      if (!is_array($json)) {
+          fwrite(STDERR, "deep health response is not valid JSON" . PHP_EOL);
+          exit(3);
+      }
+      $status = $json["status"] ?? null;
+      $pdfOk = $json["checks"]["pdf_renderer"]["ok"] ?? null;
+      if ($status === "ok" && $pdfOk === true) {
+          exit(0);
+      }
+      fwrite(STDERR, "deep health contract mismatch: status=" . var_export($status, true) . ", checks.pdf_renderer.ok=" . var_export($pdfOk, true) . PHP_EOL);
+      exit(4);
+    ' "$body_file"; then
+      echo "[OK] Deep health contract passed: status=ok and checks.pdf_renderer.ok=true (attempt $attempt/$DEEP_HEALTH_RETRIES)"
+      rm -f "$body_file"
+      return 0
+    fi
+
+    echo "[i] Deep health contract pending: $DEEP_HEALTH_URL (attempt $attempt/$DEEP_HEALTH_RETRIES)"
     rm -f "$body_file"
-    return 1
-  fi
+    sleep "$DEEP_HEALTH_SLEEP_SECONDS"
+  done
 
-  if php -r '
-    $raw = @file_get_contents($argv[1]);
-    if ($raw === false) {
-        fwrite(STDERR, "deep health body read failed" . PHP_EOL);
-        exit(2);
-    }
-    $json = json_decode($raw, true);
-    if (!is_array($json)) {
-        fwrite(STDERR, "deep health response is not valid JSON" . PHP_EOL);
-        exit(3);
-    }
-    $status = $json["status"] ?? null;
-    $pdfOk = $json["checks"]["pdf_renderer"]["ok"] ?? null;
-    if ($status === "ok" && $pdfOk === true) {
-        exit(0);
-    }
-    fwrite(STDERR, "deep health contract mismatch: status=" . var_export($status, true) . ", checks.pdf_renderer.ok=" . var_export($pdfOk, true) . PHP_EOL);
-    exit(4);
-  ' "$body_file"; then
-    echo "[OK] Deep health contract passed: status=ok and checks.pdf_renderer.ok=true"
-    rm -f "$body_file"
-    return 0
-  fi
-
-  echo "[!] Deep health contract validation failed: $DEEP_HEALTH_URL"
-  rm -f "$body_file"
+  echo "[!] Deep health contract validation failed after $DEEP_HEALTH_RETRIES attempts: $DEEP_HEALTH_URL"
   return 1
 }
 
@@ -532,6 +589,72 @@ PHP
     "not_applicable"
 
   return 0
+}
+
+read_zero_surprise_predeploy_base_url() {
+  php -r '
+    $path = (string) ($argv[1] ?? "");
+    if ($path === "" || !is_file($path) || !is_readable($path)) {
+        exit(1);
+    }
+    $ini = parse_ini_file($path, false, INI_SCANNER_RAW);
+    if (!is_array($ini)) {
+        exit(2);
+    }
+    $baseUrl = trim((string) ($ini["base_url"] ?? ""));
+    if ($baseUrl === "") {
+        exit(3);
+    }
+    echo $baseUrl;
+  ' "$ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE"
+}
+
+prepare_zero_surprise_stage_runtime() {
+  local stage_config
+  local stage_sample
+  local base_url
+
+  stage_config="$STAGE_ROOT/config.php"
+  stage_sample="$STAGE_ROOT/config-sample.php"
+
+  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+    return 0
+  fi
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] would generate zero-surprise stage config from '$stage_sample' -> '$stage_config'"
+    echo "[DRY-RUN] would ensure '$STAGE_ROOT/storage/logs/release-gate' exists for replay reports"
+    return 0
+  fi
+
+  [[ -f "$stage_sample" ]] || die "[!] Missing zero-surprise stage sample config: $stage_sample"
+
+  base_url="$(read_zero_surprise_predeploy_base_url)" \
+    || die "[!] Could not resolve zero-surprise predeploy base_url from $ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE"
+
+  cp "$stage_sample" "$stage_config"
+  mkdir -p "$STAGE_ROOT/storage/logs/release-gate"
+
+  php -r '
+    $path = (string) ($argv[1] ?? "");
+    $baseUrl = (string) ($argv[2] ?? "");
+    $raw = @file_get_contents($path);
+    if (!is_string($raw) || $raw === "") {
+        fwrite(STDERR, "Could not read generated stage config." . PHP_EOL);
+        exit(1);
+    }
+    $replacement = "const BASE_URL = " . var_export($baseUrl, true) . ";";
+    $updated = preg_replace("/const BASE_URL = [^;]+;/", $replacement, $raw, 1, $count);
+    if (!is_string($updated) || $count !== 1) {
+        fwrite(STDERR, "Could not patch BASE_URL in generated stage config." . PHP_EOL);
+        exit(2);
+    }
+    if (@file_put_contents($path, $updated) === false) {
+        fwrite(STDERR, "Could not write generated stage config." . PHP_EOL);
+        exit(3);
+    }
+  ' "$stage_config" "$base_url" \
+    || die "[!] Could not prepare zero-surprise stage config."
 }
 
 run_zero_surprise_predeploy_replay() {
@@ -858,6 +981,7 @@ absolutize_path_var ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE
 absolutize_path_var ZERO_SURPRISE_BREAKGLASS_FILE
 absolutize_path_var ZERO_SURPRISE_CANARY_CREDENTIALS_FILE
 absolutize_path_var ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE
+resolve_reload_services
 
 if [[ "$DRYRUN" -eq 0 ]]; then
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
@@ -969,6 +1093,11 @@ else
 fi
 
 validate_breakglass_policy || die "[!] Zero-surprise breakglass policy validation failed."
+prepare_zero_surprise_stage_runtime
+run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
+run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} \\;"
+run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} \\;"
+restore_runtime_script_permissions
 run_zero_surprise_predeploy_replay || die "[!] Zero-surprise pre-deploy replay failed. Aborting before atomic switch."
 validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
 
@@ -989,6 +1118,7 @@ install_renderer_dependencies
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
 run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} \\;"
 run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} \\;"
+restore_runtime_script_permissions
 
 perform_atomic_switch
 
