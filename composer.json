@@ -25,7 +25,7 @@
     ],
     "minimum-stability": "stable",
     "require": {
-        "php": ">=8.4.1",
+        "php": ">=8.3.6",
         "ext-curl": "*",
         "ext-json": "*",
         "ext-mbstring": "*",
@@ -39,8 +39,10 @@
         "guzzlehttp/guzzle": "^7.9.2",
         "sabre/vobject": "^4.5",
         "ezyang/htmlpurifier": "^4.17",
-        "symfony/finder": "^8.0",
-        "phpmailer/phpmailer": "^7.0.2"
+        "symfony/options-resolver": "^7.4",
+        "symfony/finder": "^7.4",
+        "phpmailer/phpmailer": "^7.0.2",
+        "sentry/sentry": "^4.0"
     },
     "require-dev": {
         "roave/security-advisories": "dev-master",

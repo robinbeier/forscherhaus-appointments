@@ -13,7 +13,6 @@
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
-
 /**
  * PDF renderer library.
  *
@@ -123,15 +122,19 @@ class Pdf_renderer
                 return $this->callRenderer($endpoint, $payload);
             } catch (Throwable $exception) {
                 $lastException = $exception;
-                log_message('error', 'Pdf_renderer failed for endpoint ' . $endpoint . ': ' . $exception->getMessage());
+                $this->logRendererFailure($endpoint, $exception);
             }
         }
 
         if ($lastException instanceof Throwable) {
+            $this->captureRendererFailure($lastException);
             throw new RuntimeException('PDF rendering failed for all configured endpoints.', 0, $lastException);
         }
 
-        throw new RuntimeException('PDF rendering failed: no renderer endpoint available.');
+        $exception = new RuntimeException('PDF rendering failed: no renderer endpoint available.');
+        $this->captureRendererFailure($exception);
+
+        throw $exception;
     }
 
     /**
@@ -275,6 +278,29 @@ class Pdf_renderer
         }
 
         return $payload;
+    }
+
+    protected function captureRendererFailure(Throwable $exception): void
+    {
+        if (!class_exists('SentryBootstrap')) {
+            return;
+        }
+
+        SentryBootstrap::captureException(
+            $exception,
+            [
+                'area' => 'pdf_renderer',
+                'operation' => 'render_html',
+            ],
+            [
+                'endpoints' => $this->endpoints,
+            ],
+        );
+    }
+
+    protected function logRendererFailure(string $endpoint, Throwable $exception): void
+    {
+        log_message('error', 'Pdf_renderer failed for endpoint ' . $endpoint . ': ' . $exception->getMessage());
     }
 
     /**
@@ -439,7 +465,7 @@ class Pdf_renderer
             $fallbacks = [$fallbacks];
         }
 
-        $defaults = ['http://pdf-renderer:3000', 'http://localhost:3003'];
+        $defaults = $this->defaultEndpointsForRuntime();
 
         $candidates = array_merge($candidates, $fallbacks, $defaults);
 
@@ -466,6 +492,41 @@ class Pdf_renderer
         }
 
         return $normalized;
+    }
+
+    /**
+     * Prefer host-local renderer endpoints outside containerized app runtimes.
+     *
+     * @return list<string>
+     */
+    protected function defaultEndpointsForRuntime(): array
+    {
+        if ($this->isContainerRuntime()) {
+            return ['http://pdf-renderer:3000', 'http://localhost:3003'];
+        }
+
+        return ['http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'];
+    }
+
+    protected function isContainerRuntime(): bool
+    {
+        if (is_file('/.dockerenv')) {
+            return true;
+        }
+
+        $cgroupPath = '/proc/1/cgroup';
+        if (!is_readable($cgroupPath)) {
+            return false;
+        }
+
+        $content = @file_get_contents($cgroupPath);
+        if ($content === false) {
+            return false;
+        }
+
+        return str_contains($content, '/docker/') ||
+            str_contains($content, 'containerd') ||
+            str_contains($content, 'kubepods');
     }
 
     /**

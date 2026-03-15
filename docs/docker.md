@@ -76,7 +76,7 @@ When running PHP directly on the host, MySQL is reachable via `localhost:3306`, 
 Warning: Running host-side `composer test` while `DB_HOST='mysql'` is configured will fail with a
 `php_network_getaddresses: getaddrinfo for mysql failed` error.
 
-The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the environment variable `PDF_RENDERER_URL=http://localhost:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically. HTML debug dumps for dashboard PDF exports are disabled by default and can be enabled temporarily with `PDF_RENDERER_DEBUG_DUMP=true`.
+The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the runtime environment variable `PDF_RENDERER_URL=http://127.0.0.1:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically. If the request path runs through Apache `mod_php`, set `PDF_RENDERER_URL` and the Sentry variables (`SENTRY_DSN`, optional tracing/server-name flags) in Apache as well, because PHP-FPM-only env wiring will not reach those requests. HTML debug dumps for dashboard PDF exports are disabled by default and can be enabled temporarily with `PDF_RENDERER_DEBUG_DUMP=true`.
 
 Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integration is available on `http://localhost:8100` (credentials are `admin` / `admin`). 
 
