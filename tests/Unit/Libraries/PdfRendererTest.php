@@ -134,6 +134,16 @@ class PdfRendererTest extends TestCase
                 throw new RuntimeException('renderer down at ' . $endpoint);
             }
 
+            protected function isContainerRuntime(): bool
+            {
+                return false;
+            }
+
+            protected function isLocalEnvironment(): bool
+            {
+                return false;
+            }
+
             protected function logRendererFailure(string $endpoint, Throwable $exception): void {}
         };
 
@@ -152,6 +162,10 @@ class PdfRendererTest extends TestCase
                 ['http://127.0.0.1:3003', 'http://localhost:3003'],
                 $transport->event->getExtra()['endpoints'] ?? null,
             );
+            $this->assertSame('http://127.0.0.1:3003', $transport->event->getExtra()['primary_endpoint'] ?? null);
+            $this->assertSame(2, $transport->event->getExtra()['endpoint_count'] ?? null);
+            $this->assertFalse($transport->event->getExtra()['container_runtime'] ?? true);
+            $this->assertFalse($transport->event->getExtra()['local_environment'] ?? true);
 
             SentrySdk::setCurrentHub(new Hub());
         }
