@@ -128,6 +128,7 @@ class Dashboard_export extends EA_Controller
                 $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_principal_pdf_dump.html'),
             );
         } catch (Throwable $exception) {
+            $this->captureExportException($exception, 'principal_pdf');
             log_message('error', 'Failed to render principal dashboard export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
         }
@@ -187,6 +188,7 @@ class Dashboard_export extends EA_Controller
                 $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html'),
             );
         } catch (Throwable $exception) {
+            $this->captureExportException($exception, 'teacher_pdf');
             log_message('error', 'Failed to render teacher dashboard export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
         }
@@ -242,9 +244,25 @@ class Dashboard_export extends EA_Controller
 
             $this->streamTeacherZipDownload($teacherReports, $base_view_data, $period->start, $period->end);
         } catch (Throwable $exception) {
+            $this->captureExportException($exception, 'teacher_zip');
             log_message('error', 'Failed to render teacher dashboard ZIP export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
         }
+    }
+
+    protected function captureExportException(Throwable $exception, string $exportType): void
+    {
+        if (!class_exists('SentryBootstrap')) {
+            return;
+        }
+
+        SentryBootstrap::captureException($exception, [
+            'area' => 'dashboard_export',
+            'export_type' => $exportType,
+        ], [
+            'controller' => static::class,
+            'request_uri' => $_SERVER['REQUEST_URI'] ?? null,
+        ]);
     }
 
     /**

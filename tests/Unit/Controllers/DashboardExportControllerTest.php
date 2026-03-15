@@ -7,8 +7,17 @@ use DateTimeImmutable;
 use DateTimeZone;
 use IntlDateFormatter;
 use InvalidArgumentException;
+use RuntimeException;
+use Sentry\Event;
+use Sentry\SentrySdk;
+use Sentry\State\Hub;
+use Sentry\Transport\Result;
+use Sentry\Transport\ResultStatus;
+use Sentry\Transport\TransportInterface;
+use Throwable;
 use Tests\TestCase;
 
+require_once APPPATH . 'bootstrap/SentryBootstrap.php';
 require_once APPPATH . 'controllers/Dashboard_export.php';
 
 class DashboardExportControllerTest extends TestCase
@@ -515,6 +524,49 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('Klassengröße', $mapped[1]['target_origin_label']);
     }
 
+    public function testCaptureExportExceptionSendsSentryEventWithExportContext(): void
+    {
+        $transport = $this->createMemoryTransport();
+
+        \Sentry\init([
+            'dsn' => 'https://examplePublicKey@o0.ingest.sentry.io/1',
+            'default_integrations' => false,
+            'transport' => $transport,
+        ]);
+
+        try {
+            $_SERVER['REQUEST_URI'] = '/index.php/dashboard/export/principal.pdf';
+
+            $controller = new class extends Dashboard_export {
+                public function __construct() {}
+
+                public function callCaptureExportException(Throwable $exception, string $exportType): void
+                {
+                    $this->captureExportException($exception, $exportType);
+                }
+            };
+
+            $controller->callCaptureExportException(new RuntimeException('export failed'), 'principal_pdf');
+
+            \Sentry\flush();
+
+            $this->assertNotNull($transport->event);
+            $this->assertSame('dashboard_export', $transport->event->getTags()['area'] ?? null);
+            $this->assertSame('principal_pdf', $transport->event->getTags()['export_type'] ?? null);
+            $this->assertStringContainsString(
+                'Dashboard_export',
+                (string) ($transport->event->getExtra()['controller'] ?? ''),
+            );
+            $this->assertSame(
+                '/index.php/dashboard/export/principal.pdf',
+                $transport->event->getExtra()['request_uri'] ?? null,
+            );
+        } finally {
+            unset($_SERVER['REQUEST_URI']);
+            SentrySdk::setCurrentHub(new Hub());
+        }
+    }
+
     private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
     {
         return new class ($configuredThreshold, $pdfDebugDumpFlag) extends Dashboard_export {
@@ -629,5 +681,24 @@ class DashboardExportControllerTest extends TestCase
         }
 
         return $metrics;
+    }
+
+    private function createMemoryTransport(): TransportInterface
+    {
+        return new class() implements TransportInterface {
+            public ?Event $event = null;
+
+            public function send(Event $event): Result
+            {
+                $this->event = $event;
+
+                return new Result(ResultStatus::success(), $event);
+            }
+
+            public function close(?int $timeout = null): Result
+            {
+                return new Result(ResultStatus::success(), $this->event);
+            }
+        };
     }
 }
