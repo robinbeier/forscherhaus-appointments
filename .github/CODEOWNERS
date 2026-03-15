@@ -59,6 +59,7 @@
 /application/libraries/Integrations_request_dto_factory.php @robinbeier
 /application/libraries/Ldap_client.php @robinbeier
 /application/libraries/Notifications.php @robinbeier
+/application/libraries/Pdf_renderer.php @robinbeier
 /application/libraries/Provider_utilization.php @robinbeier
 /application/libraries/Request_normalizer.php @robinbeier
 /application/libraries/Synchronization.php @robinbeier
