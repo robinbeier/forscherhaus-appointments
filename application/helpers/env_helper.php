@@ -32,6 +32,35 @@ if (!function_exists('env')) {
             throw new InvalidArgumentException('The $key argument cannot be empty.');
         }
 
-        return $_ENV[$key] ?? $default;
+        if (array_key_exists($key, $_ENV)) {
+            return $_ENV[$key];
+        }
+
+        $processValue = getenv($key);
+        if ($processValue !== false) {
+            return $processValue;
+        }
+
+        $serverValue = env_server_value($key);
+        if ($serverValue !== null) {
+            return $serverValue;
+        }
+
+        return $default;
+    }
+}
+
+if (!function_exists('env_server_value')) {
+    function env_server_value(string $key): ?string
+    {
+        foreach ([$key, 'REDIRECT_' . $key] as $candidate) {
+            if (!array_key_exists($candidate, $_SERVER)) {
+                continue;
+            }
+
+            return (string) $_SERVER[$candidate];
+        }
+
+        return null;
     }
 }

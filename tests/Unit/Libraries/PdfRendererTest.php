@@ -52,6 +52,49 @@ class PdfRendererTest extends TestCase
         );
     }
 
+    public function testResolveEndpointsUseApacheServerVariableWhenPhpEnvironmentMapIsEmpty(): void
+    {
+        $hadEnv = array_key_exists('PDF_RENDERER_URL', $_ENV);
+        $envValue = $_ENV['PDF_RENDERER_URL'] ?? null;
+        $hadServer = array_key_exists('PDF_RENDERER_URL', $_SERVER);
+        $serverValue = $_SERVER['PDF_RENDERER_URL'] ?? null;
+        $processValue = getenv('PDF_RENDERER_URL');
+        putenv('PDF_RENDERER_URL');
+
+        try {
+            unset($_ENV['PDF_RENDERER_URL']);
+            $_SERVER['PDF_RENDERER_URL'] = 'http://localhost:3003/';
+
+            $renderer = $this->createRenderer(false, false);
+            $endpoints = $renderer->callResolveEndpoints([
+                'fallback_urls' => [],
+            ]);
+
+            $this->assertSame(
+                ['http://localhost:3003', 'http://127.0.0.1:3003', 'http://pdf-renderer:3000'],
+                $endpoints,
+            );
+        } finally {
+            if ($hadEnv) {
+                $_ENV['PDF_RENDERER_URL'] = $envValue;
+            } else {
+                unset($_ENV['PDF_RENDERER_URL']);
+            }
+
+            if ($hadServer) {
+                $_SERVER['PDF_RENDERER_URL'] = $serverValue;
+            } else {
+                unset($_SERVER['PDF_RENDERER_URL']);
+            }
+
+            if ($processValue === false) {
+                putenv('PDF_RENDERER_URL');
+            } else {
+                putenv('PDF_RENDERER_URL=' . $processValue);
+            }
+        }
+    }
+
     public function testRenderHtmlCapturesSentryEventWhenAllEndpointsFail(): void
     {
         $transport = new class implements TransportInterface {

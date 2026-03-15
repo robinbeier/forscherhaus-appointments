@@ -90,6 +90,9 @@ If you run PHP on host with Docker PDF renderer, set:
 export PDF_RENDERER_URL=http://localhost:3003
 ```
 
+If the host runtime goes through Apache `mod_php`, set `PDF_RENDERER_URL` via
+Apache `SetEnv` as well; PHP-FPM-only env wiring does not reach those requests.
+
 ## Worktree Safety
 
 When using multiple git worktrees, always set a unique Docker Compose project name per worktree:
