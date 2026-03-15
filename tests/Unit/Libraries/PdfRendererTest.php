@@ -58,6 +58,7 @@ class PdfRendererTest extends TestCase
         $envValue = $_ENV['PDF_RENDERER_URL'] ?? null;
         $hadServer = array_key_exists('PDF_RENDERER_URL', $_SERVER);
         $serverValue = $_SERVER['PDF_RENDERER_URL'] ?? null;
+        $processValue = getenv('PDF_RENDERER_URL');
         putenv('PDF_RENDERER_URL');
 
         try {
@@ -84,6 +85,12 @@ class PdfRendererTest extends TestCase
                 $_SERVER['PDF_RENDERER_URL'] = $serverValue;
             } else {
                 unset($_SERVER['PDF_RENDERER_URL']);
+            }
+
+            if ($processValue === false) {
+                putenv('PDF_RENDERER_URL');
+            } else {
+                putenv('PDF_RENDERER_URL=' . $processValue);
             }
         }
     }
