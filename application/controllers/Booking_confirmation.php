@@ -60,6 +60,7 @@ class Booking_confirmation extends EA_Controller
             $provider = $this->providers_model->find((int) $appointment['id_users_provider']);
             $customer = $this->customers_model->find((int) $appointment['id_users_customer']);
         } catch (InvalidArgumentException $exception) {
+            $this->captureConfirmationException($exception, (string) $appointment_hash);
             log_message(
                 'error',
                 'Booking confirmation failed to resolve related entities: ' . $exception->getMessage(),
@@ -178,6 +179,21 @@ class Booking_confirmation extends EA_Controller
         ]);
 
         $this->load->view('pages/booking_confirmation');
+    }
+
+    protected function captureConfirmationException(Throwable $exception, string $appointmentHash): void
+    {
+        if (!class_exists('SentryBootstrap')) {
+            return;
+        }
+
+        SentryBootstrap::captureException($exception, [
+            'area' => 'booking_confirmation',
+            'operation' => 'resolve_related_entities',
+        ], [
+            'appointment_hash' => $appointmentHash,
+            'request_uri' => $_SERVER['REQUEST_URI'] ?? null,
+        ]);
     }
 
     protected function resolveLocale(string $language_code): string
