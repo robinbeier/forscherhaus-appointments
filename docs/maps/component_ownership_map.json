@@ -398,6 +398,7 @@
         "application/views/components/jquery_compat_inline.php",
         "application/libraries/Accounts.php",
         "application/libraries/Notifications.php",
+        "application/libraries/Pdf_renderer.php",
         "application/libraries/Request_normalizer.php",
         "application/libraries/Timezones.php",
         "application/models/Roles_model.php"

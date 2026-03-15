@@ -74,7 +74,7 @@ class HealthzControllerTest extends TestCase
         );
     }
 
-    public function testResolvePdfRendererEndpointsSkipsImplicitLocalhostFallbackOutsideLocalEnvironment(): void
+    public function testResolvePdfRendererEndpointsKeepsLocalhostFallbackOutsideLocalEnvironment(): void
     {
         $hadPdfRendererUrl = array_key_exists('PDF_RENDERER_URL', $_ENV);
         $pdfRendererUrl = $_ENV['PDF_RENDERER_URL'] ?? null;
@@ -88,7 +88,10 @@ class HealthzControllerTest extends TestCase
             $controller = $this->createController(false);
             $endpoints = $controller->callResolvePdfRendererEndpoints();
 
-            $this->assertSame(['http://example.com:3000', 'http://pdf-renderer:3000'], $endpoints);
+            $this->assertSame(
+                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
+                $endpoints,
+            );
         } finally {
             if ($hadPdfRendererUrl) {
                 $_ENV['PDF_RENDERER_URL'] = $pdfRendererUrl;
@@ -365,9 +368,7 @@ class HealthzControllerTest extends TestCase
                 return $handle;
             }
 
-            protected function configureCurl(mixed $curl, ?string $endpoint = null): void
-            {
-            }
+            protected function configureCurl(mixed $curl, ?string $endpoint = null): void {}
 
             protected function executeCurl(mixed $curl): string|bool
             {
@@ -405,9 +406,7 @@ class HealthzControllerTest extends TestCase
                 return 0;
             }
 
-            protected function closeCurl(mixed $curl): void
-            {
-            }
+            protected function closeCurl(mixed $curl): void {}
 
             public function callResolvePdfRendererEndpoints(): array
             {

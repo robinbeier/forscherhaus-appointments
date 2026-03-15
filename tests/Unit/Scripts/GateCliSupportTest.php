@@ -98,6 +98,15 @@ class GateCliSupportTest extends TestCase
             $this->assertStringContainsString("dump '{$resolvedCwd}/fixtures/dump.sql.gz'", $result['stdout']);
             $this->assertStringContainsString("credentials '{$resolvedCwd}/fixtures/predeploy.ini'", $result['stdout']);
             $this->assertStringContainsString("report '{$resolvedCwd}/reports/predeploy.json'", $result['stdout']);
+            $expectedStageRoot = $appPath . '_ea_20260320_1200_stage';
+            $this->assertStringContainsString(
+                "would generate zero-surprise stage config from '{$expectedStageRoot}/config-sample.php' -> '{$expectedStageRoot}/config.php'",
+                $result['stdout'],
+            );
+            $this->assertStringContainsString(
+                "restore executable bits for '{$expectedStageRoot}/scripts/ops' shell scripts when present",
+                $result['stdout'],
+            );
         } finally {
             $this->removeDirectory($workspace);
         }

@@ -349,10 +349,7 @@ class Healthz extends EA_Controller
         }
 
         $candidates[] = 'http://pdf-renderer:3000';
-
-        if ($isLocalEnv || $this->shouldAllowNonLocalLoopbackFallback()) {
-            $candidates[] = 'http://localhost:3003';
-        }
+        $candidates[] = 'http://localhost:3003';
 
         // Keep explicit loopback alias for local hosts where localhost is remapped.
         if ($isLocalEnv) {
