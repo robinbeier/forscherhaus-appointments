@@ -292,10 +292,24 @@ class Pdf_renderer
                 'area' => 'pdf_renderer',
                 'operation' => 'render_html',
             ],
-            [
-                'endpoints' => $this->endpoints,
-            ],
+            $this->buildRendererFailureContext(),
         );
+    }
+
+    /**
+     * Provide enough runtime context to explain endpoint selection in Sentry.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildRendererFailureContext(): array
+    {
+        return [
+            'endpoints' => $this->endpoints,
+            'primary_endpoint' => $this->endpoints[0] ?? null,
+            'endpoint_count' => count($this->endpoints),
+            'container_runtime' => $this->isContainerRuntime(),
+            'local_environment' => $this->isLocalEnvironment(),
+        ];
     }
 
     protected function logRendererFailure(string $endpoint, Throwable $exception): void
