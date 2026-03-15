@@ -17,6 +17,12 @@ Both gates enforce the same invariants:
 
 `unexpected_5xx` has no allowlist. Any unexpected HTTP `5xx` is a hard failure.
 
+Operational boundary:
+
+- Uptime Kuma maintenance mode may wrap the real deploy window.
+- Uptime Kuma does not replace predeploy replay, renderer health, deep health,
+  or the live canary as release gates.
+
 ## School-Day Digital Twin profile
 
 Replay and canary default to the versioned profile `school-day-default`.
