@@ -49,7 +49,7 @@ class Config {
 ```
 
 In the host machine the server is accessible from `http://localhost` and the database from `localhost:3306`.
-The development stack pins MySQL `8.0` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
+The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`) and Mailpit from `http://localhost:8025`.
 

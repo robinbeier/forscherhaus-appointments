@@ -7,7 +7,7 @@ This repository prioritizes stable, low-risk delivery for school operations and 
 ## Scope
 
 - Fork base: Easy!Appointments (`v1.5.2` lineage)
-- Stack: PHP `>=8.1` (8.2+ recommended), CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
+- Stack: PHP `>=8.3.6`, CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
 - Primary goal: school-specific scheduling workflows and operational reliability
 
 ## Fork Invariants
@@ -16,6 +16,13 @@ This repository prioritizes stable, low-risk delivery for school operations and 
 - Do not implement multi-attendant behavior unless product scope changes explicitly.
 
 ## Quickstart (Recommended)
+
+Prerequisites on host (required by `./scripts/setup-worktree.sh`):
+
+- PHP `>=8.3.6`
+- Composer
+- Node.js `>=20.19.0` plus `npm`/`npx`
+- Docker + Docker Compose
 
 ```bash
 ./scripts/setup-worktree.sh

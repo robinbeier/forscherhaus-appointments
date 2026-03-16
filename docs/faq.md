@@ -1,8 +1,18 @@
 # FAQ 
 
+This FAQ keeps common troubleshooting answers and older upstream guidance in one
+place. For fork-authoritative setup and runtime requirements, use [README.md](../README.md)
+and [Installation Guide](installation-guide.md) as the canonical sources.
+
 ## How do I check that my server has Apache, Php and MySQL already installed?
 
-Easy!Appointments is a php application and needs an apache server with php and mysql installed. Apart from that, the php "curl" extension and the apache module "mod_rewrite" need to be enabled. To check if your server fullfils the needed prerequisites you will need to either contact the web hosting company or create a php file on your web root directory with the content <?php phpinfo(); ?> and then access it from the web (eg "phpinfo.php" >> "http://domain-name.com/phpinfo.php"). This url will display all the server details.
+Easy!Appointments is a PHP application and needs Apache, PHP, and MySQL. In this
+fork, the canonical requirement set lives in [README.md](../README.md) and
+[Installation Guide](installation-guide.md), including the current PHP version
+floor and required PHP extensions. To verify a deployed server, either contact
+the hosting provider or create a `phpinfo.php` file in the web root with
+`<?php phpinfo(); ?>` and open it in the browser. That page will show the active
+PHP version, loaded extensions, and Apache module details such as `mod_rewrite`.
 
 
 ## How do I create a Google Calendar API key?
