@@ -102,7 +102,15 @@ class Privacy extends EA_Controller
     private function customerTokenCache(): ?object
     {
         $CI = &get_instance();
-        $cache = $this->cache ?? ($CI->cache ?? null);
+        $cache = $this->cache ?? null;
+
+        if (is_object($cache) && method_exists($cache, 'get')) {
+            $this->cache = $cache;
+
+            return $cache;
+        }
+
+        $cache = $CI->cache ?? null;
 
         if (is_object($cache) && method_exists($cache, 'get')) {
             $this->cache = $cache;

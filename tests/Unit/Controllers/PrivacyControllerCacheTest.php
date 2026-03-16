@@ -36,9 +36,29 @@ final class PrivacyControllerCacheTest extends TestCase
         parent::tearDown();
     }
 
+    public function testCustomerTokenCacheReturnsExistingCacheFromController(): void
+    {
+        $cache = new class {
+            public function get(string $key): ?int
+            {
+                return $key === 'customer-token-known' ? 42 : null;
+            }
+        };
+
+        $controller = $this->createControllerWithLoader(function (): void {
+            self::fail('Expected existing cache to avoid loader bootstrap.');
+        });
+        $controller->cache = $cache;
+
+        $resolved = $this->invokeCustomerTokenCache($controller);
+
+        $this->assertSame($cache, $resolved);
+        $this->assertSame($cache, $controller->cache);
+    }
+
     public function testCustomerTokenCacheReturnsExistingCacheFromFrameworkInstance(): void
     {
-        $cache = new class() {
+        $cache = new class {
             public function get(string $key): ?int
             {
                 return $key === 'customer-token-known' ? 42 : null;
@@ -58,9 +78,16 @@ final class PrivacyControllerCacheTest extends TestCase
         $this->assertSame($cache, $controller->cache);
     }
 
-    public function testCustomerTokenCacheBootstrapsCacheDriverWhenMissing(): void
+    public function testCustomerTokenCacheFallsBackToFrameworkCacheWhenControllerCacheIsInvalid(): void
     {
-        $cache = new class() {
+        $invalidCache = new class {
+            public function save(string $key, mixed $value, int $ttl): bool
+            {
+                return true;
+            }
+        };
+
+        $validCache = new class {
             public function get(string $key): ?int
             {
                 return $key === 'customer-token-known' ? 42 : null;
@@ -68,23 +95,54 @@ final class PrivacyControllerCacheTest extends TestCase
         };
 
         $CI = &get_instance();
-        unset($CI->cache);
+        $CI->cache = $validCache;
 
-        $controller = $this->createControllerWithLoader(function (Privacy $controller) use ($cache, &$CI): void {
+        $controller = $this->createControllerWithLoader(function (): void {
+            self::fail('Expected framework cache fallback to avoid loader bootstrap.');
+        });
+        $controller->cache = $invalidCache;
+
+        $resolved = $this->invokeCustomerTokenCache($controller);
+
+        $this->assertSame($validCache, $resolved);
+        $this->assertSame($validCache, $controller->cache);
+    }
+
+    public function testCustomerTokenCacheBootstrapsFileCacheDriverWhenMissing(): void
+    {
+        $cache = new class {
+            public function get(string $key): ?int
+            {
+                return $key === 'customer-token-known' ? 42 : null;
+            }
+        };
+
+        $CI = &get_instance();
+        $CI->cache = null;
+
+        $driverCalls = [];
+        $controller = $this->createControllerWithLoader(function (
+            Privacy $controller,
+            string $driver,
+            array $params,
+        ) use ($cache, &$CI, &$driverCalls): void {
+            $driverCalls[] = [$driver, $params];
             $controller->cache = $cache;
             $CI->cache = $cache;
         });
 
         $resolved = $this->invokeCustomerTokenCache($controller);
 
+        $this->assertSame([['cache', ['adapter' => 'file']]], $driverCalls);
         $this->assertSame($cache, $resolved);
+        $this->assertSame($cache, $controller->cache);
         $this->assertSame($cache, $CI->cache);
     }
 
     public function testCustomerTokenCacheReturnsNullWhenBootstrapThrows(): void
     {
         $CI = &get_instance();
-        unset($CI->cache);
+        $CI->cache = null;
 
         $controller = $this->createControllerWithLoader(function (): void {
             throw new RuntimeException('cache bootstrap failed');
@@ -93,12 +151,12 @@ final class PrivacyControllerCacheTest extends TestCase
         $resolved = $this->invokeCustomerTokenCache($controller);
 
         $this->assertNull($resolved);
-        $this->assertFalse(property_exists($CI, 'cache'));
+        $this->assertNull($CI->cache);
     }
 
     public function testCustomerTokenCacheReturnsNullWhenBootstrapDoesNotProvideGetMethod(): void
     {
-        $invalidCache = new class() {
+        $invalidCache = new class {
             public function save(string $key, mixed $value, int $ttl): bool
             {
                 return true;
@@ -106,7 +164,7 @@ final class PrivacyControllerCacheTest extends TestCase
         };
 
         $CI = &get_instance();
-        unset($CI->cache);
+        $CI->cache = null;
 
         $controller = $this->createControllerWithLoader(function (Privacy $controller) use ($invalidCache, &$CI): void {
             $controller->cache = $invalidCache;
@@ -120,15 +178,14 @@ final class PrivacyControllerCacheTest extends TestCase
 
     private function createControllerWithLoader(\Closure $driverHandler): Privacy
     {
-        return new class($driverHandler) extends Privacy {
-            public object $load;
+        return new class ($driverHandler) extends Privacy {
+            public $load;
+            public mixed $cache = null;
 
             public function __construct(\Closure $driverHandler)
             {
-                $this->load = new class($driverHandler, $this) {
-                    public function __construct(private \Closure $driverHandler, private Privacy $controller)
-                    {
-                    }
+                $this->load = new class ($driverHandler, $this) {
+                    public function __construct(private \Closure $driverHandler, private Privacy $controller) {}
 
                     public function driver(string $driver, array $params): void
                     {

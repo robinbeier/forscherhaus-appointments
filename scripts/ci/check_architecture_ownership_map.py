@@ -58,7 +58,23 @@ def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
 
 
 def get_tracked_files() -> set[str]:
-    proc = run(["git", "ls-files"])
+    try:
+        proc = run(["git", "ls-files"])
+    except subprocess.CalledProcessError:
+        files: set[str] = set()
+
+        for path in ROOT.rglob("*"):
+            if not path.is_file():
+                continue
+
+            relative_path = path.relative_to(ROOT).as_posix()
+            if relative_path == ".git" or relative_path.startswith(".git/"):
+                continue
+
+            files.add(relative_path)
+
+        return files
+
     files = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
     return files
 
