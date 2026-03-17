@@ -270,7 +270,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
         $this->assertSame(['after_15_goal_missed'], $payload['metrics']['status_reasons']);
     }
 
-    public function testBuildProviderDashboardPayloadUsesBookingOfferedPlannedSlots(): void
+    public function testBuildProviderDashboardPayloadUsesPlannedSlotsFromDashboardMetrics(): void
     {
         $provider = [
             'id' => 42,

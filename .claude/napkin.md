@@ -37,15 +37,17 @@
 
 1. **[2026-02-22] Keep production code inside `application/`**
    Do instead: place feature/controller/model/view changes in `application/` and avoid edits in `system/` unless explicitly requested.
-2. **[2026-03-09] Prefix helper functions in standalone CI scripts**
+2. **[2026-03-17] Keep dashboard capacity wording tied to planned slots**
+   Do instead: when touching dashboard badges, hints, or exports, describe capacity as planned working-plan capacity for the selected period, not live remaining availability after bookings, and regression-test both the metric seam and the user-visible label seam together.
+3. **[2026-03-09] Prefix helper functions in standalone CI scripts**
    Do instead: when adding `scripts/ci/*.php` files that unit tests may `require_once` together, give internal global helper functions a script-specific prefix so PHPUnit does not hit `Cannot redeclare function ...` collisions across multiple CLI scripts.
-3. **[2026-02-25] Keep health endpoints versioned in app code**
+4. **[2026-02-25] Keep health endpoints versioned in app code**
    Do instead: implement monitoring endpoints as routes/controllers under `application/` and deploy them via release artifacts; avoid unmanaged root files like `healthz.php` that can disappear on deploy.
-4. **[2026-02-22] Preserve single-attendant invariant**
+5. **[2026-02-22] Preserve single-attendant invariant**
    Do instead: treat `services.attendants_number` as fixed to `1` unless product scope explicitly changes to multi-attendant.
-5. **[2026-02-22] Never commit runtime secrets or local config**
+6. **[2026-02-22] Never commit runtime secrets or local config**
    Do instead: keep sensitive values in local `config.php` and adjust `config-sample.php` only for safe defaults/documentation.
-6. **[2026-03-02] Document OAuth callback URLs with default index page behavior**
+7. **[2026-03-02] Document OAuth callback URLs with default index page behavior**
    Do instead: use `.../index.php/google/oauth_callback` for default examples and explicitly mention rewrite-mode alternatives when `index.php` is removed.
 
 ## Shell & Command Reliability

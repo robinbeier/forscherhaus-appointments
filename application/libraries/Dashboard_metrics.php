@@ -380,12 +380,12 @@ class Dashboard_metrics
             return $this->buildNeutralAfter15Metrics();
         }
 
-        $total_offered_slots = 0;
+        $total_planned_slots = 0;
         $after_15_slots = 0;
         $day = $start;
 
         try {
-            $offered_hours_by_date = $this->booking_slot_analytics->get_planned_hours_by_date_for_analysis(
+            $planned_hours_by_date = $this->booking_slot_analytics->get_planned_hours_by_date_for_analysis(
                 $start->format('Y-m-d'),
                 $end->format('Y-m-d'),
                 $service,
@@ -393,16 +393,16 @@ class Dashboard_metrics
             );
 
             while ($day <= $end) {
-                $offered_hours = $offered_hours_by_date[$day->format('Y-m-d')] ?? [];
+                $planned_hours = $planned_hours_by_date[$day->format('Y-m-d')] ?? [];
 
-                foreach ($offered_hours as $offered_hour) {
-                    if (!is_string($offered_hour) || !preg_match('/^\d{2}:\d{2}$/', $offered_hour)) {
+                foreach ($planned_hours as $planned_hour) {
+                    if (!is_string($planned_hour) || !preg_match('/^\d{2}:\d{2}$/', $planned_hour)) {
                         continue;
                     }
 
-                    $total_offered_slots++;
+                    $total_planned_slots++;
 
-                    if ($offered_hour >= self::AFTER_15_CUTOFF) {
+                    if ($planned_hour >= self::AFTER_15_CUTOFF) {
                         $after_15_slots++;
                     }
                 }
@@ -415,7 +415,7 @@ class Dashboard_metrics
             return $this->buildNeutralAfter15Metrics();
         }
 
-        if ($total_offered_slots === 0) {
+        if ($total_planned_slots === 0) {
             return [
                 'after_15_slots' => 0,
                 'total_offered_slots' => 0,
@@ -426,11 +426,11 @@ class Dashboard_metrics
             ];
         }
 
-        $after_15_ratio = $after_15_slots / $total_offered_slots;
+        $after_15_ratio = $after_15_slots / $total_planned_slots;
 
         return [
             'after_15_slots' => $after_15_slots,
-            'total_offered_slots' => $total_offered_slots,
+            'total_offered_slots' => $total_planned_slots,
             'after_15_ratio' => $after_15_ratio,
             'after_15_percent' => round($after_15_ratio * 100, 1),
             'after_15_target_met' => $after_15_ratio >= self::AFTER_15_TARGET_RATIO,
@@ -731,13 +731,13 @@ class Dashboard_metrics
             return null;
         }
 
-        $total_offered_slots = $after_15_metrics['total_offered_slots'];
+        $total_planned_slots = $after_15_metrics['total_offered_slots'];
 
-        if ($total_offered_slots === null || !is_numeric($total_offered_slots)) {
+        if ($total_planned_slots === null || !is_numeric($total_planned_slots)) {
             return null;
         }
 
-        $planned_slots = (int) round((float) $total_offered_slots);
+        $planned_slots = (int) round((float) $total_planned_slots);
 
         return $planned_slots >= 0 ? $planned_slots : null;
     }
