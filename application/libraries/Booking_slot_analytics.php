@@ -204,6 +204,7 @@ class Booking_slot_analytics
             $end_date,
             $exclude_appointment_id,
         );
+        $unavailabilities = $this->exclude_buffer_blocks_from_planned_unavailabilities($unavailabilities);
         $blocked_periods = $this->get_blocked_periods_for_analysis_range($range_start, $range_end);
         $unavailabilities_by_date = $this->index_events_by_date($unavailabilities, $range_start, $range_end);
         $blocked_periods_by_date = $this->index_events_by_date($blocked_periods, $range_start, $range_end);
@@ -226,6 +227,23 @@ class Booking_slot_analytics
         }
 
         return $planned_hours_by_date;
+    }
+
+    /**
+     * Ignore booking-created buffer blocks when measuring planned capacity.
+     *
+     * @param array<int, array<string, mixed>> $unavailabilities
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function exclude_buffer_blocks_from_planned_unavailabilities(array $unavailabilities): array
+    {
+        return array_values(
+            array_filter(
+                $unavailabilities,
+                static fn(array $unavailability): bool => empty($unavailability['id_parent_appointment']),
+            ),
+        );
     }
 
     /**

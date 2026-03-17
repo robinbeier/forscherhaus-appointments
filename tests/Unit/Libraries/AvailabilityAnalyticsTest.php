@@ -286,6 +286,164 @@ class AvailabilityAnalyticsTest extends TestCase
         );
     }
 
+    public function testGetPlannedHoursByDateForAnalysisIgnoresBookingLinkedBufferBlocks(): void
+    {
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->expects($this->never())->method('query');
+
+        $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
+        $unavailabilitiesModel
+            ->expects($this->once())
+            ->method('query')
+            ->willReturn(
+                $this->createAppointmentsQueryBuilder([
+                    [
+                        'start_datetime' => '2026-02-18 08:30:00',
+                        'end_datetime' => '2026-02-18 09:00:00',
+                        'id_parent_appointment' => 999,
+                    ],
+                    [
+                        'start_datetime' => '2026-02-18 09:00:00',
+                        'end_datetime' => '2026-02-18 09:30:00',
+                        'id_parent_appointment' => null,
+                    ],
+                    [
+                        'start_datetime' => '2026-02-18 09:30:00',
+                        'end_datetime' => '2026-02-18 10:00:00',
+                        'id_parent_appointment' => 0,
+                    ],
+                ]),
+            );
+        $unavailabilitiesModel
+            ->expects($this->exactly(3))
+            ->method('cast')
+            ->with($this->callback(static fn($value): bool => is_array($value)));
+
+        $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
+        $blockedPeriodsModel
+            ->expects($this->once())
+            ->method('get_for_period')
+            ->with('2026-02-17', '2026-02-19')
+            ->willReturn([]);
+
+        $availability = new Availability($appointmentsModel, $unavailabilitiesModel, $blockedPeriodsModel);
+
+        $service = [
+            'duration' => 30,
+            'attendants_number' => 1,
+            'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            'buffer_before' => 0,
+            'buffer_after' => 0,
+        ];
+        $provider = [
+            'id' => 1,
+            'timezone' => 'Europe/Berlin',
+            'settings' => [
+                'working_plan' => json_encode([
+                    'wednesday' => [
+                        'start' => '08:00',
+                        'end' => '11:00',
+                        'breaks' => [],
+                    ],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $hoursByDate = $availability->get_planned_hours_by_date_for_analysis(
+            '2026-02-18',
+            '2026-02-18',
+            $service,
+            $provider,
+        );
+
+        $this->assertSame(
+            [
+                '2026-02-18' => ['08:00', '08:30', '10:00', '10:30'],
+            ],
+            $hoursByDate,
+        );
+    }
+
+    public function testGetOfferedHoursByDateForAnalysisKeepsBookingLinkedBufferBlocks(): void
+    {
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel
+            ->expects($this->once())
+            ->method('query')
+            ->willReturn(
+                $this->createAppointmentsQueryBuilder([
+                    [
+                        'start_datetime' => '2026-02-18 08:00:00',
+                        'end_datetime' => '2026-02-18 08:30:00',
+                    ],
+                ]),
+            );
+
+        $unavailabilitiesModel = $this->createMock(Unavailabilities_model::class);
+        $unavailabilitiesModel
+            ->expects($this->once())
+            ->method('query')
+            ->willReturn(
+                $this->createAppointmentsQueryBuilder([
+                    [
+                        'start_datetime' => '2026-02-18 08:30:00',
+                        'end_datetime' => '2026-02-18 09:00:00',
+                        'id_parent_appointment' => 999,
+                    ],
+                ]),
+            );
+        $unavailabilitiesModel
+            ->expects($this->once())
+            ->method('cast')
+            ->with($this->callback(static fn($value): bool => is_array($value)));
+
+        $blockedPeriodsModel = $this->createMock(Blocked_periods_model::class);
+        $blockedPeriodsModel
+            ->expects($this->once())
+            ->method('get_for_period')
+            ->with('2026-02-17', '2026-02-19')
+            ->willReturn([]);
+
+        $availability = new Availability($appointmentsModel, $unavailabilitiesModel, $blockedPeriodsModel);
+
+        $service = [
+            'duration' => 30,
+            'attendants_number' => 1,
+            'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+            'buffer_before' => 0,
+            'buffer_after' => 0,
+        ];
+        $provider = [
+            'id' => 1,
+            'timezone' => 'Europe/Berlin',
+            'settings' => [
+                'working_plan' => json_encode([
+                    'wednesday' => [
+                        'start' => '08:00',
+                        'end' => '11:00',
+                        'breaks' => [],
+                    ],
+                ]),
+                'working_plan_exceptions' => '{}',
+            ],
+        ];
+
+        $hoursByDate = $availability->get_offered_hours_by_date_for_analysis(
+            '2026-02-18',
+            '2026-02-18',
+            $service,
+            $provider,
+        );
+
+        $this->assertSame(
+            [
+                '2026-02-18' => ['09:00', '09:30', '10:00', '10:30'],
+            ],
+            $hoursByDate,
+        );
+    }
+
     public function testGetOfferedHoursByDateForAnalysisTreatsMissingBreaksAsNoBreaks(): void
     {
         $appointmentsModel = $this->createMock(Appointments_model::class);
