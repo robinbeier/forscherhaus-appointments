@@ -6,6 +6,7 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 
 - `README.md`: onboarding, local setup, services, shortest operator path.
 - `WORKFLOW.md`: agent runtime, Linear states, Codex Workpad, and ticket-to-merge flow.
+- `code_review.md`: canonical review priorities, findings format, and repo-specific review checks.
 - `docs/agent-harness-index.md`: routing across CI, architecture, ownership, Symphony, and specialist docs.
 - `.github/workflows/ci.yml`: source of truth for CI triggers, blocking status, and artifacts.
 
@@ -75,6 +76,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 
 - `WORKFLOW.md` is the canonical source for Linear states, publish/merge flow, and Codex Workpad behavior.
 - `README.md` stays operator-first.
+- `code_review.md` defines the durable review rubric for `/review` and normal Codex turns.
 - `docs/agent-harness-index.md` stays the routing map.
 - Use nested `AGENTS.md` files only when a subtree genuinely needs stricter local rules than the repo root.
 
