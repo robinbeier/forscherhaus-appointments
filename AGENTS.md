@@ -42,6 +42,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 - Console commands: `docs/console.md`
 - Write-path contracts: `docs/ci-write-contracts.md`
 - Release gates: `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-zero-surprise.md`
+- Observability and ops monitors: `docs/observability.md`, `scripts/ops/README.md`
 - Architecture and ownership: `docs/architecture-map.md`, `docs/ownership-map.md`, `docs/maps/component_ownership_map.json`
 - Symphony runtime and pilot docs: `tools/symphony/README.md`, `docs/symphony/STAGING_PILOT_RUNBOOK.md`
 
@@ -56,6 +57,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 - `./scripts/setup-worktree.sh` installs managed hooks; refresh with `./scripts/install-git-hooks.sh` (or replace older custom hooks with `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh`).
 - `bash ./scripts/ci/pre_pr_full.sh` enables LDAP guardrails only when LDAP/runtime paths changed; override explicitly via `PRE_PR_INCLUDE_LDAP_GUARDRAIL=1` or `0`.
 - For deterministic LDAP fixtures, run `bash ./scripts/ldap/reset_directory.sh` and `bash ./scripts/ldap/smoke.sh`.
+- For local production dump restore, run `bash ./scripts/import_prod_backup.sh` (or append `--core-services-only` to keep only mysql/php-fpm/nginx running).
 
 ## Validation Expectations
 
