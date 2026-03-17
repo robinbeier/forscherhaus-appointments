@@ -486,6 +486,40 @@ class DashboardExportControllerTest extends TestCase
         $this->assertTrue($mapped[0]['after_15_evaluable']);
     }
 
+    public function testMapMetricsForViewKeepsPlannedCapacityStableWhenBookingsExist(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapMetricsForView(
+            [
+                [
+                    'provider_id' => 42,
+                    'provider_name' => 'Booked Teacher',
+                    'target' => 18,
+                    'booked' => 6,
+                    'open' => 12,
+                    'fill_rate' => 6 / 18,
+                    'has_plan' => true,
+                    'has_explicit_target' => true,
+                    'slots_planned' => 20,
+                    'slots_required' => 20,
+                    'has_capacity_gap' => false,
+                    'after_15_percent' => 30.0,
+                    'after_15_target_met' => true,
+                    'after_15_evaluable' => true,
+                    'status_reasons' => ['booking_goal_missed'],
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertCount(1, $mapped);
+        $this->assertSame(20, $mapped[0]['slots_planned_raw']);
+        $this->assertSame('20', $mapped[0]['slots_planned_formatted']);
+        $this->assertFalse($mapped[0]['has_capacity_gap']);
+        $this->assertSame(['booking_goal_missed'], $mapped[0]['status_reasons']);
+    }
+
     public function testMapMetricsForViewLabelsFallbackTargetOrigin(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -685,7 +719,7 @@ class DashboardExportControllerTest extends TestCase
 
     private function createMemoryTransport(): TransportInterface
     {
-        return new class() implements TransportInterface {
+        return new class implements TransportInterface {
             public ?Event $event = null;
 
             public function send(Event $event): Result

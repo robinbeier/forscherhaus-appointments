@@ -238,6 +238,81 @@ class DashboardMetricsTest extends TestCase
         );
     }
 
+    public function testCollectKeepsCapacityGapDecisionBoundToPlannedSlotsWhenBookingsExist(): void
+    {
+        $providers = [
+            [
+                'id' => 10,
+                'first_name' => 'Ada',
+                'last_name' => 'Lovelace',
+                'email' => 'ada@example.org',
+                'services' => [1],
+                'class_size_default' => 18,
+            ],
+        ];
+        $service = $this->makeService(1);
+
+        /** @var Providers_model&MockObject $providersModel */
+        $providersModel = $this->createMock(Providers_model::class);
+        $providersModel->expects($this->once())->method('get_available_providers')->with(false)->willReturn($providers);
+
+        /** @var Provider_utilization&MockObject $providerUtilization */
+        $providerUtilization = $this->createMock(Provider_utilization::class);
+        $providerUtilization
+            ->expects($this->once())
+            ->method('calculate')
+            ->with($providers[0], '2024-04-15', '2024-04-15', ['Booked'], null)
+            ->willReturn(['total' => 20, 'booked' => 6, 'open' => 14, 'has_plan' => true]);
+
+        /** @var CI_DB_query_builder&MockObject $builder */
+        $builder = $this->createMock(CI_DB_query_builder::class);
+        $builder->method('select')->willReturnSelf();
+        $builder->method('where')->willReturnSelf();
+        $builder->method('where_in')->willReturnSelf();
+        $builder->method('group_by')->willReturnSelf();
+        $builder->method('get')->willReturn($this->createCountResult([['id_users_provider' => 10, 'aggregate' => 6]]));
+
+        /** @var Appointments_model&MockObject $appointmentsModel */
+        $appointmentsModel = $this->createMock(Appointments_model::class);
+        $appointmentsModel->expects($this->once())->method('query')->willReturn($builder);
+
+        /** @var Services_model&MockObject $servicesModel */
+        $servicesModel = $this->createMock(Services_model::class);
+        $servicesModel
+            ->expects($this->once())
+            ->method('get')
+            ->with(['id' => 1], 1)
+            ->willReturn([$service]);
+
+        /** @var Booking_slot_analytics&MockObject $bookingSlotAnalytics */
+        $bookingSlotAnalytics = $this->createMock(Booking_slot_analytics::class);
+        $bookingSlotAnalytics
+            ->expects($this->once())
+            ->method('get_planned_hours_by_date_for_analysis')
+            ->willReturn([
+                '2024-04-15' => $this->buildThresholdHours(14, 6),
+            ]);
+
+        $library = new Dashboard_metrics(
+            $providersModel,
+            $appointmentsModel,
+            $providerUtilization,
+            $servicesModel,
+            $bookingSlotAnalytics,
+        );
+
+        $metrics = $library->collect(new \DateTimeImmutable('2024-04-15'), new \DateTimeImmutable('2024-04-15'), [
+            'statuses' => ['Booked'],
+        ]);
+
+        $this->assertCount(1, $metrics);
+        $this->assertSame(20, $metrics[0]['slots_planned']);
+        $this->assertSame(20, $metrics[0]['total_offered_slots']);
+        $this->assertSame(20, $metrics[0]['slots_required']);
+        $this->assertFalse($metrics[0]['has_capacity_gap']);
+        $this->assertSame([Dashboard_metrics::STATUS_REASON_BOOKING_GOAL_MISSED], $metrics[0]['status_reasons']);
+    }
+
     public function testCollectKeepsServiceSpecificAfter15RatioForFallbackTargets(): void
     {
         $providers = [
