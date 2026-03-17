@@ -25,7 +25,7 @@ class PdfRendererTest extends TestCase
             'fallback_urls' => [],
         ]);
 
-        $this->assertSame(['http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'], $endpoints);
+        $this->assertSame(['http://pdf-renderer:3000'], $endpoints);
     }
 
     public function testResolveEndpointsPreferServiceNameInsideContainerRuntime(): void
@@ -46,10 +46,7 @@ class PdfRendererTest extends TestCase
             'fallback_urls' => [],
         ]);
 
-        $this->assertSame(
-            ['http://example.com:3000', 'http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'],
-            $endpoints,
-        );
+        $this->assertSame(['http://example.com:3000', 'http://pdf-renderer:3000'], $endpoints);
     }
 
     public function testResolveEndpointsUseApacheServerVariableWhenPhpEnvironmentMapIsEmpty(): void
@@ -95,6 +92,110 @@ class PdfRendererTest extends TestCase
         }
     }
 
+    public function testResolveEndpointsKeepLoopbackAliasesWhenFallbackUrlsContainLoopbackEndpoint(): void
+    {
+        $renderer = $this->createRenderer(false, false);
+        $endpoints = $renderer->callResolveEndpoints([
+            'fallback_urls' => ['http://localhost:3003'],
+        ]);
+
+        $this->assertSame(['http://localhost:3003', 'http://127.0.0.1:3003', 'http://pdf-renderer:3000'], $endpoints);
+    }
+
+    public function testResolveEndpointsAllowLegacyHealthzLoopbackFallbackFlag(): void
+    {
+        $hadEnv = array_key_exists('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', $_ENV);
+        $envValue = $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] ?? null;
+        $processValue = getenv('HEALTHZ_ALLOW_LOOPBACK_FALLBACK');
+        putenv('HEALTHZ_ALLOW_LOOPBACK_FALLBACK=1');
+
+        try {
+            $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = '1';
+
+            $renderer = $this->createRenderer(false, false);
+            $endpoints = $renderer->callResolveEndpoints([
+                'fallback_urls' => [],
+            ]);
+
+            $this->assertSame(
+                ['http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'],
+                $endpoints,
+            );
+        } finally {
+            if ($hadEnv) {
+                $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = $envValue;
+            } else {
+                unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
+            }
+
+            if ($processValue === false) {
+                putenv('HEALTHZ_ALLOW_LOOPBACK_FALLBACK');
+            } else {
+                putenv('HEALTHZ_ALLOW_LOOPBACK_FALLBACK=' . $processValue);
+            }
+        }
+    }
+
+    public function testBuildRendererRequestOptionsShortensNonPrimaryLoopbackFallbacks(): void
+    {
+        $renderer = $this->createRenderer(false, false);
+        $options = $renderer->callBuildRendererRequestOptions(
+            'http://127.0.0.1:3003',
+            ['html' => '<html></html>'],
+            false,
+        );
+
+        $this->assertSame(0.5, $options['timeout']);
+        $this->assertSame(0.25, $options['connect_timeout']);
+    }
+
+    public function testBuildRendererRequestOptionsKeepsPrimaryEndpointTimeouts(): void
+    {
+        $renderer = $this->createRenderer(false, false);
+        $options = $renderer->callBuildRendererRequestOptions(
+            'http://127.0.0.1:3003',
+            ['html' => '<html></html>'],
+            true,
+        );
+
+        $this->assertSame(30.0, $options['timeout']);
+        $this->assertSame(5.0, $options['connect_timeout']);
+    }
+
+    public function testBuildRendererRequestOptionsShortensBracketedIpv6LoopbackFallbacks(): void
+    {
+        $renderer = $this->createRenderer(false, false);
+        $options = $renderer->callBuildRendererRequestOptions('http://[::1]:3003', ['html' => '<html></html>'], false);
+
+        $this->assertSame(0.5, $options['timeout']);
+        $this->assertSame(0.25, $options['connect_timeout']);
+    }
+
+    public function testIsContainerRuntimeCachesDetectionResult(): void
+    {
+        $renderer = new class extends Pdf_renderer {
+            public int $detectionCalls = 0;
+
+            public function __construct() {}
+
+            protected function detectContainerRuntime(): bool
+            {
+                $this->detectionCalls++;
+
+                return false;
+            }
+
+            public function callIsContainerRuntime(): bool
+            {
+                return $this->isContainerRuntime();
+            }
+        };
+
+        $this->assertFalse($renderer->callIsContainerRuntime());
+        $this->assertFalse($renderer->callIsContainerRuntime());
+        $this->assertSame(1, $renderer->detectionCalls);
+    }
+
     public function testRenderHtmlCapturesSentryEventWhenAllEndpointsFail(): void
     {
         $transport = new class implements TransportInterface {
@@ -129,7 +230,7 @@ class PdfRendererTest extends TestCase
                 $this->defaultWaitFor = null;
             }
 
-            protected function callRenderer(string $endpoint, array $payload): string
+            protected function callRenderer(string $endpoint, array $payload, bool $isPrimary = false): string
             {
                 throw new RuntimeException('renderer down at ' . $endpoint);
             }
@@ -196,6 +297,15 @@ class PdfRendererTest extends TestCase
             public function callResolveEndpoints(array $config): array
             {
                 return $this->resolveEndpoints($config);
+            }
+
+            public function callBuildRendererRequestOptions(string $endpoint, array $payload, bool $isPrimary): array
+            {
+                $this->token = null;
+                $this->defaultTimeout = 30.0;
+                $this->defaultConnectTimeout = 5.0;
+
+                return $this->buildRendererRequestOptions($endpoint, $payload, $isPrimary);
             }
         };
     }
