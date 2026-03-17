@@ -22,6 +22,9 @@ use GuzzleHttp\Exception\GuzzleException;
  */
 class Pdf_renderer
 {
+    private const LOOPBACK_FALLBACK_TIMEOUT_SECONDS = 0.5;
+    private const LOOPBACK_FALLBACK_CONNECT_TIMEOUT_SECONDS = 0.25;
+
     protected EA_Controller|CI_Controller $CI;
 
     protected Client $client;
@@ -37,6 +40,12 @@ class Pdf_renderer
     protected array $defaultMargin;
 
     protected ?string $defaultWaitFor;
+
+    protected float $defaultTimeout;
+
+    protected float $defaultConnectTimeout;
+
+    protected ?bool $containerRuntime = null;
 
     /**
      * Pdf_renderer constructor.
@@ -71,15 +80,15 @@ class Pdf_renderer
         $this->defaultMargin = $this->normalizeMargin($config['margin'] ?? []);
         $this->defaultWaitFor = $config['wait_for'] !== null ? (string) $config['wait_for'] : null;
 
-        $timeout = (float) ($config['timeout'] ?? $defaults['timeout']);
-        $connectTimeout = (float) ($config['connect_timeout'] ?? $defaults['connect_timeout']);
+        $this->defaultTimeout = (float) ($config['timeout'] ?? $defaults['timeout']);
+        $this->defaultConnectTimeout = (float) ($config['connect_timeout'] ?? $defaults['connect_timeout']);
 
         $this->token = $this->resolveToken($config);
         $this->endpoints = $this->resolveEndpoints($config);
 
         $this->client = new Client([
-            'timeout' => $timeout,
-            'connect_timeout' => $connectTimeout,
+            'timeout' => $this->defaultTimeout,
+            'connect_timeout' => $this->defaultConnectTimeout,
             'http_errors' => false,
         ]);
     }
@@ -117,9 +126,9 @@ class Pdf_renderer
 
         $lastException = null;
 
-        foreach ($this->endpoints as $endpoint) {
+        foreach ($this->endpoints as $index => $endpoint) {
             try {
-                return $this->callRenderer($endpoint, $payload);
+                return $this->callRenderer($endpoint, $payload, $index === 0);
             } catch (Throwable $exception) {
                 $lastException = $exception;
                 $this->logRendererFailure($endpoint, $exception);
@@ -400,15 +409,12 @@ class Pdf_renderer
      *
      * @return string
      */
-    protected function callRenderer(string $endpoint, array $payload): string
+    protected function callRenderer(string $endpoint, array $payload, bool $isPrimary = false): string
     {
         $url = rtrim($endpoint, '/') . '/pdf';
 
         try {
-            $response = $this->client->post($url, [
-                'headers' => $this->buildHeaders(),
-                'json' => $payload,
-            ]);
+            $response = $this->client->post($url, $this->buildRendererRequestOptions($endpoint, $payload, $isPrimary));
         } catch (GuzzleException $exception) {
             throw new RuntimeException('Pdf_renderer HTTP request failed: ' . $exception->getMessage(), 0, $exception);
         }
@@ -424,6 +430,29 @@ class Pdf_renderer
         throw new RuntimeException(
             sprintf('Pdf_renderer responded with status %d: %s', $status, $body !== '' ? $body : 'no body'),
         );
+    }
+
+    /**
+     * Build request options for a specific renderer endpoint.
+     */
+    protected function buildRendererRequestOptions(string $endpoint, array $payload, bool $isPrimary): array
+    {
+        $options = [
+            'headers' => $this->buildHeaders(),
+            'json' => $payload,
+            'timeout' => $this->defaultTimeout,
+            'connect_timeout' => $this->defaultConnectTimeout,
+        ];
+
+        if (!$isPrimary && !$this->isLocalEnvironment() && $this->isLoopbackEndpoint($endpoint)) {
+            $options['timeout'] = min($this->defaultTimeout, self::LOOPBACK_FALLBACK_TIMEOUT_SECONDS);
+            $options['connect_timeout'] = min(
+                $this->defaultConnectTimeout,
+                self::LOOPBACK_FALLBACK_CONNECT_TIMEOUT_SECONDS,
+            );
+        }
+
+        return $options;
     }
 
     /**
@@ -479,7 +508,7 @@ class Pdf_renderer
             $fallbacks = [$fallbacks];
         }
 
-        $defaults = $this->defaultEndpointsForRuntime();
+        $defaults = $this->defaultEndpointsForRuntime(array_merge($candidates, $fallbacks));
 
         $candidates = array_merge($candidates, $fallbacks, $defaults);
 
@@ -513,16 +542,35 @@ class Pdf_renderer
      *
      * @return list<string>
      */
-    protected function defaultEndpointsForRuntime(): array
+    protected function defaultEndpointsForRuntime(array $candidates = []): array
     {
         if ($this->isContainerRuntime()) {
             return ['http://pdf-renderer:3000', 'http://localhost:3003'];
+        }
+
+        if (
+            !$this->isLocalEnvironment() &&
+            !$this->shouldAllowNonLocalLoopbackFallback() &&
+            !$this->containsLoopbackEndpoint($candidates)
+        ) {
+            return ['http://pdf-renderer:3000'];
         }
 
         return ['http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'];
     }
 
     protected function isContainerRuntime(): bool
+    {
+        if ($this->containerRuntime !== null) {
+            return $this->containerRuntime;
+        }
+
+        $this->containerRuntime = $this->detectContainerRuntime();
+
+        return $this->containerRuntime;
+    }
+
+    protected function detectContainerRuntime(): bool
     {
         if (is_file('/.dockerenv')) {
             return true;
@@ -543,12 +591,38 @@ class Pdf_renderer
             str_contains($content, 'kubepods');
     }
 
+    protected function containsLoopbackEndpoint(array $candidates): bool
+    {
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate)) {
+                continue;
+            }
+
+            if ($this->isLoopbackEndpoint($candidate)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function isLoopbackEndpoint(string $endpoint): bool
+    {
+        $host = strtolower((string) parse_url($endpoint, PHP_URL_HOST));
+
+        if ($host === '') {
+            return false;
+        }
+
+        return in_array($host, ['localhost', '127.0.0.1', '::1'], true);
+    }
+
     /**
      * Allow non-local loopback fallback only when explicitly enabled.
      */
     protected function shouldAllowNonLocalLoopbackFallback(): bool
     {
-        $raw = env('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', 'false');
+        $raw = env('PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK', env('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', 'false'));
         $normalized = strtolower(trim((string) $raw));
 
         return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
