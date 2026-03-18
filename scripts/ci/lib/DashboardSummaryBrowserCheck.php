@@ -72,118 +72,157 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       };
       let currentStep = 'bootstrap';
       page.setDefaultTimeout(30000);
-      const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
-      const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-      const formatPercent = (locale, value) =>
-        new Intl.NumberFormat(locale || undefined, {
-          style: 'percent',
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-        }).format(Number(value) || 0);
       const emitPayload = (payload) => {
         console.log(`${resultPrefix}${JSON.stringify(payload)}`);
         return payload;
       };
-      const parseCount = (selector) => {
-        const text = document.querySelector(selector)?.textContent?.trim() ?? '';
-        const digits = text.replace(/[^\d]/g, '');
-        return digits === '' ? 0 : Number(digits);
-      };
-      const captureSummaryState = async (locale, expected = expectedSummary) =>
-        page.evaluate(({ locale: dashboardLocale, startDate, endDate, expectedSummaryPayload }) => {
+      const installDashboardHelpers = async () => {
+        currentStep = 'install_dashboard_helpers';
+        await page.evaluate(() => {
           const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
           const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+          const parseCount = (selector) => {
+            const text = document.querySelector(selector)?.textContent?.trim() ?? '';
+            const digits = text.replace(/[^\d]/g, '');
+            return digits === '' ? 0 : Number(digits);
+          };
+          const formatPercent = (locale, value) =>
+            new Intl.NumberFormat(locale || undefined, {
+              style: 'percent',
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            }).format(Number(value) || 0);
           const formatLocalDate = (value) => {
             const year = value.getFullYear();
             const month = String(value.getMonth() + 1).padStart(2, '0');
             const day = String(value.getDate()).padStart(2, '0');
             return `${year}-${month}-${day}`;
           };
-          const parseCount = (selector) => {
-            const text = document.querySelector(selector)?.textContent?.trim() ?? '';
-            const digits = text.replace(/[^\d]/g, '');
-            return digits === '' ? 0 : Number(digits);
-          };
-          const formatPercent = (localeValue, value) =>
-            new Intl.NumberFormat(localeValue || undefined, {
-              style: 'percent',
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            }).format(Number(value) || 0);
-          const targetTotal = parseCount('#dashboard-summary-target-total');
-          const bookedTotal = parseCount('#dashboard-summary-booked-total');
-          const openTotal = parseCount('#dashboard-summary-open-total');
-          const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
-          const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
-          const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
-          const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
-          const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
-          const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
-          const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
-            ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
-            : [];
-          const normalizedSelectedDates = selectedDates
-            .map((value) => {
-              if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-                return null;
-              }
+          const resolveLocale = () => {
+            const fallbackLocale = 'de-DE';
+            const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
+            const candidate = configuredLocale || fallbackLocale;
 
-              return formatLocalDate(value);
-            })
-            .filter((value) => value !== null);
-          const normalizedExpectedTargetTotal = roundCount(expectedSummaryPayload.target_total);
-          const normalizedExpectedBookedTotal = roundCount(expectedSummaryPayload.booked_total);
-          const normalizedExpectedOpenTotal = roundCount(expectedSummaryPayload.open_total);
-          const normalizedExpectedFillRate = Number(expectedSummaryPayload.fill_rate) || 0;
-          const normalizedExpectedOpenShare =
-            normalizedExpectedTargetTotal > 0 ? normalizedExpectedOpenTotal / normalizedExpectedTargetTotal : 0;
-          const expectedFillRateText = formatPercent(dashboardLocale, normalizedExpectedFillRate);
-          const expectedOpenShareText = formatPercent(dashboardLocale, normalizedExpectedOpenShare);
-          const expectedBookedWidth = `${(clampProgress(normalizedExpectedFillRate) * 100).toFixed(1)}%`;
-          const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
-          const expectedThreshold = Number(expectedSummaryPayload.threshold) || 0;
+            if (Intl.NumberFormat.supportedLocalesOf([candidate]).length) {
+              return candidate;
+            }
 
-          return {
-            requested_start_date: startDate,
-            requested_end_date: endDate,
-            selected_start_date: normalizedSelectedDates[0] ?? '',
-            selected_end_date: normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '',
-            target_total: targetTotal,
-            booked_total: bookedTotal,
-            open_total: openTotal,
-            fill_rate: fillRateText,
-            booked_share: bookedShareText,
-            open_share: openShareText,
-            booked_width: roundedBookedWidth,
-            marker_left: markerLeft,
-            error_hidden: errorHidden,
-            expected_target_total: normalizedExpectedTargetTotal,
-            expected_booked_total: normalizedExpectedBookedTotal,
-            expected_open_total: normalizedExpectedOpenTotal,
-            expected_fill_rate: expectedFillRateText,
-            expected_open_share: expectedOpenShareText,
-            expected_booked_width: expectedBookedWidth,
-            expected_threshold: expectedThreshold,
-            totals_match:
-              targetTotal === normalizedExpectedTargetTotal &&
-              bookedTotal === normalizedExpectedBookedTotal &&
-              openTotal === normalizedExpectedOpenTotal,
-            shares_match:
-              fillRateText === expectedFillRateText &&
-              bookedShareText === expectedFillRateText &&
-              openShareText === expectedOpenShareText,
-            booked_width_matches: roundedBookedWidth === expectedBookedWidth,
-            requested_range_applied:
-              (normalizedSelectedDates[0] ?? '') === startDate &&
-              (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate,
-            threshold_badge: document.querySelector('#dashboard-summary-threshold-badge')?.textContent?.trim() ?? '',
+            if (Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length) {
+              return fallbackLocale;
+            }
+
+            return 'en-US';
           };
+          const normalizeSelectedDates = () => {
+            const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
+              ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
+              : [];
+
+            return selectedDates
+              .map((value) => {
+                if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+                  return null;
+                }
+
+                return formatLocalDate(value);
+              })
+              .filter((value) => value !== null);
+          };
+          const captureSummaryState = ({ locale, startDate, endDate, expectedSummaryPayload }) => {
+            const dashboardLocale = locale || resolveLocale();
+            const targetTotal = parseCount('#dashboard-summary-target-total');
+            const bookedTotal = parseCount('#dashboard-summary-booked-total');
+            const openTotal = parseCount('#dashboard-summary-open-total');
+            const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
+            const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
+            const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
+            const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
+            const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
+            const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
+            const summaryState = document.querySelector('#dashboard-summary-progress-track')?.getAttribute('data-summary-state') ?? '';
+            const normalizedSelectedDates = normalizeSelectedDates();
+            const expectedTargetTotal = roundCount(expectedSummaryPayload.target_total);
+            const expectedBookedTotal = roundCount(expectedSummaryPayload.booked_total);
+            const expectedOpenTotal = roundCount(expectedSummaryPayload.open_total);
+            const expectedFillRate = Number(expectedSummaryPayload.fill_rate) || 0;
+            const expectedOpenShare = expectedTargetTotal > 0 ? expectedOpenTotal / expectedTargetTotal : 0;
+            const expectedBookedWidth = `${(clampProgress(expectedFillRate) * 100).toFixed(1)}%`;
+            const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
+
+            return {
+              requested_start_date: startDate,
+              requested_end_date: endDate,
+              selected_start_date: normalizedSelectedDates[0] ?? '',
+              selected_end_date: normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '',
+              target_total: targetTotal,
+              booked_total: bookedTotal,
+              open_total: openTotal,
+              fill_rate: fillRateText,
+              booked_share: bookedShareText,
+              open_share: openShareText,
+              booked_width: roundedBookedWidth,
+              marker_left: markerLeft,
+              error_hidden: errorHidden,
+              summary_state: summaryState,
+              expected_target_total: expectedTargetTotal,
+              expected_booked_total: expectedBookedTotal,
+              expected_open_total: expectedOpenTotal,
+              expected_fill_rate: formatPercent(dashboardLocale, expectedFillRate),
+              expected_open_share: formatPercent(dashboardLocale, expectedOpenShare),
+              expected_booked_width: expectedBookedWidth,
+              expected_threshold: Number(expectedSummaryPayload.threshold) || 0,
+              totals_match:
+                targetTotal === expectedTargetTotal &&
+                bookedTotal === expectedBookedTotal &&
+                openTotal === expectedOpenTotal,
+              shares_match:
+                fillRateText === formatPercent(dashboardLocale, expectedFillRate) &&
+                bookedShareText === formatPercent(dashboardLocale, expectedFillRate) &&
+                openShareText === formatPercent(dashboardLocale, expectedOpenShare),
+              booked_width_matches: roundedBookedWidth === expectedBookedWidth,
+              requested_range_applied:
+                (normalizedSelectedDates[0] ?? '') === startDate &&
+                (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate,
+              threshold_badge: document.querySelector('#dashboard-summary-threshold-badge')?.textContent?.trim() ?? '',
+            };
+          };
+
+          window.__dashboardSummaryCheckHelpers = {
+            resolveLocale,
+            formatPercent,
+            captureSummaryState,
+            matchesSummaryState: ({ locale, startDate, endDate, expectedSummaryPayload, requireMarker }) => {
+              const captured = captureSummaryState({ locale, startDate, endDate, expectedSummaryPayload });
+
+              return (
+                captured.summary_state === 'loaded' &&
+                captured.totals_match &&
+                captured.shares_match &&
+                captured.booked_width_matches &&
+                captured.error_hidden &&
+                captured.requested_range_applied &&
+                (!requireMarker || captured.marker_left !== '')
+              );
+            },
+          };
+        });
+      };
+      const captureSummaryState = async (locale, expected = expectedSummary) => {
+        await installDashboardHelpers();
+        return page.evaluate(({ locale: dashboardLocale, startDate, endDate, expectedSummaryPayload }) => {
+          return window.__dashboardSummaryCheckHelpers.captureSummaryState({
+            locale: dashboardLocale,
+            startDate,
+            endDate,
+            expectedSummaryPayload,
+          });
         }, {
           locale,
           startDate: requestedStartDate,
           endDate: requestedEndDate,
           expectedSummaryPayload: expected,
         });
+      };
       const seedAuthenticatedSession = async () => {
         currentStep = 'seed_authenticated_session';
         await page.context().addCookies(sessionCookies);
@@ -201,6 +240,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         }
 
         await page.waitForSelector('#dashboard-summary-progress-track', { state: 'attached', timeout: 30000 });
+        await installDashboardHelpers();
       };
       const applyRequestedRange = async () => {
         currentStep = 'apply_requested_range';
@@ -229,78 +269,19 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       const waitForRenderedSummary = async () => {
         currentStep = 'wait_for_loaded_summary';
         await page.waitForSelector('#dashboard-summary-progress-track', { state: 'visible', timeout: 15000 });
+        await installDashboardHelpers();
         await page.waitForFunction(({ startDate, endDate, expected }) => {
-          const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
-          const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-          const parseCount = (selector) => {
-            const text = document.querySelector(selector)?.textContent?.trim() ?? '';
-            const digits = text.replace(/[^\d]/g, '');
-            return digits === '' ? 0 : Number(digits);
-          };
-          const formatPercent = (locale, value) =>
-            new Intl.NumberFormat(locale || undefined, {
-              style: 'percent',
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            }).format(Number(value) || 0);
-          const fallbackLocale = 'de-DE';
-          const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
-          const candidate = configuredLocale || fallbackLocale;
-          const dashboardLocale = Intl.NumberFormat.supportedLocalesOf([candidate]).length
-            ? candidate
-            : Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length
-              ? fallbackLocale
-              : 'en-US';
-          const formatLocalDate = (value) => {
-            const year = value.getFullYear();
-            const month = String(value.getMonth() + 1).padStart(2, '0');
-            const day = String(value.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-          };
-          const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
-            ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
-            : [];
-          const normalizedSelectedDates = selectedDates
-            .map((value) => {
-              if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-                return null;
-              }
+          const helpers = window.__dashboardSummaryCheckHelpers;
+          if (!helpers || typeof helpers.matchesSummaryState !== 'function') {
+            return false;
+          }
 
-              return formatLocalDate(value);
-            })
-            .filter((value) => value !== null);
-          const targetTotal = parseCount('#dashboard-summary-target-total');
-          const bookedTotal = parseCount('#dashboard-summary-booked-total');
-          const openTotal = parseCount('#dashboard-summary-open-total');
-          const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
-          const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
-          const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
-          const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
-          const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
-          const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
-          const summaryState = document.querySelector('#dashboard-summary-progress-track')?.getAttribute('data-summary-state') ?? '';
-          const expectedTargetTotal = roundCount(expected.target_total);
-          const expectedBookedTotal = roundCount(expected.booked_total);
-          const expectedOpenTotal = roundCount(expected.open_total);
-          const expectedFillRate = Number(expected.fill_rate) || 0;
-          const expectedOpenShare = expectedTargetTotal > 0 ? expectedOpenTotal / expectedTargetTotal : 0;
-          const expectedBookedWidth = `${(clampProgress(expectedFillRate) * 100).toFixed(1)}%`;
-          const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
-
-          return (
-            summaryState === 'loaded' &&
-            targetTotal === expectedTargetTotal &&
-            bookedTotal === expectedBookedTotal &&
-            openTotal === expectedOpenTotal &&
-            fillRateText === formatPercent(dashboardLocale, expectedFillRate) &&
-            bookedShareText === formatPercent(dashboardLocale, expectedFillRate) &&
-            openShareText === formatPercent(dashboardLocale, expectedOpenShare) &&
-            roundedBookedWidth === expectedBookedWidth &&
-            markerLeft !== '' &&
-            errorHidden &&
-            (normalizedSelectedDates[0] ?? '') === startDate &&
-            (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate
-          );
+          return helpers.matchesSummaryState({
+            startDate,
+            endDate,
+            expectedSummaryPayload: expected,
+            requireMarker: true,
+          });
         }, { startDate: requestedStartDate, endDate: requestedEndDate, expected: expectedSummary }, { timeout: 30000 });
       };
       const applyEmptyServiceFilter = async () => {
@@ -325,76 +306,19 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       };
       const waitForZeroState = async () => {
         currentStep = 'wait_for_zero_state';
+        await installDashboardHelpers();
         await page.waitForFunction(({ startDate, endDate, expected }) => {
-          const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
-          const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-          const parseCount = (selector) => {
-            const text = document.querySelector(selector)?.textContent?.trim() ?? '';
-            const digits = text.replace(/[^\d]/g, '');
-            return digits === '' ? 0 : Number(digits);
-          };
-          const fallbackLocale = 'de-DE';
-          const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
-          const candidate = configuredLocale || fallbackLocale;
-          const dashboardLocale = Intl.NumberFormat.supportedLocalesOf([candidate]).length
-            ? candidate
-            : Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length
-              ? fallbackLocale
-              : 'en-US';
-          const formatPercent = (locale, value) =>
-            new Intl.NumberFormat(locale || undefined, {
-              style: 'percent',
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            }).format(Number(value) || 0);
-          const formatLocalDate = (value) => {
-            const year = value.getFullYear();
-            const month = String(value.getMonth() + 1).padStart(2, '0');
-            const day = String(value.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-          };
-          const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
-            ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
-            : [];
-          const normalizedSelectedDates = selectedDates
-            .map((value) => {
-              if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-                return null;
-              }
+          const helpers = window.__dashboardSummaryCheckHelpers;
+          if (!helpers || typeof helpers.matchesSummaryState !== 'function') {
+            return false;
+          }
 
-              return formatLocalDate(value);
-            })
-            .filter((value) => value !== null);
-          const targetTotal = parseCount('#dashboard-summary-target-total');
-          const bookedTotal = parseCount('#dashboard-summary-booked-total');
-          const openTotal = parseCount('#dashboard-summary-open-total');
-          const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
-          const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
-          const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
-          const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
-          const summaryState = document.querySelector('#dashboard-summary-progress-track')?.getAttribute('data-summary-state') ?? '';
-          const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
-          const expectedTargetTotal = roundCount(expected.target_total);
-          const expectedBookedTotal = roundCount(expected.booked_total);
-          const expectedOpenTotal = roundCount(expected.open_total);
-          const expectedFillRate = Number(expected.fill_rate) || 0;
-          const expectedOpenShare = expectedTargetTotal > 0 ? expectedOpenTotal / expectedTargetTotal : 0;
-          const expectedBookedWidth = `${(clampProgress(expectedFillRate) * 100).toFixed(1)}%`;
-          const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
-
-          return (
-            summaryState === 'loaded' &&
-            targetTotal === expectedTargetTotal &&
-            bookedTotal === expectedBookedTotal &&
-            openTotal === expectedOpenTotal &&
-            fillRateText === formatPercent(dashboardLocale, expectedFillRate) &&
-            bookedShareText === formatPercent(dashboardLocale, expectedFillRate) &&
-            openShareText === formatPercent(dashboardLocale, expectedOpenShare) &&
-            roundedBookedWidth === expectedBookedWidth &&
-            errorHidden &&
-            (normalizedSelectedDates[0] ?? '') === startDate &&
-            (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate
-          );
+          return helpers.matchesSummaryState({
+            startDate,
+            endDate,
+            expectedSummaryPayload: expected,
+            requireMarker: false,
+          });
         }, { startDate: requestedStartDate, endDate: requestedEndDate, expected: zeroSummary }, { timeout: 30000 });
       };
 
@@ -407,27 +331,14 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 
         currentStep = 'read_dashboard_locale';
         const dashboardLocale = await page.evaluate(() => {
-          if (typeof resolveDashboardLocale === 'function') {
-            return resolveDashboardLocale();
-          }
-
-          const fallbackLocale = 'de-DE';
-          const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
-          const candidate = configuredLocale || fallbackLocale;
-
-          if (Intl.NumberFormat.supportedLocalesOf([candidate]).length) {
-            return candidate;
-          }
-
-          if (Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length) {
-            return fallbackLocale;
-          }
-
-          return 'en-US';
+          return window.__dashboardSummaryCheckHelpers.resolveLocale();
         });
-        const expectedThresholdText = formatPercent(
-          dashboardLocale,
-          Number(expectedSummary.updated_threshold) || Number(updatedThreshold) || 0,
+        const expectedThresholdText = await page.evaluate(
+          ({ locale, value }) => window.__dashboardSummaryCheckHelpers.formatPercent(locale, value),
+          {
+            locale: dashboardLocale,
+            value: Number(expectedSummary.updated_threshold) || Number(updatedThreshold) || 0,
+          },
         );
 
         currentStep = 'capture_before_state';

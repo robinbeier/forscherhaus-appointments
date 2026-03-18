@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace ReleaseGate;
 
-require_once __DIR__ . '/PlaywrightCookieRecords.php';
-
 use RuntimeException;
 
 final class GateHttpResponse
@@ -411,9 +409,7 @@ final class GateHttpClient
      */
     private function consumeSetCookies(array $setCookies, string $responseUrl): void
     {
-        $responseParts = parse_url($responseUrl);
         $defaultPath = $this->resolveDefaultCookiePath($responseUrl);
-        $defaultSecure = is_array($responseParts) && ($responseParts['scheme'] ?? '') === 'https';
 
         foreach ($setCookies as $setCookie) {
             $segments = array_map('trim', explode(';', $setCookie));
@@ -475,10 +471,6 @@ final class GateHttpClient
 
             if (!$pathExplicitlySet && $defaultPath !== '') {
                 $record['path'] = $defaultPath;
-            }
-
-            if (!isset($record['secure']) && $defaultSecure) {
-                $record['secure'] = true;
             }
 
             if (!$domainExplicitlySet) {

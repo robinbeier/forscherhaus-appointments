@@ -37,7 +37,8 @@ class DashboardIntegrationSmokeTest extends TestCase
         );
         self::assertStringContainsString('flatpickrInstance.setDate', $snippet);
         self::assertStringContainsString('requested_range_applied', $snippet);
-        self::assertStringContainsString('resolveDashboardLocale', $snippet);
+        self::assertStringContainsString('__dashboardSummaryCheckHelpers', $snippet);
+        self::assertStringContainsString('installDashboardHelpers', $snippet);
         self::assertStringNotContainsString('toISOString().slice(0, 10)', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-total', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-share', $snippet);

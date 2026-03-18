@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
-use function normalizeCookieRecordsForPlaywright;
 
 require_once __DIR__ . '/../../../scripts/release-gate/lib/PlaywrightCookieRecords.php';
 
