@@ -9,6 +9,46 @@ use ReleaseGate\GateAssertionException;
 use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
 
 /**
+ * @param array<int, array<string, mixed>> $cookieRecords
+ * @return array<int, array<string, mixed>>
+ */
+function dashboardSummaryBrowserNormalizeSessionCookies(array $cookieRecords): array
+{
+    $sessionCookies = [];
+
+    foreach ($cookieRecords as $cookie) {
+        $normalizedName = trim((string) ($cookie['name'] ?? ''));
+        $normalizedValue = trim((string) ($cookie['value'] ?? ''));
+
+        if ($normalizedName === '' || $normalizedValue === '') {
+            continue;
+        }
+
+        $record = [
+            'name' => $normalizedName,
+            'value' => $normalizedValue,
+        ];
+
+        foreach (['url', 'domain', 'path', 'sameSite'] as $field) {
+            $normalizedFieldValue = trim((string) ($cookie[$field] ?? ''));
+            if ($normalizedFieldValue !== '') {
+                $record[$field] = $normalizedFieldValue;
+            }
+        }
+
+        foreach (['secure', 'httpOnly'] as $field) {
+            if (array_key_exists($field, $cookie)) {
+                $record[$field] = (bool) $cookie[$field];
+            }
+        }
+
+        $sessionCookies[] = $record;
+    }
+
+    return $sessionCookies;
+}
+
+/**
  * @param array{
  *   target_url:string,
  *   cookie_url:string,
@@ -26,6 +66,13 @@ use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
  */
 function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 {
+    $currentThreshold = max(0.0, min(1.0, (float) ($config['expected_summary']['threshold'] ?? 0)));
+    $updatedThreshold = abs($currentThreshold - 0.35) < 0.0001 ? 0.9 : 0.35;
+    $config['expected_summary']['updated_threshold'] = $updatedThreshold;
+    $config['expected_summary']['updated_threshold_input'] = number_format($updatedThreshold, 2, '.', '');
+    $config['expected_summary']['updated_threshold_marker'] =
+        rtrim(rtrim(number_format($updatedThreshold * 100, 1, '.', ''), '0'), '.') . '%';
+
     $encodedTargetUrl = json_encode(
         $config['target_url'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
@@ -58,7 +105,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
     $snippet = <<<'JS'
     async (page) => {
       const resultPrefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
-      const updatedThreshold = '0.35';
       const targetUrl = __TARGET_URL__;
       const cookieUrl = __COOKIE_URL__;
       const cookieHost = __COOKIE_HOST__;
@@ -66,6 +112,8 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       const requestedStartDate = __START_DATE__;
       const requestedEndDate = __END_DATE__;
       const expectedSummary = __EXPECTED_SUMMARY__;
+      const updatedThreshold = String(expectedSummary.updated_threshold_input || '0.35');
+      const expectedUpdatedMarker = String(expectedSummary.updated_threshold_marker || '35%');
       const zeroSummary = {
         target_total: 0,
         booked_total: 0,
@@ -194,8 +242,28 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
               name: String(cookie.name || ''),
               value: String(cookie.value || ''),
             };
+            const normalizedUrl = String(cookie.url || '').trim();
             const normalizedDomain = String(cookie.domain || '').trim();
             const normalizedPath = String(cookie.path || '').trim();
+
+            if (normalizedUrl !== '') {
+              seededCookie.url = normalizedUrl;
+
+              if (cookie.secure === true) {
+                seededCookie.secure = true;
+              }
+
+              if (cookie.httpOnly === true) {
+                seededCookie.httpOnly = true;
+              }
+
+              const normalizedSameSite = String(cookie.sameSite || '').trim();
+              if (normalizedSameSite !== '') {
+                seededCookie.sameSite = normalizedSameSite;
+              }
+
+              return seededCookie;
+            }
 
             if (normalizedDomain !== '' || normalizedPath !== '') {
               seededCookie.domain = normalizedDomain !== '' ? normalizedDomain : cookieHost;
@@ -459,7 +527,10 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 
           return 'en-US';
         });
-        const expectedThresholdText = formatPercent(dashboardLocale, Number(updatedThreshold));
+        const expectedThresholdText = formatPercent(
+          dashboardLocale,
+          Number(expectedSummary.updated_threshold) || Number(updatedThreshold) || 0,
+        );
 
         currentStep = 'capture_before_state';
         const before = await captureSummaryState(dashboardLocale);
@@ -496,11 +567,11 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         await page.waitForSelector('#dashboard-threshold-modal.show', { state: 'hidden', timeout: 15000 });
 
         currentStep = 'wait_for_updated_marker';
-        await page.waitForFunction(() => {
+        await page.waitForFunction((expectedMarker) => {
           const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
           const badgeText = document.querySelector('#dashboard-summary-threshold-badge')?.textContent?.trim() ?? '';
-          return markerLeft === '35%' && badgeText !== '';
-        }, { timeout: 15000 });
+          return markerLeft === expectedMarker && badgeText !== '';
+        }, expectedUpdatedMarker, { timeout: 15000 });
 
         currentStep = 'capture_after_state';
         const after = await captureSummaryState(dashboardLocale);
@@ -531,7 +602,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           dashboard_summary_browser_check: true,
           ok:
             before.marker_left !== '' &&
-            after.marker_left === '35%' &&
+            after.marker_left === expectedUpdatedMarker &&
             before.totals_match &&
             before.shares_match &&
             before.booked_width_matches &&
@@ -585,6 +656,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           expected_booked_total: before.expected_booked_total,
           expected_open_total: before.expected_open_total,
           expected_initial_threshold: before.expected_threshold,
+          expected_marker_after: expectedUpdatedMarker,
           dashboard_locale: dashboardLocale,
           expected_threshold_text: expectedThresholdText,
           zero_state_rendered: zeroStateRendered,
@@ -616,7 +688,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
               ? 'Dashboard summary KPIs changed after threshold save.'
             : !zeroStateRendered
               ? 'Dashboard zero-state summary did not render as expected.'
-            : after.marker_left !== '35%'
+            : after.marker_left !== expectedUpdatedMarker
               ? 'Threshold marker did not update after save.'
             : !badgeChanged
                 ? 'Threshold badge did not update after save.'
@@ -704,6 +776,7 @@ function dashboardSummaryBrowserAssertPayload(array $payload): array
         'booked_width_matches_before',
         'booked_width_matches_after',
         'expected_initial_threshold',
+        'expected_marker_after',
         'expected_threshold_text',
         'dashboard_locale',
         'zero_state_rendered',
@@ -795,7 +868,7 @@ function dashboardSummaryBrowserAssertPayload(array $payload): array
         );
     }
 
-    if ($markerLeftAfter !== '35%') {
+    if ($markerLeftAfter !== trim((string) $payload['expected_marker_after'])) {
         throw new GateAssertionException('Dashboard summary marker did not update to the saved threshold.');
     }
 

@@ -136,8 +136,7 @@ class BrowserRuntimeEvidenceTest extends TestCase
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             $capturedArgs = file($capturePath, FILE_IGNORE_NEW_LINES);
             self::assertNotFalse($capturedArgs);
-            self::assertContains('--session', $capturedArgs);
-            self::assertContains('session-123', $capturedArgs);
+            self::assertContains('-s=session-123', $capturedArgs);
             self::assertContains('open', $capturedArgs);
             self::assertContains('http://example.test', $capturedArgs);
             self::assertContains('--browser=firefox', $capturedArgs);
@@ -194,6 +193,50 @@ class BrowserRuntimeEvidenceTest extends TestCase
                 putenv('PLAYWRIGHT_MCP_BROWSER=' . $previousBrowser);
             }
 
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_file($wrapperPath)) {
+                unlink($wrapperPath);
+            }
+        }
+    }
+
+    public function testRunPwcliCommandAddsHeadedFlagForOpen(): void
+    {
+        $capturePath = tempnam(sys_get_temp_dir(), 'pwcli-capture-');
+        $wrapperPath = tempnam(sys_get_temp_dir(), 'pwcli-wrapper-');
+        self::assertIsString($capturePath);
+        self::assertIsString($wrapperPath);
+
+        try {
+            file_put_contents(
+                $wrapperPath,
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" > " .
+                    escapeshellarg($capturePath) .
+                    "\n",
+            );
+            chmod($wrapperPath, 0777);
+
+            $result = runPwcliCommand(
+                [
+                    'pwcli_path' => $wrapperPath,
+                    'repo_root' => sys_get_temp_dir(),
+                    'headed' => true,
+                ],
+                'session-123',
+                ['open', 'http://example.test'],
+                5,
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $capturedArgs = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedArgs);
+            self::assertContains('-s=session-123', $capturedArgs);
+            self::assertContains('--headed', $capturedArgs);
+            self::assertContains('--browser=firefox', $capturedArgs);
+        } finally {
             if (is_file($capturePath)) {
                 unlink($capturePath);
             }
@@ -341,8 +384,8 @@ class BrowserRuntimeEvidenceTest extends TestCase
             $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
             self::assertNotFalse($capturedInvocations);
             self::assertCount(2, $capturedInvocations);
-            self::assertStringContainsString('playwright --version', $capturedInvocations[0]);
-            self::assertStringContainsString('playwright install', $capturedInvocations[1]);
+            self::assertStringContainsString('--package playwright playwright --version', $capturedInvocations[0]);
+            self::assertStringContainsString('--package playwright playwright install', $capturedInvocations[1]);
             self::assertStringContainsString('firefox', $capturedInvocations[1]);
             self::assertStringNotContainsString('playwright-cli install-browser', implode("\n", $capturedInvocations));
         } finally {
@@ -360,6 +403,48 @@ class BrowserRuntimeEvidenceTest extends TestCase
 
             if (is_dir($tempDir)) {
                 rmdir($tempDir);
+            }
+        }
+    }
+
+    public function testRunPwcliCommandForwardsHeadedForOpenCommands(): void
+    {
+        $capturePath = tempnam(sys_get_temp_dir(), 'pwcli-capture-');
+        $wrapperPath = tempnam(sys_get_temp_dir(), 'pwcli-wrapper-');
+        self::assertIsString($capturePath);
+        self::assertIsString($wrapperPath);
+
+        try {
+            file_put_contents(
+                $wrapperPath,
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" > " .
+                    escapeshellarg($capturePath) .
+                    "\n",
+            );
+            chmod($wrapperPath, 0777);
+
+            $result = runPwcliCommand(
+                [
+                    'pwcli_path' => $wrapperPath,
+                    'repo_root' => sys_get_temp_dir(),
+                    'headed' => true,
+                ],
+                'session-123',
+                ['open', 'http://example.test'],
+                5,
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $capturedArgs = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedArgs);
+            self::assertContains('--headed', $capturedArgs);
+        } finally {
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_file($wrapperPath)) {
+                unlink($wrapperPath);
             }
         }
     }

@@ -13,11 +13,12 @@ default_browser() {
 playwright_browser="${PLAYWRIGHT_MCP_BROWSER:-$(default_browser)}"
 
 playwright_cli_cmd=(npx --yes --package @playwright/cli playwright-cli)
-playwright_install_cmd=(npx --yes --package @playwright/cli playwright)
+playwright_install_cmd=(npx --yes --package @playwright/cli --package playwright playwright)
 playwright_ready_dir="${PLAYWRIGHT_MCP_READY_DIR:-/tmp/playwright-cli}"
 
-# The repo's gate parsers read sentinel JSON from stdout, so keep run-code
-# output on stdout even if the host environment configures a different mode.
+# The repo's gate parsers currently read sentinel JSON from stdout, so keep
+# run-code output on stdout even if the host environment configures a different
+# mode.
 export PLAYWRIGHT_MCP_OUTPUT_MODE="stdout"
 
 resolve_playwright_ready_marker() {
@@ -54,7 +55,7 @@ install_command_requested="false"
 help_command_requested="false"
 for arg in "$@"; do
   case "$arg" in
-    --session|--session=*)
+    -s|-s=*|--session|--session=*)
       has_session_flag="true"
       break
       ;;
@@ -69,7 +70,7 @@ done
 
 cmd=("${playwright_cli_cmd[@]}")
 if [[ "${has_session_flag}" != "true" && -n "${PLAYWRIGHT_CLI_SESSION:-}" ]]; then
-  cmd+=(--session "${PLAYWRIGHT_CLI_SESSION}")
+  cmd+=("-s=${PLAYWRIGHT_CLI_SESSION}")
 fi
 cmd+=("$@")
 

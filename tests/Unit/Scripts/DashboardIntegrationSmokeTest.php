@@ -141,6 +141,93 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringNotContainsString('new URL(cookieUrl)', $snippet);
     }
 
+    public function testBuildRunCodeSnippetUsesUrlScopedCookiesForHostOnlySessionState(): void
+    {
+        $config = $this->browserSnippetConfig();
+        $config['session_cookies'] = [
+            [
+                'name' => 'csrf_cookie',
+                'value' => 'token-123',
+                'path' => '/app/index.php/login/',
+                'url' => 'https://example.test/app/index.php/login/',
+                'httpOnly' => true,
+            ],
+        ];
+
+        $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($config);
+
+        self::assertStringContainsString('"url":"https://example.test/app/index.php/login/"', $snippet);
+        self::assertStringContainsString('const normalizedUrl = String(cookie.url || \'\').trim();', $snippet);
+        self::assertStringContainsString('seededCookie.url = normalizedUrl;', $snippet);
+    }
+
+    public function testNormalizeSessionCookiesPreservesUrlScopedHostOnlyCookies(): void
+    {
+        $cookies = dashboardSummaryBrowserNormalizeSessionCookies([
+            [
+                'name' => 'ci_session',
+                'value' => 'session-value',
+                'url' => 'https://example.test/app/index.php/login/',
+                'path' => '/app/index.php/login/',
+                'httpOnly' => true,
+            ],
+        ]);
+
+        self::assertSame(
+            [
+                [
+                    'name' => 'ci_session',
+                    'value' => 'session-value',
+                    'url' => 'https://example.test/app/index.php/login/',
+                    'path' => '/app/index.php/login/',
+                    'httpOnly' => true,
+                ],
+            ],
+            $cookies,
+        );
+    }
+
+    public function testNormalizeSessionCookiesPreservesScopedCookieMetadata(): void
+    {
+        $cookies = dashboardSummaryBrowserNormalizeSessionCookies([
+            [
+                'name' => 'csrf_cookie',
+                'value' => 'token-123',
+                'domain' => 'example.test',
+                'path' => '/app/',
+                'sameSite' => 'Lax',
+                'secure' => true,
+                'httpOnly' => true,
+            ],
+        ]);
+
+        self::assertSame(
+            [
+                [
+                    'name' => 'csrf_cookie',
+                    'value' => 'token-123',
+                    'domain' => 'example.test',
+                    'path' => '/app/',
+                    'sameSite' => 'Lax',
+                    'secure' => true,
+                    'httpOnly' => true,
+                ],
+            ],
+            $cookies,
+        );
+    }
+
+    public function testBuildRunCodeSnippetSelectsAlternateThresholdWhenCurrentThresholdAlreadyMatchesDefault(): void
+    {
+        $config = $this->browserSnippetConfig();
+        $config['expected_summary']['threshold'] = 0.35;
+
+        $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($config);
+
+        self::assertStringContainsString('"updated_threshold_input":"0.90"', $snippet);
+        self::assertStringContainsString('"updated_threshold_marker":"90%"', $snippet);
+    }
+
     public function testParseRunCodeResultRejectsMissingResultSection(): void
     {
         $this->expectException(GateAssertionException::class);
@@ -186,6 +273,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
             'expected_initial_threshold' => 0.9,
+            'expected_marker_after' => '35%',
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -233,6 +321,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
             'expected_initial_threshold' => 0.9,
+            'expected_marker_after' => '35%',
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -277,6 +366,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
             'expected_initial_threshold' => 0.9,
+            'expected_marker_after' => '35%',
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -321,6 +411,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
             'expected_initial_threshold' => 0.9,
+            'expected_marker_after' => '35%',
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -377,6 +468,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
             'expected_initial_threshold' => 0.9,
+            'expected_marker_after' => '35%',
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -421,6 +513,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
             'expected_initial_threshold' => 0.9,
+            'expected_marker_after' => '35%',
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -462,6 +555,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
             'expected_initial_threshold' => 0.9,
+            'expected_marker_after' => '35%',
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,

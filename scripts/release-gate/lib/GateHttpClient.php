@@ -167,7 +167,7 @@ final class GateHttpClient
         $requestHeaders = ['Accept: */*'];
 
         if ($useCookieJar) {
-            $cookieHeader = $this->buildCookieHeader();
+            $cookieHeader = $this->buildCookieHeader($url);
             if ($cookieHeader !== null) {
                 $requestHeaders[] = 'Cookie: ' . $cookieHeader;
             }
@@ -224,8 +224,46 @@ final class GateHttpClient
     /**
      * @return string|null
      */
-    private function buildCookieHeader(): ?string
+    private function buildCookieHeader(string $requestUrl): ?string
     {
+        if ($this->cookieRecords !== []) {
+            $requestParts = parse_url($requestUrl);
+
+            if (is_array($requestParts) && isset($requestParts['host'])) {
+                $pairs = [];
+                $order = 0;
+
+                foreach ($this->cookieRecords as $record) {
+                    if (!$this->cookieRecordMatchesRequest($record, $requestParts)) {
+                        $order++;
+                        continue;
+                    }
+
+                    $pairs[] = [
+                        'header' => (string) $record['name'] . '=' . (string) $record['value'],
+                        'path_length' => strlen($this->extractCookieRecordPath($record)),
+                        'order' => $order,
+                    ];
+                    $order++;
+                }
+
+                if ($pairs === []) {
+                    return null;
+                }
+
+                usort($pairs, static function (array $left, array $right): int {
+                    $pathCompare = $right['path_length'] <=> $left['path_length'];
+                    if ($pathCompare !== 0) {
+                        return $pathCompare;
+                    }
+
+                    return $left['order'] <=> $right['order'];
+                });
+
+                return implode('; ', array_map(static fn(array $pair): string => (string) $pair['header'], $pairs));
+            }
+        }
+
         if ($this->cookies === []) {
             return null;
         }
@@ -239,12 +277,108 @@ final class GateHttpClient
     }
 
     /**
+     * @param array<string, mixed> $record
+     * @param array<string, mixed> $requestParts
+     */
+    private function cookieRecordMatchesRequest(array $record, array $requestParts): bool
+    {
+        $requestScheme = strtolower((string) ($requestParts['scheme'] ?? 'http'));
+        $requestHost = strtolower((string) ($requestParts['host'] ?? ''));
+        $requestPath = (string) ($requestParts['path'] ?? '/');
+
+        if ($requestHost === '') {
+            return false;
+        }
+
+        if (!empty($record['secure']) && $requestScheme !== 'https') {
+            return false;
+        }
+
+        if (isset($record['url'])) {
+            $cookieUrlParts = parse_url((string) $record['url']);
+            if (!is_array($cookieUrlParts) || !isset($cookieUrlParts['host'])) {
+                return false;
+            }
+
+            $cookieHost = strtolower((string) $cookieUrlParts['host']);
+            if ($cookieHost !== $requestHost) {
+                return false;
+            }
+
+            return $this->cookiePathMatchesRequestPath((string) ($cookieUrlParts['path'] ?? '/'), $requestPath);
+        }
+
+        $cookieDomain = strtolower((string) ($record['domain'] ?? ''));
+        if ($cookieDomain === '' || !$this->cookieDomainMatchesHost($cookieDomain, $requestHost)) {
+            return false;
+        }
+
+        return $this->cookiePathMatchesRequestPath($this->extractCookieRecordPath($record), $requestPath);
+    }
+
+    private function cookieDomainMatchesHost(string $cookieDomain, string $requestHost): bool
+    {
+        $cookieDomain = ltrim(strtolower($cookieDomain), '.');
+        $requestHost = strtolower($requestHost);
+
+        if ($cookieDomain === '' || $requestHost === '') {
+            return false;
+        }
+
+        return $requestHost === $cookieDomain || str_ends_with($requestHost, '.' . $cookieDomain);
+    }
+
+    private function cookiePathMatchesRequestPath(string $cookiePath, string $requestPath): bool
+    {
+        if ($cookiePath === '') {
+            $cookiePath = '/';
+        }
+
+        if ($requestPath === '') {
+            $requestPath = '/';
+        }
+
+        if ($cookiePath === '/') {
+            return true;
+        }
+
+        if (!str_starts_with($requestPath, $cookiePath)) {
+            return false;
+        }
+
+        if (str_ends_with($cookiePath, '/')) {
+            return true;
+        }
+
+        return strlen($requestPath) === strlen($cookiePath) ||
+            (isset($requestPath[strlen($cookiePath)]) && $requestPath[strlen($cookiePath)] === '/');
+    }
+
+    /**
+     * @param array<string, mixed> $record
+     */
+    private function extractCookieRecordPath(array $record): string
+    {
+        if (isset($record['path']) && trim((string) $record['path']) !== '') {
+            return (string) $record['path'];
+        }
+
+        if (isset($record['url'])) {
+            $parts = parse_url((string) $record['url']);
+            if (is_array($parts) && isset($parts['path']) && trim((string) $parts['path']) !== '') {
+                return (string) $parts['path'];
+            }
+        }
+
+        return '/';
+    }
+
+    /**
      * @param string[] $setCookies
      */
     private function consumeSetCookies(array $setCookies, string $responseUrl): void
     {
         $responseParts = parse_url($responseUrl);
-        $defaultDomain = is_array($responseParts) ? trim((string) ($responseParts['host'] ?? '')) : '';
         $defaultPath = $this->resolveDefaultCookiePath($responseUrl);
         $defaultSecure = is_array($responseParts) && ($responseParts['scheme'] ?? '') === 'https';
 
@@ -267,6 +401,8 @@ final class GateHttpClient
                 'name' => $name,
                 'value' => trim($value),
             ];
+            $domainExplicitlySet = false;
+            $pathExplicitlySet = false;
 
             foreach ($segments as $segment) {
                 if ($segment === '') {
@@ -281,11 +417,13 @@ final class GateHttpClient
                     case 'domain':
                         if ($attributeValue !== '') {
                             $record['domain'] = $attributeValue;
+                            $domainExplicitlySet = true;
                         }
                         break;
                     case 'path':
                         if ($attributeValue !== '') {
                             $record['path'] = $attributeValue;
+                            $pathExplicitlySet = true;
                         }
                         break;
                     case 'secure':
@@ -302,11 +440,7 @@ final class GateHttpClient
                 }
             }
 
-            if (!isset($record['domain']) && $defaultDomain !== '') {
-                $record['domain'] = $defaultDomain;
-            }
-
-            if (!isset($record['path']) && $defaultPath !== '') {
+            if (!$pathExplicitlySet && $defaultPath !== '') {
                 $record['path'] = $defaultPath;
             }
 
@@ -314,13 +448,63 @@ final class GateHttpClient
                 $record['secure'] = true;
             }
 
+            if (!$domainExplicitlySet) {
+                $cookieUrl = $this->buildCookieScopeUrl($responseUrl, (string) ($record['path'] ?? $defaultPath));
+                if ($cookieUrl !== null) {
+                    $record['url'] = $cookieUrl;
+                }
+
+                unset($record['domain']);
+            }
+
             $this->cookies[$name] = (string) $record['value'];
-            $this->cookieRecords[$name] = $record;
+            $this->cookieRecords[$this->buildCookieRecordScopeKey($record)] = $record;
         }
+    }
+
+    /**
+     * @param array<string, mixed> $record
+     */
+    private function buildCookieRecordScopeKey(array $record): string
+    {
+        if (isset($record['url'])) {
+            return (string) $record['name'] . '|url|' . (string) $record['url'];
+        }
+
+        return sprintf(
+            '%s|domain|%s|path|%s',
+            (string) $record['name'],
+            (string) ($record['domain'] ?? ''),
+            (string) ($record['path'] ?? '/'),
+        );
+    }
+
+    private function buildCookieScopeUrl(string $responseUrl, string $path): ?string
+    {
+        $parts = parse_url($responseUrl);
+        if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
+            return null;
+        }
+
+        $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+        $normalizedPath = trim($path);
+
+        if ($normalizedPath === '') {
+            $normalizedPath = '/';
+        } elseif ($normalizedPath[0] !== '/') {
+            $normalizedPath = '/' . ltrim($normalizedPath, '/');
+        }
+
+        return $parts['scheme'] . '://' . $parts['host'] . $port . $normalizedPath;
     }
 
     private function resolveDefaultCookiePath(string $responseUrl): string
     {
+        $appScopePath = $this->resolveAppCookieScopePath();
+        if ($appScopePath !== '/') {
+            return $appScopePath;
+        }
+
         $parts = parse_url($responseUrl);
         if (!is_array($parts)) {
             return '/';
@@ -337,6 +521,27 @@ final class GateHttpClient
         }
 
         return substr($path, 0, $slashPosition + 1);
+    }
+
+    private function resolveAppCookieScopePath(): string
+    {
+        $basePath = trim((string) parse_url($this->baseUrl, PHP_URL_PATH), '/');
+        $indexPage = trim($this->indexPage, '/');
+        $segments = [];
+
+        if ($basePath !== '') {
+            $segments[] = $basePath;
+        }
+
+        if ($indexPage !== '') {
+            $segments[] = $indexPage;
+        }
+
+        if ($segments === []) {
+            return '/';
+        }
+
+        return '/' . implode('/', $segments) . '/';
     }
 
     /**

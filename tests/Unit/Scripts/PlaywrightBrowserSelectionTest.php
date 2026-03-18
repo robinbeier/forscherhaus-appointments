@@ -42,4 +42,20 @@ class PlaywrightBrowserSelectionTest extends TestCase
 
         self::assertSame(['snapshot'], $arguments);
     }
+
+    public function testPrepareConfiguredPlaywrightCommandArgumentsAddsHeadedOnlyForOpen(): void
+    {
+        putenv('PLAYWRIGHT_MCP_BROWSER=webkit');
+
+        self::assertSame(
+            ['open', 'https://example.test', '--headed', '--browser=webkit'],
+            prepareConfiguredPlaywrightCommandArguments(['open', 'https://example.test'], true),
+        );
+        self::assertSame(['snapshot'], prepareConfiguredPlaywrightCommandArguments(['snapshot'], true));
+    }
+
+    public function testBuildPlaywrightSessionArgumentsUsesDocumentedShortFlag(): void
+    {
+        self::assertSame(['-s=session-123'], buildPlaywrightSessionArguments('session-123'));
+    }
 }

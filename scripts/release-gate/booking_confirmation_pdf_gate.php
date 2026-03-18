@@ -122,15 +122,13 @@ try {
         $confirmationSource,
         $confirmationUrl,
     ): array {
-        $arguments = ['open', $confirmationUrl];
-
-        if ($config['headed']) {
-            $arguments[] = '--headed';
-        }
-
-        $arguments = appendConfiguredPlaywrightBrowserArgument($arguments);
-
-        $openResult = runPwcliCommand($config, $sessionId, $arguments, $repoRoot, $config['open_timeout']);
+        $openResult = runPwcliCommand(
+            $config,
+            $sessionId,
+            ['open', $confirmationUrl],
+            $repoRoot,
+            $config['open_timeout'],
+        );
         assertProcessSucceeded($openResult, 'Open confirmation page', true);
 
         $snapshotResult = runPwcliCommand($config, $sessionId, ['snapshot'], $repoRoot, $config['open_timeout']);
@@ -646,7 +644,14 @@ function runPwcliCommand(
     int $timeoutSeconds,
     ?array $environment = null,
 ): array {
-    $command = ['bash', (string) $config['pwcli_path'], '--session', $sessionId, ...$arguments];
+    $arguments = prepareConfiguredPlaywrightCommandArguments($arguments, (bool) $config['headed']);
+
+    $command = [
+        'bash',
+        (string) $config['pwcli_path'],
+        ...buildPlaywrightSessionArguments($sessionId),
+        ...$arguments,
+    ];
     $effectiveEnvironment = $environment === null ? null : array_merge(getCurrentEnvironment(), $environment);
 
     return GateProcessRunner::run($command, $repoRoot, $effectiveEnvironment, $timeoutSeconds);

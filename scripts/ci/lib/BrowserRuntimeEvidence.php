@@ -552,9 +552,9 @@ function resolveBookingPageTargetUrl(string $baseUrl, string $indexPage): string
  */
 function runPwcliCommand(array $config, string $sessionId, array $arguments, int $timeoutSeconds): array
 {
-    $arguments = \appendConfiguredPlaywrightBrowserArgument($arguments);
+    $arguments = \prepareConfiguredPlaywrightCommandArguments($arguments, (bool) $config['headed']);
 
-    $command = ['bash', $config['pwcli_path'], '--session', $sessionId, ...$arguments];
+    $command = ['bash', $config['pwcli_path'], ...\buildPlaywrightSessionArguments($sessionId), ...$arguments];
 
     return GateProcessRunner::run($command, $config['repo_root'], null, $timeoutSeconds);
 }

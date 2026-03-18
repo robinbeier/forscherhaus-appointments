@@ -1044,35 +1044,7 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
     }
 
     $summary = $metricsPayload['summary'];
-    $sessionCookies = [];
-    foreach ($client->cookieRecords() as $cookie) {
-        $normalizedName = trim((string) ($cookie['name'] ?? ''));
-        $normalizedValue = trim((string) ($cookie['value'] ?? ''));
-
-        if ($normalizedName === '' || $normalizedValue === '') {
-            continue;
-        }
-
-        $record = [
-            'name' => $normalizedName,
-            'value' => $normalizedValue,
-        ];
-
-        foreach (['domain', 'path', 'sameSite'] as $field) {
-            $normalizedFieldValue = trim((string) ($cookie[$field] ?? ''));
-            if ($normalizedFieldValue !== '') {
-                $record[$field] = $normalizedFieldValue;
-            }
-        }
-
-        foreach (['secure', 'httpOnly'] as $field) {
-            if (array_key_exists($field, $cookie)) {
-                $record[$field] = (bool) $cookie[$field];
-            }
-        }
-
-        $sessionCookies[] = $record;
-    }
+    $sessionCookies = dashboardSummaryBrowserNormalizeSessionCookies($client->cookieRecords());
 
     if ($sessionCookies === []) {
         throw new GateAssertionException(
