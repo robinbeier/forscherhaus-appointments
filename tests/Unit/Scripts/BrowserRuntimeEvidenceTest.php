@@ -17,7 +17,7 @@ use function CiRuntimeEvidence\resolvePlaywrightArtifactPath;
 use function CiRuntimeEvidence\runPwcliCommand;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidence;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidenceForChecks;
-use function resolvePlaywrightCookieUrl;
+use function ReleaseGate\resolvePlaywrightCookieUrl;
 
 class BrowserRuntimeEvidenceTest extends TestCase
 {

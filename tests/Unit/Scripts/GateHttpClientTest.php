@@ -144,6 +144,47 @@ class GateHttpClientTest extends TestCase
         self::assertNull($buildMethod->invoke($client, 'http://example.test/app/public/home'));
     }
 
+    public function testBuildCookieHeaderSkipsSecureCookieOnHttpRequest(): void
+    {
+        $client = new GateHttpClient('http://example.test/app', 'index.php');
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke(
+            $client,
+            ['ea_session=abc123; Path=/app/; Domain=example.test; Secure; HttpOnly'],
+            'https://example.test/app/index.php/login/validate',
+        );
+
+        $buildMethod = new ReflectionMethod(GateHttpClient::class, 'buildCookieHeader');
+        $buildMethod->setAccessible(true);
+
+        self::assertNull($buildMethod->invoke($client, 'http://example.test/app/index.php/dashboard'));
+        self::assertSame(
+            'ea_session=abc123',
+            $buildMethod->invoke($client, 'https://example.test/app/index.php/dashboard'),
+        );
+    }
+
+    public function testBuildCookieHeaderHonorsPathSegmentBoundaries(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke(
+            $client,
+            ['ea_session=abc123; Path=/app; Domain=example.test; HttpOnly'],
+            'https://example.test/app/index.php/login/validate',
+        );
+
+        $buildMethod = new ReflectionMethod(GateHttpClient::class, 'buildCookieHeader');
+        $buildMethod->setAccessible(true);
+
+        self::assertSame('ea_session=abc123', $buildMethod->invoke($client, 'https://example.test/app/dashboard'));
+        self::assertNull($buildMethod->invoke($client, 'https://example.test/application/dashboard'));
+    }
+
     public function testConsumeResponseCookieBlocksScopesHostOnlyCookiesPerRedirectHop(): void
     {
         $client = new GateHttpClient('https://example.test', '');

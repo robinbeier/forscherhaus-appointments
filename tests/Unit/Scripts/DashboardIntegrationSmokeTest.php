@@ -10,7 +10,7 @@ use ReleaseGate\GateAssertionException;
 require_once __DIR__ . '/../../../scripts/ci/lib/DashboardSummaryBrowserCheck.php';
 require_once __DIR__ . '/../../../scripts/release-gate/lib/PlaywrightCookieRecords.php';
 
-use function normalizeCookieRecordsForPlaywright;
+use function ReleaseGate\normalizeCookieRecordsForPlaywright;
 
 class DashboardIntegrationSmokeTest extends TestCase
 {
@@ -39,6 +39,16 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString('requested_range_applied', $snippet);
         self::assertStringContainsString('__dashboardSummaryCheckHelpers', $snippet);
         self::assertStringContainsString('installDashboardHelpers', $snippet);
+        self::assertStringContainsString('helpers.matchesSummaryState', $snippet);
+        self::assertStringContainsString(
+            "if (!helpers || typeof helpers.matchesSummaryState !== 'function') {",
+            $snippet,
+        );
+        self::assertStringContainsString(
+            'return window.__dashboardSummaryCheckHelpers.captureSummaryState({',
+            $snippet,
+        );
+        self::assertStringContainsString('return window.__dashboardSummaryCheckHelpers.resolveLocale();', $snippet);
         self::assertStringNotContainsString('toISOString().slice(0, 10)', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-total', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-share', $snippet);

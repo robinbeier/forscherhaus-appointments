@@ -369,7 +369,10 @@ function runDashboardSummaryBrowserCheck(array $config): array
     $sessionId = buildBrowserRuntimeEvidenceSessionId();
     $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
         'target_url' => $config['target_url'],
-        'session_cookies' => \normalizeCookieRecordsForPlaywright($config['session_cookies'], $config['target_url']),
+        'session_cookies' => \ReleaseGate\normalizeCookieRecordsForPlaywright(
+            $config['session_cookies'],
+            $config['target_url'],
+        ),
         'start_date' => $config['start_date'],
         'end_date' => $config['end_date'],
         'expected_summary' => $config['expected_summary'],
