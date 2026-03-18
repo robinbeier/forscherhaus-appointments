@@ -23,15 +23,15 @@ class DashboardIntegrationSmokeTest extends TestCase
     {
         $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($this->browserSnippetConfig());
 
-        self::assertStringContainsString("document.getElementById('login-form') !== null", $snippet);
-        self::assertStringContainsString("typeof window.App?.Http?.Login?.validate === 'function'", $snippet);
-        self::assertStringContainsString("typeof window.App?.Pages?.Login === 'object'", $snippet);
-        self::assertStringContainsString("typeof window.vars === 'function'", $snippet);
-        self::assertStringContainsString("await page.fill('#username', username)", $snippet);
-        self::assertStringContainsString("await page.fill('#password', password)", $snippet);
-        self::assertStringContainsString('page.waitForURL((url) => {', $snippet);
-        self::assertStringContainsString("page.click('#login')", $snippet);
-        self::assertStringContainsString("await page.waitForLoadState('domcontentloaded'", $snippet);
+        self::assertStringContainsString('page.context().addCookies(', $snippet);
+        self::assertStringContainsString(
+            "await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })",
+            $snippet,
+        );
+        self::assertStringContainsString(
+            'Dashboard session cookies were rejected and the browser was redirected to login.',
+            $snippet,
+        );
         self::assertStringContainsString('flatpickrInstance.setDate', $snippet);
         self::assertStringContainsString('requested_range_applied', $snippet);
         self::assertStringContainsString('resolveDashboardLocale', $snippet);
@@ -54,7 +54,8 @@ class DashboardIntegrationSmokeTest extends TestCase
             'const loginResponsePromise = page.waitForResponse((response) => {',
             $snippet,
         );
-        self::assertStringNotContainsString('await page.goto(targetUrl)', $snippet);
+        self::assertStringNotContainsString("await page.fill('#username', username)", $snippet);
+        self::assertStringNotContainsString("await page.fill('#password', password)", $snippet);
         self::assertStringNotContainsString("window.jQuery?._data?.(form, 'events')?.submit", $snippet);
     }
 
@@ -414,9 +415,8 @@ class DashboardIntegrationSmokeTest extends TestCase
 
     /**
      * @return array{
-     *   username:string,
-     *   password:string,
      *   target_url:string,
+     *   session_cookies:array<int, array{name:string, value:string}>,
      *   start_date:string,
      *   end_date:string,
      *   expected_summary:array{target_total:int,booked_total:int,open_total:int,fill_rate:float,threshold:float}
@@ -425,9 +425,17 @@ class DashboardIntegrationSmokeTest extends TestCase
     private function browserSnippetConfig(): array
     {
         return [
-            'username' => 'admin',
-            'password' => 'secret',
             'target_url' => 'http://nginx/index.php/dashboard',
+            'session_cookies' => [
+                [
+                    'name' => 'ci_session',
+                    'value' => 'session-value',
+                ],
+                [
+                    'name' => 'csrf_cookie',
+                    'value' => 'csrf-value',
+                ],
+            ],
             'start_date' => '2026-01-01',
             'end_date' => '2026-01-31',
             'expected_summary' => [
