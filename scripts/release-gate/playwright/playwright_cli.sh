@@ -47,6 +47,7 @@ ensure_browser_installed() {
 
 has_session_flag="false"
 install_command_requested="false"
+help_command_requested="false"
 for arg in "$@"; do
   case "$arg" in
     --session|--session=*)
@@ -55,6 +56,9 @@ for arg in "$@"; do
       ;;
     install-browser)
       install_command_requested="true"
+      ;;
+    --help|-h|help|--version|version)
+      help_command_requested="true"
       ;;
   esac
 done
@@ -65,7 +69,7 @@ if [[ "${has_session_flag}" != "true" && -n "${PLAYWRIGHT_CLI_SESSION:-}" ]]; th
 fi
 cmd+=("$@")
 
-if [[ "${install_command_requested}" != "true" ]]; then
+if [[ "${install_command_requested}" != "true" && "${help_command_requested}" != "true" ]]; then
   ensure_browser_installed
 fi
 

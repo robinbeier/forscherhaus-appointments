@@ -169,9 +169,7 @@ try {
         $sessionId,
         $downloadSnippetPath,
         $downloadPath,
-        $artifactsDir,
     ): array {
-        $snapshotPath = $artifactsDir . '/download_result_snapshot.md';
         $snippet = file_get_contents($downloadSnippetPath);
 
         if (!is_string($snippet) || trim($snippet) === '') {
@@ -199,24 +197,7 @@ try {
             null,
         );
         assertProcessSucceeded($runCodeResult, 'Trigger booking confirmation PDF download', true);
-
-        $snapshotResult = runPwcliCommand(
-            $config,
-            $sessionId,
-            ['snapshot', '--filename', $snapshotPath],
-            $repoRoot,
-            $config['open_timeout'],
-        );
-        assertProcessSucceeded($snapshotResult, 'Capture booking confirmation snapshot', true);
-        ensureFileReadable($snapshotPath, 'Booking confirmation snapshot');
-
-        $snapshotContent = file_get_contents($snapshotPath);
-
-        if (!is_string($snapshotContent) || $snapshotContent === '') {
-            throw new GateAssertionException('Booking confirmation snapshot is empty.');
-        }
-
-        $marker = parseRunCodeResult(['stdout' => $snapshotContent]);
+        $marker = parseRunCodeResult($runCodeResult);
 
         $ok = (bool) ($marker['ok'] ?? false);
         if (!$ok) {
@@ -725,7 +706,6 @@ function extractPlaywrightErrorSection(string $output): ?string
 function parseRunCodeResult(array $runCodeResult): array
 {
     $output = (string) ($runCodeResult['stdout'] ?? '');
-    $prefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
 
     if ($output === '') {
         throw new GateAssertionException('Playwright run-code produced no output.');
@@ -736,6 +716,16 @@ function parseRunCodeResult(array $runCodeResult): array
         throw new GateAssertionException($errorText);
     }
 
+    $matches = [];
+    if (preg_match('/(?:^|\R)### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) === 1) {
+        $decoded = json_decode(trim((string) ($matches[1] ?? '')), true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+    }
+
+    $prefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
     $prefixPosition = strpos($output, $prefix);
 
     if ($prefixPosition === false) {

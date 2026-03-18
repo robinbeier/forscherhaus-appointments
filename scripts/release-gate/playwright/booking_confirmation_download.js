@@ -1,5 +1,4 @@
 async (page) => {
-    const resultPrefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
     const selector = __BOOKING_GATE_SELECTOR__;
     const timeoutMs = __BOOKING_GATE_TIMEOUT_MS__;
     const downloadPath = __BOOKING_GATE_DOWNLOAD_PATH__;
@@ -15,47 +14,15 @@ async (page) => {
         console_errors: [],
         error: null,
     };
-    const publishResult = async () => {
-        await page.evaluate(
-            (payloadText) => {
-                const markerId = 'booking-confirmation-pdf-gate-result';
-                let marker = document.getElementById(markerId);
-
-                if (!(marker instanceof HTMLElement)) {
-                    marker = document.createElement('pre');
-                    marker.id = markerId;
-                    marker.style.position = 'fixed';
-                    marker.style.left = '0';
-                    marker.style.bottom = '0';
-                    marker.style.zIndex = '2147483647';
-                    marker.style.margin = '0';
-                    marker.style.padding = '0';
-                    marker.style.font = '1px monospace';
-                    marker.style.lineHeight = '1';
-                    marker.style.background = '#fff';
-                    marker.style.color = '#000';
-                    marker.style.maxWidth = '1px';
-                    marker.style.maxHeight = '1px';
-                    marker.style.overflow = 'hidden';
-                    document.body.appendChild(marker);
-                }
-
-                marker.textContent = payloadText;
-            },
-            `${resultPrefix}${JSON.stringify(result)}`,
-        );
-
-        return result;
-    };
 
     if (!downloadPath) {
         result.error = 'Missing BOOKING_GATE_DOWNLOAD_PATH.';
-        return publishResult();
+        return result;
     }
 
     if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
         result.error = 'Injected timeout must be a positive integer.';
-        return publishResult();
+        return result;
     }
 
     const onPageError = (error) => {
@@ -94,14 +61,14 @@ async (page) => {
                 'JavaScript errors detected during PDF generation. ' +
                 `page_errors=${JSON.stringify(result.page_errors)} ` +
                 `console_errors=${JSON.stringify(result.console_errors)}`;
-            return publishResult();
+            return result;
         }
 
         result.ok = true;
-        return publishResult();
+        return result;
     } catch (error) {
         result.error = error && error.message ? String(error.message) : String(error);
-        return publishResult();
+        return result;
     } finally {
         page.off('pageerror', onPageError);
         page.off('console', onConsole);

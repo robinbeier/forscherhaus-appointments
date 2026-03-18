@@ -45,18 +45,20 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringNotContainsString("dispatchEvent(new Event('submit'", $snippet);
     }
 
-    public function testParseRunCodeResultReturnsDecodedPayload(): void
+    public function testParseRunCodeResultReturnsDecodedPayloadFromResultSection(): void
     {
         $payload = dashboardSummaryBrowserParseRunCodeResult([
             'stdout' =>
-                "__DASHBOARD_SUMMARY_BROWSER_CHECK__{\"dashboard_summary_browser_check\":true,\"ok\":true,\"fill_rate_before\":\"66,7 %\",\"expected_fill_rate\":\"66,7 %\",\"zero_state_rendered\":true}\n",
+                "### Result\n" .
+                "{\"dashboard_summary_browser_check\":true,\"ok\":true,\"fill_rate_before\":\"66,7 %\",\"expected_fill_rate\":\"66,7 %\",\"zero_state_rendered\":true}\n" .
+                "### Ran Playwright code\n",
         ]);
 
         self::assertTrue($payload['ok']);
         self::assertSame('66,7 %', $payload['fill_rate_before']);
     }
 
-    public function testParseRunCodeResultParsesSentinelJsonOutsideMarkdownEnvelope(): void
+    public function testParseRunCodeResultFallsBackToLegacySentinelPayload(): void
     {
         $payload = dashboardSummaryBrowserParseRunCodeResult([
             'stdout' =>

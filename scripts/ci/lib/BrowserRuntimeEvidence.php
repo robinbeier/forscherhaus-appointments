@@ -364,7 +364,6 @@ function runDashboardSummaryBrowserCheck(array $config): array
 {
     $artifactsDir = rtrim($config['artifacts_dir'], '/');
     $sessionId = buildBrowserRuntimeEvidenceSessionId();
-    $snapshotPath = $artifactsDir . '/dashboard-summary-snapshot.md';
     $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
         'username' => $config['username'],
         'password' => $config['password'],
@@ -400,24 +399,7 @@ function runDashboardSummaryBrowserCheck(array $config): array
         $result = runPwcliCommand($config, $sessionId, ['run-code', $runCodeSnippet], $config['open_timeout'] + 15);
         assertPlaywrightCommandSucceeded($result, 'Render dashboard summary in browser');
 
-        $result = runPwcliCommand(
-            $config,
-            $sessionId,
-            ['snapshot', '--filename', $snapshotPath],
-            $config['open_timeout'],
-        );
-        assertPlaywrightCommandSucceeded($result, 'Capture dashboard summary snapshot');
-        ensureFileReadable($snapshotPath, 'Dashboard summary snapshot');
-
-        $snapshotContent = file_get_contents($snapshotPath);
-
-        if (!is_string($snapshotContent) || $snapshotContent === '') {
-            throw new RuntimeException('Dashboard summary snapshot is empty.');
-        }
-
-        return \dashboardSummaryBrowserAssertPayload(
-            \dashboardSummaryBrowserParseRunCodeResult(['stdout' => $snapshotContent]),
-        );
+        return \dashboardSummaryBrowserAssertPayload(\dashboardSummaryBrowserParseRunCodeResult($result));
     } finally {
         try {
             runPwcliCommand($config, $sessionId, ['close'], 10);

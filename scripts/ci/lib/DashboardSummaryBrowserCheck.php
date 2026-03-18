@@ -45,7 +45,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 
     $snippet = <<<'JS'
     async (page) => {
-      const resultPrefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
       const updatedThreshold = '0.35';
       const username = __USERNAME__;
       const password = __PASSWORD__;
@@ -72,35 +71,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         const text = document.querySelector(selector)?.textContent?.trim() ?? '';
         const digits = text.replace(/[^\d]/g, '');
         return digits === '' ? 0 : Number(digits);
-      };
-      const publishPayload = async (payload) => {
-        await page.evaluate((payloadText) => {
-          const markerId = 'dashboard-summary-browser-check-result';
-          let marker = document.getElementById(markerId);
-
-          if (!(marker instanceof HTMLElement)) {
-            marker = document.createElement('pre');
-            marker.id = markerId;
-            marker.style.position = 'fixed';
-            marker.style.left = '0';
-            marker.style.bottom = '0';
-            marker.style.zIndex = '2147483647';
-            marker.style.margin = '0';
-            marker.style.padding = '0';
-            marker.style.font = '1px monospace';
-            marker.style.lineHeight = '1';
-            marker.style.background = '#fff';
-            marker.style.color = '#000';
-            marker.style.maxWidth = '1px';
-            marker.style.maxHeight = '1px';
-            marker.style.overflow = 'hidden';
-            document.body.appendChild(marker);
-          }
-
-          marker.textContent = payloadText;
-        }, `${resultPrefix}${JSON.stringify(payload)}`);
-
-        return payload;
       };
       const captureSummaryState = async (locale, expected = expectedSummary) =>
         page.evaluate(({ locale: dashboardLocale, startDate, endDate, expectedSummaryPayload }) => {
@@ -497,7 +467,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           zeroState.requested_range_applied &&
           zeroState.error_hidden;
 
-        await publishPayload({
+        return {
           dashboard_summary_browser_check: true,
           ok:
             before.marker_left !== '' &&
@@ -587,15 +557,13 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
                 : !localeApplied
                   ? `Threshold badge did not use locale text ${expectedThresholdText}.`
                   : null,
-        });
-        return null;
+        };
       } catch (error) {
-        await publishPayload({
+        return {
           dashboard_summary_browser_check: true,
           ok: false,
           error: `${currentStep}: ${error instanceof Error ? error.message : String(error)}`,
-        });
-        return null;
+        };
       }
     }
     JS;
@@ -618,12 +586,21 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 function dashboardSummaryBrowserParseRunCodeResult(array $result): array
 {
     $output = (string) ($result['stdout'] ?? '');
-    $prefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
 
     if ($output === '') {
         throw new GateAssertionException('Playwright run-code produced no output.');
     }
 
+    $matches = [];
+    if (preg_match('/(?:^|\R)### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) === 1) {
+        $decoded = json_decode(trim((string) ($matches[1] ?? '')), true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+    }
+
+    $prefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
     $prefixPosition = strpos($output, $prefix);
 
     if ($prefixPosition === false) {
