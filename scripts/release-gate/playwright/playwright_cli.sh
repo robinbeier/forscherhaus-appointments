@@ -75,7 +75,6 @@ for arg in "$@"; do
   case "$arg" in
     -s|-s=*|--session|--session=*)
       has_session_flag="true"
-      break
       ;;
     install-browser)
       install_command_requested="true"
