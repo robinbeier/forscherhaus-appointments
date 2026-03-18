@@ -728,33 +728,56 @@ function parseRunCodeResult(array $runCodeResult): array
     }
 
     $prefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
-    $prefixPosition = strpos($output, $prefix);
+    $prefixPosition = strrpos($output, $prefix);
 
     if ($prefixPosition === false) {
         throw new GateAssertionException(
-            'Could not parse run-code result payload from Playwright output: ' . substr(trim($output), 0, 500),
+            'Could not parse booking confirmation run-code payload from Playwright output: ' .
+                substr(trim($output), 0, 500),
         );
     }
 
     $rawTail = trim(substr($output, $prefixPosition + strlen($prefix)));
+    $lineCandidates = [];
+
+    foreach (preg_split('/\R/', $output) ?: [] as $line) {
+        $linePrefixPosition = strrpos((string) $line, $prefix);
+        if ($linePrefixPosition === false) {
+            continue;
+        }
+
+        $lineCandidate = trim(substr((string) $line, $linePrefixPosition + strlen($prefix)));
+        if ($lineCandidate === '' || !preg_match('/^[\'"]?\{/', $lineCandidate)) {
+            continue;
+        }
+
+        $lineCandidates[] = $lineCandidate;
+    }
+
     $attempts = array_values(array_unique(array_filter([
+        ...$lineCandidates,
         $rawTail,
+        trim($rawTail, "\"'"),
         preg_replace('/"\s*$/', '', $rawTail) ?: '',
         stripcslashes($rawTail),
+        stripcslashes(trim($rawTail, "\"'")),
         stripcslashes((string) (preg_replace('/"\s*$/', '', $rawTail) ?: '')),
     ])));
 
     foreach ($attempts as $attempt) {
-        $matches = [];
-
-        if (preg_match('/\{.*?\}(?="|\R|$)/s', $attempt, $matches) !== 1) {
-            continue;
+        $normalizedAttempt = trim((string) $attempt);
+        $directDecoded = json_decode($normalizedAttempt, true);
+        if (is_array($directDecoded)) {
+            return $directDecoded;
         }
 
-        $decoded = json_decode((string) $matches[0], true);
+        $matches = [];
+        if (preg_match('/\{.*\}/s', $normalizedAttempt, $matches) === 1) {
+            $decoded = json_decode((string) $matches[0], true);
 
-        if (is_array($decoded)) {
-            return $decoded;
+            if (is_array($decoded)) {
+                return $decoded;
+            }
         }
     }
 

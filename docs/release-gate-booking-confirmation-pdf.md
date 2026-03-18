@@ -73,3 +73,8 @@ The bundled Playwright wrapper auto-installs its default Firefox path on first
 use and prepares the required Linux browser dependencies inside the validation
 container. Local and CI gate runs therefore use the same browser path across
 Linux architectures.
+
+The `run-code` snippet used by this gate emits its JSON result with the
+repo-owned `__BOOKING_CONFIRMATION_PDF_GATE__` prefix. The parser reads that
+marker directly instead of depending on undocumented stdout framing from the
+upstream Playwright CLI.

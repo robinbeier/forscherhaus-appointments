@@ -140,3 +140,8 @@ The bundled Playwright wrapper auto-installs its default Firefox path on first
 use and prepares the required Linux browser dependencies inside the validation
 container. This keeps the dashboard browser checks portable across Linux
 architectures, including local arm64 runs.
+
+The dashboard summary browser check emits its `run-code` payload with the
+repo-owned `__DASHBOARD_SUMMARY_BROWSER_CHECK__` prefix. The parser reads that
+marker directly instead of relying on undocumented stdout framing from the
+upstream Playwright CLI.

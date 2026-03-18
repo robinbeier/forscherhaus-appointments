@@ -48,6 +48,7 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString("page.waitForSelector('#dashboard-threshold-input'", $snippet);
         self::assertStringContainsString("await page.inputValue('#dashboard-threshold-input')", $snippet);
         self::assertStringContainsString('threshold_modal_matches_before', $snippet);
+        self::assertStringContainsString('__DASHBOARD_SUMMARY_BROWSER_CHECK__', $snippet);
         self::assertStringContainsString("page.click('#dashboard-threshold-form button[type=\"submit\"]')", $snippet);
         self::assertStringNotContainsString("dispatchEvent(new Event('submit'", $snippet);
         self::assertStringNotContainsString(
@@ -59,13 +60,13 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringNotContainsString("window.jQuery?._data?.(form, 'events')?.submit", $snippet);
     }
 
-    public function testParseRunCodeResultReturnsDecodedPayloadFromResultSection(): void
+    public function testParseRunCodeResultReturnsDecodedPayloadFromSentinelOutput(): void
     {
         $payload = dashboardSummaryBrowserParseRunCodeResult([
             'stdout' =>
-                "### Result\n" .
-                "{\"dashboard_summary_browser_check\":true,\"ok\":true,\"fill_rate_before\":\"66,7 %\",\"expected_fill_rate\":\"66,7 %\",\"zero_state_rendered\":true}\n" .
-                "### Ran Playwright code\n",
+                "debug line\n" .
+                "__DASHBOARD_SUMMARY_BROWSER_CHECK__{\"dashboard_summary_browser_check\":true,\"ok\":true,\"fill_rate_before\":\"66,7 %\",\"expected_fill_rate\":\"66,7 %\",\"zero_state_rendered\":true}\n" .
+                "more debug\n",
         ]);
 
         self::assertTrue($payload['ok']);
@@ -81,6 +82,31 @@ class DashboardIntegrationSmokeTest extends TestCase
 
         self::assertFalse($payload['ok']);
         self::assertSame('expected', $payload['error']);
+    }
+
+    public function testParseRunCodeResultDecodesQuotedSentinelPayload(): void
+    {
+        $payload = dashboardSummaryBrowserParseRunCodeResult([
+            'stdout' =>
+                'generic [ref=e156]: ' .
+                "\"__DASHBOARD_SUMMARY_BROWSER_CHECK__{\\\"dashboard_summary_browser_check\\\":true,\\\"ok\\\":true,\\\"error\\\":null}\"\n",
+        ]);
+
+        self::assertTrue($payload['ok']);
+        self::assertArrayHasKey('error', $payload);
+    }
+
+    public function testParseRunCodeResultIgnoresSentinelMentionInsideSnippetSource(): void
+    {
+        $payload = dashboardSummaryBrowserParseRunCodeResult([
+            'stdout' =>
+                "### Ran Playwright code\n" .
+                "const resultPrefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';\n" .
+                "### Console\n" .
+                "__DASHBOARD_SUMMARY_BROWSER_CHECK__{\"dashboard_summary_browser_check\":true,\"ok\":true}\n",
+        ]);
+
+        self::assertTrue($payload['ok']);
     }
 
     public function testParseRunCodeResultRejectsMissingResultSection(): void

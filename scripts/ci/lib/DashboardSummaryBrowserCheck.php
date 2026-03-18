@@ -51,6 +51,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 
     $snippet = <<<'JS'
     async (page) => {
+      const resultPrefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
       const updatedThreshold = '0.35';
       const targetUrl = __TARGET_URL__;
       const cookieUrl = __COOKIE_URL__;
@@ -74,6 +75,10 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           minimumFractionDigits: 1,
           maximumFractionDigits: 1,
         }).format(Number(value) || 0);
+      const emitPayload = (payload) => {
+        console.log(`${resultPrefix}${JSON.stringify(payload)}`);
+        return payload;
+      };
       const parseCount = (selector) => {
         const text = document.querySelector(selector)?.textContent?.trim() ?? '';
         const digits = text.replace(/[^\d]/g, '');
@@ -489,7 +494,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           zeroState.requested_range_applied &&
           zeroState.error_hidden;
 
-        return {
+        return emitPayload({
           dashboard_summary_browser_check: true,
           ok:
             before.marker_left !== '' &&
@@ -585,13 +590,13 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
                 : !localeApplied
                   ? `Threshold badge did not use locale text ${expectedThresholdText}.`
                   : null,
-        };
+        });
       } catch (error) {
-        return {
+        return emitPayload({
           dashboard_summary_browser_check: true,
           ok: false,
           error: `${currentStep}: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        });
       }
     }
     JS;
@@ -630,7 +635,7 @@ function dashboardSummaryBrowserParseRunCodeResult(array $result): array
     }
 
     $prefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
-    $prefixPosition = strpos($output, $prefix);
+    $prefixPosition = strrpos($output, $prefix);
 
     if ($prefixPosition === false) {
         throw new GateAssertionException(
@@ -640,28 +645,50 @@ function dashboardSummaryBrowserParseRunCodeResult(array $result): array
     }
 
     $rawTail = trim(substr($output, $prefixPosition + strlen($prefix)));
+    $lineCandidates = [];
+
+    foreach (preg_split('/\R/', $output) ?: [] as $line) {
+        $linePrefixPosition = strrpos((string) $line, $prefix);
+        if ($linePrefixPosition === false) {
+            continue;
+        }
+
+        $lineCandidate = trim(substr((string) $line, $linePrefixPosition + strlen($prefix)));
+        if ($lineCandidate === '' || !preg_match('/^[\'"]?\{/', $lineCandidate)) {
+            continue;
+        }
+
+        $lineCandidates[] = $lineCandidate;
+    }
+
     $attempts = array_values(
         array_unique(
             array_filter([
+                ...$lineCandidates,
                 $rawTail,
+                trim($rawTail, "\"'"),
                 preg_replace('/"\s*$/', '', $rawTail) ?: '',
                 stripcslashes($rawTail),
+                stripcslashes(trim($rawTail, "\"'")),
                 stripcslashes((string) (preg_replace('/"\s*$/', '', $rawTail) ?: '')),
             ]),
         ),
     );
 
     foreach ($attempts as $attempt) {
-        $matches = [];
-
-        if (preg_match('/\{.*?\}(?="|\R|$)/s', $attempt, $matches) !== 1) {
-            continue;
+        $normalizedAttempt = trim((string) $attempt);
+        $directDecoded = json_decode($normalizedAttempt, true);
+        if (is_array($directDecoded)) {
+            return $directDecoded;
         }
 
-        $decoded = json_decode((string) $matches[0], true);
+        $matches = [];
+        if (preg_match('/\{.*\}/s', $normalizedAttempt, $matches) === 1) {
+            $decoded = json_decode((string) $matches[0], true);
 
-        if (is_array($decoded)) {
-            return $decoded;
+            if (is_array($decoded)) {
+                return $decoded;
+            }
         }
     }
 
