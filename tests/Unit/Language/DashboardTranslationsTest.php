@@ -8,9 +8,17 @@ class DashboardTranslationsTest extends TestCase
 {
     public function testGermanDashboardHintsDescribePlannedCapacity(): void
     {
-        $this->assertSame('Aus geplanter Kapazität im Arbeitsplan geschätzt.', lang('dashboard_target_fallback_hint'));
-        $this->assertStringContainsString('Geplante Slots im Zeitraum', lang('dashboard_slots_gap_hint'));
-        $this->assertStringContainsString('bereits gebuchte Termine', lang('dashboard_slots_gap_hint'));
+        $translations = $this->loadTranslations('german');
+
+        $this->assertSame(
+            'Aus geplanter Kapazität im Arbeitsplan geschätzt.',
+            $translations['dashboard_target_fallback_hint'] ?? null,
+        );
+        $this->assertStringContainsString(
+            'Geplante Slots im Zeitraum',
+            $translations['dashboard_slots_gap_hint'] ?? '',
+        );
+        $this->assertStringContainsString('bereits gebuchte Termine', $translations['dashboard_slots_gap_hint'] ?? '');
     }
 
     public function testEnglishDashboardHintsDescribePlannedCapacity(): void
