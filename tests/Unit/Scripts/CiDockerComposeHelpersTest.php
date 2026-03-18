@@ -189,6 +189,44 @@ class CiDockerComposeHelpersTest extends TestCase
         self::assertStringContainsString('requires a command', $result['stderr']);
     }
 
+    public function testCiDockerWaitForPhpMysqlConnectivityRetriesUntilPhpCanReachMysql(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            sleep() { :; }
+            ci_docker_compose() {
+              if [[ "$1" == "exec" && "$2" == "-T" && "$3" == "php-fpm" && "$4" == "php" && "$5" == "-r" ]]; then
+                attempt_file="${TMPDIR:-/tmp}/ci-docker-php-mysql-attempts"
+                attempts=0
+                if [[ -f "$attempt_file" ]]; then
+                  attempts="$(cat "$attempt_file")"
+                fi
+                attempts=$((attempts + 1))
+                printf '%s' "$attempts" > "$attempt_file"
+                if [[ "$attempts" -lt 4 ]]; then
+                  return 1
+                fi
+                return 0
+              fi
+              return 1
+            }
+
+            attempt_file="${TMPDIR:-/tmp}/ci-docker-php-mysql-attempts"
+            rm -f "$attempt_file"
+            ci_docker_wait_for_php_mysql_connectivity test
+            cat "$attempt_file"
+            rm -f "$attempt_file"
+            BASH
+            ,
+            '',
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('4', trim($result['stdout']));
+    }
+
     /**
      * @return array{exit_code:int,stdout:string,stderr:string}
      */

@@ -195,6 +195,26 @@ ci_docker_wait_for_service_exec() {
     return 0
 }
 
+ci_docker_wait_for_php_mysql_connectivity() {
+    local log_prefix="${1:-ci-docker}"
+    local max_attempts=30
+    local attempt=1
+    local php_code
+
+    php_code='$mysqli = @new mysqli("mysql", "user", "password", "easyappointments"); if ($mysqli->connect_errno) { fwrite(STDERR, (string) $mysqli->connect_errno); exit(1); } $mysqli->close();'
+
+    until ci_docker_compose exec -T php-fpm php -r "$php_code" >/dev/null 2>&1; do
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            echo "[$log_prefix] php-fpm could not reach MySQL after ${max_attempts} attempts." >&2
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    return 0
+}
+
 ci_docker_install_seed_instance() {
     local log_prefix="${1:-ci-docker}"
     shift
@@ -208,7 +228,7 @@ ci_docker_install_seed_instance() {
         sleep 3
     done
 
-    echo "[$log_prefix] console install failed after 3 attempts." >&2
+    echo "[$log_prefix] console install failed after 5 attempts." >&2
     return 1
 }
 
