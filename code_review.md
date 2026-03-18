@@ -72,6 +72,11 @@ Then review the diff through these lenses:
 3. validation adequacy
 4. maintainability and architectural fit
 
+Use the reviewer roles with this split:
+
+- `reviewer_correctness` is the deep reviewer for correctness, regressions, and security-sensitive risk.
+- `pr_explorer`, `reviewer_tests`, and `reviewer_design` are bounded support reviewers that should return distilled evidence for the parent reviewer to synthesize.
+
 When a change depends on framework, library, or external API behavior, verify the assumption against primary documentation instead of guessing.
 
 ## Out of Scope
