@@ -25,6 +25,7 @@ class DashboardIntegrationSmokeTest extends TestCase
 
         self::assertStringContainsString("document.getElementById('login-form') !== null", $snippet);
         self::assertStringContainsString("typeof window.App?.Http?.Login?.validate === 'function'", $snippet);
+        self::assertStringContainsString("typeof window.App?.Pages?.Login === 'object'", $snippet);
         self::assertStringContainsString("typeof window.vars === 'function'", $snippet);
         self::assertStringContainsString("await page.fill('#username', username)", $snippet);
         self::assertStringContainsString("await page.fill('#password', password)", $snippet);
@@ -45,6 +46,8 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString('bootstrap.Dropdown.getOrCreateInstance(optionsToggle).show()', $snippet);
         self::assertStringContainsString("page.click('#dashboard-threshold-button')", $snippet);
         self::assertStringContainsString("page.waitForSelector('#dashboard-threshold-input'", $snippet);
+        self::assertStringContainsString("await page.inputValue('#dashboard-threshold-input')", $snippet);
+        self::assertStringContainsString('threshold_modal_matches_before', $snippet);
         self::assertStringContainsString("page.click('#dashboard-threshold-form button[type=\"submit\"]')", $snippet);
         self::assertStringNotContainsString("dispatchEvent(new Event('submit'", $snippet);
         self::assertStringNotContainsString(
@@ -111,6 +114,8 @@ class DashboardIntegrationSmokeTest extends TestCase
             'error_hidden_after' => true,
             'threshold_badge_before' => 'Schwellwert 90,0 %',
             'threshold_badge_after' => 'Schwellwert 35,0 %',
+            'threshold_modal_value_before' => '0.90',
+            'threshold_modal_matches_before' => true,
             'marker_left_before' => '90%',
             'marker_left_after' => '35%',
             'requested_range_applied_before' => true,
@@ -121,6 +126,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'shares_match_after' => true,
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
+            'expected_initial_threshold' => 0.9,
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -155,6 +161,8 @@ class DashboardIntegrationSmokeTest extends TestCase
             'error_hidden_after' => true,
             'threshold_badge_before' => 'Schwellwert 35,0 %',
             'threshold_badge_after' => 'Schwellwert 35,0 %',
+            'threshold_modal_value_before' => '0.90',
+            'threshold_modal_matches_before' => true,
             'marker_left_before' => '90%',
             'marker_left_after' => '35%',
             'requested_range_applied_before' => true,
@@ -165,6 +173,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'shares_match_after' => true,
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
+            'expected_initial_threshold' => 0.9,
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -196,6 +205,8 @@ class DashboardIntegrationSmokeTest extends TestCase
             'error_hidden_after' => true,
             'threshold_badge_before' => 'Threshold 90.0%',
             'threshold_badge_after' => 'Threshold 35.0%',
+            'threshold_modal_value_before' => '0.90',
+            'threshold_modal_matches_before' => true,
             'marker_left_before' => '90%',
             'marker_left_after' => '35%',
             'requested_range_applied_before' => true,
@@ -206,6 +217,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'shares_match_after' => true,
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
+            'expected_initial_threshold' => 0.9,
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -237,6 +249,8 @@ class DashboardIntegrationSmokeTest extends TestCase
             'error_hidden_after' => true,
             'threshold_badge_before' => 'Schwellwert 90,0 %',
             'threshold_badge_after' => 'Schwellwert 35,0 %',
+            'threshold_modal_value_before' => '0.90',
+            'threshold_modal_matches_before' => true,
             'marker_left_before' => '90%',
             'marker_left_after' => '35%',
             'requested_range_applied_before' => true,
@@ -247,6 +261,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'shares_match_after' => true,
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
+            'expected_initial_threshold' => 0.9,
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -290,6 +305,8 @@ class DashboardIntegrationSmokeTest extends TestCase
             'error_hidden_after' => true,
             'threshold_badge_before' => 'Schwellwert 90,0 %',
             'threshold_badge_after' => 'Schwellwert 35,0 %',
+            'threshold_modal_value_before' => '0.90',
+            'threshold_modal_matches_before' => true,
             'marker_left_before' => '90%',
             'marker_left_after' => '35%',
             'requested_range_applied_before' => true,
@@ -300,6 +317,51 @@ class DashboardIntegrationSmokeTest extends TestCase
             'shares_match_after' => true,
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
+            'expected_initial_threshold' => 0.9,
+            'expected_threshold_text' => '35,0 %',
+            'dashboard_locale' => 'de-DE',
+            'zero_state_rendered' => true,
+        ]);
+    }
+
+    public function testAssertDashboardSummaryBrowserPayloadRejectsThresholdModalMismatch(): void
+    {
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('threshold modal default did not match');
+
+        dashboardSummaryBrowserAssertPayload([
+            'dashboard_summary_browser_check' => true,
+            'ok' => true,
+            'expected_fill_rate' => '66,7 %',
+            'target_total_before' => 12,
+            'open_total_before' => 4,
+            'target_total_after' => 12,
+            'booked_total_before' => 8,
+            'booked_total_after' => 8,
+            'open_total_after' => 4,
+            'fill_rate_before' => '66,7 %',
+            'fill_rate_after' => '66,7 %',
+            'booked_share_before' => '66,7 %',
+            'booked_share_after' => '66,7 %',
+            'open_share_before' => '33,3 %',
+            'open_share_after' => '33,3 %',
+            'error_hidden_before' => true,
+            'error_hidden_after' => true,
+            'threshold_badge_before' => 'Schwellwert 90,0 %',
+            'threshold_badge_after' => 'Schwellwert 35,0 %',
+            'threshold_modal_value_before' => '0.55',
+            'threshold_modal_matches_before' => false,
+            'marker_left_before' => '90%',
+            'marker_left_after' => '35%',
+            'requested_range_applied_before' => true,
+            'requested_range_applied_after' => true,
+            'totals_match_before' => true,
+            'totals_match_after' => true,
+            'shares_match_before' => true,
+            'shares_match_after' => true,
+            'booked_width_matches_before' => true,
+            'booked_width_matches_after' => true,
+            'expected_initial_threshold' => 0.9,
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -328,6 +390,8 @@ class DashboardIntegrationSmokeTest extends TestCase
             'error_hidden_after' => true,
             'threshold_badge_before' => 'Schwellwert 90,0 %',
             'threshold_badge_after' => 'Schwellwert 35,0 %',
+            'threshold_modal_value_before' => '0.90',
+            'threshold_modal_matches_before' => true,
             'marker_left_before' => '90%',
             'marker_left_after' => '35%',
             'requested_range_applied_before' => true,
@@ -338,6 +402,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             'shares_match_after' => true,
             'booked_width_matches_before' => true,
             'booked_width_matches_after' => true,
+            'expected_initial_threshold' => 0.9,
             'expected_threshold_text' => '35,0 %',
             'dashboard_locale' => 'de-DE',
             'zero_state_rendered' => true,
@@ -354,7 +419,7 @@ class DashboardIntegrationSmokeTest extends TestCase
      *   target_url:string,
      *   start_date:string,
      *   end_date:string,
-     *   expected_summary:array{target_total:int,booked_total:int,open_total:int,fill_rate:float}
+     *   expected_summary:array{target_total:int,booked_total:int,open_total:int,fill_rate:float,threshold:float}
      * }
      */
     private function browserSnippetConfig(): array
@@ -370,6 +435,7 @@ class DashboardIntegrationSmokeTest extends TestCase
                 'booked_total' => 8,
                 'open_total' => 4,
                 'fill_rate' => 2 / 3,
+                'threshold' => 0.9,
             ],
         ];
     }

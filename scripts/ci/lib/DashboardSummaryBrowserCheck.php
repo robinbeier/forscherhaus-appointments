@@ -17,7 +17,8 @@ use ReleaseGate\GateAssertionException;
  *     target_total:int|float|string,
  *     booked_total:int|float|string,
  *     open_total:int|float|string,
- *     fill_rate:int|float|string
+ *     fill_rate:int|float|string,
+ *     threshold:int|float|string
  *   }
  * } $config
  */
@@ -130,6 +131,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           const expectedOpenShareText = formatPercent(dashboardLocale, normalizedExpectedOpenShare);
           const expectedBookedWidth = `${(clampProgress(normalizedExpectedFillRate) * 100).toFixed(1)}%`;
           const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
+          const expectedThreshold = Number(expectedSummaryPayload.threshold) || 0;
 
           return {
             requested_start_date: startDate,
@@ -151,6 +153,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             expected_fill_rate: expectedFillRateText,
             expected_open_share: expectedOpenShareText,
             expected_booked_width: expectedBookedWidth,
+            expected_threshold: expectedThreshold,
             totals_match:
               targetTotal === normalizedExpectedTargetTotal &&
               bookedTotal === normalizedExpectedBookedTotal &&
@@ -184,6 +187,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           () =>
             typeof window.App === 'object' &&
             typeof window.App?.Http?.Login?.validate === 'function' &&
+            typeof window.App?.Pages?.Login === 'object' &&
             typeof window.vars === 'function',
           { timeout: 30000 }
         );
@@ -453,6 +457,10 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         currentStep = 'wait_for_threshold_modal';
         await page.waitForSelector('#dashboard-threshold-modal.show', { state: 'visible', timeout: 5000 });
         await page.waitForSelector('#dashboard-threshold-input', { state: 'visible', timeout: 5000 });
+        currentStep = 'capture_threshold_modal_state';
+        const thresholdModalValueBefore = await page.inputValue('#dashboard-threshold-input');
+        const thresholdModalMatchesBefore =
+          Math.abs((Number.parseFloat(thresholdModalValueBefore) || 0) - (Number(before.expected_threshold) || 0)) < 0.0001;
         currentStep = 'fill_threshold_input';
         await page.fill('#dashboard-threshold-input', updatedThreshold);
         await page.waitForSelector('#dashboard-threshold-form button[type="submit"]', { state: 'visible', timeout: 5000 });
@@ -507,6 +515,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             after.requested_range_applied &&
             summaryStable &&
             zeroStateRendered &&
+            thresholdModalMatchesBefore &&
             badgeChanged &&
             localeApplied,
           target_total_before: before.target_total,
@@ -520,6 +529,8 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           expected_open_share: before.expected_open_share,
           error_hidden_before: before.error_hidden,
           threshold_badge_before: before.threshold_badge,
+          threshold_modal_value_before: thresholdModalValueBefore,
+          threshold_modal_matches_before: thresholdModalMatchesBefore,
           marker_left_before: before.marker_left,
           requested_range_applied_before: before.requested_range_applied,
           selected_start_date_before: before.selected_start_date,
@@ -546,6 +557,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           expected_target_total: before.expected_target_total,
           expected_booked_total: before.expected_booked_total,
           expected_open_total: before.expected_open_total,
+          expected_initial_threshold: before.expected_threshold,
           dashboard_locale: dashboardLocale,
           expected_threshold_text: expectedThresholdText,
           zero_state_rendered: zeroStateRendered,
@@ -561,6 +573,8 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             ? 'Dashboard error banner was visible before threshold save.'
             : before.marker_left === ''
             ? 'Summary marker was not rendered before threshold save.'
+            : !thresholdModalMatchesBefore
+            ? `Threshold modal default ${thresholdModalValueBefore} did not match expected ${before.expected_threshold}.`
             : !after.totals_match
               ? 'Dashboard summary totals changed after threshold save.'
             : !after.shares_match
@@ -696,6 +710,8 @@ function dashboardSummaryBrowserAssertPayload(array $payload): array
         'error_hidden_after',
         'threshold_badge_before',
         'threshold_badge_after',
+        'threshold_modal_value_before',
+        'threshold_modal_matches_before',
         'marker_left_before',
         'marker_left_after',
         'requested_range_applied_before',
@@ -706,6 +722,7 @@ function dashboardSummaryBrowserAssertPayload(array $payload): array
         'shares_match_after',
         'booked_width_matches_before',
         'booked_width_matches_after',
+        'expected_initial_threshold',
         'expected_threshold_text',
         'dashboard_locale',
         'zero_state_rendered',
@@ -785,6 +802,16 @@ function dashboardSummaryBrowserAssertPayload(array $payload): array
 
     if ($markerLeftBefore === '') {
         throw new GateAssertionException('Dashboard summary marker did not render before threshold save.');
+    }
+
+    if (!(bool) $payload['threshold_modal_matches_before']) {
+        throw new GateAssertionException(
+            sprintf(
+                'Dashboard summary threshold modal default did not match the loaded threshold (%s vs %s).',
+                trim((string) $payload['threshold_modal_value_before']),
+                trim((string) $payload['expected_initial_threshold']),
+            ),
+        );
     }
 
     if ($markerLeftAfter !== '35%') {
