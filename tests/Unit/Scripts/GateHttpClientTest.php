@@ -126,4 +126,34 @@ class GateHttpClientTest extends TestCase
         );
         self::assertNull($buildMethod->invoke($client, 'http://example.test/app/public/home'));
     }
+
+    public function testConsumeResponseCookieBlocksScopesHostOnlyCookiesPerRedirectHop(): void
+    {
+        $client = new GateHttpClient('https://example.test', '');
+
+        $method = new ReflectionMethod(GateHttpClient::class, 'consumeResponseCookieBlocks');
+        $method->setAccessible(true);
+        $method->invoke(
+            $client,
+            [
+                [
+                    'headers' => [
+                        'location' => ['/auth/final'],
+                    ],
+                    'set_cookies' => ['login_step=one; HttpOnly'],
+                ],
+                [
+                    'headers' => [],
+                    'set_cookies' => ['login_final=two; HttpOnly'],
+                ],
+            ],
+            'https://example.test/login/start',
+            'https://example.test/auth/final',
+        );
+
+        $records = $client->cookieRecords();
+        self::assertCount(2, $records);
+        self::assertSame('https://example.test/login/', $records[0]['url']);
+        self::assertSame('https://example.test/auth/', $records[1]['url']);
+    }
 }

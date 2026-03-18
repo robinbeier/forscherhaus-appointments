@@ -3,55 +3,15 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../release-gate/lib/GateAssertions.php';
+require_once __DIR__ . '/../../release-gate/lib/PlaywrightCookieRecords.php';
 require_once __DIR__ . '/../../release-gate/lib/PlaywrightRunCodePayload.php';
 
 use ReleaseGate\GateAssertionException;
 use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
 
 /**
- * @param array<int, array<string, mixed>> $cookieRecords
- * @return array<int, array<string, mixed>>
- */
-function dashboardSummaryBrowserNormalizeSessionCookies(array $cookieRecords): array
-{
-    $sessionCookies = [];
-
-    foreach ($cookieRecords as $cookie) {
-        $normalizedName = trim((string) ($cookie['name'] ?? ''));
-        $normalizedValue = trim((string) ($cookie['value'] ?? ''));
-
-        if ($normalizedName === '' || $normalizedValue === '') {
-            continue;
-        }
-
-        $record = [
-            'name' => $normalizedName,
-            'value' => $normalizedValue,
-        ];
-
-        foreach (['url', 'domain', 'path', 'sameSite'] as $field) {
-            $normalizedFieldValue = trim((string) ($cookie[$field] ?? ''));
-            if ($normalizedFieldValue !== '') {
-                $record[$field] = $normalizedFieldValue;
-            }
-        }
-
-        foreach (['secure', 'httpOnly'] as $field) {
-            if (array_key_exists($field, $cookie)) {
-                $record[$field] = (bool) $cookie[$field];
-            }
-        }
-
-        $sessionCookies[] = $record;
-    }
-
-    return $sessionCookies;
-}
-
-/**
  * @param array{
  *   target_url:string,
- *   cookie_url:string,
  *   session_cookies:array<int, array<string, mixed>>,
  *   start_date:string,
  *   end_date:string,
@@ -77,14 +37,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         $config['target_url'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
-    $encodedCookieUrl = json_encode(
-        $config['cookie_url'],
-        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-    );
-    $encodedCookieHost = json_encode(
-        (string) (parse_url($config['cookie_url'], PHP_URL_HOST) ?? ''),
-        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-    );
     $encodedSessionCookies = json_encode(
         $config['session_cookies'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
@@ -106,8 +58,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
     async (page) => {
       const resultPrefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
       const targetUrl = __TARGET_URL__;
-      const cookieUrl = __COOKIE_URL__;
-      const cookieHost = __COOKIE_HOST__;
       const sessionCookies = __SESSION_COOKIES__;
       const requestedStartDate = __START_DATE__;
       const requestedEndDate = __END_DATE__;
@@ -236,59 +186,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         });
       const seedAuthenticatedSession = async () => {
         currentStep = 'seed_authenticated_session';
-        await page.context().addCookies(
-          sessionCookies.map((cookie) => {
-            const seededCookie = {
-              name: String(cookie.name || ''),
-              value: String(cookie.value || ''),
-            };
-            const normalizedUrl = String(cookie.url || '').trim();
-            const normalizedDomain = String(cookie.domain || '').trim();
-            const normalizedPath = String(cookie.path || '').trim();
-
-            if (normalizedUrl !== '') {
-              seededCookie.url = normalizedUrl;
-
-              if (cookie.secure === true) {
-                seededCookie.secure = true;
-              }
-
-              if (cookie.httpOnly === true) {
-                seededCookie.httpOnly = true;
-              }
-
-              const normalizedSameSite = String(cookie.sameSite || '').trim();
-              if (normalizedSameSite !== '') {
-                seededCookie.sameSite = normalizedSameSite;
-              }
-
-              return seededCookie;
-            }
-
-            if (normalizedDomain !== '' || normalizedPath !== '') {
-              seededCookie.domain = normalizedDomain !== '' ? normalizedDomain : cookieHost;
-              seededCookie.path = normalizedPath !== '' ? normalizedPath : '/';
-
-              if (cookie.secure === true) {
-                seededCookie.secure = true;
-              }
-
-              if (cookie.httpOnly === true) {
-                seededCookie.httpOnly = true;
-              }
-
-              const normalizedSameSite = String(cookie.sameSite || '').trim();
-              if (normalizedSameSite !== '') {
-                seededCookie.sameSite = normalizedSameSite;
-              }
-
-              return seededCookie;
-            }
-
-            seededCookie.url = cookieUrl;
-            return seededCookie;
-          })
-        );
+        await page.context().addCookies(sessionCookies);
       };
       const openAuthenticatedDashboard = async () => {
         currentStep = 'open_authenticated_dashboard';
@@ -709,8 +607,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
     return trim(
         strtr($snippet, [
             '__TARGET_URL__' => $encodedTargetUrl,
-            '__COOKIE_URL__' => $encodedCookieUrl,
-            '__COOKIE_HOST__' => $encodedCookieHost,
             '__SESSION_COOKIES__' => $encodedSessionCookies,
             '__START_DATE__' => $encodedStartDate,
             '__END_DATE__' => $encodedEndDate,

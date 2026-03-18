@@ -70,10 +70,11 @@ The gate writes a JSON report with:
 - `cleanup_warnings`: optional Playwright session cleanup warnings.
 
 The bundled Playwright wrapper bootstraps the configured Playwright browser
-(Firefox by default, overridable via `PLAYWRIGHT_MCP_BROWSER`) via an explicit
-`playwright` package install step and prepares the required Linux browser
-dependencies inside the validation container. Local and CI gate runs therefore
-use the same browser path across Linux architectures.
+(Firefox by default; supported overrides follow the upstream `playwright-cli`
+contract such as `chrome`, `firefox`, `webkit`, and `msedge`) using the exact
+Playwright runtime version pinned by `@playwright/cli`, then prepares the
+required Linux browser dependencies inside the validation container. Local and
+CI gate runs therefore use the same browser path across Linux architectures.
 
 The `run-code` snippet used by this gate emits its JSON result with the
 repo-owned `__BOOKING_CONFIRMATION_PDF_GATE__` prefix. The parser reads that

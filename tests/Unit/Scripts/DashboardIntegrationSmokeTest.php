@@ -8,6 +8,9 @@ use PHPUnit\Framework\TestCase;
 use ReleaseGate\GateAssertionException;
 
 require_once __DIR__ . '/../../../scripts/ci/lib/DashboardSummaryBrowserCheck.php';
+require_once __DIR__ . '/../../../scripts/release-gate/lib/PlaywrightCookieRecords.php';
+
+use function normalizeCookieRecordsForPlaywright;
 
 class DashboardIntegrationSmokeTest extends TestCase
 {
@@ -132,12 +135,7 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString('"secure":true', $snippet);
         self::assertStringContainsString('"httpOnly":true', $snippet);
         self::assertStringContainsString('"sameSite":"Lax"', $snippet);
-        self::assertStringContainsString('const cookieHost = "nginx";', $snippet);
-        self::assertStringContainsString(
-            'seededCookie.domain = normalizedDomain !== \'\' ? normalizedDomain : cookieHost;',
-            $snippet,
-        );
-        self::assertStringContainsString('seededCookie.url = cookieUrl;', $snippet);
+        self::assertStringContainsString('await page.context().addCookies(sessionCookies);', $snippet);
         self::assertStringNotContainsString('new URL(cookieUrl)', $snippet);
     }
 
@@ -157,21 +155,23 @@ class DashboardIntegrationSmokeTest extends TestCase
         $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($config);
 
         self::assertStringContainsString('"url":"https://example.test/app/index.php/login/"', $snippet);
-        self::assertStringContainsString('const normalizedUrl = String(cookie.url || \'\').trim();', $snippet);
-        self::assertStringContainsString('seededCookie.url = normalizedUrl;', $snippet);
+        self::assertStringContainsString('await page.context().addCookies(sessionCookies);', $snippet);
     }
 
-    public function testNormalizeSessionCookiesPreservesUrlScopedHostOnlyCookies(): void
+    public function testNormalizeCookieRecordsForPlaywrightPreservesUrlScopedHostOnlyCookies(): void
     {
-        $cookies = dashboardSummaryBrowserNormalizeSessionCookies([
+        $cookies = normalizeCookieRecordsForPlaywright(
             [
-                'name' => 'ci_session',
-                'value' => 'session-value',
-                'url' => 'https://example.test/app/index.php/login/',
-                'path' => '/app/index.php/login/',
-                'httpOnly' => true,
+                [
+                    'name' => 'ci_session',
+                    'value' => 'session-value',
+                    'url' => 'https://example.test/app/index.php/login/',
+                    'path' => '/app/index.php/login/',
+                    'httpOnly' => true,
+                ],
             ],
-        ]);
+            'https://example.test/app/index.php/dashboard',
+        );
 
         self::assertSame(
             [
@@ -187,19 +187,22 @@ class DashboardIntegrationSmokeTest extends TestCase
         );
     }
 
-    public function testNormalizeSessionCookiesPreservesScopedCookieMetadata(): void
+    public function testNormalizeCookieRecordsForPlaywrightPreservesScopedCookieMetadata(): void
     {
-        $cookies = dashboardSummaryBrowserNormalizeSessionCookies([
+        $cookies = normalizeCookieRecordsForPlaywright(
             [
-                'name' => 'csrf_cookie',
-                'value' => 'token-123',
-                'domain' => 'example.test',
-                'path' => '/app/',
-                'sameSite' => 'Lax',
-                'secure' => true,
-                'httpOnly' => true,
+                [
+                    'name' => 'csrf_cookie',
+                    'value' => 'token-123',
+                    'domain' => 'example.test',
+                    'path' => '/app/',
+                    'sameSite' => 'Lax',
+                    'secure' => true,
+                    'httpOnly' => true,
+                ],
             ],
-        ]);
+            'https://example.test/app/index.php/dashboard',
+        );
 
         self::assertSame(
             [
@@ -211,6 +214,31 @@ class DashboardIntegrationSmokeTest extends TestCase
                     'sameSite' => 'Lax',
                     'secure' => true,
                     'httpOnly' => true,
+                ],
+            ],
+            $cookies,
+        );
+    }
+
+    public function testNormalizeCookieRecordsForPlaywrightFallsBackToTargetUrlForPathOnlyCookies(): void
+    {
+        $cookies = normalizeCookieRecordsForPlaywright(
+            [
+                [
+                    'name' => 'ci_session',
+                    'value' => 'session-value',
+                    'path' => '/app/index.php/login/',
+                ],
+            ],
+            'https://example.test/app/index.php/dashboard',
+        );
+
+        self::assertSame(
+            [
+                [
+                    'name' => 'ci_session',
+                    'value' => 'session-value',
+                    'url' => 'https://example.test/app/index.php/login/',
                 ],
             ],
             $cookies,
@@ -568,7 +596,6 @@ class DashboardIntegrationSmokeTest extends TestCase
     /**
      * @return array{
      *   target_url:string,
-     *   cookie_url:string,
      *   session_cookies:array<int, array<string, mixed>>,
      *   start_date:string,
      *   end_date:string,
@@ -579,7 +606,6 @@ class DashboardIntegrationSmokeTest extends TestCase
     {
         return [
             'target_url' => 'http://nginx/index.php/dashboard',
-            'cookie_url' => 'http://nginx/',
             'session_cookies' => [
                 [
                     'name' => 'ci_session',

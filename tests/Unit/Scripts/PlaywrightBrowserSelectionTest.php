@@ -58,4 +58,11 @@ class PlaywrightBrowserSelectionTest extends TestCase
     {
         self::assertSame(['-s=session-123'], buildPlaywrightSessionArguments('session-123'));
     }
+
+    public function testResolveConfiguredPlaywrightBrowserNormalizesChromiumAlias(): void
+    {
+        putenv('PLAYWRIGHT_MCP_BROWSER=chromium');
+
+        self::assertSame('chrome', resolveConfiguredPlaywrightBrowser());
+    }
 }

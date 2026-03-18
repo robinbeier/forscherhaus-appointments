@@ -7,38 +7,12 @@ namespace CiRuntimeEvidence;
 require_once __DIR__ . '/../../release-gate/lib/GateProcessRunner.php';
 require_once __DIR__ . '/../../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../../release-gate/lib/PlaywrightBrowserSelection.php';
+require_once __DIR__ . '/../../release-gate/lib/PlaywrightCookieRecords.php';
 require_once __DIR__ . '/DashboardSummaryBrowserCheck.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateProcessRunner;
-use RuntimeException;
 use Throwable;
-
-function resolveBrowserCookieUrl(string $targetUrl): string
-{
-    $parts = parse_url($targetUrl);
-
-    if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
-        throw new RuntimeException('Could not derive browser cookie URL from target URL: ' . $targetUrl);
-    }
-
-    $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
-    $path = (string) ($parts['path'] ?? '/');
-
-    $indexPagePosition = strpos($path, '/index.php');
-    if ($indexPagePosition !== false) {
-        $path = substr($path, 0, $indexPagePosition + 1);
-    } elseif ($path !== '' && $path !== '/') {
-        $slashPosition = strrpos($path, '/');
-        $path = $slashPosition === false ? '/' : substr($path, 0, $slashPosition + 1);
-    }
-
-    if ($path === '') {
-        $path = '/';
-    }
-
-    return $parts['scheme'] . '://' . $parts['host'] . $port . $path;
-}
 
 /**
  * @param array{
@@ -149,7 +123,7 @@ function collectBookingPageBrowserEvidence(array $config): array
         );
 
         if (($probe['exit_code'] ?? 1) !== 0) {
-            throw new RuntimeException('npx was not found on PATH.');
+            throw new \RuntimeException('npx was not found on PATH.');
         }
 
         $bootstrap = GateProcessRunner::run(
@@ -187,7 +161,7 @@ function collectBookingPageBrowserEvidence(array $config): array
 
     $runStep('start_trace', static function () use ($config, &$sessionId, &$traceStarted): array {
         if (!is_string($sessionId) || $sessionId === '') {
-            throw new RuntimeException('Playwright session is missing for tracing.');
+            throw new \RuntimeException('Playwright session is missing for tracing.');
         }
 
         $result = runPwcliCommand($config, $sessionId, ['tracing-start'], $config['open_timeout']);
@@ -201,7 +175,7 @@ function collectBookingPageBrowserEvidence(array $config): array
 
     $runStep('reload_booking_page', static function () use ($config, &$sessionId): array {
         if (!is_string($sessionId) || $sessionId === '') {
-            throw new RuntimeException('Playwright session is missing for reload.');
+            throw new \RuntimeException('Playwright session is missing for reload.');
         }
 
         $result = runPwcliCommand($config, $sessionId, ['reload'], $config['open_timeout']);
@@ -214,7 +188,7 @@ function collectBookingPageBrowserEvidence(array $config): array
 
     $runStep('capture_snapshot', static function () use ($config, &$sessionId, $snapshotPath, &$artifacts): array {
         if (!is_string($sessionId) || $sessionId === '') {
-            throw new RuntimeException('Playwright session is missing for snapshot capture.');
+            throw new \RuntimeException('Playwright session is missing for snapshot capture.');
         }
 
         $result = runPwcliCommand($config, $sessionId, ['snapshot'], $config['open_timeout']);
@@ -230,7 +204,7 @@ function collectBookingPageBrowserEvidence(array $config): array
 
     $runStep('capture_screenshot', static function () use ($config, &$sessionId, $screenshotPath, &$artifacts): array {
         if (!is_string($sessionId) || $sessionId === '') {
-            throw new RuntimeException('Playwright session is missing for screenshot capture.');
+            throw new \RuntimeException('Playwright session is missing for screenshot capture.');
         }
 
         $result = runPwcliCommand(
@@ -294,11 +268,11 @@ function collectBookingPageBrowserEvidence(array $config): array
                 );
 
                 if ($traceSource === null) {
-                    throw new RuntimeException('Playwright trace output did not expose a trace artifact.');
+                    throw new \RuntimeException('Playwright trace output did not expose a trace artifact.');
                 }
 
                 if ($networkSource === null) {
-                    throw new RuntimeException('Playwright trace output did not expose a network log artifact.');
+                    throw new \RuntimeException('Playwright trace output did not expose a network log artifact.');
                 }
 
                 if ($traceSource !== null) {
@@ -393,8 +367,7 @@ function runDashboardSummaryBrowserCheck(array $config): array
     $sessionId = buildBrowserRuntimeEvidenceSessionId();
     $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
         'target_url' => $config['target_url'],
-        'cookie_url' => resolveBrowserCookieUrl($config['target_url']),
-        'session_cookies' => $config['session_cookies'],
+        'session_cookies' => \normalizeCookieRecordsForPlaywright($config['session_cookies'], $config['target_url']),
         'start_date' => $config['start_date'],
         'end_date' => $config['end_date'],
         'expected_summary' => $config['expected_summary'],
@@ -406,7 +379,7 @@ function runDashboardSummaryBrowserCheck(array $config): array
     $probe = GateProcessRunner::run(['bash', '-lc', 'command -v npx >/dev/null 2>&1'], $config['repo_root'], null, 10);
 
     if (($probe['exit_code'] ?? 1) !== 0) {
-        throw new RuntimeException('npx was not found on PATH.');
+        throw new \RuntimeException('npx was not found on PATH.');
     }
 
     $bootstrap = GateProcessRunner::run(
@@ -439,7 +412,7 @@ function shouldCollectBrowserRuntimeEvidence(string $mode, bool $suiteFailed): b
         'off' => false,
         'always' => true,
         'on-failure' => $suiteFailed,
-        default => throw new RuntimeException('Unsupported browser evidence mode: ' . $mode),
+        default => throw new \RuntimeException('Unsupported browser evidence mode: ' . $mode),
     };
 }
 
@@ -510,7 +483,7 @@ function parseBrowserRuntimeEvidenceMode(mixed $raw): string
         '1', 'true', 'yes', 'on', 'always' => 'always',
         '0', 'false', 'no', 'off' => 'off',
         'on-failure', 'failure', 'fail', 'failed' => 'on-failure',
-        default => throw new RuntimeException(
+        default => throw new \RuntimeException(
             'Unsupported browser evidence mode "' . $normalized . '". Use off, on-failure, or always.',
         ),
     };
@@ -643,14 +616,14 @@ function ensureDirectory(string $path): void
     }
 
     if (!mkdir($path, 0775, true) && !is_dir($path)) {
-        throw new RuntimeException('Could not create directory: ' . $path);
+        throw new \RuntimeException('Could not create directory: ' . $path);
     }
 }
 
 function ensureFileReadable(string $path, string $label): void
 {
     if (!is_file($path) || !is_readable($path)) {
-        throw new RuntimeException($label . ' is missing or not readable: ' . $path);
+        throw new \RuntimeException($label . ' is missing or not readable: ' . $path);
     }
 }
 
@@ -659,7 +632,7 @@ function copyFile(string $source, string $target): void
     ensureDirectory(dirname($target));
 
     if (!copy($source, $target)) {
-        throw new RuntimeException(sprintf('Failed to copy artifact from %s to %s.', $source, $target));
+        throw new \RuntimeException(sprintf('Failed to copy artifact from %s to %s.', $source, $target));
     }
 }
 
@@ -668,7 +641,7 @@ function writeTextFile(string $path, string $content): void
     ensureDirectory(dirname($path));
 
     if (file_put_contents($path, $content) === false) {
-        throw new RuntimeException('Could not write file: ' . $path);
+        throw new \RuntimeException('Could not write file: ' . $path);
     }
 }
 
@@ -681,7 +654,7 @@ function writeJsonFile(string $path, array $report): void
     $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
     if ($json === false || file_put_contents($path, $json . PHP_EOL) === false) {
-        throw new RuntimeException('Could not write JSON report: ' . $path);
+        throw new \RuntimeException('Could not write JSON report: ' . $path);
     }
 }
 

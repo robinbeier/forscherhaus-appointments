@@ -130,9 +130,19 @@ final class GateHttpClient
         }
 
         $headers = [];
-        $setCookies = [];
+        $responseBlocks = [];
+        $currentBlockStarted = false;
+        $currentBlockHeaders = [];
+        $currentBlockSetCookies = [];
 
-        $headerFn = function ($ch, string $headerLine) use (&$headers, &$setCookies, $consumeResponseCookies): int {
+        $headerFn = function ($ch, string $headerLine) use (
+            &$headers,
+            &$responseBlocks,
+            &$currentBlockStarted,
+            &$currentBlockHeaders,
+            &$currentBlockSetCookies,
+            $consumeResponseCookies,
+        ): int {
             $trimmed = trim($headerLine);
 
             if ($trimmed === '') {
@@ -140,7 +150,16 @@ final class GateHttpClient
             }
 
             if (str_starts_with($trimmed, 'HTTP/')) {
-                $headers = [];
+                if ($currentBlockStarted) {
+                    $responseBlocks[] = [
+                        'headers' => $currentBlockHeaders,
+                        'set_cookies' => $currentBlockSetCookies,
+                    ];
+                }
+
+                $currentBlockStarted = true;
+                $currentBlockHeaders = [];
+                $currentBlockSetCookies = [];
 
                 return strlen($headerLine);
             }
@@ -154,11 +173,11 @@ final class GateHttpClient
             $name = strtolower(trim($parts[0]));
             $value = trim($parts[1]);
 
-            $headers[$name] ??= [];
-            $headers[$name][] = $value;
+            $currentBlockHeaders[$name] ??= [];
+            $currentBlockHeaders[$name][] = $value;
 
             if ($consumeResponseCookies && $name === 'set-cookie') {
-                $setCookies[] = $value;
+                $currentBlockSetCookies[] = $value;
             }
 
             return strlen($headerLine);
@@ -206,6 +225,18 @@ final class GateHttpClient
         $statusCode = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
         $effectiveUrl = (string) curl_getinfo($curl, CURLINFO_EFFECTIVE_URL);
 
+        if ($currentBlockStarted) {
+            $responseBlocks[] = [
+                'headers' => $currentBlockHeaders,
+                'set_cookies' => $currentBlockSetCookies,
+            ];
+        }
+
+        if ($responseBlocks !== []) {
+            $finalBlock = $responseBlocks[count($responseBlocks) - 1];
+            $headers = is_array($finalBlock['headers'] ?? null) ? $finalBlock['headers'] : [];
+        }
+
         $response = new GateHttpResponse(
             $statusCode,
             $headers,
@@ -215,7 +246,7 @@ final class GateHttpClient
         );
 
         if ($consumeResponseCookies) {
-            $this->consumeSetCookies($setCookies, $response->url);
+            $this->consumeResponseCookieBlocks($responseBlocks, $url, $response->url);
         }
 
         return $response;
@@ -463,6 +494,48 @@ final class GateHttpClient
     }
 
     /**
+     * @param array<int, array{headers?: array<string, string[]>, set_cookies?: string[]}> $responseBlocks
+     */
+    private function consumeResponseCookieBlocks(array $responseBlocks, string $requestUrl, string $effectiveUrl): void
+    {
+        if ($responseBlocks === []) {
+            return;
+        }
+
+        $currentUrl = $requestUrl;
+        $lastBlockIndex = count($responseBlocks) - 1;
+
+        foreach ($responseBlocks as $index => $block) {
+            $setCookies = array_values(
+                array_filter(
+                    is_array($block['set_cookies'] ?? null) ? $block['set_cookies'] : [],
+                    static fn($cookie): bool => is_string($cookie) && trim($cookie) !== '',
+                ),
+            );
+
+            if ($setCookies !== []) {
+                $this->consumeSetCookies($setCookies, $currentUrl);
+            }
+
+            if ($index === $lastBlockIndex) {
+                continue;
+            }
+
+            $location = $block['headers']['location'][0] ?? null;
+            if (!is_string($location) || trim($location) === '') {
+                $currentUrl = $effectiveUrl !== '' ? $effectiveUrl : $currentUrl;
+
+                continue;
+            }
+
+            $resolvedLocation = $this->resolveRedirectTargetUrl($currentUrl, $location);
+            if ($resolvedLocation !== null) {
+                $currentUrl = $resolvedLocation;
+            }
+        }
+    }
+
+    /**
      * @param array<string, mixed> $record
      */
     private function buildCookieRecordScopeKey(array $record): string
@@ -496,6 +569,79 @@ final class GateHttpClient
         }
 
         return $parts['scheme'] . '://' . $parts['host'] . $port . $normalizedPath;
+    }
+
+    private function resolveRedirectTargetUrl(string $currentUrl, string $location): ?string
+    {
+        $location = trim($location);
+        if ($location === '') {
+            return null;
+        }
+
+        if (preg_match('/^[a-z][a-z0-9+.-]*:/i', $location) === 1) {
+            return $location;
+        }
+
+        $currentParts = parse_url($currentUrl);
+        if (!is_array($currentParts) || !isset($currentParts['scheme'], $currentParts['host'])) {
+            return null;
+        }
+
+        $origin = $currentParts['scheme'] . '://' . $currentParts['host'];
+        if (isset($currentParts['port'])) {
+            $origin .= ':' . (string) $currentParts['port'];
+        }
+
+        if (str_starts_with($location, '//')) {
+            return (string) $currentParts['scheme'] . ':' . $location;
+        }
+
+        if (str_starts_with($location, '/')) {
+            return $origin . $location;
+        }
+
+        if (str_starts_with($location, '?') || str_starts_with($location, '#')) {
+            $currentPath = (string) ($currentParts['path'] ?? '/');
+
+            return $origin . $currentPath . $location;
+        }
+
+        $currentPath = (string) ($currentParts['path'] ?? '/');
+        $basePath = str_ends_with($currentPath, '/')
+            ? $currentPath
+            : substr($currentPath, 0, (int) strrpos($currentPath, '/') + 1);
+
+        return $origin . $this->normalizeUrlPath($basePath . $location);
+    }
+
+    private function normalizeUrlPath(string $path): string
+    {
+        $suffix = '';
+        $suffixPosition = strcspn($path, '?#');
+
+        if ($suffixPosition < strlen($path)) {
+            $suffix = substr($path, $suffixPosition);
+            $path = substr($path, 0, $suffixPosition);
+        }
+
+        $segments = explode('/', $path);
+        $normalizedSegments = [];
+
+        foreach ($segments as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+
+            if ($segment === '..') {
+                array_pop($normalizedSegments);
+
+                continue;
+            }
+
+            $normalizedSegments[] = $segment;
+        }
+
+        return '/' . implode('/', $normalizedSegments) . $suffix;
     }
 
     private function resolveDefaultCookiePath(string $responseUrl): string

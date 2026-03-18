@@ -50,7 +50,11 @@ function buildPlaywrightSessionArguments(string $sessionId): array
 
 function resolveConfiguredPlaywrightBrowser(): string
 {
-    $configuredBrowser = trim((string) getenv('PLAYWRIGHT_MCP_BROWSER'));
+    $configuredBrowser = strtolower(trim((string) getenv('PLAYWRIGHT_MCP_BROWSER')));
+
+    if ($configuredBrowser === 'chromium') {
+        return 'chrome';
+    }
 
     return $configuredBrowser !== '' ? $configuredBrowser : 'firefox';
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateCliSupport.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
+require_once __DIR__ . '/../release-gate/lib/PlaywrightCookieRecords.php';
 require_once __DIR__ . '/lib/BrowserRuntimeEvidence.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/DashboardSummaryBrowserCheck.php';
@@ -1044,15 +1045,14 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
     }
 
     $summary = $metricsPayload['summary'];
-    $sessionCookies = dashboardSummaryBrowserNormalizeSessionCookies($client->cookieRecords());
+    $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'dashboard');
+    $sessionCookies = normalizeCookieRecordsForPlaywright($client->cookieRecords(), $targetUrl);
 
     if ($sessionCookies === []) {
         throw new GateAssertionException(
             'POST /login/validate (dashboard summary browser render) did not yield reusable session cookies.',
         );
     }
-
-    $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'dashboard');
     $payload = runDashboardSummaryBrowserCheck([
         'repo_root' => $repoRoot,
         'target_url' => $targetUrl,

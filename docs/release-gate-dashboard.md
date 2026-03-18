@@ -137,10 +137,12 @@ This keeps the runtime/UI evidence path reproducible and narrow while giving
 agents visual and trace artifacts for CI triage and rework.
 
 The bundled Playwright wrapper bootstraps the configured Playwright browser
-(Firefox by default, overridable via `PLAYWRIGHT_MCP_BROWSER`) via an explicit
-`playwright` package install step and prepares the required Linux browser
-dependencies inside the validation container. This keeps the dashboard browser
-checks portable across Linux architectures, including local arm64 runs.
+(Firefox by default; supported overrides follow the upstream `playwright-cli`
+contract such as `chrome`, `firefox`, `webkit`, and `msedge`) using the exact
+Playwright runtime version pinned by `@playwright/cli`, then prepares the
+required Linux browser dependencies inside the validation container. This keeps
+the dashboard browser checks portable across Linux architectures, including
+local arm64 runs.
 
 The dashboard summary browser check emits its `run-code` payload with the
 repo-owned `__DASHBOARD_SUMMARY_BROWSER_CHECK__` prefix. The parser reads that
