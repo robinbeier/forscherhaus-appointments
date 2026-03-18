@@ -43,10 +43,11 @@ resolve_playwright_runtime_package() {
 }
 
 run_playwright_install() {
-  local runtime_package
+  if [[ -z "${playwright_runtime_package}" ]]; then
+    resolve_playwright_runtime_package >/dev/null
+  fi
 
-  runtime_package="$(resolve_playwright_runtime_package)"
-  npx --yes --package "${runtime_package}" playwright "$@"
+  npx --yes --package "${playwright_runtime_package}" playwright "$@"
 }
 
 resolve_playwright_ready_marker() {

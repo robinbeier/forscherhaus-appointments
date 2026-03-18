@@ -408,9 +408,11 @@ class BrowserRuntimeEvidenceTest extends TestCase
 
             $capturedNpmInvocations = file($npmCapturePath, FILE_IGNORE_NEW_LINES);
             self::assertNotFalse($capturedNpmInvocations);
-            self::assertCount(2, $capturedNpmInvocations);
+            self::assertCount(4, $capturedNpmInvocations);
             self::assertSame('view @playwright/cli version --json', $capturedNpmInvocations[0]);
             self::assertSame('view @playwright/cli@0.1.1 dependencies.playwright --json', $capturedNpmInvocations[1]);
+            self::assertSame('view @playwright/cli version --json', $capturedNpmInvocations[2]);
+            self::assertSame('view @playwright/cli@0.1.1 dependencies.playwright --json', $capturedNpmInvocations[3]);
         } finally {
             if (is_file($npmPath)) {
                 unlink($npmPath);

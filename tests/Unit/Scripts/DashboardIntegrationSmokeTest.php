@@ -179,7 +179,6 @@ class DashboardIntegrationSmokeTest extends TestCase
                     'name' => 'ci_session',
                     'value' => 'session-value',
                     'url' => 'https://example.test/app/index.php/login/',
-                    'path' => '/app/index.php/login/',
                     'httpOnly' => true,
                 ],
             ],
