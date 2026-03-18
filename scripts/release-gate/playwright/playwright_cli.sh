@@ -10,19 +10,42 @@ default_browser() {
   echo "firefox"
 }
 
-playwright_browser="${PLAYWRIGHT_MCP_BROWSER:-$(default_browser)}"
+normalize_browser() {
+  local browser="${1:-}"
 
-playwright_cli_cmd=(npx --yes --package @playwright/cli playwright-cli)
-playwright_install_cmd=(npx --yes --package @playwright/cli playwright)
+  browser="$(printf '%s' "${browser}" | tr '[:upper:]' '[:lower:]')"
+  browser="${browser#"${browser%%[![:space:]]*}"}"
+  browser="${browser%"${browser##*[![:space:]]}"}"
+
+  if [[ -z "${browser}" ]]; then
+    default_browser
+    return
+  fi
+
+  echo "${browser}"
+}
+
+playwright_browser="$(normalize_browser "${PLAYWRIGHT_MCP_BROWSER:-}")"
+
+playwright_cli_package="@playwright/cli@0.1.1"
+playwright_runtime_package="${PLAYWRIGHT_RUNTIME_PACKAGE:-playwright@1.59.0-alpha-1771104257000}"
+
+playwright_cli_cmd=(npx --yes --package "${playwright_cli_package}" playwright-cli)
 playwright_ready_dir="${PLAYWRIGHT_MCP_READY_DIR:-/tmp/playwright-cli}"
+
+run_playwright_install() {
+  npx --yes --package "${playwright_runtime_package}" playwright "$@"
+}
 
 resolve_playwright_ready_marker() {
   local version
+  local cli_marker
 
-  version="$("${playwright_install_cmd[@]}" --version | tr ' ' '-')"
+  version="$(run_playwright_install --version | tr ' ' '-')"
   version="${version//[^A-Za-z0-9._-]/_}"
+  cli_marker="${playwright_cli_package//[^A-Za-z0-9._-]/_}"
 
-  echo "${playwright_ready_dir}/${playwright_browser}-${version}.ready"
+  echo "${playwright_ready_dir}/${playwright_browser}-${cli_marker}-${version}.ready"
 }
 
 ensure_browser_installed() {
@@ -37,9 +60,9 @@ ensure_browser_installed() {
   mkdir -p "${playwright_ready_dir}"
 
   if [[ "$(uname -s)" == "Linux" ]]; then
-    DEBIAN_FRONTEND=noninteractive "${playwright_install_cmd[@]}" install --with-deps "${playwright_browser}"
+    DEBIAN_FRONTEND=noninteractive run_playwright_install install --with-deps "${playwright_browser}"
   else
-    "${playwright_install_cmd[@]}" install "${playwright_browser}"
+    run_playwright_install install "${playwright_browser}"
   fi
 
   touch "${ready_marker}"
@@ -50,7 +73,7 @@ install_command_requested="false"
 help_command_requested="false"
 for arg in "$@"; do
   case "$arg" in
-    --session|--session=*)
+    -s|-s=*|--session|--session=*)
       has_session_flag="true"
       break
       ;;
