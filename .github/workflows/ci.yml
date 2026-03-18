@@ -613,6 +613,15 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Build runtime JS assets
+        run: |
+          npm ci --no-audit --no-fund
+          npx gulp scripts
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v8
         with:
