@@ -51,6 +51,12 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString("page.waitForSelector('#dashboard-threshold-input'", $snippet);
         self::assertStringContainsString("await page.inputValue('#dashboard-threshold-input')", $snippet);
         self::assertStringContainsString('threshold_modal_matches_before', $snippet);
+        self::assertStringContainsString('Number.isFinite(thresholdModalNumberBefore)', $snippet);
+        self::assertStringContainsString('Number.isFinite(expectedThresholdBefore)', $snippet);
+        self::assertStringNotContainsString(
+            '(Number.parseFloat(thresholdModalValueBefore) || 0) - (Number(before.expected_threshold) || 0)',
+            $snippet,
+        );
         self::assertStringContainsString('__DASHBOARD_SUMMARY_BROWSER_CHECK__', $snippet);
         self::assertStringContainsString("page.click('#dashboard-threshold-form button[type=\"submit\"]')", $snippet);
         self::assertStringNotContainsString("dispatchEvent(new Event('submit'", $snippet);

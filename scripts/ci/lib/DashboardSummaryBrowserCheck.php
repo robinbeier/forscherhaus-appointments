@@ -455,8 +455,12 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         await page.waitForSelector('#dashboard-threshold-input', { state: 'visible', timeout: 5000 });
         currentStep = 'capture_threshold_modal_state';
         const thresholdModalValueBefore = await page.inputValue('#dashboard-threshold-input');
+        const thresholdModalNumberBefore = Number.parseFloat(thresholdModalValueBefore);
+        const expectedThresholdBefore = Number(before.expected_threshold);
         const thresholdModalMatchesBefore =
-          Math.abs((Number.parseFloat(thresholdModalValueBefore) || 0) - (Number(before.expected_threshold) || 0)) < 0.0001;
+          Number.isFinite(thresholdModalNumberBefore) &&
+          Number.isFinite(expectedThresholdBefore) &&
+          Math.abs(thresholdModalNumberBefore - expectedThresholdBefore) < 0.0001;
         currentStep = 'fill_threshold_input';
         await page.fill('#dashboard-threshold-input', updatedThreshold);
         await page.waitForSelector('#dashboard-threshold-form button[type="submit"]', { state: 'visible', timeout: 5000 });
