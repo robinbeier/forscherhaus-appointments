@@ -8,9 +8,9 @@ use ReleaseGate\GateAssertionException;
 
 /**
  * @param array{
- *   username:string,
- *   password:string,
  *   target_url:string,
+ *   cookie_url:string,
+ *   session_cookies:array<int, array{name:string, value:string}>,
  *   start_date:string,
  *   end_date:string,
  *   expected_summary:array{
@@ -24,16 +24,16 @@ use ReleaseGate\GateAssertionException;
  */
 function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 {
-    $encodedUsername = json_encode(
-        $config['username'],
-        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-    );
-    $encodedPassword = json_encode(
-        $config['password'],
-        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-    );
     $encodedTargetUrl = json_encode(
         $config['target_url'],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    );
+    $encodedCookieUrl = json_encode(
+        $config['cookie_url'],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    );
+    $encodedSessionCookies = json_encode(
+        $config['session_cookies'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
     $encodedStartDate = json_encode(
@@ -52,9 +52,9 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
     $snippet = <<<'JS'
     async (page) => {
       const updatedThreshold = '0.35';
-      const username = __USERNAME__;
-      const password = __PASSWORD__;
       const targetUrl = __TARGET_URL__;
+      const cookieUrl = __COOKIE_URL__;
+      const sessionCookies = __SESSION_COOKIES__;
       const requestedStartDate = __START_DATE__;
       const requestedEndDate = __END_DATE__;
       const expectedSummary = __EXPECTED_SUMMARY__;
@@ -174,41 +174,28 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           endDate: requestedEndDate,
           expectedSummaryPayload: expected,
         });
-      const ensureAuthenticatedDashboard = async () => {
-        currentStep = 'ensure_authenticated_dashboard';
+      const seedAuthenticatedSession = async () => {
+        currentStep = 'seed_authenticated_session';
+        await page.context().addCookies(
+          sessionCookies.map((cookie) => ({
+            name: String(cookie.name || ''),
+            value: String(cookie.value || ''),
+            url: cookieUrl,
+          }))
+        );
+      };
+      const openAuthenticatedDashboard = async () => {
+        currentStep = 'open_authenticated_dashboard';
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      };
+      const ensureDashboardReady = async () => {
+        currentStep = 'ensure_dashboard_ready';
         const loginFormPresent = await page.evaluate(() => document.getElementById('login-form') !== null);
 
-        if (!loginFormPresent) {
-          return;
+        if (loginFormPresent) {
+          throw new Error('Dashboard session cookies were rejected and the browser was redirected to login.');
         }
 
-        currentStep = 'wait_for_login_runtime';
-        await page.waitForFunction(
-          () =>
-            typeof window.App === 'object' &&
-            typeof window.App?.Http?.Login?.validate === 'function' &&
-            typeof window.App?.Pages?.Login === 'object' &&
-            typeof window.vars === 'function',
-          { timeout: 30000 }
-        );
-        currentStep = 'fill_login_username';
-        await page.fill('#username', username);
-        currentStep = 'fill_login_password';
-        await page.fill('#password', password);
-        currentStep = 'submit_login_form';
-        await Promise.all([
-          page.waitForURL((url) => {
-            try {
-              return new URL(targetUrl).pathname === url.pathname;
-            } catch (error) {
-              return /\/(?:index\.php\/)?dashboard(?:\/)?$/.test(url.pathname);
-            }
-          }, { timeout: 30000 }),
-          page.click('#login'),
-        ]);
-        currentStep = 'wait_for_post_login_dom';
-        await page.waitForLoadState('domcontentloaded', { timeout: 30000 });
-        currentStep = 'wait_for_post_login_dashboard';
         await page.waitForSelector('#dashboard-summary-progress-track', { state: 'attached', timeout: 30000 });
       };
       const applyRequestedRange = async () => {
@@ -408,7 +395,9 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       };
 
       try {
-        await ensureAuthenticatedDashboard();
+        await seedAuthenticatedSession();
+        await openAuthenticatedDashboard();
+        await ensureDashboardReady();
         await applyRequestedRange();
         await waitForRenderedSummary();
 
@@ -609,9 +598,9 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 
     return trim(
         strtr($snippet, [
-            '__USERNAME__' => $encodedUsername,
-            '__PASSWORD__' => $encodedPassword,
             '__TARGET_URL__' => $encodedTargetUrl,
+            '__COOKIE_URL__' => $encodedCookieUrl,
+            '__SESSION_COOKIES__' => $encodedSessionCookies,
             '__START_DATE__' => $encodedStartDate,
             '__END_DATE__' => $encodedEndDate,
             '__EXPECTED_SUMMARY__' => $encodedExpectedSummary,

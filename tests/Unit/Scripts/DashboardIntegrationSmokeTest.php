@@ -416,6 +416,7 @@ class DashboardIntegrationSmokeTest extends TestCase
     /**
      * @return array{
      *   target_url:string,
+     *   cookie_url:string,
      *   session_cookies:array<int, array{name:string, value:string}>,
      *   start_date:string,
      *   end_date:string,
@@ -426,6 +427,7 @@ class DashboardIntegrationSmokeTest extends TestCase
     {
         return [
             'target_url' => 'http://nginx/index.php/dashboard',
+            'cookie_url' => 'http://nginx/',
             'session_cookies' => [
                 [
                     'name' => 'ci_session',

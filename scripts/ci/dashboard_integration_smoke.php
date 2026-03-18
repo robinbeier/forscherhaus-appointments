@@ -1044,13 +1044,33 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
     }
 
     $summary = $metricsPayload['summary'];
+    $sessionCookies = [];
+    foreach ($client->cookies() as $name => $value) {
+        $normalizedName = trim((string) $name);
+        $normalizedValue = trim((string) $value);
+
+        if ($normalizedName === '' || $normalizedValue === '') {
+            continue;
+        }
+
+        $sessionCookies[] = [
+            'name' => $normalizedName,
+            'value' => $normalizedValue,
+        ];
+    }
+
+    if ($sessionCookies === []) {
+        throw new GateAssertionException(
+            'POST /login/validate (dashboard summary browser render) did not yield reusable session cookies.',
+        );
+    }
+
     $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'dashboard');
     $payload = runDashboardSummaryBrowserCheck([
         'repo_root' => $repoRoot,
         'target_url' => $targetUrl,
         'artifacts_dir' => $artifactsDir,
-        'username' => (string) $config['username'],
-        'password' => (string) $config['password'],
+        'session_cookies' => $sessionCookies,
         'start_date' => (string) $config['start_date'],
         'end_date' => (string) $config['end_date'],
         'expected_summary' => [
