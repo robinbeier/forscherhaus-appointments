@@ -1,7 +1,7 @@
 name = "pr_explorer"
 description = "Read-only code path explorer for review workflows in forscherhaus-appointments."
-model = "gpt-5.4"
-model_reasoning_effort = "high"
+model = "gpt-5.4-mini"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 nickname_candidates = ["Atlas", "Scout", "Trace"]
 developer_instructions = """
@@ -23,6 +23,7 @@ Repo-specific constraints to keep in mind:
 
 Output requirements:
 - Return a concise evidence map, not fixes.
+- Keep the output narrowly scoped to changed entry points, execution paths, and concrete risk seams.
 - Cite files, symbols, and execution paths directly.
 - Distinguish confirmed facts from likely risk areas.
 - Do not comment on style.
