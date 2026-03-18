@@ -135,6 +135,60 @@ class CiDockerComposeHelpersTest extends TestCase
         }
     }
 
+    public function testCiDockerWaitForServiceExecRetriesUntilCommandSucceeds(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            sleep() { :; }
+            ci_docker_compose() {
+              if [[ "$1" == "exec" && "$2" == "-T" && "$3" == "php-fpm" && "$4" == "php" && "$5" == "-v" ]]; then
+                attempt_file="${TMPDIR:-/tmp}/ci-docker-wait-attempts"
+                attempts=0
+                if [[ -f "$attempt_file" ]]; then
+                  attempts="$(cat "$attempt_file")"
+                fi
+                attempts=$((attempts + 1))
+                printf '%s' "$attempts" > "$attempt_file"
+                if [[ "$attempts" -lt 3 ]]; then
+                  return 1
+                fi
+                return 0
+              fi
+              return 1
+            }
+
+            attempt_file="${TMPDIR:-/tmp}/ci-docker-wait-attempts"
+            rm -f "$attempt_file"
+            ci_docker_wait_for_service_exec php-fpm test php -v
+            cat "$attempt_file"
+            rm -f "$attempt_file"
+            BASH
+            ,
+            '',
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('3', trim($result['stdout']));
+    }
+
+    public function testCiDockerWaitForServiceExecFailsWithoutCommand(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            ci_docker_wait_for_service_exec php-fpm test
+            BASH
+            ,
+            '',
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('requires a command', $result['stderr']);
+    }
+
     /**
      * @return array{exit_code:int,stdout:string,stderr:string}
      */

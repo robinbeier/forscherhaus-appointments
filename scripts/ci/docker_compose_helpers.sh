@@ -170,12 +170,37 @@ ci_docker_wait_for_mysql_readiness() {
     return 0
 }
 
+ci_docker_wait_for_service_exec() {
+    local service="${1:?service is required}"
+    local log_prefix="${2:-ci-docker}"
+    shift 2
+
+    if [[ "$#" -eq 0 ]]; then
+        echo "[$log_prefix] ci_docker_wait_for_service_exec requires a command." >&2
+        return 1
+    fi
+
+    local max_attempts=30
+    local attempt=1
+
+    until ci_docker_compose exec -T "$service" "$@" >/dev/null 2>&1; do
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            echo "[$log_prefix] ${service} exec readiness timed out after ${max_attempts} attempts." >&2
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    return 0
+}
+
 ci_docker_install_seed_instance() {
     local log_prefix="${1:-ci-docker}"
     shift
 
     local attempt
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4 5; do
         if ci_docker_compose "$@"; then
             return 0
         fi

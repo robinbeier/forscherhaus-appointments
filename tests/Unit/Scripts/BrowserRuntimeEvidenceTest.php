@@ -98,7 +98,7 @@ class BrowserRuntimeEvidenceTest extends TestCase
         self::assertStringStartsWith('/repo/storage/logs/ci/dashboard-integration-smoke-browser-', $path);
     }
 
-    public function testRunPwcliCommandPinsFirefoxForOpenCommands(): void
+    public function testRunPwcliCommandDefaultsToFirefoxForOpenCommands(): void
     {
         $capturePath = tempnam(sys_get_temp_dir(), 'pwcli-capture-');
         $wrapperPath = tempnam(sys_get_temp_dir(), 'pwcli-wrapper-');
@@ -134,6 +134,58 @@ class BrowserRuntimeEvidenceTest extends TestCase
             self::assertContains('http://example.test', $capturedArgs);
             self::assertContains('--browser=firefox', $capturedArgs);
         } finally {
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_file($wrapperPath)) {
+                unlink($wrapperPath);
+            }
+        }
+    }
+
+    public function testRunPwcliCommandRespectsConfiguredPlaywrightBrowserOverride(): void
+    {
+        $capturePath = tempnam(sys_get_temp_dir(), 'pwcli-capture-');
+        $wrapperPath = tempnam(sys_get_temp_dir(), 'pwcli-wrapper-');
+        self::assertIsString($capturePath);
+        self::assertIsString($wrapperPath);
+
+        $previousBrowser = getenv('PLAYWRIGHT_MCP_BROWSER');
+
+        try {
+            file_put_contents(
+                $wrapperPath,
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" > " .
+                    escapeshellarg($capturePath) .
+                    "\n",
+            );
+            chmod($wrapperPath, 0777);
+            putenv('PLAYWRIGHT_MCP_BROWSER=chromium');
+
+            $result = runPwcliCommand(
+                [
+                    'pwcli_path' => $wrapperPath,
+                    'repo_root' => sys_get_temp_dir(),
+                    'headed' => false,
+                ],
+                'session-123',
+                ['open', 'http://example.test'],
+                5,
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $capturedArgs = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedArgs);
+            self::assertContains('--browser=chromium', $capturedArgs);
+            self::assertNotContains('--browser=firefox', $capturedArgs);
+        } finally {
+            if ($previousBrowser === false) {
+                putenv('PLAYWRIGHT_MCP_BROWSER');
+            } else {
+                putenv('PLAYWRIGHT_MCP_BROWSER=' . $previousBrowser);
+            }
+
             if (is_file($capturePath)) {
                 unlink($capturePath);
             }
