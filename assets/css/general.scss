@@ -24,7 +24,8 @@ select {
 }
 
 body .ui-widget {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
+    font-family:
+        -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
         'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
     font-size: 1.1em;
 }
@@ -183,7 +184,8 @@ body .ui-widget input,
 .ui-widget select,
 body .ui-widget textarea,
 body .ui-widget button {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
+    font-family:
+        -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
         'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
     font-size: 1rem;
 }
@@ -306,6 +308,94 @@ body .ui-datepicker .ui-datepicker-buttonpane button {
 
 #dashboard-page .utilization-badge {
     font-size: 0.85rem;
+}
+
+#dashboard-page .dashboard-summary-card .card-body {
+    padding: 1.25rem;
+}
+
+#dashboard-page .dashboard-summary-threshold-badge {
+    align-self: flex-start;
+    font-weight: 500;
+}
+
+#dashboard-page .dashboard-summary-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+#dashboard-page .dashboard-summary-progress-title {
+    color: #495057;
+    font-size: 0.95rem;
+}
+
+#dashboard-page .dashboard-summary-progress-value {
+    color: #111827;
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+#dashboard-page .dashboard-summary-progress-track {
+    position: relative;
+    height: 18px;
+    border-radius: 999px;
+    background: #e5e7eb;
+}
+
+#dashboard-page .dashboard-summary-progress-booked {
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #1d4ed8, #2563eb);
+    transition: width 180ms ease-in-out;
+}
+
+#dashboard-page .dashboard-summary-progress-marker {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 3px;
+    border-radius: 999px;
+    background: #111827;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+    transform: translateX(-50%);
+}
+
+#dashboard-page .dashboard-summary-progress-scale {
+    display: flex;
+    justify-content: space-between;
+    color: #6c757d;
+    font-size: 0.8rem;
+}
+
+#dashboard-page .dashboard-summary-metric {
+    height: 100%;
+    min-height: 7rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid #e9ecef;
+    border-radius: 0.85rem;
+    background: #f8f9fa;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+#dashboard-page .dashboard-summary-metric-label {
+    color: #6c757d;
+    font-size: 0.82rem;
+}
+
+#dashboard-page .dashboard-summary-metric-value {
+    color: #111827;
+    font-size: 1.65rem;
+    line-height: 1.1;
+    font-weight: 600;
+}
+
+#dashboard-page .dashboard-summary-metric-note {
+    color: #495057;
+    font-size: 0.88rem;
 }
 
 #dashboard-page .dashboard-provider-cell {

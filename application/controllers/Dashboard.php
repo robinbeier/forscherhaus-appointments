@@ -97,6 +97,7 @@ class Dashboard extends EA_Controller
             'appointment_status_options' => $appointment_status_options,
             'dashboard_conflict_threshold' => $threshold,
             'dashboard_default_statuses' => $default_statuses,
+            'dashboard_number_locale' => $this->resolveDashboardNumberLocale((string) config('language_code')),
             'dashboard_service_options' => $service_options,
             'dashboard_saved_range_start' => $saved_range['start_date'],
             'dashboard_saved_range_end' => $saved_range['end_date'],
@@ -185,10 +186,14 @@ class Dashboard extends EA_Controller
                 'provider_ids' => $filters->providerIds,
                 'threshold' => $threshold,
             ]);
+            $summary = $this->dashboard_metrics->summarize($metrics, $threshold);
 
             $this->persistProviderDashboardRange((int) session('user_id'), $period->start, $period->end);
 
-            json_response($metrics);
+            json_response([
+                'metrics' => $metrics,
+                'summary' => $this->buildAdminSummary($summary, $threshold),
+            ]);
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -715,6 +720,39 @@ class Dashboard extends EA_Controller
     protected function formatNumber(int $value): string
     {
         return (string) $value;
+    }
+
+    /**
+     * Build the admin summary payload for the overall booking-progress card.
+     */
+    protected function buildAdminSummary(array $summary, float $threshold): array
+    {
+        $target_total = max(0, (int) ($summary['target_total'] ?? 0));
+        $booked_total = max(0, (int) ($summary['booked_total'] ?? 0));
+        $open_total = max(0, (int) ($summary['open_total'] ?? 0));
+        $fill_rate = max(0.0, (float) ($summary['fill_rate'] ?? 0.0));
+
+        return [
+            'target_total' => $target_total,
+            'booked_total' => $booked_total,
+            'open_total' => $open_total,
+            'fill_rate' => $fill_rate,
+            'threshold' => $threshold,
+        ];
+    }
+
+    protected function resolveDashboardNumberLocale(string $language_code): string
+    {
+        $normalized = strtolower(trim($language_code));
+
+        return match ($normalized) {
+            'de' => 'de-DE',
+            'en' => 'en-US',
+            'bu' => 'bg-BG',
+            'rs' => 'sr-RS',
+            '' => 'de-DE',
+            default => $normalized,
+        };
     }
 
     /**

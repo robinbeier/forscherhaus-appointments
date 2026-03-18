@@ -6,10 +6,12 @@ require_once __DIR__ . '/../release-gate/lib/GateCliSupport.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
 require_once __DIR__ . '/lib/BrowserRuntimeEvidence.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
+require_once __DIR__ . '/lib/DashboardSummaryBrowserCheck.php';
 
 use function CiRuntimeEvidence\buildDefaultBrowserRuntimeEvidenceArtifactsDir;
 use function CiRuntimeEvidence\collectBookingPageBrowserEvidence;
 use function CiRuntimeEvidence\parseBrowserRuntimeEvidenceMode;
+use function CiRuntimeEvidence\runDashboardSummaryBrowserCheck;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidenceForChecks;
 use CiContract\CheckSelection;
 use ReleaseGate\GateAssertionException;
@@ -261,6 +263,51 @@ try {
                 'providers' => $summary['providers'],
                 'booked_total' => $summary['booked_total'],
             ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'dashboard_page_readiness')) {
+        $runCheck('dashboard_page_readiness', static function () use ($client, $config): array {
+            $response = $client->get('dashboard', [], $config['http_timeout']);
+            GateAssertions::assertStatus($response->statusCode, 200, 'GET /dashboard');
+
+            $html = (string) $response->body;
+
+            if (trim($html) === '') {
+                throw new GateAssertionException('GET /dashboard returned an empty response body.');
+            }
+
+            foreach (
+                [
+                    'id="dashboard-page"',
+                    'id="dashboard-summary-progress-track"',
+                    'id="dashboard-summary-threshold-badge"',
+                ]
+                as $needle
+            ) {
+                if (!str_contains($html, $needle)) {
+                    throw new GateAssertionException('GET /dashboard is missing expected markup: ' . $needle);
+                }
+            }
+
+            if (
+                !str_contains($html, 'assets/js/pages/dashboard.js') &&
+                !str_contains($html, 'assets/js/pages/dashboard.min.js')
+            ) {
+                throw new GateAssertionException('GET /dashboard is missing expected dashboard page script include.');
+            }
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'bytes' => strlen($html),
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'dashboard_summary_browser_render')) {
+        $runCheck('dashboard_summary_browser_render', static function () use ($config, $repoRoot): array {
+            return dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender($config, $repoRoot);
         });
     }
 
@@ -806,6 +853,8 @@ function integrationSmokeSupportedCheckIds(): array
         'ldap_sso_success',
         'ldap_sso_wrong_password',
         'dashboard_metrics',
+        'dashboard_page_readiness',
+        'dashboard_summary_browser_render',
         'booking_page_readiness',
         'booking_extract_bootstrap',
         'booking_available_hours',
@@ -837,6 +886,8 @@ function integrationSmokeCheckDependencies(): array
         'ldap_sso_success' => [],
         'ldap_sso_wrong_password' => [],
         'dashboard_metrics' => ['auth_login_validate'],
+        'dashboard_page_readiness' => ['auth_login_validate'],
+        'dashboard_summary_browser_render' => ['auth_login_validate'],
         'booking_page_readiness' => [],
         'booking_extract_bootstrap' => ['booking_page_readiness'],
         'booking_available_hours' => ['booking_extract_bootstrap'],
@@ -943,6 +994,118 @@ function dashboardIntegrationSmokeWarmLoginCsrf(GateHttpClient $client, array $c
         throw new GateAssertionException(
             'GET /login (LDAP guardrail) did not set cookie "' . $config['csrf_cookie_name'] . '".',
         );
+    }
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $config, string $repoRoot): array
+{
+    $artifactsDir = rtrim((string) $config['browser_evidence_dir'], '/') . '/dashboard-summary-browser-render';
+    dashboardIntegrationSmokeEnsureDirectory($artifactsDir);
+
+    $client = dashboardIntegrationSmokeCreateClient($config);
+    dashboardIntegrationSmokeWarmLoginCsrf($client, $config);
+
+    $loginResponse = $client->post(
+        'login/validate',
+        [
+            'username' => $config['username'],
+            'password' => $config['password'],
+        ],
+        $config['http_timeout'],
+        true,
+    );
+    GateAssertions::assertStatus(
+        $loginResponse->statusCode,
+        200,
+        'POST /login/validate (dashboard summary browser render)',
+    );
+    GateAssertions::assertLoginPayload(
+        GateAssertions::decodeJson($loginResponse->body, 'POST /login/validate (dashboard summary browser render)'),
+    );
+
+    $metricsResponse = $client->post('dashboard/metrics', buildMetricsPayload($config), $config['http_timeout'], true);
+    GateAssertions::assertStatus(
+        $metricsResponse->statusCode,
+        200,
+        'POST /dashboard/metrics (dashboard summary browser render)',
+    );
+    $metricsPayload = GateAssertions::decodeJson(
+        $metricsResponse->body,
+        'POST /dashboard/metrics (dashboard summary browser render)',
+    );
+
+    if (!is_array($metricsPayload) || !is_array($metricsPayload['summary'] ?? null)) {
+        throw new GateAssertionException(
+            'POST /dashboard/metrics (dashboard summary browser render) did not return a summary payload.',
+        );
+    }
+
+    $summary = $metricsPayload['summary'];
+    $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'dashboard');
+    $payload = runDashboardSummaryBrowserCheck([
+        'repo_root' => $repoRoot,
+        'target_url' => $targetUrl,
+        'artifacts_dir' => $artifactsDir,
+        'username' => (string) $config['username'],
+        'password' => (string) $config['password'],
+        'start_date' => (string) $config['start_date'],
+        'end_date' => (string) $config['end_date'],
+        'expected_summary' => [
+            'target_total' => $summary['target_total'] ?? 0,
+            'booked_total' => $summary['booked_total'] ?? 0,
+            'open_total' => $summary['open_total'] ?? 0,
+            'fill_rate' => $summary['fill_rate'] ?? 0,
+        ],
+        'pwcli_path' => (string) $config['browser_pwcli_path'],
+        'bootstrap_timeout' => (int) $config['browser_bootstrap_timeout'],
+        'open_timeout' => (int) $config['browser_open_timeout'],
+        'headed' => (bool) $config['browser_headed'],
+    ]);
+
+    return [
+        'target_url' => $targetUrl,
+        'fill_rate' => (string) ($payload['fill_rate_before'] ?? ''),
+        'open_total_before' => (int) ($payload['open_total_before'] ?? 0),
+        'open_total_after' => (int) ($payload['open_total_after'] ?? 0),
+        'threshold_badge_before' => (string) ($payload['threshold_badge_before'] ?? ''),
+        'threshold_badge_after' => (string) ($payload['threshold_badge_after'] ?? ''),
+        'marker_left_before' => (string) ($payload['marker_left_before'] ?? ''),
+        'marker_left_after' => (string) ($payload['marker_left_after'] ?? ''),
+    ];
+}
+
+/**
+ * @param array<string, mixed> $config
+ */
+function dashboardIntegrationSmokeBuildAppUrl(array $config, string $path): string
+{
+    $segments = [rtrim((string) $config['base_url'], '/')];
+    $indexPage = trim((string) ($config['index_page'] ?? 'index.php'), '/');
+
+    if ($indexPage !== '') {
+        $segments[] = $indexPage;
+    }
+
+    $normalizedPath = trim($path, '/');
+
+    if ($normalizedPath !== '') {
+        $segments[] = $normalizedPath;
+    }
+
+    return implode('/', $segments);
+}
+
+function dashboardIntegrationSmokeEnsureDirectory(string $directory): void
+{
+    if (is_dir($directory)) {
+        return;
+    }
+
+    if (!mkdir($directory, 0777, true) && !is_dir($directory)) {
+        throw new RuntimeException('Could not create directory: ' . $directory);
     }
 }
 

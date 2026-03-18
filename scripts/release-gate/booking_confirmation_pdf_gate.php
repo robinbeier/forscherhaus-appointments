@@ -125,6 +125,8 @@ try {
             $arguments[] = '--headed';
         }
 
+        $arguments[] = '--browser=firefox';
+
         $openResult = runPwcliCommand($config, $sessionId, $arguments, $repoRoot, $config['open_timeout']);
         assertProcessSucceeded($openResult, 'Open confirmation page', true);
 
@@ -167,7 +169,9 @@ try {
         $sessionId,
         $downloadSnippetPath,
         $downloadPath,
+        $artifactsDir,
     ): array {
+        $snapshotPath = $artifactsDir . '/download_result_snapshot.md';
         $snippet = file_get_contents($downloadSnippetPath);
 
         if (!is_string($snippet) || trim($snippet) === '') {
@@ -196,7 +200,23 @@ try {
         );
         assertProcessSucceeded($runCodeResult, 'Trigger booking confirmation PDF download', true);
 
-        $marker = parseRunCodeResult($runCodeResult);
+        $snapshotResult = runPwcliCommand(
+            $config,
+            $sessionId,
+            ['snapshot', '--filename', $snapshotPath],
+            $repoRoot,
+            $config['open_timeout'],
+        );
+        assertProcessSucceeded($snapshotResult, 'Capture booking confirmation snapshot', true);
+        ensureFileReadable($snapshotPath, 'Booking confirmation snapshot');
+
+        $snapshotContent = file_get_contents($snapshotPath);
+
+        if (!is_string($snapshotContent) || $snapshotContent === '') {
+            throw new GateAssertionException('Booking confirmation snapshot is empty.');
+        }
+
+        $marker = parseRunCodeResult(['stdout' => $snapshotContent]);
 
         $ok = (bool) ($marker['ok'] ?? false);
         if (!$ok) {
@@ -249,28 +269,13 @@ try {
         $result = runPwcliCommand($config, $sessionId, ['network'], $repoRoot, $config['open_timeout']);
         assertProcessSucceeded($result, 'Collect network log', true);
 
-        $networkOutput = (string) ($result['stdout'] ?? '');
-        $networkSourcePath = resolvePlaywrightNetworkArtifactPath($networkOutput, $repoRoot);
-        $networkLogContent = $networkOutput;
-
-        if ($networkSourcePath !== null) {
-            ensureFileReadable($networkSourcePath, 'Playwright network artifact');
-
-            $resolvedContent = file_get_contents($networkSourcePath);
-
-            if (!is_string($resolvedContent)) {
-                throw new RuntimeException('Could not read Playwright network artifact: ' . $networkSourcePath);
-            }
-
-            $networkLogContent = $resolvedContent;
-        }
+        $networkLogContent = (string) ($result['stdout'] ?? '');
 
         writeTextFile($networkLogPath, $networkLogContent);
         $lineCount = count(array_filter(explode("\n", $networkLogContent), 'strlen'));
 
         return [
             'network_log_path' => $networkLogPath,
-            'source_network_log_path' => $networkSourcePath,
             'lines' => $lineCount,
         ];
     });
@@ -717,49 +722,10 @@ function extractPlaywrightErrorSection(string $output): ?string
     return $message !== '' ? $message : 'Unknown Playwright error.';
 }
 
-function resolvePlaywrightNetworkArtifactPath(string $output, string $repoRoot): ?string
-{
-    if (trim($output) === '') {
-        return null;
-    }
-
-    $resultSection = null;
-    $sectionMatches = [];
-
-    if (preg_match('/(?:^|\R)### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $sectionMatches) === 1) {
-        $resultSection = trim((string) ($sectionMatches[1] ?? ''));
-    }
-
-    if ($resultSection === null || $resultSection === '') {
-        return null;
-    }
-
-    $linkMatches = [];
-    if (preg_match('/^\s*-\s+\[[^\]]+\]\(([^)]+)\)\s*$/m', $resultSection, $linkMatches) !== 1) {
-        return null;
-    }
-
-    $linkPath = trim((string) ($linkMatches[1] ?? ''));
-
-    if ($linkPath === '') {
-        return null;
-    }
-
-    if (preg_match('#^(?:/|[A-Za-z]:[\\\\/])#', $linkPath) === 1) {
-        return $linkPath;
-    }
-
-    return rtrim($repoRoot, '/') . '/' . ltrim($linkPath, '/');
-}
-
-/**
- * @param array<string, mixed> $runCodeResult
- *
- * @return array<string, mixed>
- */
 function parseRunCodeResult(array $runCodeResult): array
 {
     $output = (string) ($runCodeResult['stdout'] ?? '');
+    $prefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
 
     if ($output === '') {
         throw new GateAssertionException('Playwright run-code produced no output.');
@@ -770,24 +736,37 @@ function parseRunCodeResult(array $runCodeResult): array
         throw new GateAssertionException($errorText);
     }
 
-    $rawJson = null;
-    $matches = [];
-    if (preg_match('/### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) === 1) {
-        $rawJson = trim((string) ($matches[1] ?? ''));
-    }
+    $prefixPosition = strpos($output, $prefix);
 
-    if ($rawJson === null || $rawJson === '') {
+    if ($prefixPosition === false) {
         throw new GateAssertionException(
             'Could not parse run-code result payload from Playwright output: ' . substr(trim($output), 0, 500),
         );
     }
 
-    $decoded = json_decode($rawJson, true);
-    if (!is_array($decoded)) {
-        throw new GateAssertionException('Playwright run-code result payload is not valid JSON.');
+    $rawTail = trim(substr($output, $prefixPosition + strlen($prefix)));
+    $attempts = array_values(array_unique(array_filter([
+        $rawTail,
+        preg_replace('/"\s*$/', '', $rawTail) ?: '',
+        stripcslashes($rawTail),
+        stripcslashes((string) (preg_replace('/"\s*$/', '', $rawTail) ?: '')),
+    ])));
+
+    foreach ($attempts as $attempt) {
+        $matches = [];
+
+        if (preg_match('/\{.*?\}(?="|\R|$)/s', $attempt, $matches) !== 1) {
+            continue;
+        }
+
+        $decoded = json_decode((string) $matches[0], true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
     }
 
-    return $decoded;
+    throw new GateAssertionException('Playwright run-code result payload is not valid JSON.');
 }
 
 /**

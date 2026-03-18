@@ -50,6 +50,7 @@ ensure_local_config
 
 # Keep changed-file checks deterministic against current base branch state.
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
+ci_docker_build_php_fpm_if_inputs_changed "$BASE_REF" "pre-pr-quick"
 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh

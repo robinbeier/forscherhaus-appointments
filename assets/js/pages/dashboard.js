@@ -11,6 +11,22 @@
 
 App.Components = App.Components || {};
 
+function resolveDashboardLocale() {
+    const fallbackLocale = 'de-DE';
+    const configuredLocale = String(vars('dashboard_number_locale') || '').trim();
+    const candidate = configuredLocale || fallbackLocale;
+
+    if (Intl.NumberFormat.supportedLocalesOf([candidate]).length) {
+        return candidate;
+    }
+
+    if (Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length) {
+        return fallbackLocale;
+    }
+
+    return 'en-US';
+}
+
 App.Components.DashboardHeatmap = (function () {
     const $card = $('#heatmap-utilization');
     const $loading = $card.find('.heatmap-loading');
@@ -33,7 +49,7 @@ App.Components.DashboardHeatmap = (function () {
         5: lang('friday_short'),
     };
 
-    const locale = vars('language_code') || 'de-DE';
+    const locale = resolveDashboardLocale();
     const countFormatter = new Intl.NumberFormat(locale, {maximumFractionDigits: 0});
     const percentFormatter = new Intl.NumberFormat(locale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
 
@@ -497,6 +513,16 @@ App.Pages.Dashboard = (function () {
     const $exportSelectAll = $('#dashboard-export-select-all');
     const $exportSelectNone = $('#dashboard-export-select-none');
     const $heatmapToggle = $('#dashboard-show-heatmap');
+    const $summaryThresholdBadge = $('#dashboard-summary-threshold-badge');
+    const $summaryFillRate = $('#dashboard-summary-fill-rate');
+    const $summaryProgressTrack = $('#dashboard-summary-progress-track');
+    const $summaryProgressBooked = $('#dashboard-summary-progress-booked');
+    const $summaryProgressMarker = $('#dashboard-summary-progress-marker');
+    const $summaryTargetTotal = $('#dashboard-summary-target-total');
+    const $summaryBookedTotal = $('#dashboard-summary-booked-total');
+    const $summaryBookedShare = $('#dashboard-summary-booked-share');
+    const $summaryOpenTotal = $('#dashboard-summary-open-total');
+    const $summaryOpenShare = $('#dashboard-summary-open-share');
     const thresholdModalElement = document.getElementById('dashboard-threshold-modal');
 
     const appointmentStatusOptions = vars('appointment_status_options') || [];
@@ -506,15 +532,24 @@ App.Pages.Dashboard = (function () {
     const initialThreshold = parseFloat(vars('dashboard_conflict_threshold'));
     const savedRangeStart = vars('dashboard_saved_range_start') || '';
     const savedRangeEnd = vars('dashboard_saved_range_end') || '';
-    const locale = vars('language_code') || 'de-DE';
+    const locale = resolveDashboardLocale();
     const countFormatter = new Intl.NumberFormat(locale, {maximumFractionDigits: 0});
-    const percentFormatter = new Intl.NumberFormat(locale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    const percentageValueFormatter = new Intl.NumberFormat(locale, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1,
+    });
+    const shareFormatter = new Intl.NumberFormat(locale, {
+        style: 'percent',
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+    });
 
     let threshold = Number.isFinite(initialThreshold) ? initialThreshold : 0.9;
     let thresholdModal;
     let datePicker;
     let chart;
     let metrics = [];
+    let summary = createEmptySummary();
     let selectedTeacherProviderIds = [];
     let lastFilters = null;
 
@@ -540,6 +575,7 @@ App.Pages.Dashboard = (function () {
 
         applyInitialRange();
         updateThresholdDisplay();
+        renderSummary();
 
         $filters.on('submit', onFiltersSubmit);
         $hideWithoutTarget.on('change', onHideToggleChange);
@@ -742,7 +778,12 @@ App.Pages.Dashboard = (function () {
                 const savedThreshold = parseFloat(response?.threshold);
 
                 threshold = Number.isFinite(savedThreshold) ? savedThreshold : value;
+                summary = {
+                    ...summary,
+                    threshold,
+                };
                 updateThresholdDisplay();
+                renderSummary();
                 renderChart();
                 renderTable();
                 hideError();
@@ -764,19 +805,47 @@ App.Pages.Dashboard = (function () {
         const filters = getFilters();
 
         if (!filters) {
+            setSummaryState('error');
             showError(lang('filter_period_required'));
             return;
         }
 
+        setSummaryState('loading');
         hideError();
 
         heatmap?.onFiltersUpdated(filters);
 
         App.Http.Dashboard.fetch(filters)
             .done((response) => {
-                metrics = Array.isArray(response) ? response : [];
+                const payload = normalizeMetricsResponse(response);
+
+                if (!payload) {
+                    metrics = [];
+                    summary = createEmptySummary();
+                    setSummaryState('error');
+                    refreshTeacherExportSelection();
+                    showError(lang('unexpected_issues'));
+                    updateHiddenCounter();
+                    renderSummary();
+                    renderChart();
+                    renderTable();
+
+                    return;
+                }
+
+                metrics = payload.metrics;
+                summary = payload.summary;
+                const responseThreshold = Number(payload.summary?.threshold);
+                threshold = Number.isFinite(responseThreshold) ? responseThreshold : threshold;
+                summary = {
+                    ...summary,
+                    threshold,
+                };
+                setSummaryState('loaded');
+                updateThresholdDisplay();
                 refreshTeacherExportSelection();
                 updateHiddenCounter();
+                renderSummary();
                 renderChart();
                 renderTable();
             })
@@ -787,12 +856,70 @@ App.Pages.Dashboard = (function () {
 
                 const message = jqXHR?.responseJSON?.message ?? lang('unexpected_issues');
                 metrics = [];
+                summary = createEmptySummary();
+                setSummaryState('error');
                 refreshTeacherExportSelection();
                 showError(message);
                 updateHiddenCounter();
+                renderSummary();
                 renderChart();
                 renderTable();
             });
+    }
+
+    function normalizeMetricsResponse(response) {
+        if (!response || typeof response !== 'object') {
+            return null;
+        }
+
+        if (!Array.isArray(response.metrics)) {
+            return null;
+        }
+
+        const responseSummary = response.summary && typeof response.summary === 'object' ? response.summary : null;
+
+        if (!responseSummary) {
+            return null;
+        }
+
+        for (const key of ['target_total', 'booked_total', 'open_total', 'fill_rate', 'threshold']) {
+            if (!Object.prototype.hasOwnProperty.call(responseSummary, key)) {
+                return null;
+            }
+        }
+
+        if (
+            !Number.isFinite(Number(responseSummary.target_total)) ||
+            !Number.isFinite(Number(responseSummary.booked_total)) ||
+            !Number.isFinite(Number(responseSummary.open_total)) ||
+            !Number.isFinite(Number(responseSummary.fill_rate)) ||
+            !Number.isFinite(Number(responseSummary.threshold))
+        ) {
+            return null;
+        }
+
+        return {
+            metrics: response.metrics,
+            summary: responseSummary,
+        };
+    }
+
+    function createEmptySummary() {
+        return {
+            target_total: 0,
+            booked_total: 0,
+            open_total: 0,
+            fill_rate: 0,
+            threshold,
+        };
+    }
+
+    function setSummaryState(state) {
+        if (!$summaryProgressTrack.length) {
+            return;
+        }
+
+        $summaryProgressTrack.attr('data-summary-state', state);
     }
 
     function onExportSelectAll(event) {
@@ -942,6 +1069,45 @@ App.Pages.Dashboard = (function () {
             start,
             end,
         };
+    }
+
+    function renderSummary() {
+        if (!$summaryProgressTrack.length) {
+            return;
+        }
+
+        const targetTotal = Math.max(0, Number(summary?.target_total ?? 0));
+        const bookedTotal = Math.max(0, Number(summary?.booked_total ?? 0));
+        const openTotal = Math.max(0, Number(summary?.open_total ?? 0));
+        const fillRate = targetTotal > 0 ? Math.max(0, Number(summary?.fill_rate ?? 0)) : 0;
+        const progressFillRate = Math.max(0, Math.min(1, fillRate));
+        const openShare = targetTotal > 0 ? Math.max(0, Math.min(1, openTotal / targetTotal)) : 0;
+        const summaryThreshold = Math.max(0, Math.min(1, Number(summary?.threshold ?? threshold)));
+        const thresholdPercent = summaryThreshold * 100;
+        const progressFillRatePercent = progressFillRate * 100;
+        const bookedTotalFormatted = countFormatter.format(Math.round(bookedTotal));
+        const targetTotalFormatted = countFormatter.format(Math.round(targetTotal));
+        const openTotalFormatted = countFormatter.format(Math.round(openTotal));
+        const fillRateFormatted = formatPercent(fillRate);
+        const openShareFormatted = formatPercent(openShare);
+        const thresholdLabel = (lang('dashboard_summary_threshold_badge_pattern') || 'Threshold %s').replace(
+            '%s',
+            formatPercent(summaryThreshold),
+        );
+
+        $summaryFillRate.text(fillRateFormatted);
+        $summaryTargetTotal.text(targetTotalFormatted);
+        $summaryBookedTotal.text(bookedTotalFormatted);
+        $summaryBookedShare.text(fillRateFormatted);
+        $summaryOpenTotal.text(openTotalFormatted);
+        $summaryOpenShare.text(openShareFormatted);
+        $summaryThresholdBadge.text(thresholdLabel);
+        $summaryProgressBooked.css('width', `${progressFillRatePercent}%`);
+        $summaryProgressMarker.css('left', `${thresholdPercent}%`);
+        $summaryProgressTrack.attr({
+            'aria-valuenow': progressFillRatePercent.toFixed(1),
+            'aria-valuetext': fillRateFormatted,
+        });
     }
 
     function renderChart() {
@@ -1251,7 +1417,7 @@ App.Pages.Dashboard = (function () {
             return null;
         }
 
-        return percentFormatter.format(numeric);
+        return percentageValueFormatter.format(numeric);
     }
 
     function parseSlotValue(value, options = {}) {
@@ -1303,8 +1469,11 @@ App.Pages.Dashboard = (function () {
             return;
         }
 
-        const percent = Math.round(threshold * 100);
-        $thresholdDisplay.text(`${percent}%`);
+        $thresholdDisplay.text(formatPercent(threshold));
+    }
+
+    function formatPercent(value) {
+        return shareFormatter.format(Math.max(0, value));
     }
 
     function showError(message) {

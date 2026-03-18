@@ -13,6 +13,7 @@ use function CiRuntimeEvidence\buildDefaultBrowserRuntimeEvidenceArtifactsDir;
 use function CiRuntimeEvidence\parseBrowserRuntimeEvidenceMode;
 use function CiRuntimeEvidence\resolveBookingPageTargetUrl;
 use function CiRuntimeEvidence\resolvePlaywrightArtifactPath;
+use function CiRuntimeEvidence\runPwcliCommand;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidence;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidenceForChecks;
 
@@ -95,5 +96,51 @@ class BrowserRuntimeEvidenceTest extends TestCase
         $path = buildDefaultBrowserRuntimeEvidenceArtifactsDir('/repo');
 
         self::assertStringStartsWith('/repo/storage/logs/ci/dashboard-integration-smoke-browser-', $path);
+    }
+
+    public function testRunPwcliCommandPinsFirefoxForOpenCommands(): void
+    {
+        $capturePath = tempnam(sys_get_temp_dir(), 'pwcli-capture-');
+        $wrapperPath = tempnam(sys_get_temp_dir(), 'pwcli-wrapper-');
+        self::assertIsString($capturePath);
+        self::assertIsString($wrapperPath);
+
+        try {
+            file_put_contents(
+                $wrapperPath,
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" > " .
+                    escapeshellarg($capturePath) .
+                    "\n",
+            );
+            chmod($wrapperPath, 0777);
+
+            $result = runPwcliCommand(
+                [
+                    'pwcli_path' => $wrapperPath,
+                    'repo_root' => sys_get_temp_dir(),
+                    'headed' => false,
+                ],
+                'session-123',
+                ['open', 'http://example.test'],
+                5,
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $capturedArgs = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedArgs);
+            self::assertContains('--session', $capturedArgs);
+            self::assertContains('session-123', $capturedArgs);
+            self::assertContains('open', $capturedArgs);
+            self::assertContains('http://example.test', $capturedArgs);
+            self::assertContains('--browser=firefox', $capturedArgs);
+        } finally {
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_file($wrapperPath)) {
+                unlink($wrapperPath);
+            }
+        }
     }
 }

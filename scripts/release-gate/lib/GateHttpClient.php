@@ -17,8 +17,7 @@ final class GateHttpResponse
         public readonly string $body,
         public readonly float $durationMs,
         public readonly string $url,
-    ) {
-    }
+    ) {}
 
     public function header(string $name): ?string
     {
@@ -46,8 +45,7 @@ final class GateHttpClient
         private readonly string $userAgent = 'dashboard-release-gate/1.0',
         private readonly string $csrfCookieName = 'csrf_cookie',
         private readonly string $csrfTokenName = 'csrf_token',
-    ) {
-    }
+    ) {}
 
     public function get(string $path, array $query = [], ?int $timeoutSeconds = null): GateHttpResponse
     {
@@ -87,6 +85,14 @@ final class GateHttpClient
     public function getCookie(string $name): ?string
     {
         return $this->cookies[$name] ?? null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function cookies(): array
+    {
+        return $this->cookies;
     }
 
     /**

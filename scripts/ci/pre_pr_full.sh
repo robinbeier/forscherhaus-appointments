@@ -34,7 +34,7 @@ cleanup_stack() {
 }
 
 pre_pr_full_should_include_ldap_guardrail() {
-    local diff_range changed_paths
+    local changed_paths
 
     if [[ "${PRE_PR_INCLUDE_LDAP_GUARDRAIL:-}" == "1" ]]; then
         return 0
@@ -44,15 +44,7 @@ pre_pr_full_should_include_ldap_guardrail() {
         return 1
     fi
 
-    if [[ "$BASE_REF" == origin/* ]]; then
-        diff_range="${BASE_REF}...HEAD"
-    else
-        diff_range="origin/${BASE_REF}...HEAD"
-    fi
-
-    if ! changed_paths="$(git diff --name-only "$diff_range" 2>/dev/null)"; then
-        changed_paths="$(git diff --name-only HEAD~1...HEAD 2>/dev/null || true)"
-    fi
+    changed_paths="$(git_ci_collect_changed_paths "$BASE_REF")"
 
     while IFS= read -r path; do
         case "$path" in

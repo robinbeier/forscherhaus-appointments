@@ -34,10 +34,98 @@ class DashboardReleaseGateAssertionsTest extends TestCase
             ],
         ];
 
+        $summary = GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), true);
+
+        $this->assertSame(1, $summary['providers']);
+        $this->assertSame(10, $summary['booked_total']);
+    }
+
+    public function testAssertMetricsPayloadAcceptsStructuredDashboardResponse(): void
+    {
+        $payload = [
+            'metrics' => [
+                [
+                    'provider_id' => 11,
+                    'provider_name' => 'Ada Lovelace',
+                    'target' => 20,
+                    'booked' => 10,
+                    'open' => 10,
+                    'fill_rate' => 0.5,
+                    'needs_attention' => true,
+                    'has_plan' => true,
+                    'slots_planned' => 18,
+                    'slots_required' => 20,
+                    'has_capacity_gap' => true,
+                    'after_15_slots' => 4,
+                    'total_offered_slots' => 19,
+                    'after_15_ratio' => 4 / 20,
+                    'after_15_percent' => 20.0,
+                    'after_15_target_met' => false,
+                    'after_15_evaluable' => true,
+                ],
+            ],
+            'summary' => [
+                'target_total' => 20,
+                'booked_total' => 10,
+                'open_total' => 10,
+                'fill_rate' => 0.5,
+                'threshold' => 0.9,
+            ],
+        ];
+
         $summary = GateAssertions::assertMetricsPayload($payload, true);
 
         $this->assertSame(1, $summary['providers']);
         $this->assertSame(10, $summary['booked_total']);
+    }
+
+    public function testAssertMetricsPayloadUsesAggregateOpenTotalFromSummaryProgress(): void
+    {
+        $payload = [
+            [
+                'provider_id' => 11,
+                'provider_name' => 'Ada Lovelace',
+                'target' => 10,
+                'booked' => 12,
+                'open' => 0,
+                'fill_rate' => 1.2,
+                'needs_attention' => false,
+                'has_plan' => true,
+                'slots_planned' => 10,
+                'slots_required' => 10,
+                'has_capacity_gap' => false,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 10,
+                'after_15_ratio' => 0.4,
+                'after_15_percent' => 40.0,
+                'after_15_target_met' => true,
+                'after_15_evaluable' => true,
+            ],
+            [
+                'provider_id' => 12,
+                'provider_name' => 'Alan Turing',
+                'target' => 10,
+                'booked' => 5,
+                'open' => 5,
+                'fill_rate' => 0.5,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 8,
+                'slots_required' => 10,
+                'has_capacity_gap' => true,
+                'after_15_slots' => 2,
+                'total_offered_slots' => 10,
+                'after_15_ratio' => 0.2,
+                'after_15_percent' => 20.0,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
+            ],
+        ];
+
+        $summary = GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), true);
+
+        $this->assertSame(2, $summary['providers']);
+        $this->assertSame(17, $summary['booked_total']);
     }
 
     public function testAssertMetricsPayloadRejectsOpenMismatch(): void
@@ -67,7 +155,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         $this->expectException(GateAssertionException::class);
         $this->expectExceptionMessage('open mismatch');
 
-        GateAssertions::assertMetricsPayload($payload, false);
+        GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), false);
     }
 
     public function testAssertMetricsPayloadAcceptsFallbackAfter15RatiosBasedOnPlannedSlots(): void
@@ -95,7 +183,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
             ],
         ];
 
-        $summary = GateAssertions::assertMetricsPayload($payload, true);
+        $summary = GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), true);
 
         $this->assertSame(1, $summary['providers']);
         $this->assertSame(4, $summary['booked_total']);
@@ -126,7 +214,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
             ],
         ];
 
-        $summary = GateAssertions::assertMetricsPayload($payload, true);
+        $summary = GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), true);
 
         $this->assertSame(1, $summary['providers']);
         $this->assertSame(4, $summary['booked_total']);
@@ -159,7 +247,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         $this->expectException(GateAssertionException::class);
         $this->expectExceptionMessage('has_capacity_gap mismatch');
 
-        GateAssertions::assertMetricsPayload($payload, false);
+        GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), false);
     }
 
     public function testAssertMetricsPayloadRejectsNonIntegerProviderId(): void
@@ -189,7 +277,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         $this->expectException(GateAssertionException::class);
         $this->expectExceptionMessage('provider_id must be an integer');
 
-        GateAssertions::assertMetricsPayload($payload, false);
+        GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), false);
     }
 
     public function testAssertMetricsPayloadRejectsAfter15PercentMismatch(): void
@@ -219,7 +307,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         $this->expectException(GateAssertionException::class);
         $this->expectExceptionMessage('after_15_percent mismatch');
 
-        GateAssertions::assertMetricsPayload($payload, false);
+        GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), false);
     }
 
     public function testAssertMetricsPayloadAcceptsNeutralAfter15Metrics(): void
@@ -265,7 +353,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
             ],
         ];
 
-        $summary = GateAssertions::assertMetricsPayload($payload, true);
+        $summary = GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), true);
 
         $this->assertSame(2, $summary['providers']);
         $this->assertSame(24, $summary['booked_total']);
@@ -298,7 +386,7 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         $this->expectException(GateAssertionException::class);
         $this->expectExceptionMessage('must use null/null or 0/0 slot counts');
 
-        GateAssertions::assertMetricsPayload($payload, false);
+        GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), false);
     }
 
     public function testAssertHeatmapPayloadRejectsInvalidWeekday(): void
@@ -335,6 +423,22 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         $this->expectExceptionMessage('does not start with %PDF-');
 
         GateAssertions::assertPdfBinary('NOT_A_PDF', 'application/pdf', 1);
+    }
+
+    private function wrapMetricsPayload(array $metrics): array
+    {
+        $targetTotal = array_sum(array_map(static fn(array $row): int => (int) ($row['target'] ?? 0), $metrics));
+        $bookedTotal = array_sum(array_map(static fn(array $row): int => (int) ($row['booked'] ?? 0), $metrics));
+        return [
+            'metrics' => $metrics,
+            'summary' => [
+                'target_total' => $targetTotal,
+                'booked_total' => $bookedTotal,
+                'open_total' => max($targetTotal - $bookedTotal, 0),
+                'fill_rate' => $targetTotal > 0 ? $bookedTotal / $targetTotal : 0.0,
+                'threshold' => 0.9,
+            ],
+        ];
     }
 
     public function testAssertZipBinaryRejectsInvalidPrefix(): void

@@ -76,6 +76,26 @@ ci_docker_prepare_runtime() {
     ci_docker_configure_mysql_data_path
 }
 
+ci_docker_php_fpm_inputs_changed() {
+    local base_ref="${1:?base ref is required}"
+    local changed_paths
+
+    changed_paths="$(git_ci_collect_changed_paths "$base_ref")"
+
+    while IFS= read -r path; do
+        case "$path" in
+            docker-compose.yml|\
+            docker/compose.ci-local.yml|\
+            docker/php-fpm/*|\
+            docker/php-fpm/*/*)
+                return 0
+                ;;
+        esac
+    done <<< "$changed_paths"
+
+    return 1
+}
+
 ci_docker_init_compose() {
     local log_prefix="${1:-ci-docker}"
     local local_ci_compose_override="${EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH:-docker/compose.ci-local.yml}"
@@ -109,6 +129,18 @@ ci_docker_compose() {
     local log_prefix="${CI_DOCKER_LOG_PREFIX:-ci-docker}"
     ci_docker_init_compose "$log_prefix"
     "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
+}
+
+ci_docker_build_php_fpm_if_inputs_changed() {
+    local base_ref="${1:?base ref is required}"
+    local log_prefix="${2:-ci-docker}"
+
+    if ! ci_docker_php_fpm_inputs_changed "$base_ref"; then
+        return 0
+    fi
+
+    echo "[$log_prefix] Rebuilding php-fpm image because Docker runtime inputs changed."
+    ci_docker_compose build php-fpm
 }
 
 ci_docker_wait_for_mysql_readiness() {
