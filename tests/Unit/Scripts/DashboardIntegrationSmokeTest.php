@@ -38,6 +38,9 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString('flatpickrInstance.setDate', $snippet);
         self::assertStringContainsString('requested_range_applied', $snippet);
         self::assertStringContainsString('resolveDashboardLocale', $snippet);
+        self::assertStringContainsString('page.addInitScript((installedHelperName) => {', $snippet);
+        self::assertStringContainsString("const helperName = '__dashboardSummaryCheckHelpers';", $snippet);
+        self::assertStringContainsString('window[installedHelperName] = {', $snippet);
         self::assertStringNotContainsString('toISOString().slice(0, 10)', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-total', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-share', $snippet);
@@ -67,16 +70,20 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringNotContainsString("await page.fill('#username', username)", $snippet);
         self::assertStringNotContainsString("await page.fill('#password', password)", $snippet);
         self::assertStringNotContainsString("window.jQuery?._data?.(form, 'events')?.submit", $snippet);
+        self::assertStringNotContainsString('__SUMMARY_HELPERS__', $snippet);
     }
 
-    public function testBuildRunCodeSnippetExecutesInMockedPageContext(): void
+    public function testBuildRunCodeSnippetInstallsDashboardHelpersBeforeFirstNavigation(): void
     {
-        $result = $this->runDashboardSnippetInMockedPageContext($this->browserSnippetConfig());
+        $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($this->browserSnippetConfig());
 
-        self::assertTrue($result['ok']);
-        self::assertTrue($result['zero_state_rendered']);
-        self::assertSame('35%', $result['marker_left_after']);
-        self::assertSame('35,0 %', str_replace("\u{00A0}", ' ', (string) $result['expected_threshold_text']));
+        $installOffset = strpos($snippet, 'await installDashboardHelpers();');
+        $navigateOffset = strpos($snippet, 'await openAuthenticatedDashboard();');
+
+        self::assertNotFalse($installOffset);
+        self::assertNotFalse($navigateOffset);
+        self::assertLessThan($navigateOffset, $installOffset);
+        self::assertStringContainsString("throw new Error('Dashboard summary helpers were not installed.')", $snippet);
     }
 
     public function testParseRunCodeResultReturnsDecodedPayloadFromSentinelOutput(): void
@@ -641,267 +648,5 @@ class DashboardIntegrationSmokeTest extends TestCase
                 'threshold' => 0.9,
             ],
         ];
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     * @return array<string, mixed>
-     */
-    private function runDashboardSnippetInMockedPageContext(array $config): array
-    {
-        $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($config);
-        $tempPath = tempnam(sys_get_temp_dir(), 'dashboard-snippet-');
-        self::assertNotFalse($tempPath);
-        $scriptPath = $tempPath . '.js';
-        rename($tempPath, $scriptPath);
-
-        $nodeScript = strtr(
-            <<<'JS'
-            const snippet = __SNIPPET__;
-            const runSnippet = eval(`(${snippet})`);
-            const locale = 'de-DE';
-            const formatPercent = (value) =>
-              new Intl.NumberFormat(locale, {
-                style: 'percent',
-                minimumFractionDigits: 1,
-                maximumFractionDigits: 1,
-              }).format(Number(value) || 0);
-            const formatMarker = (value) => `${(Math.max(0, Math.min(1, Number(value) || 0)) * 100).toFixed(1)}`.replace(/\.0$/, '') + '%';
-            const refreshSummaryDisplay = (state) => {
-              const targetTotal = Number(state.summary.targetTotal) || 0;
-              const fillRate = Number(state.summary.fillRate) || 0;
-              const openShare = targetTotal > 0 ? Number(state.summary.openTotal) / targetTotal : 0;
-
-              state.fillRateText = formatPercent(fillRate);
-              state.bookedShareText = formatPercent(fillRate);
-              state.openShareText = formatPercent(openShare);
-              state.bookedWidth = `${(Math.max(0, Math.min(1, fillRate)) * 100).toFixed(1)}%`;
-            };
-
-            const state = {
-              summary: {
-                targetTotal: 12,
-                bookedTotal: 8,
-                openTotal: 4,
-                fillRate: 2 / 3,
-              },
-              selectedDates: [],
-              thresholdInput: '0.90',
-              thresholdBadge: `Schwellwert ${formatPercent(0.9)}`,
-              markerLeft: '90%',
-              summaryState: 'loaded',
-              errorHidden: true,
-            };
-
-            refreshSummaryDisplay(state);
-
-            class HTMLElement {}
-            class HTMLSelectElement extends HTMLElement {
-              constructor() {
-                super();
-                this.options = [{ value: '' }];
-                this.value = '';
-              }
-
-              add(option) {
-                this.options.push(option);
-              }
-
-              dispatchEvent() {}
-            }
-
-            class Option {
-              constructor(text, value) {
-                this.text = text;
-                this.value = value;
-              }
-            }
-
-            class Event {
-              constructor(type, init = {}) {
-                this.type = type;
-                this.init = init;
-              }
-            }
-
-            const serviceSelect = new HTMLSelectElement();
-            const optionsToggle = new HTMLElement();
-            const flatpickrInstance = {
-              selectedDates: [],
-              setDate(dates) {
-                this.selectedDates = dates;
-                state.selectedDates = dates;
-              },
-            };
-
-            const textElement = (getter) => ({
-              get textContent() {
-                return getter();
-              },
-            });
-
-            const querySelector = (selector) => {
-              switch (selector) {
-                case '#dashboard-summary-target-total':
-                  return textElement(() => String(state.summary.targetTotal));
-                case '#dashboard-summary-booked-total':
-                  return textElement(() => String(state.summary.bookedTotal));
-                case '#dashboard-summary-open-total':
-                  return textElement(() => String(state.summary.openTotal));
-                case '#dashboard-summary-fill-rate':
-                  return textElement(() => state.fillRateText);
-                case '#dashboard-summary-booked-share':
-                  return textElement(() => state.bookedShareText);
-                case '#dashboard-summary-open-share':
-                  return textElement(() => state.openShareText);
-                case '#dashboard-summary-progress-booked':
-                  return {
-                    style: {
-                      get width() {
-                        return state.bookedWidth;
-                      },
-                    },
-                  };
-                case '#dashboard-summary-progress-marker':
-                  return {
-                    style: {
-                      get left() {
-                        return state.markerLeft;
-                      },
-                    },
-                  };
-                case '#dashboard-error':
-                  return {
-                    hasAttribute(name) {
-                      return name === 'hidden' ? state.errorHidden : false;
-                    },
-                  };
-                case '#dashboard-summary-progress-track':
-                  return {
-                    getAttribute(name) {
-                      return name === 'data-summary-state' ? state.summaryState : null;
-                    },
-                  };
-                case '#dashboard-date-range':
-                  return { _flatpickr: flatpickrInstance };
-                case '#dashboard-summary-threshold-badge':
-                  return textElement(() => state.thresholdBadge);
-                case '#dashboard-service':
-                  return serviceSelect;
-                case '#dashboard-options-toggle':
-                  return optionsToggle;
-                default:
-                  return null;
-              }
-            };
-
-            globalThis.window = {};
-            globalThis.document = {
-              querySelector,
-              getElementById(id) {
-                return id === 'login-form' ? null : null;
-              },
-            };
-            globalThis.vars = (name) => (name === 'dashboard_number_locale' ? locale : '');
-            globalThis.bootstrap = {
-              Dropdown: {
-                getOrCreateInstance() {
-                  return {
-                    show() {},
-                  };
-                },
-              },
-            };
-            globalThis.HTMLElement = HTMLElement;
-            globalThis.HTMLSelectElement = HTMLSelectElement;
-            globalThis.Option = Option;
-            globalThis.Event = Event;
-
-            const page = {
-              setDefaultTimeout() {},
-              context() {
-                return {
-                  async addCookies() {},
-                };
-              },
-              async goto() {},
-              async waitForSelector() {},
-              async evaluate(fn, arg) {
-                return await fn(arg);
-              },
-              async waitForFunction(fn, arg) {
-                const result = await fn(arg);
-                if (!result) {
-                  throw new Error('waitForFunction predicate returned false');
-                }
-              },
-              async click(selector) {
-                if (selector === '#dashboard-filters button[type="submit"]') {
-                  if (serviceSelect.value === '999999') {
-                    state.summary = {
-                      targetTotal: 0,
-                      bookedTotal: 0,
-                      openTotal: 0,
-                      fillRate: 0,
-                    };
-                    refreshSummaryDisplay(state);
-                  }
-                  return;
-                }
-
-                if (selector === '#dashboard-threshold-button') {
-                  return;
-                }
-
-                if (selector === '#dashboard-threshold-form button[type="submit"]') {
-                  const threshold = Number.parseFloat(state.thresholdInput) || 0;
-                  state.markerLeft = formatMarker(threshold);
-                  state.thresholdBadge = `Schwellwert ${formatPercent(threshold)}`;
-                }
-              },
-              async inputValue(selector) {
-                if (selector !== '#dashboard-threshold-input') {
-                  throw new Error(`Unexpected selector for inputValue: ${selector}`);
-                }
-
-                return state.thresholdInput;
-              },
-              async fill(selector, value) {
-                if (selector !== '#dashboard-threshold-input') {
-                  throw new Error(`Unexpected selector for fill: ${selector}`);
-                }
-
-                state.thresholdInput = String(value);
-              },
-            };
-
-            console.log = () => {};
-
-            (async () => {
-              const result = await runSnippet(page);
-              process.stdout.write(JSON.stringify(result));
-            })().catch((error) => {
-              process.stderr.write(`${error.stack || String(error)}\n`);
-              process.exit(1);
-            });
-            JS
-            ,
-            [
-                '__SNIPPET__' => json_encode(
-                    $snippet,
-                    JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-                ),
-            ],
-        );
-
-        file_put_contents($scriptPath, $nodeScript);
-        exec('node ' . escapeshellarg($scriptPath), $output, $exitCode);
-        unlink($scriptPath);
-
-        self::assertSame(0, $exitCode, implode("\n", $output));
-        $decoded = json_decode(implode("\n", $output), true, 512, JSON_THROW_ON_ERROR);
-        self::assertIsArray($decoded);
-
-        return $decoded;
     }
 }

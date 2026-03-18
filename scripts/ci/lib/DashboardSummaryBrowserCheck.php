@@ -53,115 +53,11 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         $config['expected_summary'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
-    $summaryHelpersSnippet = <<<'JS'
-      const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
-      const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-      const formatPercent = (locale, value) =>
-        new Intl.NumberFormat(locale || undefined, {
-          style: 'percent',
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-        }).format(Number(value) || 0);
-      const formatLocalDate = (value) => {
-        const year = value.getFullYear();
-        const month = String(value.getMonth() + 1).padStart(2, '0');
-        const day = String(value.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-      const parseCount = (selector) => {
-        const text = document.querySelector(selector)?.textContent?.trim() ?? '';
-        const digits = text.replace(/[^\d]/g, '');
-        return digits === '' ? 0 : Number(digits);
-      };
-      const resolveDashboardLocale = () => {
-        const fallbackLocale = 'de-DE';
-        const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
-        const candidate = configuredLocale || fallbackLocale;
-
-        if (Intl.NumberFormat.supportedLocalesOf([candidate]).length) {
-          return candidate;
-        }
-
-        if (Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length) {
-          return fallbackLocale;
-        }
-
-        return 'en-US';
-      };
-      const captureDashboardSummaryState = ({ locale, startDate, endDate, expectedSummaryPayload }) => {
-        const dashboardLocale = locale || resolveDashboardLocale();
-        const targetTotal = parseCount('#dashboard-summary-target-total');
-        const bookedTotal = parseCount('#dashboard-summary-booked-total');
-        const openTotal = parseCount('#dashboard-summary-open-total');
-        const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
-        const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
-        const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
-        const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
-        const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
-        const summaryState = document.querySelector('#dashboard-summary-progress-track')?.getAttribute('data-summary-state') ?? '';
-        const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
-        const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
-          ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
-          : [];
-        const normalizedSelectedDates = selectedDates
-          .map((value) => {
-            if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-              return null;
-            }
-
-            return formatLocalDate(value);
-          })
-          .filter((value) => value !== null);
-        const expectedTargetTotal = roundCount(expectedSummaryPayload.target_total);
-        const expectedBookedTotal = roundCount(expectedSummaryPayload.booked_total);
-        const expectedOpenTotal = roundCount(expectedSummaryPayload.open_total);
-        const expectedFillRate = Number(expectedSummaryPayload.fill_rate) || 0;
-        const expectedOpenShare = expectedTargetTotal > 0 ? expectedOpenTotal / expectedTargetTotal : 0;
-        const expectedBookedWidth = `${(clampProgress(expectedFillRate) * 100).toFixed(1)}%`;
-        const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
-
-        return {
-          requested_start_date: startDate,
-          requested_end_date: endDate,
-          selected_start_date: normalizedSelectedDates[0] ?? '',
-          selected_end_date: normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '',
-          target_total: targetTotal,
-          booked_total: bookedTotal,
-          open_total: openTotal,
-          fill_rate: fillRateText,
-          booked_share: bookedShareText,
-          open_share: openShareText,
-          booked_width: roundedBookedWidth,
-          marker_left: markerLeft,
-          summary_state: summaryState,
-          error_hidden: errorHidden,
-          expected_target_total: expectedTargetTotal,
-          expected_booked_total: expectedBookedTotal,
-          expected_open_total: expectedOpenTotal,
-          expected_fill_rate: formatPercent(dashboardLocale, expectedFillRate),
-          expected_open_share: formatPercent(dashboardLocale, expectedOpenShare),
-          expected_booked_width: expectedBookedWidth,
-          expected_threshold: Number(expectedSummaryPayload.threshold) || 0,
-          totals_match:
-            targetTotal === expectedTargetTotal &&
-            bookedTotal === expectedBookedTotal &&
-            openTotal === expectedOpenTotal,
-          shares_match:
-            fillRateText === formatPercent(dashboardLocale, expectedFillRate) &&
-            bookedShareText === formatPercent(dashboardLocale, expectedFillRate) &&
-            openShareText === formatPercent(dashboardLocale, expectedOpenShare),
-          booked_width_matches: roundedBookedWidth === expectedBookedWidth,
-          requested_range_applied:
-            (normalizedSelectedDates[0] ?? '') === startDate &&
-            (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate,
-          threshold_badge: document.querySelector('#dashboard-summary-threshold-badge')?.textContent?.trim() ?? '',
-        };
-      };
-    JS;
 
     $snippet = <<<'JS'
     async (page) => {
       const resultPrefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
+      const helperName = '__dashboardSummaryCheckHelpers';
       const targetUrl = __TARGET_URL__;
       const sessionCookies = __SESSION_COOKIES__;
       const requestedStartDate = __START_DATE__;
@@ -177,21 +73,143 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       };
       let currentStep = 'bootstrap';
       page.setDefaultTimeout(30000);
-      __SUMMARY_HELPERS__
       const emitPayload = (payload) => {
         console.log(`${resultPrefix}${JSON.stringify(payload)}`);
         return payload;
       };
+      const installDashboardHelpers = async () => {
+        currentStep = 'install_dashboard_helpers';
+        await page.addInitScript((installedHelperName) => {
+          if (typeof window[installedHelperName] === 'object' && window[installedHelperName] !== null) {
+            return;
+          }
+
+          const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
+          const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+          const formatPercent = (locale, value) =>
+            new Intl.NumberFormat(locale || undefined, {
+              style: 'percent',
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            }).format(Number(value) || 0);
+          const formatLocalDate = (value) => {
+            const year = value.getFullYear();
+            const month = String(value.getMonth() + 1).padStart(2, '0');
+            const day = String(value.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          };
+          const parseCount = (selector) => {
+            const text = document.querySelector(selector)?.textContent?.trim() ?? '';
+            const digits = text.replace(/[^\d]/g, '');
+            return digits === '' ? 0 : Number(digits);
+          };
+          const resolveDashboardLocale = () => {
+            const fallbackLocale = 'de-DE';
+            const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
+            const candidate = configuredLocale || fallbackLocale;
+
+            if (Intl.NumberFormat.supportedLocalesOf([candidate]).length) {
+              return candidate;
+            }
+
+            if (Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length) {
+              return fallbackLocale;
+            }
+
+            return 'en-US';
+          };
+          const captureDashboardSummaryState = ({ locale, startDate, endDate, expectedSummaryPayload }) => {
+            const dashboardLocale = locale || resolveDashboardLocale();
+            const targetTotal = parseCount('#dashboard-summary-target-total');
+            const bookedTotal = parseCount('#dashboard-summary-booked-total');
+            const openTotal = parseCount('#dashboard-summary-open-total');
+            const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
+            const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
+            const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
+            const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
+            const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
+            const summaryState = document.querySelector('#dashboard-summary-progress-track')?.getAttribute('data-summary-state') ?? '';
+            const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
+            const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
+              ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
+              : [];
+            const normalizedSelectedDates = selectedDates
+              .map((value) => {
+                if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+                  return null;
+                }
+
+                return formatLocalDate(value);
+              })
+              .filter((value) => value !== null);
+            const expectedTargetTotal = roundCount(expectedSummaryPayload.target_total);
+            const expectedBookedTotal = roundCount(expectedSummaryPayload.booked_total);
+            const expectedOpenTotal = roundCount(expectedSummaryPayload.open_total);
+            const expectedFillRate = Number(expectedSummaryPayload.fill_rate) || 0;
+            const expectedOpenShare = expectedTargetTotal > 0 ? expectedOpenTotal / expectedTargetTotal : 0;
+            const expectedBookedWidth = `${(clampProgress(expectedFillRate) * 100).toFixed(1)}%`;
+            const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
+
+            return {
+              requested_start_date: startDate,
+              requested_end_date: endDate,
+              selected_start_date: normalizedSelectedDates[0] ?? '',
+              selected_end_date: normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '',
+              target_total: targetTotal,
+              booked_total: bookedTotal,
+              open_total: openTotal,
+              fill_rate: fillRateText,
+              booked_share: bookedShareText,
+              open_share: openShareText,
+              booked_width: roundedBookedWidth,
+              marker_left: markerLeft,
+              summary_state: summaryState,
+              error_hidden: errorHidden,
+              expected_target_total: expectedTargetTotal,
+              expected_booked_total: expectedBookedTotal,
+              expected_open_total: expectedOpenTotal,
+              expected_fill_rate: formatPercent(dashboardLocale, expectedFillRate),
+              expected_open_share: formatPercent(dashboardLocale, expectedOpenShare),
+              expected_booked_width: expectedBookedWidth,
+              expected_threshold: Number(expectedSummaryPayload.threshold) || 0,
+              totals_match:
+                targetTotal === expectedTargetTotal &&
+                bookedTotal === expectedBookedTotal &&
+                openTotal === expectedOpenTotal,
+              shares_match:
+                fillRateText === formatPercent(dashboardLocale, expectedFillRate) &&
+                bookedShareText === formatPercent(dashboardLocale, expectedFillRate) &&
+                openShareText === formatPercent(dashboardLocale, expectedOpenShare),
+              booked_width_matches: roundedBookedWidth === expectedBookedWidth,
+              requested_range_applied:
+                (normalizedSelectedDates[0] ?? '') === startDate &&
+                (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate,
+              threshold_badge: document.querySelector('#dashboard-summary-threshold-badge')?.textContent?.trim() ?? '',
+            };
+          };
+
+          window[installedHelperName] = {
+            captureDashboardSummaryState,
+            formatPercent,
+            resolveDashboardLocale,
+          };
+        }, helperName);
+      };
       const captureSummaryState = async (locale, expected = expectedSummary) =>
-        page.evaluate(({ locale: dashboardLocale, startDate, endDate, expectedSummaryPayload }) => {
-          __SUMMARY_HELPERS__
-          return captureDashboardSummaryState({
+        page.evaluate(({ installedHelperName, locale: dashboardLocale, startDate, endDate, expectedSummaryPayload }) => {
+          const helpers = window[installedHelperName];
+          if (!helpers || typeof helpers.captureDashboardSummaryState !== 'function') {
+            throw new Error('Dashboard summary helpers were not installed.');
+          }
+
+          return helpers.captureDashboardSummaryState({
             locale: dashboardLocale,
             startDate,
             endDate,
             expectedSummaryPayload,
           });
         }, {
+          installedHelperName: helperName,
           locale,
           startDate: requestedStartDate,
           endDate: requestedEndDate,
@@ -242,9 +260,13 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       const waitForRenderedSummary = async () => {
         currentStep = 'wait_for_loaded_summary';
         await page.waitForSelector('#dashboard-summary-progress-track', { state: 'visible', timeout: 15000 });
-        await page.waitForFunction(({ startDate, endDate, expected }) => {
-          __SUMMARY_HELPERS__
-          const captured = captureDashboardSummaryState({
+        await page.waitForFunction(({ installedHelperName, startDate, endDate, expected }) => {
+          const helpers = window[installedHelperName];
+          if (!helpers || typeof helpers.captureDashboardSummaryState !== 'function') {
+            return false;
+          }
+
+          const captured = helpers.captureDashboardSummaryState({
             startDate,
             endDate,
             expectedSummaryPayload: expected,
@@ -258,7 +280,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             captured.error_hidden &&
             captured.requested_range_applied
           );
-        }, { startDate: requestedStartDate, endDate: requestedEndDate, expected: expectedSummary }, { timeout: 30000 });
+        }, { installedHelperName: helperName, startDate: requestedStartDate, endDate: requestedEndDate, expected: expectedSummary }, { timeout: 30000 });
       };
       const applyEmptyServiceFilter = async () => {
         currentStep = 'apply_empty_service_filter';
@@ -282,9 +304,13 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       };
       const waitForZeroState = async () => {
         currentStep = 'wait_for_zero_state';
-        await page.waitForFunction(({ startDate, endDate, expected }) => {
-          __SUMMARY_HELPERS__
-          const captured = captureDashboardSummaryState({
+        await page.waitForFunction(({ installedHelperName, startDate, endDate, expected }) => {
+          const helpers = window[installedHelperName];
+          if (!helpers || typeof helpers.captureDashboardSummaryState !== 'function') {
+            return false;
+          }
+
+          const captured = helpers.captureDashboardSummaryState({
             startDate,
             endDate,
             expectedSummaryPayload: expected,
@@ -297,10 +323,11 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             captured.error_hidden &&
             captured.requested_range_applied
           );
-        }, { startDate: requestedStartDate, endDate: requestedEndDate, expected: zeroSummary }, { timeout: 30000 });
+        }, { installedHelperName: helperName, startDate: requestedStartDate, endDate: requestedEndDate, expected: zeroSummary }, { timeout: 30000 });
       };
 
       try {
+        await installDashboardHelpers();
         await seedAuthenticatedSession();
         await openAuthenticatedDashboard();
         await ensureDashboardReady();
@@ -308,14 +335,30 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         await waitForRenderedSummary();
 
         currentStep = 'read_dashboard_locale';
-        const dashboardLocale = await page.evaluate(() => {
-          __SUMMARY_HELPERS__
-          return resolveDashboardLocale();
-        });
-        const expectedThresholdText = formatPercent(
-          dashboardLocale,
-          Number(expectedSummary.updated_threshold) || Number(updatedThreshold) || 0,
+        const localeMetadata = await page.evaluate(
+          ({ installedHelperName, thresholdValue }) => {
+            const helpers = window[installedHelperName];
+            if (
+              !helpers ||
+              typeof helpers.resolveDashboardLocale !== 'function' ||
+              typeof helpers.formatPercent !== 'function'
+            ) {
+              throw new Error('Dashboard summary helpers were not installed.');
+            }
+
+            const dashboardLocale = helpers.resolveDashboardLocale();
+
+            return {
+              dashboardLocale,
+              expectedThresholdText: helpers.formatPercent(dashboardLocale, thresholdValue),
+            };
+          },
+          {
+            installedHelperName: helperName,
+            thresholdValue: Number(expectedSummary.updated_threshold) || Number(updatedThreshold) || 0,
+          },
         );
+        const dashboardLocale = localeMetadata.dashboardLocale;
 
         currentStep = 'capture_before_state';
         const before = await captureSummaryState(dashboardLocale);
@@ -371,7 +414,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         const zeroState = await captureSummaryState(dashboardLocale, zeroSummary);
 
         const badgeChanged = before.threshold_badge !== after.threshold_badge;
-        const localeApplied = after.threshold_badge.includes(expectedThresholdText);
+        const localeApplied = after.threshold_badge.includes(localeMetadata.expectedThresholdText);
         const summaryStable =
           before.target_total === after.target_total &&
           before.booked_total === after.booked_total &&
@@ -447,7 +490,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           expected_initial_threshold: before.expected_threshold,
           expected_marker_after: expectedUpdatedMarker,
           dashboard_locale: dashboardLocale,
-          expected_threshold_text: expectedThresholdText,
+          expected_threshold_text: localeMetadata.expectedThresholdText,
           zero_state_rendered: zeroStateRendered,
           error: !before.totals_match
             ? `Dashboard summary totals did not match target=${before.expected_target_total}, booked=${before.expected_booked_total}, open=${before.expected_open_total}.`
@@ -482,7 +525,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             : !badgeChanged
                 ? 'Threshold badge did not update after save.'
                 : !localeApplied
-                  ? `Threshold badge did not use locale text ${expectedThresholdText}.`
+                  ? `Threshold badge did not use locale text ${localeMetadata.expectedThresholdText}.`
                   : null,
         });
       } catch (error) {
@@ -502,7 +545,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             '__START_DATE__' => $encodedStartDate,
             '__END_DATE__' => $encodedEndDate,
             '__EXPECTED_SUMMARY__' => $encodedExpectedSummary,
-            '__SUMMARY_HELPERS__' => $summaryHelpersSnippet,
         ]),
     );
 }
