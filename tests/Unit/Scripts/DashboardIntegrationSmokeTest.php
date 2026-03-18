@@ -884,9 +884,13 @@ class DashboardIntegrationSmokeTest extends TestCase
               process.stderr.write(`${error.stack || String(error)}\n`);
               process.exit(1);
             });
-            JS,
+            JS
+            ,
             [
-                '__SNIPPET__' => json_encode($snippet, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                '__SNIPPET__' => json_encode(
+                    $snippet,
+                    JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+                ),
             ],
         );
 
