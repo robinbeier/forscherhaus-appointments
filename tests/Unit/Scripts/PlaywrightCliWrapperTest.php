@@ -238,6 +238,100 @@ class PlaywrightCliWrapperTest extends TestCase
         }
     }
 
+    public function testWrapperIgnoresLongSessionValueWhenScanningForInstallCommand(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-long-session-install-value-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $npxPath = $binDir . '/npx';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.59.0-alpha-1771104257000\\n'\nfi\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000 PLAYWRIGHT_MCP_READY_DIR=%s bash %s --session install-browser open https://example.test',
+            escapeshellarg($binDir),
+            escapeshellarg($tempDir . '/ready'),
+            escapeshellarg($this->wrapperPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(3, $capturedInvocations);
+            self::assertStringContainsString(
+                '--package playwright@1.59.0-alpha-1771104257000 playwright install',
+                $capturedInvocations[1],
+            );
+            self::assertStringContainsString(
+                'playwright-cli --session install-browser open https://example.test',
+                $capturedInvocations[2],
+            );
+        } finally {
+            @unlink($npxPath);
+            @unlink($capturePath);
+            @rmdir($binDir);
+            @rmdir($tempDir);
+        }
+    }
+
+    public function testWrapperIgnoresLongSessionValueWhenScanningForHelpCommand(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-long-session-help-value-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $npxPath = $binDir . '/npx';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.59.0-alpha-1771104257000\\n'\nfi\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000 PLAYWRIGHT_MCP_READY_DIR=%s bash %s --session help open https://example.test',
+            escapeshellarg($binDir),
+            escapeshellarg($tempDir . '/ready'),
+            escapeshellarg($this->wrapperPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(3, $capturedInvocations);
+            self::assertStringContainsString(
+                '--package playwright@1.59.0-alpha-1771104257000 playwright install',
+                $capturedInvocations[1],
+            );
+            self::assertStringContainsString(
+                'playwright-cli --session help open https://example.test',
+                $capturedInvocations[2],
+            );
+        } finally {
+            @unlink($npxPath);
+            @unlink($capturePath);
+            @rmdir($binDir);
+            @rmdir($tempDir);
+        }
+    }
+
     public function testWrapperDoesNotInjectEnvSessionWhenLongSessionFlagIsPresent(): void
     {
         $tempDir = sys_get_temp_dir() . '/pwcli-long-session-' . bin2hex(random_bytes(4));

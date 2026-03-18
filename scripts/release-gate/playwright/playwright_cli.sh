@@ -71,10 +71,19 @@ ensure_browser_installed() {
 has_session_flag="false"
 install_command_requested="false"
 help_command_requested="false"
-for arg in "$@"; do
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  arg="${args[i]}"
+
   case "$arg" in
-    -s|-s=*|--session|--session=*)
+    -s|--session)
       has_session_flag="true"
+      ((i+=1))
+      continue
+      ;;
+    -s=*|--session=*)
+      has_session_flag="true"
+      continue
       ;;
     install-browser)
       install_command_requested="true"
