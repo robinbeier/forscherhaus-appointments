@@ -136,7 +136,18 @@ The deep-runtime suite stores these artifacts under:
 This keeps the runtime/UI evidence path reproducible and narrow while giving
 agents visual and trace artifacts for CI triage and rework.
 
-The bundled Playwright wrapper auto-installs its default Firefox path on first
-use and prepares the required Linux browser dependencies inside the validation
-container. This keeps the dashboard browser checks portable across Linux
-architectures, including local arm64 runs.
+The bundled Playwright wrapper bootstraps the configured Playwright browser
+(Firefox by default; supported overrides follow the upstream `playwright-cli`
+contract such as `chrome`, `firefox`, `webkit`, and `msedge`) using the exact
+Playwright runtime version pinned by `@playwright/cli`, then prepares the
+required Linux browser dependencies inside the validation container. This keeps
+the dashboard browser checks portable across Linux architectures, including
+local arm64 runs.
+
+The dashboard summary browser check emits its `run-code` payload with the
+repo-owned `__DASHBOARD_SUMMARY_BROWSER_CHECK__` prefix. The parser reads that
+marker directly instead of relying on undocumented stdout framing from the
+upstream Playwright CLI. The wrapper pins `PLAYWRIGHT_MCP_OUTPUT_MODE=stdout`
+for these gate runs so the repo keeps reading the sentinel from stdout in the
+current Playwright CLI behavior, even if the host environment configures
+Playwright CLI output differently.

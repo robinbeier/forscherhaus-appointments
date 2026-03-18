@@ -65,7 +65,7 @@ class PlaywrightBrowserSelectionTest extends TestCase
 
     public function testBuildPlaywrightSessionArgumentsUsesSharedSessionFlagShape(): void
     {
-        self::assertSame(['--session', 'session-123'], buildPlaywrightSessionArguments('session-123'));
+        self::assertSame(['-s=session-123'], buildPlaywrightSessionArguments('session-123'));
     }
 
     public function testResolveConfiguredPlaywrightBrowserPreservesConfiguredBrowserToken(): void

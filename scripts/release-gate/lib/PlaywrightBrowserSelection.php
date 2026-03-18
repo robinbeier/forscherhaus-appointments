@@ -47,7 +47,7 @@ function prepareConfiguredPlaywrightCommandArguments(array $arguments, bool $hea
  */
 function buildPlaywrightSessionArguments(string $sessionId): array
 {
-    return ['--session', $sessionId];
+    return ['-s=' . $sessionId];
 }
 
 function resolveConfiguredPlaywrightBrowser(): string

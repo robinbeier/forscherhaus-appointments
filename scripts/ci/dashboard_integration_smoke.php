@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateCliSupport.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
+require_once __DIR__ . '/../release-gate/lib/PlaywrightCookieRecords.php';
 require_once __DIR__ . '/lib/BrowserRuntimeEvidence.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/DashboardSummaryBrowserCheck.php';
@@ -18,7 +19,6 @@ use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateCliSupport;
 use ReleaseGate\GateHttpClient;
-
 const INTEGRATION_SMOKE_EXIT_SUCCESS = 0;
 const INTEGRATION_SMOKE_EXIT_ASSERTION_FAILURE = 1;
 const INTEGRATION_SMOKE_EXIT_RUNTIME_ERROR = 2;
@@ -1045,12 +1045,18 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
 
     $summary = $metricsPayload['summary'];
     $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'dashboard');
+    $sessionCookies = normalizeCookieRecordsForPlaywright($client->cookieRecords(), $targetUrl);
+
+    if ($sessionCookies === []) {
+        throw new GateAssertionException(
+            'POST /login/validate (dashboard summary browser render) did not yield reusable session cookies.',
+        );
+    }
     $payload = runDashboardSummaryBrowserCheck([
         'repo_root' => $repoRoot,
         'target_url' => $targetUrl,
         'artifacts_dir' => $artifactsDir,
-        'username' => (string) $config['username'],
-        'password' => (string) $config['password'],
+        'session_cookies' => $sessionCookies,
         'start_date' => (string) $config['start_date'],
         'end_date' => (string) $config['end_date'],
         'expected_summary' => [
@@ -1058,6 +1064,7 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
             'booked_total' => $summary['booked_total'] ?? 0,
             'open_total' => $summary['open_total'] ?? 0,
             'fill_rate' => $summary['fill_rate'] ?? 0,
+            'threshold' => $summary['threshold'] ?? 0,
         ],
         'pwcli_path' => (string) $config['browser_pwcli_path'],
         'bootstrap_timeout' => (int) $config['browser_bootstrap_timeout'],
