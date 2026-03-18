@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/lib/GateAssertions.php';
 require_once __DIR__ . '/lib/GateProcessRunner.php';
+require_once __DIR__ . '/lib/PlaywrightBrowserSelection.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
@@ -125,7 +126,7 @@ try {
             $arguments[] = '--headed';
         }
 
-        $arguments[] = '--browser=' . resolveConfiguredPlaywrightBrowser();
+        $arguments = appendConfiguredPlaywrightBrowserArgument($arguments);
 
         $openResult = runPwcliCommand($config, $sessionId, $arguments, $repoRoot, $config['open_timeout']);
         assertProcessSucceeded($openResult, 'Open confirmation page', true);
@@ -649,12 +650,6 @@ function runPwcliCommand(
     return GateProcessRunner::run($command, $repoRoot, $effectiveEnvironment, $timeoutSeconds);
 }
 
-function resolveConfiguredPlaywrightBrowser(): string
-{
-    $configuredBrowser = trim((string) getenv('PLAYWRIGHT_MCP_BROWSER'));
-
-    return $configuredBrowser !== '' ? $configuredBrowser : 'firefox';
-}
 
 /**
  * @param array<string, mixed> $result

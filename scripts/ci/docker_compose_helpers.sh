@@ -201,7 +201,7 @@ ci_docker_wait_for_php_mysql_connectivity() {
     local attempt=1
     local php_code
 
-    php_code='$mysqli = @new mysqli("mysql", "user", "password", "easyappointments"); if ($mysqli->connect_errno) { fwrite(STDERR, (string) $mysqli->connect_errno); exit(1); } $mysqli->close();'
+    php_code='require getcwd() . "/config.php"; $mysqli = @new mysqli(Config::DB_HOST, Config::DB_USERNAME, Config::DB_PASSWORD, Config::DB_NAME); if ($mysqli->connect_errno) { fwrite(STDERR, (string) $mysqli->connect_errno); exit(1); } $mysqli->close();'
 
     until ci_docker_compose exec -T php-fpm php -r "$php_code" >/dev/null 2>&1; do
         if [[ "$attempt" -ge "$max_attempts" ]]; then
