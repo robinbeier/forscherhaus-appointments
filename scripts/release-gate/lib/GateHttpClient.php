@@ -38,6 +38,11 @@ final class GateHttpClient
      */
     private array $cookies = [];
 
+    /**
+     * @var array<string, array<string, mixed>>
+     */
+    private array $cookieRecords = [];
+
     public function __construct(
         private readonly string $baseUrl,
         private readonly string $indexPage = 'index.php',
@@ -93,6 +98,14 @@ final class GateHttpClient
     public function cookies(): array
     {
         return $this->cookies;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function cookieRecords(): array
+    {
+        return array_values($this->cookieRecords);
     }
 
     /**
@@ -193,17 +206,19 @@ final class GateHttpClient
         $statusCode = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
         $effectiveUrl = (string) curl_getinfo($curl, CURLINFO_EFFECTIVE_URL);
 
-        if ($consumeResponseCookies) {
-            $this->consumeSetCookies($setCookies);
-        }
-
-        return new GateHttpResponse(
+        $response = new GateHttpResponse(
             $statusCode,
             $headers,
             (string) $body,
             round($durationMs, 2),
             $effectiveUrl !== '' ? $effectiveUrl : $url,
         );
+
+        if ($consumeResponseCookies) {
+            $this->consumeSetCookies($setCookies, $response->url);
+        }
+
+        return $response;
     }
 
     /**
@@ -226,10 +241,16 @@ final class GateHttpClient
     /**
      * @param string[] $setCookies
      */
-    private function consumeSetCookies(array $setCookies): void
+    private function consumeSetCookies(array $setCookies, string $responseUrl): void
     {
+        $responseParts = parse_url($responseUrl);
+        $defaultDomain = is_array($responseParts) ? trim((string) ($responseParts['host'] ?? '')) : '';
+        $defaultPath = $this->resolveDefaultCookiePath($responseUrl);
+        $defaultSecure = is_array($responseParts) && ($responseParts['scheme'] ?? '') === 'https';
+
         foreach ($setCookies as $setCookie) {
-            $pair = explode(';', $setCookie, 2)[0] ?? '';
+            $segments = array_map('trim', explode(';', $setCookie));
+            $pair = array_shift($segments) ?? '';
 
             if ($pair === '' || !str_contains($pair, '=')) {
                 continue;
@@ -242,8 +263,80 @@ final class GateHttpClient
                 continue;
             }
 
-            $this->cookies[$name] = trim($value);
+            $record = [
+                'name' => $name,
+                'value' => trim($value),
+            ];
+
+            foreach ($segments as $segment) {
+                if ($segment === '') {
+                    continue;
+                }
+
+                $attributeParts = explode('=', $segment, 2);
+                $attributeName = strtolower(trim($attributeParts[0] ?? ''));
+                $attributeValue = trim($attributeParts[1] ?? '');
+
+                switch ($attributeName) {
+                    case 'domain':
+                        if ($attributeValue !== '') {
+                            $record['domain'] = $attributeValue;
+                        }
+                        break;
+                    case 'path':
+                        if ($attributeValue !== '') {
+                            $record['path'] = $attributeValue;
+                        }
+                        break;
+                    case 'secure':
+                        $record['secure'] = true;
+                        break;
+                    case 'httponly':
+                        $record['httpOnly'] = true;
+                        break;
+                    case 'samesite':
+                        if ($attributeValue !== '') {
+                            $record['sameSite'] = ucfirst(strtolower($attributeValue));
+                        }
+                        break;
+                }
+            }
+
+            if (!isset($record['domain']) && $defaultDomain !== '') {
+                $record['domain'] = $defaultDomain;
+            }
+
+            if (!isset($record['path']) && $defaultPath !== '') {
+                $record['path'] = $defaultPath;
+            }
+
+            if (!isset($record['secure']) && $defaultSecure) {
+                $record['secure'] = true;
+            }
+
+            $this->cookies[$name] = (string) $record['value'];
+            $this->cookieRecords[$name] = $record;
         }
+    }
+
+    private function resolveDefaultCookiePath(string $responseUrl): string
+    {
+        $parts = parse_url($responseUrl);
+        if (!is_array($parts)) {
+            return '/';
+        }
+
+        $path = trim((string) ($parts['path'] ?? '/'));
+        if ($path === '' || $path === '/') {
+            return '/';
+        }
+
+        $slashPosition = strrpos($path, '/');
+        if ($slashPosition === false || $slashPosition === 0) {
+            return '/';
+        }
+
+        return substr($path, 0, $slashPosition + 1);
     }
 
     /**

@@ -96,6 +96,51 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertArrayHasKey('error', $payload);
     }
 
+    public function testParseRunCodeResultDecodesQuotedSentinelInsideLegacyResultSection(): void
+    {
+        $payload = dashboardSummaryBrowserParseRunCodeResult([
+            'stdout' =>
+                "### Result\n" .
+                'generic [ref=e156]: ' .
+                "\"__DASHBOARD_SUMMARY_BROWSER_CHECK__{\\\"dashboard_summary_browser_check\\\":true,\\\"ok\\\":true,\\\"threshold_badge_before\\\":\\\"Schwellwert 90,0 %\\\"}\"\n" .
+                "### Ran Playwright code\n",
+        ]);
+
+        self::assertTrue($payload['ok']);
+        self::assertSame('Schwellwert 90,0 %', $payload['threshold_badge_before']);
+    }
+
+    public function testBuildRunCodeSnippetPreservesScopedCookieMetadata(): void
+    {
+        $config = $this->browserSnippetConfig();
+        $config['session_cookies'] = [
+            [
+                'name' => 'ci_session',
+                'value' => 'session-value',
+                'domain' => 'example.test',
+                'path' => '/app/',
+                'secure' => true,
+                'httpOnly' => true,
+                'sameSite' => 'Lax',
+            ],
+        ];
+
+        $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($config);
+
+        self::assertStringContainsString('"domain":"example.test"', $snippet);
+        self::assertStringContainsString('"path":"/app/"', $snippet);
+        self::assertStringContainsString('"secure":true', $snippet);
+        self::assertStringContainsString('"httpOnly":true', $snippet);
+        self::assertStringContainsString('"sameSite":"Lax"', $snippet);
+        self::assertStringContainsString('const cookieHost = "nginx";', $snippet);
+        self::assertStringContainsString(
+            'seededCookie.domain = normalizedDomain !== \'\' ? normalizedDomain : cookieHost;',
+            $snippet,
+        );
+        self::assertStringContainsString('seededCookie.url = cookieUrl;', $snippet);
+        self::assertStringNotContainsString('new URL(cookieUrl)', $snippet);
+    }
+
     public function testParseRunCodeResultRejectsMissingResultSection(): void
     {
         $this->expectException(GateAssertionException::class);
@@ -430,7 +475,7 @@ class DashboardIntegrationSmokeTest extends TestCase
      * @return array{
      *   target_url:string,
      *   cookie_url:string,
-     *   session_cookies:array<int, array{name:string, value:string}>,
+     *   session_cookies:array<int, array<string, mixed>>,
      *   start_date:string,
      *   end_date:string,
      *   expected_summary:array{target_total:int,booked_total:int,open_total:int,fill_rate:float,threshold:float}

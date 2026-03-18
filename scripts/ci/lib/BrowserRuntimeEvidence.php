@@ -23,8 +23,21 @@ function resolveBrowserCookieUrl(string $targetUrl): string
     }
 
     $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+    $path = (string) ($parts['path'] ?? '/');
 
-    return $parts['scheme'] . '://' . $parts['host'] . $port . '/';
+    $indexPagePosition = strpos($path, '/index.php');
+    if ($indexPagePosition !== false) {
+        $path = substr($path, 0, $indexPagePosition + 1);
+    } elseif ($path !== '' && $path !== '/') {
+        $slashPosition = strrpos($path, '/');
+        $path = $slashPosition === false ? '/' : substr($path, 0, $slashPosition + 1);
+    }
+
+    if ($path === '') {
+        $path = '/';
+    }
+
+    return $parts['scheme'] . '://' . $parts['host'] . $port . $path;
 }
 
 /**
@@ -357,7 +370,7 @@ function collectBookingPageBrowserEvidence(array $config): array
  *   repo_root:string,
  *   target_url:string,
  *   artifacts_dir:string,
- *   session_cookies:array<int, array{name:string, value:string}>,
+ *   session_cookies:array<int, array<string, mixed>>,
  *   start_date:string,
  *   end_date:string,
  *   expected_summary:array{

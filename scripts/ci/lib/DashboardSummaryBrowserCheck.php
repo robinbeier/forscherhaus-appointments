@@ -12,7 +12,7 @@ use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
  * @param array{
  *   target_url:string,
  *   cookie_url:string,
- *   session_cookies:array<int, array{name:string, value:string}>,
+ *   session_cookies:array<int, array<string, mixed>>,
  *   start_date:string,
  *   end_date:string,
  *   expected_summary:array{
@@ -32,6 +32,10 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
     );
     $encodedCookieUrl = json_encode(
         $config['cookie_url'],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    );
+    $encodedCookieHost = json_encode(
+        (string) (parse_url($config['cookie_url'], PHP_URL_HOST) ?? ''),
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
     $encodedSessionCookies = json_encode(
@@ -57,6 +61,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       const updatedThreshold = '0.35';
       const targetUrl = __TARGET_URL__;
       const cookieUrl = __COOKIE_URL__;
+      const cookieHost = __COOKIE_HOST__;
       const sessionCookies = __SESSION_COOKIES__;
       const requestedStartDate = __START_DATE__;
       const requestedEndDate = __END_DATE__;
@@ -184,11 +189,37 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       const seedAuthenticatedSession = async () => {
         currentStep = 'seed_authenticated_session';
         await page.context().addCookies(
-          sessionCookies.map((cookie) => ({
-            name: String(cookie.name || ''),
-            value: String(cookie.value || ''),
-            url: cookieUrl,
-          }))
+          sessionCookies.map((cookie) => {
+            const seededCookie = {
+              name: String(cookie.name || ''),
+              value: String(cookie.value || ''),
+            };
+            const normalizedDomain = String(cookie.domain || '').trim();
+            const normalizedPath = String(cookie.path || '').trim();
+
+            if (normalizedDomain !== '' || normalizedPath !== '') {
+              seededCookie.domain = normalizedDomain !== '' ? normalizedDomain : cookieHost;
+              seededCookie.path = normalizedPath !== '' ? normalizedPath : '/';
+
+              if (cookie.secure === true) {
+                seededCookie.secure = true;
+              }
+
+              if (cookie.httpOnly === true) {
+                seededCookie.httpOnly = true;
+              }
+
+              const normalizedSameSite = String(cookie.sameSite || '').trim();
+              if (normalizedSameSite !== '') {
+                seededCookie.sameSite = normalizedSameSite;
+              }
+
+              return seededCookie;
+            }
+
+            seededCookie.url = cookieUrl;
+            return seededCookie;
+          })
         );
       };
       const openAuthenticatedDashboard = async () => {
@@ -607,6 +638,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         strtr($snippet, [
             '__TARGET_URL__' => $encodedTargetUrl,
             '__COOKIE_URL__' => $encodedCookieUrl,
+            '__COOKIE_HOST__' => $encodedCookieHost,
             '__SESSION_COOKIES__' => $encodedSessionCookies,
             '__START_DATE__' => $encodedStartDate,
             '__END_DATE__' => $encodedEndDate,

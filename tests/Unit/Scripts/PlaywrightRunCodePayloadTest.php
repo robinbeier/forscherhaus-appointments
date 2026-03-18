@@ -38,12 +38,38 @@ class PlaywrightRunCodePayloadTest extends TestCase
         self::assertSame(4, $payload['value']);
     }
 
-    public function testParsePlaywrightRunCodeJsonPayloadRejectsMissingSentinelPayload(): void
+    public function testParsePlaywrightRunCodeJsonPayloadFallsBackToLegacyResultSection(): void
+    {
+        $payload = parsePlaywrightRunCodeJsonPayload(
+            "### Result\n{\"ok\":true,\"value\":7}\n### Ran Playwright code\n",
+            '__PAYLOAD__',
+            'test run-code',
+        );
+
+        self::assertTrue($payload['ok']);
+        self::assertSame(7, $payload['value']);
+    }
+
+    public function testParsePlaywrightRunCodeJsonPayloadDecodesQuotedSentinelInsideLegacyResultSection(): void
+    {
+        $payload = parsePlaywrightRunCodeJsonPayload(
+            "### Result\n" .
+                "generic [ref=e156]: \"__PAYLOAD__{\\\"ok\\\":true,\\\"value\\\":9}\"\n" .
+                "### Ran Playwright code\n",
+            '__PAYLOAD__',
+            'test run-code',
+        );
+
+        self::assertTrue($payload['ok']);
+        self::assertSame(9, $payload['value']);
+    }
+
+    public function testParsePlaywrightRunCodeJsonPayloadRejectsMissingPayload(): void
     {
         $this->expectException(GateAssertionException::class);
         $this->expectExceptionMessage('Could not parse test run-code payload');
 
-        parsePlaywrightRunCodeJsonPayload("### Result\n{\"ok\":true}\n", '__PAYLOAD__', 'test run-code');
+        parsePlaywrightRunCodeJsonPayload("### Debug\nno payload here\n", '__PAYLOAD__', 'test run-code');
     }
 
     public function testParsePlaywrightRunCodeJsonPayloadRejectsInvalidJson(): void

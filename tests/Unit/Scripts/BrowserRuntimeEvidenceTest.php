@@ -74,6 +74,14 @@ class BrowserRuntimeEvidenceTest extends TestCase
         self::assertSame('http://localhost/booking', resolveBookingPageTargetUrl('http://localhost', ''));
     }
 
+    public function testResolveBrowserCookieUrlKeepsAppSubdirectory(): void
+    {
+        self::assertSame(
+            'https://example.test/app/',
+            \CiRuntimeEvidence\resolveBrowserCookieUrl('https://example.test/app/index.php/dashboard'),
+        );
+    }
+
     public function testResolvePlaywrightArtifactPathSupportsRelativeAndAbsoluteMarkdownLinks(): void
     {
         $output = <<<'TXT'
