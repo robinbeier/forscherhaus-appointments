@@ -18,5 +18,11 @@ class BookingConfirmationDownloadSnippetTest extends TestCase
         self::assertStringContainsString('__BOOKING_CONFIRMATION_PDF_GATE__', $snippet);
         self::assertStringContainsString('console.log(`${resultPrefix}${JSON.stringify(payload)}`);', $snippet);
         self::assertStringNotContainsString('### Result', $snippet);
+        self::assertNotFalse(strpos($snippet, 'const emitResult = (payload) => {'));
+        self::assertNotFalse(strpos($snippet, 'if (!downloadPath) {'));
+        self::assertLessThan(
+            strpos($snippet, 'if (!downloadPath) {'),
+            strpos($snippet, 'const emitResult = (payload) => {'),
+        );
     }
 }

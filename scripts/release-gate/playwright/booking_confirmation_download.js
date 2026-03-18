@@ -16,6 +16,11 @@ async (page) => {
         error: null,
     };
 
+    const emitResult = (payload) => {
+        console.log(`${resultPrefix}${JSON.stringify(payload)}`);
+        return payload;
+    };
+
     if (!downloadPath) {
         result.error = 'Missing BOOKING_GATE_DOWNLOAD_PATH.';
         return emitResult(result);
@@ -40,11 +45,6 @@ async (page) => {
         }
 
         result.console_errors.push(String(message.text()));
-    };
-
-    const emitResult = (payload) => {
-        console.log(`${resultPrefix}${JSON.stringify(payload)}`);
-        return payload;
     };
 
     page.on('pageerror', onPageError);
