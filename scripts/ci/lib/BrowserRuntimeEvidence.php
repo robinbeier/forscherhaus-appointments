@@ -369,7 +369,10 @@ function runDashboardSummaryBrowserCheck(array $config): array
     $sessionId = buildBrowserRuntimeEvidenceSessionId();
     $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
         'target_url' => $config['target_url'],
-        'session_cookies' => \normalizeCookieRecordsForPlaywright($config['session_cookies'], $config['target_url']),
+        'session_cookies' => \ReleaseGate\normalizeCookieRecordsForPlaywright(
+            $config['session_cookies'],
+            $config['target_url'],
+        ),
         'start_date' => $config['start_date'],
         'end_date' => $config['end_date'],
         'expected_summary' => $config['expected_summary'],
@@ -527,9 +530,14 @@ function resolveBookingPageTargetUrl(string $baseUrl, string $indexPage): string
  */
 function runPwcliCommand(array $config, string $sessionId, array $arguments, int $timeoutSeconds): array
 {
-    $arguments = prepareConfiguredPlaywrightCommandArguments($arguments, (bool) $config['headed']);
+    $arguments = \ReleaseGate\prepareConfiguredPlaywrightCommandArguments($arguments, (bool) $config['headed']);
 
-    $command = ['bash', $config['pwcli_path'], ...buildPlaywrightSessionArguments($sessionId), ...$arguments];
+    $command = [
+        'bash',
+        $config['pwcli_path'],
+        ...\ReleaseGate\buildPlaywrightSessionArguments($sessionId),
+        ...$arguments,
+    ];
 
     return GateProcessRunner::run($command, $config['repo_root'], null, $timeoutSeconds);
 }

@@ -10,7 +10,7 @@ use ReleaseGate\GateAssertionException;
 require_once __DIR__ . '/../../../scripts/ci/lib/DashboardSummaryBrowserCheck.php';
 require_once __DIR__ . '/../../../scripts/release-gate/lib/PlaywrightCookieRecords.php';
 
-use function normalizeCookieRecordsForPlaywright;
+use function ReleaseGate\normalizeCookieRecordsForPlaywright;
 
 class DashboardIntegrationSmokeTest extends TestCase
 {
@@ -38,6 +38,9 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString('flatpickrInstance.setDate', $snippet);
         self::assertStringContainsString('requested_range_applied', $snippet);
         self::assertStringContainsString('resolveDashboardLocale', $snippet);
+        self::assertStringContainsString('page.addInitScript((installedHelperName) => {', $snippet);
+        self::assertStringContainsString("const helperName = '__dashboardSummaryCheckHelpers';", $snippet);
+        self::assertStringContainsString('window[installedHelperName] = {', $snippet);
         self::assertStringNotContainsString('toISOString().slice(0, 10)', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-total', $snippet);
         self::assertStringContainsString('#dashboard-summary-open-share', $snippet);
@@ -67,6 +70,20 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringNotContainsString("await page.fill('#username', username)", $snippet);
         self::assertStringNotContainsString("await page.fill('#password', password)", $snippet);
         self::assertStringNotContainsString("window.jQuery?._data?.(form, 'events')?.submit", $snippet);
+        self::assertStringNotContainsString('__SUMMARY_HELPERS__', $snippet);
+    }
+
+    public function testBuildRunCodeSnippetInstallsDashboardHelpersBeforeFirstNavigation(): void
+    {
+        $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($this->browserSnippetConfig());
+
+        $installOffset = strpos($snippet, 'await installDashboardHelpers();');
+        $navigateOffset = strpos($snippet, 'await openAuthenticatedDashboard();');
+
+        self::assertNotFalse($installOffset);
+        self::assertNotFalse($navigateOffset);
+        self::assertLessThan($navigateOffset, $installOffset);
+        self::assertStringContainsString("throw new Error('Dashboard summary helpers were not installed.')", $snippet);
     }
 
     public function testParseRunCodeResultReturnsDecodedPayloadFromSentinelOutput(): void

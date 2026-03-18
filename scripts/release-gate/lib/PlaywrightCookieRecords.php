@@ -89,19 +89,3 @@ namespace ReleaseGate {
         return $parts['scheme'] . '://' . $parts['host'] . $port . $normalizedPath;
     }
 }
-
-namespace {
-    /**
-     * @param array<int, array<string, mixed>> $cookieRecords
-     * @return array<int, array<string, mixed>>
-     */
-    function normalizeCookieRecordsForPlaywright(array $cookieRecords, string $targetUrl): array
-    {
-        return \ReleaseGate\normalizeCookieRecordsForPlaywright($cookieRecords, $targetUrl);
-    }
-
-    function resolvePlaywrightCookieUrl(string $targetUrl, string $path = '/'): string
-    {
-        return \ReleaseGate\resolvePlaywrightCookieUrl($targetUrl, $path);
-    }
-}

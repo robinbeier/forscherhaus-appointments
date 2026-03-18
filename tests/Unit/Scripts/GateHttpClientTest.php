@@ -59,6 +59,23 @@ class GateHttpClientTest extends TestCase
         self::assertTrue($records[0]['httpOnly']);
     }
 
+    public function testConsumeSetCookiesDoesNotInferSecureFromHttpsTransport(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+
+        $method = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $method->setAccessible(true);
+        $method->invoke(
+            $client,
+            ['csrf_cookie=token-123; HttpOnly'],
+            'https://example.test/app/index.php/login/validate',
+        );
+
+        $records = $client->cookieRecords();
+        self::assertCount(1, $records);
+        self::assertArrayNotHasKey('secure', $records[0]);
+    }
+
     public function testConsumeSetCookiesPreservesDistinctCookieScopesWithSameName(): void
     {
         $client = new GateHttpClient('https://example.test/app', 'index.php');
@@ -196,5 +213,35 @@ class GateHttpClientTest extends TestCase
         self::assertCount(2, $records);
         self::assertSame('https://example.test/login/', $records[0]['url']);
         self::assertSame('https://example.test/auth/', $records[1]['url']);
+    }
+
+    public function testConsumeResponseCookieBlocksNormalizesRelativeRedirectTargets(): void
+    {
+        $client = new GateHttpClient('https://example.test', '');
+
+        $method = new ReflectionMethod(GateHttpClient::class, 'consumeResponseCookieBlocks');
+        $method->setAccessible(true);
+        $method->invoke(
+            $client,
+            [
+                [
+                    'headers' => [
+                        'location' => ['../auth/final?step=2#details'],
+                    ],
+                    'set_cookies' => ['login_step=one; HttpOnly'],
+                ],
+                [
+                    'headers' => [],
+                    'set_cookies' => ['login_final=two; HttpOnly'],
+                ],
+            ],
+            'https://example.test/app/login/start',
+            'https://example.test/app/auth/final?step=2#details',
+        );
+
+        $records = $client->cookieRecords();
+        self::assertCount(2, $records);
+        self::assertSame('https://example.test/app/login/', $records[0]['url']);
+        self::assertSame('https://example.test/app/auth/', $records[1]['url']);
     }
 }

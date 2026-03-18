@@ -1045,7 +1045,7 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
 
     $summary = $metricsPayload['summary'];
     $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'dashboard');
-    $sessionCookies = normalizeCookieRecordsForPlaywright($client->cookieRecords(), $targetUrl);
+    $sessionCookies = \ReleaseGate\normalizeCookieRecordsForPlaywright($client->cookieRecords(), $targetUrl);
 
     if ($sessionCookies === []) {
         throw new GateAssertionException(
