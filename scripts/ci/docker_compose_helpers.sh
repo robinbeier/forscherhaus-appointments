@@ -76,6 +76,26 @@ ci_docker_prepare_runtime() {
     ci_docker_configure_mysql_data_path
 }
 
+ci_docker_php_fpm_inputs_changed() {
+    local base_ref="${1:?base ref is required}"
+    local changed_paths
+
+    changed_paths="$(git_ci_collect_changed_paths "$base_ref")"
+
+    while IFS= read -r path; do
+        case "$path" in
+            docker-compose.yml|\
+            docker/compose.ci-local.yml|\
+            docker/php-fpm/*|\
+            docker/php-fpm/*/*)
+                return 0
+                ;;
+        esac
+    done <<< "$changed_paths"
+
+    return 1
+}
+
 ci_docker_init_compose() {
     local log_prefix="${1:-ci-docker}"
     local local_ci_compose_override="${EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH:-docker/compose.ci-local.yml}"
@@ -111,6 +131,18 @@ ci_docker_compose() {
     "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
 }
 
+ci_docker_build_php_fpm_if_inputs_changed() {
+    local base_ref="${1:?base ref is required}"
+    local log_prefix="${2:-ci-docker}"
+
+    if ! ci_docker_php_fpm_inputs_changed "$base_ref"; then
+        return 0
+    fi
+
+    echo "[$log_prefix] Rebuilding php-fpm image because Docker runtime inputs changed."
+    ci_docker_compose build php-fpm
+}
+
 ci_docker_wait_for_mysql_readiness() {
     local log_prefix="${1:-ci-docker}"
     local max_attempts=60
@@ -138,12 +170,37 @@ ci_docker_wait_for_mysql_readiness() {
     return 0
 }
 
+ci_docker_wait_for_service_exec() {
+    local service="${1:?service is required}"
+    local log_prefix="${2:-ci-docker}"
+    shift 2
+
+    if [[ "$#" -eq 0 ]]; then
+        echo "[$log_prefix] ci_docker_wait_for_service_exec requires a command." >&2
+        return 1
+    fi
+
+    local max_attempts=30
+    local attempt=1
+
+    until ci_docker_compose exec -T "$service" "$@" >/dev/null 2>&1; do
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            echo "[$log_prefix] ${service} exec readiness timed out after ${max_attempts} attempts." >&2
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    return 0
+}
+
 ci_docker_install_seed_instance() {
     local log_prefix="${1:-ci-docker}"
     shift
 
     local attempt
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4 5; do
         if ci_docker_compose "$@"; then
             return 0
         fi

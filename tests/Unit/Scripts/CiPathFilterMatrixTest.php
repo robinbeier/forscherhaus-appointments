@@ -240,6 +240,57 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testDashboardSummaryBrowserCheckLibraryChangeTriggersIntegrationSmokeAndBootstrap(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/lib/DashboardSummaryBrowserCheck.php']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertFalse($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
+        self::assertFalse($matches['write_contract_booking']);
+        self::assertFalse($matches['write_contract_api']);
+    }
+
+    public function testGitHelpersChangeTriggersIntegrationSmokeAndBootstrap(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/git_helpers.sh']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertFalse($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
+        self::assertFalse($matches['write_contract_booking']);
+        self::assertFalse($matches['write_contract_api']);
+    }
+
+    public function testDockerComposeHelpersChangeTriggersIntegrationSmokeAndBootstrap(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/docker_compose_helpers.sh']);
+
+        self::assertFalse($matches['request_contracts_required']);
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertFalse($matches['coverage_required']);
+        self::assertFalse($matches['heavy_job_trends_required']);
+        self::assertFalse($matches['pdf_renderer_latency_required']);
+        self::assertFalse($matches['api_contract']);
+        self::assertFalse($matches['booking_flows']);
+        self::assertTrue($matches['integration_smoke']);
+        self::assertFalse($matches['ldap_guardrail_required']);
+        self::assertFalse($matches['write_contract_booking']);
+        self::assertFalse($matches['write_contract_api']);
+    }
+
     public function testLdapConstantsChangeTriggersLdapGuardrailFilter(): void
     {
         $matches = $this->applyFilters(['application/config/constants.php']);

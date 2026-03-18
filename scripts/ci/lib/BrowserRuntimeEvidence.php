@@ -6,6 +6,7 @@ namespace CiRuntimeEvidence;
 
 require_once __DIR__ . '/../../release-gate/lib/GateProcessRunner.php';
 require_once __DIR__ . '/../../release-gate/lib/GateAssertions.php';
+require_once __DIR__ . '/DashboardSummaryBrowserCheck.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateProcessRunner;
@@ -125,7 +126,7 @@ function collectBookingPageBrowserEvidence(array $config): array
         }
 
         $bootstrap = GateProcessRunner::run(
-            ['bash', $config['pwcli_path'], '--help'],
+            ['bash', $config['pwcli_path'], 'install-browser'],
             $config['repo_root'],
             null,
             $config['bootstrap_timeout'],
@@ -337,6 +338,77 @@ function collectBookingPageBrowserEvidence(array $config): array
     ];
 }
 
+/**
+ * @param array{
+ *   repo_root:string,
+ *   target_url:string,
+ *   artifacts_dir:string,
+ *   username:string,
+ *   password:string,
+ *   start_date:string,
+ *   end_date:string,
+ *   expected_summary:array{
+ *     target_total:int|float|string,
+ *     booked_total:int|float|string,
+ *     open_total:int|float|string,
+ *     fill_rate:int|float|string
+ *   },
+ *   pwcli_path:string,
+ *   bootstrap_timeout:int,
+ *   open_timeout:int,
+ *   headed:bool
+ * } $config
+ * @return array<string, mixed>
+ */
+function runDashboardSummaryBrowserCheck(array $config): array
+{
+    $artifactsDir = rtrim($config['artifacts_dir'], '/');
+    $sessionId = buildBrowserRuntimeEvidenceSessionId();
+    $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
+        'username' => $config['username'],
+        'password' => $config['password'],
+        'target_url' => $config['target_url'],
+        'start_date' => $config['start_date'],
+        'end_date' => $config['end_date'],
+        'expected_summary' => $config['expected_summary'],
+    ]);
+
+    ensureDirectory($artifactsDir);
+    ensureFileReadable($config['pwcli_path'], 'Playwright wrapper');
+
+    $probe = GateProcessRunner::run(['bash', '-lc', 'command -v npx >/dev/null 2>&1'], $config['repo_root'], null, 10);
+
+    if (($probe['exit_code'] ?? 1) !== 0) {
+        throw new RuntimeException('npx was not found on PATH.');
+    }
+
+    $bootstrap = GateProcessRunner::run(
+        ['bash', $config['pwcli_path'], 'install-browser'],
+        $config['repo_root'],
+        null,
+        $config['bootstrap_timeout'],
+    );
+    assertPlaywrightCommandSucceeded($bootstrap, 'Bootstrap Playwright CLI');
+
+    try {
+        $result = runPwcliCommand($config, $sessionId, ['open', 'about:blank'], $config['open_timeout']);
+        assertPlaywrightCommandSucceeded($result, 'Open browser for dashboard summary render');
+
+        $result = runPwcliCommand($config, $sessionId, ['goto', $config['target_url']], $config['open_timeout']);
+        assertPlaywrightCommandSucceeded($result, 'Open dashboard page');
+
+        $result = runPwcliCommand($config, $sessionId, ['run-code', $runCodeSnippet], $config['open_timeout'] + 15);
+        assertPlaywrightCommandSucceeded($result, 'Render dashboard summary in browser');
+
+        return \dashboardSummaryBrowserAssertPayload(\dashboardSummaryBrowserParseRunCodeResult($result));
+    } finally {
+        try {
+            runPwcliCommand($config, $sessionId, ['close'], 10);
+        } catch (Throwable) {
+        }
+    }
+}
+
 function shouldCollectBrowserRuntimeEvidence(string $mode, bool $suiteFailed): bool
 {
     return match ($mode) {
@@ -456,9 +528,34 @@ function resolveBookingPageTargetUrl(string $baseUrl, string $indexPage): string
  */
 function runPwcliCommand(array $config, string $sessionId, array $arguments, int $timeoutSeconds): array
 {
+    if (($arguments[0] ?? null) === 'open' && !browserArgumentProvided($arguments)) {
+        $arguments[] = '--browser=' . resolvePlaywrightBrowserName();
+    }
+
     $command = ['bash', $config['pwcli_path'], '--session', $sessionId, ...$arguments];
 
     return GateProcessRunner::run($command, $config['repo_root'], null, $timeoutSeconds);
+}
+
+/**
+ * @param list<string> $arguments
+ */
+function browserArgumentProvided(array $arguments): bool
+{
+    foreach ($arguments as $argument) {
+        if (str_starts_with((string) $argument, '--browser=')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function resolvePlaywrightBrowserName(): string
+{
+    $configuredBrowser = trim((string) getenv('PLAYWRIGHT_MCP_BROWSER'));
+
+    return $configuredBrowser !== '' ? $configuredBrowser : 'firefox';
 }
 
 /**

@@ -68,3 +68,8 @@ The gate writes a JSON report with:
 - `summary`: pass/fail counts and exit code.
 - `failure`: present on failure with exception details.
 - `cleanup_warnings`: optional Playwright session cleanup warnings.
+
+The bundled Playwright wrapper auto-installs its default Firefox path on first
+use and prepares the required Linux browser dependencies inside the validation
+container. Local and CI gate runs therefore use the same browser path across
+Linux architectures.

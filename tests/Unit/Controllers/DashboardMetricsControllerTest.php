@@ -64,6 +64,12 @@ class DashboardMetricsControllerTest extends TestCase
                 'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
             ],
         ];
+        $summary = [
+            'target_total' => 12,
+            'booked_total' => 8,
+            'open_total' => 4,
+            'fill_rate' => 8 / 12,
+        ];
 
         $metricsLibrary = $this->createMock(Dashboard_metrics::class);
         $metricsLibrary
@@ -86,6 +92,7 @@ class DashboardMetricsControllerTest extends TestCase
                 ],
             )
             ->willReturn($expected);
+        $metricsLibrary->expects($this->once())->method('summarize')->with($expected, 0.73)->willReturn($summary);
 
         $controller = $this->createController();
         $controller->dashboard_metrics = $metricsLibrary;
@@ -94,7 +101,12 @@ class DashboardMetricsControllerTest extends TestCase
 
         $response = json_decode(get_instance()->output->get_output(), true);
 
-        $this->assertSame($expected, $response);
+        $this->assertSame($expected, $response['metrics']);
+        $this->assertSame(12, $response['summary']['target_total']);
+        $this->assertSame(8, $response['summary']['booked_total']);
+        $this->assertSame(4, $response['summary']['open_total']);
+        $this->assertEqualsWithDelta(8 / 12, $response['summary']['fill_rate'], 0.0001);
+        $this->assertSame(0.73, $response['summary']['threshold']);
         $this->assertTrue($controller->persistCalled);
         $this->assertSame(11, $controller->persistUserId);
         $this->assertSame('2026-11-24', $controller->persistStartDate);
@@ -187,6 +199,60 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertFalse($controller->persistCalled);
     }
 
+    public function testResolveDashboardNumberLocaleMapsLegacyLanguageCodes(): void
+    {
+        $controller = $this->createController();
+
+        $this->assertSame('de-DE', $controller->callResolveDashboardNumberLocale('de'));
+        $this->assertSame('en-US', $controller->callResolveDashboardNumberLocale('en'));
+        $this->assertSame('bg-BG', $controller->callResolveDashboardNumberLocale('bu'));
+        $this->assertSame('sr-RS', $controller->callResolveDashboardNumberLocale('rs'));
+        $this->assertSame('fr', $controller->callResolveDashboardNumberLocale('fr'));
+        $this->assertSame('de-DE', $controller->callResolveDashboardNumberLocale(''));
+    }
+
+    public function testBuildAdminSummaryPreservesOverbookedFillRate(): void
+    {
+        $controller = $this->createController();
+
+        $summary = $controller->callBuildAdminSummary(
+            [
+                'target_total' => 20,
+                'booked_total' => 22,
+                'open_total' => 0,
+                'fill_rate' => 1.1,
+            ],
+            0.9,
+        );
+
+        $this->assertSame(20, $summary['target_total']);
+        $this->assertSame(22, $summary['booked_total']);
+        $this->assertSame(0, $summary['open_total']);
+        $this->assertSame(1.1, $summary['fill_rate']);
+        $this->assertSame(0.9, $summary['threshold']);
+    }
+
+    public function testBuildAdminSummaryPreservesZeroStateTotals(): void
+    {
+        $controller = $this->createController();
+
+        $summary = $controller->callBuildAdminSummary(
+            [
+                'target_total' => 0,
+                'booked_total' => 0,
+                'open_total' => 0,
+                'fill_rate' => 0,
+            ],
+            0.9,
+        );
+
+        $this->assertSame(0, $summary['target_total']);
+        $this->assertSame(0, $summary['booked_total']);
+        $this->assertSame(0, $summary['open_total']);
+        $this->assertSame(0.0, $summary['fill_rate']);
+        $this->assertSame(0.9, $summary['threshold']);
+    }
+
     private function createController(): object
     {
         return new class extends Dashboard {
@@ -211,6 +277,16 @@ class DashboardMetricsControllerTest extends TestCase
             protected function getConfiguredThreshold(): float
             {
                 return 0.9;
+            }
+
+            public function callResolveDashboardNumberLocale(string $languageCode): string
+            {
+                return $this->resolveDashboardNumberLocale($languageCode);
+            }
+
+            public function callBuildAdminSummary(array $summary, float $threshold): array
+            {
+                return $this->buildAdminSummary($summary, $threshold);
             }
         };
     }

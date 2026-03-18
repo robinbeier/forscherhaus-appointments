@@ -13,6 +13,7 @@ use function CiRuntimeEvidence\buildDefaultBrowserRuntimeEvidenceArtifactsDir;
 use function CiRuntimeEvidence\parseBrowserRuntimeEvidenceMode;
 use function CiRuntimeEvidence\resolveBookingPageTargetUrl;
 use function CiRuntimeEvidence\resolvePlaywrightArtifactPath;
+use function CiRuntimeEvidence\runPwcliCommand;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidence;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidenceForChecks;
 
@@ -95,5 +96,210 @@ class BrowserRuntimeEvidenceTest extends TestCase
         $path = buildDefaultBrowserRuntimeEvidenceArtifactsDir('/repo');
 
         self::assertStringStartsWith('/repo/storage/logs/ci/dashboard-integration-smoke-browser-', $path);
+    }
+
+    public function testRunPwcliCommandDefaultsToFirefoxForOpenCommands(): void
+    {
+        $capturePath = tempnam(sys_get_temp_dir(), 'pwcli-capture-');
+        $wrapperPath = tempnam(sys_get_temp_dir(), 'pwcli-wrapper-');
+        self::assertIsString($capturePath);
+        self::assertIsString($wrapperPath);
+
+        try {
+            file_put_contents(
+                $wrapperPath,
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" > " .
+                    escapeshellarg($capturePath) .
+                    "\n",
+            );
+            chmod($wrapperPath, 0777);
+
+            $result = runPwcliCommand(
+                [
+                    'pwcli_path' => $wrapperPath,
+                    'repo_root' => sys_get_temp_dir(),
+                    'headed' => false,
+                ],
+                'session-123',
+                ['open', 'http://example.test'],
+                5,
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $capturedArgs = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedArgs);
+            self::assertContains('--session', $capturedArgs);
+            self::assertContains('session-123', $capturedArgs);
+            self::assertContains('open', $capturedArgs);
+            self::assertContains('http://example.test', $capturedArgs);
+            self::assertContains('--browser=firefox', $capturedArgs);
+        } finally {
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_file($wrapperPath)) {
+                unlink($wrapperPath);
+            }
+        }
+    }
+
+    public function testRunPwcliCommandRespectsConfiguredPlaywrightBrowserOverride(): void
+    {
+        $capturePath = tempnam(sys_get_temp_dir(), 'pwcli-capture-');
+        $wrapperPath = tempnam(sys_get_temp_dir(), 'pwcli-wrapper-');
+        self::assertIsString($capturePath);
+        self::assertIsString($wrapperPath);
+
+        $previousBrowser = getenv('PLAYWRIGHT_MCP_BROWSER');
+
+        try {
+            file_put_contents(
+                $wrapperPath,
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" > " .
+                    escapeshellarg($capturePath) .
+                    "\n",
+            );
+            chmod($wrapperPath, 0777);
+            putenv('PLAYWRIGHT_MCP_BROWSER=chromium');
+
+            $result = runPwcliCommand(
+                [
+                    'pwcli_path' => $wrapperPath,
+                    'repo_root' => sys_get_temp_dir(),
+                    'headed' => false,
+                ],
+                'session-123',
+                ['open', 'http://example.test'],
+                5,
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $capturedArgs = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedArgs);
+            self::assertContains('--browser=chromium', $capturedArgs);
+            self::assertNotContains('--browser=firefox', $capturedArgs);
+        } finally {
+            if ($previousBrowser === false) {
+                putenv('PLAYWRIGHT_MCP_BROWSER');
+            } else {
+                putenv('PLAYWRIGHT_MCP_BROWSER=' . $previousBrowser);
+            }
+
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_file($wrapperPath)) {
+                unlink($wrapperPath);
+            }
+        }
+    }
+
+    public function testPlaywrightCliWrapperSkipsBrowserInstallForHelp(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-help-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $npxPath = $binDir . '/npx';
+        $wrapperPath = __DIR__ . '/../../../scripts/release-gate/playwright/playwright_cli.sh';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " . escapeshellarg($capturePath) . "\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_MCP_READY_DIR=%s bash %s run-code --help',
+            escapeshellarg($binDir),
+            escapeshellarg($tempDir . '/ready'),
+            escapeshellarg($wrapperPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(1, $capturedInvocations);
+            self::assertStringContainsString('playwright-cli run-code --help', $capturedInvocations[0]);
+            self::assertStringNotContainsString('playwright --version', $capturedInvocations[0]);
+            self::assertStringNotContainsString(' install ', $capturedInvocations[0]);
+        } finally {
+            if (is_file($npxPath)) {
+                unlink($npxPath);
+            }
+
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_dir($binDir)) {
+                rmdir($binDir);
+            }
+
+            if (is_dir($tempDir)) {
+                rmdir($tempDir);
+            }
+        }
+    }
+
+    public function testPlaywrightCliWrapperInstallBrowserBootstrapsWithoutForwardingPseudoCommand(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-install-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $npxPath = $binDir . '/npx';
+        $wrapperPath = __DIR__ . '/../../../scripts/release-gate/playwright/playwright_cli.sh';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.0.0\\n'\nfi\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser',
+            escapeshellarg($binDir),
+            escapeshellarg($tempDir . '/ready'),
+            escapeshellarg($wrapperPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(2, $capturedInvocations);
+            self::assertStringContainsString('playwright --version', $capturedInvocations[0]);
+            self::assertStringContainsString('playwright install', $capturedInvocations[1]);
+            self::assertStringContainsString('firefox', $capturedInvocations[1]);
+            self::assertStringNotContainsString('playwright-cli install-browser', implode("\n", $capturedInvocations));
+        } finally {
+            if (is_file($npxPath)) {
+                unlink($npxPath);
+            }
+
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_dir($binDir)) {
+                rmdir($binDir);
+            }
+
+            if (is_dir($tempDir)) {
+                rmdir($tempDir);
+            }
+        }
     }
 }

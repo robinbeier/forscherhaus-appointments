@@ -65,16 +65,31 @@ final class GateAssertions
     public static function assertMetricsPayload(mixed $payload, bool $requireNonEmpty): array
     {
         if (!is_array($payload)) {
-            throw new GateAssertionException('Dashboard metrics payload must be an array.');
+            throw new GateAssertionException('Dashboard metrics payload must be an object.');
         }
 
-        if ($requireNonEmpty && count($payload) === 0) {
+        if (!array_key_exists('metrics', $payload)) {
+            throw new GateAssertionException('Dashboard metrics payload misses "metrics".');
+        }
+
+        if (!array_key_exists('summary', $payload)) {
+            throw new GateAssertionException('Dashboard metrics payload misses "summary".');
+        }
+
+        $metrics = $payload['metrics'];
+        $summaryPayload = $payload['summary'];
+
+        if (!is_array($metrics)) {
+            throw new GateAssertionException('Dashboard metrics payload.metrics must be an array.');
+        }
+
+        if ($requireNonEmpty && count($metrics) === 0) {
             throw new GateAssertionException('Dashboard metrics payload is empty but non-empty metrics were required.');
         }
 
         $bookedTotal = 0;
 
-        foreach ($payload as $index => $row) {
+        foreach ($metrics as $index => $row) {
             $context = 'metrics[' . $index . ']';
 
             if (!is_array($row)) {
@@ -157,8 +172,63 @@ final class GateAssertions
             $bookedTotal += $booked;
         }
 
+        if (!is_array($summaryPayload)) {
+            throw new GateAssertionException('Dashboard metrics payload.summary must be an object.');
+        }
+
+        foreach (['booked_total', 'target_total', 'open_total', 'fill_rate', 'threshold'] as $key) {
+            if (!array_key_exists($key, $summaryPayload)) {
+                throw new GateAssertionException('Dashboard metrics payload.summary misses key "' . $key . '".');
+            }
+        }
+
+        $summaryBooked = self::toNonNegativeInt($summaryPayload['booked_total'] ?? null, 'summary.booked_total');
+        if ($summaryBooked !== $bookedTotal) {
+            throw new GateAssertionException(
+                sprintf('summary.booked_total mismatch: expected %d, got %d.', $bookedTotal, $summaryBooked),
+            );
+        }
+
+        $summaryTarget = self::toNonNegativeInt($summaryPayload['target_total'] ?? null, 'summary.target_total');
+        $computedTarget = array_sum(
+            array_map(
+                static fn(array $row): int => max(0, (int) ($row['target'] ?? 0)),
+                array_filter($metrics, static fn($row): bool => is_array($row)),
+            ),
+        );
+
+        if ($summaryTarget !== $computedTarget) {
+            throw new GateAssertionException(
+                sprintf('summary.target_total mismatch: expected %d, got %d.', $computedTarget, $summaryTarget),
+            );
+        }
+
+        $summaryOpen = self::toNonNegativeInt($summaryPayload['open_total'] ?? null, 'summary.open_total');
+        $computedOpen = max($computedTarget - $bookedTotal, 0);
+
+        if ($summaryOpen !== $computedOpen) {
+            throw new GateAssertionException(
+                sprintf('summary.open_total mismatch: expected %d, got %d.', $computedOpen, $summaryOpen),
+            );
+        }
+
+        $summaryFillRate = self::toNonNegativeFloat($summaryPayload['fill_rate'] ?? null, 'summary.fill_rate');
+        $expectedSummaryFillRate = $computedTarget > 0 ? $bookedTotal / $computedTarget : 0.0;
+
+        if (abs($summaryFillRate - $expectedSummaryFillRate) > 0.0001) {
+            throw new GateAssertionException(
+                sprintf(
+                    'summary.fill_rate mismatch: expected %.6f, got %.6f.',
+                    $expectedSummaryFillRate,
+                    $summaryFillRate,
+                ),
+            );
+        }
+
+        self::toNonNegativeFloat($summaryPayload['threshold'] ?? null, 'summary.threshold');
+
         return [
-            'providers' => count($payload),
+            'providers' => count($metrics),
             'booked_total' => $bookedTotal,
         ];
     }

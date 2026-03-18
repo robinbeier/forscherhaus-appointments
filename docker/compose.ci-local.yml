@@ -4,3 +4,6 @@ services:
 
     mysql:
         ports: !reset []
+
+    openldap:
+        ports: !reset []

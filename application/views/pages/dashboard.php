@@ -103,6 +103,80 @@
 
     <div class="row mb-4">
         <div class="col-12">
+            <div class="card dashboard-summary-card">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-lg-row align-items-lg-start gap-3 mb-4">
+                        <div>
+                            <h5 class="mb-1 fw-light"><?= lang('dashboard_summary_title') ?></h5>
+                            <p class="text-muted mb-0"><?= lang('dashboard_summary_subtitle') ?></p>
+                        </div>
+                        <span class="badge bg-light text-dark ms-lg-auto dashboard-summary-threshold-badge" id="dashboard-summary-threshold-badge">
+                            <?= lang('dashboard_summary_threshold_badge') ?>
+                        </span>
+                    </div>
+
+                    <div class="dashboard-summary-progress">
+                        <div class="d-flex justify-content-between align-items-center gap-3 mb-2">
+                            <span class="dashboard-summary-progress-title" id="dashboard-summary-progress-title">
+                                <?= lang('dashboard_summary_progress_label') ?>
+                            </span>
+                            <strong class="dashboard-summary-progress-value" id="dashboard-summary-fill-rate">0.0 %</strong>
+                        </div>
+                        <div
+                            class="dashboard-summary-progress-track"
+                            role="progressbar"
+                            aria-labelledby="dashboard-summary-progress-title"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow="0"
+                            aria-valuetext="0.0 %"
+                            id="dashboard-summary-progress-track"
+                            data-summary-state="idle"
+                        >
+                            <div class="dashboard-summary-progress-booked" id="dashboard-summary-progress-booked"></div>
+                            <div class="dashboard-summary-progress-marker" id="dashboard-summary-progress-marker" aria-hidden="true"></div>
+                        </div>
+                        <div class="dashboard-summary-progress-scale">
+                            <span>0 %</span>
+                            <span>100 %</span>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mt-1">
+                        <div class="col-12 col-md-4">
+                            <div class="dashboard-summary-metric">
+                                <span class="dashboard-summary-metric-label"><?= lang(
+                                    'dashboard_summary_total_parents',
+                                ) ?></span>
+                                <strong class="dashboard-summary-metric-value" id="dashboard-summary-target-total">0</strong>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <div class="dashboard-summary-metric">
+                                <span class="dashboard-summary-metric-label"><?= lang(
+                                    'dashboard_summary_booked',
+                                ) ?></span>
+                                <strong class="dashboard-summary-metric-value" id="dashboard-summary-booked-total">0</strong>
+                                <span class="dashboard-summary-metric-note" id="dashboard-summary-booked-share">0.0 %</span>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <div class="dashboard-summary-metric">
+                                <span class="dashboard-summary-metric-label"><?= lang(
+                                    'dashboard_summary_open',
+                                ) ?></span>
+                                <strong class="dashboard-summary-metric-value" id="dashboard-summary-open-total">0</strong>
+                                <span class="dashboard-summary-metric-note" id="dashboard-summary-open-share">0.0 %</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
             <div class="card">
                 <div class="card-header">
                     <h5 class="mb-0 fw-light">

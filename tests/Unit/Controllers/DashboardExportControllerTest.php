@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Controllers;
 
+use Dashboard_metrics;
 use Dashboard_export;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -19,6 +20,7 @@ use Tests\TestCase;
 
 require_once APPPATH . 'bootstrap/SentryBootstrap.php';
 require_once APPPATH . 'controllers/Dashboard_export.php';
+require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
 class DashboardExportControllerTest extends TestCase
 {
@@ -603,15 +605,24 @@ class DashboardExportControllerTest extends TestCase
 
     private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
     {
-        return new class ($configuredThreshold, $pdfDebugDumpFlag) extends Dashboard_export {
+        $dashboardMetrics = new class extends Dashboard_metrics {
+            public function __construct() {}
+        };
+
+        return new class ($configuredThreshold, $pdfDebugDumpFlag, $dashboardMetrics) extends Dashboard_export {
             private float $configuredThreshold;
 
             private mixed $pdfDebugDumpFlag;
 
-            public function __construct(float $configuredThreshold, mixed $pdfDebugDumpFlag)
-            {
+            public function __construct(
+                float $configuredThreshold,
+                mixed $pdfDebugDumpFlag,
+                Dashboard_metrics $dashboardMetrics,
+            ) {
                 $this->configuredThreshold = $configuredThreshold;
                 $this->pdfDebugDumpFlag = $pdfDebugDumpFlag;
+                $this->dashboardMetrics = $dashboardMetrics;
+                $this->dashboard_metrics = $dashboardMetrics;
             }
 
             public function callResolveThreshold(mixed $thresholdInput): float

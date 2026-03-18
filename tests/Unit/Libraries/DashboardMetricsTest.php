@@ -22,6 +22,135 @@ require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
 class DashboardMetricsTest extends TestCase
 {
+    public function testSummarizeBuildsOverallBookingProgressTotals(): void
+    {
+        $library = new Dashboard_metrics(
+            $this->createMock(Providers_model::class),
+            $this->createMock(Appointments_model::class),
+            $this->createMock(Provider_utilization::class),
+            $this->createMock(Services_model::class),
+            $this->createMock(Booking_slot_analytics::class),
+        );
+
+        $summary = $library->summarize(
+            [
+                [
+                    'target' => 10,
+                    'booked' => 6,
+                    'open' => 4,
+                    'needs_attention' => true,
+                    'is_target_fallback' => false,
+                    'has_explicit_target' => true,
+                    'has_plan' => true,
+                ],
+                [
+                    'target' => 8,
+                    'booked' => 8,
+                    'open' => 0,
+                    'needs_attention' => false,
+                    'is_target_fallback' => true,
+                    'has_explicit_target' => false,
+                    'has_plan' => true,
+                ],
+                [
+                    'target' => 0,
+                    'booked' => 0,
+                    'open' => 0,
+                    'needs_attention' => false,
+                    'is_target_fallback' => false,
+                    'has_explicit_target' => false,
+                    'has_plan' => false,
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertSame(3, $summary['provider_count']);
+        $this->assertSame(18, $summary['target_total']);
+        $this->assertSame(14, $summary['booked_total']);
+        $this->assertSame(4, $summary['open_total']);
+        $this->assertSame(1, $summary['attention_count']);
+        $this->assertSame(1, $summary['fallback_count']);
+        $this->assertSame(1, $summary['explicit_target_count']);
+        $this->assertSame(2, $summary['without_target_count']);
+        $this->assertSame(2, $summary['with_plan_count']);
+        $this->assertSame(3, $summary['missing_to_threshold_total']);
+        $this->assertSame(14, $summary['booked_distinct_total']);
+        $this->assertSame(1, $summary['providers_below_threshold']);
+        $this->assertEqualsWithDelta(14 / 18, $summary['fill_rate'], 0.0001);
+    }
+
+    public function testSummarizeComputesOpenTotalFromAggregateProgressToOneHundredPercent(): void
+    {
+        $library = new Dashboard_metrics(
+            $this->createMock(Providers_model::class),
+            $this->createMock(Appointments_model::class),
+            $this->createMock(Provider_utilization::class),
+            $this->createMock(Services_model::class),
+            $this->createMock(Booking_slot_analytics::class),
+        );
+
+        $summary = $library->summarize(
+            [
+                [
+                    'target' => 10,
+                    'booked' => 12,
+                    'open' => 0,
+                    'needs_attention' => false,
+                    'is_target_fallback' => false,
+                    'has_explicit_target' => true,
+                    'has_plan' => true,
+                ],
+                [
+                    'target' => 10,
+                    'booked' => 5,
+                    'open' => 5,
+                    'needs_attention' => true,
+                    'is_target_fallback' => false,
+                    'has_explicit_target' => true,
+                    'has_plan' => true,
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertSame(3, $summary['open_total']);
+        $this->assertEqualsWithDelta(17 / 20, $summary['fill_rate'], 0.0001);
+    }
+
+    public function testSummarizeReturnsStableZeroStateWhenNoTargetsExist(): void
+    {
+        $library = new Dashboard_metrics(
+            $this->createMock(Providers_model::class),
+            $this->createMock(Appointments_model::class),
+            $this->createMock(Provider_utilization::class),
+            $this->createMock(Services_model::class),
+            $this->createMock(Booking_slot_analytics::class),
+        );
+
+        $summary = $library->summarize(
+            [
+                [
+                    'target' => 0,
+                    'booked' => 0,
+                    'open' => 0,
+                    'needs_attention' => false,
+                    'is_target_fallback' => false,
+                    'has_explicit_target' => false,
+                    'has_plan' => false,
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertSame(0, $summary['target_total']);
+        $this->assertSame(0, $summary['booked_total']);
+        $this->assertSame(0, $summary['open_total']);
+        $this->assertSame(0.0, $summary['fill_rate']);
+        $this->assertSame(0, $summary['missing_to_threshold_total']);
+        $this->assertSame(0, $summary['providers_below_threshold']);
+    }
+
     public function testCollectBatchesBookedAppointmentCountsForAllProviders(): void
     {
         $providers = [

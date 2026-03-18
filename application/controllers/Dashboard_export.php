@@ -256,13 +256,17 @@ class Dashboard_export extends EA_Controller
             return;
         }
 
-        SentryBootstrap::captureException($exception, [
-            'area' => 'dashboard_export',
-            'export_type' => $exportType,
-        ], [
-            'controller' => static::class,
-            'request_uri' => $_SERVER['REQUEST_URI'] ?? null,
-        ]);
+        SentryBootstrap::captureException(
+            $exception,
+            [
+                'area' => 'dashboard_export',
+                'export_type' => $exportType,
+            ],
+            [
+                'controller' => static::class,
+                'request_uri' => $_SERVER['REQUEST_URI'] ?? null,
+            ],
+        );
     }
 
     /**
@@ -443,44 +447,17 @@ class Dashboard_export extends EA_Controller
      */
     protected function buildSummary(array $metrics, float $threshold): array
     {
-        $total_target = 0;
-        $total_booked = 0;
-        $total_open = 0;
-        $attention_count = 0;
-        $fallback_count = 0;
-        $explicit_target_count = 0;
-        $with_plan_count = 0;
-        $missing_to_threshold_total = 0;
-
-        foreach ($metrics as $metric) {
-            $total_target += (int) ($metric['target'] ?? 0);
-            $total_booked += (int) ($metric['booked'] ?? 0);
-            $total_open += (int) ($metric['open'] ?? 0);
-            $target = (int) ($metric['target'] ?? 0);
-            $booked = (int) ($metric['booked'] ?? 0);
-            $threshold_target = (int) ceil($threshold * $target);
-            $gap_to_threshold = max($threshold_target - $booked, 0);
-            $missing_to_threshold_total += $gap_to_threshold;
-
-            if (!empty($metric['needs_attention'])) {
-                $attention_count++;
-            }
-
-            if (!empty($metric['is_target_fallback'])) {
-                $fallback_count++;
-            }
-
-            if (!empty($metric['has_explicit_target'])) {
-                $explicit_target_count++;
-            }
-
-            if (!empty($metric['has_plan'])) {
-                $with_plan_count++;
-            }
-        }
-
-        $provider_count = count($metrics);
-        $fill_rate = $total_target > 0 ? $total_booked / $total_target : 0.0;
+        $summary = $this->dashboardMetrics->summarize($metrics, $threshold);
+        $provider_count = (int) ($summary['provider_count'] ?? count($metrics));
+        $fill_rate = (float) ($summary['fill_rate'] ?? 0.0);
+        $total_target = (int) ($summary['target_total'] ?? 0);
+        $total_booked = (int) ($summary['booked_total'] ?? 0);
+        $total_open = (int) ($summary['open_total'] ?? 0);
+        $attention_count = (int) ($summary['attention_count'] ?? 0);
+        $fallback_count = (int) ($summary['fallback_count'] ?? 0);
+        $explicit_target_count = (int) ($summary['explicit_target_count'] ?? 0);
+        $with_plan_count = (int) ($summary['with_plan_count'] ?? 0);
+        $missing_to_threshold_total = (int) ($summary['missing_to_threshold_total'] ?? 0);
 
         return [
             'provider_count' => $provider_count,
@@ -495,13 +472,14 @@ class Dashboard_export extends EA_Controller
             'attention_count' => $attention_count,
             'fallback_count' => $fallback_count,
             'explicit_target_count' => $explicit_target_count,
-            'without_target_count' => max($provider_count - $explicit_target_count, 0),
+            'without_target_count' =>
+                (int) ($summary['without_target_count'] ?? max($provider_count - $explicit_target_count, 0)),
             'with_plan_count' => $with_plan_count,
             'missing_to_threshold_total' => $missing_to_threshold_total,
             'missing_to_threshold_total_formatted' => $this->formatNumber($missing_to_threshold_total),
-            'booked_distinct_total' => $total_booked,
+            'booked_distinct_total' => (int) ($summary['booked_distinct_total'] ?? $total_booked),
             'booked_distinct_total_formatted' => $this->formatNumber($total_booked),
-            'providers_below_threshold' => $attention_count,
+            'providers_below_threshold' => (int) ($summary['providers_below_threshold'] ?? $attention_count),
         ];
     }
 

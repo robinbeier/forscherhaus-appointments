@@ -188,6 +188,71 @@ class Dashboard_metrics
         return array_values($metrics);
     }
 
+    /**
+     * Summarize an already collected metrics payload for dashboard consumers.
+     *
+     * @param array $metrics
+     * @param float $threshold
+     *
+     * @return array
+     */
+    public function summarize(array $metrics, float $threshold): array
+    {
+        $total_target = 0;
+        $total_booked = 0;
+        $attention_count = 0;
+        $fallback_count = 0;
+        $explicit_target_count = 0;
+        $with_plan_count = 0;
+        $missing_to_threshold_total = 0;
+
+        foreach ($metrics as $metric) {
+            $target = max(0, (int) ($metric['target'] ?? 0));
+            $booked = max(0, (int) ($metric['booked'] ?? 0));
+            $total_target += $target;
+            $total_booked += $booked;
+
+            $threshold_target = (int) ceil($threshold * $target);
+            $missing_to_threshold_total += max($threshold_target - $booked, 0);
+
+            if (!empty($metric['needs_attention'])) {
+                $attention_count++;
+            }
+
+            if (!empty($metric['is_target_fallback'])) {
+                $fallback_count++;
+            }
+
+            if (!empty($metric['has_explicit_target'])) {
+                $explicit_target_count++;
+            }
+
+            if (!empty($metric['has_plan'])) {
+                $with_plan_count++;
+            }
+        }
+
+        $provider_count = count($metrics);
+        $total_open = max($total_target - $total_booked, 0);
+        $fill_rate = $total_target > 0 ? $total_booked / $total_target : 0.0;
+
+        return [
+            'provider_count' => $provider_count,
+            'fill_rate' => $fill_rate,
+            'target_total' => $total_target,
+            'booked_total' => $total_booked,
+            'open_total' => $total_open,
+            'attention_count' => $attention_count,
+            'fallback_count' => $fallback_count,
+            'explicit_target_count' => $explicit_target_count,
+            'without_target_count' => max($provider_count - $explicit_target_count, 0),
+            'with_plan_count' => $with_plan_count,
+            'missing_to_threshold_total' => $missing_to_threshold_total,
+            'booked_distinct_total' => $total_booked,
+            'providers_below_threshold' => $attention_count,
+        ];
+    }
+
     protected function normalizeStatuses(array $statuses): array
     {
         $normalized = array_values(
