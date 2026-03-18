@@ -53,6 +53,111 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         $config['expected_summary'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
+    $summaryHelpersSnippet = <<<'JS'
+      const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
+      const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+      const formatPercent = (locale, value) =>
+        new Intl.NumberFormat(locale || undefined, {
+          style: 'percent',
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        }).format(Number(value) || 0);
+      const formatLocalDate = (value) => {
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      const parseCount = (selector) => {
+        const text = document.querySelector(selector)?.textContent?.trim() ?? '';
+        const digits = text.replace(/[^\d]/g, '');
+        return digits === '' ? 0 : Number(digits);
+      };
+      const resolveDashboardLocale = () => {
+        const fallbackLocale = 'de-DE';
+        const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
+        const candidate = configuredLocale || fallbackLocale;
+
+        if (Intl.NumberFormat.supportedLocalesOf([candidate]).length) {
+          return candidate;
+        }
+
+        if (Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length) {
+          return fallbackLocale;
+        }
+
+        return 'en-US';
+      };
+      const captureDashboardSummaryState = ({ locale, startDate, endDate, expectedSummaryPayload }) => {
+        const dashboardLocale = locale || resolveDashboardLocale();
+        const targetTotal = parseCount('#dashboard-summary-target-total');
+        const bookedTotal = parseCount('#dashboard-summary-booked-total');
+        const openTotal = parseCount('#dashboard-summary-open-total');
+        const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
+        const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
+        const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
+        const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
+        const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
+        const summaryState = document.querySelector('#dashboard-summary-progress-track')?.getAttribute('data-summary-state') ?? '';
+        const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
+        const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
+          ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
+          : [];
+        const normalizedSelectedDates = selectedDates
+          .map((value) => {
+            if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+              return null;
+            }
+
+            return formatLocalDate(value);
+          })
+          .filter((value) => value !== null);
+        const expectedTargetTotal = roundCount(expectedSummaryPayload.target_total);
+        const expectedBookedTotal = roundCount(expectedSummaryPayload.booked_total);
+        const expectedOpenTotal = roundCount(expectedSummaryPayload.open_total);
+        const expectedFillRate = Number(expectedSummaryPayload.fill_rate) || 0;
+        const expectedOpenShare = expectedTargetTotal > 0 ? expectedOpenTotal / expectedTargetTotal : 0;
+        const expectedBookedWidth = `${(clampProgress(expectedFillRate) * 100).toFixed(1)}%`;
+        const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
+
+        return {
+          requested_start_date: startDate,
+          requested_end_date: endDate,
+          selected_start_date: normalizedSelectedDates[0] ?? '',
+          selected_end_date: normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '',
+          target_total: targetTotal,
+          booked_total: bookedTotal,
+          open_total: openTotal,
+          fill_rate: fillRateText,
+          booked_share: bookedShareText,
+          open_share: openShareText,
+          booked_width: roundedBookedWidth,
+          marker_left: markerLeft,
+          summary_state: summaryState,
+          error_hidden: errorHidden,
+          expected_target_total: expectedTargetTotal,
+          expected_booked_total: expectedBookedTotal,
+          expected_open_total: expectedOpenTotal,
+          expected_fill_rate: formatPercent(dashboardLocale, expectedFillRate),
+          expected_open_share: formatPercent(dashboardLocale, expectedOpenShare),
+          expected_booked_width: expectedBookedWidth,
+          expected_threshold: Number(expectedSummaryPayload.threshold) || 0,
+          totals_match:
+            targetTotal === expectedTargetTotal &&
+            bookedTotal === expectedBookedTotal &&
+            openTotal === expectedOpenTotal,
+          shares_match:
+            fillRateText === formatPercent(dashboardLocale, expectedFillRate) &&
+            bookedShareText === formatPercent(dashboardLocale, expectedFillRate) &&
+            openShareText === formatPercent(dashboardLocale, expectedOpenShare),
+          booked_width_matches: roundedBookedWidth === expectedBookedWidth,
+          requested_range_applied:
+            (normalizedSelectedDates[0] ?? '') === startDate &&
+            (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate,
+          threshold_badge: document.querySelector('#dashboard-summary-threshold-badge')?.textContent?.trim() ?? '',
+        };
+      };
+    JS;
 
     $snippet = <<<'JS'
     async (page) => {
@@ -72,145 +177,15 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       };
       let currentStep = 'bootstrap';
       page.setDefaultTimeout(30000);
+      __SUMMARY_HELPERS__
       const emitPayload = (payload) => {
         console.log(`${resultPrefix}${JSON.stringify(payload)}`);
         return payload;
       };
-      const installDashboardHelpers = async () => {
-        currentStep = 'install_dashboard_helpers';
-        await page.evaluate(() => {
-          const roundCount = (value) => Math.max(0, Math.round(Number(value) || 0));
-          const clampProgress = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-          const parseCount = (selector) => {
-            const text = document.querySelector(selector)?.textContent?.trim() ?? '';
-            const digits = text.replace(/[^\d]/g, '');
-            return digits === '' ? 0 : Number(digits);
-          };
-          const formatPercent = (locale, value) =>
-            new Intl.NumberFormat(locale || undefined, {
-              style: 'percent',
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            }).format(Number(value) || 0);
-          const formatLocalDate = (value) => {
-            const year = value.getFullYear();
-            const month = String(value.getMonth() + 1).padStart(2, '0');
-            const day = String(value.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-          };
-          const resolveLocale = () => {
-            const fallbackLocale = 'de-DE';
-            const configuredLocale = typeof vars === 'function' ? String(vars('dashboard_number_locale') || '').trim() : '';
-            const candidate = configuredLocale || fallbackLocale;
-
-            if (Intl.NumberFormat.supportedLocalesOf([candidate]).length) {
-              return candidate;
-            }
-
-            if (Intl.NumberFormat.supportedLocalesOf([fallbackLocale]).length) {
-              return fallbackLocale;
-            }
-
-            return 'en-US';
-          };
-          const normalizeSelectedDates = () => {
-            const selectedDates = Array.isArray(document.querySelector('#dashboard-date-range')?._flatpickr?.selectedDates)
-              ? document.querySelector('#dashboard-date-range')._flatpickr.selectedDates
-              : [];
-
-            return selectedDates
-              .map((value) => {
-                if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-                  return null;
-                }
-
-                return formatLocalDate(value);
-              })
-              .filter((value) => value !== null);
-          };
-          const captureSummaryState = ({ locale, startDate, endDate, expectedSummaryPayload }) => {
-            const dashboardLocale = locale || resolveLocale();
-            const targetTotal = parseCount('#dashboard-summary-target-total');
-            const bookedTotal = parseCount('#dashboard-summary-booked-total');
-            const openTotal = parseCount('#dashboard-summary-open-total');
-            const fillRateText = document.querySelector('#dashboard-summary-fill-rate')?.textContent?.trim() ?? '';
-            const bookedShareText = document.querySelector('#dashboard-summary-booked-share')?.textContent?.trim() ?? '';
-            const openShareText = document.querySelector('#dashboard-summary-open-share')?.textContent?.trim() ?? '';
-            const bookedWidth = document.querySelector('#dashboard-summary-progress-booked')?.style.width ?? '';
-            const markerLeft = document.querySelector('#dashboard-summary-progress-marker')?.style.left ?? '';
-            const errorHidden = document.querySelector('#dashboard-error')?.hasAttribute('hidden') ?? false;
-            const summaryState = document.querySelector('#dashboard-summary-progress-track')?.getAttribute('data-summary-state') ?? '';
-            const normalizedSelectedDates = normalizeSelectedDates();
-            const expectedTargetTotal = roundCount(expectedSummaryPayload.target_total);
-            const expectedBookedTotal = roundCount(expectedSummaryPayload.booked_total);
-            const expectedOpenTotal = roundCount(expectedSummaryPayload.open_total);
-            const expectedFillRate = Number(expectedSummaryPayload.fill_rate) || 0;
-            const expectedOpenShare = expectedTargetTotal > 0 ? expectedOpenTotal / expectedTargetTotal : 0;
-            const expectedBookedWidth = `${(clampProgress(expectedFillRate) * 100).toFixed(1)}%`;
-            const roundedBookedWidth = bookedWidth === '' ? '' : `${(Number.parseFloat(bookedWidth) || 0).toFixed(1)}%`;
-
-            return {
-              requested_start_date: startDate,
-              requested_end_date: endDate,
-              selected_start_date: normalizedSelectedDates[0] ?? '',
-              selected_end_date: normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '',
-              target_total: targetTotal,
-              booked_total: bookedTotal,
-              open_total: openTotal,
-              fill_rate: fillRateText,
-              booked_share: bookedShareText,
-              open_share: openShareText,
-              booked_width: roundedBookedWidth,
-              marker_left: markerLeft,
-              error_hidden: errorHidden,
-              summary_state: summaryState,
-              expected_target_total: expectedTargetTotal,
-              expected_booked_total: expectedBookedTotal,
-              expected_open_total: expectedOpenTotal,
-              expected_fill_rate: formatPercent(dashboardLocale, expectedFillRate),
-              expected_open_share: formatPercent(dashboardLocale, expectedOpenShare),
-              expected_booked_width: expectedBookedWidth,
-              expected_threshold: Number(expectedSummaryPayload.threshold) || 0,
-              totals_match:
-                targetTotal === expectedTargetTotal &&
-                bookedTotal === expectedBookedTotal &&
-                openTotal === expectedOpenTotal,
-              shares_match:
-                fillRateText === formatPercent(dashboardLocale, expectedFillRate) &&
-                bookedShareText === formatPercent(dashboardLocale, expectedFillRate) &&
-                openShareText === formatPercent(dashboardLocale, expectedOpenShare),
-              booked_width_matches: roundedBookedWidth === expectedBookedWidth,
-              requested_range_applied:
-                (normalizedSelectedDates[0] ?? '') === startDate &&
-                (normalizedSelectedDates[normalizedSelectedDates.length - 1] ?? '') === endDate,
-              threshold_badge: document.querySelector('#dashboard-summary-threshold-badge')?.textContent?.trim() ?? '',
-            };
-          };
-
-          window.__dashboardSummaryCheckHelpers = {
-            resolveLocale,
-            formatPercent,
-            captureSummaryState,
-            matchesSummaryState: ({ locale, startDate, endDate, expectedSummaryPayload, requireMarker }) => {
-              const captured = captureSummaryState({ locale, startDate, endDate, expectedSummaryPayload });
-
-              return (
-                captured.summary_state === 'loaded' &&
-                captured.totals_match &&
-                captured.shares_match &&
-                captured.booked_width_matches &&
-                captured.error_hidden &&
-                captured.requested_range_applied &&
-                (!requireMarker || captured.marker_left !== '')
-              );
-            },
-          };
-        });
-      };
-      const captureSummaryState = async (locale, expected = expectedSummary) => {
-        await installDashboardHelpers();
-        return page.evaluate(({ locale: dashboardLocale, startDate, endDate, expectedSummaryPayload }) => {
-          return window.__dashboardSummaryCheckHelpers.captureSummaryState({
+      const captureSummaryState = async (locale, expected = expectedSummary) =>
+        page.evaluate(({ locale: dashboardLocale, startDate, endDate, expectedSummaryPayload }) => {
+          __SUMMARY_HELPERS__
+          return captureDashboardSummaryState({
             locale: dashboardLocale,
             startDate,
             endDate,
@@ -222,7 +197,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           endDate: requestedEndDate,
           expectedSummaryPayload: expected,
         });
-      };
       const seedAuthenticatedSession = async () => {
         currentStep = 'seed_authenticated_session';
         await page.context().addCookies(sessionCookies);
@@ -240,7 +214,6 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         }
 
         await page.waitForSelector('#dashboard-summary-progress-track', { state: 'attached', timeout: 30000 });
-        await installDashboardHelpers();
       };
       const applyRequestedRange = async () => {
         currentStep = 'apply_requested_range';
@@ -269,19 +242,22 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       const waitForRenderedSummary = async () => {
         currentStep = 'wait_for_loaded_summary';
         await page.waitForSelector('#dashboard-summary-progress-track', { state: 'visible', timeout: 15000 });
-        await installDashboardHelpers();
         await page.waitForFunction(({ startDate, endDate, expected }) => {
-          const helpers = window.__dashboardSummaryCheckHelpers;
-          if (!helpers || typeof helpers.matchesSummaryState !== 'function') {
-            return false;
-          }
-
-          return helpers.matchesSummaryState({
+          __SUMMARY_HELPERS__
+          const captured = captureDashboardSummaryState({
             startDate,
             endDate,
             expectedSummaryPayload: expected,
-            requireMarker: true,
           });
+          return (
+            captured.summary_state === 'loaded' &&
+            captured.totals_match &&
+            captured.shares_match &&
+            captured.booked_width_matches &&
+            captured.marker_left !== '' &&
+            captured.error_hidden &&
+            captured.requested_range_applied
+          );
         }, { startDate: requestedStartDate, endDate: requestedEndDate, expected: expectedSummary }, { timeout: 30000 });
       };
       const applyEmptyServiceFilter = async () => {
@@ -306,19 +282,21 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       };
       const waitForZeroState = async () => {
         currentStep = 'wait_for_zero_state';
-        await installDashboardHelpers();
         await page.waitForFunction(({ startDate, endDate, expected }) => {
-          const helpers = window.__dashboardSummaryCheckHelpers;
-          if (!helpers || typeof helpers.matchesSummaryState !== 'function') {
-            return false;
-          }
-
-          return helpers.matchesSummaryState({
+          __SUMMARY_HELPERS__
+          const captured = captureDashboardSummaryState({
             startDate,
             endDate,
             expectedSummaryPayload: expected,
-            requireMarker: false,
           });
+          return (
+            captured.summary_state === 'loaded' &&
+            captured.totals_match &&
+            captured.shares_match &&
+            captured.booked_width_matches &&
+            captured.error_hidden &&
+            captured.requested_range_applied
+          );
         }, { startDate: requestedStartDate, endDate: requestedEndDate, expected: zeroSummary }, { timeout: 30000 });
       };
 
@@ -331,14 +309,12 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 
         currentStep = 'read_dashboard_locale';
         const dashboardLocale = await page.evaluate(() => {
-          return window.__dashboardSummaryCheckHelpers.resolveLocale();
+          __SUMMARY_HELPERS__
+          return resolveDashboardLocale();
         });
-        const expectedThresholdText = await page.evaluate(
-          ({ locale, value }) => window.__dashboardSummaryCheckHelpers.formatPercent(locale, value),
-          {
-            locale: dashboardLocale,
-            value: Number(expectedSummary.updated_threshold) || Number(updatedThreshold) || 0,
-          },
+        const expectedThresholdText = formatPercent(
+          dashboardLocale,
+          Number(expectedSummary.updated_threshold) || Number(updatedThreshold) || 0,
         );
 
         currentStep = 'capture_before_state';
@@ -526,6 +502,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
             '__START_DATE__' => $encodedStartDate,
             '__END_DATE__' => $encodedEndDate,
             '__EXPECTED_SUMMARY__' => $encodedExpectedSummary,
+            '__SUMMARY_HELPERS__' => $summaryHelpersSnippet,
         ]),
     );
 }

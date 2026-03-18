@@ -25,10 +25,19 @@ compose() {
 }
 
 ensure_ldap_service_exists() {
-    if ! compose config --services | grep -Fxq "${LDAP_SERVICE_NAME}"; then
+    local services
+
+    if ! services="$(compose config --services 2>&1)"; then
+        echo "Unknown LDAP service: ${LDAP_SERVICE_NAME}" >&2
+        echo "Failed to inspect compose services:" >&2
+        printf '%s\n' "${services}" >&2
+        return 1
+    fi
+
+    if ! grep -Fxq "${LDAP_SERVICE_NAME}" <<<"${services}"; then
         echo "Unknown LDAP service: ${LDAP_SERVICE_NAME}" >&2
         echo "Available services:" >&2
-        compose config --services >&2
+        printf '%s\n' "${services}" >&2
         return 1
     fi
 }
