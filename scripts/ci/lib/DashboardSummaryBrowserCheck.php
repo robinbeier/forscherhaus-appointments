@@ -184,13 +184,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           () =>
             typeof window.App === 'object' &&
             typeof window.App?.Http?.Login?.validate === 'function' &&
-            typeof window.vars === 'function' &&
-            (() => {
-              const form = document.getElementById('login-form');
-              const submitHandlers = window.jQuery?._data?.(form, 'events')?.submit;
-
-              return Array.isArray(submitHandlers) && submitHandlers.length > 0;
-            })(),
+            typeof window.vars === 'function',
           { timeout: 30000 }
         );
         currentStep = 'fill_login_username';

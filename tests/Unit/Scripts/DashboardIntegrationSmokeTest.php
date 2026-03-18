@@ -26,7 +26,6 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString("document.getElementById('login-form') !== null", $snippet);
         self::assertStringContainsString("typeof window.App?.Http?.Login?.validate === 'function'", $snippet);
         self::assertStringContainsString("typeof window.vars === 'function'", $snippet);
-        self::assertStringContainsString("window.jQuery?._data?.(form, 'events')?.submit", $snippet);
         self::assertStringContainsString("await page.fill('#username', username)", $snippet);
         self::assertStringContainsString("await page.fill('#password', password)", $snippet);
         self::assertStringContainsString('page.waitForURL((url) => {', $snippet);
@@ -53,6 +52,7 @@ class DashboardIntegrationSmokeTest extends TestCase
             $snippet,
         );
         self::assertStringNotContainsString('await page.goto(targetUrl)', $snippet);
+        self::assertStringNotContainsString("window.jQuery?._data?.(form, 'events')?.submit", $snippet);
     }
 
     public function testParseRunCodeResultReturnsDecodedPayloadFromResultSection(): void
