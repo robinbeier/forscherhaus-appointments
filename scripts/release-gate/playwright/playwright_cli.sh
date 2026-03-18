@@ -10,6 +10,14 @@ default_browser() {
   echo "firefox"
 }
 
+default_playwright_cli_version() {
+  echo "0.1.1"
+}
+
+default_playwright_runtime_package() {
+  echo "playwright@1.59.0-alpha-1771104257000"
+}
+
 normalize_browser() {
   local browser="${1:-}"
 
@@ -27,14 +35,69 @@ normalize_browser() {
 
 playwright_browser="$(normalize_browser "${PLAYWRIGHT_MCP_BROWSER:-}")"
 
-playwright_cli_package="@playwright/cli@0.1.1"
-playwright_runtime_package="${PLAYWRIGHT_RUNTIME_PACKAGE:-playwright@1.59.0-alpha-1771104257000}"
+playwright_cli_name="@playwright/cli"
+
+resolve_playwright_cli_version() {
+  local version
+
+  if ! command -v npm >/dev/null 2>&1; then
+    default_playwright_cli_version
+    return
+  fi
+
+  version="$(npm view "${playwright_cli_name}" version --json 2>/dev/null | tr -d '"' | tr -d '\r\n')"
+  if [[ -z "${version}" || "${version}" == "null" ]]; then
+    default_playwright_cli_version
+    return
+  fi
+
+  echo "${version}"
+}
+
+playwright_cli_version="${PLAYWRIGHT_CLI_VERSION:-$(default_playwright_cli_version)}"
+playwright_cli_package="${playwright_cli_name}@${playwright_cli_version}"
 
 playwright_cli_cmd=(npx --yes --package "${playwright_cli_package}" playwright-cli)
 playwright_ready_dir="${PLAYWRIGHT_MCP_READY_DIR:-/tmp/playwright-cli}"
 
+resolve_playwright_runtime_package() {
+  local cli_version
+  local runtime_package
+
+  if [[ -n "${PLAYWRIGHT_RUNTIME_PACKAGE:-}" ]]; then
+    echo "${PLAYWRIGHT_RUNTIME_PACKAGE}"
+    return
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    default_playwright_runtime_package
+    return
+  fi
+
+  cli_version="${PLAYWRIGHT_CLI_VERSION:-${playwright_cli_version}}"
+
+  runtime_package="$(
+    npm view "${playwright_cli_name}@${cli_version}" dependencies.playwright --json 2>/dev/null \
+      | tr -d '"' \
+      | tr -d '\r\n'
+  )"
+
+  if [[ -z "${runtime_package}" || "${runtime_package}" == "null" ]]; then
+    default_playwright_runtime_package
+    return
+  fi
+
+  if [[ "${runtime_package}" != playwright@* ]]; then
+    runtime_package="playwright@${runtime_package}"
+  fi
+
+  echo "${runtime_package}"
+}
+
 run_playwright_install() {
-  npx --yes --package "${playwright_runtime_package}" playwright "$@"
+  local runtime_package
+  runtime_package="$(resolve_playwright_runtime_package)"
+  npx --yes --package "${runtime_package}" playwright "$@"
 }
 
 resolve_playwright_ready_marker() {
@@ -99,6 +162,8 @@ if [[ "${has_session_flag}" != "true" && -n "${PLAYWRIGHT_CLI_SESSION:-}" ]]; th
   cmd+=(--session "${PLAYWRIGHT_CLI_SESSION}")
 fi
 cmd+=("$@")
+
+export PLAYWRIGHT_MCP_OUTPUT_MODE="stdout"
 
 if [[ "${install_command_requested}" == "true" ]]; then
   ensure_browser_installed
