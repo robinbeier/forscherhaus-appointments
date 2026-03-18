@@ -158,6 +158,37 @@ class DashboardReleaseGateAssertionsTest extends TestCase
         GateAssertions::assertMetricsPayload($this->wrapMetricsPayload($payload), false);
     }
 
+    public function testAssertMetricsPayloadRejectsThresholdAboveOne(): void
+    {
+        $payload = $this->wrapMetricsPayload([
+            [
+                'provider_id' => 22,
+                'provider_name' => 'Alan Turing',
+                'target' => 20,
+                'booked' => 12,
+                'open' => 8,
+                'fill_rate' => 0.6,
+                'needs_attention' => true,
+                'has_plan' => true,
+                'slots_planned' => 20,
+                'slots_required' => 20,
+                'has_capacity_gap' => false,
+                'after_15_slots' => 4,
+                'total_offered_slots' => 19,
+                'after_15_ratio' => 4 / 20,
+                'after_15_percent' => 20.0,
+                'after_15_target_met' => false,
+                'after_15_evaluable' => true,
+            ],
+        ]);
+        $payload['summary']['threshold'] = 1.2;
+
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('less than or equal to 1.0');
+
+        GateAssertions::assertMetricsPayload($payload, false);
+    }
+
     public function testAssertMetricsPayloadAcceptsFallbackAfter15RatiosBasedOnPlannedSlots(): void
     {
         $payload = [
