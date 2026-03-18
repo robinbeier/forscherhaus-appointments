@@ -13,6 +13,19 @@ use ReleaseGate\GateProcessRunner;
 use RuntimeException;
 use Throwable;
 
+function resolveBrowserCookieUrl(string $targetUrl): string
+{
+    $parts = parse_url($targetUrl);
+
+    if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
+        throw new RuntimeException('Could not derive browser cookie URL from target URL: ' . $targetUrl);
+    }
+
+    $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+
+    return $parts['scheme'] . '://' . $parts['host'] . $port . '/';
+}
+
 /**
  * @param array{
  *   repo_root:string,
@@ -343,8 +356,7 @@ function collectBookingPageBrowserEvidence(array $config): array
  *   repo_root:string,
  *   target_url:string,
  *   artifacts_dir:string,
- *   username:string,
- *   password:string,
+ *   session_cookies:array<int, array{name:string, value:string}>,
  *   start_date:string,
  *   end_date:string,
  *   expected_summary:array{
@@ -366,9 +378,9 @@ function runDashboardSummaryBrowserCheck(array $config): array
     $artifactsDir = rtrim($config['artifacts_dir'], '/');
     $sessionId = buildBrowserRuntimeEvidenceSessionId();
     $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
-        'username' => $config['username'],
-        'password' => $config['password'],
         'target_url' => $config['target_url'],
+        'cookie_url' => resolveBrowserCookieUrl($config['target_url']),
+        'session_cookies' => $config['session_cookies'],
         'start_date' => $config['start_date'],
         'end_date' => $config['end_date'],
         'expected_summary' => $config['expected_summary'],
@@ -394,9 +406,6 @@ function runDashboardSummaryBrowserCheck(array $config): array
     try {
         $result = runPwcliCommand($config, $sessionId, ['open', 'about:blank'], $config['open_timeout']);
         assertPlaywrightCommandSucceeded($result, 'Open browser for dashboard summary render');
-
-        $result = runPwcliCommand($config, $sessionId, ['goto', $config['target_url']], $config['open_timeout']);
-        assertPlaywrightCommandSucceeded($result, 'Open dashboard page');
 
         $result = runPwcliCommand($config, $sessionId, ['run-code', $runCodeSnippet], $config['open_timeout'] + 15);
         assertPlaywrightCommandSucceeded($result, 'Render dashboard summary in browser');
