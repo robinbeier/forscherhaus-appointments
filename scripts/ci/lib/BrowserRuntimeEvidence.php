@@ -351,7 +351,8 @@ function collectBookingPageBrowserEvidence(array $config): array
  *     target_total:int|float|string,
  *     booked_total:int|float|string,
  *     open_total:int|float|string,
- *     fill_rate:int|float|string
+ *     fill_rate:int|float|string,
+ *     threshold:int|float|string
  *   },
  *   pwcli_path:string,
  *   bootstrap_timeout:int,

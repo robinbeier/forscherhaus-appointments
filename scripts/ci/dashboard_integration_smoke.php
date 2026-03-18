@@ -1058,6 +1058,7 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
             'booked_total' => $summary['booked_total'] ?? 0,
             'open_total' => $summary['open_total'] ?? 0,
             'fill_rate' => $summary['fill_rate'] ?? 0,
+            'threshold' => $summary['threshold'] ?? 0,
         ],
         'pwcli_path' => (string) $config['browser_pwcli_path'],
         'bootstrap_timeout' => (int) $config['browser_bootstrap_timeout'],

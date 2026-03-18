@@ -225,7 +225,10 @@ final class GateAssertions
             );
         }
 
-        self::toNonNegativeFloat($summaryPayload['threshold'] ?? null, 'summary.threshold');
+        $summaryThreshold = self::toNonNegativeFloat($summaryPayload['threshold'] ?? null, 'summary.threshold');
+        if ($summaryThreshold > 1.0) {
+            throw new GateAssertionException('summary.threshold must be less than or equal to 1.0.');
+        }
 
         return [
             'providers' => count($metrics),
