@@ -6,6 +6,7 @@ namespace CiRuntimeEvidence;
 
 require_once __DIR__ . '/../../release-gate/lib/GateProcessRunner.php';
 require_once __DIR__ . '/../../release-gate/lib/GateAssertions.php';
+require_once __DIR__ . '/../../release-gate/lib/PlaywrightBrowserSelection.php';
 require_once __DIR__ . '/DashboardSummaryBrowserCheck.php';
 
 use ReleaseGate\GateAssertionException;
@@ -538,34 +539,11 @@ function resolveBookingPageTargetUrl(string $baseUrl, string $indexPage): string
  */
 function runPwcliCommand(array $config, string $sessionId, array $arguments, int $timeoutSeconds): array
 {
-    if (($arguments[0] ?? null) === 'open' && !browserArgumentProvided($arguments)) {
-        $arguments[] = '--browser=' . resolvePlaywrightBrowserName();
-    }
+    $arguments = \appendConfiguredPlaywrightBrowserArgument($arguments);
 
     $command = ['bash', $config['pwcli_path'], '--session', $sessionId, ...$arguments];
 
     return GateProcessRunner::run($command, $config['repo_root'], null, $timeoutSeconds);
-}
-
-/**
- * @param list<string> $arguments
- */
-function browserArgumentProvided(array $arguments): bool
-{
-    foreach ($arguments as $argument) {
-        if (str_starts_with((string) $argument, '--browser=')) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-function resolvePlaywrightBrowserName(): string
-{
-    $configuredBrowser = trim((string) getenv('PLAYWRIGHT_MCP_BROWSER'));
-
-    return $configuredBrowser !== '' ? $configuredBrowser : 'firefox';
 }
 
 /**
