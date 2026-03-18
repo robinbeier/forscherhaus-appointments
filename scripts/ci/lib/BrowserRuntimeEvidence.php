@@ -367,6 +367,7 @@ function runDashboardSummaryBrowserCheck(array $config): array
     $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
         'username' => $config['username'],
         'password' => $config['password'],
+        'target_url' => $config['target_url'],
         'start_date' => $config['start_date'],
         'end_date' => $config['end_date'],
         'expected_summary' => $config['expected_summary'],

@@ -24,9 +24,14 @@ class DashboardIntegrationSmokeTest extends TestCase
         $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($this->browserSnippetConfig());
 
         self::assertStringContainsString("document.getElementById('login-form') !== null", $snippet);
+        self::assertStringContainsString("typeof window.App?.Http?.Login?.validate === 'function'", $snippet);
+        self::assertStringContainsString("typeof window.vars === 'function'", $snippet);
         self::assertStringContainsString("await page.fill('#username', username)", $snippet);
         self::assertStringContainsString("await page.fill('#password', password)", $snippet);
-        self::assertStringContainsString("await page.click('#login')", $snippet);
+        self::assertStringContainsString('const loginResponsePromise = page.waitForResponse((response) => {', $snippet);
+        self::assertStringContainsString("page.click('#login')", $snippet);
+        self::assertStringContainsString('await page.goto(targetUrl)', $snippet);
+        self::assertStringContainsString("await page.waitForLoadState('domcontentloaded'", $snippet);
         self::assertStringContainsString('flatpickrInstance.setDate', $snippet);
         self::assertStringContainsString('requested_range_applied', $snippet);
         self::assertStringContainsString('resolveDashboardLocale', $snippet);
@@ -341,6 +346,7 @@ class DashboardIntegrationSmokeTest extends TestCase
      * @return array{
      *   username:string,
      *   password:string,
+     *   target_url:string,
      *   start_date:string,
      *   end_date:string,
      *   expected_summary:array{target_total:int,booked_total:int,open_total:int,fill_rate:float}
@@ -351,6 +357,7 @@ class DashboardIntegrationSmokeTest extends TestCase
         return [
             'username' => 'admin',
             'password' => 'secret',
+            'target_url' => 'http://nginx/index.php/dashboard',
             'start_date' => '2026-01-01',
             'end_date' => '2026-01-31',
             'expected_summary' => [

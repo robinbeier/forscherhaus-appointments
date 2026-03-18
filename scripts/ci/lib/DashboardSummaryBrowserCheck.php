@@ -10,6 +10,7 @@ use ReleaseGate\GateAssertionException;
  * @param array{
  *   username:string,
  *   password:string,
+ *   target_url:string,
  *   start_date:string,
  *   end_date:string,
  *   expected_summary:array{
@@ -30,6 +31,10 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         $config['password'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
+    $encodedTargetUrl = json_encode(
+        $config['target_url'],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    );
     $encodedStartDate = json_encode(
         $config['start_date'],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
@@ -48,6 +53,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
       const updatedThreshold = '0.35';
       const username = __USERNAME__;
       const password = __PASSWORD__;
+      const targetUrl = __TARGET_URL__;
       const requestedStartDate = __START_DATE__;
       const requestedEndDate = __END_DATE__;
       const expectedSummary = __EXPECTED_SUMMARY__;
@@ -173,14 +179,39 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           return;
         }
 
+        currentStep = 'wait_for_login_runtime';
+        await page.waitForFunction(
+          () =>
+            typeof window.App === 'object' &&
+            typeof window.App?.Http?.Login?.validate === 'function' &&
+            typeof window.vars === 'function' &&
+            (() => {
+              const form = document.getElementById('login-form');
+              const submitHandlers = window.jQuery?._data?.(form, 'events')?.submit;
+
+              return Array.isArray(submitHandlers) && submitHandlers.length > 0;
+            })(),
+          { timeout: 30000 }
+        );
         currentStep = 'fill_login_username';
         await page.fill('#username', username);
         currentStep = 'fill_login_password';
         await page.fill('#password', password);
         currentStep = 'submit_login_form';
-        await page.click('#login');
+        await Promise.all([
+          page.waitForURL((url) => {
+            try {
+              return new URL(targetUrl).pathname === url.pathname;
+            } catch (error) {
+              return /\/(?:index\.php\/)?dashboard(?:\/)?$/.test(url.pathname);
+            }
+          }, { timeout: 30000 }),
+          page.click('#login'),
+        ]);
+        currentStep = 'wait_for_post_login_dom';
+        await page.waitForLoadState('domcontentloaded', { timeout: 30000 });
         currentStep = 'wait_for_post_login_dashboard';
-        await page.waitForFunction(() => document.getElementById('dashboard-summary-progress-track') !== null, { timeout: 30000 });
+        await page.waitForSelector('#dashboard-summary-progress-track', { state: 'attached', timeout: 30000 });
       };
       const applyRequestedRange = async () => {
         currentStep = 'apply_requested_range';
@@ -572,6 +603,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
         strtr($snippet, [
             '__USERNAME__' => $encodedUsername,
             '__PASSWORD__' => $encodedPassword,
+            '__TARGET_URL__' => $encodedTargetUrl,
             '__START_DATE__' => $encodedStartDate,
             '__END_DATE__' => $encodedEndDate,
             '__EXPECTED_SUMMARY__' => $encodedExpectedSummary,
