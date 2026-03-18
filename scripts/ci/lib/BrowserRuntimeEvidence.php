@@ -126,7 +126,7 @@ function collectBookingPageBrowserEvidence(array $config): array
         }
 
         $bootstrap = GateProcessRunner::run(
-            ['bash', $config['pwcli_path'], '--help'],
+            ['bash', $config['pwcli_path'], 'install-browser'],
             $config['repo_root'],
             null,
             $config['bootstrap_timeout'],
@@ -382,7 +382,7 @@ function runDashboardSummaryBrowserCheck(array $config): array
     }
 
     $bootstrap = GateProcessRunner::run(
-        ['bash', $config['pwcli_path'], '--help'],
+        ['bash', $config['pwcli_path'], 'install-browser'],
         $config['repo_root'],
         null,
         $config['bootstrap_timeout'],

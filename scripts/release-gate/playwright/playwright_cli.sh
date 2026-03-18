@@ -69,7 +69,12 @@ if [[ "${has_session_flag}" != "true" && -n "${PLAYWRIGHT_CLI_SESSION:-}" ]]; th
 fi
 cmd+=("$@")
 
-if [[ "${install_command_requested}" != "true" && "${help_command_requested}" != "true" ]]; then
+if [[ "${install_command_requested}" == "true" ]]; then
+  ensure_browser_installed
+  exit 0
+fi
+
+if [[ "${help_command_requested}" != "true" ]]; then
   ensure_browser_installed
 fi
 

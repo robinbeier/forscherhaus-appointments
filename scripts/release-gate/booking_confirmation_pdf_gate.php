@@ -95,7 +95,7 @@ try {
         }
 
         $pwcliBootstrap = GateProcessRunner::run(
-            ['bash', $config['pwcli_path'], '--help'],
+            ['bash', $config['pwcli_path'], 'install-browser'],
             $repoRoot,
             null,
             $config['bootstrap_timeout'],

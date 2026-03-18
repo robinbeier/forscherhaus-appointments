@@ -195,4 +195,59 @@ class BrowserRuntimeEvidenceTest extends TestCase
             }
         }
     }
+
+    public function testPlaywrightCliWrapperInstallBrowserBootstrapsWithoutForwardingPseudoCommand(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-install-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $npxPath = $binDir . '/npx';
+        $wrapperPath = __DIR__ . '/../../../scripts/release-gate/playwright/playwright_cli.sh';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.0.0\\n'\nfi\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser',
+            escapeshellarg($binDir),
+            escapeshellarg($tempDir . '/ready'),
+            escapeshellarg($wrapperPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(2, $capturedInvocations);
+            self::assertStringContainsString('playwright --version', $capturedInvocations[0]);
+            self::assertStringContainsString('playwright install', $capturedInvocations[1]);
+            self::assertStringContainsString('firefox', $capturedInvocations[1]);
+            self::assertStringNotContainsString('playwright-cli install-browser', implode("\n", $capturedInvocations));
+        } finally {
+            if (is_file($npxPath)) {
+                unlink($npxPath);
+            }
+
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_dir($binDir)) {
+                rmdir($binDir);
+            }
+
+            if (is_dir($tempDir)) {
+                rmdir($tempDir);
+            }
+        }
+    }
 }
