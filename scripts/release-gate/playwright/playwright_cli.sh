@@ -16,6 +16,10 @@ playwright_cli_cmd=(npx --yes --package @playwright/cli playwright-cli)
 playwright_install_cmd=(npx --yes --package @playwright/cli playwright)
 playwright_ready_dir="${PLAYWRIGHT_MCP_READY_DIR:-/tmp/playwright-cli}"
 
+# The repo's gate parsers read sentinel JSON from stdout, so keep run-code
+# output on stdout even if the host environment configures a different mode.
+export PLAYWRIGHT_MCP_OUTPUT_MODE="stdout"
+
 resolve_playwright_ready_marker() {
   local version
 

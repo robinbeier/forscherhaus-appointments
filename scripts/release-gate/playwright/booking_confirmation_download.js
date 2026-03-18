@@ -1,4 +1,5 @@
 async (page) => {
+    const resultPrefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
     const selector = __BOOKING_GATE_SELECTOR__;
     const timeoutMs = __BOOKING_GATE_TIMEOUT_MS__;
     const downloadPath = __BOOKING_GATE_DOWNLOAD_PATH__;
@@ -17,12 +18,12 @@ async (page) => {
 
     if (!downloadPath) {
         result.error = 'Missing BOOKING_GATE_DOWNLOAD_PATH.';
-        return result;
+        return emitResult(result);
     }
 
     if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
         result.error = 'Injected timeout must be a positive integer.';
-        return result;
+        return emitResult(result);
     }
 
     const onPageError = (error) => {
@@ -39,6 +40,11 @@ async (page) => {
         }
 
         result.console_errors.push(String(message.text()));
+    };
+
+    const emitResult = (payload) => {
+        console.log(`${resultPrefix}${JSON.stringify(payload)}`);
+        return payload;
     };
 
     page.on('pageerror', onPageError);
@@ -61,14 +67,14 @@ async (page) => {
                 'JavaScript errors detected during PDF generation. ' +
                 `page_errors=${JSON.stringify(result.page_errors)} ` +
                 `console_errors=${JSON.stringify(result.console_errors)}`;
-            return result;
+            return emitResult(result);
         }
 
         result.ok = true;
-        return result;
+        return emitResult(result);
     } catch (error) {
         result.error = error && error.message ? String(error.message) : String(error);
-        return result;
+        return emitResult(result);
     } finally {
         page.off('pageerror', onPageError);
         page.off('console', onConsole);

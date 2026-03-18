@@ -69,7 +69,14 @@ The gate writes a JSON report with:
 - `failure`: present on failure with exception details.
 - `cleanup_warnings`: optional Playwright session cleanup warnings.
 
-The bundled Playwright wrapper auto-installs its default Firefox path on first
-use and prepares the required Linux browser dependencies inside the validation
-container. Local and CI gate runs therefore use the same browser path across
-Linux architectures.
+The bundled Playwright wrapper auto-installs the configured Playwright browser
+(Firefox by default, overridable via `PLAYWRIGHT_MCP_BROWSER`) and prepares the
+required Linux browser dependencies inside the validation container. Local and
+CI gate runs therefore use the same browser path across Linux architectures.
+
+The `run-code` snippet used by this gate emits its JSON result with the
+repo-owned `__BOOKING_CONFIRMATION_PDF_GATE__` prefix. The parser reads that
+marker directly instead of depending on undocumented stdout framing from the
+upstream Playwright CLI. The wrapper pins `PLAYWRIGHT_MCP_OUTPUT_MODE=stdout`
+for these gate runs so the sentinel payload stays on stdout even if the host
+environment configures Playwright CLI output differently.

@@ -248,6 +248,59 @@ class BrowserRuntimeEvidenceTest extends TestCase
         }
     }
 
+    public function testPlaywrightCliWrapperPinsOutputModeToStdout(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-output-mode-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $npxPath = $binDir . '/npx';
+        $wrapperPath = __DIR__ . '/../../../scripts/release-gate/playwright/playwright_cli.sh';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'mode=%s args=%s\n' \"\${PLAYWRIGHT_MCP_OUTPUT_MODE:-}\" \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.0.0\\n'\nfi\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_MCP_READY_DIR=%s PLAYWRIGHT_MCP_OUTPUT_MODE=file bash %s run-code --help',
+            escapeshellarg($binDir),
+            escapeshellarg($tempDir . '/ready'),
+            escapeshellarg($wrapperPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(1, $capturedInvocations);
+            self::assertStringContainsString('mode=stdout', $capturedInvocations[0]);
+            self::assertStringContainsString('playwright-cli run-code --help', $capturedInvocations[0]);
+        } finally {
+            if (is_file($npxPath)) {
+                unlink($npxPath);
+            }
+
+            if (is_file($capturePath)) {
+                unlink($capturePath);
+            }
+
+            if (is_dir($binDir)) {
+                rmdir($binDir);
+            }
+
+            if (is_dir($tempDir)) {
+                rmdir($tempDir);
+            }
+        }
+    }
+
     public function testPlaywrightCliWrapperInstallBrowserBootstrapsWithoutForwardingPseudoCommand(): void
     {
         $tempDir = sys_get_temp_dir() . '/pwcli-install-' . bin2hex(random_bytes(4));

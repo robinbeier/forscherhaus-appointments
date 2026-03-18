@@ -5,10 +5,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib/GateAssertions.php';
 require_once __DIR__ . '/lib/GateProcessRunner.php';
 require_once __DIR__ . '/lib/PlaywrightBrowserSelection.php';
+require_once __DIR__ . '/lib/PlaywrightRunCodePayload.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateProcessRunner;
+use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
 
 const RELEASE_GATE_EXIT_SUCCESS = 0;
 const RELEASE_GATE_EXIT_ASSERTION_FAILURE = 1;
@@ -708,57 +710,16 @@ function extractPlaywrightErrorSection(string $output): ?string
 function parseRunCodeResult(array $runCodeResult): array
 {
     $output = (string) ($runCodeResult['stdout'] ?? '');
-
-    if ($output === '') {
-        throw new GateAssertionException('Playwright run-code produced no output.');
-    }
-
     $errorText = extractPlaywrightErrorSection($output);
     if ($errorText !== null) {
         throw new GateAssertionException($errorText);
     }
 
-    $matches = [];
-    if (preg_match('/(?:^|\R)### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) === 1) {
-        $decoded = json_decode(trim((string) ($matches[1] ?? '')), true);
-
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-    }
-
-    $prefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
-    $prefixPosition = strpos($output, $prefix);
-
-    if ($prefixPosition === false) {
-        throw new GateAssertionException(
-            'Could not parse run-code result payload from Playwright output: ' . substr(trim($output), 0, 500),
-        );
-    }
-
-    $rawTail = trim(substr($output, $prefixPosition + strlen($prefix)));
-    $attempts = array_values(array_unique(array_filter([
-        $rawTail,
-        preg_replace('/"\s*$/', '', $rawTail) ?: '',
-        stripcslashes($rawTail),
-        stripcslashes((string) (preg_replace('/"\s*$/', '', $rawTail) ?: '')),
-    ])));
-
-    foreach ($attempts as $attempt) {
-        $matches = [];
-
-        if (preg_match('/\{.*?\}(?="|\R|$)/s', $attempt, $matches) !== 1) {
-            continue;
-        }
-
-        $decoded = json_decode((string) $matches[0], true);
-
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-    }
-
-    throw new GateAssertionException('Playwright run-code result payload is not valid JSON.');
+    return parsePlaywrightRunCodeJsonPayload(
+        $output,
+        '__BOOKING_CONFIRMATION_PDF_GATE__',
+        'booking confirmation run-code',
+    );
 }
 
 /**

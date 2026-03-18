@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../release-gate/lib/GateAssertions.php';
+require_once __DIR__ . '/../../release-gate/lib/PlaywrightRunCodePayload.php';
 
 use ReleaseGate\GateAssertionException;
+use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
 
 /**
  * @param array{
@@ -51,6 +53,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
 
     $snippet = <<<'JS'
     async (page) => {
+      const resultPrefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
       const updatedThreshold = '0.35';
       const targetUrl = __TARGET_URL__;
       const cookieUrl = __COOKIE_URL__;
@@ -74,6 +77,10 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           minimumFractionDigits: 1,
           maximumFractionDigits: 1,
         }).format(Number(value) || 0);
+      const emitPayload = (payload) => {
+        console.log(`${resultPrefix}${JSON.stringify(payload)}`);
+        return payload;
+      };
       const parseCount = (selector) => {
         const text = document.querySelector(selector)?.textContent?.trim() ?? '';
         const digits = text.replace(/[^\d]/g, '');
@@ -489,7 +496,7 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
           zeroState.requested_range_applied &&
           zeroState.error_hidden;
 
-        return {
+        return emitPayload({
           dashboard_summary_browser_check: true,
           ok:
             before.marker_left !== '' &&
@@ -585,13 +592,13 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
                 : !localeApplied
                   ? `Threshold badge did not use locale text ${expectedThresholdText}.`
                   : null,
-        };
+        });
       } catch (error) {
-        return {
+        return emitPayload({
           dashboard_summary_browser_check: true,
           ok: false,
           error: `${currentStep}: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        });
       }
     }
     JS;
@@ -614,58 +621,11 @@ function dashboardSummaryBrowserBuildRunCodeSnippet(array $config): string
  */
 function dashboardSummaryBrowserParseRunCodeResult(array $result): array
 {
-    $output = (string) ($result['stdout'] ?? '');
-
-    if ($output === '') {
-        throw new GateAssertionException('Playwright run-code produced no output.');
-    }
-
-    $matches = [];
-    if (preg_match('/(?:^|\R)### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) === 1) {
-        $decoded = json_decode(trim((string) ($matches[1] ?? '')), true);
-
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-    }
-
-    $prefix = '__DASHBOARD_SUMMARY_BROWSER_CHECK__';
-    $prefixPosition = strpos($output, $prefix);
-
-    if ($prefixPosition === false) {
-        throw new GateAssertionException(
-            'Could not parse dashboard summary browser payload from Playwright output: ' .
-                substr(trim($output), 0, 500),
-        );
-    }
-
-    $rawTail = trim(substr($output, $prefixPosition + strlen($prefix)));
-    $attempts = array_values(
-        array_unique(
-            array_filter([
-                $rawTail,
-                preg_replace('/"\s*$/', '', $rawTail) ?: '',
-                stripcslashes($rawTail),
-                stripcslashes((string) (preg_replace('/"\s*$/', '', $rawTail) ?: '')),
-            ]),
-        ),
+    return parsePlaywrightRunCodeJsonPayload(
+        (string) ($result['stdout'] ?? ''),
+        '__DASHBOARD_SUMMARY_BROWSER_CHECK__',
+        'dashboard summary browser',
     );
-
-    foreach ($attempts as $attempt) {
-        $matches = [];
-
-        if (preg_match('/\{.*?\}(?="|\R|$)/s', $attempt, $matches) !== 1) {
-            continue;
-        }
-
-        $decoded = json_decode((string) $matches[0], true);
-
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-    }
-
-    throw new GateAssertionException('Playwright run-code result payload is not valid JSON.');
 }
 
 /**
