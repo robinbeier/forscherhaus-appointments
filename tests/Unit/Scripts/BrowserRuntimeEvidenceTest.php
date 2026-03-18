@@ -161,7 +161,7 @@ class BrowserRuntimeEvidenceTest extends TestCase
                     "\n",
             );
             chmod($wrapperPath, 0777);
-            putenv('PLAYWRIGHT_MCP_BROWSER=chromium');
+            putenv('PLAYWRIGHT_MCP_BROWSER= Chromium ');
 
             $result = runPwcliCommand(
                 [

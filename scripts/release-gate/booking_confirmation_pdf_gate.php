@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/lib/GateAssertions.php';
 require_once __DIR__ . '/lib/GateProcessRunner.php';
+require_once __DIR__ . '/lib/BookingConfirmationRunCodeResult.php';
+require_once __DIR__ . '/lib/PlaywrightBrowserSelection.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateProcessRunner;
+use function ReleaseGate\buildPlaywrightSessionArguments;
+use function ReleaseGate\extractPlaywrightErrorSection;
+use function ReleaseGate\parseBookingConfirmationRunCodeResult;
+use function ReleaseGate\prepareConfiguredPlaywrightCommandArguments;
 
 const RELEASE_GATE_EXIT_SUCCESS = 0;
 const RELEASE_GATE_EXIT_ASSERTION_FAILURE = 1;
@@ -119,15 +125,13 @@ try {
         $confirmationSource,
         $confirmationUrl,
     ): array {
-        $arguments = ['open', $confirmationUrl];
-
-        if ($config['headed']) {
-            $arguments[] = '--headed';
-        }
-
-        $arguments[] = '--browser=firefox';
-
-        $openResult = runPwcliCommand($config, $sessionId, $arguments, $repoRoot, $config['open_timeout']);
+        $openResult = runPwcliCommand(
+            $config,
+            $sessionId,
+            ['open', $confirmationUrl],
+            $repoRoot,
+            $config['open_timeout'],
+        );
         assertProcessSucceeded($openResult, 'Open confirmation page', true);
 
         $snapshotResult = runPwcliCommand($config, $sessionId, ['snapshot'], $repoRoot, $config['open_timeout']);
@@ -197,7 +201,7 @@ try {
             null,
         );
         assertProcessSucceeded($runCodeResult, 'Trigger booking confirmation PDF download', true);
-        $marker = parseRunCodeResult($runCodeResult);
+        $marker = parseBookingConfirmationRunCodeResult($runCodeResult);
 
         $ok = (bool) ($marker['ok'] ?? false);
         if (!$ok) {
@@ -643,11 +647,19 @@ function runPwcliCommand(
     int $timeoutSeconds,
     ?array $environment = null,
 ): array {
-    $command = ['bash', (string) $config['pwcli_path'], '--session', $sessionId, ...$arguments];
+    $arguments = prepareConfiguredPlaywrightCommandArguments($arguments, (bool) $config['headed']);
+
+    $command = [
+        'bash',
+        (string) $config['pwcli_path'],
+        ...buildPlaywrightSessionArguments($sessionId),
+        ...$arguments,
+    ];
     $effectiveEnvironment = $environment === null ? null : array_merge(getCurrentEnvironment(), $environment);
 
     return GateProcessRunner::run($command, $repoRoot, $effectiveEnvironment, $timeoutSeconds);
 }
+
 
 /**
  * @param array<string, mixed> $result
@@ -685,78 +697,6 @@ function assertProcessSucceeded(array $result, string $context, bool $asAssertio
     }
 
     $throwProcessFailure(sprintf('%s failed with exit code %d. %s', $context, $exitCode, $excerpt));
-}
-
-function extractPlaywrightErrorSection(string $output): ?string
-{
-    if (trim($output) === '') {
-        return null;
-    }
-
-    $matches = [];
-    if (preg_match('/(?:^|\R)### Error\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) !== 1) {
-        return null;
-    }
-
-    $message = trim((string) ($matches[1] ?? ''));
-
-    return $message !== '' ? $message : 'Unknown Playwright error.';
-}
-
-function parseRunCodeResult(array $runCodeResult): array
-{
-    $output = (string) ($runCodeResult['stdout'] ?? '');
-
-    if ($output === '') {
-        throw new GateAssertionException('Playwright run-code produced no output.');
-    }
-
-    $errorText = extractPlaywrightErrorSection($output);
-    if ($errorText !== null) {
-        throw new GateAssertionException($errorText);
-    }
-
-    $matches = [];
-    if (preg_match('/(?:^|\R)### Result\s*\R(.+?)(?:\R###\s+[^\r\n]+|\z)/s', $output, $matches) === 1) {
-        $decoded = json_decode(trim((string) ($matches[1] ?? '')), true);
-
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-    }
-
-    $prefix = '__BOOKING_CONFIRMATION_PDF_GATE__';
-    $prefixPosition = strpos($output, $prefix);
-
-    if ($prefixPosition === false) {
-        throw new GateAssertionException(
-            'Could not parse run-code result payload from Playwright output: ' . substr(trim($output), 0, 500),
-        );
-    }
-
-    $rawTail = trim(substr($output, $prefixPosition + strlen($prefix)));
-    $attempts = array_values(array_unique(array_filter([
-        $rawTail,
-        preg_replace('/"\s*$/', '', $rawTail) ?: '',
-        stripcslashes($rawTail),
-        stripcslashes((string) (preg_replace('/"\s*$/', '', $rawTail) ?: '')),
-    ])));
-
-    foreach ($attempts as $attempt) {
-        $matches = [];
-
-        if (preg_match('/\{.*?\}(?="|\R|$)/s', $attempt, $matches) !== 1) {
-            continue;
-        }
-
-        $decoded = json_decode((string) $matches[0], true);
-
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-    }
-
-    throw new GateAssertionException('Playwright run-code result payload is not valid JSON.');
 }
 
 /**
