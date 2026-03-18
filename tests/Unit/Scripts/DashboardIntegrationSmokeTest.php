@@ -26,11 +26,11 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString("document.getElementById('login-form') !== null", $snippet);
         self::assertStringContainsString("typeof window.App?.Http?.Login?.validate === 'function'", $snippet);
         self::assertStringContainsString("typeof window.vars === 'function'", $snippet);
+        self::assertStringContainsString("window.jQuery?._data?.(form, 'events')?.submit", $snippet);
         self::assertStringContainsString("await page.fill('#username', username)", $snippet);
         self::assertStringContainsString("await page.fill('#password', password)", $snippet);
-        self::assertStringContainsString('const loginResponsePromise = page.waitForResponse((response) => {', $snippet);
+        self::assertStringContainsString('page.waitForURL((url) => {', $snippet);
         self::assertStringContainsString("page.click('#login')", $snippet);
-        self::assertStringContainsString('await page.goto(targetUrl)', $snippet);
         self::assertStringContainsString("await page.waitForLoadState('domcontentloaded'", $snippet);
         self::assertStringContainsString('flatpickrInstance.setDate', $snippet);
         self::assertStringContainsString('requested_range_applied', $snippet);
@@ -48,6 +48,11 @@ class DashboardIntegrationSmokeTest extends TestCase
         self::assertStringContainsString("page.waitForSelector('#dashboard-threshold-input'", $snippet);
         self::assertStringContainsString("page.click('#dashboard-threshold-form button[type=\"submit\"]')", $snippet);
         self::assertStringNotContainsString("dispatchEvent(new Event('submit'", $snippet);
+        self::assertStringNotContainsString(
+            'const loginResponsePromise = page.waitForResponse((response) => {',
+            $snippet,
+        );
+        self::assertStringNotContainsString('await page.goto(targetUrl)', $snippet);
     }
 
     public function testParseRunCodeResultReturnsDecodedPayloadFromResultSection(): void
