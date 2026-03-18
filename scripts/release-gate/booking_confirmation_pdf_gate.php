@@ -125,7 +125,7 @@ try {
             $arguments[] = '--headed';
         }
 
-        $arguments[] = '--browser=firefox';
+        $arguments[] = '--browser=' . resolveConfiguredPlaywrightBrowser();
 
         $openResult = runPwcliCommand($config, $sessionId, $arguments, $repoRoot, $config['open_timeout']);
         assertProcessSucceeded($openResult, 'Open confirmation page', true);
@@ -647,6 +647,13 @@ function runPwcliCommand(
     $effectiveEnvironment = $environment === null ? null : array_merge(getCurrentEnvironment(), $environment);
 
     return GateProcessRunner::run($command, $repoRoot, $effectiveEnvironment, $timeoutSeconds);
+}
+
+function resolveConfiguredPlaywrightBrowser(): string
+{
+    $configuredBrowser = trim((string) getenv('PLAYWRIGHT_MCP_BROWSER'));
+
+    return $configuredBrowser !== '' ? $configuredBrowser : 'firefox';
 }
 
 /**

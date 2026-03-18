@@ -88,9 +88,11 @@ git diff --quiet --exit-code -- assets/vendor build || {
 
 echo_section "Start quick gate database service"
 trap cleanup_stack EXIT
-ci_docker_compose up -d mysql
+ci_docker_compose up -d mysql php-fpm
 ci_docker_wait_for_mysql_readiness "pre-pr-quick"
-ci_docker_install_seed_instance "pre-pr-quick" run --rm php-fpm php index.php console install
+ci_docker_wait_for_service_exec php-fpm "pre-pr-quick" php -v
+ci_docker_wait_for_php_mysql_connectivity "pre-pr-quick"
+ci_docker_install_seed_instance "pre-pr-quick" exec -T php-fpm php index.php console install
 
 echo_section "PHPUnit"
 ci_docker_compose run --rm php-fpm composer test

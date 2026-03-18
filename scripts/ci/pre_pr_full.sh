@@ -138,6 +138,7 @@ if [[ "${INTEGRATION_SMOKE_INCLUDE_LDAP}" == "1" ]]; then
 fi
 ci_docker_wait_for_mysql_readiness "pre-pr-full"
 ci_docker_wait_for_service_exec php-fpm "pre-pr-full" php -v
+ci_docker_wait_for_php_mysql_connectivity "pre-pr-full"
 ci_docker_install_seed_instance "pre-pr-full" exec -T php-fpm php index.php console install
 
 DEEP_RUNTIME_MANIFEST="storage/logs/ci/deep-runtime-suite/manifest.json"
