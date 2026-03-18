@@ -38,6 +38,10 @@ resolve_playwright_runtime_package() {
     exit 1
   fi
 
+  if [[ "${runtime_package}" != playwright* ]]; then
+    runtime_package="playwright@${runtime_package}"
+  fi
+
   playwright_runtime_package="${runtime_package}"
   echo "${playwright_runtime_package}"
 }
