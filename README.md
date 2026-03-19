@@ -146,6 +146,11 @@ docker compose run --rm php-fpm composer test
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
 
+On cold local Docker stacks, `integration-smoke` may need extra Playwright
+startup time. In that case, rerun the full gate with
+`PRE_PR_INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT=600` and
+`PRE_PR_INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT=60`.
+
 Use `bash ./scripts/ci/pre_pr_quick.sh` for a faster local gate. For the full
 optional matrix, scope-specific smokes, and rollback notes, see
 [Agent Harness Index](docs/agent-harness-index.md) and [AGENTS.md](AGENTS.md).

@@ -15,6 +15,8 @@ PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:applica
 PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT:-phpstan:request-contracts:l1}"
 PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT:-phpstan:request-contracts:l2}"
 DEPTRAC_ANALYZE_SCRIPT="${PRE_PR_DEPTRAC_ANALYZE_SCRIPT:-deptrac:analyze}"
+INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT="${PRE_PR_INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT:-180}"
+INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT="${PRE_PR_INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT:-20}"
 CI_DOCKER_LOG_PREFIX="pre-pr-full"
 
 require_cmd() {
@@ -162,6 +164,8 @@ ci_docker_compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
     --booking-search-days=14 --retry-count=1 \
     --start-date=2026-01-01 --end-date=2026-01-31 \
     --integration-smoke-include-ldap="${INTEGRATION_SMOKE_INCLUDE_LDAP}" \
+    --integration-smoke-browser-bootstrap-timeout="${INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT}" \
+    --integration-smoke-browser-open-timeout="${INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT}" \
     --report-dir=storage/logs/ci/deep-runtime-suite
 
 echo_section "Deep runtime verdicts"
