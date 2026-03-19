@@ -26,6 +26,12 @@ Review rules:
 - Explain impact, triggering conditions, and likely user-visible or operational consequences.
 - Cite files, functions, and relevant call paths.
 - Suggest a reproduction path when possible.
+- Do not turn unrelated harness, infra, or broad cleanup ideas into blocking
+  findings for a small scoped PR unless they demonstrably make the current diff
+  unsafe.
+- If you notice worthwhile but non-blocking hardening outside the diff's problem
+  class, call it follow-up scope and still return `no findings` for the current
+  review when appropriate.
 - If you find no substantive issues, say exactly: no findings.
 
 Do not:

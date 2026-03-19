@@ -113,6 +113,12 @@ Turn discipline:
   without reopening broad exploration.
 - For small doc-only or single-file tasks, do not broaden scope once the
   requested diff is correct.
+- If review or validation uncovers a second problem class outside the original
+  change goal or touched paths, stop and decide explicitly whether it is:
+  - required to make the current diff safe to merge
+  - a follow-up that must be split into a separate issue or PR
+- Do not silently expand a small product/UI change into unrelated harness,
+  infrastructure, release-gate, or broad test-architecture work.
 - Do not end a turn while the issue remains in an active state unless you are
   truly blocked or the remaining work is intentionally being handed to the next
   continuation turn.
@@ -340,6 +346,16 @@ When the issue is moved to `Rework`:
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
 
+Apply a scope checkpoint before implementing review feedback:
+
+- Keep findings blocking only when they demonstrate a concrete correctness,
+  regression, security, or validation risk in the current diff.
+- Route unrelated hardening, infra cleanup, harness improvements, or broader
+  refactors into follow-up work instead of silently enlarging the PR.
+- If addressing findings would spread the change into a new subsystem or a
+  different problem class, stop and split unless the current diff is otherwise
+  unsafe to merge.
+
 ### 6. Merge loop
 
 When the issue is moved to `Ready to Merge`:
@@ -367,6 +383,18 @@ Every PR must cover two review lenses:
 - Reviewer A: bugs, regressions, security, edge cases
 - Reviewer B: architecture, readability, test coverage, maintainability
 
+Default reviewer depth should match PR scope:
+
+- Small scoped product or UI PRs default to `pr_explorer` plus
+  `reviewer_correctness`.
+- Add `reviewer_tests` only when the change introduces or alters behavior whose
+  safety is not already proven by the executed checks.
+- Add `reviewer_design` only when the diff changes architecture boundaries,
+  reuse patterns, or long-lived seams in a meaningful way.
+- Add `docs_researcher` only when framework, library, platform, or external API
+  assumptions are genuinely material to the diff.
+- Do not use extra reviewers just to search for optional hardening work.
+
 The PR is not done until:
 
 - required blocking CI is green
@@ -387,6 +415,9 @@ Stop and ask for human input when:
 - a blocking CI gate would need to be relaxed
 - a review comment conflicts with the user’s stated intent and the correct
   answer is not inferable from code, tests, or nearby docs
+- review findings would expand a small or scoped PR into a separate subsystem,
+  infrastructure topic, or broad harness hardening effort that is not required
+  to make the current diff safe
 
 If a blocking gate must temporarily become advisory because of false positives,
 create a follow-up issue with a return-to-blocking deadline of at most 14 days.

@@ -24,6 +24,11 @@ Review rules:
 - Prefer concrete missing cases over generic 'needs more tests' comments.
 - Report only concrete missing regression cases or weak assertions tied to exact behavior and test seams.
 - Cite the exact behavior that is unproven and the most appropriate test seam.
+- Do not demand broad harness expansion, new end-to-end suites, or unrelated
+  validation infrastructure for a small scoped PR unless the current change is
+  otherwise unproven.
+- Treat adjacent validation improvements outside the changed behavior as
+  follow-up scope, not blocking findings.
 - If validation is sufficient, say exactly: no findings.
 
 Do not:
