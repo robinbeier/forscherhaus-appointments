@@ -8,6 +8,7 @@ set -Eeuo pipefail
 umask 022
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CURRENT_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 DEPLOY_CWD="$(pwd -P)"
 
 REL=""
@@ -180,6 +181,34 @@ ensure_renderer_restart_permissions() {
   command -v sudo >/dev/null 2>&1 || die "[!] 'sudo' is required for non-root deployment user."
   sudo -n -l /bin/systemctl restart "$RENDERER_SERVICE" >/dev/null 2>&1 \
     || die "[!] Missing non-interactive permission for '/bin/systemctl restart $RENDERER_SERVICE'."
+}
+
+validate_stage_release_artifact() {
+  local validator_script="$STAGE_ROOT/scripts/release-gate/validate_release_artifact.php"
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] validate release artifact at '$STAGE_ROOT' with '$validator_script'"
+    return 0
+  fi
+
+  [[ -f "$validator_script" ]] || die "[!] Missing release artifact validator in stage: $validator_script"
+
+  php "$validator_script" --root="$STAGE_ROOT" \
+    || die "[!] Extracted stage is missing required release artifacts."
+}
+
+validate_deploy_script_drift() {
+  local stage_deploy_script="$STAGE_ROOT/deploy_ea.sh"
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] compare running deploy script '$CURRENT_SCRIPT_PATH' with staged '$stage_deploy_script'"
+    return 0
+  fi
+
+  [[ -f "$stage_deploy_script" ]] || die "[!] Missing deploy script in staged release: $stage_deploy_script"
+
+  cmp -s "$CURRENT_SCRIPT_PATH" "$stage_deploy_script" \
+    || die "[!] Host deploy script drift detected: '$CURRENT_SCRIPT_PATH' does not match '$stage_deploy_script'. Sync the host deploy script from the merged repo before deploying."
 }
 
 systemctl_run() {
@@ -1076,6 +1105,8 @@ else
   STAGE_ROOT="$STAGE"
 fi
 
+validate_stage_release_artifact
+validate_deploy_script_drift
 validate_breakglass_policy || die "[!] Zero-surprise breakglass policy validation failed."
 prepare_zero_surprise_stage_runtime
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"

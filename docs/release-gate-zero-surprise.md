@@ -106,16 +106,26 @@ Explicit overrides remain supported:
 
 ## Deploy flow
 
+Before a deploy even reaches the zero-surprise replay, the release process now
+hard-fails on two extra conditions:
+
+- `build_release.sh` refreshes frontend assets and validates the staged tree and
+  final tarball with `scripts/release-gate/validate_release_artifact.php`
+- `deploy_ea.sh` validates the extracted stage contents again and aborts if the
+  running host deploy script does not byte-match the release copy in the
+  archive, so host script drift cannot silently bypass newer gate logic
+
 Pre-switch order in `deploy_ea.sh`:
 
 1. unpack release archive and detect `STAGE_ROOT`
-2. validate breakglass policy if any zero-surprise bypass is requested
-3. generate a stage-local `config.php` from `config-sample.php`, patch `BASE_URL`, and disable request rate limiting so the isolated replay stack stays deterministic
-4. normalize stage ownership, permissions, and runtime script executable bits
-5. run `zero_surprise_replay.php` from `STAGE_ROOT`
-6. inside the isolated replay DB, sync the configured gate account before dashboard/auth checks so dump freshness does not gate login readiness
-7. validate the generated predeploy report
-8. continue with stage preparation and `perform_atomic_switch`
+2. validate the extracted stage artifact contents and fail fast on host deploy-script drift
+3. validate breakglass policy if any zero-surprise bypass is requested
+4. generate a stage-local `config.php` from `config-sample.php`, patch `BASE_URL`, and disable request rate limiting so the isolated replay stack stays deterministic
+5. normalize stage ownership, permissions, and runtime script executable bits
+6. run `zero_surprise_replay.php` from `STAGE_ROOT`
+7. inside the isolated replay DB, sync the configured gate account before dashboard/auth checks so dump freshness does not gate login readiness
+8. validate the generated predeploy report
+9. continue with stage preparation and `perform_atomic_switch`
 
 Post-switch order in `deploy_ea.sh`:
 
