@@ -49,6 +49,8 @@
    Do instead: keep sensitive values in local `config.php` and adjust `config-sample.php` only for safe defaults/documentation.
 7. **[2026-03-02] Document OAuth callback URLs with default index page behavior**
    Do instead: use `.../index.php/google/oauth_callback` for default examples and explicitly mention rewrite-mode alternatives when `index.php` is removed.
+8. **[2026-03-19] Disable app rate limiting inside zero-surprise predeploy stage configs**
+   Do instead: when preparing the isolated predeploy stage from `config-sample.php`, patch both `BASE_URL` and `Config::RATE_LIMITING = false`; replay traffic routed through `http://nginx` can otherwise hit the global rate limiter and fail with `429` before the real deploy starts.
 
 ## Shell & Command Reliability
 

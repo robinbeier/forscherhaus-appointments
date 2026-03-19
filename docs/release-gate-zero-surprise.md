@@ -110,10 +110,12 @@ Pre-switch order in `deploy_ea.sh`:
 
 1. unpack release archive and detect `STAGE_ROOT`
 2. validate breakglass policy if any zero-surprise bypass is requested
-3. run `zero_surprise_replay.php` from `STAGE_ROOT`
-4. inside the isolated replay DB, sync the configured gate account before dashboard/auth checks so dump freshness does not gate login readiness
-5. validate the generated predeploy report
-6. continue with stage preparation and `perform_atomic_switch`
+3. generate a stage-local `config.php` from `config-sample.php`, patch `BASE_URL`, and disable request rate limiting so the isolated replay stack stays deterministic
+4. normalize stage ownership, permissions, and runtime script executable bits
+5. run `zero_surprise_replay.php` from `STAGE_ROOT`
+6. inside the isolated replay DB, sync the configured gate account before dashboard/auth checks so dump freshness does not gate login readiness
+7. validate the generated predeploy report
+8. continue with stage preparation and `perform_atomic_switch`
 
 Post-switch order in `deploy_ea.sh`:
 
