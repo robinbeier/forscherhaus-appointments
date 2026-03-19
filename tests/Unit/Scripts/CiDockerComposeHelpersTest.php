@@ -189,6 +189,149 @@ class CiDockerComposeHelpersTest extends TestCase
         self::assertStringContainsString('requires a command', $result['stderr']);
     }
 
+    public function testCiDockerWaitForEasyappointmentsMysqlConnectivityRetriesUntilPhpCanReachMysql(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            sleep() { :; }
+            ci_docker_compose() {
+              if [[ "$1" == "exec" && "$2" == "-T" && "$3" == "php-fpm" && "$4" == "php" && "$5" == "-r" ]]; then
+                attempt_file="${TMPDIR:-/tmp}/ci-docker-php-mysql-attempts"
+                attempts=0
+                if [[ -f "$attempt_file" ]]; then
+                  attempts="$(cat "$attempt_file")"
+                fi
+                attempts=$((attempts + 1))
+                printf '%s' "$attempts" > "$attempt_file"
+                if [[ "$attempts" -lt 4 ]]; then
+                  return 1
+                fi
+                return 0
+              fi
+              return 1
+            }
+
+            attempt_file="${TMPDIR:-/tmp}/ci-docker-php-mysql-attempts"
+            rm -f "$attempt_file"
+            ci_docker_wait_for_easyappointments_mysql_connectivity test
+            cat "$attempt_file"
+            rm -f "$attempt_file"
+            BASH
+            ,
+            '',
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('4', trim($result['stdout']));
+    }
+
+    public function testCiDockerWaitForEasyappointmentsMysqlConnectivityUsesConfigDrivenProbe(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            ci_docker_compose() {
+              if [[ "$1" == "exec" && "$2" == "-T" && "$3" == "php-fpm" && "$4" == "php" && "$5" == "-r" ]]; then
+                if [[ "$6" == *'Config::DB_HOST'* && "$6" == *'new mysqli'* ]]; then
+                  return 0
+                fi
+              fi
+              return 1
+            }
+
+            ci_docker_wait_for_easyappointments_mysql_connectivity test
+            BASH
+            ,
+            '',
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+    }
+
+    public function testCiDockerWaitForEasyappointmentsMysqlConnectivityTimesOutWhenPhpCannotReachMysql(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            sleep() { :; }
+            ci_docker_compose() {
+              return 1
+            }
+
+            ci_docker_wait_for_easyappointments_mysql_connectivity test
+            BASH
+            ,
+            '',
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('php-fpm could not reach MySQL after 30 attempts.', $result['stderr']);
+    }
+
+    public function testCiDockerInstallSeedInstanceUsesDefaultRetryBudget(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            sleep() { :; }
+            ci_docker_compose() {
+              attempt_file="${TMPDIR:-/tmp}/ci-docker-seed-attempts-default"
+              attempts=0
+              if [[ -f "$attempt_file" ]]; then
+                attempts="$(cat "$attempt_file")"
+              fi
+              attempts=$((attempts + 1))
+              printf '%s' "$attempts" > "$attempt_file"
+              return 1
+            }
+
+            attempt_file="${TMPDIR:-/tmp}/ci-docker-seed-attempts-default"
+            rm -f "$attempt_file"
+            ci_docker_install_seed_instance test exec -T php-fpm php index.php console install
+            BASH
+            ,
+            '',
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('console install failed after 3 attempts.', $result['stderr']);
+    }
+
+    public function testCiDockerInstallSeedInstanceHonorsRetryOverride(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            sleep() { :; }
+            ci_docker_compose() {
+              attempt_file="${TMPDIR:-/tmp}/ci-docker-seed-attempts-override"
+              attempts=0
+              if [[ -f "$attempt_file" ]]; then
+                attempts="$(cat "$attempt_file")"
+              fi
+              attempts=$((attempts + 1))
+              printf '%s' "$attempts" > "$attempt_file"
+              return 1
+            }
+
+            attempt_file="${TMPDIR:-/tmp}/ci-docker-seed-attempts-override"
+            rm -f "$attempt_file"
+            CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS=5 ci_docker_install_seed_instance test exec -T php-fpm php index.php console install
+            BASH
+            ,
+            '',
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('console install failed after 5 attempts.', $result['stderr']);
+    }
+
     /**
      * @return array{exit_code:int,stdout:string,stderr:string}
      */

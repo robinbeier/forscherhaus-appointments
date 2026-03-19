@@ -688,7 +688,7 @@ function parseCliOptions(array $csrfDefaults, string $repoRoot): array
         $repoRoot,
     );
     $browserBootstrapTimeout = parsePositiveInt(
-        getOptionalOption($options, 'browser-bootstrap-timeout', 90),
+        getOptionalOption($options, 'browser-bootstrap-timeout', 180),
         'browser-bootstrap-timeout',
     );
     $browserOpenTimeout = parsePositiveInt(
@@ -785,7 +785,7 @@ function printHelpAndExit(): void
       --browser-evidence-dir=PATH
       --browser-evidence-on-failure-checks=id1,id2
       --browser-pwcli-path=scripts/release-gate/playwright/playwright_cli.sh
-      --browser-bootstrap-timeout=90
+      --browser-bootstrap-timeout=180
       --browser-open-timeout=20
       --browser-headed
       --checks=id1,id2
