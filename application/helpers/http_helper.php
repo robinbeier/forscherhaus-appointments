@@ -115,7 +115,6 @@ if (!function_exists('json_exception')) {
         $response = [
             'success' => false,
             'message' => $e->getMessage(),
-            'trace' => trace($e),
         ];
 
         $logger = load_class('Log', 'core');
@@ -126,8 +125,6 @@ if (!function_exists('json_exception')) {
         } else {
             log_message('error', $log_summary);
         }
-
-        unset($response['trace']); // Do not send the trace to the browser as it might contain sensitive info
 
         json_response($response, 500);
     }
