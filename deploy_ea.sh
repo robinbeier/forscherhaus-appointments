@@ -635,25 +635,9 @@ prepare_zero_surprise_stage_runtime() {
   cp "$stage_sample" "$stage_config"
   mkdir -p "$STAGE_ROOT/storage/logs/release-gate"
 
-  php -r '
-    $path = (string) ($argv[1] ?? "");
-    $baseUrl = (string) ($argv[2] ?? "");
-    $raw = @file_get_contents($path);
-    if (!is_string($raw) || $raw === "") {
-        fwrite(STDERR, "Could not read generated stage config." . PHP_EOL);
-        exit(1);
-    }
-    $replacement = "const BASE_URL = " . var_export($baseUrl, true) . ";";
-    $updated = preg_replace("/const BASE_URL = [^;]+;/", $replacement, $raw, 1, $count);
-    if (!is_string($updated) || $count !== 1) {
-        fwrite(STDERR, "Could not patch BASE_URL in generated stage config." . PHP_EOL);
-        exit(2);
-    }
-    if (@file_put_contents($path, $updated) === false) {
-        fwrite(STDERR, "Could not write generated stage config." . PHP_EOL);
-        exit(3);
-    }
-  ' "$stage_config" "$base_url" \
+  php "$STAGE_ROOT/scripts/release-gate/prepare_zero_surprise_stage_config.php" \
+    --config="$stage_config" \
+    --base-url="$base_url" \
     || die "[!] Could not prepare zero-surprise stage config."
 }
 

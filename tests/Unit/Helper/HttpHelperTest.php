@@ -138,6 +138,59 @@ class HttpHelperTest extends TestCase
         $this->assertLessThanOrEqual(16000, strlen($trace));
     }
 
+    public function testJsonExceptionKeepsResponseShapeAndLogsCompactJsonSummary(): void
+    {
+        get_instance()->output->set_output('');
+
+        $message = 'json-exception-log-test-' . substr(md5((string) microtime(true)), 0, 12);
+        $exception = $this->captureStandaloneException($message);
+        $log_path = $this->currentLogPath();
+        $initial_size = is_file($log_path) ? filesize($log_path) : 0;
+
+        json_exception($exception);
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+        $log_delta = $this->readLogDelta($log_path, $initial_size === false ? 0 : $initial_size);
+
+        $this->assertIsArray($response);
+        $this->assertFalse((bool) ($response['success'] ?? true));
+        $this->assertSame($message, $response['message'] ?? null);
+        $this->assertArrayNotHasKey('trace', $response);
+
+        $log_line = null;
+
+        foreach (preg_split('/\R/', $log_delta) ?: [] as $line) {
+            if (str_contains($line, 'ERROR - ') && str_contains($line, 'JSON exception: ')) {
+                $log_line = $line;
+            }
+        }
+
+        $this->assertIsString($log_line);
+
+        $json_prefix = 'JSON exception: ';
+        $json_offset = strpos($log_line, $json_prefix);
+
+        $this->assertNotFalse($json_offset);
+
+        $json_payload = substr($log_line, $json_offset + strlen($json_prefix));
+
+        $this->assertIsString($json_payload);
+        $this->assertMatchesRegularExpression('/^\{.*\}(?: Trace:|$)/', $json_payload);
+        preg_match('/^(\{.*\})(?: Trace:|$)/', $json_payload, $matches);
+
+        $this->assertArrayHasKey(1, $matches);
+
+        $logged_summary = json_decode($matches[1], true);
+
+        $this->assertIsArray($logged_summary);
+        $this->assertSame(RuntimeException::class, $logged_summary['class'] ?? null);
+        $this->assertSame($message, $logged_summary['message'] ?? null);
+        $this->assertArrayHasKey('frame_count', $logged_summary);
+        $this->assertArrayHasKey('trace_truncated', $logged_summary);
+        $this->assertArrayNotHasKey('trace', $logged_summary);
+        $this->assertArrayNotHasKey('frames', $logged_summary);
+    }
+
     public function testHttpHelperDeclaresResponseFunctionExactlyOnce(): void
     {
         $source = file_get_contents(APPPATH . 'helpers/http_helper.php');
@@ -215,6 +268,17 @@ class HttpHelperTest extends TestCase
         throw new RuntimeException('Trace test exception');
     }
 
+    private function captureStandaloneException(string $message): Throwable
+    {
+        try {
+            throw new RuntimeException($message);
+        } catch (Throwable $e) {
+            return $e;
+        }
+
+        throw new RuntimeException('Expected standalone exception was not thrown.');
+    }
+
     private function captureDeepException(int $depth): Throwable
     {
         try {
@@ -256,5 +320,23 @@ class HttpHelperTest extends TestCase
         }
 
         throw new RuntimeException('Expected oversized trace exception was not thrown.');
+    }
+
+    private function currentLogPath(): string
+    {
+        $log_path = (string) config_item('log_path');
+
+        return rtrim($log_path, '/\\') . '/log-' . date('Y-m-d') . '.php';
+    }
+
+    private function readLogDelta(string $log_path, int $initial_size): string
+    {
+        clearstatcache(true, $log_path);
+
+        $contents = file_get_contents($log_path);
+
+        $this->assertIsString($contents);
+
+        return substr($contents, $initial_size) ?: '';
     }
 }
