@@ -37,4 +37,3 @@
 .env.symphony.pilot
 __pycache__/
 .DS_Store
-build_release.sh
