@@ -1,78 +1,141 @@
-# Easy!Appointments
+# Forscherhaus Appointments
 
-Easy!Appointments is a highly customizable web application that allows your customers to book appointments with you via a sophisticated web interface. Moreover, it provides the ability to sync your data with Google Calendar so you can use them with other services.
+Forscherhaus school scheduling fork of Easy!Appointments.
 
-## Setup
+This repository prioritizes stable, low-risk delivery for school operations and keeps compatibility with the existing Easy!Appointments architecture.
 
-Read [AGENTS.md](AGENTS.md) for the compact operator contract and [docs/agent-harness-index.md](docs/agent-harness-index.md) for the routing map into topic docs.
+## Scope
 
-### With Docker
+- Fork base: Easy!Appointments (`v1.5.2` lineage)
+- Stack: PHP `>=8.3.6`, CodeIgniter, MySQL, jQuery/Bootstrap/FullCalendar
+- Primary goal: school-specific scheduling workflows and operational reliability
+
+## Fork Invariants
+
+- `services.attendants_number` is intentionally restricted to `1`.
+- Do not implement multi-attendant behavior unless product scope changes explicitly.
+
+## Quickstart (Recommended)
+
+Prerequisites on host (required by `./scripts/setup-worktree.sh`):
+
+- PHP `>=8.3.6`
+- Composer
+- Node.js `>=20.19.0` plus `npm`/`npx`
+- Docker + Docker Compose
 
 ```bash
+./scripts/setup-worktree.sh
 docker compose up -d
+
+# when you need deterministic LDAP fixtures for search/import/SSO work
+bash ./scripts/ldap/reset_directory.sh
+bash ./scripts/ldap/smoke.sh
 ```
 
-Application: [http://localhost](http://localhost)
-
-### Installation
+Smoke-check:
 
 ```bash
-docker compose run --rm php-fpm php index.php console install
+docker compose run --rm php-fpm composer test
+npm run build
 ```
 
-Default credentials:
+## Harness Guide
 
-- Username: `administrator`
-- Password: `administrator`
+Need the shortest route to the right steering source?
 
-## Services
+- [Agent Harness Index](docs/agent-harness-index.md): routing across onboarding,
+  agent runtime, CI, architecture, ownership, and Symphony
+- [WORKFLOW.md](WORKFLOW.md): agent runtime and ticket-to-merge rules
+- [AGENTS.md](AGENTS.md): compact repo guardrails plus the extended local/CI command matrix
 
-Start the full stack:
-
-```bash
-docker compose up -d
-```
-
-Core services only:
+## Core Commands
 
 ```bash
-docker compose up -d mysql php-fpm nginx
-```
+npm start
 
-Optional supporting services are documented in [docs/docker.md](docs/docker.md).
+npm run build
 
-## Database
+npm run lint:js
 
-Dump the local database:
-
-```bash
-docker compose exec mysql sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' > dump.sql
-```
-
-Restore a dump:
-
-```bash
-docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' < dump.sql
-```
-
-For production-dump restore and reset workflows see [docs/docker.md](docs/docker.md).
-
-## Validation
-
-Fast local gate:
-
-```bash
-bash ./scripts/ci/pre_pr_quick.sh
-```
-
-Review-ready path:
-
-```bash
+npm run assets:refresh
 docker compose run --rm php-fpm composer test
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
 
-For scoped checks, deep runtime suites, and rollout docs see [docs/agent-harness-index.md](docs/agent-harness-index.md).
+For optional smoke tests, write-path contracts, deep runtime suites, release
+gates, and CI-only signals, use [Agent Harness Index](docs/agent-harness-index.md)
+as the routing map and [AGENTS.md](AGENTS.md) as the compact command-and-guardrail hub.
+
+## Release Gates
+
+Primary references:
+
+- [Zero-surprise restore-dump replay + live canary](docs/release-gate-zero-surprise.md)
+- [Dashboard release gate](docs/release-gate-dashboard.md)
+- [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
+- [Agent Harness Index](docs/agent-harness-index.md)
+
+## Local Services (Docker)
+
+- App: `http://localhost`
+- phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
+- Mailpit: `http://localhost:8025`
+- PDF renderer: `http://localhost:3003`
+- Baikal (CalDAV): `http://localhost:8100`
+
+For deterministic LDAP fixtures, reset and smoke the local directory with:
+
+```bash
+bash ./scripts/ldap/reset_directory.sh
+bash ./scripts/ldap/smoke.sh
+```
+
+If you run PHP on host with Docker PDF renderer, set:
+
+```bash
+export PDF_RENDERER_URL=http://localhost:3003
+```
+
+If the host runtime goes through Apache `mod_php`, set `PDF_RENDERER_URL` via
+Apache `SetEnv` as well; PHP-FPM-only env wiring does not reach those requests.
+
+## Worktree Safety
+
+When using multiple git worktrees, always set a unique Docker Compose project name per worktree:
+
+```bash
+docker compose -p fh-main up -d
+docker compose -p fh-hotfix up -d
+```
+
+This prevents mixed container mounts across worktrees.
+
+## Documentation Map
+
+- [Agent harness index](docs/agent-harness-index.md)
+- [Compact guardrails and extended command matrix](AGENTS.md)
+- [Write-path CI contracts](docs/ci-write-contracts.md)
+- [Architecture map](docs/architecture-map.md)
+- [Ownership map](docs/ownership-map.md)
+- [Installation guide](docs/installation-guide.md)
+- [Docker guide](docs/docker.md)
+- [Observability guide](docs/observability.md)
+- [Console commands](docs/console.md)
+- [REST API](docs/rest-api.md)
+- [Google Calendar sync](docs/google-calendar-sync.md)
+- [CalDAV sync](docs/caldav-calendar-sync.md)
+- [LDAP](docs/ldap.md)
+- [LDAP parallel replacement spike](docs/ldap-parallel-spike.md)
+- [Provider room feature](docs/feature-provider-room.md)
+- [FAQ](docs/faq.md)
+
+## Contribution Rules (Short)
+
+- Keep production code changes inside `application/`.
+- Do not modify `system/` unless applying an explicit upstream patch.
+- Use CodeIgniter migrations for all DB schema changes (with rollback path).
+- Keep `config.php` out of version control; update `config-sample.php` only with safe defaults.
 
 ## Testing Before PR
 
@@ -155,3 +218,7 @@ This is a maintained fork of:
 Upstream merges are done selectively and scheduled according to release risk.
 
 ## License
+
+Code licensed under [GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html).
+Upstream project content is published under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/); keep attribution notices when redistributing modified content/docs.
+See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
