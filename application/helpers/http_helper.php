@@ -115,11 +115,32 @@ if (!function_exists('json_exception')) {
         $response = [
             'success' => false,
             'message' => $e->getMessage(),
-            'trace' => trace($e),
         ];
 
+        $logger = load_class('Log', 'core');
+        $log_summary = json_exception_log_summary($e);
+
+        if (is_object($logger) && method_exists($logger, 'write_log')) {
+            $logger->write_log('error', $log_summary);
+        } else {
+            log_message('error', $log_summary);
+        }
+
+        json_response($response, 500);
+    }
+}
+
+if (!function_exists('json_exception_log_summary')) {
+    /**
+     * Build a compact log summary for JSON exceptions without embedding the full trace payload.
+     *
+     * @param Throwable $e
+     */
+    function json_exception_log_summary(Throwable $e): string
+    {
         $sanitize_for_log = static function (string $value, int $max_length = 512): string {
-            $normalized = trim(str_replace(["\r", "\n"], ' ', $value));
+            $normalized = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $value);
+            $normalized = is_string($normalized) ? trim($normalized) : '';
 
             return substr($normalized, 0, $max_length);
         };
@@ -141,59 +162,32 @@ if (!function_exists('json_exception')) {
             return $sanitize_for_log(trim($function . ($location !== '' ? '@' . $location : '')), 256);
         };
 
-        $log_summary = [
-            'class' => get_class($e),
-            'code' => $e->getCode(),
-            'message' => $sanitize_for_log((string) $response['message']),
-            'file' => $sanitize_for_log($e->getFile(), 256),
-            'line' => $e->getLine(),
+        $trace = $e->getTrace();
+        $trace_summary = [];
+
+        foreach (array_slice($trace, 0, 3) as $frame) {
+            $frame_summary = $summarize_frame($frame);
+
+            if ($frame_summary !== '') {
+                $trace_summary[] = $frame_summary;
+            }
+        }
+
+        $log_parts = [
+            'JSON exception:',
+            'class=' . get_class($e),
+            'code=' . (string) $e->getCode(),
+            'message=' . $sanitize_for_log($e->getMessage(), 384),
+            'file=' . $sanitize_for_log($e->getFile(), 256),
+            'line=' . (string) $e->getLine(),
+            'frame_count=' . (string) count($trace),
         ];
 
-        $decoded_trace = json_decode($response['trace'], true);
-
-        if (is_array($decoded_trace)) {
-            if (isset($decoded_trace['frame_count'])) {
-                $log_summary['frame_count'] = $decoded_trace['frame_count'];
-            }
-
-            if (array_key_exists('truncated', $decoded_trace)) {
-                $log_summary['trace_truncated'] = (bool) $decoded_trace['truncated'];
-            }
-
-            if (array_key_exists('size_truncated', $decoded_trace)) {
-                $log_summary['trace_size_truncated'] = (bool) $decoded_trace['size_truncated'];
-            }
-
-            $first_frame = $summarize_frame($decoded_trace['frames'][0] ?? null);
-
-            if ($first_frame !== '') {
-                $log_summary['first_frame'] = $first_frame;
-            }
-        } else {
-            $log_summary['trace'] = $sanitize_for_log((string) $response['trace'], 256);
+        if ($trace_summary !== []) {
+            $log_parts[] = 'trace_summary=' . $sanitize_for_log(implode(' <= ', $trace_summary), 384);
         }
 
-        $encoded_log_summary = json_encode($log_summary, JSON_PARTIAL_OUTPUT_ON_ERROR);
-
-        if (is_string($encoded_log_summary)) {
-            log_message('error', 'JSON exception: ' . $encoded_log_summary);
-        } else {
-            log_message(
-                'error',
-                'JSON exception fallback: class=' .
-                    $log_summary['class'] .
-                    ' message=' .
-                    $log_summary['message'] .
-                    ' file=' .
-                    $log_summary['file'] .
-                    ' line=' .
-                    (string) $log_summary['line'],
-            );
-        }
-
-        unset($response['trace']); // Do not send the trace to the browser as it might contain sensitive info
-
-        json_response($response, 500);
+        return implode(' ', $log_parts);
     }
 }
 

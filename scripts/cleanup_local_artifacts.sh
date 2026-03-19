@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WITH_DEPS=0
 DRY_RUN=0
+DEP_PATHS=(
+    "$ROOT_DIR/vendor"
+    "$ROOT_DIR/node_modules"
+    "$ROOT_DIR/tools/symphony/node_modules"
+    "$ROOT_DIR/pdf-renderer/node_modules"
+)
 
 usage() {
     cat <<'EOF'
@@ -16,7 +22,7 @@ Removes conservative local artifacts:
 - easyappointments-0.0.0.zip
 
 Optional:
-- --with-deps   also remove vendor/ and node_modules/
+- --with-deps   also remove reproducible dependency directories
 - --dry-run     print what would be removed without deleting anything
 
 This script intentionally does not touch docker/mysql/.
@@ -29,9 +35,14 @@ log() {
 
 path_size() {
     local path="$1"
+    local size
 
     if [[ -e "$path" ]]; then
-        du -sh "$path" 2>/dev/null | awk '{print $1}'
+        if size="$(du -sh "$path" 2>/dev/null | awk '{print $1}')"; then
+            printf '%s' "$size"
+        else
+            printf 'unknown'
+        fi
     else
         printf '0B'
     fi
@@ -73,8 +84,11 @@ remove_storage_logs_contents() {
         return
     fi
 
-    find "$logs_dir" -depth -mindepth 1 ! -name '.htaccess' ! -name 'index.html' -exec rm -rf {} +
-    log "removed contents of $logs_dir ($size, preserved placeholders)"
+    if find "$logs_dir" -depth -mindepth 1 ! -name '.htaccess' ! -name 'index.html' -exec rm -rf {} + 2>/dev/null; then
+        log "removed contents of $logs_dir ($size, preserved placeholders)"
+    else
+        log "removed accessible contents of $logs_dir ($size, preserved placeholders; some entries may require manual cleanup)"
+    fi
 }
 
 for arg in "$@"; do
@@ -104,10 +118,11 @@ remove_path "$ROOT_DIR/.phpunit.cache"
 remove_path "$ROOT_DIR/easyappointments-0.0.0.zip"
 
 if [[ "$WITH_DEPS" -eq 1 ]]; then
-    remove_path "$ROOT_DIR/vendor"
-    remove_path "$ROOT_DIR/node_modules"
+    for dep_path in "${DEP_PATHS[@]}"; do
+        remove_path "$dep_path"
+    done
 else
-    log "preserved $ROOT_DIR/vendor and $ROOT_DIR/node_modules (use --with-deps to remove)"
+    log "preserved reproducible dependency directories (use --with-deps to remove)"
 fi
 
 log "preserved $ROOT_DIR/docker/mysql"

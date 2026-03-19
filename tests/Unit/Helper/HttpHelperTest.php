@@ -138,57 +138,199 @@ class HttpHelperTest extends TestCase
         $this->assertLessThanOrEqual(16000, strlen($trace));
     }
 
-    public function testJsonExceptionKeepsResponseShapeAndLogsCompactJsonSummary(): void
+    public function testJsonExceptionLogSummarySanitizesAndCompactsExceptionData(): void
+    {
+        $message = "json-exception-log-test\n\t" . chr(0) . str_repeat('x', 600);
+        $exception = $this->captureStandaloneException($message);
+
+        $summary = json_exception_log_summary($exception);
+
+        $this->assertStringContainsString('JSON exception: class=RuntimeException', $summary);
+        $this->assertStringContainsString('message=json-exception-log-test ', $summary);
+        $this->assertStringContainsString('frame_count=', $summary);
+        $this->assertStringContainsString(
+            'trace_summary=Tests\Unit\Helper\HttpHelperTest->captureStandaloneException@',
+            $summary,
+        );
+        $this->assertStringNotContainsString("\n", $summary);
+        $this->assertStringNotContainsString("\t", $summary);
+        $this->assertStringNotContainsString(chr(0), $summary);
+        $this->assertLessThanOrEqual(1200, strlen($summary));
+    }
+
+    public function testJsonExceptionLogSummaryKeepsMultipleTraceFramesBounded(): void
+    {
+        $summary = json_exception_log_summary($this->captureDeepException(3));
+
+        $this->assertStringContainsString('trace_summary=', $summary);
+        $this->assertGreaterThanOrEqual(1, substr_count($summary, ' <= '));
+        $this->assertGreaterThanOrEqual(2, substr_count($summary, 'Tests\Unit\Helper\HttpHelperTest->callDeep@'));
+        $this->assertLessThanOrEqual(1200, strlen($summary));
+    }
+
+    public function testJsonExceptionKeepsResponseShapeAndWritesCompactErrorLog(): void
     {
         get_instance()->output->set_output('');
+        get_instance()->output->headers = [];
 
         $message = 'json-exception-log-test-' . substr(md5((string) microtime(true)), 0, 12);
         $exception = $this->captureStandaloneException($message);
-        $log_path = $this->currentLogPath();
-        $initial_size = is_file($log_path) ? filesize($log_path) : 0;
 
         json_exception($exception);
 
         $response = json_decode(get_instance()->output->get_output(), true);
-        $log_delta = $this->readLogDelta($log_path, $initial_size === false ? 0 : $initial_size);
+        $log_line = $this->findLogLineForMessage($message);
 
         $this->assertIsArray($response);
         $this->assertFalse((bool) ($response['success'] ?? true));
         $this->assertSame($message, $response['message'] ?? null);
         $this->assertArrayNotHasKey('trace', $response);
+        $this->assertSame('application/json', get_instance()->output->get_content_type());
 
-        $log_line = null;
+        $this->assertStringContainsString('JSON exception: class=RuntimeException', $log_line);
+        $this->assertStringContainsString('message=' . $message, $log_line);
+        $this->assertStringContainsString('frame_count=', $log_line);
+        $this->assertStringContainsString(
+            'trace_summary=Tests\Unit\Helper\HttpHelperTest->captureStandaloneException@',
+            $log_line,
+        );
+        $this->assertStringNotContainsString('"trace":"', $log_line);
+        $this->assertStringNotContainsString('"frames":[', $log_line);
+        $this->assertStringNotContainsString(' Trace: array (', $log_line);
+    }
 
-        foreach (preg_split('/\R/', $log_delta) ?: [] as $line) {
-            if (str_contains($line, 'ERROR - ') && str_contains($line, 'JSON exception: ')) {
-                $log_line = $line;
+    public function testJsonExceptionEmits500StatusAndJsonContentTypeOverHttp(): void
+    {
+        $scriptPath = tempnam(sys_get_temp_dir(), 'json-exception-http-');
+        $this->assertIsString($scriptPath);
+        $repoRoot = dirname(__DIR__, 3);
+
+        try {
+            file_put_contents(
+                $scriptPath,
+                <<<PHP
+                <?php
+                declare(strict_types=1);
+
+                define('BASEPATH', '$repoRoot/system/');
+
+                final class TestOutput
+                {
+                    public array \$headers = [];
+                    private string \$contentType = 'text/html';
+                    private string \$output = '';
+
+                    public function set_header(string \$header, bool \$replace = true): self
+                    {
+                        \$this->headers[] = [\$header, \$replace];
+                        header(\$header, \$replace);
+
+                        return \$this;
+                    }
+
+                    public function set_status_header(int \$status): self
+                    {
+                        http_response_code(\$status);
+
+                        return \$this;
+                    }
+
+                    public function set_content_type(string \$mimeType): self
+                    {
+                        \$this->contentType = \$mimeType;
+
+                        return \$this->set_header('Content-Type: ' . \$mimeType . '; charset=UTF-8');
+                    }
+
+                    public function set_output(string \$output): self
+                    {
+                        \$this->output = \$output;
+
+                        return \$this;
+                    }
+
+                    public function get_output(): string
+                    {
+                        return \$this->output;
+                    }
+
+                    public function get_content_type(): string
+                    {
+                        return \$this->contentType;
+                    }
+                }
+
+                final class TestCiInstance
+                {
+                    public TestOutput \$output;
+
+                    public function __construct()
+                    {
+                        \$this->output = new TestOutput();
+                    }
+                }
+
+                final class TestLog
+                {
+                    public function write_log(string \$level, string \$message): bool
+                    {
+                        return true;
+                    }
+                }
+
+                function &get_instance(): TestCiInstance
+                {
+                    static \$instance;
+
+                    if (!\$instance instanceof TestCiInstance) {
+                        \$instance = new TestCiInstance();
+                    }
+
+                    return \$instance;
+                }
+
+                function load_class(string \$class, string \$directory): object
+                {
+                    static \$logger;
+
+                    if (\$class === 'Log' && \$directory === 'core') {
+                        if (!\$logger instanceof TestLog) {
+                            \$logger = new TestLog();
+                        }
+
+                        return \$logger;
+                    }
+
+                    throw new RuntimeException('Unexpected load_class request: ' . \$directory . '/' . \$class);
+                }
+
+                require '$repoRoot/application/helpers/http_helper.php';
+
+                try {
+                    throw new RuntimeException('http-json-exception-test');
+                } catch (Throwable \$e) {
+                    json_exception(\$e);
+                }
+
+                echo get_instance()->output->get_output();
+                PHP
+                ,
+            );
+
+            $result = $this->runHttpScript($scriptPath);
+
+            $this->assertSame(0, $result['exit_code'], $result['stderr']);
+            $this->assertStringContainsString('HTTP/1.1 500 Internal Server Error', $result['headers']);
+            $this->assertStringContainsString('Content-Type: application/json; charset=UTF-8', $result['headers']);
+            $this->assertStringContainsString(
+                '{"success":false,"message":"http-json-exception-test"}',
+                $result['body'],
+            );
+        } finally {
+            if (is_file($scriptPath)) {
+                unlink($scriptPath);
             }
         }
-
-        $this->assertIsString($log_line);
-
-        $json_prefix = 'JSON exception: ';
-        $json_offset = strpos($log_line, $json_prefix);
-
-        $this->assertNotFalse($json_offset);
-
-        $json_payload = substr($log_line, $json_offset + strlen($json_prefix));
-
-        $this->assertIsString($json_payload);
-        $this->assertMatchesRegularExpression('/^\{.*\}(?: Trace:|$)/', $json_payload);
-        preg_match('/^(\{.*\})(?: Trace:|$)/', $json_payload, $matches);
-
-        $this->assertArrayHasKey(1, $matches);
-
-        $logged_summary = json_decode($matches[1], true);
-
-        $this->assertIsArray($logged_summary);
-        $this->assertSame(RuntimeException::class, $logged_summary['class'] ?? null);
-        $this->assertSame($message, $logged_summary['message'] ?? null);
-        $this->assertArrayHasKey('frame_count', $logged_summary);
-        $this->assertArrayHasKey('trace_truncated', $logged_summary);
-        $this->assertArrayNotHasKey('trace', $logged_summary);
-        $this->assertArrayNotHasKey('frames', $logged_summary);
     }
 
     public function testHttpHelperDeclaresResponseFunctionExactlyOnce(): void
@@ -324,19 +466,111 @@ class HttpHelperTest extends TestCase
 
     private function currentLogPath(): string
     {
-        $log_path = (string) config_item('log_path');
+        $logPath = (string) config_item('log_path');
+        $configuredExtension = (string) config_item('log_file_extension');
+        $extension = $configuredExtension !== '' ? ltrim($configuredExtension, '.') : 'php';
 
-        return rtrim($log_path, '/\\') . '/log-' . date('Y-m-d') . '.php';
+        return rtrim($logPath, '/\\') . '/log-' . date('Y-m-d') . '.' . $extension;
     }
 
-    private function readLogDelta(string $log_path, int $initial_size): string
+    private function findLogLineForMessage(string $message): string
     {
+        $log_path = $this->currentLogPath();
         clearstatcache(true, $log_path);
 
         $contents = file_get_contents($log_path);
 
         $this->assertIsString($contents);
+        $this->assertNotFalse(strpos($contents, $message));
 
-        return substr($contents, $initial_size) ?: '';
+        $position = strrpos($contents, $message);
+        $this->assertNotFalse($position);
+        $line_start = strrpos(substr($contents, 0, (int) $position), PHP_EOL);
+        $line_start = $line_start === false ? 0 : $line_start + strlen(PHP_EOL);
+        $line_end = strpos($contents, PHP_EOL, (int) $position);
+        $line_end = $line_end === false ? strlen($contents) : $line_end;
+
+        return substr($contents, $line_start, $line_end - $line_start);
+    }
+
+    /**
+     * @return array{exit_code:int,headers:string,body:string,stderr:string}
+     */
+    private function runHttpScript(string $scriptPath): array
+    {
+        $serverLog = tempnam(sys_get_temp_dir(), 'json-exception-http-log-');
+        $this->assertIsString($serverLog);
+
+        $descriptorSpec = [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['file', $serverLog, 'w'],
+            2 => ['file', $serverLog, 'a'],
+        ];
+
+        for ($serverAttempt = 0; $serverAttempt < 10; $serverAttempt++) {
+            $port = random_int(20000, 45000);
+            $server = proc_open(
+                ['php', '-S', '127.0.0.1:' . $port, $scriptPath],
+                $descriptorSpec,
+                $pipes,
+                dirname($scriptPath),
+                null,
+            );
+            $this->assertIsResource($server);
+
+            try {
+                $requestHeaders = '';
+                $requestBody = '';
+                $requestSucceeded = false;
+
+                for ($requestAttempt = 0; $requestAttempt < 50; $requestAttempt++) {
+                    $context = stream_context_create([
+                        'http' => [
+                            'ignore_errors' => true,
+                            'timeout' => 1,
+                        ],
+                    ]);
+
+                    $body = @file_get_contents('http://127.0.0.1:' . $port . '/', false, $context);
+                    $headers = function_exists('http_get_last_response_headers')
+                        ? http_get_last_response_headers()
+                        : $http_response_header ?? [];
+
+                    if (is_string($body) && is_array($headers) && $headers !== []) {
+                        $requestHeaders = implode("\r\n", $headers);
+                        $requestBody = $body;
+                        $requestSucceeded = true;
+                        break;
+                    }
+
+                    $serverStatus = proc_get_status($server);
+                    $this->assertIsArray($serverStatus);
+
+                    if (!(bool) ($serverStatus['running'] ?? false)) {
+                        break;
+                    }
+
+                    usleep(100000);
+                }
+
+                if ($requestSucceeded) {
+                    $serverStatus = proc_get_status($server);
+                    $this->assertIsArray($serverStatus);
+                    $this->assertTrue((bool) ($serverStatus['running'] ?? false));
+
+                    return [
+                        'exit_code' => 0,
+                        'headers' => $requestHeaders,
+                        'body' => $requestBody,
+                        'stderr' => (string) file_get_contents($serverLog),
+                    ];
+                }
+            } finally {
+                proc_terminate($server);
+                proc_close($server);
+            }
+        }
+
+        $this->fail((string) file_get_contents($serverLog));
     }
 }
