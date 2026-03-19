@@ -15,6 +15,21 @@ Review for real engineering risk in this order:
 
 Prefer high-signal findings over broad commentary or style feedback.
 
+## Scope Guardrails
+
+Keep review effort proportional to the change:
+
+- Small scoped UI, product, or doc diffs should stay small unless the diff is
+  demonstrably unsafe.
+- Treat unrelated infrastructure hardening, test-harness upgrades, release-gate
+  cleanup, or broad refactors as follow-up material, not blocking review
+  findings, unless they are required to make the current diff safe.
+- When a concern belongs to a different subsystem or problem class than the
+  requested change, call that out explicitly as follow-up scope instead of
+  silently broadening the PR.
+- If a finding depends on a chain of speculative improvements rather than a
+  concrete failure mode in the diff, do not block on it.
+
 ## Findings Bar
 
 Report findings only when they materially increase:
@@ -76,6 +91,13 @@ Use the reviewer roles with this split:
 
 - `reviewer_correctness` is the deep reviewer for correctness, regressions, and security-sensitive risk.
 - `pr_explorer`, `reviewer_tests`, and `reviewer_design` are bounded support reviewers that should return distilled evidence for the parent reviewer to synthesize.
+
+Default reviewer depth should match the change:
+
+- For small scoped product/UI changes, start with `pr_explorer` plus `reviewer_correctness`.
+- Add `reviewer_tests` only when validation adequacy is genuinely uncertain for the changed behavior.
+- Add `reviewer_design` only when the diff materially affects long-lived seams, architecture, or reuse boundaries.
+- Use `docs_researcher` only when framework, library, platform, or external API assumptions matter.
 
 When a change depends on framework, library, or external API behavior, verify the assumption against primary documentation instead of guessing.
 

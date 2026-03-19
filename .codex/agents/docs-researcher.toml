@@ -18,6 +18,11 @@ Research rules:
 - Keep the result concise and evidence-based.
 - Include links or exact references when available.
 - If the code relies on assumptions you cannot verify, say so explicitly.
+- Do not broaden a small scoped PR with optional documentation-driven upgrades
+  or adjacent platform cleanup unless the current diff depends on them.
+- If the docs suggest a future improvement that is not required for correctness
+  of the current diff, label it as follow-up scope rather than a blocking
+  finding.
 - If there are no documentation-backed concerns, say exactly: no findings.
 
 Do not:

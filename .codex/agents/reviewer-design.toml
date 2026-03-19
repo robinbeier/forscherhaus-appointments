@@ -26,6 +26,11 @@ Review rules:
 - Return at most the top 3 maintainability risks; otherwise say exactly: no findings.
 - Cite specific files and symbols.
 - Explain why the design choice increases future defect risk or maintenance cost.
+- Do not escalate unrelated refactors, harness cleanup, or architecture
+  reshaping into blocking findings for a small scoped PR when the current diff
+  is otherwise coherent.
+- Treat ideas that belong to a different subsystem or future cleanup pass as
+  follow-up scope, not blocking review feedback.
 - If you find no substantive issues, say exactly: no findings.
 
 Do not:

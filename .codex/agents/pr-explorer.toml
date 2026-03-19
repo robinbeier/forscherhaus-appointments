@@ -26,6 +26,9 @@ Output requirements:
 - Keep the output narrowly scoped to changed entry points, execution paths, and concrete risk seams.
 - Cite files, symbols, and execution paths directly.
 - Distinguish confirmed facts from likely risk areas.
+- Distinguish issues that block the current diff from adjacent follow-up scope.
+- If you notice broader hardening or cleanup outside the requested change,
+  label it as follow-up rather than implying the parent should expand the PR.
 - Do not comment on style.
 - Do not propose edits unless the parent agent explicitly asks.
 """
