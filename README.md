@@ -150,6 +150,25 @@ Use `bash ./scripts/ci/pre_pr_quick.sh` for a faster local gate. For the full
 optional matrix, scope-specific smokes, and rollback notes, see
 [Agent Harness Index](docs/agent-harness-index.md) and [AGENTS.md](AGENTS.md).
 
+## Local Cleanup
+
+Local runtime artifacts can become much larger than the actual git checkout,
+especially under `storage/logs/`.
+
+Conservative cleanup that preserves local DB data in `docker/mysql/`:
+
+```bash
+bash ./scripts/cleanup_local_artifacts.sh
+```
+
+This removes local app logs, `build/`, `.phpunit.cache/`, and the local
+`easyappointments-0.0.0.zip` artifact. To also remove reproducible dependency
+directories, opt in explicitly:
+
+```bash
+bash ./scripts/cleanup_local_artifacts.sh --with-deps
+```
+
 Hook note: `./scripts/setup-worktree.sh` installs managed `.git/hooks/pre-commit`
 and `.git/hooks/pre-push` hooks. The managed `pre-commit` keeps PHP-related
 commits on the same deterministic MySQL/bootstrap path as `pre_pr_quick.sh`,

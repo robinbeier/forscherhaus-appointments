@@ -118,22 +118,76 @@ if (!function_exists('json_exception')) {
             'trace' => trace($e),
         ];
 
-        $encoded_response = json_encode($response, JSON_PARTIAL_OUTPUT_ON_ERROR);
+        $sanitize_for_log = static function (string $value, int $max_length = 512): string {
+            $normalized = trim(str_replace(["\r", "\n"], ' ', $value));
 
-        if (is_string($encoded_response)) {
-            log_message('error', 'JSON exception: ' . $encoded_response);
+            return substr($normalized, 0, $max_length);
+        };
+
+        $summarize_frame = static function (?array $frame) use ($sanitize_for_log): string {
+            if (!is_array($frame)) {
+                return '';
+            }
+
+            $function = trim((string) (($frame['class'] ?? '') . ($frame['type'] ?? '') . ($frame['function'] ?? '')));
+            $location = trim(
+                (string) (($frame['file'] ?? '') . (isset($frame['line']) ? ':' . (string) $frame['line'] : '')),
+            );
+
+            if ($function === '' && $location === '') {
+                return '';
+            }
+
+            return $sanitize_for_log(trim($function . ($location !== '' ? '@' . $location : '')), 256);
+        };
+
+        $log_summary = [
+            'class' => get_class($e),
+            'code' => $e->getCode(),
+            'message' => $sanitize_for_log((string) $response['message']),
+            'file' => $sanitize_for_log($e->getFile(), 256),
+            'line' => $e->getLine(),
+        ];
+
+        $decoded_trace = json_decode($response['trace'], true);
+
+        if (is_array($decoded_trace)) {
+            if (isset($decoded_trace['frame_count'])) {
+                $log_summary['frame_count'] = $decoded_trace['frame_count'];
+            }
+
+            if (array_key_exists('truncated', $decoded_trace)) {
+                $log_summary['trace_truncated'] = (bool) $decoded_trace['truncated'];
+            }
+
+            if (array_key_exists('size_truncated', $decoded_trace)) {
+                $log_summary['trace_size_truncated'] = (bool) $decoded_trace['size_truncated'];
+            }
+
+            $first_frame = $summarize_frame($decoded_trace['frames'][0] ?? null);
+
+            if ($first_frame !== '') {
+                $log_summary['first_frame'] = $first_frame;
+            }
         } else {
-            $safe_message = str_replace(["\r", "\n"], ' ', (string) $response['message']);
-            $safe_trace = str_replace(["\r", "\n"], ' ', (string) $response['trace']);
+            $log_summary['trace'] = $sanitize_for_log((string) $response['trace'], 256);
+        }
 
+        $encoded_log_summary = json_encode($log_summary, JSON_PARTIAL_OUTPUT_ON_ERROR);
+
+        if (is_string($encoded_log_summary)) {
+            log_message('error', 'JSON exception: ' . $encoded_log_summary);
+        } else {
             log_message(
                 'error',
                 'JSON exception fallback: class=' .
-                    get_class($e) .
+                    $log_summary['class'] .
                     ' message=' .
-                    substr($safe_message, 0, 512) .
-                    ' trace=' .
-                    substr($safe_trace, 0, 1024),
+                    $log_summary['message'] .
+                    ' file=' .
+                    $log_summary['file'] .
+                    ' line=' .
+                    (string) $log_summary['line'],
             );
         }
 
