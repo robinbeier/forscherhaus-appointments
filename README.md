@@ -102,8 +102,9 @@ This removes everything under `storage/logs/` except the placeholder
 `.htaccess` and `index.html` files, plus `build/`, `.phpunit.cache/`, and the
 local `easyappointments-0.0.0.zip` artifact. That includes local CI, release,
 and ops artifacts stored under `storage/logs/`. To also remove reproducible
-dependency directories, opt in explicitly only when you are fine reinstalling
-them afterwards:
+dependency directories such as the root installs plus
+`tools/symphony/node_modules/` and `pdf-renderer/node_modules/`, opt in
+explicitly only when you are fine reinstalling them afterwards:
 
 ```bash
 bash ./scripts/cleanup_local_artifacts.sh --with-deps
