@@ -514,7 +514,7 @@ class HttpHelperTest extends TestCase
                 $descriptorSpec,
                 $pipes,
                 dirname($scriptPath),
-                $_ENV,
+                null,
             );
             $this->assertIsResource($server);
 
