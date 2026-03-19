@@ -8,11 +8,13 @@ require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
 require_once __DIR__ . '/lib/OpenApiContractValidator.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/BookedSlotMatcher.php';
+require_once __DIR__ . '/lib/BookingWriteContractState.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
 use CiContract\BookedSlotMatcher;
+use CiContract\BookingWriteContractState;
 use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
 use CiContract\DeterministicFixtureFactory;
@@ -252,6 +254,8 @@ function runBookingContractsAttempt(
                     $state['primary_appointment_hash'] = $appointmentHash;
                     $state['primary_customer_id'] = $customerId;
                     $state['primary_customer'] = $customerPayload;
+                    $state['primary_appointment_start'] = trim((string) ($appointment['start'] ?? ''));
+                    $state['primary_appointment_end'] = trim((string) ($appointment['end'] ?? ''));
 
                     return [
                         'http_status' => $response->statusCode,
@@ -523,13 +527,14 @@ function runBookingContractsAttempt(
                 'booking_cancel_unknown_hash_contract',
                 static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
                     $customerId = toPositiveInt($state['primary_customer_id'] ?? null, 'cancel_unknown.customer_id');
+                    $appointmentWindow = BookingWriteContractState::requirePrimaryAppointmentWindow($state);
 
                     $protectPayload = $factory->createApiAppointmentPayload(
                         $customerId,
                         (int) $slot['provider_id'],
                         (int) $slot['service_id'],
-                        $slot['start_datetime'],
-                        $slot['end_datetime'],
+                        $appointmentWindow['start'],
+                        $appointmentWindow['end'],
                         [
                             'notes' => 'run:' . $state['run_id'] . ':unknown-hash-protection',
                         ],
