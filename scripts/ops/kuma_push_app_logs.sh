@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/kuma_push_common.sh
 source "$SCRIPT_DIR/lib/kuma_push_common.sh"
 
+kuma_push_load_env_file
+
 APP_ROOT="${KUMA_APP_ROOT:-/var/www/html/easyappointments}"
 LOG_FILE="${KUMA_APP_LOG_FILE:-${APP_ROOT}/storage/logs/log-$(date +%F).php}"
 STATE_DIR="${KUMA_PUSH_STATE_DIR:-/var/tmp/kuma-push-state}"
@@ -15,7 +17,6 @@ PATTERN="${KUMA_APP_LOG_PATTERN:-ERROR - }"
 IGNORE_REGEX="${KUMA_APP_LOG_IGNORE_REGEX:-}"
 THRESHOLD="${KUMA_APP_LOG_ERROR_THRESHOLD:-0}"
 
-kuma_push_load_env_file
 kuma_push_require_env KUMA_PUSH_URL_APP_LOGS
 
 mkdir -p "$STATE_DIR"

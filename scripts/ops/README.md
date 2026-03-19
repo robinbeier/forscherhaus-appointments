@@ -64,6 +64,6 @@ App log script behavior:
 
 - tracks only newly appended bytes in the current daily app log
 - primes itself on first run to avoid an immediate false alarm from historical log lines
-- supports `KUMA_APP_LOG_IGNORE_REGEX` for expected noisy log lines, e.g. the host-only `http://pdf-renderer:3000` fallback error
+- supports `KUMA_APP_LOG_IGNORE_REGEX` for expected noisy log lines, e.g. the host-only `http://pdf-renderer:3000` fallback error or expected invalid-login errors such as `JSON exception: .*Ungültige Zugangsdaten angegeben`
 - uses an exclusive lock around the state file so a staggered second cron run cannot race the primary per-minute run
 - production currently runs `kuma_push_app_logs.sh` twice per minute: once on the minute and once with a `sleep 30` offset for faster recovery on monitor `#9`
