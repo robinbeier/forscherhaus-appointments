@@ -68,6 +68,8 @@ function deepRuntimeSuiteUsage(): string
         '  --start-date=DATE      Dashboard/integration smoke start date.',
         '  --end-date=DATE        Dashboard/integration smoke end date.',
         '  --integration-smoke-include-ldap=BOOL  Include LDAP guardrail checks in integration-smoke (default: true).',
+        '  --integration-smoke-browser-bootstrap-timeout=N  Browser bootstrap timeout in seconds for integration-smoke (default: 180).',
+        '  --integration-smoke-browser-open-timeout=N  Browser open timeout in seconds for integration-smoke (default: 20).',
         '  --integration-smoke-browser-evidence=MODE  Browser evidence mode for integration-smoke (default: on-failure).',
         '  --integration-smoke-browser-evidence-on-failure-checks=LIST  Check IDs that trigger evidence in on-failure mode.',
         '  --report-dir=PATH      Output directory for suite manifest/reports.',
@@ -89,6 +91,8 @@ function deepRuntimeSuiteUsage(): string
  *   start_date:string,
  *   end_date:string,
  *   integration_smoke_include_ldap:bool,
+ *   integration_smoke_browser_bootstrap_timeout:int,
+ *   integration_smoke_browser_open_timeout:int,
  *   integration_smoke_browser_evidence_mode:string,
  *   integration_smoke_browser_evidence_on_failure_checks:array<int, string>,
  *   report_dir:string,
@@ -113,6 +117,8 @@ function deepRuntimeSuiteDefaultConfig(): array
         'start_date' => '2026-01-01',
         'end_date' => '2026-01-31',
         'integration_smoke_include_ldap' => true,
+        'integration_smoke_browser_bootstrap_timeout' => 180,
+        'integration_smoke_browser_open_timeout' => 20,
         'integration_smoke_browser_evidence_mode' => 'on-failure',
         'integration_smoke_browser_evidence_on_failure_checks' => deepRuntimeDefaultBrowserEvidenceOnFailureChecks(),
         'report_dir' => $reportDir,
@@ -185,6 +191,22 @@ function parseDeepRuntimeSuiteCliOptions(array $argv, array &$config): void
 
         if (str_starts_with($arg, '--integration-smoke-include-ldap=')) {
             $config['integration_smoke_include_ldap'] = parseBooleanCliOption($arg, '--integration-smoke-include-ldap');
+            continue;
+        }
+
+        if (str_starts_with($arg, '--integration-smoke-browser-bootstrap-timeout=')) {
+            $config['integration_smoke_browser_bootstrap_timeout'] = parsePositiveIntCliOption(
+                $arg,
+                '--integration-smoke-browser-bootstrap-timeout',
+            );
+            continue;
+        }
+
+        if (str_starts_with($arg, '--integration-smoke-browser-open-timeout=')) {
+            $config['integration_smoke_browser_open_timeout'] = parsePositiveIntCliOption(
+                $arg,
+                '--integration-smoke-browser-open-timeout',
+            );
             continue;
         }
 
@@ -372,7 +394,7 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
             'integration-smoke' => [
                 'id' => $suiteId,
                 'command' => sprintf(
-                    'php scripts/ci/dashboard_integration_smoke.php --base-url=%s --index-page=%s --username=%s --password=%s --start-date=%s --end-date=%s --checks=%s --browser-evidence=%s --browser-evidence-on-failure-checks=%s --browser-evidence-dir=%s --output-json=%s',
+                    'php scripts/ci/dashboard_integration_smoke.php --base-url=%s --index-page=%s --username=%s --password=%s --start-date=%s --end-date=%s --checks=%s --browser-bootstrap-timeout=%d --browser-open-timeout=%d --browser-evidence=%s --browser-evidence-on-failure-checks=%s --browser-evidence-dir=%s --output-json=%s',
                     escapeshellarg((string) $config['base_url']),
                     escapeshellarg((string) $config['index_page']),
                     escapeshellarg((string) $config['username']),
@@ -385,6 +407,8 @@ function buildDeepRuntimeSuiteDefinitions(array $config): array
                             deepRuntimeIntegrationSmokeChecks((bool) $config['integration_smoke_include_ldap']),
                         ),
                     ),
+                    (int) $config['integration_smoke_browser_bootstrap_timeout'],
+                    (int) $config['integration_smoke_browser_open_timeout'],
                     escapeshellarg((string) $config['integration_smoke_browser_evidence_mode']),
                     escapeshellarg(
                         implode(',', (array) $config['integration_smoke_browser_evidence_on_failure_checks']),

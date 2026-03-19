@@ -94,6 +94,8 @@ class DeepRuntimeSuiteTest extends TestCase
             $checks,
         );
         self::assertStringContainsString("--browser-evidence='on-failure'", $definitions[0]['command']);
+        self::assertStringContainsString('--browser-bootstrap-timeout=180', $definitions[0]['command']);
+        self::assertStringContainsString('--browser-open-timeout=20', $definitions[0]['command']);
         self::assertStringContainsString(
             "--browser-evidence-on-failure-checks='booking_page_readiness,booking_extract_bootstrap'",
             $definitions[0]['command'],
@@ -144,6 +146,8 @@ class DeepRuntimeSuiteTest extends TestCase
         $config = deepRuntimeSuiteDefaultConfig();
         $config['suites_raw'] = 'integration-smoke';
         $config['integration_smoke_include_ldap'] = false;
+        $config['integration_smoke_browser_bootstrap_timeout'] = 600;
+        $config['integration_smoke_browser_open_timeout'] = 60;
         $config['integration_smoke_browser_evidence_mode'] = 'always';
         $config['integration_smoke_browser_evidence_on_failure_checks'] = ['booking_page_readiness'];
         $config['report_dir'] = $this->tmpDir;
@@ -151,6 +155,8 @@ class DeepRuntimeSuiteTest extends TestCase
 
         $definitions = buildDeepRuntimeSuiteDefinitions($config);
 
+        self::assertStringContainsString('--browser-bootstrap-timeout=600', $definitions[0]['command']);
+        self::assertStringContainsString('--browser-open-timeout=60', $definitions[0]['command']);
         self::assertStringContainsString("--browser-evidence='always'", $definitions[0]['command']);
         self::assertStringContainsString(
             "--browser-evidence-on-failure-checks='booking_page_readiness'",
@@ -190,7 +196,7 @@ class DeepRuntimeSuiteTest extends TestCase
         self::assertNotSame('', $manifest['completed_at_utc']);
     }
 
-    public function testParseDeepRuntimeSuiteCliOptionsSupportsBrowserEvidenceOverrides(): void
+    public function testParseDeepRuntimeSuiteCliOptionsSupportsBrowserOverrides(): void
     {
         $config = deepRuntimeSuiteDefaultConfig();
 
@@ -198,12 +204,16 @@ class DeepRuntimeSuiteTest extends TestCase
             [
                 'run_deep_runtime_suite.php',
                 '--suites=integration-smoke',
+                '--integration-smoke-browser-bootstrap-timeout=600',
+                '--integration-smoke-browser-open-timeout=60',
                 '--integration-smoke-browser-evidence=always',
                 '--integration-smoke-browser-evidence-on-failure-checks=booking_page_readiness,booking_extract_bootstrap',
             ],
             $config,
         );
 
+        self::assertSame(600, $config['integration_smoke_browser_bootstrap_timeout']);
+        self::assertSame(60, $config['integration_smoke_browser_open_timeout']);
         self::assertSame('always', $config['integration_smoke_browser_evidence_mode']);
         self::assertSame(
             ['booking_page_readiness', 'booking_extract_bootstrap'],
