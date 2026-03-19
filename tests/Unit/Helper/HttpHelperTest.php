@@ -272,11 +272,6 @@ class HttpHelperTest extends TestCase
 
                 final class TestLog
                 {
-                    public function write_compact_error(string \$message): bool
-                    {
-                        return true;
-                    }
-
                     public function write_log(string \$level, string \$message): bool
                     {
                         return true;
@@ -322,10 +317,10 @@ class HttpHelperTest extends TestCase
                 ,
             );
 
-            $result = $this->runHttpScript($scriptPath);
+            $result = $this->runPhpCgiScript($scriptPath);
 
             $this->assertSame(0, $result['exit_code'], $result['stderr']);
-            $this->assertStringContainsString('HTTP/1.1 500 Internal Server Error', $result['headers']);
+            $this->assertMatchesRegularExpression('/(?:^|\\r?\\n)Status:\\s*500\\b/', $result['headers']);
             $this->assertStringContainsString('Content-Type: application/json; charset=UTF-8', $result['headers']);
             $this->assertStringContainsString(
                 '{"success":false,"message":"http-json-exception-test"}',
@@ -501,81 +496,47 @@ class HttpHelperTest extends TestCase
     /**
      * @return array{exit_code:int,headers:string,body:string,stderr:string}
      */
-    private function runHttpScript(string $scriptPath): array
+    private function runPhpCgiScript(string $scriptPath): array
     {
-        $serverLog = tempnam(sys_get_temp_dir(), 'json-exception-http-log-');
-        $this->assertIsString($serverLog);
+        $process = proc_open(
+            ['php-cgi', '-d', 'opcache.enable=0'],
+            [
+                0 => ['file', '/dev/null', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ],
+            $pipes,
+            dirname($scriptPath),
+            array_merge($_ENV, [
+                'GATEWAY_INTERFACE' => 'CGI/1.1',
+                'REDIRECT_STATUS' => '1',
+                'REQUEST_METHOD' => 'GET',
+                'REQUEST_URI' => '/json-exception-test',
+                'SCRIPT_FILENAME' => $scriptPath,
+                'SCRIPT_NAME' => '/json-exception-test',
+                'SERVER_PROTOCOL' => 'HTTP/1.1',
+                'HTTP_HOST' => 'localhost',
+            ]),
+        );
+        $this->assertIsResource($process);
 
-        $descriptorSpec = [
-            0 => ['file', '/dev/null', 'r'],
-            1 => ['file', $serverLog, 'w'],
-            2 => ['file', $serverLog, 'a'],
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        $this->assertIsString($stdout);
+
+        $parts = preg_split("/\\r?\\n\\r?\\n/", $stdout, 2);
+        $this->assertIsArray($parts);
+        $this->assertCount(2, $parts, $stdout);
+
+        return [
+            'exit_code' => $exitCode,
+            'headers' => $parts[0],
+            'body' => $parts[1],
+            'stderr' => is_string($stderr) ? $stderr : '',
         ];
-
-        for ($serverAttempt = 0; $serverAttempt < 10; $serverAttempt++) {
-            $port = random_int(20000, 45000);
-            $server = proc_open(
-                ['php', '-S', '127.0.0.1:' . $port, $scriptPath],
-                $descriptorSpec,
-                $pipes,
-                dirname($scriptPath),
-                $_ENV,
-            );
-            $this->assertIsResource($server);
-
-            try {
-                $requestHeaders = '';
-                $requestBody = '';
-                $requestSucceeded = false;
-
-                for ($requestAttempt = 0; $requestAttempt < 50; $requestAttempt++) {
-                    $context = stream_context_create([
-                        'http' => [
-                            'ignore_errors' => true,
-                            'timeout' => 1,
-                        ],
-                    ]);
-
-                    $body = @file_get_contents('http://127.0.0.1:' . $port . '/', false, $context);
-                    $headers = function_exists('http_get_last_response_headers')
-                        ? http_get_last_response_headers()
-                        : $http_response_header ?? [];
-
-                    if (is_string($body) && is_array($headers) && $headers !== []) {
-                        $requestHeaders = implode("\r\n", $headers);
-                        $requestBody = $body;
-                        $requestSucceeded = true;
-                        break;
-                    }
-
-                    $serverStatus = proc_get_status($server);
-                    $this->assertIsArray($serverStatus);
-
-                    if (!(bool) ($serverStatus['running'] ?? false)) {
-                        break;
-                    }
-
-                    usleep(100000);
-                }
-
-                if ($requestSucceeded) {
-                    $serverStatus = proc_get_status($server);
-                    $this->assertIsArray($serverStatus);
-                    $this->assertTrue((bool) ($serverStatus['running'] ?? false));
-
-                    return [
-                        'exit_code' => 0,
-                        'headers' => $requestHeaders,
-                        'body' => $requestBody,
-                        'stderr' => (string) file_get_contents($serverLog),
-                    ];
-                }
-            } finally {
-                proc_terminate($server);
-                proc_close($server);
-            }
-        }
-
-        $this->fail((string) file_get_contents($serverLog));
     }
 }
