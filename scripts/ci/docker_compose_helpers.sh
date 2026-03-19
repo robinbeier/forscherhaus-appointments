@@ -195,12 +195,35 @@ ci_docker_wait_for_service_exec() {
     return 0
 }
 
+ci_docker_wait_for_easyappointments_mysql_connectivity() {
+    local log_prefix="${1:-ci-docker}"
+    local max_attempts=30
+    local attempt=1
+    local php_code
+
+    # The console installer reads the repo-local app config inside php-fpm, so
+    # readiness must prove that exact runtime can open a DB connection first.
+    php_code='require getcwd() . "/config.php"; $mysqli = @new mysqli(Config::DB_HOST, Config::DB_USERNAME, Config::DB_PASSWORD, Config::DB_NAME); if ($mysqli->connect_errno) { fwrite(STDERR, (string) $mysqli->connect_errno); exit(1); } $mysqli->close();'
+
+    until ci_docker_compose exec -T php-fpm php -r "$php_code" >/dev/null 2>&1; do
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            echo "[$log_prefix] php-fpm could not reach MySQL after ${max_attempts} attempts." >&2
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    return 0
+}
+
 ci_docker_install_seed_instance() {
     local log_prefix="${1:-ci-docker}"
+    local max_attempts="${CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS:-3}"
     shift
 
     local attempt
-    for attempt in 1 2 3 4 5; do
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
         if ci_docker_compose "$@"; then
             return 0
         fi
@@ -208,7 +231,7 @@ ci_docker_install_seed_instance() {
         sleep 3
     done
 
-    echo "[$log_prefix] console install failed after 3 attempts." >&2
+    echo "[$log_prefix] console install failed after ${max_attempts} attempts." >&2
     return 1
 }
 
