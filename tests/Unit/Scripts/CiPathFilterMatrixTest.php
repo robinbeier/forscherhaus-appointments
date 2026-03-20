@@ -149,10 +149,37 @@ class CiPathFilterMatrixTest extends TestCase
 
         self::assertStringContainsString("needs.changes.outputs.request_contracts_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.deep_bootstrap_required == 'true'", $workflow);
+        self::assertStringContainsString(
+            'deep_runtime_asset_build_required: ${{ steps.filter.outputs.integration_smoke }}',
+            $workflow,
+        );
         self::assertStringContainsString("needs.changes.outputs.coverage_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.heavy_job_trends_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.pdf_renderer_latency_required == 'true'", $workflow);
         self::assertStringNotContainsString("needs.changes.outputs.deep_required == 'true'", $workflow);
+    }
+
+    public function testDeepRuntimeAssetBuildGuardStaysPinnedToTheBrowserSuiteContract(): void
+    {
+        $workflow = file_get_contents($this->workflowPath());
+        self::assertNotFalse($workflow);
+
+        $seedSnapshotJob = $this->extractJobBlock($workflow, 'deep-check-seed-snapshot', 'deep-runtime-suite');
+        self::assertStringNotContainsString('Setup Node.js', $seedSnapshotJob);
+        self::assertStringNotContainsString('Build runtime JS assets', $seedSnapshotJob);
+        self::assertStringNotContainsString('npx gulp scripts', $seedSnapshotJob);
+
+        $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
+        self::assertStringContainsString(
+            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'",
+            $deepRuntimeJob,
+        );
+        self::assertSame(
+            2,
+            substr_count($deepRuntimeJob, "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'"),
+        );
+        self::assertStringContainsString('Build runtime JS assets', $deepRuntimeJob);
+        self::assertStringContainsString('npx gulp scripts', $deepRuntimeJob);
     }
 
     public function testHeavyJobDurationTrendScriptUsesDedicatedFilterOnly(): void
@@ -494,5 +521,19 @@ class CiPathFilterMatrixTest extends TestCase
     private function workflowPath(): string
     {
         return __DIR__ . '/../../../.github/workflows/ci.yml';
+    }
+
+    private function extractJobBlock(string $workflow, string $jobName, string $nextJobName): string
+    {
+        $start = strpos($workflow, "\n  {$jobName}:\n");
+        self::assertNotFalse($start, sprintf('Expected job "%s" to exist in the workflow.', $jobName));
+
+        $end = strpos($workflow, "\n  {$nextJobName}:\n", $start + 1);
+        self::assertNotFalse(
+            $end,
+            sprintf('Expected job "%s" to follow "%s" in the workflow.', $nextJobName, $jobName),
+        );
+
+        return substr($workflow, $start, $end - $start);
     }
 }

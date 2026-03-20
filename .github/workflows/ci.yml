@@ -26,6 +26,7 @@ jobs:
     outputs:
       request_contracts_required: ${{ steps.filter.outputs.request_contracts_required }}
       deep_bootstrap_required: ${{ steps.filter.outputs.deep_bootstrap_required }}
+      deep_runtime_asset_build_required: ${{ steps.filter.outputs.integration_smoke }}
       coverage_required: ${{ steps.filter.outputs.coverage_required }}
       heavy_job_trends_required: ${{ steps.filter.outputs.heavy_job_trends_required }}
       pdf_renderer_latency_required: ${{ steps.filter.outputs.pdf_renderer_latency_required }}
@@ -613,15 +614,6 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20.19.0'
-          cache: npm
-      - name: Build runtime JS assets
-        run: |
-          npm ci --no-audit --no-fund
-          npx gulp scripts
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v8
         with:
@@ -691,11 +683,13 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v6
       - name: Setup Node.js
+        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: '20.19.0'
           cache: npm
       - name: Build runtime JS assets
+        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
         run: |
           npm ci --no-audit --no-fund
           npx gulp scripts
