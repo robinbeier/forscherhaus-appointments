@@ -6,11 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/kuma_push_common.sh
 source "$SCRIPT_DIR/lib/kuma_push_common.sh"
 
+kuma_push_load_env_file
+
 WINDOW_MINUTES="${KUMA_PDF_RENDERER_LOG_WINDOW_MINUTES:-5}"
 SERVICE_NAME="${KUMA_PDF_RENDERER_SERVICE_NAME:-fh-pdf-renderer}"
 THRESHOLD="${KUMA_PDF_RENDERER_ERROR_THRESHOLD:-0}"
 
-kuma_push_load_env_file
 kuma_push_require_env KUMA_PUSH_URL_PDF_RENDERER_LOGS
 
 entries="$(journalctl -u "$SERVICE_NAME" --since "-${WINDOW_MINUTES} min" -p err..alert --no-pager -o cat || true)"
