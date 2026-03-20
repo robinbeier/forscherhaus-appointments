@@ -6,11 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/kuma_push_common.sh
 source "$SCRIPT_DIR/lib/kuma_push_common.sh"
 
+kuma_push_load_env_file
+
 WINDOW_MINUTES="${KUMA_PHP_FPM_LOG_WINDOW_MINUTES:-5}"
 SERVICE_NAME="${KUMA_PHP_FPM_SERVICE_NAME:-php8.3-fpm}"
 THRESHOLD="${KUMA_PHP_FPM_ERROR_THRESHOLD:-0}"
 
-kuma_push_load_env_file
 kuma_push_require_env KUMA_PUSH_URL_PHP_FPM_LOGS
 
 entries="$(journalctl -u "$SERVICE_NAME" --since "-${WINDOW_MINUTES} min" -p err..alert --no-pager -o cat || true)"

@@ -3,10 +3,12 @@ set -Eeuo pipefail
 umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${KUMA_PDF_EXPORT_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 # shellcheck source=scripts/ops/lib/kuma_push_common.sh
 source "$SCRIPT_DIR/lib/kuma_push_common.sh"
 
+kuma_push_load_env_file
+
+REPO_ROOT="${KUMA_PDF_EXPORT_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 GATE_OUTPUT_DIR="${KUMA_PDF_EXPORT_OUTPUT_DIR:-${REPO_ROOT}/storage/logs/ops}"
 GATE_OUTPUT_FILE="${GATE_OUTPUT_DIR}/kuma-pdf-export-latest.json"
 WINDOW_DAYS="${KUMA_PDF_EXPORT_WINDOW_DAYS:-30}"
@@ -19,7 +21,6 @@ MAX_PDF_DURATION_MS="${KUMA_PDF_EXPORT_MAX_PDF_DURATION_MS:-30000}"
 REQUIRE_NONEMPTY_METRICS="${KUMA_PDF_EXPORT_REQUIRE_NONEMPTY_METRICS:-0}"
 CREDENTIALS_FILE="${KUMA_PDF_EXPORT_CREDENTIALS_FILE:-/etc/fh/release-gate-admin.env}"
 
-kuma_push_load_env_file
 kuma_push_source_if_exists "$CREDENTIALS_FILE"
 kuma_push_require_env KUMA_PUSH_URL_PDF_EXPORT
 
