@@ -12,60 +12,65 @@ class KumaPushAppLogsScriptTest extends TestCase
     {
         $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-' . bin2hex(random_bytes(8));
         $stubBin = $workspace . '/bin';
-        $repo = $workspace . '/repo';
         $appRoot = $workspace . '/app-root';
         $stateDir = $workspace . '/state';
         $capturePath = $workspace . '/curl-args.log';
         $today = gmdate('Y-m-d');
         $logFile = $appRoot . '/storage/logs/log-' . $today . '.php';
-        $stateFile = $stateDir . '/app-logs.state';
         $envFile = $workspace . '/uptime-kuma-push.env';
 
         mkdir($stubBin, 0777, true);
-        mkdir($repo . '/scripts/ops/lib', 0777, true);
         mkdir(dirname($logFile), 0777, true);
         mkdir($stateDir, 0777, true);
 
         try {
-            $this->copyScript('scripts/ops/kuma_push_app_logs.sh', $repo . '/scripts/ops/kuma_push_app_logs.sh');
-            $this->copyScript('scripts/ops/lib/kuma_push_common.sh', $repo . '/scripts/ops/lib/kuma_push_common.sh');
-
             file_put_contents(
                 $stubBin . '/curl',
-                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" >> " . escapeshellarg($capturePath) . "\n",
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" >> " .
+                    escapeshellarg($capturePath) .
+                    "\n",
             );
             chmod($stubBin . '/curl', 0755);
 
             file_put_contents(
                 $envFile,
-                "KUMA_PUSH_URL_APP_LOGS='https://kuma.example/push/app-logs'\n"
-                . "KUMA_APP_ROOT='" . addslashes($appRoot) . "'\n"
-                . "KUMA_APP_LOG_IGNORE_REGEX='ignored-host-noise'\n",
+                'KUMA_PUSH_URL_APP_LOGS=' .
+                    escapeshellarg('https://kuma.example/push/app-logs') .
+                    "\n" .
+                    'KUMA_APP_ROOT=' .
+                    escapeshellarg($appRoot) .
+                    "\n" .
+                    'KUMA_APP_LOG_IGNORE_REGEX=' .
+                    escapeshellarg('ignored-host-noise') .
+                    "\n",
             );
 
-            file_put_contents(
-                $logFile,
-                "[error] ERROR - ignored-host-noise\n",
+            file_put_contents($logFile, '');
+
+            $primeResult = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
             );
 
-            file_put_contents($stateFile, $logFile . '|' . $this->statDevInode($logFile) . "|0\n");
+            self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
+            self::assertStringContainsString('OK primed app log monitor', $primeResult['stdout']);
+
+            file_put_contents($logFile, "[error] ERROR - ignored-host-noise\n", FILE_APPEND);
 
             $result = $this->runCommand(
                 ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
-                $repo,
-                [
-                    'KUMA_PUSH_ENV_FILE' => $envFile,
-                    'KUMA_PUSH_STATE_DIR' => $stateDir,
-                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                    'TZ' => 'UTC',
-                ],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
             );
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('OK new_app_errors=0', $result['stdout']);
-            self::assertStringContainsString('status=up', $this->readFile($capturePath));
-            self::assertStringContainsString('msg=OK new_app_errors=0', $this->readFile($capturePath));
-            self::assertStringContainsString('ping=1', $this->readFile($capturePath));
+            $curlCalls = $this->readFile($capturePath);
+            self::assertStringContainsString('status=up', $curlCalls);
+            self::assertStringContainsString('msg=OK primed app log monitor', $curlCalls);
+            self::assertStringContainsString('msg=OK new_app_errors=0', $curlCalls);
+            self::assertStringContainsString('ping=1', $curlCalls);
         } finally {
             $this->removeDirectory($workspace);
         }
@@ -102,13 +107,17 @@ class KumaPushAppLogsScriptTest extends TestCase
         ];
     }
 
-    private function copyScript(string $sourceRelativePath, string $destinationPath): void
+    /**
+     * @return array<string, string>
+     */
+    private function commandEnv(string $envFile, string $stateDir, string $stubBin): array
     {
-        $scriptSource = file_get_contents($this->repoRoot() . '/' . $sourceRelativePath);
-        self::assertIsString($scriptSource);
-
-        file_put_contents($destinationPath, $scriptSource);
-        chmod($destinationPath, 0755);
+        return [
+            'KUMA_PUSH_ENV_FILE' => $envFile,
+            'KUMA_PUSH_STATE_DIR' => $stateDir,
+            'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+            'TZ' => 'UTC',
+        ];
     }
 
     private function repoRoot(): string
@@ -122,14 +131,6 @@ class KumaPushAppLogsScriptTest extends TestCase
         self::assertIsString($contents);
 
         return $contents;
-    }
-
-    private function statDevInode(string $path): string
-    {
-        $stat = stat($path);
-        self::assertIsArray($stat);
-
-        return $stat['dev'] . ':' . $stat['ino'];
     }
 
     private function removeDirectory(string $path): void
