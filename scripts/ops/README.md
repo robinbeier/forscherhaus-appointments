@@ -1,27 +1,20 @@
 # Ops Monitoring Scripts
 
-These scripts are designed to extend the current production Uptime Kuma setup without conflicting with the existing seven monitors on `188.245.244.123`.
+These scripts mirror and extend the current production Uptime Kuma setup without
+storing Push secrets in the repository.
 
-Current production monitor names:
+Current production monitor names are documented in `docs/uptime-kuma.md` and
+mirrored in `scripts/ops/uptime-kuma.monitors.yml`.
 
-- `App-Homepage`
-- `App — Health Shallow`
-- `App - Health Deep`
-- `Host - Services`
-- `Host - Resources`
-- `Ops - Jobs Freshness`
-- `App - PDF Renderer`
-
-Suggested additional Push monitors:
-
-- `App - Log Errors`
-- `App - php8.3-fpm Log Errors`
-- `App - PDF Renderer Log Errors`
-- `App - Dashboard PDF Export`
+Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
+and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
 
 Script inventory:
 
 - `kuma_push_app_logs.sh` monitors newly appended application log errors
+- `kuma_push_host_services.sh` monitors critical systemd services
+- `kuma_push_host_resources.sh` monitors disk, memory, and load thresholds
+- `kuma_push_ops_jobs.sh` monitors backup/job freshness
 - `kuma_push_php_fpm_logs.sh` monitors recent `php8.3-fpm` journal errors
 - `kuma_push_pdf_renderer_logs.sh` monitors recent `fh-pdf-renderer` journal errors
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
@@ -33,6 +26,9 @@ Default env file:
 
 Required new Push URLs:
 
+- `KUMA_PUSH_URL_HOST_SERVICES`
+- `KUMA_PUSH_URL_HOST_RESOURCES`
+- `KUMA_PUSH_URL_OPS_JOBS`
 - `KUMA_PUSH_URL_APP_LOGS`
 - `KUMA_PUSH_URL_PHP_FPM_LOGS`
 - `KUMA_PUSH_URL_PDF_RENDERER_LOGS`

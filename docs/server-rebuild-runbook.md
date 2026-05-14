@@ -165,7 +165,8 @@ The rebuild project must choose and test one of these paths:
   history
 
 See the Uptime Kuma milestone in
-`docs/long-horizon-lts-modernization/Plan.md`.
+`docs/long-horizon-lts-modernization/Plan.md` and the operational template in
+`docs/uptime-kuma.md`.
 
 ## Cutover Strategy
 

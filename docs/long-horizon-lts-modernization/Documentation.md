@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 4 complete.
+Status: Milestone 5 partial.
 
 Created: 2026-05-14.
 
-Current milestone: Milestone 4, Database Migration Rehearsal.
+Current milestone: Milestone 5, Uptime Kuma Mirror and Restore.
 
-Next action: start Milestone 5 by mirroring Uptime Kuma desired state and testing backup/restore.
+Next action: restore a Kuma backup into a disposable instance and validate monitor parity.
 
 ## Locked Decisions
 
@@ -62,7 +62,7 @@ Uptime Kuma:
 | 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, and confirmed HTTP 200 boot smoke. |
-| 5. Uptime Kuma Mirror and Restore | Not started | Current Kuma shape known; repo mirror pending. |
+| 5. Uptime Kuma Mirror and Restore | Partial | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; full Kuma DB restore rehearsal pending. |
 | 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires rehearsal success. |
 
@@ -107,6 +107,11 @@ Uptime Kuma:
   Validation: copied `/root/mariadb-backup-20260319T203328Z.sql.gz` from production, verified it with `gzip -t`, imported it into an isolated MariaDB 10.11 Docker stack with host ports disabled, ran `php index.php console migrate`, confirmed non-sensitive row counts (`13` tables, `73` settings, `379` users, `569` appointments, migration version `68`), and got `HTTP/1.1 200 OK` from nginx inside the restore stack.
   Decision: existing production dumps are usable for rehearsal; final cutover still needs a fresh approved dump or an explicitly accepted recent dump.
   Next: mirror and rehearse Uptime Kuma desired state, backup, and restore.
+
+- 2026-05-14T19:05:00Z - Milestone 5 - Mirrored Uptime Kuma desired state into the repo.
+  Validation: read-only production inspection captured Uptime Kuma image, bind address, data volume, 13 active monitor definitions with Push tokens redacted, cron script basenames/schedules only, and historical backup archive locations; added repo templates for Kuma Compose, desired monitors, Push env, crontab, and missing Host/Ops Push scripts.
+  Decision: Push monitor secrets remain host-local env values only; the repository mirrors monitor intent and scripts, not the live Kuma database.
+  Next: restore an approved Kuma backup into a disposable Kuma instance and verify monitor parity plus green Push monitors.
 
 ## Known Risks and Follow-Ups
 
