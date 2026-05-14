@@ -112,6 +112,8 @@ For a fresh Ubuntu LTS server, keep this deployment model:
 6. Keep the old server available until production checks and Uptime Kuma
    monitors are green after cutover.
 
+The full rebuild checklist lives in `docs/server-rebuild-runbook.md`.
+
 ## Required Host-Local Secrets
 
 These files are intentionally not committed:

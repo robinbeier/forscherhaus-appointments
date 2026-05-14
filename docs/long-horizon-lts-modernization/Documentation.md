@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 2 complete.
+Status: Milestone 3 complete.
 
 Created: 2026-05-14.
 
-Current milestone: Milestone 2, Deployment Model Clarification.
+Current milestone: Milestone 3, Fresh Server Rebuild Runbook.
 
-Next action: start Milestone 3 by drafting the fresh-server rebuild runbook.
+Next action: start Milestone 4 by rehearsing database dump migration locally from an existing production dump.
 
 ## Locked Decisions
 
@@ -60,7 +60,7 @@ Uptime Kuma:
 | 0. Baseline and Safety Inventory | Complete | Refreshed Composer/npm outdated data and read-only production runtime/Kuma baseline on 2026-05-14. |
 | 1. Runtime and Dependency Modernization | Complete | Composer/npm safe update sets applied; Node 24 target validated locally and in Docker. |
 | 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
-| 3. Fresh Server Rebuild Runbook | Not started | Strategy chosen, no runbook yet. |
+| 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Not started | DB is assumed dump-migratable; rehearsal pending. |
 | 5. Uptime Kuma Mirror and Restore | Not started | Current Kuma shape known; repo mirror pending. |
 | 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
@@ -97,6 +97,11 @@ Uptime Kuma:
   Validation: inspected `build_release.sh`, `deploy_ea.sh`, and existing release-gate docs; added `docs/deployment.md`; linked it from `README.md`; no production commands were run.
   Decision: keep artifact deployment as the stable path instead of switching production to a Git checkout; clarify the artifact -> stage -> predeploy -> switch -> postdeploy -> rollback flow.
   Next: begin fresh-server rebuild runbook.
+
+- 2026-05-14T18:56:25Z - Milestone 3 - Drafted fresh-server rebuild runbook.
+  Validation: read-only SSH inventory captured host, OS, resources, running services, package versions, Apache vhosts/modules, Docker/Kuma shape, app/release/secret paths, and PDF renderer unit metadata without printing secret contents; added `docs/server-rebuild-runbook.md`; linked it from `README.md` and `docs/deployment.md`.
+  Decision: rebuild target keeps artifact deployment, MariaDB 10.11, Node 24 for tooling/PDF renderer, and old server rollback until cutover acceptance.
+  Next: rehearse database restore from an existing production dump.
 
 ## Known Risks and Follow-Ups
 
