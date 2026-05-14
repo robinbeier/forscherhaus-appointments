@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 0 complete; Milestone 1 ready.
+Status: Milestone 1 in progress; Composer safe update complete.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 1, Runtime and Dependency Modernization.
 
-Next action: apply the smallest safe Composer update set and validate it before touching npm updates.
+Next action: apply the smallest safe npm update set and validate it separately.
 
 ## Locked Decisions
 
@@ -58,7 +58,7 @@ Uptime Kuma:
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | 0. Baseline and Safety Inventory | Complete | Refreshed Composer/npm outdated data and read-only production runtime/Kuma baseline on 2026-05-14. |
-| 1. Runtime and Dependency Modernization | Not started | Dependency candidates identified, not applied. |
+| 1. Runtime and Dependency Modernization | In progress | Composer safe update set applied and quick gate passed; npm/Node work pending. |
 | 2. Deployment Model Clarification | Not started | Existing release-gate docs inspected. |
 | 3. Fresh Server Rebuild Runbook | Not started | Strategy chosen, no runbook yet. |
 | 4. Database Migration Rehearsal | Not started | DB is assumed dump-migratable; rehearsal pending. |
@@ -72,6 +72,11 @@ Uptime Kuma:
   Validation: `composer outdated --direct --locked --format=json` passed; `npm outdated --json --include=dev` in root, `pdf-renderer`, and `tools/symphony` returned expected outdated exit code with parseable JSON; read-only SSH baseline confirmed Ubuntu 24.04.4 LTS, PHP 8.3.6 FPM, Apache 2.4.58, MariaDB 10.11.14, Node 20.20.2, Composer 2.7.1, app path `/var/www/html/easyappointments`, not a Git checkout, and healthy `louislam/uptime-kuma:2.3.2` bound to `127.0.0.1:3001`.
   Decision: milestone baseline accepted; production remains read-only.
   Next: start Milestone 1 with Composer patch/minor updates.
+
+- 2026-05-14T18:37:33Z - Milestone 1 - Applied Composer safe update set.
+  Validation: `composer update deptrac/deptrac google/apiclient phpstan/phpstan roave/security-advisories sentry/sentry --with-dependencies` passed with no advisories; `composer deptrac:analyze` passed; host `composer phpstan:application` passed with sandbox escalation; `bash ./scripts/ci/pre_pr_quick.sh` passed in the repo's isolated Docker CI stack. A direct host `composer test` and a direct non-isolated `docker compose run --rm php-fpm composer test` were intentionally not accepted as evidence because the host could not resolve `mysql` and the default local MySQL volume was dirty.
+  Decision: keep this as the minimal Composer production-safe update block; defer `phpunit/phpunit` and Symfony major-line moves to separate, explicit steps.
+  Next: update and validate the small npm lockfile set for root, `pdf-renderer`, and `tools/symphony`.
 
 ## Known Risks and Follow-Ups
 
