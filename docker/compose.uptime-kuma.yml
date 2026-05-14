@@ -3,9 +3,9 @@ services:
         image: 'louislam/uptime-kuma:2.3.2'
         restart: unless-stopped
         ports:
-            - '127.0.0.1:3001:3001'
+            - '${KUMA_BIND_ADDR:-127.0.0.1}:${KUMA_PORT:-3001}:3001'
         volumes:
-            - uptime-kuma-data:/app/data
+            - '${KUMA_DATA_PATH:-uptime-kuma-data}:/app/data'
 
 volumes:
     uptime-kuma-data:

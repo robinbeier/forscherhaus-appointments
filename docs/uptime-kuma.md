@@ -59,6 +59,14 @@ Start Kuma from the repository template:
 docker compose -f docker/compose.uptime-kuma.yml up -d
 ```
 
+For a disposable local restore rehearsal, use a separate data path and port:
+
+```bash
+KUMA_DATA_PATH=/private/tmp/fh-kuma-restore-test-data \
+KUMA_PORT=13001 \
+docker compose -f docker/compose.uptime-kuma.yml up -d
+```
+
 Put Apache or another reverse proxy in front of `127.0.0.1:3001` for
 `monitor.dasforscherhaus-leg.de`.
 
@@ -121,9 +129,22 @@ Confirmed:
 - production already has historical Kuma backup archives
 - repo now contains a Kuma container template, monitor template, env example,
   crontab example, and the missing Host/Ops Push scripts
+- historical backup
+  `/root/backups/uptime-kuma/uptime-kuma-data-pre-2.2.1-20260310T152414Z.tar.gz`
+  was copied to a disposable local restore path
+- the backup checksum matched the production `.sha256` file
+- the restored Kuma 2.3.2 container started healthy on local port `13001`
+- local HTTP smoke returned `HTTP/1.1 302 Found` to `/dashboard`
+- restored monitor metadata was readable from the local SQLite database
 
 Pending:
 
-- restore a Kuma backup into a disposable local or new-server Kuma instance
-- validate that the restored instance shows the same monitors
+- create or approve a current backup of the live 13-monitor Kuma state
+- validate that the current backup restores all 13 monitors
 - validate that Push monitors go green with host-local env values
+
+Important limitation:
+
+- the tested historical backup contains the earlier 7-monitor state, not the
+  current 13-monitor production state; restore mechanics are proven, but current
+  monitor parity still needs a fresh approved backup.

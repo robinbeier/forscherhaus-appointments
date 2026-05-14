@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 5 partial.
+Status: Milestone 5 mostly complete.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 5, Uptime Kuma Mirror and Restore.
 
-Next action: restore a Kuma backup into a disposable instance and validate monitor parity.
+Next action: create or approve a current Kuma backup, then validate full 13-monitor restore parity.
 
 ## Locked Decisions
 
@@ -62,7 +62,7 @@ Uptime Kuma:
 | 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, and confirmed HTTP 200 boot smoke. |
-| 5. Uptime Kuma Mirror and Restore | Partial | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; full Kuma DB restore rehearsal pending. |
+| 5. Uptime Kuma Mirror and Restore | Mostly complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; historical backup restored locally and Kuma started healthy; current 13-monitor backup parity pending. |
 | 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires rehearsal success. |
 
@@ -112,6 +112,11 @@ Uptime Kuma:
   Validation: read-only production inspection captured Uptime Kuma image, bind address, data volume, 13 active monitor definitions with Push tokens redacted, cron script basenames/schedules only, and historical backup archive locations; added repo templates for Kuma Compose, desired monitors, Push env, crontab, and missing Host/Ops Push scripts.
   Decision: Push monitor secrets remain host-local env values only; the repository mirrors monitor intent and scripts, not the live Kuma database.
   Next: restore an approved Kuma backup into a disposable Kuma instance and verify monitor parity plus green Push monitors.
+
+- 2026-05-14T19:10:31Z - Milestone 5 - Tested Uptime Kuma restore mechanics from an existing historical backup.
+  Validation: copied `/root/backups/uptime-kuma/uptime-kuma-data-pre-2.2.1-20260310T152414Z.tar.gz` and its `.sha256` file, verified checksum match, extracted into `/private/tmp/fh-kuma-restore-test-data`, started Kuma 2.3.2 from `docker/compose.uptime-kuma.yml` on local port `13001`, confirmed the container was healthy, confirmed HTTP returned `302 Found` to `/dashboard`, and queried restored monitor metadata.
+  Decision: the existing historical backup proves the restore path but is stale; it contains the older 7-monitor set, while current production has 13 active monitors. Full monitor parity requires a fresh approved backup or explicitly accepted current data export.
+  Next: obtain an approved current Kuma backup, restore it into the disposable target, and verify all 13 monitors plus Push green status.
 
 ## Known Risks and Follow-Ups
 
