@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 1 in progress; Composer safe update complete.
+Status: Milestone 1 in progress; Composer and npm safe updates complete.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 1, Runtime and Dependency Modernization.
 
-Next action: apply the smallest safe npm update set and validate it separately.
+Next action: evaluate Node 24 compatibility and decide whether to move Docker/tooling from Node 20 in this milestone.
 
 ## Locked Decisions
 
@@ -58,7 +58,7 @@ Uptime Kuma:
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | 0. Baseline and Safety Inventory | Complete | Refreshed Composer/npm outdated data and read-only production runtime/Kuma baseline on 2026-05-14. |
-| 1. Runtime and Dependency Modernization | In progress | Composer safe update set applied and quick gate passed; npm/Node work pending. |
+| 1. Runtime and Dependency Modernization | In progress | Composer and npm safe update sets applied and validated; Node 24 compatibility pending. |
 | 2. Deployment Model Clarification | Not started | Existing release-gate docs inspected. |
 | 3. Fresh Server Rebuild Runbook | Not started | Strategy chosen, no runbook yet. |
 | 4. Database Migration Rehearsal | Not started | DB is assumed dump-migratable; rehearsal pending. |
@@ -77,6 +77,11 @@ Uptime Kuma:
   Validation: `composer update deptrac/deptrac google/apiclient phpstan/phpstan roave/security-advisories sentry/sentry --with-dependencies` passed with no advisories; `composer deptrac:analyze` passed; host `composer phpstan:application` passed with sandbox escalation; `bash ./scripts/ci/pre_pr_quick.sh` passed in the repo's isolated Docker CI stack. A direct host `composer test` and a direct non-isolated `docker compose run --rm php-fpm composer test` were intentionally not accepted as evidence because the host could not resolve `mysql` and the default local MySQL volume was dirty.
   Decision: keep this as the minimal Composer production-safe update block; defer `phpunit/phpunit` and Symfony major-line moves to separate, explicit steps.
   Next: update and validate the small npm lockfile set for root, `pdf-renderer`, and `tools/symphony`.
+
+- 2026-05-14T18:45:12Z - Milestone 1 - Applied npm safe update set and transitive audit lockfile fixes.
+  Validation: root `npm run build`, `npm run lint:js`, and `npm audit --audit-level=moderate` passed; `pdf-renderer` `npm ci --ignore-scripts`, `node --check server.js`, and `npm audit --audit-level=moderate` passed; `tools/symphony` `npm run build`, `npm test`, and `npm audit --audit-level=moderate` passed. The first root build failed in the sandbox because the archive step could not resolve `api.github.com` or write Composer cache; the escalated rerun passed.
+  Decision: keep npm changes lockfile-only; include transitive audit fixes because they do not require manifest changes and remove all current npm audit findings in the three package roots.
+  Next: evaluate Node 24 compatibility and whether moving Docker/runtime docs from Node 20 to Node 24 is safe in this milestone.
 
 ## Known Risks and Follow-Ups
 
