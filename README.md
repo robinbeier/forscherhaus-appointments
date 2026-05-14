@@ -74,6 +74,7 @@ Primary references:
 - [Zero-surprise restore-dump replay + live canary](docs/release-gate-zero-surprise.md)
 - [Dashboard release gate](docs/release-gate-dashboard.md)
 - [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
+- [Deployment runbook](docs/deployment.md)
 - [Agent Harness Index](docs/agent-harness-index.md)
 
 Release artifact builds should go through `./build_release.sh`. The builder now

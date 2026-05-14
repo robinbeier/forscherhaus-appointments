@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 1 complete.
+Status: Milestone 2 complete.
 
 Created: 2026-05-14.
 
-Current milestone: Milestone 1, Runtime and Dependency Modernization.
+Current milestone: Milestone 2, Deployment Model Clarification.
 
-Next action: start Milestone 2 by documenting the preferred artifact-based deployment path.
+Next action: start Milestone 3 by drafting the fresh-server rebuild runbook.
 
 ## Locked Decisions
 
@@ -59,7 +59,7 @@ Uptime Kuma:
 | --- | --- | --- |
 | 0. Baseline and Safety Inventory | Complete | Refreshed Composer/npm outdated data and read-only production runtime/Kuma baseline on 2026-05-14. |
 | 1. Runtime and Dependency Modernization | Complete | Composer/npm safe update sets applied; Node 24 target validated locally and in Docker. |
-| 2. Deployment Model Clarification | Not started | Existing release-gate docs inspected. |
+| 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
 | 3. Fresh Server Rebuild Runbook | Not started | Strategy chosen, no runbook yet. |
 | 4. Database Migration Rehearsal | Not started | DB is assumed dump-migratable; rehearsal pending. |
 | 5. Uptime Kuma Mirror and Restore | Not started | Current Kuma shape known; repo mirror pending. |
@@ -92,6 +92,11 @@ Uptime Kuma:
   Validation: `bash ./scripts/ci/pre_pr_quick.sh` passed after rebuilding the local CI `php-fpm` image with NodeSource `setup_24.x`, refreshing frontend assets, installing the isolated MySQL fixture, running PHPUnit, PHPStan application, typed request DTO checks, and architecture ownership checks.
   Decision: Milestone 1 is complete.
   Next: begin Milestone 2 deployment model clarification.
+
+- 2026-05-14T18:54:16Z - Milestone 2 - Documented artifact-based deployment as the preferred model.
+  Validation: inspected `build_release.sh`, `deploy_ea.sh`, and existing release-gate docs; added `docs/deployment.md`; linked it from `README.md`; no production commands were run.
+  Decision: keep artifact deployment as the stable path instead of switching production to a Git checkout; clarify the artifact -> stage -> predeploy -> switch -> postdeploy -> rollback flow.
+  Next: begin fresh-server rebuild runbook.
 
 ## Known Risks and Follow-Ups
 
