@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 3 complete.
+Status: Milestone 4 complete.
 
 Created: 2026-05-14.
 
-Current milestone: Milestone 3, Fresh Server Rebuild Runbook.
+Current milestone: Milestone 4, Database Migration Rehearsal.
 
-Next action: start Milestone 4 by rehearsing database dump migration locally from an existing production dump.
+Next action: start Milestone 5 by mirroring Uptime Kuma desired state and testing backup/restore.
 
 ## Locked Decisions
 
@@ -61,7 +61,7 @@ Uptime Kuma:
 | 1. Runtime and Dependency Modernization | Complete | Composer/npm safe update sets applied; Node 24 target validated locally and in Docker. |
 | 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
-| 4. Database Migration Rehearsal | Not started | DB is assumed dump-migratable; rehearsal pending. |
+| 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, and confirmed HTTP 200 boot smoke. |
 | 5. Uptime Kuma Mirror and Restore | Not started | Current Kuma shape known; repo mirror pending. |
 | 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires rehearsal success. |
@@ -102,6 +102,11 @@ Uptime Kuma:
   Validation: read-only SSH inventory captured host, OS, resources, running services, package versions, Apache vhosts/modules, Docker/Kuma shape, app/release/secret paths, and PDF renderer unit metadata without printing secret contents; added `docs/server-rebuild-runbook.md`; linked it from `README.md` and `docs/deployment.md`.
   Decision: rebuild target keeps artifact deployment, MariaDB 10.11, Node 24 for tooling/PDF renderer, and old server rollback until cutover acceptance.
   Next: rehearse database restore from an existing production dump.
+
+- 2026-05-14T19:01:21Z - Milestone 4 - Rehearsed database restore from an existing production dump.
+  Validation: copied `/root/mariadb-backup-20260319T203328Z.sql.gz` from production, verified it with `gzip -t`, imported it into an isolated MariaDB 10.11 Docker stack with host ports disabled, ran `php index.php console migrate`, confirmed non-sensitive row counts (`13` tables, `73` settings, `379` users, `569` appointments, migration version `68`), and got `HTTP/1.1 200 OK` from nginx inside the restore stack.
+  Decision: existing production dumps are usable for rehearsal; final cutover still needs a fresh approved dump or an explicitly accepted recent dump.
+  Next: mirror and rehearse Uptime Kuma desired state, backup, and restore.
 
 ## Known Risks and Follow-Ups
 

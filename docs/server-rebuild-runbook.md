@@ -146,6 +146,9 @@ The migration rehearsal should prove:
 - release gates pass against restored data
 - row counts or domain-specific smoke checks match expectations
 
+The local rehearsal procedure and the latest result are recorded in
+`docs/database-migration-rehearsal.md`.
+
 Do not point production DNS at the new server until this has passed at least once
 on a rehearsal server or isolated rebuild target.
 
