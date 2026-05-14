@@ -10,7 +10,7 @@ BASE_REF="${PRE_PR_BASE_REF:-main}"
 # Keep quick-gate static analysis configurable for toolchain upgrade branches.
 PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
 # Keep the quick gate aligned with the repo's frontend tooling baseline.
-ROOT_NODE_MINIMUM_VERSION=20.19.0
+ROOT_NODE_MINIMUM_VERSION=24.0.0
 CI_DOCKER_LOG_PREFIX="pre-pr-quick"
 
 require_cmd() {

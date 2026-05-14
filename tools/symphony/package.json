@@ -5,7 +5,7 @@
     "description": "Symphony sidecar scaffold for forscherhaus-appointments",
     "type": "module",
     "engines": {
-        "node": ">=20"
+        "node": ">=24"
     },
     "scripts": {
         "build": "tsc -p tsconfig.json",

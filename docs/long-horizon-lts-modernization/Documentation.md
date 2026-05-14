@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 1 in progress; Composer and npm safe updates complete.
+Status: Milestone 1 complete.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 1, Runtime and Dependency Modernization.
 
-Next action: evaluate Node 24 compatibility and decide whether to move Docker/tooling from Node 20 in this milestone.
+Next action: start Milestone 2 by documenting the preferred artifact-based deployment path.
 
 ## Locked Decisions
 
@@ -27,7 +27,7 @@ Next action: evaluate Node 24 compatibility and decide whether to move Docker/to
 Repository:
 
 - Runtime declaration: `php >=8.3.6`.
-- Root Node declaration: `node >=20.19.0`.
+- Root Node declaration: `node >=24.0.0`.
 - Docker PHP image: `php:8.4.18-fpm-bookworm`.
 - Existing release gates include zero-surprise replay, artifact validation, deep health, PDF checks, and live canary.
 - Existing observability docs define Uptime Kuma as outside-in and push-monitor coverage.
@@ -58,7 +58,7 @@ Uptime Kuma:
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | 0. Baseline and Safety Inventory | Complete | Refreshed Composer/npm outdated data and read-only production runtime/Kuma baseline on 2026-05-14. |
-| 1. Runtime and Dependency Modernization | In progress | Composer and npm safe update sets applied and validated; Node 24 compatibility pending. |
+| 1. Runtime and Dependency Modernization | Complete | Composer/npm safe update sets applied; Node 24 target validated locally and in Docker. |
 | 2. Deployment Model Clarification | Not started | Existing release-gate docs inspected. |
 | 3. Fresh Server Rebuild Runbook | Not started | Strategy chosen, no runbook yet. |
 | 4. Database Migration Rehearsal | Not started | DB is assumed dump-migratable; rehearsal pending. |
@@ -83,10 +83,14 @@ Uptime Kuma:
   Decision: keep npm changes lockfile-only; include transitive audit fixes because they do not require manifest changes and remove all current npm audit findings in the three package roots.
   Next: evaluate Node 24 compatibility and whether moving Docker/runtime docs from Node 20 to Node 24 is safe in this milestone.
 
+- 2026-05-14T18:50:48Z - Milestone 1 - Moved development, CI, and Docker Node target to Node 24.
+  Validation: official Node.js release/EOL pages confirm Node 20 is EOL and Node 24 is the current LTS line; root `npm run build`, `npm run lint:js`, and `npm audit --audit-level=moderate` passed; `tools/symphony` `npm run build`, `npm test`, and `npm audit --audit-level=moderate` passed; `docker compose build php-fpm` passed; `docker compose run --rm php-fpm node --version` returned `v24.15.0`.
+  Decision: require Node `>=24.0.0` for repo-local tooling and use NodeSource `setup_24.x` in the PHP-FPM development image; production remains untouched until the rebuild/migration phase.
+  Next: commit the Node 24 target change and run `bash ./scripts/ci/pre_pr_quick.sh` from the clean commit.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is not proven.
-- Node 24 compatibility is not proven.
 - Production deployment is not currently Git-based; artifact deployment must be documented precisely.
 - Kuma restore must preserve either full history or an explicitly accepted reduced state.
 - Secrets and push URLs must not leak through docs, command output, or commits.

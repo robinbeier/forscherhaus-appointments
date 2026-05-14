@@ -21,7 +21,7 @@ Prerequisites on host (required by `./scripts/setup-worktree.sh`):
 
 - PHP `>=8.3.6`
 - Composer
-- Node.js `>=20.19.0` plus `npm`/`npx`
+- Node.js `>=24.0.0` plus `npm`/`npx`
 - Docker + Docker Compose
 
 ```bash

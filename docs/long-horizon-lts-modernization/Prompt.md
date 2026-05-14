@@ -27,7 +27,7 @@ This is not a feature project. It is an LTS-readiness, deployment, migration, an
 - Current app deployment is not a Git checkout.
 - Repository runtime declarations:
   - `composer.json`: `php >=8.3.6`.
-  - root `package.json`: `node >=20.19.0`.
+  - initial root `package.json`: `node >=20.19.0`.
   - Docker PHP dev image: `php:8.4.18-fpm-bookworm`.
 - Uptime Kuma:
   - Runs as Docker container `uptime-kuma`.
