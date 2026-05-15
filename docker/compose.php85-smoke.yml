@@ -1,0 +1,6 @@
+services:
+    php-fpm:
+        build:
+            context: docker/php-fpm
+            args:
+                PHP_FPM_BASE_IMAGE: php:8.5-fpm-bookworm

@@ -76,6 +76,86 @@ When running PHP directly on the host, MySQL is reachable via `localhost:3306`, 
 Warning: Running host-side `composer test` while `DB_HOST='mysql'` is configured will fail with a
 `php_network_getaddresses: getaddrinfo for mysql failed` error.
 
+## PHP 8.5 Preview Smoke
+
+The normal development image stays on the PHP version pinned in
+`docker/php-fpm/Dockerfile`. To test future PHP 8.5 compatibility without
+changing that default, use the preview override with a unique Compose project
+and temporary MySQL data directory:
+
+```bash
+COMPOSE_PROJECT_NAME=fh-php85-smoke \
+EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \
+docker compose \
+  -f docker-compose.yml \
+  -f docker/compose.ci-local.yml \
+  -f docker/compose.php85-smoke.yml \
+  build php-fpm
+```
+
+Runtime and platform checks:
+
+```bash
+COMPOSE_PROJECT_NAME=fh-php85-smoke \
+EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \
+docker compose \
+  -f docker-compose.yml \
+  -f docker/compose.ci-local.yml \
+  -f docker/compose.php85-smoke.yml \
+  run --rm --no-deps php-fpm php -v
+
+COMPOSE_PROJECT_NAME=fh-php85-smoke \
+EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \
+docker compose \
+  -f docker-compose.yml \
+  -f docker/compose.ci-local.yml \
+  -f docker/compose.php85-smoke.yml \
+  run --rm --no-deps php-fpm composer check-platform-reqs
+```
+
+For PHPUnit or other DB-backed checks, start and install the isolated test DB
+first:
+
+```bash
+COMPOSE_PROJECT_NAME=fh-php85-smoke \
+EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \
+docker compose \
+  -f docker-compose.yml \
+  -f docker/compose.ci-local.yml \
+  -f docker/compose.php85-smoke.yml \
+  up -d mysql
+
+COMPOSE_PROJECT_NAME=fh-php85-smoke \
+EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \
+docker compose \
+  -f docker-compose.yml \
+  -f docker/compose.ci-local.yml \
+  -f docker/compose.php85-smoke.yml \
+  run --rm php-fpm php index.php console install
+
+COMPOSE_PROJECT_NAME=fh-php85-smoke \
+EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \
+docker compose \
+  -f docker-compose.yml \
+  -f docker/compose.ci-local.yml \
+  -f docker/compose.php85-smoke.yml \
+  run --rm -e APP_ENV=testing php-fpm composer test
+```
+
+Clean up after the smoke:
+
+```bash
+COMPOSE_PROJECT_NAME=fh-php85-smoke \
+EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \
+docker compose \
+  -f docker-compose.yml \
+  -f docker/compose.ci-local.yml \
+  -f docker/compose.php85-smoke.yml \
+  down --remove-orphans
+
+rm -rf /private/tmp/fh-php85-smoke-mysql
+```
+
 The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the runtime environment variable `PDF_RENDERER_URL=http://127.0.0.1:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically. If the request path runs through Apache `mod_php`, set `PDF_RENDERER_URL` and the Sentry variables (`SENTRY_DSN`, optional tracing/server-name flags) in Apache as well, because PHP-FPM-only env wiring will not reach those requests. HTML debug dumps for dashboard PDF exports are disabled by default and can be enabled temporarily with `PDF_RENDERER_DEBUG_DUMP=true`.
 
 Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integration is available on `http://localhost:8100` (credentials are `admin` / `admin`). 

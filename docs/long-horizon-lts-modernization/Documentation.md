@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358 restored-data app smoke follow-up complete.
+Status: Milestone 5 complete; ROB-358 and ROB-359 follow-ups complete.
 
 Created: 2026-05-14.
 
@@ -30,6 +30,8 @@ Repository:
 - Root Node declaration: `node >=24.0.0`.
 - Docker PHP image: `php:8.4.18-fpm-bookworm`.
 - Existing release gates include zero-surprise replay, artifact validation, deep health, PDF checks, and live canary.
+- PHP 8.5 preview smoke path is available via
+  `docker/compose.php85-smoke.yml`.
 - Existing observability docs define Uptime Kuma as outside-in and push-monitor coverage.
 
 Production server:
@@ -133,9 +135,15 @@ Uptime Kuma:
   Decision: restored-data validation is no longer limited to import and HTTP boot; final cutover still needs the same gates rerun against the accepted cutover dump.
   Next: start end-to-end cutover rehearsal.
 
+- 2026-05-15T09:04:15Z - Milestone 1 follow-up / ROB-359 - Proved PHP 8.5 compatibility smoke path.
+  Validation: added a default-preserving `PHP_FPM_BASE_IMAGE` build arg and `docker/compose.php85-smoke.yml`; built isolated Compose project `fh-rob-359` from official `php:8.5-fpm-bookworm` digest `sha256:c5589e9861eb95593c211d6d8e988280e911eeccd2ea496937f4cc3f148533d8`; confirmed `PHP 8.5.6`, Composer `2.9.8`, Node `v24.15.0`, required extensions including GD/LDAP/MySQL/Redis/Event/Inotify, and `composer check-platform-reqs` success. `composer phpstan:application`, `composer deptrac:analyze`, focused PHPUnit buffer tests, `tests/Unit/Helper/DonutHelperTest.php` under PHP 8.5 and PHP 8.4, and full PHP 8.5 `composer test` passed after removing deprecated no-op `imagedestroy()` calls from the donut helper.
+  Decision: PHP 8.5 compatibility is proven for the repo's Docker smoke path; this is preview evidence only and does not change the current production PHP 8.3 or primary dev PHP 8.4 runtime policy.
+  Next: keep PHP 8.5 in the future-compatibility lane until a fresh target server path needs it.
+
 ## Known Risks and Follow-Ups
 
-- PHP 8.5 compatibility is not proven.
+- PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
+  yet for a real Ubuntu 26.04 target host or production cutover.
 - A fresh Ubuntu LTS server has not yet been provisioned from
   `docs/server-rebuild-runbook.md`; the runbook is documented but not proven on a
   clean host.

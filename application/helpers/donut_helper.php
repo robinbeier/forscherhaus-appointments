@@ -45,8 +45,6 @@ if (!function_exists('donut_image_data_url')) {
         $foregroundColor = imagecolorallocatealpha($image, $fgR, $fgG, $fgB, 0);
 
         if ($backgroundColor === false || $foregroundColor === false) {
-            imagedestroy($image);
-
             return null;
         }
 
@@ -82,7 +80,6 @@ if (!function_exists('donut_image_data_url')) {
         ob_start();
         imagepng($image);
         $binary = ob_get_clean();
-        imagedestroy($image);
 
         if ($binary === false) {
             return null;
