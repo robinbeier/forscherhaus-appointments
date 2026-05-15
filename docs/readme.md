@@ -18,6 +18,7 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Provider Room Feature](feature-provider-room.md)
 - [Dashboard Release Gate](release-gate-dashboard.md)
 - [Booking Confirmation PDF Gate](release-gate-booking-confirmation-pdf.md)
+- [Cutover Rehearsal Checklist](cutover-rehearsal-checklist.md)
 - [FAQ](faq.md)
 
 *This document applies to Easy!Appointments v1.5.2.*

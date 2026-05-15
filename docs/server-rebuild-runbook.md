@@ -170,6 +170,10 @@ See the Uptime Kuma milestone in
 
 ## Cutover Strategy
 
+Use [cutover-rehearsal-checklist.md](cutover-rehearsal-checklist.md) to run the
+ordered rehearsal across provisioning, DB restore, artifact deploy, Uptime Kuma,
+DNS decision points, validations, and rollback.
+
 Before DNS cutover:
 
 - old production server remains unchanged

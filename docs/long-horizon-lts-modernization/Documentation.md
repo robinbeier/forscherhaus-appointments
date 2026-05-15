@@ -2,13 +2,14 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, and ROB-361 follow-ups complete.
+Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, and ROB-362 follow-ups complete.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 5, Uptime Kuma Mirror and Restore.
 
-Next action: start Milestone 6 by rehearsing the end-to-end cutover sequence from fresh server baseline, DB restore, artifact deploy, and Kuma restore.
+Next action: provision or choose a fresh rehearsal target, then execute the
+Milestone 6 sequence from the cutover rehearsal checklist.
 
 ## Locked Decisions
 
@@ -155,6 +156,11 @@ Uptime Kuma:
   Decision: local release artifact build and validation are proven; local release archives and logs include staged config and should be treated as sensitive operator artifacts, so the ROB-361 `/tmp` archives and logs were deleted after evidence was recorded.
   Next: prove artifact deploy on a clean target host during the fresh-server rehearsal path.
 
+- 2026-05-15T13:55:25Z - Milestone 6 preparation / ROB-362 - Drafted the cutover rehearsal checklist.
+  Validation: added `docs/cutover-rehearsal-checklist.md`, linked it from `docs/server-rebuild-runbook.md` and `docs/readme.md`, and kept it reference-based against the existing deployment, zero-surprise, observability, Uptime Kuma, DB rehearsal, and long-horizon runbooks. The checklist lists required inputs, artifacts, host-local secret file paths, validation commands, pre-DNS go/no-go criteria, post-cutover checks, rollback decision points, and stop conditions without including secret values or live data.
+  Decision: Milestone 6 now has an executable checklist, but the end-to-end rehearsal itself has not started.
+  Next: provision or choose a fresh rehearsal target, then execute the checklist.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
@@ -166,9 +172,9 @@ Uptime Kuma:
   artifact has not yet been deployed end-to-end on a fresh target host.
 - Database migration app smokes passed on the 2026-05-15 restored dump; final
   cutover still needs these checks rerun against the approved cutover dump.
-- End-to-end cutover rehearsal has not started; DNS, final DB restore, artifact
-  deploy, Kuma restore, gates, monitors, and rollback decision point still need a
-  single rehearsed sequence.
+- End-to-end cutover rehearsal has a checklist, but it has not started; DNS,
+  final DB restore, artifact deploy, Kuma restore, gates, monitors, and rollback
+  decision point still need a single rehearsed sequence.
 - Old-server rollback is the chosen strategy, but it has not yet been exercised
   in a cutover rehearsal.
 - The current Uptime Kuma live export restores successfully and preserves
