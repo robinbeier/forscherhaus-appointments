@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, and ROB-362 follow-ups complete.
+Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, and ROB-363 follow-ups complete.
 
 Created: 2026-05-14.
 
@@ -161,6 +161,11 @@ Uptime Kuma:
   Decision: Milestone 6 now has an executable checklist, but the end-to-end rehearsal itself has not started.
   Next: provision or choose a fresh rehearsal target, then execute the checklist.
 
+- 2026-05-15T14:21:05Z - Milestone 6 preparation / ROB-363 - Detailed the old-server rollback drill.
+  Validation: added `docs/old-server-rollback-drill.md`, linked it from `docs/cutover-rehearsal-checklist.md`, `docs/server-rebuild-runbook.md`, and `docs/readme.md`, and kept the drill documentation-only. The drill distinguishes same-host `deploy_ea.sh` rollback from migration-level old-server rollback, defines project timing defaults of `10` minutes for rollback decision, `30` minutes maximum accepted public downtime, and a `7` day old-server observation window, and lists concrete DNS, DB write-safety, artifact, Kuma, operator, and evidence checks without documenting secret values or live data.
+  Decision: old-server rollback is now operationally specified on paper; it still has not been exercised against a fresh target host or real DNS route.
+  Next: provision or choose a fresh rehearsal target, then execute the cutover checklist and rollback drill.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
@@ -175,8 +180,8 @@ Uptime Kuma:
 - End-to-end cutover rehearsal has a checklist, but it has not started; DNS,
   final DB restore, artifact deploy, Kuma restore, gates, monitors, and rollback
   decision point still need a single rehearsed sequence.
-- Old-server rollback is the chosen strategy, but it has not yet been exercised
-  in a cutover rehearsal.
+- Old-server rollback is documented as an operational drill, but it has not yet
+  been exercised in a cutover rehearsal.
 - The current Uptime Kuma live export restores successfully and preserves
   history, and a verified secure local copy now exists outside Git at the
   operator-controlled archive path. The temporary `/private/tmp` source has

@@ -242,6 +242,9 @@ or required Kuma checks fail.
 
 ## Phase 8: Rollback Drill
 
+Use [old-server-rollback-drill.md](old-server-rollback-drill.md) for the
+migration-level old-server rollback procedure and timing defaults.
+
 Rollback decision points:
 
 - Before DNS switch: keep DNS on the old server and fix the target host.

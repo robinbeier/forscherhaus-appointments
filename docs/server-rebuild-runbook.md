@@ -202,6 +202,9 @@ Rollback:
 - use `deploy_ea.sh` rollback only for a failed artifact deploy on the same
   server; use the old server for migration-level rollback
 
+The detailed old-server rollback drill, timing defaults, and evidence checklist
+live in [old-server-rollback-drill.md](old-server-rollback-drill.md).
+
 ## Acceptance Criteria
 
 The rebuild runbook is accepted when:

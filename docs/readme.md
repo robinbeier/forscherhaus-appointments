@@ -19,6 +19,7 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Dashboard Release Gate](release-gate-dashboard.md)
 - [Booking Confirmation PDF Gate](release-gate-booking-confirmation-pdf.md)
 - [Cutover Rehearsal Checklist](cutover-rehearsal-checklist.md)
+- [Old-Server Rollback Drill](old-server-rollback-drill.md)
 - [FAQ](faq.md)
 
 *This document applies to Easy!Appointments v1.5.2.*
