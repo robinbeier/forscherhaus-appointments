@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Status: Milestone 5 complete.
+Status: Milestone 5 complete; ROB-358 restored-data app smoke follow-up complete.
 
 Created: 2026-05-14.
 
@@ -61,7 +61,7 @@ Uptime Kuma:
 | 1. Runtime and Dependency Modernization | Complete | Composer/npm safe update sets applied; Node 24 target validated locally and in Docker. |
 | 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
-| 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, and confirmed HTTP 200 boot smoke. |
+| 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
 | 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, and all 12 monitors went green in the disposable instance. |
 | 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires rehearsal success. |
@@ -128,6 +128,11 @@ Uptime Kuma:
   Decision: full Kuma data migration is the preferred path for the rebuild; final cutover needs a fresh live export close to the migration window, and Push secrets remain host-local.
   Next: start end-to-end cutover rehearsal.
 
+- 2026-05-15T08:40:24Z - Milestone 4 follow-up / ROB-358 - Validated app behavior against restored production data.
+  Validation: copied existing dump `/root/backups/easyappointments/20260515T021701Z/db/easyappointments.sql.gz`, verified `gzip -t`, imported into isolated MariaDB 10.11 stack `fh-rob-358`, ran migrations, seeded a local-only smoke admin, confirmed non-sensitive counts (`13` tables, `73` settings, `454` users, `708` appointments, migration version `68`), passed non-LDAP dashboard/app smoke `11/11`, booking write contract `6/6`, dashboard release gate `8/8`, booking confirmation PDF gate `6/6`, and zero-surprise replay with `3` steps and `4` invariants.
+  Decision: restored-data validation is no longer limited to import and HTTP boot; final cutover still needs the same gates rerun against the accepted cutover dump.
+  Next: start end-to-end cutover rehearsal.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is not proven.
@@ -136,9 +141,8 @@ Uptime Kuma:
   clean host.
 - Artifact deployment is documented in `docs/deployment.md`, but a release
   artifact has not yet been deployed end-to-end on a fresh target host.
-- Database migration has been proven for import, migrations, and HTTP boot only;
-  admin login, booking flow, dashboard, PDF export, and zero-surprise replay
-  still need restored-data validation.
+- Database migration app smokes passed on the 2026-05-15 restored dump; final
+  cutover still needs these checks rerun against the approved cutover dump.
 - End-to-end cutover rehearsal has not started; DNS, final DB restore, artifact
   deploy, Kuma restore, gates, monitors, and rollback decision point still need a
   single rehearsed sequence.

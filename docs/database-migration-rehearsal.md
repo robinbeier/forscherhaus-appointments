@@ -132,6 +132,71 @@ Decision:
 - The final cutover still needs a fresh, approved dump from the old server or a
   clearly accepted recent dump.
 
+## 2026-05-15 ROB-358 Restored-Data App Smoke Result
+
+Source dump:
+
+- remote path:
+  `/root/backups/easyappointments/20260515T021701Z/db/easyappointments.sql.gz`
+- copied locally to:
+  `/private/tmp/fh-rob-358-dumps/easyappointments-20260515T021701Z.sql.gz`
+- compressed size: 144798 bytes
+- uncompressed size: 465797 bytes
+- SHA256:
+  `a6681caca010ea779b04280c35db6881e5526c1aa5ca9a82d5fcfcbfa35c3b96`
+- archive validation: `gzip -t` passed
+
+Restore and migration:
+
+- MariaDB 10.11 restore stack used Compose project `fh-rob-358` with host app
+  ports disabled.
+- Dump import into `easyappointments` passed.
+- `php index.php console migrate` passed.
+- A local-only gate administrator was seeded in the isolated restore database
+  for smoke credentials `administrator` / `administrator`.
+- Non-sensitive counts after migration:
+  - tables: `13`
+  - settings: `73`
+  - users: `454`
+  - appointments: `708`
+  - latest migration version: `68`
+- nginx HTTP boot smoke returned `HTTP/1.1 200 OK`.
+- PDF renderer health returned `{"ok":true}`.
+
+Validation:
+
+- Non-LDAP dashboard/app smoke passed `11/11` checks:
+  `storage/logs/ci/rob-358-dashboard-nonldap-smoke.json`.
+- Booking write contract passed `6/6` checks:
+  `storage/logs/ci/rob-358-booking-write-contract.json`.
+- Dashboard release gate passed `8/8` checks including principal PDF, teacher
+  ZIP, and teacher PDF exports:
+  `storage/logs/release-gate/rob-358-dashboard-release-gate.json`.
+- Booking confirmation PDF gate passed `6/6` checks with a fully linked restored
+  appointment:
+  `storage/logs/release-gate/rob-358-booking-confirmation-pdf.json`.
+- Zero-surprise replay passed with `3` steps and `4` invariants:
+  `storage/logs/release-gate/rob-358-zero-surprise.json`.
+
+Notes:
+
+- Local `RATE_LIMITING` was disabled only in the untracked test `config.php` to
+  make repeated smoke requests deterministic.
+- The dump did not expose bookable slots in the default 14-day search window, so
+  restored-data booking checks used `--booking-search-days=180`.
+- LDAP-specific smoke checks were not included in this restored-data app smoke;
+  they require their own LDAP fixture/runtime validation.
+
+Decision:
+
+- The current production dump has been validated beyond import and HTTP boot:
+  admin login, dashboard metrics/page readiness, booking read paths, API
+  availability, booking write/cancel contracts, dashboard PDF/ZIP exports,
+  booking confirmation PDF generation, and zero-surprise replay all pass against
+  restored data.
+- Final cutover still needs the same validation rerun against a fresh approved
+  dump or an explicitly accepted recent cutover dump.
+
 ## Cleanup
 
 Stop the stack:
