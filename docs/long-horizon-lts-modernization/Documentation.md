@@ -174,6 +174,11 @@ Uptime Kuma:
   Decision: rebuild the existing Hetzner server in place from Ubuntu 24.04 LTS after provider snapshot, fresh DB dump, and local host-config backup; restore Kuma from the secured archive; keep artifact deployment; use provider snapshot restore as migration-level rollback.
   Next: create provider snapshot and pre-wipe backup artifacts, then execute the same-server rebuild runbook.
 
+- 2026-05-15T16:22:22Z - Milestone 6 preparation - Prepared pre-wipe backup helper for the same-server rebuild.
+  Validation: added `scripts/ops/prepare_same_server_rebuild_backup.sh`, linked it from `docs/same-server-rebuild-runbook.md`, confirmed `bash -n`, confirmed default dry-run prints the intended SSH target, remote staging path, local secure backup path, database, app config path, and remote cleanup behavior without writing local backup artifacts, and confirmed Markdown formatting.
+  Decision: the helper stays dry-run by default and requires `--execute` after the provider snapshot is complete; it creates a fresh DB dump, host-config archive, inventory, and checksums, downloads them to secure local storage outside Git, verifies them locally, and removes the temporary remote staging directory unless `--keep-remote` is passed.
+  Next: create the provider snapshot, then run the helper with `--execute` immediately before the reinstall.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
@@ -181,9 +186,10 @@ Uptime Kuma:
 - The selected same-server Ubuntu 24.04 rebuild has not yet been executed.
 - Provider snapshot creation and restore have not been evidenced in this repo
   documentation yet.
-- The pre-wipe backup set still needs to be created and verified: fresh DB dump,
-  `/etc/fh`, Apache vhosts, cronjobs, systemd units, app configs, service
-  inventory, and relevant deployment metadata.
+- The pre-wipe backup helper is prepared but not executed; the actual backup
+  set still needs to be created and verified after the provider snapshot: fresh
+  DB dump, `/etc/fh`, Apache vhosts, cronjobs, systemd units, app configs,
+  service inventory, and relevant deployment metadata.
 - The earlier parallel-target fresh-server path remains documented, but it is
   no longer the selected execution path unless a second server is introduced.
 - Local artifact build and validation now pass with Node 24 LTS, but the release

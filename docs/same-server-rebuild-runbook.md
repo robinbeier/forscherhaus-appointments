@@ -89,6 +89,17 @@ Rollback rule:
 Create a fresh DB dump and copy host-local operational files to secure local
 storage. Verify every archive before continuing.
 
+The prepared helper is:
+
+```bash
+bash ./scripts/ops/prepare_same_server_rebuild_backup.sh --execute
+```
+
+Default mode is dry-run. Only pass `--execute` after the provider snapshot has
+completed. The helper writes to secure local storage outside Git, verifies the
+dump and archive checksums locally, and removes the temporary remote staging
+directory unless `--keep-remote` is passed.
+
 Required backup set:
 
 - fresh MariaDB dump for the Easy!Appointments database
