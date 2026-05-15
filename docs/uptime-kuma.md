@@ -139,12 +139,27 @@ Confirmed:
 
 Pending:
 
-- create or approve a current backup of the live 13-monitor Kuma state
-- validate that the current backup restores all 13 monitors
+- create or approve a current backup of the live 12-monitor Kuma state
+- validate that the current backup restores all 12 monitors
 - validate that Push monitors go green with host-local env values
 
 Important limitation:
 
 - the tested historical backup contains the earlier 7-monitor state, not the
-  current 13-monitor production state; restore mechanics are proven, but current
+  current 12-monitor production state; restore mechanics are proven, but current
   monitor parity still needs a fresh approved backup.
+
+## 2026-05-15 Live Export
+
+Created a current live export outside the repository under `/private/tmp`.
+
+Validation:
+
+- archive checksum verified with `shasum -a 256 -c`
+- archive extracted successfully
+- exported SQLite database returned `PRAGMA integrity_check = ok`
+- exported database contains `12` monitors
+- exported database contains `8` Push monitors
+- redacted manifest contains all current monitor names and Push-token presence
+
+The export archive contains secrets and monitor history. Do not commit it.
