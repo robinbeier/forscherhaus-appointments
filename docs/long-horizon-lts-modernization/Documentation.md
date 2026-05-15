@@ -131,9 +131,24 @@ Uptime Kuma:
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is not proven.
-- Production deployment is not currently Git-based; artifact deployment must be documented precisely.
-- Kuma restore must preserve either full history or an explicitly accepted reduced state.
-- Secrets and push URLs must not leak through docs, command output, or commits.
+- A fresh Ubuntu LTS server has not yet been provisioned from
+  `docs/server-rebuild-runbook.md`; the runbook is documented but not proven on a
+  clean host.
+- Artifact deployment is documented in `docs/deployment.md`, but a release
+  artifact has not yet been deployed end-to-end on a fresh target host.
+- Database migration has been proven for import, migrations, and HTTP boot only;
+  admin login, booking flow, dashboard, PDF export, and zero-surprise replay
+  still need restored-data validation.
+- End-to-end cutover rehearsal has not started; DNS, final DB restore, artifact
+  deploy, Kuma restore, gates, monitors, and rollback decision point still need a
+  single rehearsed sequence.
+- Old-server rollback is the chosen strategy, but it has not yet been exercised
+  in a cutover rehearsal.
+- The current Uptime Kuma live export restores successfully and preserves
+  history, but the export contains secrets and must be moved from `/private/tmp`
+  to secure operator-controlled storage before it can be relied on.
+- Secrets and push URLs must not leak through docs, command output, commits, or
+  retained local test artifacts.
 - Ubuntu 26.04 production migration should wait for a stable LTS-to-LTS upgrade window or fresh-server image process.
 
 ## Status Update Protocol
