@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358, ROB-359, and ROB-360 follow-ups complete.
+Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, and ROB-361 follow-ups complete.
 
 Created: 2026-05-14.
 
@@ -150,6 +150,11 @@ Uptime Kuma:
   Decision: the secure operator-controlled archive is now the only retained local copy known to this run.
   Next: start end-to-end cutover rehearsal.
 
+- 2026-05-15T09:55:03Z - Milestone 2 follow-up / ROB-361 - Hardened and validated the local artifact release path.
+  Validation: enforced Node 24 LTS with `mise x node@24`, confirmed PHP `8.5.3`, Composer `2.9.5`, Node `v24.15.0`, and npm `11.12.1`; made `build_release.sh` and `deploy_ea.sh` executable in Git; ran `mise x node@24 -- ./build_release.sh --rel ea_rob361_20260515_095309 --project "$PWD" --skip-upload`; build completed with no upload, refreshed frontend assets without tracked drift, installed production Composer dependencies into the stage, validated the staged directory and archive, and explicit post-build artifact validation passed. Final local artifact evidence before cleanup: SHA256 `7f1cb8979deb11b8ab2740b643d4ed744af5107964b9f8b31d9876ac7b4e7cbd`, size `41514796` bytes.
+  Decision: local release artifact build and validation are proven; local release archives and logs include staged config and should be treated as sensitive operator artifacts, so the ROB-361 `/tmp` archives and logs were deleted after evidence was recorded.
+  Next: prove artifact deploy on a clean target host during the fresh-server rehearsal path.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
@@ -157,7 +162,7 @@ Uptime Kuma:
 - A fresh Ubuntu LTS server has not yet been provisioned from
   `docs/server-rebuild-runbook.md`; the runbook is documented but not proven on a
   clean host.
-- Artifact deployment is documented in `docs/deployment.md`, but a release
+- Local artifact build and validation now pass with Node 24 LTS, but the release
   artifact has not yet been deployed end-to-end on a fresh target host.
 - Database migration app smokes passed on the 2026-05-15 restored dump; final
   cutover still needs these checks rerun against the approved cutover dump.

@@ -28,6 +28,13 @@ Build from a clean, validated repository checkout:
 ./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" --skip-upload
 ```
 
+For local hardening or rebuild rehearsal work, keep the build on the Node 24
+tooling target and disable upload explicitly:
+
+```bash
+mise x node@24 -- ./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" --skip-upload
+```
+
 For the current production host upload path:
 
 ```bash
@@ -45,6 +52,12 @@ The builder:
 - validates the staged tree and final archive with
   `scripts/release-gate/validate_release_artifact.php`
 - verifies upload checksum and required archive entries when upload is enabled
+
+Local release archives are written to `/tmp/<REL>.tar.gz` and include the
+staged application config. Treat local archives and `/tmp/build_ea_<REL>.log`
+as sensitive operator artifacts: do not commit, attach, or paste their contents,
+and remove them after recording validation evidence unless they are intentionally
+retained for a follow-up rehearsal.
 
 ## Deploy
 
