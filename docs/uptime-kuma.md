@@ -164,6 +164,36 @@ Validation:
 
 The export archive contains secrets and monitor history. Do not commit it.
 
+## 2026-05-15 Secure Live Export Archive
+
+Copied the verified current live export from temporary local storage to an
+operator-controlled local archive outside the repository.
+
+Secure archive:
+
+- path:
+  `/Users/robinbeier/Documents/forscherhaus-ops-secure/uptime-kuma/20260515T055731Z`
+- files: archive, `.sha256`, and redacted manifest
+- archive SHA256:
+  `b29f85f61cd4e2bdf15d707fd04e4518acf70f36dae5b08f7b64e6951907b9c4`
+- archive size: `58621910` bytes
+
+Validation:
+
+- source checksum passed before copy
+- destination SHA256 matched the source checksum after copy
+- source and destination archive sizes matched after copy
+- archive directory permissions are `0700`
+- archive files are `0600`
+
+Retention:
+
+- the secure copy is the retained reference for rebuild rehearsal work
+- final cutover still needs a fresh live export close to the migration window
+- the temporary `/private/tmp` source may be removed after the operator confirms
+  the secure archive is sufficient
+- Push URLs, tokens, and Kuma database files remain outside Git
+
 ## 2026-05-15 Current Export Restore Rehearsal
 
 Restored the current live export into a disposable local Kuma instance.

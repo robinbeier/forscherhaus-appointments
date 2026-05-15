@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358 and ROB-359 follow-ups complete.
+Status: Milestone 5 complete; ROB-358, ROB-359, and ROB-360 follow-ups complete.
 
 Created: 2026-05-14.
 
@@ -64,7 +64,7 @@ Uptime Kuma:
 | 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
-| 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, and all 12 monitors went green in the disposable instance. |
+| 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, all 12 monitors went green in the disposable instance, and the verified current export was copied to secure operator-controlled storage outside Git. |
 | 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires rehearsal success. |
 
@@ -140,6 +140,11 @@ Uptime Kuma:
   Decision: PHP 8.5 compatibility is proven for the repo's Docker smoke path; this is preview evidence only and does not change the current production PHP 8.3 or primary dev PHP 8.4 runtime policy.
   Next: keep PHP 8.5 in the future-compatibility lane until a fresh target server path needs it.
 
+- 2026-05-15T09:19:08Z - Milestone 5 follow-up / ROB-360 - Secured the current Uptime Kuma live export outside temporary local storage.
+  Validation: copied the archive, checksum, and redacted manifest to `/Users/robinbeier/Documents/forscherhaus-ops-secure/uptime-kuma/20260515T055731Z`; set the archive path to `0700` directories and `0600` files; verified destination SHA256 `b29f85f61cd4e2bdf15d707fd04e4518acf70f36dae5b08f7b64e6951907b9c4`; confirmed source and destination archive sizes both reported `58621910` bytes; no Push URLs, tokens, or Kuma DB files were committed.
+  Decision: the secure local archive is the retained reference for rebuild rehearsal work; final cutover still needs a fresh live export close to the migration window.
+  Next: start end-to-end cutover rehearsal.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
@@ -157,8 +162,9 @@ Uptime Kuma:
 - Old-server rollback is the chosen strategy, but it has not yet been exercised
   in a cutover rehearsal.
 - The current Uptime Kuma live export restores successfully and preserves
-  history, but the export contains secrets and must be moved from `/private/tmp`
-  to secure operator-controlled storage before it can be relied on.
+  history, and a verified secure local copy now exists outside Git at the
+  operator-controlled archive path. The temporary `/private/tmp` source may be
+  removed after the operator confirms the secure archive is sufficient.
 - Secrets and push URLs must not leak through docs, command output, commits, or
   retained local test artifacts.
 - Ubuntu 26.04 production migration should wait for a stable LTS-to-LTS upgrade window or fresh-server image process.
