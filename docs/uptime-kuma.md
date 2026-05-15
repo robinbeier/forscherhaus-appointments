@@ -190,8 +190,8 @@ Retention:
 
 - the secure copy is the retained reference for rebuild rehearsal work
 - final cutover still needs a fresh live export close to the migration window
-- the temporary `/private/tmp` source may be removed after the operator confirms
-  the secure archive is sufficient
+- the temporary `/private/tmp` source was removed after the secure archive was
+  verified
 - Push URLs, tokens, and Kuma database files remain outside Git
 
 ## 2026-05-15 Current Export Restore Rehearsal

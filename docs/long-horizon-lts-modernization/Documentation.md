@@ -145,6 +145,11 @@ Uptime Kuma:
   Decision: the secure local archive is the retained reference for rebuild rehearsal work; final cutover still needs a fresh live export close to the migration window.
   Next: start end-to-end cutover rehearsal.
 
+- 2026-05-15T09:30:09Z - Milestone 5 follow-up / ROB-360 - Removed the temporary Uptime Kuma export source.
+  Validation: deleted `/private/tmp/uptime-kuma-live-export-20260515T055731Z`, confirmed the path no longer exists, and verified the secure archive SHA256 still reports `b29f85f61cd4e2bdf15d707fd04e4518acf70f36dae5b08f7b64e6951907b9c4`.
+  Decision: the secure operator-controlled archive is now the only retained local copy known to this run.
+  Next: start end-to-end cutover rehearsal.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
@@ -163,8 +168,8 @@ Uptime Kuma:
   in a cutover rehearsal.
 - The current Uptime Kuma live export restores successfully and preserves
   history, and a verified secure local copy now exists outside Git at the
-  operator-controlled archive path. The temporary `/private/tmp` source may be
-  removed after the operator confirms the secure archive is sufficient.
+  operator-controlled archive path. The temporary `/private/tmp` source has
+  been removed.
 - Secrets and push URLs must not leak through docs, command output, commits, or
   retained local test artifacts.
 - Ubuntu 26.04 production migration should wait for a stable LTS-to-LTS upgrade window or fresh-server image process.
