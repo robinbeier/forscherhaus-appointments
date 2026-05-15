@@ -17,6 +17,7 @@
 /assets/css/**/*.css
 /assets/vendor
 /config.php
+/.env.*.pilot
 /storage/backups/*
 !/storage/backups/.htaccess
 !/storage/backups/index.html
@@ -34,6 +35,5 @@
 /vendor/
 /.phpunit.cache/
 /metafile
-.env.symphony.pilot
 __pycache__/
 .DS_Store

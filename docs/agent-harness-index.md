@@ -13,10 +13,6 @@ This file stays intentionally short. It is a map, not a second runbook.
   matrix: read `AGENTS.md`.
 - If you need architecture and ownership scope: read `docs/architecture-map.md`
   and `docs/ownership-map.md`.
-- If you need Symphony runtime, pilot behavior, or the current SPEC closeout
-  gap matrix: read `tools/symphony/README.md`,
-  `docs/symphony/STAGING_PILOT_RUNBOOK.md`, and
-  `docs/symphony/SPEC_GAP_SCORECARD_2026-03-12.md`.
 
 ## Canonical Sources By Topic
 
@@ -33,7 +29,6 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Canonical architecture/ownership map source | `docs/maps/component_ownership_map.json` | Machine-readable source of truth. |
 | Write-path contract harness | `docs/ci-write-contracts.md` | Focused contract-smoke reference. |
 | Release gates | `docs/release-gate-zero-surprise.md`, `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md` | Dedicated gate behavior and usage. |
-| Symphony pilot and state API | `tools/symphony/README.md`, `docs/symphony/STAGING_PILOT_RUNBOOK.md`, `docs/symphony/SPEC_GAP_SCORECARD_2026-03-12.md` | Runtime guidance plus current SPEC closeout view. |
 
 ## Validation Routing
 
@@ -51,7 +46,6 @@ This file stays intentionally short. It is a map, not a second runbook.
   - write-path contracts: `docs/ci-write-contracts.md`
   - integration smoke browser evidence: `docs/release-gate-dashboard.md`
   - architecture boundaries entry points: `AGENTS.md`
-  - Symphony pilot entry points: `AGENTS.md`, `tools/symphony/README.md`
 
 ## Scheduled Hygiene
 

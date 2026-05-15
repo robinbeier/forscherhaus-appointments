@@ -45,7 +45,7 @@ npm run build
 Need the shortest route to the right steering source?
 
 - [Agent Harness Index](docs/agent-harness-index.md): routing across onboarding,
-  agent runtime, CI, architecture, ownership, and Symphony
+  agent runtime, CI, architecture, and ownership
 - [WORKFLOW.md](WORKFLOW.md): agent runtime and ticket-to-merge rules
 - [AGENTS.md](AGENTS.md): compact repo guardrails plus the extended local/CI command matrix
 
@@ -176,7 +176,7 @@ This removes everything under `storage/logs/` except the placeholder
 local `easyappointments-0.0.0.zip` artifact. That includes local CI, release,
 and ops artifacts stored under `storage/logs/`. To also remove reproducible
 dependency directories such as the root installs plus
-`tools/symphony/node_modules/` and `pdf-renderer/node_modules/`, opt in
+`pdf-renderer/node_modules/`, opt in
 explicitly only when you are fine reinstalling them afterwards:
 
 ```bash

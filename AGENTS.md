@@ -7,7 +7,7 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 - `README.md`: onboarding, local setup, services, shortest operator path.
 - `WORKFLOW.md`: agent runtime, Linear states, Codex Workpad, and ticket-to-merge flow.
 - `code_review.md`: canonical review priorities, findings format, and repo-specific review checks.
-- `docs/agent-harness-index.md`: routing across CI, architecture, ownership, Symphony, and specialist docs.
+- `docs/agent-harness-index.md`: routing across CI, architecture, ownership, and specialist docs.
 - `.github/workflows/ci.yml`: source of truth for CI triggers, blocking status, and artifacts.
 
 ## Hard Rules
@@ -44,7 +44,6 @@ bash ./scripts/ci/pre_pr_quick.sh
 - Release gates: `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-zero-surprise.md`
 - Observability and ops monitors: `docs/observability.md`, `scripts/ops/README.md`
 - Architecture and ownership: `docs/architecture-map.md`, `docs/ownership-map.md`, `docs/maps/component_ownership_map.json`
-- Symphony runtime and pilot docs: `tools/symphony/README.md`, `docs/symphony/STAGING_PILOT_RUNBOOK.md`
 
 ## Working Defaults
 
@@ -53,7 +52,6 @@ bash ./scripts/ci/pre_pr_quick.sh
 - With host PHP and Docker PDF renderer, set `PDF_RENDERER_URL=http://localhost:3003`.
 - Use a unique Docker Compose project name per worktree.
 - Prefer `docker compose run --rm php-fpm composer deptrac:analyze` over host `composer deptrac:analyze`.
-- For Symphony pilot readiness, run `bash ./scripts/ci/run_symphony_pilot_checks.sh`; append `--with-full-gate` only when you also need the repo-wide pre-PR baseline.
 - `./scripts/setup-worktree.sh` installs managed hooks; refresh with `./scripts/install-git-hooks.sh` (or replace older custom hooks with `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh`).
 - `bash ./scripts/ci/pre_pr_full.sh` enables LDAP guardrails only when LDAP/runtime paths changed; override explicitly via `PRE_PR_INCLUDE_LDAP_GUARDRAIL=1` or `0`.
 - On cold local Docker stacks, `bash ./scripts/ci/pre_pr_full.sh` may need longer Playwright startup via `PRE_PR_INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT=600` and `PRE_PR_INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT=60`.
@@ -73,7 +71,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 
 - Keep commits short, imperative, and scoped.
 - Multi-PR work stays sequential: finish and merge one PR before starting the next.
-- Link Symphony or infrastructure PRs to Linear only when they truly belong to that issue.
+- Link infrastructure PRs to Linear only when they truly belong to that issue.
 - For UI-visible changes, update supporting docs or evidence when the repo workflow expects it.
 
 ## Agent Notes

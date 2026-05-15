@@ -6,14 +6,14 @@ description: Create a repo-conformant git commit from the current worktree, incl
 
 # Commit
 
-Use this skill when Symphony must finalize local work before a push, PR update,
-or merge handoff.
+Use this skill when local work must be finalized before a push, PR update, or
+merge handoff.
 
 ## Goals
 
--   Stage exactly the intended files for the current issue.
--   Write a short imperative commit subject that matches this repo.
--   Record what changed, why, and which checks were run.
+- Stage exactly the intended files for the current issue.
+- Write a short imperative commit subject that matches this repo.
+- Record what changed, why, and which checks were run.
 
 ## Steps
 
@@ -29,10 +29,10 @@ or merge handoff.
 
 ## Repo Rules
 
--   Keep the message consistent with [AGENTS.md](../../../AGENTS.md).
--   If frontend source files changed, include rebuilt artifacts when required.
--   If tests were intentionally deferred, say so explicitly in the commit body.
--   Do not commit logs, tmp files, or unrelated generated output.
+- Keep the message consistent with [AGENTS.md](../../../AGENTS.md).
+- If frontend source files changed, include rebuilt artifacts when required.
+- If tests were intentionally deferred, say so explicitly in the commit body.
+- Do not commit logs, tmp files, or unrelated generated output.
 
 ## Template
 
