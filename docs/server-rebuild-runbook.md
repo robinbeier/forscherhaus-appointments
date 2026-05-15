@@ -4,8 +4,13 @@ This runbook describes the target path for rebuilding the production server from
 a fresh Ubuntu LTS base, then deploying the app through the repository release
 artifact flow.
 
-The current production server must remain unchanged until the rebuild has been
-rehearsed and accepted.
+For the currently selected in-place rebuild path on the same Hetzner server,
+use [same-server-rebuild-runbook.md](same-server-rebuild-runbook.md). This file
+remains the reference for a parallel fresh target server where the current
+production server stays online as migration-level rollback.
+
+The current production server must remain unchanged until a parallel rebuild has
+been rehearsed and accepted.
 
 ## Current Production Baseline
 
@@ -56,9 +61,12 @@ Uptime Kuma currently runs as Docker container `uptime-kuma` with image
 
 ## Target Baseline
 
-For the rebuild, use the newest sensible Ubuntu LTS image available when the
-server is created. The expected target is Ubuntu 26.04 LTS once it is available
-through the provider and the LTS upgrade/rebuild window is stable.
+For a parallel rebuild, use the newest sensible Ubuntu LTS image available when
+the server is created. The expected future target is Ubuntu 26.04 LTS once it is
+available through the provider and the LTS upgrade/rebuild window is stable.
+
+For the selected same-server rebuild, the target baseline is Ubuntu 24.04 LTS;
+Ubuntu 26.04 is deliberately deferred.
 
 Target runtime choices:
 

@@ -2,14 +2,14 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, and ROB-363 follow-ups complete.
+Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, and ROB-363 follow-ups complete. Same-server rebuild path selected and documented.
 
 Created: 2026-05-14.
 
-Current milestone: Milestone 5, Uptime Kuma Mirror and Restore.
+Current milestone: Milestone 6 preparation.
 
-Next action: provision or choose a fresh rehearsal target, then execute the
-Milestone 6 sequence from the cutover rehearsal checklist.
+Next action: create the provider snapshot and pre-wipe local backup set, then
+execute the same-server rebuild runbook on Ubuntu 24.04 LTS.
 
 ## Locked Decisions
 
@@ -22,6 +22,9 @@ Milestone 6 sequence from the cutover rehearsal checklist.
 | 2026-05-14 | Move JS/tooling readiness toward Node 24 LTS. | Production Node 20 is EOL; Node 24 is the longer-lived LTS target. |
 | 2026-05-14 | Use artifact-based deployment as the preferred deployment model. | Existing release gates and artifact validation are valuable; deployment should become clearer, not ad hoc. |
 | 2026-05-14 | Mirror Uptime Kuma desired state in repo, but keep Kuma DB and secrets host-local. | Monitoring must be reproducible without committing operational state or credentials. |
+| 2026-05-15 | Use same-server rebuild on the existing Hetzner server as the practical execution path. | A second server is unlikely; production traffic is not expected before August 2026; the provider snapshot gives the rollback path while keeping the same IP. |
+| 2026-05-15 | Target Ubuntu 24.04 LTS for the same-server rebuild. | It matches the current supported LTS base and avoids combining the host rebuild with an Ubuntu 26.04 migration. |
+| 2026-05-15 | Create a provider snapshot, fresh DB dump, and local host-config backup directly before wiping the server. | The old live server will be reinstalled in place, so rollback and restore evidence must exist before the destructive step. |
 
 ## Baseline Facts
 
@@ -66,8 +69,8 @@ Uptime Kuma:
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
 | 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, all 12 monitors went green in the disposable instance, and the verified current export was copied to secure operator-controlled storage outside Git. |
-| 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
-| 7. Final Cutover and Post-Cutover Documentation | Not started | Requires rehearsal success. |
+| 6. End-to-End Cutover Rehearsal | Prepared, not executed | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Actual rebuild still needs provider snapshot, pre-wipe backups, Ubuntu 24.04 reinstall, restore, gates, Kuma, and acceptance. |
+| 7. Final Cutover and Post-Cutover Documentation | Not started | Requires same-server rebuild acceptance or a future parallel target cutover. |
 
 ## Validation Log
 
@@ -166,29 +169,40 @@ Uptime Kuma:
   Decision: old-server rollback is now operationally specified on paper; it still has not been exercised against a fresh target host or real DNS route.
   Next: provision or choose a fresh rehearsal target, then execute the cutover checklist and rollback drill.
 
+- 2026-05-15T16:10:31Z - Milestone 6 preparation - Selected and documented the same-server rebuild path.
+  Validation: added `docs/same-server-rebuild-runbook.md` and updated the long-horizon plan, cutover checklist, fresh-server runbook, and old-server rollback drill to distinguish the selected same-server Hetzner rebuild from the earlier parallel-target model.
+  Decision: rebuild the existing Hetzner server in place from Ubuntu 24.04 LTS after provider snapshot, fresh DB dump, and local host-config backup; restore Kuma from the secured archive; keep artifact deployment; use provider snapshot restore as migration-level rollback.
+  Next: create provider snapshot and pre-wipe backup artifacts, then execute the same-server rebuild runbook.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
-  yet for a real Ubuntu 26.04 target host or production cutover.
-- A fresh Ubuntu LTS server has not yet been provisioned from
-  `docs/server-rebuild-runbook.md`; the runbook is documented but not proven on a
-  clean host.
+  yet for a real Ubuntu 26.04 target host or future production migration.
+- The selected same-server Ubuntu 24.04 rebuild has not yet been executed.
+- Provider snapshot creation and restore have not been evidenced in this repo
+  documentation yet.
+- The pre-wipe backup set still needs to be created and verified: fresh DB dump,
+  `/etc/fh`, Apache vhosts, cronjobs, systemd units, app configs, service
+  inventory, and relevant deployment metadata.
+- The earlier parallel-target fresh-server path remains documented, but it is
+  no longer the selected execution path unless a second server is introduced.
 - Local artifact build and validation now pass with Node 24 LTS, but the release
-  artifact has not yet been deployed end-to-end on a fresh target host.
+  artifact has not yet been deployed end-to-end on the rebuilt host.
 - Database migration app smokes passed on the 2026-05-15 restored dump; final
-  cutover still needs these checks rerun against the approved cutover dump.
-- End-to-end cutover rehearsal has a checklist, but it has not started; DNS,
-  final DB restore, artifact deploy, Kuma restore, gates, monitors, and rollback
-  decision point still need a single rehearsed sequence.
-- Old-server rollback is documented as an operational drill, but it has not yet
-  been exercised in a cutover rehearsal.
+  rebuild still needs these checks rerun against the pre-wipe dump.
+- End-to-end rebuild execution has a runbook, but it has not started; reinstall,
+  DB restore, artifact deploy, Kuma restore, gates, monitors, and provider
+  snapshot rollback evidence still need a single executed sequence.
+- Old-server rollback is documented for the parallel-target model, but it is not
+  the selected rollback path for the same-server rebuild.
 - The current Uptime Kuma live export restores successfully and preserves
   history, and a verified secure local copy now exists outside Git at the
   operator-controlled archive path. The temporary `/private/tmp` source has
   been removed.
 - Secrets and push URLs must not leak through docs, command output, commits, or
   retained local test artifacts.
-- Ubuntu 26.04 production migration should wait for a stable LTS-to-LTS upgrade window or fresh-server image process.
+- Ubuntu 26.04 production migration should wait for a later, explicit LTS path
+  after the Ubuntu 24.04 same-server rebuild is stable.
 
 ## Status Update Protocol
 

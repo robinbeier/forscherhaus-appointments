@@ -7,6 +7,13 @@ single ordered rehearsal plan.
 This checklist is for rehearsal planning and execution on a fresh target host.
 It does not replace the detailed runbooks it references.
 
+For the currently selected same-server Hetzner rebuild, use
+[same-server-rebuild-runbook.md](same-server-rebuild-runbook.md) as the
+operational source of truth. In that path there is no second live target server,
+the public IP is expected to stay unchanged, production traffic is not expected
+before August 2026, and provider snapshot restore replaces old-server DNS
+rollback as the migration-level rollback path.
+
 ## Non-Goals
 
 - Do not mutate the current production server while drafting this checklist.
@@ -16,11 +23,16 @@ It does not replace the detailed runbooks it references.
   database contents, Kuma database contents, or release archive contents.
 - Do not use `deploy_ea.sh` rollback as the migration-level rollback plan. Use
   it only for a failed artifact deployment on the same target host.
+- For the same-server rebuild path, do not treat DNS rollback as the primary
+  rollback path. Restore the provider snapshot if the rebuilt host must be
+  abandoned.
 
 ## Source Runbooks
 
 - Fresh target provisioning, DB/Kuma migration choices, DNS, and rollback:
   [server-rebuild-runbook.md](server-rebuild-runbook.md)
+- Same-server Hetzner rebuild with provider snapshot rollback:
+  [same-server-rebuild-runbook.md](same-server-rebuild-runbook.md)
 - Artifact build, upload, deploy, local archive handling, and host-local secret
   paths: [deployment.md](deployment.md)
 - Zero-surprise predeploy replay, live canary, breakglass, reports, and deploy

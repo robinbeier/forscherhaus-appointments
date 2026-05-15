@@ -4,6 +4,12 @@ Purpose: make the current production server usable as an explicit
 migration-level rollback target during a fresh-server rehearsal or final
 cutover.
 
+This drill applies to the parallel-server migration path. For the selected
+same-server Hetzner rebuild, use
+[same-server-rebuild-runbook.md](same-server-rebuild-runbook.md); the provider
+snapshot is the migration-level rollback path because the old live server is
+reinstalled in place.
+
 This drill documents decisions, checks, and evidence. It does not authorize
 changes to the current production server. A later cutover task must explicitly
 authorize any live DNS, database, deployment, or monitoring action.

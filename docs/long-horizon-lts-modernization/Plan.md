@@ -4,6 +4,24 @@
 
 Complete one milestone at a time. After each milestone, run its validations, repair failures immediately, and update `Documentation.md` before moving on.
 
+## Execution Path Update
+
+As of 2026-05-15, the practical migration path is a same-server rebuild on the
+existing Hetzner server rather than a second parallel target host. The selected
+path is documented in `docs/same-server-rebuild-runbook.md`:
+
+- create a provider snapshot first
+- create and locally secure a fresh DB dump and host-config backup before wipe
+- reinstall the same server with Ubuntu 24.04 LTS
+- keep the same public IP
+- restore the app through the artifact deployment path
+- restore Uptime Kuma from the secured archive
+- use provider snapshot restore as migration-level rollback
+
+The parallel fresh-server milestones below remain useful as a model, but DNS
+cutover and old-server rollback only apply if a second target server is later
+introduced.
+
 ## Milestone 0: Baseline and Safety Inventory
 
 Goal: Freeze current repo, production, and monitoring facts before changing anything.
@@ -193,16 +211,17 @@ Stop-and-fix:
 
 ## Milestone 6: End-to-End Cutover Rehearsal
 
-Goal: Prove the whole migration before touching production traffic.
+Goal: Prove the whole migration before production traffic returns.
 
 Deliverables:
 
-- New server built from runbook.
+- Rebuilt server or fresh target built from the selected runbook.
 - App deployed from release artifact.
 - DB restored and migrated.
 - Kuma restored or intentionally kept separate.
 - Release gates and monitors green.
-- Rollback checklist verified.
+- Rollback checklist verified: provider snapshot restore for same-server
+  rebuild, old-server rollback for parallel migration.
 - Final cutover checklist prepared.
 
 Validations:
@@ -222,16 +241,18 @@ Stop-and-fix:
 
 ## Milestone 7: Final Cutover and Post-Cutover Documentation
 
-Goal: Switch to the new server only after rehearsal success.
+Goal: accept the rebuilt or new server only after rehearsal success.
 
 Deliverables:
 
-- Final DB dump from old server.
-- Final restore on new server.
+- Final DB dump from the pre-wipe server.
+- Final restore on the rebuilt or new server.
 - Final release artifact deployed.
-- DNS/traffic cutover.
+- DNS/traffic cutover if a second target server is used; otherwise same-IP
+  service acceptance.
 - Post-cutover gates and Kuma checks.
-- Old server retained as rollback for an agreed observation window.
+- Provider snapshot retained for the agreed observation window on the
+  same-server path, or old server retained if a parallel target is used.
 - `Documentation.md` updated with shipped state and remaining follow-ups.
 
 Validations:
@@ -244,4 +265,6 @@ Validations:
 
 Stop-and-fix:
 
-- If post-cutover canary fails, roll back to the old server or previous release according to the documented rollback path.
+- If post-cutover canary fails, restore the provider snapshot on the
+  same-server path, or roll back to the old server or previous release
+  according to the documented parallel-server rollback path.
