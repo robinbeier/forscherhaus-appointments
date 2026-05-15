@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 5 mostly complete.
+Status: Milestone 5 complete.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 5, Uptime Kuma Mirror and Restore.
 
-Next action: restore the current Kuma export into a disposable instance and validate full 12-monitor parity plus Push green status.
+Next action: start Milestone 6 by rehearsing the end-to-end cutover sequence from fresh server baseline, DB restore, artifact deploy, and Kuma restore.
 
 ## Locked Decisions
 
@@ -62,7 +62,7 @@ Uptime Kuma:
 | 2. Deployment Model Clarification | Complete | Added `docs/deployment.md` and linked it from `README.md`. |
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, and confirmed HTTP 200 boot smoke. |
-| 5. Uptime Kuma Mirror and Restore | Mostly complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; historical backup restored locally and Kuma started healthy; current 12-monitor live export created and integrity-checked; restore parity pending. |
+| 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, and all 12 monitors went green in the disposable instance. |
 | 6. End-to-End Cutover Rehearsal | Not started | Requires prior milestones. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires rehearsal success. |
 
@@ -122,6 +122,11 @@ Uptime Kuma:
   Validation: streamed a live SQLite `.backup` plus Kuma data files from the production container to `/private/tmp/uptime-kuma-live-export-20260515T055731Z`, generated a local SHA256 file, verified the archive checksum, extracted it locally, confirmed `PRAGMA integrity_check` returned `ok`, and confirmed the exported database contains `12` monitors and `8` Push monitors.
   Decision: current live export is available locally but contains secrets and monitor history; it must stay out of Git.
   Next: restore this current export into a disposable Kuma instance and confirm full monitor parity plus Push green status.
+
+- 2026-05-15T06:13:29Z - Milestone 5 - Restored current Uptime Kuma live export and validated parity.
+  Validation: restored the current export into `/private/tmp/fh-kuma-live-restore-test-data`, started Kuma 2.3.2 on local port `13002`, confirmed healthy container status and `HTTP/1.1 302 Found` to `/dashboard`, confirmed `PRAGMA integrity_check` returned `ok`, verified `12` monitors and `8` Push monitors, diffed restored monitor metadata against `scripts/ops/uptime-kuma.monitors.yml` with no differences for ID/name/type/interval/retry/max-retries, generated a temporary host-local Push env file outside Git, sent green test pings for all 8 Push monitors, and confirmed latest heartbeat status was green for all 12 monitors.
+  Decision: full Kuma data migration is the preferred path for the rebuild; final cutover needs a fresh live export close to the migration window, and Push secrets remain host-local.
+  Next: start end-to-end cutover rehearsal.
 
 ## Known Risks and Follow-Ups
 

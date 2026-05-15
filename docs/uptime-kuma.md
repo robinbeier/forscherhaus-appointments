@@ -163,3 +163,43 @@ Validation:
 - redacted manifest contains all current monitor names and Push-token presence
 
 The export archive contains secrets and monitor history. Do not commit it.
+
+## 2026-05-15 Current Export Restore Rehearsal
+
+Restored the current live export into a disposable local Kuma instance.
+
+Restore target:
+
+- data path: `/private/tmp/fh-kuma-live-restore-test-data`
+- local port: `13002`
+- Compose project: `fh-kuma-live-restore-test`
+
+Validation:
+
+- archive extracted successfully
+- restored SQLite database returned `PRAGMA integrity_check = ok`
+- restored Kuma 2.3.2 container started healthy
+- local HTTP smoke returned `HTTP/1.1 302 Found` to `/dashboard`
+- restored database contained `12` monitors
+- restored database contained `8` Push monitors
+- restored monitor metadata matched `scripts/ops/uptime-kuma.monitors.yml`
+  for ID, name, type, interval, retry interval, and max retries
+- a temporary host-local Push env file was generated from the restored DB and
+  kept outside the repository
+- all 8 Push monitors accepted green test pings against the restored instance
+- latest heartbeat status was green for all 12 monitors
+
+Decision:
+
+- full Kuma data migration is the preferred rebuild path because the current
+  export restores monitor history, monitor configuration, and Push tokens
+  successfully
+- final cutover still needs a fresh live export close to the migration window
+- Push URLs and any generated env files remain host-local only
+
+Cleanup:
+
+- disposable container, extracted data, temporary Push env, and comparison files
+  were removed after validation
+- the original current export archive remains outside Git for retention or
+  secure relocation
