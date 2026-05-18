@@ -8,7 +8,7 @@ Created: 2026-05-14.
 
 Current milestone: Milestone 6 preparation.
 
-Next action: decide the server-side Node 24 installation source, then continue with app, database, and Kuma restore on the rebuilt Ubuntu 26.04 LTS host.
+Next action: continue with app, database, PDF renderer container, and Kuma restore on the rebuilt Ubuntu 26.04 LTS host.
 
 ## Locked Decisions
 
@@ -64,9 +64,10 @@ Rebuilt target host:
 - Swap: 2G `/swapfile`.
 - Host-local secret path prepared: `/etc/fh` (`0700`, `root:root`).
 - Release staging path prepared: `/root/releases` (`0755`, `root:root`).
-- Node/npm: not installed yet on the rebuilt host; NodeSource `setup_24.x`
-  requires explicit approval because it adds a persistent third-party Apt
-  repository.
+- Node/npm: intentionally not installed on the rebuilt host while deployment
+  remains artifact-based and the PDF renderer runs as a container. Ubuntu 26.04
+  currently offers `nodejs` 22.22.1 and `npm` 9.2.0; NodeSource Node 24 is not
+  used to avoid a persistent third-party Apt repository.
 
 Uptime Kuma:
 
@@ -209,8 +210,8 @@ Uptime Kuma:
 
 - 2026-05-18T18:05:43Z - Milestone 6 / ROB-365 - Probed and bootstrapped the rebuilt Ubuntu 26.04 host.
   Validation: operator confirmed SSH works after reinstall; `bash ./scripts/ops/probe_same_server_rebuild_target.sh --execute` passed after `apt-get update` and confirmed Ubuntu 26.04 LTS `resolute`, unchanged IPv4 `188.245.244.123/32`, 1.9 GiB RAM, 38G root disk, Hetzner Ubuntu package sources, PHP 8.5.4, MariaDB 11.8.6, Apache 2.4.66, Composer 2.9.5, Docker 29.1.3, Docker Compose 2.40.3, certbot 4.0.0, and fail2ban availability. `apt-get dist-upgrade -y` reported no pending upgrades. A 2G `/swapfile` was created and enabled. Installed Apache, PHP-FPM and required PHP extensions, MariaDB, Composer, Docker Compose plugin, certbot Apache plugin, fail2ban, cron, unattended-upgrades, and supporting tools. Enabled Apache `rewrite`, `headers`, `ssl`, `http2`, `proxy`, `proxy_http`, `proxy_wstunnel`, `proxy_fcgi`, `setenvif`, and `php8.5-fpm`; `apache2ctl configtest` returned `Syntax OK`; Apache, PHP-FPM, MariaDB, Docker, fail2ban, unattended-upgrades, and cron are active. Created `/etc/fh` as `0700 root:root` and `/root/releases` as `0755 root:root`.
-  Decision: accept Ubuntu 26.04 base bootstrap for the app restore path, but keep Node 24 unresolved because adding NodeSource `setup_24.x` as a persistent third-party Apt repository requires explicit approval.
-  Next: either explicitly approve NodeSource for server-side Node 24, or proceed with artifact deploy without server-side Node and restore app, DB, PDF renderer, and Kuma.
+  Decision: accept Ubuntu 26.04 base bootstrap for the app restore path, but keep Node 24 off the server because artifact deploy builds off-host and the PDF renderer container carries its own Node runtime. Do not add the NodeSource `setup_24.x` third-party Apt repository.
+  Next: proceed with artifact deploy without server-side Node and restore app, DB, PDF renderer, and Kuma.
 
 ## Known Risks and Follow-Ups
 
@@ -220,9 +221,10 @@ Uptime Kuma:
 - The selected same-server Ubuntu 26.04 rebuild has started and the base
   runtime bootstrap is complete, but app, database, PDF renderer, Uptime Kuma,
   and end-to-end release gates have not yet been restored or accepted.
-- Node 24 is validated locally and in Docker, but not installed on the rebuilt
-  server yet. The server-side NodeSource `setup_24.x` path requires explicit
-  approval because it adds a persistent third-party Apt repository.
+- Node 24 is validated locally and in Docker, but intentionally not installed
+  on the rebuilt server while deployment remains artifact-based and the PDF
+  renderer runs as a container. If server-side builds become necessary later,
+  revisit the host Node source explicitly.
 - Provider snapshot creation has been reported by the operator, but provider
   snapshot restore has not been tested.
 - The pre-wipe backup set has been created and verified locally. It contains

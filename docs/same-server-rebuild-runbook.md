@@ -44,7 +44,8 @@ provider snapshot is the migration-level rollback path.
   from the target host before restore
 - Ubuntu release MariaDB package line, with the actual MariaDB version recorded
   from the target host before restore
-- Node 24 LTS for build tooling and PDF renderer support
+- No host-level Node.js by default while deployment remains artifact-based and
+  the PDF renderer runs as a container
 - Composer 2.x
 - Docker with Compose plugin for Uptime Kuma
 - certbot with Apache plugin
@@ -168,7 +169,8 @@ apt-get install php-fpm php-cli php-curl php-gd php-intl php-mbstring php-mysql 
 
 Then:
 
-- install Node 24 LTS from the chosen documented source
+- do not install host-level Node.js by default; the accepted release artifact is
+  built off-host, and the PDF renderer container carries its own Node runtime
 - install Composer 2.x
 - install Docker and the Docker Compose plugin
 - enable Apache modules: `rewrite`, `headers`, `ssl`, `http2`, `proxy`,
@@ -187,8 +189,6 @@ apache2 -v
 php -v
 php -m
 mariadb --version
-node --version
-npm --version
 composer --version
 docker --version
 docker compose version
@@ -248,7 +248,7 @@ Required validation:
 The rebuild is accepted when:
 
 - Ubuntu 26.04 LTS base is updated and documented
-- Apache, PHP-FPM, MariaDB, Docker, Composer, Node, certbot, fail2ban, and
+- Apache, PHP-FPM, MariaDB, Docker, Composer, certbot, fail2ban, and
   unattended upgrades are installed and version-recorded
 - app deploy uses the artifact path, not a Git checkout
 - DB import, migrations, and restored-data smokes pass
