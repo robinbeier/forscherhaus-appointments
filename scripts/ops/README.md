@@ -18,6 +18,7 @@ Script inventory:
 - `kuma_push_php_fpm_logs.sh` monitors recent `php8.3-fpm` journal errors
 - `kuma_push_pdf_renderer_logs.sh` monitors recent `fh-pdf-renderer` journal errors
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
+- `kuma_push_apache_scanner_activity.sh` watches recent Apache access logs for common scanner probes
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
 
 Default env file:
@@ -33,6 +34,7 @@ Required new Push URLs:
 - `KUMA_PUSH_URL_PHP_FPM_LOGS`
 - `KUMA_PUSH_URL_PDF_RENDERER_LOGS`
 - `KUMA_PUSH_URL_PDF_EXPORT`
+- `KUMA_PUSH_URL_SECURITY_SCANNER`
 
 Optional php-fpm log env:
 

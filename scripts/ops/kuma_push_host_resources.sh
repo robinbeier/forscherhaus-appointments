@@ -50,7 +50,7 @@ if (( mem_used_percent >= MEM_USED_WARN_PERCENT )); then
   reasons+=("mem=${mem_used_percent}%")
 fi
 
-if awk -v load="$load_1m" -v limit="$load_limit" 'BEGIN {exit !(load >= limit)}'; then
+if awk -v load_value="$load_1m" -v limit="$load_limit" 'BEGIN {exit !(load_value >= limit)}'; then
   status="down"
   ping="0"
   reasons+=("load=${load_1m}")

@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, ROB-363, and ROB-364 follow-ups complete. Same-server pre-wipe backup is secured and verified. ROB-365 is in progress on the rebuilt Ubuntu 26.04 host.
+Status: Milestone 6 same-server restore is functionally complete through ROB-366. The rebuilt Ubuntu 26.04 host serves the app, restored DB, containerized PDF renderer, TLS, and restored Uptime Kuma without host-level Node.js.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 6 preparation.
 
-Next action: continue with app, database, PDF renderer container, and Kuma restore on the rebuilt Ubuntu 26.04 LTS host.
+Next action: run the final rebuilt-server acceptance checklist and decide how long to retain the provider snapshot rollback.
 
 ## Locked Decisions
 
@@ -68,6 +68,13 @@ Rebuilt target host:
   remains artifact-based and the PDF renderer runs as a container. Ubuntu 26.04
   currently offers `nodejs` 22.22.1 and `npm` 9.2.0; NodeSource Node 24 is not
   used to avoid a persistent third-party Apt repository.
+- Active app release: `ea_rebuild_20260518_182248`.
+- App URL: `https://dasforscherhaus-leg.de/`.
+- Monitor URL: `https://monitor.dasforscherhaus-leg.de/`.
+- PDF renderer: Docker-backed `fh-pdf-renderer` systemd service, bound to
+  `127.0.0.1:3003`.
+- Uptime Kuma: Docker Compose project `uptime-kuma`, bound to
+  `127.0.0.1:3001`.
 
 Uptime Kuma:
 
@@ -88,7 +95,7 @@ Uptime Kuma:
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
 | 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, all 12 monitors went green in the disposable instance, and the verified current export was copied to secure operator-controlled storage outside Git. |
-| 6. End-to-End Cutover Rehearsal | In progress | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Same-server reinstall now runs Ubuntu 26.04 LTS, the target probe passed, base runtime packages and services are installed, and app/DB/Kuma restore plus gates still need execution. |
+| 6. End-to-End Cutover Rehearsal | In progress | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Same-server reinstall now runs Ubuntu 26.04 LTS, app/DB/artifact deploy/PDF renderer/Kuma restore are complete, and all 12 active Kuma monitors are green. Final acceptance and snapshot-retention decision remain. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires same-server rebuild acceptance or a future parallel target cutover. |
 
 ## Validation Log
@@ -213,14 +220,19 @@ Uptime Kuma:
   Decision: accept Ubuntu 26.04 base bootstrap for the app restore path, but keep Node 24 off the server because artifact deploy builds off-host and the PDF renderer container carries its own Node runtime. Do not add the NodeSource `setup_24.x` third-party Apt repository.
   Next: proceed with artifact deploy without server-side Node and restore app, DB, PDF renderer, and Kuma.
 
+- 2026-05-18T18:42:22Z - Milestone 6 / ROB-366 - Restored app, database, containerized PDF renderer, TLS, and Uptime Kuma on the rebuilt host.
+  Validation: copied verified DB, host-config, and Kuma archives to `/root/rebuild-restore-inputs`; verified DB and host-config SHA256 plus Kuma archive SHA256 from the retained `.sha256` file; imported the pre-wipe DB dump into MariaDB 11.8.6; created host-local app DB credentials under `/etc/fh`; restored `/etc/fh` with `0700` directories and `0600` files; built and uploaded release artifact `ea_rebuild_20260518_182248` with matching local/remote SHA256 `8c00ef9458d112ceedc18faf2bf523acabde484af8eada42ae398bb2d09ab048`; zero-surprise predeploy replay and report validation passed; configured PHP-FPM runtime env from `/etc/fh/php-fpm-runtime.env` after the first deploy attempt exposed missing `HEALTHZ_TOKEN`; manually completed the activation of the validated release; `zero_surprise_live_canary.php` passed; migration command completed; homepage, renderer health, and deep health returned HTTP 200; DB counts were `13` tables, `73` settings, `453` users, `708` appointments, migration version `68`; certbot issued and deployed TLS for `dasforscherhaus-leg.de`, `www.dasforscherhaus-leg.de`, and `monitor.dasforscherhaus-leg.de`; restored Kuma from the secured 2026-05-15 archive with SQLite integrity `ok`, `12` active monitors, and `8` Push monitors; generated host-local Push env from restored Kuma tokens; installed cron under `/etc/cron.d/fh-uptime-kuma-push`; all Push scripts passed once manually; all 12 active Kuma monitors had latest status `1`; host `node` and `npm` remained absent.
+  Decision: use a Docker-backed `fh-pdf-renderer` service and `deploy_ea.sh --renderer-deploy-mode external` for this rebuilt host; add a repo-level static `/health` endpoint because the restored Kuma Shallow Health monitor expects keyword `OK` at that path; keep Push URLs host-local under `/root/backups/uptime-kuma-push.env`.
+  Next: run ROB-369 final acceptance, review any residual logs, and decide provider snapshot retention.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 is installed on the real Ubuntu 26.04 target host, but app-level
   compatibility on that host is not accepted until DB restore, migrations,
   browser smokes, PDF smoke, and release gates pass.
 - The selected same-server Ubuntu 26.04 rebuild has started and the base
-  runtime bootstrap is complete, but app, database, PDF renderer, Uptime Kuma,
-  and end-to-end release gates have not yet been restored or accepted.
+  runtime bootstrap plus app, database, PDF renderer, TLS, Uptime Kuma, and
+  push-monitor restore are complete. Final acceptance is still separate.
 - Node 24 is validated locally and in Docker, but intentionally not installed
   on the rebuilt server while deployment remains artifact-based and the PDF
   renderer runs as a container. If server-side builds become necessary later,
@@ -232,14 +244,14 @@ Uptime Kuma:
   attachments, and screenshots.
 - The earlier parallel-target fresh-server path remains documented, but it is
   no longer the selected execution path unless a second server is introduced.
-- Local artifact build and validation now pass with Node 24 LTS, but the release
-  artifact has not yet been deployed end-to-end on the rebuilt host.
-- Database migration app smokes passed on the 2026-05-15 restored dump; final
-  rebuild still needs these checks rerun against the pre-wipe dump.
-- End-to-end rebuild execution has started with snapshot, pre-wipe backup,
-  reinstall, target probe, and base bootstrap; DB restore, artifact deploy,
-  Kuma restore, gates, monitors, and provider snapshot rollback evidence still
-  need a single executed sequence.
+- Local artifact build and validation pass with Node 24 LTS; the rebuilt host
+  successfully runs the uploaded artifact without host-level Node.js by using
+  the external/containerized PDF renderer mode.
+- Database migration app smokes passed on the pre-wipe dump after restore.
+- End-to-end rebuild execution has completed snapshot, pre-wipe backup,
+  reinstall, target probe, base bootstrap, DB restore, artifact deploy,
+  containerized PDF renderer, TLS, Kuma restore, push scripts, and monitors.
+  Provider snapshot rollback restore has still not been tested.
 - Old-server rollback is documented for the parallel-target model, but it is not
   the selected rollback path for the same-server rebuild.
 - The current Uptime Kuma live export restores successfully and preserves
