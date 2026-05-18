@@ -150,8 +150,9 @@ packages=(
 )
 missing=0
 for package_name in "${packages[@]}"; do
-    candidate="$(apt-cache policy "${package_name}" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
-    installed="$(apt-cache policy "${package_name}" 2>/dev/null | awk '/Installed:/ {print $2; exit}')"
+    policy_output="$(apt-cache policy "${package_name}" 2>/dev/null || true)"
+    candidate="$(printf '%s\n' "${policy_output}" | awk '/Candidate:/ {print $2; found=1} found {exit}')"
+    installed="$(printf '%s\n' "${policy_output}" | awk '/Installed:/ {print $2; found=1} found {exit}')"
     printf '%-30s installed=%-24s candidate=%s\n' "${package_name}" "${installed:-unknown}" "${candidate:-unknown}"
     if [[ -z "${candidate}" || "${candidate}" == "(none)" ]]; then
         case "${package_name}" in
