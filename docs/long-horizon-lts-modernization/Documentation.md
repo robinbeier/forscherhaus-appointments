@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 6 same-server restore is accepted through ROB-369. The rebuilt Ubuntu 26.04 host serves the app, restored DB, containerized PDF renderer, TLS, and restored Uptime Kuma without host-level Node.js.
+Status: Milestone 6 same-server restore is accepted through ROB-369 and post-acceptance temporary restore artifacts have been removed. The rebuilt Ubuntu 26.04 host serves the app, restored DB, containerized PDF renderer, TLS, and restored Uptime Kuma without host-level Node.js.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 7 post-rebuild documentation and cleanup.
 
-Next action: keep the provider snapshot according to the operator-managed retention decision, then remove temporary restore artifacts only after explicit operator approval.
+Next action: keep the provider snapshot according to the operator-managed retention decision and continue normal post-rebuild observation.
 
 ## Locked Decisions
 
@@ -96,7 +96,7 @@ Uptime Kuma:
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
 | 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, all 12 monitors went green in the disposable instance, and the verified current export was copied to secure operator-controlled storage outside Git. |
 | 6. End-to-End Cutover Rehearsal | Complete | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Same-server reinstall runs Ubuntu 26.04 LTS; app, DB, artifact deploy, containerized PDF renderer, TLS, Kuma restore, Push scripts, and all 12 active Kuma monitors passed final acceptance. |
-| 7. Final Cutover and Post-Cutover Documentation | In progress | Same-server rebuild is accepted with provider snapshot retained. Remaining work is cleanup of temporary restore artifacts after explicit operator approval and normal post-rebuild observation. |
+| 7. Final Cutover and Post-Cutover Documentation | In progress | Same-server rebuild is accepted with provider snapshot retained. Temporary restore artifacts were removed after explicit operator approval. Remaining work is normal post-rebuild observation and any future operations handoff notes. |
 
 ## Validation Log
 
@@ -231,6 +231,11 @@ Uptime Kuma:
   Decision: accept the rebuilt Ubuntu 26.04 same-server state with the provider snapshot retained; snapshot-retention tracking is operator-managed outside this repo. Keep temporary restore artifacts on the server until explicit cleanup approval after acceptance.
   Next: post-acceptance cleanup can remove temporary restore inputs and the placeholder deploy directory only after operator approval.
 
+- 2026-05-18T19:04:17Z - Milestone 7 - Removed temporary post-acceptance restore artifacts.
+  Validation: verified the active app path was separate from the placeholder directory; removed `/root/rebuild-restore-inputs` and `/var/www/html/easyappointments_placeholder_after_failed_deploy`; confirmed both paths are absent afterward; app homepage returned HTTP `200`, `www` returned HTTP `200`, monitor endpoint returned HTTP `302`, PDF renderer health returned HTTP `200`, and deep health returned HTTP `200`; Apache, PHP 8.5 FPM, MariaDB, Docker, fail2ban, cron, unattended-upgrades, and `fh-pdf-renderer` remained active; Uptime Kuma reported `12` active monitors and `12` green latest statuses; recent app error-like lines were `0`; recent warning counts for Apache, PHP-FPM, MariaDB, PDF renderer, Docker, and cron were `0`.
+  Decision: temporary restore inputs and the failed-deploy placeholder are no longer retained on the server. Provider snapshot retention remains operator-managed outside this repo.
+  Next: continue normal post-rebuild observation.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 is installed on the real Ubuntu 26.04 target host and the rebuilt
@@ -257,10 +262,9 @@ Uptime Kuma:
   containerized PDF renderer, TLS, Kuma restore, push scripts, monitors, final
   acceptance, and log review. Provider snapshot rollback restore has still not
   been tested.
-- Temporary restore inputs remain on the server by decision until explicit
-  operator cleanup approval. Treat `/root/rebuild-restore-inputs` and
-  `/var/www/html/easyappointments_placeholder_after_failed_deploy` as
-  secret-bearing cleanup candidates.
+- Temporary restore inputs were removed after explicit operator approval:
+  `/root/rebuild-restore-inputs` and
+  `/var/www/html/easyappointments_placeholder_after_failed_deploy` are absent.
 - Old-server rollback is documented for the parallel-target model, but it is not
   the selected rollback path for the same-server rebuild.
 - The current Uptime Kuma live export restores successfully and preserves
