@@ -22,6 +22,7 @@ MARK_RELEASE=1
 RENDERER_SERVICE="fh-pdf-renderer"
 RENDERER_HEALTH_URL="http://127.0.0.1:3003/healthz"
 RENDERER_STATE_DIR="/var/lib/fh-pdf-renderer"
+RENDERER_DEPLOY_MODE="${FH_RENDERER_DEPLOY_MODE:-host}"
 DEEP_HEALTH_URL="http://localhost/index.php/healthz"
 HEALTHZ_TOKEN_FILE=""
 ZERO_SURPRISE_REPORT=""
@@ -71,6 +72,10 @@ Renderer / health gate options:
   --renderer-service NAME      systemd service name               [default: fh-pdf-renderer]
   --renderer-health-url URL    Renderer health endpoint           [default: http://127.0.0.1:3003/healthz]
   --renderer-state-dir PATH    Persistent renderer state dir      [default: /var/lib/fh-pdf-renderer]
+  --renderer-deploy-mode MODE  Renderer dependency mode:
+                                host installs npm deps before switch,
+                                external only restarts/probes service
+                                                                  [default: host]
   --deep-health-url URL         App deep health endpoint           [default: http://localhost/index.php/healthz]
   --healthz-token-file PATH     File containing deep-health token  [required for non-dry deploy]
   --zero-surprise-report PATH   Output path for generated predeploy report
@@ -439,6 +444,18 @@ perform_atomic_switch() {
 
 is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+validate_renderer_deploy_mode() {
+  case "$RENDERER_DEPLOY_MODE" in
+    host|external)
+      return 0
+      ;;
+    *)
+      echo "[!] --renderer-deploy-mode must be 'host' or 'external'."
+      return 1
+      ;;
+  esac
 }
 
 extract_base64_field() {
@@ -940,6 +957,7 @@ while [[ $# -gt 0 ]]; do
     --renderer-service) RENDERER_SERVICE="$2"; shift 2;;
     --renderer-health-url) RENDERER_HEALTH_URL="$2"; shift 2;;
     --renderer-state-dir) RENDERER_STATE_DIR="$2"; shift 2;;
+    --renderer-deploy-mode) RENDERER_DEPLOY_MODE="$2"; shift 2;;
     --deep-health-url) DEEP_HEALTH_URL="$2"; shift 2;;
     --healthz-token-file) HEALTHZ_TOKEN_FILE="$2"; shift 2;;
     --zero-surprise-report) ZERO_SURPRISE_REPORT="$2"; shift 2;;
@@ -986,6 +1004,7 @@ fi
 if [[ -z "$ZERO_SURPRISE_PROFILE" ]]; then
   die "[!] --zero-surprise-profile must not be empty."
 fi
+validate_renderer_deploy_mode || exit 1
 
 absolutize_path_var HEALTHZ_TOKEN_FILE
 absolutize_path_var ZERO_SURPRISE_REPORT
@@ -1042,6 +1061,7 @@ echo "    Reload services      : $RELOAD_SERVICES"
 echo "    Renderer service     : $RENDERER_SERVICE"
 echo "    Renderer health URL  : $RENDERER_HEALTH_URL"
 echo "    Renderer state dir   : $RENDERER_STATE_DIR"
+echo "    Renderer deploy mode : $RENDERER_DEPLOY_MODE"
 echo "    Deep health URL      : $DEEP_HEALTH_URL"
 echo "    Token file           : ${HEALTHZ_TOKEN_FILE:-<not-set-dry-run>}"
 echo "    Zero-surprise gate   : $REQUIRE_ZERO_SURPRISE"
@@ -1078,8 +1098,10 @@ if ! echo "$ARCH_LIST" | grep -E '(^|.*/)(application/config/config\.php)$' >/de
 fi
 
 # Pre-switch mandatory gates: runtime tool checks + service-control permission.
-require_command node
-require_command npm
+if [[ "$RENDERER_DEPLOY_MODE" == "host" ]]; then
+  require_command node
+  require_command npm
+fi
 require_command curl
 require_command php
 require_command runuser
@@ -1120,15 +1142,21 @@ run_shell "cp '$APP/config.php' '$STAGE_ROOT/config.php'"
 run_shell "mkdir -p '$STAGE_ROOT/storage'"
 run_shell "rsync -a '$APP/storage/' '$STAGE_ROOT/storage/' 2>/dev/null || true"
 
-if [[ "$DRYRUN" -eq 0 ]]; then
+if [[ "$DRYRUN" -eq 0 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
   [[ -f "$STAGE_ROOT/pdf-renderer/package-lock.json" ]] \
     || die "[!] Missing pre-switch gate file: $STAGE_ROOT/pdf-renderer/package-lock.json"
-else
+elif [[ "$DRYRUN" -eq 1 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
   echo "[DRY-RUN] would verify $STAGE_ROOT/pdf-renderer/package-lock.json exists"
+else
+  echo "[i] Renderer dependency install handled externally; skipping host npm gate."
 fi
 
-prepare_renderer_state_dir
-install_renderer_dependencies
+if [[ "$RENDERER_DEPLOY_MODE" == "host" ]]; then
+  prepare_renderer_state_dir
+  install_renderer_dependencies
+else
+  echo "[i] Renderer deploy mode external: leaving dependency/image preparation to '$RENDERER_SERVICE'."
+fi
 
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
 run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} \\;"

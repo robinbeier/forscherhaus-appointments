@@ -73,6 +73,13 @@ Run deploys from the production host, using the uploaded archive:
   --zero-surprise-incident-webhook-file /etc/fh/zero-surprise-incident.ini
 ```
 
+When the host runs the PDF renderer as an external/containerized service and
+does not install host-level Node.js, add:
+
+```bash
+--renderer-deploy-mode external
+```
+
 `deploy_ea.sh` performs these safety checks before switching traffic:
 
 - archive exists and contains required release files
@@ -82,7 +89,8 @@ Run deploys from the production host, using the uploaded archive:
 - staged runtime config is generated for isolated predeploy replay
 - zero-surprise predeploy restore-dump replay passes
 - generated predeploy report validates
-- renderer dependency lockfile exists before switch
+- renderer dependency lockfile exists before switch when using the default
+  host-managed renderer mode
 
 After the atomic switch, `deploy_ea.sh` verifies:
 
@@ -116,8 +124,10 @@ accepted.
 
 For a fresh Ubuntu LTS server, keep this deployment model:
 
-1. Provision OS packages, PHP-FPM, Apache, MariaDB client access, Node 24,
-   Composer, Docker, and the PDF renderer service.
+1. Provision OS packages, PHP-FPM, Apache, MariaDB client access, Composer,
+   Docker, and the PDF renderer service. Host-level Node.js is not required
+   when the PDF renderer runs as a container and release artifacts are built
+   off-host.
 2. Restore or migrate the application database separately.
 3. Upload a release archive to `/root/releases`.
 4. Place host-local secrets and credentials under `/etc/fh`.
