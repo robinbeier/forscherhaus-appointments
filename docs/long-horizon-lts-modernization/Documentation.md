@@ -2,13 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, ROB-363, and ROB-364 follow-ups complete. Same-server pre-wipe backup is secured and verified.
+Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, ROB-363, and ROB-364 follow-ups complete. Same-server pre-wipe backup is secured and verified. ROB-365 is in progress on the rebuilt Ubuntu 26.04 host.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 6 preparation.
 
-Next action: execute the same-server rebuild runbook on Ubuntu 26.04 LTS.
+Next action: decide the server-side Node 24 installation source, then continue with app, database, and Kuma restore on the rebuilt Ubuntu 26.04 LTS host.
 
 ## Locked Decisions
 
@@ -42,14 +42,31 @@ Repository:
 Production server:
 
 - Host: `booking-server`.
-- OS: Ubuntu 24.04.4 LTS.
-- Apache: 2.4.58.
-- PHP: 8.3.6 via `php8.3-fpm`.
-- MariaDB: 10.11.14.
-- Node: 20.20.2 from NodeSource `node_20.x`.
-- Composer: 2.7.1.
-- App path: `/var/www/html/easyappointments`.
-- Deployment shape: app directory is not a Git checkout.
+- Pre-wipe OS: Ubuntu 24.04.4 LTS.
+- Pre-wipe Apache: 2.4.58.
+- Pre-wipe PHP: 8.3.6 via `php8.3-fpm`.
+- Pre-wipe MariaDB: 10.11.14.
+- Pre-wipe Node: 20.20.2 from NodeSource `node_20.x`.
+- Pre-wipe Composer: 2.7.1.
+- Pre-wipe app path: `/var/www/html/easyappointments`.
+- Pre-wipe deployment shape: app directory was not a Git checkout.
+
+Rebuilt target host:
+
+- Host: `booking-server`.
+- OS: Ubuntu 26.04 LTS (`resolute`).
+- Apache: 2.4.66.
+- PHP: 8.5.4 via `php8.5-fpm`.
+- MariaDB: 11.8.6.
+- Composer: 2.9.5.
+- Docker: 29.1.3 with Compose plugin 2.40.3.
+- certbot: 4.0.0.
+- Swap: 2G `/swapfile`.
+- Host-local secret path prepared: `/etc/fh` (`0700`, `root:root`).
+- Release staging path prepared: `/root/releases` (`0755`, `root:root`).
+- Node/npm: not installed yet on the rebuilt host; NodeSource `setup_24.x`
+  requires explicit approval because it adds a persistent third-party Apt
+  repository.
 
 Uptime Kuma:
 
@@ -70,7 +87,7 @@ Uptime Kuma:
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
 | 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, all 12 monitors went green in the disposable instance, and the verified current export was copied to secure operator-controlled storage outside Git. |
-| 6. End-to-End Cutover Rehearsal | In progress | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Actual rebuild now targets Ubuntu 26.04 LTS and still needs reinstall, target probe, restore, gates, Kuma, and acceptance. |
+| 6. End-to-End Cutover Rehearsal | In progress | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Same-server reinstall now runs Ubuntu 26.04 LTS, the target probe passed, base runtime packages and services are installed, and app/DB/Kuma restore plus gates still need execution. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires same-server rebuild acceptance or a future parallel target cutover. |
 
 ## Validation Log
@@ -190,14 +207,22 @@ Uptime Kuma:
   Decision: install Ubuntu 26.04 LTS for the same-server rebuild; keep Ubuntu 24.04 LTS as fallback if the 26.04 target probe, package install, DB restore, or app gates fail before acceptance.
   Next: after provider reinstall, run the read-only target probe before bootstrapping runtime packages.
 
+- 2026-05-18T18:05:43Z - Milestone 6 / ROB-365 - Probed and bootstrapped the rebuilt Ubuntu 26.04 host.
+  Validation: operator confirmed SSH works after reinstall; `bash ./scripts/ops/probe_same_server_rebuild_target.sh --execute` passed after `apt-get update` and confirmed Ubuntu 26.04 LTS `resolute`, unchanged IPv4 `188.245.244.123/32`, 1.9 GiB RAM, 38G root disk, Hetzner Ubuntu package sources, PHP 8.5.4, MariaDB 11.8.6, Apache 2.4.66, Composer 2.9.5, Docker 29.1.3, Docker Compose 2.40.3, certbot 4.0.0, and fail2ban availability. `apt-get dist-upgrade -y` reported no pending upgrades. A 2G `/swapfile` was created and enabled. Installed Apache, PHP-FPM and required PHP extensions, MariaDB, Composer, Docker Compose plugin, certbot Apache plugin, fail2ban, cron, unattended-upgrades, and supporting tools. Enabled Apache `rewrite`, `headers`, `ssl`, `http2`, `proxy`, `proxy_http`, `proxy_wstunnel`, `proxy_fcgi`, `setenvif`, and `php8.5-fpm`; `apache2ctl configtest` returned `Syntax OK`; Apache, PHP-FPM, MariaDB, Docker, fail2ban, unattended-upgrades, and cron are active. Created `/etc/fh` as `0700 root:root` and `/root/releases` as `0755 root:root`.
+  Decision: accept Ubuntu 26.04 base bootstrap for the app restore path, but keep Node 24 unresolved because adding NodeSource `setup_24.x` as a persistent third-party Apt repository requires explicit approval.
+  Next: either explicitly approve NodeSource for server-side Node 24, or proceed with artifact deploy without server-side Node and restore app, DB, PDF renderer, and Kuma.
+
 ## Known Risks and Follow-Ups
 
-- PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
-  yet for the real Ubuntu 26.04 target host.
-- The selected same-server Ubuntu 26.04 rebuild has not yet been executed.
-- The Ubuntu 26.04 package/runtime baseline is intentionally not assumed from
-  docs alone; the target probe must record actual PHP, MariaDB, Node, Docker,
-  Composer, Apache, certbot, and package-source facts before restore/deploy.
+- PHP 8.5 is installed on the real Ubuntu 26.04 target host, but app-level
+  compatibility on that host is not accepted until DB restore, migrations,
+  browser smokes, PDF smoke, and release gates pass.
+- The selected same-server Ubuntu 26.04 rebuild has started and the base
+  runtime bootstrap is complete, but app, database, PDF renderer, Uptime Kuma,
+  and end-to-end release gates have not yet been restored or accepted.
+- Node 24 is validated locally and in Docker, but not installed on the rebuilt
+  server yet. The server-side NodeSource `setup_24.x` path requires explicit
+  approval because it adds a persistent third-party Apt repository.
 - Provider snapshot creation has been reported by the operator, but provider
   snapshot restore has not been tested.
 - The pre-wipe backup set has been created and verified locally. It contains
@@ -209,9 +234,10 @@ Uptime Kuma:
   artifact has not yet been deployed end-to-end on the rebuilt host.
 - Database migration app smokes passed on the 2026-05-15 restored dump; final
   rebuild still needs these checks rerun against the pre-wipe dump.
-- End-to-end rebuild execution has started with snapshot and pre-wipe backup;
-  reinstall, DB restore, artifact deploy, Kuma restore, gates, monitors, and
-  provider snapshot rollback evidence still need a single executed sequence.
+- End-to-end rebuild execution has started with snapshot, pre-wipe backup,
+  reinstall, target probe, and base bootstrap; DB restore, artifact deploy,
+  Kuma restore, gates, monitors, and provider snapshot rollback evidence still
+  need a single executed sequence.
 - Old-server rollback is documented for the parallel-target model, but it is not
   the selected rollback path for the same-server rebuild.
 - The current Uptime Kuma live export restores successfully and preserves
