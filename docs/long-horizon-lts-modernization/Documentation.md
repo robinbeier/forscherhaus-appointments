@@ -2,14 +2,13 @@
 
 ## Current Status
 
-Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, and ROB-363 follow-ups complete. Same-server rebuild path selected and documented.
+Status: Milestone 5 complete; ROB-358, ROB-359, ROB-360, ROB-361, ROB-362, ROB-363, and ROB-364 follow-ups complete. Same-server pre-wipe backup is secured and verified.
 
 Created: 2026-05-14.
 
 Current milestone: Milestone 6 preparation.
 
-Next action: create the provider snapshot and pre-wipe local backup set, then
-execute the same-server rebuild runbook on Ubuntu 24.04 LTS.
+Next action: execute the same-server rebuild runbook on Ubuntu 24.04 LTS.
 
 ## Locked Decisions
 
@@ -25,6 +24,7 @@ execute the same-server rebuild runbook on Ubuntu 24.04 LTS.
 | 2026-05-15 | Use same-server rebuild on the existing Hetzner server as the practical execution path. | A second server is unlikely; production traffic is not expected before August 2026; the provider snapshot gives the rollback path while keeping the same IP. |
 | 2026-05-15 | Target Ubuntu 24.04 LTS for the same-server rebuild. | It matches the current supported LTS base and avoids combining the host rebuild with an Ubuntu 26.04 migration. |
 | 2026-05-15 | Create a provider snapshot, fresh DB dump, and local host-config backup directly before wiping the server. | The old live server will be reinstalled in place, so rollback and restore evidence must exist before the destructive step. |
+| 2026-05-18 | Proceed with rebuild preparation using the completed provider snapshot and verified pre-wipe backup set. | The destructive step now has a provider rollback point plus local DB/config/inventory restore inputs. |
 
 ## Baseline Facts
 
@@ -69,7 +69,7 @@ Uptime Kuma:
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
 | 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, all 12 monitors went green in the disposable instance, and the verified current export was copied to secure operator-controlled storage outside Git. |
-| 6. End-to-End Cutover Rehearsal | Prepared, not executed | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Actual rebuild still needs provider snapshot, pre-wipe backups, Ubuntu 24.04 reinstall, restore, gates, Kuma, and acceptance. |
+| 6. End-to-End Cutover Rehearsal | In progress | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Actual rebuild still needs Ubuntu 24.04 reinstall, restore, gates, Kuma, and acceptance. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires same-server rebuild acceptance or a future parallel target cutover. |
 
 ## Validation Log
@@ -179,26 +179,30 @@ Uptime Kuma:
   Decision: the helper stays dry-run by default and requires `--execute` after the provider snapshot is complete; it creates a fresh DB dump, host-config archive, inventory, and checksums, downloads them to secure local storage outside Git, verifies them locally, and removes the temporary remote staging directory unless `--keep-remote` is passed.
   Next: create the provider snapshot, then run the helper with `--execute` immediately before the reinstall.
 
+- 2026-05-18T17:41:50Z - Milestone 6 / ROB-364 - Created and verified the same-server pre-wipe backup set.
+  Validation: operator confirmed the provider snapshot was created; ran `bash ./scripts/ops/prepare_same_server_rebuild_backup.sh --execute`; created local backup root `/Users/robinbeier/Documents/forscherhaus-ops-secure/same-server-rebuild/20260518T174053Z`; helper and independent verification passed `gzip -t`, `tar -tzf`, and `shasum -a 256 -c meta/checksums.sha256`; local backup directories are `0700`, files are `0600`; remote staging directory `/root/rebuild-prewipe-backup-20260518T174053Z` no longer exists.
+  Decision: ROB-364 is complete; the rebuild now has provider snapshot rollback plus verified local DB/config/inventory restore inputs.
+  Next: start ROB-365, reinstall the same server with Ubuntu 24.04 LTS and bootstrap the runtime.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
   yet for a real Ubuntu 26.04 target host or future production migration.
 - The selected same-server Ubuntu 24.04 rebuild has not yet been executed.
-- Provider snapshot creation and restore have not been evidenced in this repo
-  documentation yet.
-- The pre-wipe backup helper is prepared but not executed; the actual backup
-  set still needs to be created and verified after the provider snapshot: fresh
-  DB dump, `/etc/fh`, Apache vhosts, cronjobs, systemd units, app configs,
-  service inventory, and relevant deployment metadata.
+- Provider snapshot creation has been reported by the operator, but provider
+  snapshot restore has not been tested.
+- The pre-wipe backup set has been created and verified locally. It contains
+  secret-bearing restore inputs and must remain outside Git, chat, Linear
+  attachments, and screenshots.
 - The earlier parallel-target fresh-server path remains documented, but it is
   no longer the selected execution path unless a second server is introduced.
 - Local artifact build and validation now pass with Node 24 LTS, but the release
   artifact has not yet been deployed end-to-end on the rebuilt host.
 - Database migration app smokes passed on the 2026-05-15 restored dump; final
   rebuild still needs these checks rerun against the pre-wipe dump.
-- End-to-end rebuild execution has a runbook, but it has not started; reinstall,
-  DB restore, artifact deploy, Kuma restore, gates, monitors, and provider
-  snapshot rollback evidence still need a single executed sequence.
+- End-to-end rebuild execution has started with snapshot and pre-wipe backup;
+  reinstall, DB restore, artifact deploy, Kuma restore, gates, monitors, and
+  provider snapshot rollback evidence still need a single executed sequence.
 - Old-server rollback is documented for the parallel-target model, but it is not
   the selected rollback path for the same-server rebuild.
 - The current Uptime Kuma live export restores successfully and preserves
