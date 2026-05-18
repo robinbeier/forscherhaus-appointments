@@ -12,7 +12,8 @@ path is documented in `docs/same-server-rebuild-runbook.md`:
 
 - create a provider snapshot first
 - create and locally secure a fresh DB dump and host-config backup before wipe
-- reinstall the same server with Ubuntu 24.04 LTS
+- reinstall the same server with Ubuntu 26.04 LTS, with Ubuntu 24.04 LTS kept
+  as fallback if 26.04 has blocking host/runtime issues
 - keep the same public IP
 - restore the app through the artifact deployment path
 - restore Uptime Kuma from the secured archive
@@ -134,7 +135,8 @@ Deliverables:
 - New-server setup runbook for Ubuntu LTS.
 - Required packages and services.
 - PHP-FPM/Apache/PDF renderer configuration outline.
-- MariaDB 10.11 setup and restore assumptions.
+- MariaDB setup and restore assumptions, including version drift from the old
+  MariaDB 10.11 host when the selected LTS ships a newer line.
 - Node 24 setup for build/tooling where needed.
 - Secret file layout, using templates only.
 - Preflight checklist for disk, RAM, DNS, TLS, firewall, backups.
@@ -216,6 +218,8 @@ Goal: Prove the whole migration before production traffic returns.
 Deliverables:
 
 - Rebuilt server or fresh target built from the selected runbook.
+- Target host probe confirms the selected Ubuntu LTS version, package
+  candidates, resources, and package sources before restore work starts.
 - App deployed from release artifact.
 - DB restored and migrated.
 - Kuma restored or intentionally kept separate.

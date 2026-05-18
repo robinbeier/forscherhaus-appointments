@@ -1,7 +1,7 @@
 # Same-Server Rebuild Runbook
 
 Purpose: rebuild the current Hetzner production server in place from a fresh
-Ubuntu 24.04 LTS image, then restore the app, database, Uptime Kuma, and
+Ubuntu 26.04 LTS image, then restore the app, database, Uptime Kuma, and
 artifact deployment path from verified backups.
 
 This is the selected path when no second target server is available. The
@@ -22,6 +22,8 @@ provider snapshot is the migration-level rollback path.
   fresher pre-wipe Kuma export is explicitly approved.
 - Deployment stays artifact-based; the rebuilt app directory is not a Git
   checkout.
+- Ubuntu 24.04 LTS remains the fallback reinstall target if Ubuntu 26.04 LTS
+  shows a blocking host/runtime issue before restore acceptance.
 
 ## Non-Goals
 
@@ -30,15 +32,18 @@ provider snapshot is the migration-level rollback path.
   files in Git.
 - Do not rely on DNS rollback as the primary rollback path when the same IP is
   retained.
-- Do not upgrade to Ubuntu 26.04 LTS in this step; the target baseline is Ubuntu
-  24.04 LTS unless a later explicit decision changes it.
+- Do not use Ubuntu `proposed` or third-party PHP PPAs by default. Use the
+  26.04 release packages first and record the actual PHP/MariaDB candidates
+  before installing app runtime dependencies.
 
 ## Target Baseline
 
-- Ubuntu 24.04 LTS
+- Ubuntu 26.04 LTS
 - Apache with PHP-FPM
-- PHP 8.3 from the Ubuntu LTS package line
-- MariaDB 10.11
+- Ubuntu release PHP-FPM package line, with the actual PHP version recorded
+  from the target host before restore
+- Ubuntu release MariaDB package line, with the actual MariaDB version recorded
+  from the target host before restore
 - Node 24 LTS for build tooling and PDF renderer support
 - Composer 2.x
 - Docker with Compose plugin for Uptime Kuma
@@ -133,12 +138,22 @@ env files, or notification configuration.
 In the provider panel:
 
 1. Confirm the provider snapshot exists and is restorable.
-2. Reinstall the same server with Ubuntu 24.04 LTS.
+2. Reinstall the same server with Ubuntu 26.04 LTS.
 3. Confirm the public IP is unchanged.
 4. Re-enable SSH key access.
 5. Login via SSH and record the new OS baseline.
 
+Before installing or restoring app runtime packages, run the read-only 26.04
+probe:
+
+```bash
+bash ./scripts/ops/probe_same_server_rebuild_target.sh --execute
+```
+
 Stop if the IP changes unexpectedly or SSH access cannot be restored.
+Stop and decide on rollback or 24.04 fallback if the probe does not confirm
+Ubuntu 26.04, sufficient resources, package candidates, and working Ubuntu
+package sources.
 
 ## Phase 4: Base Bootstrap
 
@@ -165,6 +180,20 @@ Then:
 - restore the PDF renderer service and verify its health endpoint
 - configure TLS with certbot after vhosts are in place
 
+Record the installed runtime versions after package install:
+
+```bash
+apache2 -v
+php -v
+php -m
+mariadb --version
+node --version
+npm --version
+composer --version
+docker --version
+docker compose version
+```
+
 ## Phase 5: App and Database Restore
 
 1. Restore host-local app config and secret files from the local backup.
@@ -179,6 +208,8 @@ Required validation:
 - dump integrity check passed before import
 - migrations pass
 - non-sensitive row counts match the pre-wipe evidence
+- MariaDB version change from the old 10.11 host is explicitly recorded, if
+  26.04 installs a newer MariaDB line
 - app home route returns HTTP success
 - admin login smoke passes
 - booking smoke passes
@@ -216,7 +247,7 @@ Required validation:
 
 The rebuild is accepted when:
 
-- Ubuntu 24.04 LTS base is updated and documented
+- Ubuntu 26.04 LTS base is updated and documented
 - Apache, PHP-FPM, MariaDB, Docker, Composer, Node, certbot, fail2ban, and
   unattended upgrades are installed and version-recorded
 - app deploy uses the artifact path, not a Git checkout
@@ -233,6 +264,7 @@ The rebuild is accepted when:
 - local DB dump or host-config backup fails integrity verification
 - SSH access after reinstall cannot be established
 - same IP assumption is false
+- the read-only 26.04 probe fails or package candidates are missing
 - app config or required secret files are unavailable
 - DB import or migrations fail
 - artifact deploy cannot pass validation

@@ -8,7 +8,7 @@ Created: 2026-05-14.
 
 Current milestone: Milestone 6 preparation.
 
-Next action: execute the same-server rebuild runbook on Ubuntu 24.04 LTS.
+Next action: execute the same-server rebuild runbook on Ubuntu 26.04 LTS.
 
 ## Locked Decisions
 
@@ -25,6 +25,7 @@ Next action: execute the same-server rebuild runbook on Ubuntu 24.04 LTS.
 | 2026-05-15 | Target Ubuntu 24.04 LTS for the same-server rebuild. | It matches the current supported LTS base and avoids combining the host rebuild with an Ubuntu 26.04 migration. |
 | 2026-05-15 | Create a provider snapshot, fresh DB dump, and local host-config backup directly before wiping the server. | The old live server will be reinstalled in place, so rollback and restore evidence must exist before the destructive step. |
 | 2026-05-18 | Proceed with rebuild preparation using the completed provider snapshot and verified pre-wipe backup set. | The destructive step now has a provider rollback point plus local DB/config/inventory restore inputs. |
+| 2026-05-18 | Switch the selected reinstall target from Ubuntu 24.04 LTS to Ubuntu 26.04 LTS, with 24.04 retained as fallback. | Hetzner now offers 26.04, the install is fresh rather than an in-place upgrade, and production traffic is not expected before October 2026. |
 
 ## Baseline Facts
 
@@ -69,7 +70,7 @@ Uptime Kuma:
 | 3. Fresh Server Rebuild Runbook | Complete | Added `docs/server-rebuild-runbook.md` from read-only production inventory. |
 | 4. Database Migration Rehearsal | Complete | Restored existing production MariaDB dump into isolated MariaDB 10.11 stack, ran migrations, checked row counts, confirmed HTTP 200 boot smoke, then completed ROB-358 restored-data app smokes and release gates. |
 | 5. Uptime Kuma Mirror and Restore | Complete | Production monitor desired state captured without Push tokens; repo templates and missing Host/Ops Push scripts added; current 12-monitor live export restored locally, matched repo template, all 12 monitors went green in the disposable instance, and the verified current export was copied to secure operator-controlled storage outside Git. |
-| 6. End-to-End Cutover Rehearsal | In progress | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Actual rebuild still needs Ubuntu 24.04 reinstall, restore, gates, Kuma, and acceptance. |
+| 6. End-to-End Cutover Rehearsal | In progress | Cutover checklist, old-server rollback drill, and same-server rebuild runbook exist. Provider snapshot was created by the operator; pre-wipe DB/config/inventory backup was created and verified locally. Actual rebuild now targets Ubuntu 26.04 LTS and still needs reinstall, target probe, restore, gates, Kuma, and acceptance. |
 | 7. Final Cutover and Post-Cutover Documentation | Not started | Requires same-server rebuild acceptance or a future parallel target cutover. |
 
 ## Validation Log
@@ -182,13 +183,21 @@ Uptime Kuma:
 - 2026-05-18T17:41:50Z - Milestone 6 / ROB-364 - Created and verified the same-server pre-wipe backup set.
   Validation: operator confirmed the provider snapshot was created; ran `bash ./scripts/ops/prepare_same_server_rebuild_backup.sh --execute`; created local backup root `/Users/robinbeier/Documents/forscherhaus-ops-secure/same-server-rebuild/20260518T174053Z`; helper and independent verification passed `gzip -t`, `tar -tzf`, and `shasum -a 256 -c meta/checksums.sha256`; local backup directories are `0700`, files are `0600`; remote staging directory `/root/rebuild-prewipe-backup-20260518T174053Z` no longer exists.
   Decision: ROB-364 is complete; the rebuild now has provider snapshot rollback plus verified local DB/config/inventory restore inputs.
-  Next: start ROB-365, reinstall the same server with Ubuntu 24.04 LTS and bootstrap the runtime.
+  Next: start ROB-365, reinstall the same server and bootstrap the runtime.
+
+- 2026-05-18T17:50:40Z - Milestone 6 preparation - Reframed the same-server rebuild for Ubuntu 26.04 LTS.
+  Validation: official Ubuntu sources show Ubuntu 26.04 LTS is released and visible as `resolute`; Ubuntu package sources show 26.04 package candidates may move PHP and MariaDB beyond the old 24.04 baseline, so added a read-only target probe at `scripts/ops/probe_same_server_rebuild_target.sh` before restore/deploy work.
+  Decision: install Ubuntu 26.04 LTS for the same-server rebuild; keep Ubuntu 24.04 LTS as fallback if the 26.04 target probe, package install, DB restore, or app gates fail before acceptance.
+  Next: after provider reinstall, run the read-only target probe before bootstrapping runtime packages.
 
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 compatibility is proven for the isolated Docker smoke path, but not
-  yet for a real Ubuntu 26.04 target host or future production migration.
-- The selected same-server Ubuntu 24.04 rebuild has not yet been executed.
+  yet for the real Ubuntu 26.04 target host.
+- The selected same-server Ubuntu 26.04 rebuild has not yet been executed.
+- The Ubuntu 26.04 package/runtime baseline is intentionally not assumed from
+  docs alone; the target probe must record actual PHP, MariaDB, Node, Docker,
+  Composer, Apache, certbot, and package-source facts before restore/deploy.
 - Provider snapshot creation has been reported by the operator, but provider
   snapshot restore has not been tested.
 - The pre-wipe backup set has been created and verified locally. It contains
@@ -211,8 +220,8 @@ Uptime Kuma:
   been removed.
 - Secrets and push URLs must not leak through docs, command output, commits, or
   retained local test artifacts.
-- Ubuntu 26.04 production migration should wait for a later, explicit LTS path
-  after the Ubuntu 24.04 same-server rebuild is stable.
+- Ubuntu 24.04 remains the fallback reinstall target if Ubuntu 26.04 validation
+  fails before same-server rebuild acceptance.
 
 ## Status Update Protocol
 

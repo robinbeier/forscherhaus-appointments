@@ -65,8 +65,10 @@ For a parallel rebuild, use the newest sensible Ubuntu LTS image available when
 the server is created. The expected future target is Ubuntu 26.04 LTS once it is
 available through the provider and the LTS upgrade/rebuild window is stable.
 
-For the selected same-server rebuild, the target baseline is Ubuntu 24.04 LTS;
-Ubuntu 26.04 is deliberately deferred.
+For the selected same-server rebuild, the target baseline is Ubuntu 26.04 LTS
+because it is now visible in the provider panel and the project has no expected
+production traffic before October 2026. Ubuntu 24.04 LTS remains the fallback
+if 26.04 package/runtime validation fails before restore acceptance.
 
 Target runtime choices:
 
