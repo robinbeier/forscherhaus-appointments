@@ -1,0 +1,12 @@
+# Install these entries on the application host after creating the matching
+# Uptime Kuma Push monitors and host-local env file.
+
+* * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_host_services.sh
+* * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_host_resources.sh
+*/15 * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_ops_jobs.sh
+* * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_app_logs.sh
+* * * * * sleep 30; KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_app_logs.sh
+* * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_php_fpm_logs.sh
+* * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_pdf_renderer_logs.sh
+*/15 * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_pdf_export.sh
+* * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_apache_scanner_activity.sh

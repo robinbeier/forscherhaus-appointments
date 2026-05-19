@@ -21,7 +21,7 @@ Prerequisites on host (required by `./scripts/setup-worktree.sh`):
 
 - PHP `>=8.3.6`
 - Composer
-- Node.js `>=20.19.0` plus `npm`/`npx`
+- Node.js `>=24.0.0` plus `npm`/`npx`
 - Docker + Docker Compose
 
 ```bash
@@ -74,6 +74,8 @@ Primary references:
 - [Zero-surprise restore-dump replay + live canary](docs/release-gate-zero-surprise.md)
 - [Dashboard release gate](docs/release-gate-dashboard.md)
 - [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
+- [Deployment runbook](docs/deployment.md)
+- [Fresh server rebuild runbook](docs/server-rebuild-runbook.md)
 - [Agent Harness Index](docs/agent-harness-index.md)
 
 Release artifact builds should go through `./build_release.sh`. The builder now

@@ -43,6 +43,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 - Write-path contracts: `docs/ci-write-contracts.md`
 - Release gates: `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-zero-surprise.md`
 - Observability and ops monitors: `docs/observability.md`, `scripts/ops/README.md`
+- Production SSH operations harness: `docs/ops/agent-operations.md`
 - Architecture and ownership: `docs/architecture-map.md`, `docs/ownership-map.md`, `docs/maps/component_ownership_map.json`
 - Symphony runtime and pilot docs: `tools/symphony/README.md`, `docs/symphony/STAGING_PILOT_RUNBOOK.md`
 
