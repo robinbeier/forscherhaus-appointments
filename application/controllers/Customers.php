@@ -201,7 +201,13 @@ class Customers extends EA_Controller
                     continue;
                 }
 
-                $appointments = $this->appointments_model->get(['id_users_customer' => $customer['id']]);
+                $appointment_where = ['id_users_customer' => $customer['id']];
+
+                if ($request_dto->providerId !== null) {
+                    $appointment_where['id_users_provider'] = $request_dto->providerId;
+                }
+
+                $appointments = $this->appointments_model->get($appointment_where);
 
                 foreach ($appointments as &$appointment) {
                     $this->appointments_model->load($appointment, ['service', 'provider']);
