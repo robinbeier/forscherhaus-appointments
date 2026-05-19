@@ -235,64 +235,78 @@ class Calendar extends EA_Controller
 
             $this->check_event_permissions((int) $appointment_data['id_users_provider']);
 
-            // Save customer changes to the database.
-            if ($customer_data) {
-                $customer = $customer_data;
-
-                $required_permissions = !empty($customer['id'])
-                    ? can('add', PRIV_CUSTOMERS)
-                    : can('edit', PRIV_CUSTOMERS);
-
-                if (!$required_permissions) {
-                    throw new RuntimeException('You do not have the required permissions for this task.');
-                }
-
-                $this->customers_model->only($customer, $this->allowed_customer_fields);
-
-                $this->customers_model->optional($customer, $this->optional_customer_fields);
-
-                $customer['id'] = $this->customers_model->save($customer);
-            }
-
-            // Save appointment changes to the database.
             $manage_mode = !empty($appointment_data['id']);
 
-            if ($appointment_data) {
-                $appointment = $appointment_data;
+            $this->db->trans_begin();
 
-                $required_permissions = !empty($appointment['id'])
-                    ? can('add', PRIV_APPOINTMENTS)
-                    : can('edit', PRIV_APPOINTMENTS);
+            try {
+                // Save customer changes to the database.
+                if ($customer_data) {
+                    $customer = $customer_data;
 
-                if (!$required_permissions) {
-                    throw new RuntimeException('You do not have the required permissions for this task.');
+                    $required_permissions = !empty($customer['id'])
+                        ? can('add', PRIV_CUSTOMERS)
+                        : can('edit', PRIV_CUSTOMERS);
+
+                    if (!$required_permissions) {
+                        throw new RuntimeException('You do not have the required permissions for this task.');
+                    }
+
+                    $this->customers_model->only($customer, $this->allowed_customer_fields);
+
+                    $this->customers_model->optional($customer, $this->optional_customer_fields);
+
+                    $customer['id'] = $this->customers_model->save($customer);
                 }
 
-                // If the appointment does not contain the customer record id, then it means that is going to be inserted.
+                // Save appointment changes to the database.
+                if ($appointment_data) {
+                    $appointment = $appointment_data;
 
-                if (!isset($appointment['id_users_customer'])) {
-                    $appointment['id_users_customer'] = $customer['id'] ?? $customer_data['id'];
+                    $required_permissions = !empty($appointment['id'])
+                        ? can('add', PRIV_APPOINTMENTS)
+                        : can('edit', PRIV_APPOINTMENTS);
+
+                    if (!$required_permissions) {
+                        throw new RuntimeException('You do not have the required permissions for this task.');
+                    }
+
+                    // If the appointment does not contain the customer record id, then it means that is going to be inserted.
+
+                    if (!isset($appointment['id_users_customer'])) {
+                        $appointment['id_users_customer'] = $customer['id'] ?? $customer_data['id'];
+                    }
+
+                    if ($manage_mode && !empty($appointment['id'])) {
+                        $this->synchronization->remove_appointment_on_provider_change($appointment['id']);
+                    }
+
+                    $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
+
+                    $this->appointments_model->optional($appointment, $this->optional_appointment_fields);
+
+                    $appointment['id'] = $this->appointments_model->save($appointment);
                 }
 
-                if ($manage_mode && !empty($appointment['id'])) {
-                    $this->synchronization->remove_appointment_on_provider_change($appointment['id']);
+                if (empty($appointment['id'])) {
+                    throw new RuntimeException('The appointment ID is not available.');
                 }
 
-                $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
+                if ($this->db->trans_status() === false) {
+                    throw new RuntimeException('Could not save appointment transaction.');
+                }
 
-                $this->appointments_model->optional($appointment, $this->optional_appointment_fields);
+                $appointment = $this->appointments_model->find($appointment['id']);
+                $provider = $this->providers_model->find($appointment['id_users_provider']);
+                $customer = $this->customers_model->find($appointment['id_users_customer']);
+                $service = $this->services_model->find($appointment['id_services']);
 
-                $appointment['id'] = $this->appointments_model->save($appointment);
+                $this->db->trans_commit();
+            } catch (Throwable $e) {
+                $this->db->trans_rollback();
+
+                throw $e;
             }
-
-            if (empty($appointment['id'])) {
-                throw new RuntimeException('The appointment ID is not available.');
-            }
-
-            $appointment = $this->appointments_model->find($appointment['id']);
-            $provider = $this->providers_model->find($appointment['id_users_provider']);
-            $customer = $this->customers_model->find($appointment['id_users_customer']);
-            $service = $this->services_model->find($appointment['id_services']);
 
             $company_color = setting('company_color');
 
