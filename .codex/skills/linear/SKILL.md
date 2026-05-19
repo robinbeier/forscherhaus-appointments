@@ -1,14 +1,14 @@
 ---
 name: linear
 description: |
-    Use Symphony's `linear_graphql` tool for Linear issue reads, state changes,
-    PR attachments, and the single persistent `## Codex Workpad` comment.
+    Use available Linear tooling for issue reads, state changes, PR attachments,
+    and the single persistent `## Codex Workpad` comment.
 ---
 
 # Linear GraphQL
 
-Use this skill during Symphony sessions when the issue state, PR linkage, or
-workpad comment must be updated.
+Use this skill when the Linear issue state, PR linkage, or workpad comment must
+be updated.
 
 Default order:
 
@@ -20,8 +20,10 @@ Default order:
 
 ## Primary Tool
 
-Use the `linear_graphql` client tool exposed by Symphony's app-server session.
-It reuses Symphony's configured Linear auth.
+Use the configured Linear integration available in the current Codex session. If
+a GraphQL client is available, prefer it for precise reads and mutations. If no
+Linear tool is available, stop and report the missing access instead of
+inventing state changes.
 
 Tool input:
 
@@ -36,23 +38,23 @@ Tool input:
 
 Rules:
 
--   Prefer a single GraphQL operation per tool call, but multi-operation
-    documents are allowed and may require an explicit operation name on the
-    Linear side.
--   Treat a top-level `errors` array as failure.
--   Ask only for the fields you need.
+- Prefer a single GraphQL operation per tool call, but multi-operation
+  documents are allowed and may require an explicit operation name on the
+  Linear side.
+- Treat a top-level `errors` array as failure.
+- Ask only for the fields you need.
 
 ## Required Repo States
 
 This repo expects the Linear workflow states:
 
--   `Todo`
--   `In Progress`
--   `In Review`
--   `Rework`
--   `Ready to Merge`
--   `Done`
--   `Canceled`
+- `Todo`
+- `In Progress`
+- `In Review`
+- `Rework`
+- `Ready to Merge`
+- `Done`
+- `Canceled`
 
 ## Common Queries And Mutations
 
@@ -189,43 +191,43 @@ Recommended sections:
 
 ### Status
 
--   Summary: <where the issue stands now>
--   Next: <next concrete action>
+- Summary: <where the issue stands now>
+- Next: <next concrete action>
 
 ### Plan
 
--   <next concrete steps only>
+- <next concrete steps only>
 
 ### Validation
 
--   Done: <commands or checks already run>
--   Pending: <remaining checks if any>
+- Done: <commands or checks already run>
+- Pending: <remaining checks if any>
 
 ### Blockers
 
--   None.
+- None.
 ```
 
 Update the workpad at least:
 
--   when a run starts and you have learned new facts
--   before opening or updating a PR
--   when moving the issue to `In Review`, `Rework`, `Ready to Merge`, or `Done`
+- when a run starts and you have learned new facts
+- before opening or updating a PR
+- when moving the issue to `In Review`, `Rework`, `Ready to Merge`, or `Done`
 
 Workpad rules:
 
--   Keep any environment stamp to one short line.
--   Do not duplicate issue title, labels, blocker metadata, or PR URL in the
-    workpad.
--   Summarize evidence instead of pasting long command output.
--   For small or already-understood tasks, update the workpad and move on instead
-    of expanding it into a long narrative.
+- Keep any environment stamp to one short line.
+- Do not duplicate issue title, labels, blocker metadata, or PR URL in the
+  workpad.
+- Summarize evidence instead of pasting long command output.
+- For small or already-understood tasks, update the workpad and move on instead
+  of expanding it into a long narrative.
 
 ## Usage Rules
 
--   Fetch the exact destination `stateId` from `issue.team.states` before
-    changing state.
--   Prefer `attachmentLinkGitHubPR` over a plain URL when attaching a PR.
--   Do not create multiple workpad comments.
--   Do not put the PR URL into the workpad; keep PR linkage on the issue itself.
--   Do not add raw-token shell helpers for Linear GraphQL; use `linear_graphql`.
+- Fetch the exact destination `stateId` from `issue.team.states` before
+  changing state.
+- Prefer `attachmentLinkGitHubPR` over a plain URL when attaching a PR.
+- Do not create multiple workpad comments.
+- Do not put the PR URL into the workpad; keep PR linkage on the issue itself.
+- Do not add raw-token shell helpers for Linear GraphQL; use `linear_graphql`.
