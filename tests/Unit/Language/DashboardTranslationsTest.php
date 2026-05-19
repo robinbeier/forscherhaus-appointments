@@ -39,6 +39,18 @@ class DashboardTranslationsTest extends TestCase
         );
     }
 
+    public function testPasswordRecoveryContactHintIsAvailableInBackendLanguages(): void
+    {
+        $this->assertSame(
+            'Bitte Robin ansprechen.',
+            $this->loadTranslations('german')['password_recovery_contact_robin'] ?? null,
+        );
+        $this->assertSame(
+            'Please contact Robin.',
+            $this->loadTranslations('english')['password_recovery_contact_robin'] ?? null,
+        );
+    }
+
     /**
      * @return array<string, string>
      */

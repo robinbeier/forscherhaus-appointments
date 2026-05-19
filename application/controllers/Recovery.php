@@ -26,9 +26,6 @@ class Recovery extends EA_Controller
     public function __construct()
     {
         parent::__construct();
-
-        $this->load->library('accounts');
-        $this->load->library('email_messages');
     }
 
     /**
@@ -54,40 +51,35 @@ class Recovery extends EA_Controller
     {
         try {
             $request_dto = $this->authRequestDtoFactory()->buildRecoveryRequestDto();
-            $username = $request_dto->username;
+            $username = trim((string) $request_dto->username);
+            $email = trim((string) $request_dto->email);
 
-            if (empty($username)) {
-                throw new InvalidArgumentException('No username value provided.');
-            }
-
-            $email = $request_dto->email;
-
-            if (empty($email)) {
-                throw new InvalidArgumentException('No email value provided.');
-            }
-
-            $new_password = $this->accounts->regenerate_password($username, $email);
-
-            $company_color = setting('company_color');
-
-            if ($new_password) {
-                $settings = [
-                    'company_name' => setting('company_name'),
-                    'company_link' => setting('company_link'),
-                    'company_email' => setting('company_email'),
-                    'company_color' =>
-                        !empty($company_color) && $company_color != DEFAULT_COMPANY_COLOR ? $company_color : null,
-                ];
-
-                $this->email_messages->send_password($new_password, $email, $settings);
-            }
-
-            json_response([
-                'success' => true,
-            ]);
+            $this->contactRobinResponse($this->getContactRobinResponseStatus($username, $email));
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /**
+     * Determine the HTTP status for neutralized recovery requests.
+     */
+    protected function getContactRobinResponseStatus(string $username, string $email): int
+    {
+        return $username === '' || $email === '' ? 400 : 200;
+    }
+
+    /**
+     * Return the neutral recovery response used for disabled self-service password recovery.
+     */
+    protected function contactRobinResponse(int $status = 200): void
+    {
+        json_response(
+            [
+                'success' => $status < 400,
+                'message' => lang('password_recovery_contact_robin'),
+            ],
+            $status,
+        );
     }
 
     private function authRequestDtoFactory(): Auth_request_dto_factory

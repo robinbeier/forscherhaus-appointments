@@ -18,6 +18,8 @@ App.Pages.Login = (function () {
     const $loginForm = $('#login-form');
     const $username = $('#username');
     const $password = $('#password');
+    const $forgotPassword = $('.forgot-password');
+    const $alert = $('.alert');
 
     /**
      * Login Button "Click"
@@ -36,21 +38,27 @@ App.Pages.Login = (function () {
             return;
         }
 
-        const $alert = $('.alert');
-
-        $alert.addClass('d-none');
+        $alert.addClass('d-none').removeClass('alert-danger alert-success alert-info');
 
         App.Http.Login.validate(username, password).done((response) => {
             if (response.success) {
                 window.location.href = vars('dest_url');
             } else {
                 $alert.text(lang('login_failed'));
-                $alert.removeClass('d-none alert-danger alert-success').addClass('alert-danger');
+                $alert.removeClass('d-none alert-danger alert-success alert-info').addClass('alert-danger');
             }
         });
     }
 
+    function onForgotPasswordClick(event) {
+        event.preventDefault();
+
+        $alert.text(lang('password_recovery_contact_robin'));
+        $alert.removeClass('d-none alert-danger alert-success alert-info').addClass('alert-info');
+    }
+
     $loginForm.on('submit', onLoginFormSubmit);
+    $forgotPassword.on('click', onForgotPasswordClick);
 
     return {};
 })();
