@@ -237,6 +237,7 @@ $lang['enter_password_here'] = 'Geben Sie Ihr Passwort hier ein ...';
 $lang['login'] = 'Anmelden';
 $lang['forgot_your_password'] = 'Passwort vergessen?';
 $lang['login_failed'] = 'Anmeldung fehlgeschlagen, bitte geben Sie die richtigen Anmeldedaten ein und versuchen Sie es erneut.';
+$lang['password_recovery_contact_robin'] = 'Bitte Robin ansprechen.';
 $lang['type_username_and_email_for_new_password'] = 'Geben Sie Ihren Nutzernamen und Ihre E-Mail-Adresse ein, um Ihr neues Passwort zu erhalten.';
 $lang['enter_email_here'] = 'Geben Sie Ihre E-Mail-Adresse hier ein ...';
 $lang['regenerate_password'] = 'Passwort generieren';
