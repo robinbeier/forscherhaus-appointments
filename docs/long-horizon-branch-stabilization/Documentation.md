@@ -2,15 +2,15 @@
 
 ## Current Status
 
-Status: Milestone 3 in progress. LTS modernization is merged into `main`;
-Remove-Symphony is being rebuilt on the post-LTS base.
+Status: Milestone 4 complete. LTS modernization is merged into `main`;
+Remove-Symphony is rebuilt on the post-LTS base and locally validated.
 
 Created: 2026-05-19.
 
-Current milestone: Milestone 3 - Rebase or Merge Remove-Symphony onto Post-LTS Main.
+Current milestone: Milestone 5 - Push/Open Remove-Symphony PR and Babysit.
 
-Next action: validate the updated Remove-Symphony branch, push it to
-`origin/codex/remove-symphony`, open or update its PR, and run `babysit-pr`.
+Next action: push the updated branch to `origin/codex/remove-symphony`, open or
+update its PR, and run `babysit-pr`.
 
 ## Locked Decisions
 
@@ -44,9 +44,9 @@ These facts must be refreshed when implementation begins.
 | 0. Baseline and Branch Inventory | Complete | Fresh `origin` refs checked on 2026-05-19. Worktree clean; `origin/main` `0f3b64c4af23358184b0b125d2f97b1c2a4d8d34`; LTS `003cca218b6fd1e7ba02eebdc13417726e7f1c4d`, `0/33`; Remove-Symphony `fd9118743b4e4fa6372ec2d77df7a3238073798c`, `0/1`; overlapping paths recorded. |
 | 1. Stabilize LTS Modernization on Current Main | Complete | LTS has no behind commits relative to `origin/main`; no merge conflict resolution needed. `git diff --check`, ops shell syntax checks, production read-only doctor/validate, `bash ./scripts/ci/pre_pr_quick.sh`, and `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` passed. |
 | 2. Push/Open LTS PR and Babysit | Complete | PR #272 opened, `babysit-pr` used, Codex Review P2 scanner timestamp feedback fixed in follow-up commit, CI reached 20/20 passing, mergeability `CLEAN`, and PR #272 merged as `512cd6d1b59a5cf289853f5580b47366c691f62d`. |
-| 3. Rebase or Merge Remove-Symphony onto Post-LTS Main | In progress | Local stabilization branch `codex/remove-symphony-stabilize` created because `codex/remove-symphony` is checked out in another worktree; post-LTS `main` merged; `tools/symphony/package.json` and `tools/symphony/package-lock.json` conflicts resolved in favor of deletion. |
-| 4. Validate Remove-Symphony | Not started | Requires removal branch validation on the post-LTS base. |
-| 5. Push/Open Remove-Symphony PR and Babysit | Not started | Requires removal branch validation and PR creation. |
+| 3. Rebase or Merge Remove-Symphony onto Post-LTS Main | Complete | Local stabilization branch `codex/remove-symphony-stabilize` created because `codex/remove-symphony` is checked out in another worktree; post-LTS `main` merged; `tools/symphony/package.json` and `tools/symphony/package-lock.json` conflicts resolved in favor of deletion. |
+| 4. Validate Remove-Symphony | Complete | `git diff --check main..HEAD`, Symphony resurrection scan, and `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` passed. |
+| 5. Push/Open Remove-Symphony PR and Babysit | In progress | Requires push to `origin/codex/remove-symphony`, PR creation/update, and `babysit-pr`. |
 
 ## Known Risks and Follow-Ups
 
@@ -115,3 +115,15 @@ Next: <next action>
   deletion; remove untracked `tools/symphony` build/dependency remnants.
   Next: run Remove-Symphony validation gates, push to `origin/codex/remove-symphony`,
   open/update PR, and run `babysit-pr`.
+- 2026-05-19T06:34:41Z - Milestone 4 - Validated Remove-Symphony.
+  Branch/base: `codex/remove-symphony-stabilize` on post-LTS `main`
+  `512cd6d1b59a5cf289853f5580b47366c691f62d`.
+  Validation: `git diff --check main..HEAD` passed; resurrection scan with
+  `rg -n "tools/symphony|run_symphony|Symphony pilot|STAGING_PILOT_RUNBOOK|SPEC_GAP_SCORECARD|SPEC_AUDIT" .`
+  returned only historical/planning references in long-horizon documentation;
+  `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` passed including
+  integration smoke 12/12, deep runtime suites 5/5, and coverage delta
+  `+7.1175pp`.
+  Decision: Remove-Symphony is locally ready to publish from this stabilization
+  branch to `origin/codex/remove-symphony`.
+  Next: push, open/update PR, and run `babysit-pr`.
