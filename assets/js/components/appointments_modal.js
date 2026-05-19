@@ -147,7 +147,10 @@ App.Components.AppointmentsModal = (function () {
 
             // Define error callback.
             const errorCallback = (jqXHR) => {
-                const responseMessage = jqXHR?.responseJSON?.message || lang('service_communication_error');
+                const responseMessage =
+                    jqXHR?.status === 409 && jqXHR?.responseJSON?.message
+                        ? jqXHR.responseJSON.message
+                        : lang('service_communication_error');
 
                 $appointmentsModal.find('.modal-message').text(responseMessage);
                 $appointmentsModal.find('.modal-message').addClass('alert-danger').removeClass('d-none');

@@ -15,12 +15,13 @@ class AppointmentModalConflictFeedbackTest extends TestCase
         $this->assertStringContainsString('errorCallback(jqXHR, textStatus, errorThrown);', $source);
     }
 
-    public function testAppointmentModalShowsServerErrorMessageWhenAvailable(): void
+    public function testAppointmentModalShowsServerErrorMessageForExpectedConflictsOnly(): void
     {
         $source = file_get_contents(FCPATH . 'assets/js/components/appointments_modal.js');
 
         $this->assertIsString($source);
-        $this->assertStringContainsString('const responseMessage = jqXHR?.responseJSON?.message', $source);
+        $this->assertStringContainsString('jqXHR?.status === 409 && jqXHR?.responseJSON?.message', $source);
+        $this->assertStringContainsString('jqXHR.responseJSON.message', $source);
         $this->assertStringContainsString('.text(responseMessage)', $source);
         $this->assertStringContainsString("lang('service_communication_error')", $source);
     }
