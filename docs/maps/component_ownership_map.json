@@ -255,7 +255,8 @@
       "depends_on": [
         "integrations-sync",
         "scheduling-backoffice",
-        "settings-compliance"
+        "settings-compliance",
+        "shared-core"
       ]
     },
     {
