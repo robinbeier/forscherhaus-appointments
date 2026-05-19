@@ -48,9 +48,9 @@ App.Http.Calendar = (function () {
                     successCallback(response);
                 }
             })
-            .fail(() => {
+            .fail((jqXHR, textStatus, errorThrown) => {
                 if (errorCallback) {
-                    errorCallback();
+                    errorCallback(jqXHR, textStatus, errorThrown);
                 }
             });
     }
