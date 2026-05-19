@@ -1,0 +1,8 @@
+services:
+    mysql:
+        image: 'mariadb:10.11'
+        environment:
+            - MARIADB_ROOT_PASSWORD=secret
+            - MARIADB_DATABASE=easyappointments
+            - MARIADB_USER=user
+            - MARIADB_PASSWORD=password

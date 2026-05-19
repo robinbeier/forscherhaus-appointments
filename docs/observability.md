@@ -68,5 +68,7 @@ Keep host-local runtime files out of the repository:
 - root crontab entries
 - Uptime Kuma database state
 
+The reproducible Kuma target state is documented in `docs/uptime-kuma.md`.
+
 Document the interface and required variables in the repo. Keep machine- or
 host-specific values on the host.

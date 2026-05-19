@@ -24,6 +24,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
+| Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |
 | Ownership scope | `docs/ownership-map.md` | Generated view of ownership and key paths. |
 | Canonical architecture/ownership map source | `docs/maps/component_ownership_map.json` | Machine-readable source of truth. |

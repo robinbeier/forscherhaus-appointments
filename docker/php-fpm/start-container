@@ -16,7 +16,7 @@ if [[ "${EA_SKIP_NPM_BOOTSTRAP:-0}" == "1" ]]; then
     echo "➜ Skip NPM Dependency Bootstrap"
 else
     echo "➜ Verify Node.js minimum version"
-    bash ./scripts/ci/require_node_minimum.sh 20.19.0 docker-bootstrap
+    bash ./scripts/ci/require_node_minimum.sh 24.0.0 docker-bootstrap
     echo "➜ Install NPM Dependencies"
     [[ -d node_modules ]] || npm install
 fi

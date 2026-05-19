@@ -1,0 +1,114 @@
+# Uptime Kuma desired-state mirror captured from production on 2026-05-14.
+# This is a template for manual or scripted reconstruction. It intentionally
+# omits Push tokens and other secret values.
+
+container:
+    image: louislam/uptime-kuma:2.3.2
+    listen: 127.0.0.1:3001
+    data_path: /app/data
+
+monitors:
+    - id: 1
+      name: App-Homepage
+      type: http
+      interval: 30
+      retry_interval: 30
+      max_retries: 1
+      timeout: 15
+      method: GET
+      url: https://dasforscherhaus-leg.de/
+      accepted_statuscodes: ['200-299']
+      max_redirects: 2
+    - id: 2
+      name: App — Health Shallow
+      type: keyword
+      interval: 30
+      retry_interval: 30
+      max_retries: 1
+      timeout: 15
+      method: GET
+      url: https://dasforscherhaus-leg.de/health
+      keyword: OK
+      accepted_statuscodes: ['200']
+      max_redirects: 2
+    - id: 4
+      name: App - Health Deep
+      type: json-query
+      interval: 30
+      retry_interval: 30
+      max_retries: 2
+      timeout: 15
+      method: GET
+      url: https://dasforscherhaus-leg.de/index.php/healthz
+      json_path: status
+      expected_value: ok
+      accepted_statuscodes: ['200']
+      max_redirects: 2
+    - id: 5
+      name: Host - Services
+      type: push
+      interval: 60
+      retry_interval: 60
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_HOST_SERVICES
+    - id: 6
+      name: Host - Resources
+      type: push
+      interval: 60
+      retry_interval: 60
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_HOST_RESOURCES
+    - id: 7
+      name: Ops - Jobs Freshness
+      type: push
+      interval: 900
+      retry_interval: 900
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_OPS_JOBS
+    - id: 8
+      name: App - PDF Renderer
+      type: json-query
+      interval: 30
+      retry_interval: 30
+      max_retries: 2
+      timeout: 15
+      method: GET
+      url: https://dasforscherhaus-leg.de/index.php/healthz
+      json_path: checks.pdf_renderer.ok
+      expected_value: 'true'
+      accepted_statuscodes: ['200', '503']
+    - id: 9
+      name: App - Log Errors
+      type: push
+      interval: 60
+      retry_interval: 60
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_APP_LOGS
+    - id: 10
+      name: App - php8.3-fpm Log Errors
+      type: push
+      interval: 60
+      retry_interval: 60
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_PHP_FPM_LOGS
+    - id: 11
+      name: App - PDF Renderer Log Errors
+      type: push
+      interval: 60
+      retry_interval: 60
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_PDF_RENDERER_LOGS
+    - id: 12
+      name: App - Dashboard PDF Export
+      type: push
+      interval: 900
+      retry_interval: 900
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_PDF_EXPORT
+    - id: 13
+      name: Security - Scanner Activity
+      type: push
+      interval: 60
+      retry_interval: 60
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_SECURITY_SCANNER

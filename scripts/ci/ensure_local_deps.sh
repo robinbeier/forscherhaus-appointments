@@ -6,7 +6,7 @@ ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
 FORCE_INSTALL=0
-ROOT_NODE_MINIMUM_VERSION=20.19.0
+ROOT_NODE_MINIMUM_VERSION=24.0.0
 
 case "${1:-}" in
 --force)

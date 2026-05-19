@@ -386,7 +386,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20.19.0'
+          node-version: '24'
           cache: npm
       - name: Frontend compile
         run: |
@@ -423,7 +423,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20.19.0'
+          node-version: '24'
           cache: npm
       - name: Install npm dependencies
         run: npm ci --no-audit --no-fund
@@ -442,7 +442,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20.19.0'
+          node-version: '24'
           cache: npm
       - name: Frontend compile
         run: |
@@ -473,7 +473,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20.19.0'
+          node-version: '24'
           cache: npm
       - name: Frontend compile
         run: |
@@ -516,7 +516,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20.19.0'
+          node-version: '24'
           cache: npm
       - name: Install npm dependencies
         run: npm ci --no-audit --no-fund
@@ -686,7 +686,7 @@ jobs:
         if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
         uses: actions/setup-node@v6
         with:
-          node-version: '20.19.0'
+          node-version: '24'
           cache: npm
       - name: Build runtime JS assets
         if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
