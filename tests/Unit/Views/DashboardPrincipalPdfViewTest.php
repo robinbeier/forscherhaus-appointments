@@ -143,4 +143,72 @@ class DashboardPrincipalPdfViewTest extends TestCase
 
         $this->assertStringNotContainsString('Alle Klassenleitungen liegen aktuell im Buchungsziel.', $output);
     }
+
+    public function testRendersMissingParentsSummaryInsteadOfThresholdGap(): void
+    {
+        require_once APPPATH . 'helpers/donut_helper.php';
+
+        $school_name = 'Forscherhaus';
+        $logo_data_url = null;
+        $generated_at_text = '12.03.2026, 10:00';
+        $period_label = '13.04.2026 - 19.04.2026';
+        $threshold_percent = '90 %';
+        $threshold_ratio = 0.9;
+        $summary = [
+            'fill_rate_formatted' => '93,1 %',
+            'booked_distinct_total_formatted' => '215',
+            'target_total_formatted' => '231',
+            'missing_parents_total_formatted' => '16',
+            'fill_rate' => 215 / 231,
+        ];
+        $principal_pages = [
+            [
+                [
+                    'provider_name' => 'Saskia Hucke',
+                    'target' => '20',
+                    'target_raw' => 20,
+                    'booked' => '16',
+                    'booked_raw' => 16,
+                    'fill_ratio' => 0.8,
+                    'fill_rate_percent' => '80,0 %',
+                    'fill_rate_percent_value' => 80,
+                    'gap_to_threshold' => 2,
+                    'gap_to_threshold_formatted' => '2',
+                    'slots_planned_raw' => 23,
+                    'slots_required_raw' => 22,
+                    'has_plan' => true,
+                    'has_explicit_target' => true,
+                    'status_reasons' => ['booking_goal_missed'],
+                ],
+            ],
+        ];
+        $principal_overview = [
+            'teachers_total' => 1,
+            'below_count' => 1,
+            'booking_goal_missed_count' => 1,
+            'after_15_goal_missed_count' => 0,
+            'capacity_gap_count' => 0,
+            'attention_count' => 1,
+            'in_target_count' => 0,
+            'gap_total_formatted' => '2',
+            'in_target_label' => '0 / 1 Lehrkräfte im Buchungsziel',
+            'top_attention' => $principal_pages[0],
+            'booked_distinct_formatted' => '215',
+            'target_total_formatted' => '231',
+            'missing_parents_total_formatted' => '16',
+            'fill_rate_value' => 215 / 231,
+            'capacity_gap_label' => 'Kapazitätslücke',
+        ];
+        $metrics = $principal_pages[0];
+
+        ob_start();
+        include APPPATH . 'views/exports/dashboard_principal_pdf.php';
+        $output = (string) ob_get_clean();
+
+        $this->assertStringContainsString('215 von 231 Eltern erreicht', $output);
+        $this->assertStringContainsString('Fehlend', $output);
+        $this->assertStringContainsString('Fehlende Eltern:', $output);
+        $this->assertStringContainsString('<strong>16</strong>', $output);
+        $this->assertStringNotContainsString('Fehlend bis Buchungsziel', $output);
+    }
 }

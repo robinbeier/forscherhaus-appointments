@@ -475,6 +475,7 @@ $lang['dashboard_download_teacher_pdf'] = 'ZIP Lehrkräfte';
 $lang['dashboard_download_principal_pdf'] = 'PDF Schulleitung';
 $lang['dashboard_principal_in_booking_goal'] = 'Lehrkräfte im Buchungsziel';
 $lang['dashboard_principal_missing_until_booking_goal'] = 'Fehlend bis Buchungsziel';
+$lang['dashboard_principal_missing_parents'] = 'Fehlend';
 $lang['dashboard_principal_after_15_heading'] = 'Nach 15:00';
 $lang['dashboard_principal_until_booking_goal'] = 'bis Buchungsziel';
 $lang['dashboard_export_teachers'] = 'Lehrkräfte für Export';

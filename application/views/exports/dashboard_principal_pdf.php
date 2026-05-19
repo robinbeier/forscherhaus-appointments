@@ -333,15 +333,14 @@ $belowCount = isset($principalOverview['below_count'])
 $inTargetCount = isset($principalOverview['in_target_count'])
     ? max(0, (int) $principalOverview['in_target_count'])
     : max($teachersTotal - $belowCount, 0);
-$gapTotal = isset($principalOverview['gap_total'])
-    ? max(0, (int) $principalOverview['gap_total'])
-    : array_sum(array_map(static fn(array $metric): int => (int) ($metric['gap_to_threshold'] ?? 0), $preparedMetrics));
-
 $bookedDistinctFormatted =
     (string) ($principalOverview['booked_distinct_formatted'] ??
         ($summary['booked_distinct_total_formatted'] ?? ($summary['booked_total_formatted'] ?? '0')));
 $targetTotalFormatted =
     (string) ($principalOverview['target_total_formatted'] ?? ($summary['target_total_formatted'] ?? '0'));
+$missingParentsFormatted =
+    (string) ($principalOverview['missing_parents_total_formatted'] ??
+        ($summary['missing_parents_total_formatted'] ?? '0'));
 $fillRateValue = isset($principalOverview['fill_rate_value'])
     ? (float) $principalOverview['fill_rate_value']
     : (float) ($summary['fill_rate'] ?? 0.0);
@@ -360,7 +359,6 @@ $inTargetDonutImage = donut_image_data_url($progressInTarget, $donutImageSize, $
     'foreground' => '#16A34A',
 ]);
 
-$gapTotalFormatted = (string) ($principalOverview['gap_total_formatted'] ?? $formatNumber(max($gapTotal, 0)));
 $inTargetLabel =
     (string) ($principalOverview['in_target_label'] ??
         number_format($inTargetCount, 0, ',', '.') .
@@ -469,13 +467,11 @@ $attentionCount = isset($principalOverview['attention_count'])
               </div>
             </article>
 
-            <article class="card" aria-label="Fehlende Eltern bis Schwelle">
-              <h3><?= html_escape(
-                  lang('dashboard_principal_missing_until_booking_goal') ?: 'Fehlend bis Buchungsziel',
-              ) ?></h3>
+            <article class="card" aria-label="Fehlende Eltern">
+              <h3><?= html_escape(lang('dashboard_principal_missing_parents') ?: 'Fehlend') ?></h3>
               <div class="kpi">
                 <span>Fehlende Eltern:</span>
-                <strong><?= html_escape($gapTotalFormatted) ?></strong>
+                <strong><?= html_escape($missingParentsFormatted) ?></strong>
               </div>
             </article>
           </div>
