@@ -21,6 +21,7 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Cutover Rehearsal Checklist](cutover-rehearsal-checklist.md)
 - [Same-Server Rebuild Runbook](same-server-rebuild-runbook.md)
 - [Codex Production Operations Harness](ops/agent-operations.md)
+- [Branch Stabilization Long-Horizon Task](long-horizon-branch-stabilization/Prompt.md)
 - [Old-Server Rollback Drill](old-server-rollback-drill.md)
 - [FAQ](faq.md)
 
