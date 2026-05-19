@@ -9,6 +9,17 @@
                 <div class="input-group mb-3">
                     <input type="text" class="key form-control" aria-label="keyword">
 
+                    <select id="filter-provider" class="form-select" aria-label="<?= lang('provider') ?>">
+                        <option value="">
+                            <?= lang('all') ?> <?= lang('providers') ?>
+                        </option>
+                        <?php foreach (vars('customer_filter_providers') as $provider): ?>
+                            <option value="<?= e($provider['id']) ?>">
+                                <?= e(trim($provider['first_name'] . ' ' . $provider['last_name'])) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
                     <button class="filter btn btn-outline-secondary" type="submit"
                             data-tippy-content="<?= lang('filter') ?>">
                         <i class="fas fa-search"></i>
