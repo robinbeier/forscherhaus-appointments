@@ -23,6 +23,7 @@ class CleanupLocalArtifactsScriptTest extends TestCase
             self::assertMatchesRegularExpression('~would remove .*/vendor~', $result['stdout']);
             self::assertMatchesRegularExpression('~would remove .*/node_modules~', $result['stdout']);
             self::assertMatchesRegularExpression('~would remove .*/pdf-renderer/node_modules~', $result['stdout']);
+            self::assertMatchesRegularExpression('~would remove .*/tools/symphony/node_modules~', $result['stdout']);
             self::assertMatchesRegularExpression('~preserved .*/docker/mysql~', $result['stdout']);
 
             self::assertFileExists($repo . '/storage/logs/debug.log');
@@ -33,6 +34,7 @@ class CleanupLocalArtifactsScriptTest extends TestCase
             self::assertFileExists($repo . '/vendor/autoload.php');
             self::assertFileExists($repo . '/node_modules/pkg/index.js');
             self::assertFileExists($repo . '/pdf-renderer/node_modules/pkg/index.js');
+            self::assertFileExists($repo . '/tools/symphony/node_modules/pkg/index.js');
         } finally {
             $this->removeDirectory($repo);
         }
@@ -56,6 +58,7 @@ class CleanupLocalArtifactsScriptTest extends TestCase
             self::assertFileExists($repo . '/vendor/autoload.php');
             self::assertFileExists($repo . '/node_modules/pkg/index.js');
             self::assertFileExists($repo . '/pdf-renderer/node_modules/pkg/index.js');
+            self::assertFileExists($repo . '/tools/symphony/node_modules/pkg/index.js');
             self::assertFileExists($repo . '/docker/mysql/ibdata1');
         } finally {
             $this->removeDirectory($repo);
@@ -73,6 +76,7 @@ class CleanupLocalArtifactsScriptTest extends TestCase
             self::assertDirectoryDoesNotExist($repo . '/vendor');
             self::assertDirectoryDoesNotExist($repo . '/node_modules');
             self::assertDirectoryDoesNotExist($repo . '/pdf-renderer/node_modules');
+            self::assertDirectoryDoesNotExist($repo . '/tools/symphony/node_modules');
             self::assertFileExists($repo . '/docker/mysql/ibdata1');
         } finally {
             $this->removeDirectory($repo);
@@ -98,6 +102,10 @@ class CleanupLocalArtifactsScriptTest extends TestCase
             self::assertMatchesRegularExpression('~skip .*/node_modules \\(missing\\)~', $result['stdout']);
             self::assertMatchesRegularExpression(
                 '~skip .*/pdf-renderer/node_modules \\(missing\\)~',
+                $result['stdout'],
+            );
+            self::assertMatchesRegularExpression(
+                '~skip .*/tools/symphony/node_modules \\(missing\\)~',
                 $result['stdout'],
             );
             self::assertFileExists($repo . '/docker/mysql/ibdata1');
@@ -203,6 +211,7 @@ class CleanupLocalArtifactsScriptTest extends TestCase
         mkdir($repo . '/vendor', 0777, true);
         mkdir($repo . '/node_modules/pkg', 0777, true);
         mkdir($repo . '/pdf-renderer/node_modules/pkg', 0777, true);
+        mkdir($repo . '/tools/symphony/node_modules/pkg', 0777, true);
         mkdir($repo . '/docker/mysql', 0777, true);
 
         $scriptSource = file_get_contents(dirname(__DIR__, 3) . '/scripts/cleanup_local_artifacts.sh');
@@ -221,6 +230,7 @@ class CleanupLocalArtifactsScriptTest extends TestCase
         file_put_contents($repo . '/vendor/autoload.php', "<?php\n");
         file_put_contents($repo . '/node_modules/pkg/index.js', "export {};\n");
         file_put_contents($repo . '/pdf-renderer/node_modules/pkg/index.js', "export {};\n");
+        file_put_contents($repo . '/tools/symphony/node_modules/pkg/index.js', "export {};\n");
         file_put_contents($repo . '/docker/mysql/ibdata1', "mysql\n");
 
         return $repo;

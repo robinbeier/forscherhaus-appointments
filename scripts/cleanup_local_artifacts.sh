@@ -8,6 +8,7 @@ DEP_PATHS=(
     "$ROOT_DIR/vendor"
     "$ROOT_DIR/node_modules"
     "$ROOT_DIR/pdf-renderer/node_modules"
+    "$ROOT_DIR/tools/symphony/node_modules"
 )
 
 usage() {
