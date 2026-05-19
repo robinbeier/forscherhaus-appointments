@@ -22,8 +22,9 @@ provider snapshot is the migration-level rollback path.
   fresher pre-wipe Kuma export is explicitly approved.
 - Deployment stays artifact-based; the rebuilt app directory is not a Git
   checkout.
-- Ubuntu 24.04 LTS remains the fallback reinstall target if Ubuntu 26.04 LTS
-  shows a blocking host/runtime issue before restore acceptance.
+- Ubuntu 24.04 LTS was the fallback reinstall target before restore
+  acceptance. After ROB-369, the accepted path is Ubuntu 26.04 LTS unless a
+  future observation finding makes that untenable.
 
 ## Non-Goals
 
@@ -152,9 +153,10 @@ bash ./scripts/ops/probe_same_server_rebuild_target.sh --execute
 ```
 
 Stop if the IP changes unexpectedly or SSH access cannot be restored.
-Stop and decide on rollback or 24.04 fallback if the probe does not confirm
-Ubuntu 26.04, sufficient resources, package candidates, and working Ubuntu
-package sources.
+Stop and decide on rollback if the probe does not confirm Ubuntu 26.04,
+sufficient resources, package candidates, and working Ubuntu package sources.
+Only revisit Ubuntu 24.04 if a future observation finding makes the accepted
+26.04 path untenable.
 
 ## Phase 4: Base Bootstrap
 

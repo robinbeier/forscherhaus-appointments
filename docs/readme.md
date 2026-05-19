@@ -20,6 +20,7 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Booking Confirmation PDF Gate](release-gate-booking-confirmation-pdf.md)
 - [Cutover Rehearsal Checklist](cutover-rehearsal-checklist.md)
 - [Same-Server Rebuild Runbook](same-server-rebuild-runbook.md)
+- [Codex Production Operations Harness](ops/agent-operations.md)
 - [Old-Server Rollback Drill](old-server-rollback-drill.md)
 - [FAQ](faq.md)
 

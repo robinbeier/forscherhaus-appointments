@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/lib/kuma_push_common.sh"
 kuma_push_load_env_file
 kuma_push_require_env KUMA_PUSH_URL_HOST_SERVICES
 
-SERVICES="${KUMA_HOST_SERVICES_LIST:-apache2 php8.3-fpm mariadb docker fh-pdf-renderer}"
+SERVICES="${KUMA_HOST_SERVICES_LIST:-apache2 php8.5-fpm mariadb docker fh-pdf-renderer}"
 failed=()
 
 for service in $SERVICES; do

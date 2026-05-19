@@ -48,6 +48,10 @@ Active monitors:
 | App - Dashboard PDF Export | `push` | 900s | `KUMA_PUSH_URL_PDF_EXPORT` |
 | Security - Scanner Activity | `push` | 60s | `KUMA_PUSH_URL_SECURITY_SCANNER` |
 
+The accepted Ubuntu 26.04 rebuild runs PHP-FPM as `php8.5-fpm`. Older monitor
+display names may still mention `php8.3-fpm`, but host-local Push env and repo
+script defaults should target `php8.5-fpm`.
+
 The full non-secret monitor shape is mirrored in
 `scripts/ops/uptime-kuma.monitors.yml`.
 
