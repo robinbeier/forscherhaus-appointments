@@ -452,6 +452,8 @@ class Dashboard_export extends EA_Controller
         $fill_rate = (float) ($summary['fill_rate'] ?? 0.0);
         $total_target = (int) ($summary['target_total'] ?? 0);
         $total_booked = (int) ($summary['booked_total'] ?? 0);
+        $booked_distinct_total = (int) ($summary['booked_distinct_total'] ?? $total_booked);
+        $missing_parents_total = max($total_target - $booked_distinct_total, 0);
         $total_open = (int) ($summary['open_total'] ?? 0);
         $attention_count = (int) ($summary['attention_count'] ?? 0);
         $fallback_count = (int) ($summary['fallback_count'] ?? 0);
@@ -477,8 +479,10 @@ class Dashboard_export extends EA_Controller
             'with_plan_count' => $with_plan_count,
             'missing_to_threshold_total' => $missing_to_threshold_total,
             'missing_to_threshold_total_formatted' => $this->formatNumber($missing_to_threshold_total),
-            'booked_distinct_total' => (int) ($summary['booked_distinct_total'] ?? $total_booked),
-            'booked_distinct_total_formatted' => $this->formatNumber($total_booked),
+            'booked_distinct_total' => $booked_distinct_total,
+            'booked_distinct_total_formatted' => $this->formatNumber($booked_distinct_total),
+            'missing_parents_total' => $missing_parents_total,
+            'missing_parents_total_formatted' => $this->formatNumber($missing_parents_total),
             'providers_below_threshold' => (int) ($summary['providers_below_threshold'] ?? $attention_count),
         ];
     }
@@ -729,6 +733,9 @@ class Dashboard_export extends EA_Controller
                     ($summary['booked_total_formatted'] ?? $this->formatNumber(0))),
             'target_total_formatted' => (string) ($summary['target_total_formatted'] ?? $this->formatNumber(0)),
             'fill_rate_value' => (float) ($summary['fill_rate'] ?? 0.0),
+            'missing_parents_total' => (int) ($summary['missing_parents_total'] ?? 0),
+            'missing_parents_total_formatted' =>
+                (string) ($summary['missing_parents_total_formatted'] ?? $this->formatNumber(0)),
         ];
     }
 

@@ -475,6 +475,7 @@ $lang['dashboard_download_teacher_pdf'] = 'Teacher ZIP';
 $lang['dashboard_download_principal_pdf'] = 'Principal PDF';
 $lang['dashboard_principal_in_booking_goal'] = 'Teachers in booking goal';
 $lang['dashboard_principal_missing_until_booking_goal'] = 'Missing until booking goal';
+$lang['dashboard_principal_missing_parents'] = 'Missing';
 $lang['dashboard_principal_after_15_heading'] = 'After 15:00';
 $lang['dashboard_principal_until_booking_goal'] = 'Until booking goal';
 $lang['dashboard_export_teachers'] = 'Teachers for export';

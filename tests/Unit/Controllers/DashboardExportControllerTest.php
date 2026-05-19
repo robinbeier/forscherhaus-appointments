@@ -241,6 +241,8 @@ class DashboardExportControllerTest extends TestCase
         $summary = [
             'booked_distinct_total_formatted' => '10',
             'target_total_formatted' => '24',
+            'missing_parents_total' => 14,
+            'missing_parents_total_formatted' => '14',
             'fill_rate' => 0.42,
         ];
 
@@ -258,6 +260,8 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('3 / 5 Lehrkräfte im Buchungsziel', $overview['in_target_label']);
         $this->assertSame('10', $overview['booked_distinct_formatted']);
         $this->assertSame('24', $overview['target_total_formatted']);
+        $this->assertSame(14, $overview['missing_parents_total']);
+        $this->assertSame('14', $overview['missing_parents_total_formatted']);
         $this->assertSame(0.42, $overview['fill_rate_value']);
         $this->assertCount(3, $overview['top_attention']);
         $this->assertSame('Teacher A', $overview['top_attention'][0]['provider_name']);
@@ -315,6 +319,8 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(2, $summary['with_plan_count']);
         $this->assertSame(3, $summary['missing_to_threshold_total']);
         $this->assertSame('3', $summary['missing_to_threshold_total_formatted']);
+        $this->assertSame(4, $summary['missing_parents_total']);
+        $this->assertSame('4', $summary['missing_parents_total_formatted']);
         $this->assertSame(1, $summary['providers_below_threshold']);
         $this->assertEqualsWithDelta(14 / 18, $summary['fill_rate'], 0.0001);
     }
