@@ -432,14 +432,20 @@ class Customers_model extends EA_Model
      * @param int|null $limit Record limit.
      * @param int|null $offset Record offset.
      * @param string|null $order_by Order by.
+     * @param int|null $provider_id Provider filter.
      *
      * @return array Returns an array of customers.
      */
-    public function search(string $keyword, ?int $limit = null, ?int $offset = null, ?string $order_by = null): array
-    {
+    public function search(
+        string $keyword,
+        ?int $limit = null,
+        ?int $offset = null,
+        ?string $order_by = null,
+        ?int $provider_id = null,
+    ): array {
         $role_id = $this->get_customer_role_id();
 
-        $customers = $this->db
+        $query = $this->db
             ->select()
             ->from('users')
             ->where('id_roles', $role_id)
@@ -455,7 +461,29 @@ class Customers_model extends EA_Model
             ->or_like('state', $keyword)
             ->or_like('zip_code', $keyword)
             ->or_like('notes', $keyword)
-            ->group_end()
+            ->group_end();
+
+        if ($provider_id !== null) {
+            $appointments_table = $this->db->dbprefix('appointments');
+
+            $query->where(
+                'id IN (
+                    SELECT id_users_customer
+                    FROM ' .
+                    $appointments_table .
+                    '
+                    WHERE id_users_provider = ' .
+                    (int) $provider_id .
+                    '
+                    AND is_unavailability = 0
+                    AND id_users_customer IS NOT NULL
+                )',
+                null,
+                false,
+            );
+        }
+
+        $customers = $query
             ->limit($limit)
             ->offset($offset)
             ->order_by($this->quote_order_by($order_by))

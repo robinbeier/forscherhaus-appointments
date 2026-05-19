@@ -54,6 +54,7 @@ class Customers extends EA_Controller
 
         $this->load->model('appointments_model');
         $this->load->model('customers_model');
+        $this->load->model('providers_model');
         $this->load->model('secretaries_model');
         $this->load->model('roles_model');
 
@@ -105,6 +106,12 @@ class Customers extends EA_Controller
             $secretary_providers = $secretary['providers'];
         }
 
+        $customer_filter_providers = $this->get_customer_filter_providers(
+            $role_slug,
+            (int) $user_id,
+            $secretary_providers,
+        );
+
         script_vars([
             'user_id' => $user_id,
             'role_slug' => $role_slug,
@@ -114,6 +121,7 @@ class Customers extends EA_Controller
             'secretary_providers' => $secretary_providers,
             'default_language' => setting('default_language'),
             'default_timezone' => setting('default_timezone'),
+            'customer_filter_providers' => $customer_filter_providers,
         ]);
 
         html_vars([
@@ -131,6 +139,7 @@ class Customers extends EA_Controller
             'require_city' => $require_city,
             'require_zip_code' => $require_zip_code,
             'available_languages' => config('available_languages'),
+            'customer_filter_providers' => $customer_filter_providers,
         ]);
 
         $this->load->view('pages/customers');
@@ -180,6 +189,7 @@ class Customers extends EA_Controller
                 $request_dto->limit,
                 $request_dto->offset,
                 $request_dto->orderBy,
+                $request_dto->providerId,
             );
 
             $user_id = session('user_id');
@@ -191,7 +201,13 @@ class Customers extends EA_Controller
                     continue;
                 }
 
-                $appointments = $this->appointments_model->get(['id_users_customer' => $customer['id']]);
+                $appointment_where = ['id_users_customer' => $customer['id']];
+
+                if ($request_dto->providerId !== null) {
+                    $appointment_where['id_users_provider'] = $request_dto->providerId;
+                }
+
+                $appointments = $this->appointments_model->get($appointment_where);
 
                 foreach ($appointments as &$appointment) {
                     $this->appointments_model->load($appointment, ['service', 'provider']);
@@ -204,6 +220,31 @@ class Customers extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /**
+     * Return the provider options visible in the customer page filter.
+     */
+    private function get_customer_filter_providers(string $role_slug, int $user_id, array $secretary_providers): array
+    {
+        if ($role_slug === DB_SLUG_PROVIDER) {
+            return [$this->providers_model->find($user_id)];
+        }
+
+        $providers = $this->providers_model->get(null, null, null, 'first_name ASC, last_name ASC, email ASC');
+
+        if ($role_slug !== DB_SLUG_SECRETARY) {
+            return $providers;
+        }
+
+        $secretary_provider_ids = array_map('intval', $secretary_providers);
+
+        return array_values(
+            array_filter(
+                $providers,
+                static fn(array $provider): bool => in_array((int) $provider['id'], $secretary_provider_ids, true),
+            ),
+        );
     }
 
     /**

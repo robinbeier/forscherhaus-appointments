@@ -21,8 +21,8 @@ final class BackofficeSearchRequestDto
         public readonly string $orderBy,
         public readonly int $limit,
         public readonly int $offset,
-    ) {
-    }
+        public readonly ?int $providerId = null,
+    ) {}
 }
 
 /**
@@ -33,9 +33,7 @@ final class BackofficeEntityPayloadRequestDto
     /**
      * @param array<string, mixed> $payload
      */
-    public function __construct(public readonly array $payload)
-    {
-    }
+    public function __construct(public readonly array $payload) {}
 }
 
 /**
@@ -43,9 +41,7 @@ final class BackofficeEntityPayloadRequestDto
  */
 final class BackofficeEntityIdRequestDto
 {
-    public function __construct(public readonly string|int|null $id)
-    {
-    }
+    public function __construct(public readonly string|int|null $id) {}
 }
 
 /**
@@ -56,9 +52,7 @@ final class BackofficeSettingsRequestDto
     /**
      * @param array<int|string, mixed> $settings
      */
-    public function __construct(public readonly array $settings)
-    {
-    }
+    public function __construct(public readonly array $settings) {}
 }
 
 /**
@@ -99,6 +93,7 @@ class Backoffice_request_dto_factory
             request('offset', '0'),
             $default_order_by,
             $default_limit,
+            request('provider_id'),
         );
     }
 
@@ -124,17 +119,20 @@ class Backoffice_request_dto_factory
         mixed $offset,
         string $default_order_by = 'update_datetime DESC',
         int $default_limit = 1000,
+        mixed $provider_id = null,
     ): BackofficeSearchRequestDto {
         $normalized_keyword = $this->request_normalizer->normalizeString($keyword, '', false) ?? '';
         $normalized_order_by = $this->request_normalizer->normalizeString($order_by, $default_order_by, false);
         $normalized_limit = $this->request_normalizer->normalizeInt($limit, $default_limit) ?? $default_limit;
         $normalized_offset = $this->request_normalizer->normalizeInt($offset, 0) ?? 0;
+        $normalized_provider_id = $this->request_normalizer->normalizePositiveInt($provider_id, null);
 
         return new BackofficeSearchRequestDto(
             $normalized_keyword,
             $normalized_order_by ?? $default_order_by,
             max(0, $normalized_limit),
             max(0, $normalized_offset),
+            $normalized_provider_id,
         );
     }
 

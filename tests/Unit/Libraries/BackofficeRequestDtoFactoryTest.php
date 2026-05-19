@@ -22,12 +22,13 @@ class BackofficeRequestDtoFactoryTest extends TestCase
 
     public function testCreateSearchRequestDtoNormalizesKeywordOrderAndPagination(): void
     {
-        $dto = $this->factory->createSearchRequestDto(' term ', null, '-10', '-5');
+        $dto = $this->factory->createSearchRequestDto(' term ', null, '-10', '-5', provider_id: '12');
 
         $this->assertSame('term', $dto->keyword);
         $this->assertSame('update_datetime DESC', $dto->orderBy);
         $this->assertSame(0, $dto->limit);
         $this->assertSame(0, $dto->offset);
+        $this->assertSame(12, $dto->providerId);
     }
 
     public function testCreateEntityPayloadRequestDtoSupportsAssocArrayAndJsonPayloads(): void
