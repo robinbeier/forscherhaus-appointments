@@ -323,8 +323,33 @@ class Calendar extends EA_Controller
                 'success' => true,
             ]);
         } catch (Throwable $e) {
+            $expected_status = $this->get_appointment_save_expected_error_status($e);
+
+            if ($expected_status !== null) {
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => $e->getMessage(),
+                    ],
+                    $expected_status,
+                );
+
+                return;
+            }
+
             json_exception($e);
         }
+    }
+
+    protected function get_appointment_save_expected_error_status(Throwable $e): ?int
+    {
+        $expected_conflict_messages = [
+            lang('buffer_conflict_error'),
+            lang('buffer_outside_schedule_error'),
+            lang('requested_hour_is_unavailable'),
+        ];
+
+        return in_array($e->getMessage(), $expected_conflict_messages, true) ? 409 : null;
     }
 
     private function check_event_permissions(int $provider_id): void
