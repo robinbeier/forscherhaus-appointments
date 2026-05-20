@@ -101,6 +101,13 @@ production schedule runs:
 - PDF renderer log errors every minute
 - dashboard PDF export every 15 minutes
 
+The `App - Log Errors` Push monitor is still an app-error monitor, not a
+scanner monitor. Its script ignores only built-in, narrow known-noise patterns
+for externally generated scanner/proxy traffic that was observed while `/`,
+`/health`, and `/index.php/healthz` remained green. Additional
+`KUMA_APP_LOG_IGNORE_REGEX` values stay host-local and must not hide broad
+classes such as all 404s or all PHP warnings.
+
 ## Backup and Restore
 
 Production has historical Kuma backups under `/root/backups/uptime-kuma` and

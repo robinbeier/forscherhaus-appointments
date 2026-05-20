@@ -59,6 +59,30 @@ section() {
     printf '\n[%s]\n' "$1"
 }
 
+if [[ -r /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh ]]; then
+    # shellcheck source=scripts/ops/lib/app_log_classification.sh
+    source /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh
+else
+    app_log_known_noise_regex() {
+        cat <<'REGEX'
+ERROR - .*--> 404 Page Not Found: Azenvnet/index|ERROR - .*--> Severity: Warning --> unlink\(.*/storage/cache/rate_limit_key_[^)]*\): No such file or directory .*/system/libraries/Cache/drivers/Cache_file\.php 279
+REGEX
+    }
+
+    app_log_filter_actionable_file() {
+        local input_file="$1"
+        local output_file="$2"
+        grep -Ev "$(app_log_known_noise_regex)" "$input_file" > "$output_file" || true
+    }
+
+    app_log_count_error_like_file() {
+        local input_file="$1"
+        grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$input_file" 2>/dev/null \
+            | wc -l \
+            | awk '{print $1}'
+    }
+fi
+
 check_eq() {
     local key="$1"
     local got="$2"
@@ -96,13 +120,20 @@ app_error_count() {
     local count=0
     local file
     local matches
+    local tmp_matches
+    local tmp_actionable
     if [[ ! -d /var/www/html/easyappointments/storage/logs ]]; then
         printf 'missing'
         return
     fi
     while IFS= read -r -d '' file; do
-        matches="$(grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$file" 2>/dev/null | wc -l | awk '{print $1}' || true)"
+        tmp_matches="$(mktemp)"
+        tmp_actionable="$(mktemp)"
+        grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$file" > "$tmp_matches" 2>/dev/null || true
+        app_log_filter_actionable_file "$tmp_matches" "$tmp_actionable"
+        matches="$(app_log_count_error_like_file "$tmp_actionable" || true)"
         count=$((count + matches))
+        rm -f "$tmp_matches" "$tmp_actionable"
     done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
     printf '%s' "$count"
 }

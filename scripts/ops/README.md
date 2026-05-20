@@ -69,6 +69,21 @@ App log script behavior:
 
 - tracks only newly appended bytes in the current daily app log
 - primes itself on first run to avoid an immediate false alarm from historical log lines
-- supports `KUMA_APP_LOG_IGNORE_REGEX` for expected noisy log lines, e.g. the host-only `http://pdf-renderer:3000` fallback error or expected invalid-login errors such as `JSON exception: .*Ungültige Zugangsdaten angegeben`
+- applies a built-in narrow classifier for known scanner/proxy noise that has
+  been proven not to represent app downtime, currently:
+    - absolute-URI scanner 404s matching the observed `Azenvnet/index` route
+      shape
+    - CodeIgniter file-cache expiry races for `rate_limit_key_*` entries at
+      `Cache_file.php 279`
+- supports `KUMA_APP_LOG_IGNORE_REGEX` for additional host-local expected noisy
+  log lines, e.g. the host-only `http://pdf-renderer:3000` fallback error or
+  expected invalid-login errors such as
+  `JSON exception: .*Ungültige Zugangsdaten angegeben`
+- does not ignore all 404s, all warnings, or all rate-limit-related errors;
+  genuine unclassified app errors must still turn monitor `#9` red
 - uses an exclusive lock around the state file so a staggered second cron run cannot race the primary per-minute run
 - production currently runs `kuma_push_app_logs.sh` twice per minute: once on the minute and once with a `sleep 30` offset for faster recovery on monitor `#9`
+
+`prod_logs_summary.sh` and `prod_validate_after_change.sh` use the same built-in
+classifier, so post-change validation reports actionable app log errors while
+also showing how many recent error-like lines were ignored as known noise.
