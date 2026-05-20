@@ -50,14 +50,15 @@ Repo desired monitor catalog:
 | Ops - Backup Creation Freshness | `push` | 900s | `KUMA_PUSH_URL_BACKUP_CREATION` |
 | App - PDF Renderer | `json-query` | 30s | same `X-Health-Token` boundary as deep health |
 | App - Log Errors | `push` | 60s | `KUMA_PUSH_URL_APP_LOGS` |
-| App - php8.3-fpm Log Errors | `push` | 60s | `KUMA_PUSH_URL_PHP_FPM_LOGS` |
+| App - php8.5-fpm Log Errors | `push` | 60s | `KUMA_PUSH_URL_PHP_FPM_LOGS` |
 | App - PDF Renderer Log Errors | `push` | 60s | `KUMA_PUSH_URL_PDF_RENDERER_LOGS` |
 | App - Dashboard PDF Export | `push` | 900s | `KUMA_PUSH_URL_PDF_EXPORT` |
 | Security - Scanner Activity | `push` | 60s | `KUMA_PUSH_URL_SECURITY_SCANNER` |
 
-The accepted Ubuntu 26.04 rebuild runs PHP-FPM as `php8.5-fpm`. Older monitor
-display names may still mention `php8.3-fpm`, but host-local Push env and repo
-script defaults should target `php8.5-fpm`.
+The accepted Ubuntu 26.04 rebuild runs PHP-FPM as `php8.5-fpm`. Repo desired
+state, host-local Push env, and script defaults should all target
+`php8.5-fpm`. If the live Kuma UI still shows the older `php8.3-fpm` monitor
+display name, treat that as a gated Kuma rename rather than a script change.
 
 The full non-secret monitor shape is mirrored in
 `scripts/ops/uptime-kuma.monitors.yml`.

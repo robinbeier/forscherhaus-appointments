@@ -99,7 +99,7 @@ monitors:
       max_retries: 1
       env_var: KUMA_PUSH_URL_APP_LOGS
     - id: 10
-      name: App - php8.3-fpm Log Errors
+      name: App - php8.5-fpm Log Errors
       type: push
       interval: 60
       retry_interval: 60

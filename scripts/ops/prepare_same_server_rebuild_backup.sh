@@ -15,6 +15,7 @@ REMOTE_WORK_DIR="${REMOTE_WORK_DIR:-/root/rebuild-prewipe-backup-${STAMP}}"
 LOCAL_BACKUP_ROOT="${LOCAL_BACKUP_ROOT:-${HOME}/Documents/forscherhaus-ops-secure/same-server-rebuild/${STAMP}}"
 DB_NAME="${DB_NAME:-easyappointments}"
 APP_CONFIG_PATH="${APP_CONFIG_PATH:-/var/www/html/easyappointments/application/config/config.php}"
+PROD_SERVICE_HEALTH_UNITS="${PROD_SERVICE_HEALTH_UNITS:-apache2 php8.5-fpm mariadb docker fail2ban fh-pdf-renderer}"
 EXECUTE=0
 KEEP_REMOTE=0
 
@@ -149,7 +150,7 @@ PLAN
 create_remote_artifacts() {
     log "Creating remote backup artifacts on ${PROD_SSH_TARGET}"
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
-        "REMOTE_WORK_DIR='${REMOTE_WORK_DIR}' DB_NAME='${DB_NAME}' APP_CONFIG_PATH='${APP_CONFIG_PATH}' bash -s" <<'REMOTE'
+        "REMOTE_WORK_DIR='${REMOTE_WORK_DIR}' DB_NAME='${DB_NAME}' APP_CONFIG_PATH='${APP_CONFIG_PATH}' PROD_SERVICE_HEALTH_UNITS='${PROD_SERVICE_HEALTH_UNITS}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 mkdir -p "${REMOTE_WORK_DIR}/db" "${REMOTE_WORK_DIR}/meta"
@@ -186,7 +187,10 @@ gzip -t "${REMOTE_WORK_DIR}/db/${DB_NAME}.sql.gz"
     printf '\n[enabled-units]\n'
     systemctl list-unit-files --state=enabled --no-pager 2>/dev/null || true
     printf '\n[service-health]\n'
-    systemctl is-active apache2 php8.3-fpm mariadb docker fail2ban fh-pdf-renderer 2>/dev/null || true
+    # Keep the unit list configurable so the inventory follows the accepted
+    # production PHP-FPM unit after rebuilds without editing this script again.
+    # shellcheck disable=SC2086
+    systemctl is-active ${PROD_SERVICE_HEALTH_UNITS} 2>/dev/null || true
     printf '\n[apache-vhosts]\n'
     apache2ctl -S 2>&1 || true
     printf '\n[apache-modules]\n'

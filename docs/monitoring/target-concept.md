@@ -101,7 +101,7 @@ postdeploy health and canary gates pass.
 | Ops - Restore Verify Freshness | Detect stale restore verification | Kuma Push | Backup | `kuma_push_ops_jobs.sh` restore-verify marker age | 15m | marker missing, invalid, or > 1440m | Renew backup/restore verification | Medium | Marker basename and age only; no backup contents |
 | Ops - Backup Creation Freshness | Prove backup creation job freshness | Kuma Push | Backup | `kuma_push_backup_creation.sh` backup-success marker age | 15m | marker missing, invalid, or > 1440m | Check backup creation job and storage | Medium | Marker basename and age only; no dump listing or backup contents |
 | App - Log Errors | Detect new unclassified app errors | Kuma Push | Error | `kuma_push_app_logs.sh` | 60s plus 30s stagger | new non-ignored `ERROR - ` lines | Classify with `prod_logs_summary.sh`; route to Sentry/issue if real | High until ROB-382 | Push URL secret; ignore regex targeted only |
-| App - PHP-FPM Log Errors | Detect PHP-FPM service errors | Kuma Push | Error | `journalctl -u php8.5-fpm` | 60s | error count > threshold | Inspect PHP-FPM journal and app health | Medium | Rename old php8.3 monitor display |
+| App - php8.5-fpm Log Errors | Detect PHP-FPM service errors | Kuma Push | Error | `journalctl -u php8.5-fpm` | 60s | error count > threshold | Inspect PHP-FPM journal and app health | Medium | Live UI rename remains a Kuma gate if still stale |
 | App - PDF Renderer Log Errors | Detect renderer service errors | Kuma Push | Error | `journalctl -u fh-pdf-renderer` | 60s | error count > threshold | Inspect renderer container/service | Medium | No PDF content in messages |
 | App - Dashboard PDF Export | Prove live dashboard PDF path | Kuma Push script | Business/PDF | `kuma_push_pdf_export.sh` | 15m | gate rc != 0 or report missing | Check dashboard gate report, renderer, auth creds | Medium | Uses host-local gate credentials |
 | App - Booking Confirmation PDF | Optional parent PDF live synthetic | Script/Kuma | Business/PDF | Booking confirmation PDF gate | TBD | PDF cannot be downloaded/validated | Only build if privacy-safe stable synthetic data exists | Medium-high | Needs decision; avoid real family hashes |
@@ -228,7 +228,8 @@ Change or clarify:
 
 - Document deep-health/PDF JSON monitors as requiring a secret header. Do not
   put the token in repo templates.
-- Rename `App - php8.3-fpm Log Errors` to `App - php8.5-fpm Log Errors`.
+- Keep the PHP-FPM log monitor display and script default aligned to
+  `php8.5-fpm`; a stale live Kuma display name is a gated rename.
 - Verify production `KUMA_HOST_SERVICES_LIST` includes `cron`, `fail2ban`, and
   `unattended-upgrades`, or explicitly document why they are doctor-only.
 - Split or rename `Ops - Jobs Freshness` so it says restore verify freshness,
@@ -412,8 +413,10 @@ Marking: `Repo-only`, `Server`, `Kuma`
 
 Marking: `Repo-only`, `Kuma`, `Server`
 
-- Rename the old `php8.3-fpm` monitor display to `php8.5-fpm`.
+- Repo desired state uses `App - php8.5-fpm Log Errors`.
 - Ensure `KUMA_PHP_FPM_SERVICE_NAME=php8.5-fpm` is host-local.
+- Rename an old live `php8.3-fpm` monitor display to `php8.5-fpm` only through
+  an explicit Kuma gate.
 - Keep old historical monitor data if possible; rename rather than recreate if
   Kuma supports it cleanly.
 
@@ -454,7 +457,7 @@ Recommended order:
 4. ROB-385: Backup freshness vs restore-verify freshness split.
    Labels: `Repo-only`, `Server`, `Kuma`.
 5. ROB-386: Production monitor runtime-name drift cleanup (`php8.3` to `php8.5`).
-   Labels: `Kuma`, `Server`.
+   Labels: `Repo-only`, `Kuma`, `Server`.
 6. ROB-387, optional: Privacy-safe parent confirmation PDF live synthetic.
    Labels: `Needs decision`, `Repo-only`, `Kuma`.
 7. ROB-367: include monitoring soak and lessons learned.
@@ -477,7 +480,7 @@ Useful but not urgent:
 
 - Document the deep-health token boundary in Kuma docs/templates.
 - Split backup creation freshness from restore verification.
-- Rename php8.3 monitor display names to php8.5.
+- Keep PHP-FPM monitor display names aligned to `php8.5-fpm`.
 - Add explicit Sentry redaction and safer context.
 
 Do not build now:
