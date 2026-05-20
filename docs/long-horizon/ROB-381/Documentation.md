@@ -2,13 +2,14 @@
 
 ## Current Status
 
-- Status: ROB-388 final repo-only coordination package in progress.
-- Branch: `codex/rob-388-roadmap-coordination`.
+- Status: repo-only roadmap and follow-up Kuma live gates completed; Sentry
+  live verification remains gated.
+- Branch: `codex/rob-381-monitoring-doc-reconcile`.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
-- Live gates: Server/Kuma/Sentry writes are not approved by default.
-- Current start point for new work: ROB-367 live observation, only after an
-  explicit server/Kuma read-only gate.
+- Live gates: Server/Kuma/Sentry writes remain explicit milestone gates.
+- Current start point for new work: Sentry live verification, only through a
+  secure token, connector, or host-local path.
 
 ## Roadmap Issue Status
 
@@ -23,10 +24,14 @@
   drift.
 - ROB-387: completed by PR #286, decide privacy-safe parent booking
   confirmation PDF synthetic.
-- ROB-388: in progress, final long-horizon implementation coordinator package.
-- ROB-367: existing post-rebuild observation issue to receive final monitoring
-  findings.
-- New roadmap issues: created in Linear on 2026-05-20.
+- ROB-388: completed by PR #287, final long-horizon implementation
+  coordinator package.
+- ROB-367: completed post-rebuild observation handoff.
+- ROB-390: completed, live backup-creation freshness split.
+- ROB-391: completed, live PHP-FPM monitor display-name alignment.
+- ROB-392: completed by PR #289, production app-log counting hardening.
+- Roadmap issues: created in Linear on 2026-05-20 and completed through the
+  current repo/Kuma scope.
 
 ## Decisions
 
@@ -180,25 +185,35 @@ handled before continuing to the next milestone.
 
 ### Milestone 7 - ROB-367 Observation Integration
 
-- Status: prepared for the later live observation gate.
+- Status: completed by the post-rebuild observation handoff.
 - Done:
   - Added the final ROB-381 monitoring observation checklist to the ROB-367
     Codex Workpad.
-  - Kept ROB-367 as a server/Kuma read-only live milestone; no production
-    change or live monitor edit is part of ROB-388.
-- Pending:
-  - Run ROB-367 after an explicitly approved production observation window.
+  - Kept ROB-367 as a server/Kuma read-only live milestone during ROB-388; no
+    production change or live monitor edit was part of that repo-only PR.
+  - Split follow-up work into ROB-390, ROB-391, and ROB-392.
 
 ### Milestone 8 - Final Review Package
 
-- Status: in progress on branch `codex/rob-388-roadmap-coordination`.
+- Status: completed by PR #287.
 - Done:
   - Reconciled the long-horizon implementation log with PRs #280, #281, #283,
     #284, #285, and #286.
   - Reconciled the monitoring target concept with shipped repo-only milestones
     and remaining live gates.
-- Pending:
-  - Final validation, PR creation, and babysitting.
+
+### Milestone 9 - Post-Rebuild Follow-Up Closure
+
+- Status: completed.
+- Done:
+  - ROB-390 applied the live Kuma backup-freshness split on 2026-05-20:
+    `Ops - Restore Verify Freshness` and `Ops - Backup Creation Freshness`
+    were green after the change.
+  - ROB-391 renamed the live PHP-FPM monitor display to
+    `App - php8.5-fpm Log Errors` on 2026-05-20.
+  - ROB-392 tightened production app-log counting and shipped by PR #289.
+  - PR #290 documented the live Kuma maintenance result and updated the
+    post-change validation expected monitor count to 13.
 
 ## Validation Log
 
@@ -376,10 +391,13 @@ artifacts.
 Remaining live work is intentionally gated:
 
 - Sentry live verification still needs a secure token or connector path.
-- Kuma live renames/header audits/new Push monitors require explicit Kuma
-  access approval.
-- ROB-367 production observation requires read-only server/Kuma checks after an
-  approved observation window.
+- Future Kuma live writes still require explicit Kuma access approval, but the
+  ROB-390/ROB-391 live changes are closed.
+- Any server-side follow-up beyond read-only inspection needs a named
+  milestone and stop condition.
 
-No Server, Kuma, or Sentry live configuration was changed by the repo-only
-long-horizon implementation run.
+The original repo-only long-horizon implementation run did not change Server,
+Kuma, or Sentry live configuration. Later approved follow-up gates changed
+Kuma and host-local Push scheduling for ROB-390/ROB-391 only; secrets, Push
+URLs, Kuma DB contents, backup contents, and production data were not copied
+into Git, Linear, or chat.
