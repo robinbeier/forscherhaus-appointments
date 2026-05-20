@@ -522,13 +522,18 @@ Urgent:
 - Keep future Sentry configuration changes gated; the one-off live ingestion
   smoke completed on 2026-05-20 and is recorded in
   [Sentry Ingestion Enablement Gate](sentry-ingestion-gate-2026-05-20.md).
+- Complete the minimal Sentry production issue alert gate after providing a
+  token or UI path with alert-write permission; the first API attempt stopped
+  safely with HTTP `403` and is recorded in
+  [Sentry Alert Gate](sentry-alert-gate-2026-05-20.md).
 - Keep live Push URL, health-token, and parent-confirmation bearer-like values
   out of chat, Linear, docs, and git.
 
 Useful but not urgent:
 
-- Decide whether Sentry alert rules or a scheduled delivery smoke are worth the
-  operational noise now that one-off ingestion is verified.
+- Revisit a scheduled Sentry delivery smoke only after the minimal production
+  issue alert is in place and there is a concrete operational need beyond
+  manual deploy/configuration gates.
 - Reconcile any future Kuma desired-state drift with redacted snapshots before
   changing live monitors.
 - Revisit parent confirmation PDF synthetics only if a privacy-safe synthetic
