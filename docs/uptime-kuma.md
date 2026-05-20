@@ -56,9 +56,8 @@ Repo desired monitor catalog:
 | Security - Scanner Activity | `push` | 60s | `KUMA_PUSH_URL_SECURITY_SCANNER` |
 
 The accepted Ubuntu 26.04 rebuild runs PHP-FPM as `php8.5-fpm`. Repo desired
-state, host-local Push env, and script defaults should all target
-`php8.5-fpm`. If the live Kuma UI still shows the older `php8.3-fpm` monitor
-display name, treat that as a gated Kuma rename rather than a script change.
+state, host-local Push env, script defaults, and live Kuma monitor display names
+should all target `php8.5-fpm`.
 
 The full non-secret monitor shape is mirrored in
 `scripts/ops/uptime-kuma.monitors.yml`.
@@ -159,9 +158,36 @@ separate by design:
 - Neither monitor reads backup contents, lists backup directories, validates
   off-host retention, or proves end-to-end restoreability alone.
 
-If the live Kuma UI still shows the older `Ops - Jobs Freshness` name, treat the
-repo desired-state rename as a gated Kuma write. Until that live rename happens,
-the monitor's intended meaning is restore-verification freshness.
+Before the 2026-05-20 live gate, the live UI still used the older
+`Ops - Jobs Freshness` name. The monitor's intended meaning was already
+restore-verification freshness; the live gate below aligned the display name
+with that meaning.
+
+## 2026-05-20 ROB-390/ROB-391 Live Gate
+
+The live Kuma write gate for ROB-390 and ROB-391 was applied on 2026-05-20 over
+SSH with Push URLs and tokens kept host-local.
+
+Redacted result:
+
+- a server-local Kuma SQLite backup was created before the write;
+- `App - php8.3-fpm Log Errors` was renamed to
+  `App - php8.5-fpm Log Errors`;
+- `Ops - Jobs Freshness` was renamed to `Ops - Restore Verify Freshness`;
+- a separate Push monitor `Ops - Backup Creation Freshness` was created;
+- the host-local Push env now contains a backup-creation Push URL without the
+  value being copied into Git, Linear, or chat;
+- `/etc/cron.d/fh-uptime-kuma-push` now schedules
+  `kuma_push_backup_creation.sh`;
+- the production host had the current split `kuma_push_ops_jobs.sh` and
+  `kuma_push_backup_creation.sh` installed from this repository after the live
+  gate exposed the missing server-side script;
+- manual Push validation returned separate green restore-verification and
+  backup-creation signals using only marker ages;
+- post-change Kuma summary showed 13 active monitors and 13 latest green.
+
+Do not include the generated Push token, full Push URL, Kuma DB contents, or
+backup contents in follow-up documentation.
 
 ## Backup and Restore
 
