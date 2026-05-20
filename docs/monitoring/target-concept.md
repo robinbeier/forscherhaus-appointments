@@ -376,49 +376,56 @@ implementation run. Treat it as shipped baseline:
   classification helper;
 - no runtime rate-limit bypass is part of the shipped solution.
 
-### 2. Sentry Hardening And Verification
+### 2. Sentry Hardening And Verification - Shipped Repo-Side
 
 Marking: `Repo-only`, `Sentry`, `Needs decision`
 
-Create a follow-up from ROB-381:
+ROB-383 was completed by PR #281. Shipped repo-side state:
 
-- add explicit redaction/scrubbing before expanding capture;
-- remove raw appointment hash from Sentry extras;
-- add tags for area/operation/http status/release;
-- add a safe Sentry test-event workflow;
-- configure usable read-only Sentry audit access with `SENTRY_ORG` and
-  `SENTRY_PROJECT`;
-- verify production event ingestion without sending PII.
+- central Sentry event scrubbing removes bearer-like values, raw request input,
+  sensitive headers, and raw confirmation URLs before send;
+- booking confirmation captures no longer include raw appointment hashes;
+- PDF renderer failures report endpoint kind instead of raw renderer URL;
+- the Sentry smoke script is dry-run by default and sends only when the
+  operator explicitly sets `SENTRY_SMOKE_SEND=1`;
+- live production event-ingestion verification remains gated on secure
+  Sentry token or connector access.
 
-### 3. Deep Health And Kuma Secret Boundary Cleanup
+### 3. Deep Health And Kuma Secret Boundary Cleanup - Shipped Repo-Side
 
 Marking: `Repo-only`, `Kuma`
 
-- Update `docs/uptime-kuma.md` and monitor template comments to mark
-  health-token header requirements.
-- Keep token values out of Git.
-- Verify the live Kuma monitors still have the correct secret header configured.
+- ROB-384 was completed by PR #283.
+- The desired-state monitor file now marks the deep-health and PDF-renderer
+  monitors as requiring host/Kuma-local `X-Health-Token` headers.
+- The agent operations docs distinguish token-missing `401` from real app or
+  dependency `503` failures.
+- Live Kuma header audit remains a gated read-only Kuma step because token
+  values must not be printed or committed.
 
-### 4. Backup And Cron Freshness Split
+### 4. Backup And Cron Freshness Split - Shipped Repo-Side
 
 Marking: `Repo-only`, `Server`, `Kuma`
 
-- Rename or document `Ops - Jobs Freshness` as restore-verify freshness.
-- Add backup creation freshness with a separate marker-based Push script; the
-  restore verification marker does not prove backup creation by itself.
-- Decide whether cron/fail2ban/unattended-upgrades belong in Host Services
-  Push or remain doctor-only.
+- ROB-385 was completed by PR #284.
+- Repo desired state now names the existing restore-verification signal
+  `Ops - Restore Verify Freshness`.
+- `scripts/ops/kuma_push_backup_creation.sh` adds a separate marker-based Push
+  signal for backup creation freshness.
+- Live adoption requires host-local Push URL provisioning and cron/timer
+  scheduling; Push URLs remain secrets.
 
-### 5. Runtime Name Drift Cleanup
+### 5. Runtime Name Drift Cleanup - Shipped Repo-Side
 
 Marking: `Repo-only`, `Kuma`, `Server`
 
+- ROB-386 was completed by PR #285.
+- A read-only production check confirmed `php8.5-fpm` active/enabled and
+  `php8.3-fpm` inactive/not listed.
 - Repo desired state uses `App - php8.5-fpm Log Errors`.
-- Ensure `KUMA_PHP_FPM_SERVICE_NAME=php8.5-fpm` is host-local.
-- Rename an old live `php8.3-fpm` monitor display to `php8.5-fpm` only through
-  an explicit Kuma gate.
-- Keep old historical monitor data if possible; rename rather than recreate if
-  Kuma supports it cleanly.
+- The pre-wipe inventory helper defaults to `php8.5-fpm` while keeping service
+  names configurable.
+- Renaming a stale live Kuma display name remains an explicit Kuma write gate.
 
 ### 6. Optional Parent Confirmation PDF Synthetic
 
@@ -450,11 +457,20 @@ Marking: `Server`, `Kuma`, `Repo-only`
 
 When ROB-367 runs, use the monitoring concepts here as the observation checklist:
 
-- Kuma stayed green or exceptions are classified;
-- Push monitors received fresh signals;
-- service logs are quiet or findings have issues;
+- Kuma stayed green or exceptions are classified by monitor type;
+- Push monitors received fresh signals, including separate backup creation and
+  restore-verification freshness after live adoption;
+- service logs are quiet or findings have narrow follow-up issues;
 - backup/restore freshness is clear;
+- PHP-FPM runtime names match the live `php8.5-fpm` service;
+- deep-health failures separate missing token/header configuration from real
+  dependency failures;
+- PDF monitoring avoids bearer-like parent confirmation URLs unless a
+  privacy-safe synthetic target is explicitly created;
 - lessons are recorded in the relevant ops or long-horizon doc.
+
+ROB-388 feeds this checklist into ROB-367, but ROB-367 itself remains a later
+read-only production observation gate.
 
 ## Linear Follow-Up Proposal
 
@@ -463,39 +479,50 @@ Recommended order:
 1. ROB-382: Uptime-Kuma App-Log-Monitor gegen Scanner-/Proxy-Noise haerten.
    Done by PR #280; keep as shipped baseline, do not broaden.
    Labels: `Repo-only`, `Server`, `Kuma`.
-2. ROB-383: Sentry redaction and event-context hardening. Start here for the
-   next repo-only implementation PR.
+2. ROB-383: Sentry redaction and event-context hardening.
+   Completed by PR #281.
    Labels: `Repo-only`, `Sentry`, `Needs decision`.
 3. ROB-384: Kuma deep-health secret-boundary documentation and live header audit.
+   Completed by PR #283; live header audit remains gated.
    Labels: `Repo-only`, `Kuma`.
 4. ROB-385: Backup freshness vs restore-verify freshness split.
+   Completed by PR #284; live Push URL provisioning remains gated.
    Labels: `Repo-only`, `Server`, `Kuma`.
 5. ROB-386: Production monitor runtime-name drift cleanup (`php8.3` to `php8.5`).
+   Completed by PR #285; live Kuma display-name change remains gated.
    Labels: `Repo-only`, `Kuma`, `Server`.
 6. ROB-387: decide privacy-safe parent confirmation PDF live synthetic.
+   Completed by PR #286; decision is no live parent confirmation synthetic yet.
    Labels: `Needs decision`, `Repo-only`, `Kuma`.
 7. ROB-367: include monitoring soak and lessons learned.
+   Remains the next live observation gate, read-only unless separately
+   approved.
    Labels: `Server`, `Kuma`, `Repo-only`.
 8. ROB-388: run the full long-horizon implementation from
    `docs/long-horizon/ROB-381/`.
+   Final repo-only coordination package.
    Labels: `Repo-only first`, `Server gate`, `Kuma gate`, `Sentry gate`.
 
 ## Short Summary
 
 Urgent:
 
-- Start ROB-383 so Sentry redaction/context is safe before relying on alerts.
-- Keep Sentry live verification gated until a secure token/connector path is
-  available.
-- Keep post-change validation classification aligned with the shipped ROB-382
-  helper.
+- Run ROB-367 as a read-only production observation after an explicitly
+  approved window.
+- Keep remaining Sentry/Kuma live verification gated until secrets can be used
+  through a secure token, connector, or host-local path.
+- Keep live Push URL, health-token, and parent-confirmation bearer-like values
+  out of chat, Linear, docs, and git.
 
 Useful but not urgent:
 
-- Document the deep-health token boundary in Kuma docs/templates.
-- Split backup creation freshness from restore verification.
-- Keep PHP-FPM monitor display names aligned to `php8.5-fpm`.
-- Add explicit Sentry redaction and safer context.
+- Provision the new backup creation freshness Push monitor in Kuma.
+- Rename any stale live `php8.3-fpm` Kuma display name to `php8.5-fpm` while
+  preserving history if Kuma allows it.
+- Perform live Sentry ingestion verification with a sanitized smoke event after
+  secure token/connector access exists.
+- Revisit parent confirmation PDF synthetics only if a privacy-safe synthetic
+  target exists.
 
 Do not build now:
 

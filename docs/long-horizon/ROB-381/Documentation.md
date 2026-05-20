@@ -2,12 +2,13 @@
 
 ## Current Status
 
-- Status: ROB-387 repo-only milestone in progress.
-- Branch: `codex/rob-387-pdf-synthetic-decision`.
+- Status: ROB-388 final repo-only coordination package in progress.
+- Branch: `codex/rob-388-roadmap-coordination`.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
 - Live gates: Server/Kuma/Sentry writes are not approved by default.
-- Current start point for new work: ROB-387 repo-only decision PR.
+- Current start point for new work: ROB-367 live observation, only after an
+  explicit server/Kuma read-only gate.
 
 ## Roadmap Issue Status
 
@@ -20,9 +21,9 @@
   verification signal.
 - ROB-386: completed by PR #285, clean up production monitor runtime-name
   drift.
-- ROB-387: in progress, decide privacy-safe parent booking confirmation PDF
-  synthetic.
-- ROB-388: Long-horizon implementation coordinator for the full roadmap.
+- ROB-387: completed by PR #286, decide privacy-safe parent booking
+  confirmation PDF synthetic.
+- ROB-388: in progress, final long-horizon implementation coordinator package.
 - ROB-367: existing post-rebuild observation issue to receive final monitoring
   findings.
 - New roadmap issues: created in Linear on 2026-05-20.
@@ -163,7 +164,7 @@ handled before continuing to the next milestone.
 
 ### Milestone 6 - Optional Booking Confirmation PDF Synthetic Decision
 
-- Status: in progress on branch `codex/rob-387-pdf-synthetic-decision`.
+- Status: completed by PR #286.
 - Decision:
   - No live Kuma synthetic monitor for the parent booking confirmation PDF flow
     yet.
@@ -172,16 +173,32 @@ handled before continuing to the next milestone.
     confirmation hash or full confirmation URL.
   - Classified those values as bearer-like parent-facing access.
   - Added a dedicated decision document with future go criteria.
-- Pending:
-  - Final validation, PR creation, and babysitting.
+- Result:
+  - Babysat PR #286 until GitHub reported 7/7 checks green and clean
+    mergeability.
+  - Merged PR #286 into `origin/main` at `74f711ab`.
 
 ### Milestone 7 - ROB-367 Observation Integration
 
-- Status: not started.
+- Status: prepared for the later live observation gate.
+- Done:
+  - Added the final ROB-381 monitoring observation checklist to the ROB-367
+    Codex Workpad.
+  - Kept ROB-367 as a server/Kuma read-only live milestone; no production
+    change or live monitor edit is part of ROB-388.
+- Pending:
+  - Run ROB-367 after an explicitly approved production observation window.
 
 ### Milestone 8 - Final Review Package
 
-- Status: not started.
+- Status: in progress on branch `codex/rob-388-roadmap-coordination`.
+- Done:
+  - Reconciled the long-horizon implementation log with PRs #280, #281, #283,
+    #284, #285, and #286.
+  - Reconciled the monitoring target concept with shipped repo-only milestones
+    and remaining live gates.
+- Pending:
+  - Final validation, PR creation, and babysitting.
 
 ## Validation Log
 
@@ -321,6 +338,24 @@ Result: whitespace checks passed, grep hits were limited to placeholders,
 public URLs, and documentation terms such as confirmation hash/URL, and the full
 quick pre-PR gate passed.
 
+### 2026-05-20 - ROB-387 PR Babysitting And Merge
+
+- PR #286 watched with `.codex/skills/babysit-pr/SKILL.md`.
+- GitHub checks reached 7/7 passed.
+- PR mergeability reached `CLEAN`.
+- No review comments were surfaced by the watcher.
+- PR #286 merged into `origin/main` at `74f711ab`.
+
+### 2026-05-20 - ROB-388 Coordination Validation
+
+- `git diff --check`
+- secret/PII grep over changed ROB-388 docs
+- `bash ./scripts/ci/pre_pr_quick.sh`
+
+Result: whitespace checks passed, grep hits were limited to public URLs,
+placeholders, and documentation terms such as token, secret, Push URL, and
+confirmation hash/URL, and the full quick pre-PR gate passed.
+
 ## Known Risks
 
 - Linear connector may be intermittently unavailable.
@@ -331,6 +366,20 @@ quick pre-PR gate passed.
 
 ## Final Shipped State
 
-ROB-383 shipped repo-only. Sentry live verification remains a later gated step
-that needs a secure token or connector path; no Server, Kuma, or Sentry live
-configuration was changed by this milestone.
+The repo-only ROB-381 implementation roadmap shipped through ROB-387 and the
+ROB-388 coordination package now records the final state. The app-log
+classification, Sentry redaction/context hardening, deep-health secret-boundary
+docs, backup/restore freshness split, PHP-FPM runtime-name alignment, and
+parent booking confirmation PDF synthetic decision are all represented in repo
+artifacts.
+
+Remaining live work is intentionally gated:
+
+- Sentry live verification still needs a secure token or connector path.
+- Kuma live renames/header audits/new Push monitors require explicit Kuma
+  access approval.
+- ROB-367 production observation requires read-only server/Kuma checks after an
+  approved observation window.
+
+No Server, Kuma, or Sentry live configuration was changed by the repo-only
+long-horizon implementation run.
