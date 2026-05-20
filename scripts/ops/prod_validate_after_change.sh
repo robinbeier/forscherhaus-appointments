@@ -75,9 +75,21 @@ REGEX
         grep -Ev "$(app_log_known_noise_regex)" "$input_file" > "$output_file" || true
     }
 
+    app_log_error_like_regex() {
+        cat <<'REGEX'
+^(ERROR|CRITICAL)[[:space:]-]|^(Fatal error|Uncaught)|^PHP (Fatal error|Parse error|Recoverable fatal error)
+REGEX
+    }
+
+    app_log_extract_error_like_file() {
+        local input_file="$1"
+        local output_file="$2"
+        grep -Eh "$(app_log_error_like_regex)" "$input_file" > "$output_file" 2>/dev/null || true
+    }
+
     app_log_count_error_like_file() {
         local input_file="$1"
-        grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$input_file" 2>/dev/null \
+        grep -Eh "$(app_log_error_like_regex)" "$input_file" 2>/dev/null \
             | wc -l \
             | awk '{print $1}'
     }
@@ -129,7 +141,7 @@ app_error_count() {
     while IFS= read -r -d '' file; do
         tmp_matches="$(mktemp)"
         tmp_actionable="$(mktemp)"
-        grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$file" > "$tmp_matches" 2>/dev/null || true
+        app_log_extract_error_like_file "$file" "$tmp_matches"
         app_log_filter_actionable_file "$tmp_matches" "$tmp_actionable"
         matches="$(app_log_count_error_like_file "$tmp_actionable" || true)"
         count=$((count + matches))

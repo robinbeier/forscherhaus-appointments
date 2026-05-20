@@ -70,12 +70,13 @@ app_error_count() {
     local count=0
     local file
     local matches
+    local error_like_regex='^(ERROR|CRITICAL)[[:space:]-]|^(Fatal error|Uncaught)|^PHP (Fatal error|Parse error|Recoverable fatal error)'
     if [[ ! -d /var/www/html/easyappointments/storage/logs ]]; then
         printf 'missing'
         return
     fi
     while IFS= read -r -d '' file; do
-        matches="$(grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$file" 2>/dev/null | wc -l | awk '{print $1}' || true)"
+        matches="$(grep -Eh "$error_like_regex" "$file" 2>/dev/null | wc -l | awk '{print $1}' || true)"
         count=$((count + matches))
     done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
     printf '%s' "$count"
