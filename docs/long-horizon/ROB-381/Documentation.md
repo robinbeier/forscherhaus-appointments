@@ -89,7 +89,17 @@ handled before continuing to the next milestone.
 
 ### Milestone 2 - Sentry Redaction And Event Context Hardening
 
-- Status: next repo-only implementation milestone.
+- Status: in progress on branch `codex/rob-383-sentry-hardening`.
+- Done:
+  - Added central Sentry extra/request/user scrubbing in `SentryBootstrap`.
+  - Added safe digest helper for bearer-like correlation values.
+  - Removed raw appointment hash from booking confirmation capture.
+  - Replaced PDF renderer endpoint URL extras with endpoint-kind categories.
+  - Added a dry-run-by-default Sentry delivery smoke script gated by
+    `SENTRY_SMOKE_SEND=1`.
+  - Documented the Sentry data policy in `docs/observability.md`.
+- Pending:
+  - Full milestone validation and PR babysitting.
 - Gate: secure Sentry token/connector needed only for live verification, not for
   repo-side code hardening.
 
@@ -133,6 +143,23 @@ handled before continuing to the next milestone.
 
 Result: passed. The only secret-scan text hit was an intentional documentation
 warning that `config.php` must not be printed.
+
+### 2026-05-20 - ROB-383 Focused Validation
+
+- `php -l application/bootstrap/SentryBootstrap.php`
+- `php -l application/controllers/Booking_confirmation.php`
+- `php -l application/libraries/Pdf_renderer.php`
+- `php -l tests/Unit/Bootstrap/SentryBootstrapTest.php`
+- `php -l tests/Unit/Controllers/BookingConfirmationControllerTest.php`
+- `php -l tests/Unit/Libraries/PdfRendererTest.php`
+- `php -l scripts/ops/sentry_smoke.php`
+- `php scripts/ops/sentry_smoke.php`
+- `docker compose run --rm -e APP_ENV=testing php-fpm php vendor/bin/phpunit tests/Unit/Bootstrap/SentryBootstrapTest.php tests/Unit/Controllers/BookingConfirmationControllerTest.php tests/Unit/Libraries/PdfRendererTest.php`
+- `bash ./scripts/ci/pre_pr_quick.sh`
+
+Result: focused syntax and PHPUnit checks passed after tightening route
+scrubbing for booking-confirmation URLs. Sentry smoke dry-run passed without
+sending a live event. Full `pre_pr_quick` also passed.
 
 ## Known Risks
 

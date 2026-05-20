@@ -10,6 +10,7 @@ use Sentry\State\Hub;
 use Sentry\Transport\Result;
 use Sentry\Transport\ResultStatus;
 use Sentry\Transport\TransportInterface;
+use SentryBootstrap;
 use Tests\TestCase;
 
 require_once APPPATH . 'bootstrap/SentryBootstrap.php';
@@ -39,22 +40,21 @@ class BookingConfirmationControllerTest extends TestCase
                 }
             };
 
-            $controller->callCaptureConfirmationException(
-                new InvalidArgumentException('missing relation'),
-                'hash-123',
-            );
+            $controller->callCaptureConfirmationException(new InvalidArgumentException('missing relation'), 'hash-123');
 
             \Sentry\flush();
 
             $this->assertNotNull($transport->event);
             $this->assertSame('booking_confirmation', $transport->event->getTags()['area'] ?? null);
+            $this->assertSame('resolve_related_entities', $transport->event->getTags()['operation'] ?? null);
+            $this->assertArrayNotHasKey('appointment_hash', $transport->event->getExtra());
+            $this->assertTrue($transport->event->getExtra()['appointment_hash_present'] ?? false);
             $this->assertSame(
-                'resolve_related_entities',
-                $transport->event->getTags()['operation'] ?? null,
+                SentryBootstrap::safeDigest('hash-123'),
+                $transport->event->getExtra()['appointment_hash_digest'] ?? null,
             );
-            $this->assertSame('hash-123', $transport->event->getExtra()['appointment_hash'] ?? null);
             $this->assertSame(
-                '/index.php/booking_confirmation/of/hash-123',
+                '/index.php/booking_confirmation/of/[redacted]',
                 $transport->event->getExtra()['request_uri'] ?? null,
             );
         } finally {
@@ -65,7 +65,7 @@ class BookingConfirmationControllerTest extends TestCase
 
     private function createMemoryTransport(): TransportInterface
     {
-        return new class() implements TransportInterface {
+        return new class implements TransportInterface {
             public ?Event $event = null;
 
             public function send(Event $event): Result

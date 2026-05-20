@@ -3,6 +3,12 @@ declare(strict_types=1);
 
 final class SentryBootstrap
 {
+    private const SENSITIVE_CONTEXT_KEY_PATTERN =
+        '/(^|_)(' .
+        'appointment_hash|confirmation_hash|recovery_token|token|secret|password|passwd|authorization|cookie|dsn|' .
+        'push_url|raw_request_body|request_body|email|phone|customer_name|provider_name|db_password|database_url' .
+        ')(_|$)/i';
+
     /**
      * @param array<string, string> $server
      */
@@ -52,6 +58,7 @@ final class SentryBootstrap
             'dsn' => $dsn,
             'environment' => $environment,
             'send_default_pii' => self::parseBooleanValue($env['SENTRY_SEND_DEFAULT_PII'] ?? null, false),
+            'before_send' => [self::class, 'scrubEvent'],
         ];
 
         $release = self::readReleaseIdentifier($releaseFile);
@@ -99,8 +106,10 @@ final class SentryBootstrap
             return;
         }
 
+        $safeExtra = self::scrubContextArray($extra);
+
         try {
-            \Sentry\withScope(function ($scope) use ($exception, $tags, $extra): void {
+            \Sentry\withScope(function ($scope) use ($exception, $tags, $safeExtra): void {
                 foreach ($tags as $key => $value) {
                     $normalizedKey = trim((string) $key);
                     $normalizedValue = trim((string) $value);
@@ -112,7 +121,7 @@ final class SentryBootstrap
                     $scope->setTag($normalizedKey, $normalizedValue);
                 }
 
-                foreach ($extra as $key => $value) {
+                foreach ($safeExtra as $key => $value) {
                     $normalizedKey = trim((string) $key);
 
                     if ($normalizedKey === '') {
@@ -129,6 +138,51 @@ final class SentryBootstrap
         }
     }
 
+    public static function scrubEvent(\Sentry\Event $event, ?\Sentry\EventHint $hint = null): \Sentry\Event
+    {
+        $event->setExtra(self::scrubContextArray($event->getExtra()));
+        $event->setRequest(self::scrubContextArray($event->getRequest()));
+        $event->setUser(null);
+
+        foreach ($event->getContexts() as $name => $context) {
+            $event->setContext((string) $name, self::scrubContextArray($context));
+        }
+
+        return $event;
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    public static function scrubContextArray(array $context): array
+    {
+        $scrubbed = [];
+
+        foreach ($context as $key => $value) {
+            $normalizedKey = trim((string) $key);
+
+            if ($normalizedKey === '') {
+                continue;
+            }
+
+            $scrubbed[$normalizedKey] = self::scrubContextValue($normalizedKey, $value);
+        }
+
+        return $scrubbed;
+    }
+
+    public static function safeDigest(?string $value): ?string
+    {
+        $normalized = trim((string) $value);
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        return substr(hash('sha256', $normalized), 0, 16);
+    }
+
     private static function parseOptionalFloat(mixed $value): ?float
     {
         if ($value === null) {
@@ -141,6 +195,55 @@ final class SentryBootstrap
         }
 
         return (float) $normalized;
+    }
+
+    private static function scrubContextValue(string $key, mixed $value): mixed
+    {
+        if (self::isSensitiveContextKey($key)) {
+            return '[redacted]';
+        }
+
+        if (is_array($value)) {
+            return self::scrubContextArray($value);
+        }
+
+        if (is_string($value)) {
+            return self::scrubString($value);
+        }
+
+        return $value;
+    }
+
+    private static function isSensitiveContextKey(string $key): bool
+    {
+        if (preg_match('/(^|_)(appointment_hash|confirmation_hash)_(digest|present)$/i', $key) === 1) {
+            return false;
+        }
+
+        return preg_match(self::SENSITIVE_CONTEXT_KEY_PATTERN, $key) === 1;
+    }
+
+    private static function scrubString(string $value): string
+    {
+        $scrubbed = preg_replace('/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i', '[redacted-email]', $value);
+        $scrubbed = is_string($scrubbed) ? $scrubbed : $value;
+
+        $scrubbed = preg_replace(
+            '~/(booking_confirmation/of|appointments/ics|booking|calendar/(?:index|reschedule)|backend/index)/[^/?#]+~i',
+            '/$1/[redacted]',
+            $scrubbed,
+        );
+        $scrubbed = is_string($scrubbed) ? $scrubbed : $value;
+
+        $scrubbed = preg_replace('#/push/[A-Za-z0-9_-]+#', '/push/[redacted]', $scrubbed);
+        $scrubbed = is_string($scrubbed) ? $scrubbed : $value;
+
+        if (str_contains($scrubbed, '?')) {
+            $parts = explode('?', $scrubbed, 2);
+            $scrubbed = $parts[0] . '?[redacted-query]';
+        }
+
+        return $scrubbed;
     }
 
     private static function parseBooleanValue(mixed $value, bool $default): bool

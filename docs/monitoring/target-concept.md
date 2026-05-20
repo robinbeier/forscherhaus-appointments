@@ -160,11 +160,13 @@ Recommended extra context:
 - PDF duration/status and endpoint count, not HTML or payload;
 - sync provider count or provider class, not provider names or tokens.
 
-Current context to change:
+Current context changed by ROB-383:
 
-- Replace raw `appointment_hash` in booking confirmation capture with a
-  non-reversible digest, a short prefix, or a boolean like
-  `appointment_hash_present=true`.
+- Booking confirmation capture no longer sends raw `appointment_hash`; it sends
+  `appointment_hash_present` and a short non-reversible digest.
+- PDF renderer capture sends endpoint categories, not concrete renderer URLs.
+- `SentryBootstrap` scrubs explicit extras and installs a `before_send`
+  scrubber for event extras/request data/user context.
 
 ### Redaction
 

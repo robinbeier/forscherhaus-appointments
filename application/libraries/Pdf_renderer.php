@@ -313,12 +313,32 @@ class Pdf_renderer
     protected function buildRendererFailureContext(): array
     {
         return [
-            'endpoints' => $this->endpoints,
-            'primary_endpoint' => $this->endpoints[0] ?? null,
+            'endpoint_kinds' => array_map(
+                fn(string $endpoint): string => $this->classifyEndpointKind($endpoint),
+                $this->endpoints,
+            ),
+            'primary_endpoint_kind' => isset($this->endpoints[0])
+                ? $this->classifyEndpointKind($this->endpoints[0])
+                : null,
             'endpoint_count' => count($this->endpoints),
             'container_runtime' => $this->isContainerRuntime(),
             'local_environment' => $this->isLocalEnvironment(),
         ];
+    }
+
+    protected function classifyEndpointKind(string $endpoint): string
+    {
+        $host = parse_url($endpoint, PHP_URL_HOST);
+
+        if (is_string($host) && in_array(strtolower($host), ['localhost', '127.0.0.1', '::1'], true)) {
+            return 'loopback';
+        }
+
+        if ($host === 'pdf-renderer') {
+            return 'docker_dns';
+        }
+
+        return 'configured';
     }
 
     protected function logRendererFailure(string $endpoint, Throwable $exception): void

@@ -46,6 +46,7 @@ class SentryBootstrapTest extends TestCase
             $this->assertSame('dasforscherhaus-leg.de', $options['server_name']);
             $this->assertSame(0.05, $options['traces_sample_rate']);
             $this->assertTrue($options['send_default_pii']);
+            $this->assertIsCallable($options['before_send']);
         } finally {
             @unlink($releaseFile);
         }
@@ -76,6 +77,7 @@ class SentryBootstrapTest extends TestCase
             $this->assertFalse($options['send_default_pii']);
             $this->assertSame('apache.example.test', $options['server_name']);
             $this->assertSame('ea_20260314_2316', $options['release']);
+            $this->assertIsCallable($options['before_send']);
         } finally {
             @unlink($releaseFile);
 
@@ -143,5 +145,84 @@ class SentryBootstrapTest extends TestCase
         );
 
         SentrySdk::setCurrentHub(new Hub());
+    }
+
+    public function testCaptureExceptionScrubsSensitiveExtraBeforeSend(): void
+    {
+        $transport = new class implements TransportInterface {
+            public ?Event $event = null;
+
+            public function send(Event $event): Result
+            {
+                $this->event = $event;
+
+                return new Result(ResultStatus::success(), $event);
+            }
+
+            public function close(?int $timeout = null): Result
+            {
+                return new Result(ResultStatus::success(), $this->event);
+            }
+        };
+
+        \Sentry\init([
+            'dsn' => 'https://examplePublicKey@o0.ingest.sentry.io/1',
+            'default_integrations' => false,
+            'transport' => $transport,
+        ]);
+
+        SentryBootstrap::captureException(
+            new RuntimeException('booking confirmation smoke'),
+            ['area' => 'booking_confirmation'],
+            [
+                'appointment_hash' => 'hash-123',
+                'appointment_hash_digest' => SentryBootstrap::safeDigest('hash-123'),
+                'appointment_hash_present' => true,
+                'request_uri' => '/index.php/booking_confirmation/of/hash-123?token=secret',
+                'customer_email' => 'parent@example.test',
+                'nested' => [
+                    'authorization' => 'Bearer secret',
+                    'note' => 'send to parent@example.test',
+                ],
+            ],
+        );
+
+        \Sentry\flush();
+
+        $this->assertNotNull($transport->event);
+        $extra = $transport->event->getExtra();
+
+        $this->assertSame('[redacted]', $extra['appointment_hash'] ?? null);
+        $this->assertSame(SentryBootstrap::safeDigest('hash-123'), $extra['appointment_hash_digest'] ?? null);
+        $this->assertTrue($extra['appointment_hash_present'] ?? false);
+        $this->assertSame(
+            '/index.php/booking_confirmation/of/[redacted]?[redacted-query]',
+            $extra['request_uri'] ?? null,
+        );
+        $this->assertSame('[redacted]', $extra['customer_email'] ?? null);
+        $this->assertSame('[redacted]', $extra['nested']['authorization'] ?? null);
+        $this->assertSame('send to [redacted-email]', $extra['nested']['note'] ?? null);
+
+        SentrySdk::setCurrentHub(new Hub());
+    }
+
+    public function testScrubEventRemovesUserAndSanitizesRequest(): void
+    {
+        $event = Event::createEvent();
+        $event->setRequest([
+            'url' => 'https://example.test/booking/hash-123?appointment_hash=hash-123',
+            'headers' => [
+                'authorization' => 'Bearer secret',
+            ],
+        ]);
+
+        $scrubbed = SentryBootstrap::scrubEvent($event);
+
+        $this->assertNull($scrubbed->getUser());
+        $this->assertSame(
+            'https://example.test/booking/[redacted]?[redacted-query]',
+            $scrubbed->getRequest()['url'] ?? null,
+        );
+        $this->assertSame('[redacted]', $scrubbed->getRequest()['headers']['authorization'] ?? null);
     }
 }
