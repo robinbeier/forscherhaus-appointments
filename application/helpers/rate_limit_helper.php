@@ -12,17 +12,6 @@
  * ---------------------------------------------------------------------------- */
 
 if (!function_exists('rate_limit')) {
-    function rate_limit_is_forward_proxy_probe(?string $method = null, ?string $request_uri = null): bool
-    {
-        $normalized_method = strtoupper(trim((string) ($method ?? ($_SERVER['REQUEST_METHOD'] ?? ''))));
-
-        if ($normalized_method === 'CONNECT') {
-            return true;
-        }
-
-        return false;
-    }
-
     function rate_limit_is_local_loopback_request(string $ip, ?string $host = null): bool
     {
         $normalizedIp = trim($ip);
@@ -69,7 +58,6 @@ if (!function_exists('rate_limit')) {
         if (
             !$rate_limiting ||
             is_cli() ||
-            rate_limit_is_forward_proxy_probe() ||
             rate_limit_is_local_loopback_request($ip, $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? null))
         ) {
             return;
