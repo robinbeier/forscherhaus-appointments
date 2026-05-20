@@ -32,7 +32,12 @@ Read-only inventory captured on 2026-05-14:
 - data volume: `uptime-kuma_uptime-kuma-data` mounted at `/app/data`
 - database file: `/app/data/kuma.db`
 
-Active monitors:
+Active monitors were captured on 2026-05-14. The repo desired-state catalog now
+also includes reviewed follow-up changes, such as the ROB-385 split between
+restore-verification freshness and backup-creation freshness. Any live Kuma
+rename or new monitor creation remains an explicit Kuma write gate.
+
+Repo desired monitor catalog:
 
 | Name | Type | Interval | Secret handling |
 | --- | --- | ---: | --- |
@@ -41,7 +46,8 @@ Active monitors:
 | App - Health Deep | `json-query` | 30s | `X-Health-Token` header value in Kuma/host-local config only |
 | Host - Services | `push` | 60s | `KUMA_PUSH_URL_HOST_SERVICES` |
 | Host - Resources | `push` | 60s | `KUMA_PUSH_URL_HOST_RESOURCES` |
-| Ops - Jobs Freshness | `push` | 900s | `KUMA_PUSH_URL_OPS_JOBS` |
+| Ops - Restore Verify Freshness | `push` | 900s | `KUMA_PUSH_URL_OPS_JOBS` |
+| Ops - Backup Creation Freshness | `push` | 900s | `KUMA_PUSH_URL_BACKUP_CREATION` |
 | App - PDF Renderer | `json-query` | 30s | same `X-Health-Token` boundary as deep health |
 | App - Log Errors | `push` | 60s | `KUMA_PUSH_URL_APP_LOGS` |
 | App - php8.3-fpm Log Errors | `push` | 60s | `KUMA_PUSH_URL_PHP_FPM_LOGS` |
@@ -127,7 +133,9 @@ production schedule runs:
 
 - host services every minute
 - host resources every minute
-- backup/job freshness every 15 minutes
+- restore-verification freshness every 15 minutes
+- backup-creation freshness every 15 minutes after the host-local backup job
+  writes its success marker
 - app log errors every minute plus a 30 second staggered run
 - php-fpm log errors every minute
 - PDF renderer log errors every minute
@@ -139,6 +147,20 @@ for externally generated scanner/proxy traffic that was observed while `/`,
 `/health`, and `/index.php/healthz` remained green. Additional
 `KUMA_APP_LOG_IGNORE_REGEX` values stay host-local and must not hide broad
 classes such as all 404s or all PHP warnings.
+
+`Ops - Restore Verify Freshness` and `Ops - Backup Creation Freshness` are
+separate by design:
+
+- `kuma_push_ops_jobs.sh` reads only `last_verify_success.utc` and proves that a
+  restore-verification flow completed recently.
+- `kuma_push_backup_creation.sh` reads only `last_backup_success.utc` and proves
+  that a backup-creation flow completed recently.
+- Neither monitor reads backup contents, lists backup directories, validates
+  off-host retention, or proves end-to-end restoreability alone.
+
+If the live Kuma UI still shows the older `Ops - Jobs Freshness` name, treat the
+repo desired-state rename as a gated Kuma write. Until that live rename happens,
+the monitor's intended meaning is restore-verification freshness.
 
 ## Backup and Restore
 

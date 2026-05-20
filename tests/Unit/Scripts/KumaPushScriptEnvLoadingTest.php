@@ -249,6 +249,104 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
         }
     }
 
+    public function testOpsJobsMonitorReportsRestoreVerifyFreshness(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $envFile = $workspace . '/ops-jobs.env';
+            $markerFile = $workspace . '/last_verify_success.utc';
+            $curlArgsFile = $workspace . '/curl-args.txt';
+
+            file_put_contents($markerFile, gmdate('c'));
+            file_put_contents(
+                $envFile,
+                implode(PHP_EOL, [
+                    'KUMA_PUSH_URL_OPS_JOBS=https://kuma.example/ops-jobs',
+                    'KUMA_OPS_JOBS_VERIFY_FILE=' . $markerFile,
+                    'KUMA_OPS_JOBS_MAX_VERIFY_AGE_MINUTES=60',
+                    '',
+                ]),
+            );
+
+            $this->writeStub(
+                $workspace . '/bin/curl',
+                <<<'BASH'
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf '%s\n' "$*" > "$CURL_ARGS_FILE"
+                exit 0
+                BASH
+                ,
+            );
+
+            $result = $this->runCommand(['bash', 'scripts/ops/kuma_push_ops_jobs.sh'], $this->repoRoot(), [
+                'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
+                'KUMA_PUSH_ENV_FILE' => $envFile,
+                'CURL_ARGS_FILE' => $curlArgsFile,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertMatchesRegularExpression('/OK restore_verify_age_minutes=\d+ max=60/', $result['stdout']);
+
+            $curlArgs = file_get_contents($curlArgsFile);
+            self::assertIsString($curlArgs);
+            self::assertStringContainsString('https://kuma.example/ops-jobs', $curlArgs);
+            self::assertStringContainsString('msg=OK restore_verify_age_minutes=', $curlArgs);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testBackupCreationMonitorReportsMarkerFreshness(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $envFile = $workspace . '/backup-creation.env';
+            $markerFile = $workspace . '/last_backup_success.utc';
+            $curlArgsFile = $workspace . '/curl-args.txt';
+
+            file_put_contents($markerFile, gmdate('c'));
+            file_put_contents(
+                $envFile,
+                implode(PHP_EOL, [
+                    'KUMA_PUSH_URL_BACKUP_CREATION=https://kuma.example/backup-creation',
+                    'KUMA_BACKUP_CREATION_MARKER_FILE=' . $markerFile,
+                    'KUMA_BACKUP_CREATION_MAX_AGE_MINUTES=60',
+                    '',
+                ]),
+            );
+
+            $this->writeStub(
+                $workspace . '/bin/curl',
+                <<<'BASH'
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf '%s\n' "$*" > "$CURL_ARGS_FILE"
+                exit 0
+                BASH
+                ,
+            );
+
+            $result = $this->runCommand(['bash', 'scripts/ops/kuma_push_backup_creation.sh'], $this->repoRoot(), [
+                'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
+                'KUMA_PUSH_ENV_FILE' => $envFile,
+                'CURL_ARGS_FILE' => $curlArgsFile,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertMatchesRegularExpression('/OK backup_age_minutes=\d+ max=60/', $result['stdout']);
+
+            $curlArgs = file_get_contents($curlArgsFile);
+            self::assertIsString($curlArgs);
+            self::assertStringContainsString('https://kuma.example/backup-creation', $curlArgs);
+            self::assertStringContainsString('msg=OK backup_age_minutes=', $curlArgs);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     /**
      * @param list<string> $command
      * @param array<string, string> $env

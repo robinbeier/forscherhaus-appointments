@@ -1,6 +1,9 @@
-# Uptime Kuma desired-state mirror captured from production on 2026-05-14.
+# Uptime Kuma desired-state mirror captured from production on 2026-05-14 and
+# extended by reviewed repo-only monitoring follow-ups.
 # This is a template for manual or scripted reconstruction. It intentionally
 # omits Push tokens and other secret values.
+# Entries added or renamed after the production capture require an explicit
+# live Kuma gate before the UI is expected to match exactly.
 
 container:
     image: louislam/uptime-kuma:2.3.2
@@ -61,12 +64,19 @@ monitors:
       max_retries: 1
       env_var: KUMA_PUSH_URL_HOST_RESOURCES
     - id: 7
-      name: Ops - Jobs Freshness
+      name: Ops - Restore Verify Freshness
       type: push
       interval: 900
       retry_interval: 900
       max_retries: 1
       env_var: KUMA_PUSH_URL_OPS_JOBS
+    - id: 14
+      name: Ops - Backup Creation Freshness
+      type: push
+      interval: 900
+      retry_interval: 900
+      max_retries: 1
+      env_var: KUMA_PUSH_URL_BACKUP_CREATION
     - id: 8
       name: App - PDF Renderer
       type: json-query

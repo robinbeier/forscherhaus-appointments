@@ -2,21 +2,22 @@
 
 ## Current Status
 
-- Status: ROB-384 repo-only milestone in progress.
-- Branch: `codex/rob-384-kuma-secret-boundary`.
+- Status: ROB-385 repo-only milestone in progress.
+- Branch: `codex/rob-385-backup-freshness`.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
 - Live gates: Server/Kuma/Sentry writes are not approved by default.
-- Current start point for new work: ROB-384 repo-only PR.
+- Current start point for new work: ROB-385 repo-only PR.
 
 ## Roadmap Issue Status
 
 - ROB-381: audit and target concept source issue.
 - ROB-382: completed by PR #280, app-log noise classification.
 - ROB-383: completed by PR #281, Sentry redaction and event-context hardening.
-- ROB-384: in progress, Kuma deep-health secret-boundary documentation and
-  header audit.
-- ROB-385: Split backup creation freshness from restore verification signal.
+- ROB-384: completed by PR #283, Kuma deep-health secret-boundary documentation
+  and header audit.
+- ROB-385: in progress, split backup creation freshness from restore
+  verification signal.
 - ROB-386: Clean up production monitor runtime-name drift.
 - ROB-387: Decide privacy-safe parent booking confirmation PDF synthetic.
 - ROB-388: Long-horizon implementation coordinator for the full roadmap.
@@ -106,7 +107,7 @@ handled before continuing to the next milestone.
 
 ### Milestone 3 - Deep Health And Kuma Secret Boundary Cleanup
 
-- Status: in progress on branch `codex/rob-384-kuma-secret-boundary`.
+- Status: completed by PR #283.
 - Done:
   - Corrected Kuma desired-state docs so `App - Health Deep` and
     `App - PDF Renderer` require `X-Health-Token` as a host/Kuma-local secret.
@@ -115,12 +116,24 @@ handled before continuing to the next milestone.
   - Added agent diagnosis guidance for `401` vs `503` deep-health failures.
   - Updated the server-local agent README template to name the health token path
     as secret-bearing without exposing its contents.
-- Pending:
-  - Final validation, PR creation, and babysitting.
+  - Babysat PR #283 until GitHub reported 7/7 checks green and clean
+    mergeability.
+  - Merged PR #283 into `origin/main` at `cf99f70e`.
 
 ### Milestone 4 - Backup Creation Vs Restore-Verify Freshness
 
-- Status: not started.
+- Status: in progress on branch `codex/rob-385-backup-freshness`.
+- Done:
+  - Confirmed `kuma_push_ops_jobs.sh` reads only
+    `last_verify_success.utc`, so it proves restore-verification freshness,
+    not backup creation freshness.
+  - Renamed the desired-state monitor to `Ops - Restore Verify Freshness`.
+  - Added a separate `kuma_push_backup_creation.sh` marker-based Push script
+    for `last_backup_success.utc`.
+  - Added the new Push env variable, cron template entry, desired-state monitor,
+    docs, and unit coverage.
+- Pending:
+  - Final validation, PR creation, and babysitting.
 
 ### Milestone 5 - Runtime Monitor Naming Drift Cleanup
 
@@ -192,6 +205,26 @@ sending a live event. Full `pre_pr_quick` also passed.
 Result: desired-state YAML parsed with 12 monitors, no secret-pattern hits in
 the changed files, no stale public-only wording for tokenized deep-health
 monitors, public shallow health returned `OK`, and full `pre_pr_quick` passed.
+
+### 2026-05-20 - ROB-384 PR Babysitting And Merge
+
+- PR #283 watched with `.codex/skills/babysit-pr/SKILL.md`.
+- GitHub checks reached 7/7 passed.
+- PR mergeability reached `CLEAN`.
+- No review comments were surfaced by the watcher.
+- PR #283 merged into `origin/main` at `cf99f70e`.
+
+### 2026-05-20 - ROB-385 Focused Validation
+
+- `bash -n scripts/ops/kuma_push_ops_jobs.sh scripts/ops/kuma_push_backup_creation.sh`
+- `php -l tests/Unit/Scripts/KumaPushScriptEnvLoadingTest.php`
+- `ruby -e "require 'yaml'; data = YAML.load_file('scripts/ops/uptime-kuma.monitors.yml'); raise 'bad monitors' unless data['monitors'].is_a?(Array); puts \"monitors #{data['monitors'].length}\""`
+- `docker compose run --rm -e APP_ENV=testing php-fpm php vendor/bin/phpunit tests/Unit/Scripts/KumaPushScriptEnvLoadingTest.php`
+- `bash ./scripts/ci/pre_pr_quick.sh`
+
+Result: shell/PHP syntax passed, desired-state YAML parsed with 13 monitors,
+focused Kuma Push script PHPUnit coverage passed with 5 tests and 39
+assertions, and the full quick pre-PR gate passed.
 
 ## Known Risks
 

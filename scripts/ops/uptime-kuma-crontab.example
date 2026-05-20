@@ -4,6 +4,7 @@
 * * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_host_services.sh
 * * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_host_resources.sh
 */15 * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_ops_jobs.sh
+*/15 * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_backup_creation.sh
 * * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_app_logs.sh
 * * * * * sleep 30; KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_app_logs.sh
 * * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_php_fpm_logs.sh
