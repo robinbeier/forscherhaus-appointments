@@ -20,11 +20,11 @@ final class RateLimitHelperTest extends TestCase
         $this->assertFalse(rate_limit_is_local_loopback_request('203.0.113.10', 'localhost'));
     }
 
-    public function testForwardProxyProbeDetectionCatchesConnectAndAbsoluteUris(): void
+    public function testForwardProxyProbeDetectionOnlyCatchesConnectRequests(): void
     {
         $this->assertTrue(rate_limit_is_forward_proxy_probe('CONNECT', 'www.example.test:443'));
-        $this->assertTrue(rate_limit_is_forward_proxy_probe('GET', 'http://example.test/'));
-        $this->assertTrue(rate_limit_is_forward_proxy_probe('GET', 'https://example.test/path'));
+        $this->assertFalse(rate_limit_is_forward_proxy_probe('GET', 'http://example.test/'));
+        $this->assertFalse(rate_limit_is_forward_proxy_probe('GET', 'https://example.test/path'));
         $this->assertFalse(rate_limit_is_forward_proxy_probe('GET', '/appointments'));
         $this->assertFalse(rate_limit_is_forward_proxy_probe('POST', '/index.php/booking/register'));
     }
