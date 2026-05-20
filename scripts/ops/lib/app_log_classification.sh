@@ -24,10 +24,23 @@ app_log_filter_actionable_file() {
   rm -f "$tmp_file"
 }
 
+app_log_error_like_regex() {
+  cat <<'REGEX'
+^(ERROR|CRITICAL)[[:space:]-]|^(Fatal error|Uncaught)|^PHP (Fatal error|Parse error|Recoverable fatal error)
+REGEX
+}
+
+app_log_extract_error_like_file() {
+  local input_file="$1"
+  local output_file="$2"
+
+  grep -Eh "$(app_log_error_like_regex)" "$input_file" > "$output_file" 2>/dev/null || true
+}
+
 app_log_count_error_like_file() {
   local input_file="$1"
 
-  grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$input_file" 2>/dev/null \
+  grep -Eh "$(app_log_error_like_regex)" "$input_file" 2>/dev/null \
     | wc -l \
     | awk '{print $1}'
 }
