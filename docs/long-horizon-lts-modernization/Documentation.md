@@ -241,6 +241,11 @@ Uptime Kuma:
   Decision: classify the post-rebuild state as stable with follow-ups. The accepted Ubuntu 26.04 operating model holds: PHP 8.5 FPM is the active runtime, MariaDB 11.8 remains healthy, the PDF renderer stays container-backed, Certbot/timers are active, Kuma is restored and green, and host Node remains intentionally absent. Follow-ups were created for live monitoring drift rather than mixing fixes into ROB-367: ROB-390 applies the live Kuma backup-creation vs restore-verification split, ROB-391 renames the stale live PHP-FPM monitor display from `php8.3-fpm` to `php8.5-fpm`, and ROB-392 tightens `prod_logs_summary.sh` so standalone stack/context lines are not counted as actionable app-log errors.
   Next: handle ROB-390, ROB-391, and ROB-392 as separate narrow issues; keep any Server/Kuma/Sentry write actions behind explicit approval gates.
 
+- 2026-05-20T15:43:21Z - Milestone 7 / ROB-390 and ROB-391 - Applied the approved live Kuma maintenance gate.
+  Validation: operator approved immediate SSH-based Kuma writes. A server-local Kuma SQLite backup was created before the write. `App - php8.3-fpm Log Errors` was renamed to `App - php8.5-fpm Log Errors`; `Ops - Jobs Freshness` was renamed to `Ops - Restore Verify Freshness`; `Ops - Backup Creation Freshness` was created as a separate Push monitor; the host-local Push env and cron gained the backup-creation signal; the missing split Push scripts were installed from the repository; manual restore-verify and backup-creation Push validation returned green messages with marker ages only; post-change Uptime Kuma summary showed `13` active monitors and `13` latest green. No Push URLs, token values, Kuma DB contents, backup contents, DB rows, or production data were recorded.
+  Decision: the live Kuma monitor catalog now matches the repo desired-state split for backup creation versus restore verification and the PHP 8.5 FPM display name. The post-change validation gate should expect `13` active/green monitors.
+  Next: keep future live Kuma changes behind explicit approval gates and keep generated Push secrets host-local only.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 is installed on the real Ubuntu 26.04 target host and the rebuilt
@@ -273,13 +278,11 @@ Uptime Kuma:
 - Temporary restore inputs were removed after explicit operator approval:
   `/root/rebuild-restore-inputs` and
   `/var/www/html/easyappointments_placeholder_after_failed_deploy` are absent.
-- Live Kuma monitor drift remains after the repo-only monitoring roadmap:
-  `Ops - Jobs Freshness` still needs the ROB-385 live split into restore
-  verification and backup creation freshness, and the PHP-FPM log monitor
-  display still needs the ROB-386 `php8.5-fpm` rename. Track these as ROB-390
-  and ROB-391; do not print Push URLs or Kuma token values while applying them.
-- `prod_logs_summary.sh` can overcount case-insensitive app-log context lines
-  as actionable errors. Track the repo-only cleanup as ROB-392.
+- Live Kuma monitor drift from the repo-only monitoring roadmap has been
+  closed for ROB-390 and ROB-391. Production now has separate restore-verify
+  and backup-creation freshness monitors plus the `php8.5-fpm` display name.
+- The ROB-392 app-log counting cleanup has shipped; keep future log-noise
+  changes narrow and regression-tested.
 - Old-server rollback is documented for the parallel-target model, but it is not
   the selected rollback path for the same-server rebuild.
 - The current Uptime Kuma live export restores successfully and preserves
