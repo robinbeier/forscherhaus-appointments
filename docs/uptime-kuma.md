@@ -34,8 +34,9 @@ Read-only inventory captured on 2026-05-14:
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
 also includes reviewed follow-up changes, such as the ROB-385 split between
-restore-verification freshness and backup-creation freshness. Any live Kuma
-rename or new monitor creation remains an explicit Kuma write gate.
+restore-verification freshness and backup-creation freshness. ROB-390 and
+ROB-391 applied the related live Kuma changes on 2026-05-20; future live Kuma
+renames or new monitor creation still require an explicit Kuma write gate.
 
 Repo desired monitor catalog:
 
@@ -229,17 +230,18 @@ Confirmed:
 - local HTTP smoke returned `HTTP/1.1 302 Found` to `/dashboard`
 - restored monitor metadata was readable from the local SQLite database
 
-Pending:
+Superseded by the 2026-05-15 live export and the 2026-05-20 ROB-390/ROB-391
+live gate:
 
-- create or approve a current backup of the live 12-monitor Kuma state
-- validate that the current backup restores all 12 monitors
-- validate that Push monitors go green with host-local env values
+- a current 12-monitor live export was validated on 2026-05-15;
+- ROB-390/ROB-391 moved the live state to 13 active monitors on 2026-05-20;
+- post-change validation showed 13 active monitors and 13 latest green.
 
 Important limitation:
 
 - the tested historical backup contains the earlier 7-monitor state, not the
-  current 12-monitor production state; restore mechanics are proven, but current
-  monitor parity still needs a fresh approved backup.
+  later 12- or 13-monitor production state; restore mechanics are proven, but
+  any future full-history migration should use a fresh approved live backup.
 
 ## 2026-05-15 Live Export
 

@@ -100,8 +100,8 @@ postdeploy health and canary gates pass.
 | Host - Resources | Detect disk/memory/load pressure | Kuma Push | Capacity | `kuma_push_host_resources.sh` | 60s | threshold breach | Identify path/process before cleanup | Medium | No process dumps in Push msg |
 | Ops - Restore Verify Freshness | Detect stale restore verification | Kuma Push | Backup | `kuma_push_ops_jobs.sh` restore-verify marker age | 15m | marker missing, invalid, or > 1440m | Renew backup/restore verification | Medium | Marker basename and age only; no backup contents |
 | Ops - Backup Creation Freshness | Prove backup creation job freshness | Kuma Push | Backup | `kuma_push_backup_creation.sh` backup-success marker age | 15m | marker missing, invalid, or > 1440m | Check backup creation job and storage | Medium | Marker basename and age only; no dump listing or backup contents |
-| App - Log Errors | Detect new unclassified app errors | Kuma Push | Error | `kuma_push_app_logs.sh` | 60s plus 30s stagger | new non-ignored `ERROR - ` lines | Classify with `prod_logs_summary.sh`; route to Sentry/issue if real | High until ROB-382 | Push URL secret; ignore regex targeted only |
-| App - php8.5-fpm Log Errors | Detect PHP-FPM service errors | Kuma Push | Error | `journalctl -u php8.5-fpm` | 60s | error count > threshold | Inspect PHP-FPM journal and app health | Medium | Live UI rename remains a Kuma gate if still stale |
+| App - Log Errors | Detect new unclassified app errors | Kuma Push | Error | `kuma_push_app_logs.sh` | 60s plus 30s stagger | new non-ignored `ERROR - ` lines | Classify with `prod_logs_summary.sh`; route to Sentry/issue if real | Low-medium after ROB-382/ROB-392 | Push URL secret; ignore regex targeted only |
+| App - php8.5-fpm Log Errors | Detect PHP-FPM service errors | Kuma Push | Error | `journalctl -u php8.5-fpm` | 60s | error count > threshold | Inspect PHP-FPM journal and app health | Medium | Live display name aligned by ROB-391; Push URL stays host-local |
 | App - PDF Renderer Log Errors | Detect renderer service errors | Kuma Push | Error | `journalctl -u fh-pdf-renderer` | 60s | error count > threshold | Inspect renderer container/service | Medium | No PDF content in messages |
 | App - Dashboard PDF Export | Prove live dashboard PDF path | Kuma Push script | Business/PDF | `kuma_push_pdf_export.sh` | 15m | gate rc != 0 or report missing | Check dashboard gate report, renderer, auth creds | Medium | Uses host-local gate credentials |
 | App - Booking Confirmation PDF | No-go for live synthetic until privacy-safe target exists | Release gate/manual only | Business/PDF | Booking confirmation PDF gate | Manual/release only | PDF cannot be downloaded/validated in approved gate | Use release/restored-data gate; do not add Kuma monitor yet | Medium-high | No real family hashes or reusable bearer links |
@@ -229,26 +229,26 @@ Change or clarify:
 - Document deep-health/PDF JSON monitors as requiring a secret header. Do not
   put the token in repo templates.
 - Keep the PHP-FPM log monitor display and script default aligned to
-  `php8.5-fpm`; a stale live Kuma display name is a gated rename.
+  `php8.5-fpm`; ROB-391 completed the live Kuma display-name alignment on
+  2026-05-20.
 - Verify production `KUMA_HOST_SERVICES_LIST` includes `cron`, `fail2ban`, and
   `unattended-upgrades`, or explicitly document why they are doctor-only.
-- Split or rename `Ops - Jobs Freshness` so it says restore verify freshness,
-  not generic jobs.
-- After ROB-382, make `App - Log Errors` ignore only proven scanner/proxy noise
-  while still alerting on new real app errors.
-- Update `prod_validate_after_change.sh` to classify known ignored app-log
-  lines consistently with the app-log monitor.
+- Keep backup creation and restore verification as separate signals; ROB-390
+  completed the live split and renamed the old generic jobs monitor on
+  2026-05-20.
+- Keep `App - Log Errors` limited to proven scanner/proxy noise ignores while
+  still alerting on new real app errors; ROB-382 and ROB-392 aligned the Kuma
+  script, app-log summary, and post-change validation logic.
 
 ### Add Only If Useful
 
 Add:
 
-- backup creation freshness if restore verify remains separate;
 - TLS/certbot freshness if not already covered by Kuma certificate features or
   post-change checks;
 - Sentry delivery smoke if production Sentry becomes operationally important.
 
-Add only after the first ROB-382 cleanup:
+Keep deferred after ROB-387:
 
 - parent booking confirmation PDF synthetic, and only if a privacy-safe stable
   synthetic confirmation can be maintained.
@@ -486,41 +486,49 @@ Recommended order:
    Completed by PR #283; live header audit remains gated.
    Labels: `Repo-only`, `Kuma`.
 4. ROB-385: Backup freshness vs restore-verify freshness split.
-   Completed by PR #284; live Push URL provisioning remains gated.
+   Completed by PR #284; live Push URL provisioning was completed by ROB-390.
    Labels: `Repo-only`, `Server`, `Kuma`.
 5. ROB-386: Production monitor runtime-name drift cleanup (`php8.3` to `php8.5`).
-   Completed by PR #285; live Kuma display-name change remains gated.
+   Completed by PR #285; live Kuma display-name alignment was completed by
+   ROB-391.
    Labels: `Repo-only`, `Kuma`, `Server`.
 6. ROB-387: decide privacy-safe parent confirmation PDF live synthetic.
    Completed by PR #286; decision is no live parent confirmation synthetic yet.
    Labels: `Needs decision`, `Repo-only`, `Kuma`.
 7. ROB-367: include monitoring soak and lessons learned.
-   Remains the next live observation gate, read-only unless separately
-   approved.
+   Completed as the post-rebuild observation handoff; follow-up live changes
+   were split into ROB-390, ROB-391, and ROB-392.
    Labels: `Server`, `Kuma`, `Repo-only`.
 8. ROB-388: run the full long-horizon implementation from
    `docs/long-horizon/ROB-381/`.
-   Final repo-only coordination package.
+   Completed by PR #287 as the final repo-only coordination package.
    Labels: `Repo-only first`, `Server gate`, `Kuma gate`, `Sentry gate`.
+9. ROB-390: split live backup-creation freshness from restore verification.
+   Completed on 2026-05-20; live Kuma summary showed 13 active monitors and
+   13 latest green after the change.
+   Labels: `Server`, `Kuma`.
+10. ROB-391: align live PHP-FPM monitor display name with `php8.5-fpm`.
+    Completed on 2026-05-20.
+    Labels: `Kuma`.
+11. ROB-392: tighten production app-log counting.
+    Completed by PR #289.
+    Labels: `Repo-only`, `Server`, `Kuma`.
 
 ## Short Summary
 
 Urgent:
 
-- Run ROB-367 as a read-only production observation after an explicitly
-  approved window.
-- Keep remaining Sentry/Kuma live verification gated until secrets can be used
+- Keep remaining Sentry live verification gated until secrets can be used
   through a secure token, connector, or host-local path.
 - Keep live Push URL, health-token, and parent-confirmation bearer-like values
   out of chat, Linear, docs, and git.
 
 Useful but not urgent:
 
-- Provision the new backup creation freshness Push monitor in Kuma.
-- Rename any stale live `php8.3-fpm` Kuma display name to `php8.5-fpm` while
-  preserving history if Kuma allows it.
 - Perform live Sentry ingestion verification with a sanitized smoke event after
   secure token/connector access exists.
+- Reconcile any future Kuma desired-state drift with redacted snapshots before
+  changing live monitors.
 - Revisit parent confirmation PDF synthetics only if a privacy-safe synthetic
   target exists.
 
