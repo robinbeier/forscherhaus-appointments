@@ -2,14 +2,14 @@
 
 ## Current Status
 
-- Status: repo-only roadmap and follow-up Kuma live gates completed; Sentry
-  live verification remains gated.
+- Status: repo-only roadmap, follow-up Kuma live gates, and Sentry ingestion
+  smoke gate completed.
 - Branch: `codex/rob-381-monitoring-doc-reconcile`.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
 - Live gates: Server/Kuma/Sentry writes remain explicit milestone gates.
-- Current start point for new work: Sentry live verification, only through a
-  secure token, connector, or host-local path.
+- Current start point for new work: decide whether Sentry alert rules or a
+  scheduled delivery smoke are worth the operational noise.
 
 ## Roadmap Issue Status
 
@@ -377,7 +377,8 @@ confirmation hash/URL, and the full quick pre-PR gate passed.
 - Live Sentry audit previously returned unauthorized with the available local
   environment; this must be fixed through secure token configuration, not by
   pasting the token into the task.
-- Sentry live verification remains gated on a secure token/connector path.
+- Sentry alert configuration remains gated on an explicit Sentry configuration
+  decision.
 
 ## Final Shipped State
 
@@ -390,7 +391,8 @@ artifacts.
 
 Remaining live work is intentionally gated:
 
-- Sentry live verification still needs a secure token or connector path.
+- Sentry live ingestion was verified by the 2026-05-20 smoke gate; future
+  Sentry configuration changes still need explicit approval.
 - Future Kuma live writes still require explicit Kuma access approval, but the
   ROB-390/ROB-391 live changes are closed.
 - Any server-side follow-up beyond read-only inspection needs a named

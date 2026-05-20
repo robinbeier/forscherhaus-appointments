@@ -246,7 +246,8 @@ Add:
 
 - TLS/certbot freshness if not already covered by Kuma certificate features or
   post-change checks;
-- Sentry delivery smoke if production Sentry becomes operationally important.
+- scheduled Sentry delivery smoke only if the completed one-off smoke evidence
+  is not enough for operations.
 
 Keep deferred after ROB-387:
 
@@ -518,15 +519,16 @@ Recommended order:
 
 Urgent:
 
-- Keep remaining Sentry live verification gated until secrets can be used
-  through a secure token, connector, or host-local path.
+- Keep future Sentry configuration changes gated; the one-off live ingestion
+  smoke completed on 2026-05-20 and is recorded in
+  [Sentry Ingestion Enablement Gate](sentry-ingestion-gate-2026-05-20.md).
 - Keep live Push URL, health-token, and parent-confirmation bearer-like values
   out of chat, Linear, docs, and git.
 
 Useful but not urgent:
 
-- Perform live Sentry ingestion verification with a sanitized smoke event after
-  secure token/connector access exists.
+- Decide whether Sentry alert rules or a scheduled delivery smoke are worth the
+  operational noise now that one-off ingestion is verified.
 - Reconcile any future Kuma desired-state drift with redacted snapshots before
   changing live monitors.
 - Revisit parent confirmation PDF synthetics only if a privacy-safe synthetic
