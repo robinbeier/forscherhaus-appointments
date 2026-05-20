@@ -240,11 +240,10 @@ class PdfRendererTest extends TestCase
             $this->assertNotNull($transport->event);
             $this->assertSame('pdf_renderer', $transport->event->getTags()['area'] ?? null);
             $this->assertSame('render_html', $transport->event->getTags()['operation'] ?? null);
-            $this->assertSame(
-                ['http://127.0.0.1:3003', 'http://localhost:3003'],
-                $transport->event->getExtra()['endpoints'] ?? null,
-            );
-            $this->assertSame('http://127.0.0.1:3003', $transport->event->getExtra()['primary_endpoint'] ?? null);
+            $this->assertSame(['loopback', 'loopback'], $transport->event->getExtra()['endpoint_kinds'] ?? null);
+            $this->assertArrayNotHasKey('endpoints', $transport->event->getExtra());
+            $this->assertArrayNotHasKey('primary_endpoint', $transport->event->getExtra());
+            $this->assertSame('loopback', $transport->event->getExtra()['primary_endpoint_kind'] ?? null);
             $this->assertSame(2, $transport->event->getExtra()['endpoint_count'] ?? null);
             $this->assertFalse($transport->event->getExtra()['container_runtime'] ?? true);
             $this->assertFalse($transport->event->getExtra()['local_environment'] ?? true);

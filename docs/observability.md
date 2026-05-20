@@ -25,6 +25,29 @@ Sentry runtime configuration:
 - For Apache `mod_php` request paths, configure `SENTRY_*` via Apache `SetEnv`.
 - If the application is served by Apache `mod_php`, Apache is the canonical
   runtime source for Sentry and `PDF_RENDERER_URL`.
+- `SentryBootstrap` installs a `before_send` scrubber and also scrubs explicit
+  extras passed through `SentryBootstrap::captureException()`. Keep this as the
+  central redaction boundary before adding new capture sites.
+
+Sentry data policy:
+
+- Do send stable tags such as `area`, `operation`, `export_type`, release, and
+  environment.
+- Do not send raw appointment hashes, recovery tokens, Push URLs, DSNs, request
+  bodies, authorization headers, customer emails, phone numbers, or names.
+- For bearer-like values needed for correlation, use boolean presence flags or
+  non-reversible short digests from `SentryBootstrap::safeDigest()`.
+- PDF renderer failures should send endpoint categories such as `loopback`,
+  `docker_dns`, or `configured`, not full renderer URLs.
+
+Sentry delivery smoke:
+
+- `php scripts/ops/sentry_smoke.php` is dry-run by default and prints no DSN,
+  token, event payload, or server config.
+- To send the synthetic event from a host with Sentry env already configured,
+  explicitly set `SENTRY_SMOKE_SEND=1`.
+- The smoke event uses `area=sentry_smoke` and `operation=delivery_smoke`; it
+  must stay synthetic and must not include production customer/request data.
 
 ## Deploy Observability Model
 
@@ -57,6 +80,11 @@ Use Sentry for:
 - uncaught PHP exceptions
 - selected caught exceptions on critical request paths
 - release-correlated application failures such as PDF renderer errors
+
+Do not use Sentry for expected business outcomes such as validation failures,
+invalid logins, CAPTCHA failures, booking conflicts, unauthorized health probes,
+scanner 404s, or availability checks. Those remain normal HTTP responses,
+Kuma/ops signals, or log-only observations depending on the case.
 
 ## Anti-Drift Rule
 

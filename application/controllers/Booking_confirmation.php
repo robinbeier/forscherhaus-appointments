@@ -187,13 +187,18 @@ class Booking_confirmation extends EA_Controller
             return;
         }
 
-        SentryBootstrap::captureException($exception, [
-            'area' => 'booking_confirmation',
-            'operation' => 'resolve_related_entities',
-        ], [
-            'appointment_hash' => $appointmentHash,
-            'request_uri' => $_SERVER['REQUEST_URI'] ?? null,
-        ]);
+        SentryBootstrap::captureException(
+            $exception,
+            [
+                'area' => 'booking_confirmation',
+                'operation' => 'resolve_related_entities',
+            ],
+            [
+                'appointment_hash_present' => $appointmentHash !== '',
+                'appointment_hash_digest' => SentryBootstrap::safeDigest($appointmentHash),
+                'request_uri' => $_SERVER['REQUEST_URI'] ?? null,
+            ],
+        );
     }
 
     protected function resolveLocale(string $language_code): string
