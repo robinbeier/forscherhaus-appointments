@@ -5,6 +5,8 @@ umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/kuma_push_common.sh
 source "$SCRIPT_DIR/lib/kuma_push_common.sh"
+# shellcheck source=scripts/ops/lib/app_log_classification.sh
+source "$SCRIPT_DIR/lib/app_log_classification.sh"
 
 kuma_push_load_env_file
 
@@ -67,10 +69,8 @@ else
   cp "$LOG_FILE" "$tmp_delta"
 fi
 
-if [[ -n "$IGNORE_REGEX" ]]; then
-  grep -Ev "$IGNORE_REGEX" "$tmp_delta" > "${tmp_delta}.filtered" || true
-  mv "${tmp_delta}.filtered" "$tmp_delta"
-fi
+app_log_filter_actionable_file "$tmp_delta" "${tmp_delta}.filtered" "$IGNORE_REGEX"
+mv "${tmp_delta}.filtered" "$tmp_delta"
 
 printf '%s|%s|%s\n' "$LOG_FILE" "$current_inode" "$current_size" > "$STATE_FILE"
 

@@ -35,7 +35,7 @@ class KumaPushAppLogsScriptTest extends TestCase
             file_put_contents(
                 $envFile,
                 'KUMA_PUSH_URL_APP_LOGS=' .
-                    escapeshellarg('https://kuma.example/push/app-logs') .
+                    escapeshellarg('https://kuma.example/app-logs') .
                     "\n" .
                     'KUMA_APP_ROOT=' .
                     escapeshellarg($appRoot) .
@@ -71,6 +71,106 @@ class KumaPushAppLogsScriptTest extends TestCase
             self::assertStringContainsString('msg=OK primed app log monitor', $curlCalls);
             self::assertStringContainsString('msg=OK new_app_errors=0', $curlCalls);
             self::assertStringContainsString('ping=1', $curlCalls);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testAppLogMonitorIgnoresBuiltInScannerAndProxyNoise(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $capturePath = $workspace . '/curl-args.log';
+        $today = gmdate('Y-m-d');
+        $logFile = $appRoot . '/storage/logs/log-' . $today . '.php';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+        mkdir($stateDir, 0777, true);
+
+        try {
+            $this->writeCurlStub($stubBin, $capturePath);
+            $this->writeEnvFile($envFile, $appRoot);
+            file_put_contents($logFile, '');
+
+            $primeResult = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
+
+            file_put_contents(
+                $logFile,
+                implode("\n", [
+                    'ERROR - 2026-05-19 11:31:14 --> 404 Page Not Found: Azenvnet/index',
+                    'ERROR - 2026-05-20 06:45:10 --> Severity: Warning --> unlink(/var/www/html/easyappointments/storage/cache/rate_limit_key_203.0.113.10): No such file or directory /var/www/html/easyappointments/system/libraries/Cache/drivers/Cache_file.php 279',
+                    '',
+                ]),
+                FILE_APPEND,
+            );
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('OK new_app_errors=0', $result['stdout']);
+            self::assertStringContainsString('msg=OK new_app_errors=0', $this->readFile($capturePath));
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testAppLogMonitorStillAlertsForRealNewAppErrors(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $capturePath = $workspace . '/curl-args.log';
+        $today = gmdate('Y-m-d');
+        $logFile = $appRoot . '/storage/logs/log-' . $today . '.php';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+        mkdir($stateDir, 0777, true);
+
+        try {
+            $this->writeCurlStub($stubBin, $capturePath);
+            $this->writeEnvFile($envFile, $appRoot);
+            file_put_contents($logFile, '');
+
+            $primeResult = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
+
+            file_put_contents(
+                $logFile,
+                "ERROR - 2026-05-20 08:00:00 --> Severity: Warning --> unexpected app failure\n",
+                FILE_APPEND,
+            );
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('CRIT new_app_errors=1', $result['stdout']);
+            self::assertStringContainsString('status=down', $this->readFile($capturePath));
         } finally {
             $this->removeDirectory($workspace);
         }
@@ -131,6 +231,28 @@ class KumaPushAppLogsScriptTest extends TestCase
         self::assertIsString($contents);
 
         return $contents;
+    }
+
+    private function writeCurlStub(string $stubBin, string $capturePath): void
+    {
+        file_put_contents(
+            $stubBin . '/curl',
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$@\" >> " . escapeshellarg($capturePath) . "\n",
+        );
+        chmod($stubBin . '/curl', 0755);
+    }
+
+    private function writeEnvFile(string $envFile, string $appRoot): void
+    {
+        file_put_contents(
+            $envFile,
+            'KUMA_PUSH_URL_APP_LOGS=' .
+                escapeshellarg('https://kuma.example/app-logs') .
+                "\n" .
+                'KUMA_APP_ROOT=' .
+                escapeshellarg($appRoot) .
+                "\n",
+        );
     }
 
     private function removeDirectory(string $path): void

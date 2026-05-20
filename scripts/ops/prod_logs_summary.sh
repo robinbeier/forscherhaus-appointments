@@ -62,6 +62,30 @@ section() {
     printf '\n[%s]\n' "$1"
 }
 
+if [[ -r /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh ]]; then
+    # shellcheck source=scripts/ops/lib/app_log_classification.sh
+    source /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh
+else
+    app_log_known_noise_regex() {
+        cat <<'REGEX'
+ERROR - .*--> 404 Page Not Found: Azenvnet/index|ERROR - .*--> Severity: Warning --> unlink\(.*/storage/cache/rate_limit_key_[^)]*\): No such file or directory .*/system/libraries/Cache/drivers/Cache_file\.php 279
+REGEX
+    }
+
+    app_log_filter_actionable_file() {
+        local input_file="$1"
+        local output_file="$2"
+        grep -Ev "$(app_log_known_noise_regex)" "$input_file" > "$output_file" || true
+    }
+
+    app_log_count_error_like_file() {
+        local input_file="$1"
+        grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$input_file" 2>/dev/null \
+            | wc -l \
+            | awk '{print $1}'
+    }
+fi
+
 redact() {
     sed -E \
         -e 's#https?://[^[:space:]]+#https://[REDACTED_URL]#g' \
@@ -94,17 +118,32 @@ done
 
 section app_log_summary
 if [[ -d /var/www/html/easyappointments/storage/logs ]]; then
-    count=0
+    total_count=0
+    actionable_count=0
     while IFS= read -r -d '' file; do
-        matches="$(grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$file" 2>/dev/null | wc -l | awk '{print $1}' || true)"
-        count=$((count + matches))
+        matches="$(app_log_count_error_like_file "$file" || true)"
+        total_count=$((total_count + matches))
+        tmp_matches="$(mktemp)"
+        tmp_actionable="$(mktemp)"
+        grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' "$file" > "$tmp_matches" 2>/dev/null || true
+        app_log_filter_actionable_file "$tmp_matches" "$tmp_actionable"
+        matches="$(app_log_count_error_like_file "$tmp_actionable" || true)"
+        actionable_count=$((actionable_count + matches))
+        rm -f "$tmp_matches" "$tmp_actionable"
     done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
-    printf 'app_error_like_lines_24h=%s\n' "$count"
-    if (( count > 0 )); then
+    ignored_count=$((total_count - actionable_count))
+    printf 'app_error_like_lines_24h=%s\n' "$actionable_count"
+    printf 'app_error_like_lines_24h_total=%s\n' "$total_count"
+    printf 'app_error_like_lines_24h_ignored_known_noise=%s\n' "$ignored_count"
+    if (( actionable_count > 0 )); then
+        tmp_matches="$(mktemp)"
+        tmp_actionable="$(mktemp)"
         find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0 \
-            | xargs -0 grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' 2>/dev/null \
-            | tail -n 20 \
+            | xargs -0 grep -Eih '(ERROR|CRITICAL|Fatal error|Uncaught)' > "$tmp_matches" 2>/dev/null || true
+        app_log_filter_actionable_file "$tmp_matches" "$tmp_actionable"
+        tail -n 20 "$tmp_actionable" \
             | redact || true
+        rm -f "$tmp_matches" "$tmp_actionable"
     fi
 else
     printf 'app_logs=missing\n'
