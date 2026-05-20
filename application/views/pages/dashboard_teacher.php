@@ -24,7 +24,17 @@
                                 autocomplete="off"
                             >
                         </div>
-                        <div class="col-12 col-md-6 col-lg-4 ms-lg-auto">
+                        <div class="col-12 col-md-6 col-lg-4">
+                            <button
+                                type="button"
+                                class="btn btn-outline-primary w-100"
+                                id="dashboard-teacher-parent-export"
+                            >
+                                <i class="fas fa-file-pdf me-2"></i>
+                                PDF für Eltern herunterladen
+                            </button>
+                        </div>
+                        <div class="col-12 col-md-6 col-lg-4">
                             <button type="submit" class="btn btn-primary w-100">
                                 <i class="fas fa-sync-alt me-2"></i>
                                 <?= lang('refresh') ?>

@@ -147,6 +147,57 @@ class DashboardExportControllerTest extends TestCase
         }
     }
 
+    public function testBuildProviderParentAppointmentPagesCreatesSingleEmptyPageWhenNoAppointments(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $pages = $controller->callBuildProviderParentAppointmentPages([]);
+
+        $this->assertCount(1, $pages);
+        $this->assertSame([], $pages[0]['appointments']);
+        $this->assertSame(0, $pages[0]['chunk_index']);
+        $this->assertSame(1, $pages[0]['chunks_total']);
+        $this->assertFalse($pages[0]['has_any_appointments']);
+    }
+
+    public function testBuildProviderParentAppointmentPagesUsesProviderParentChunkSizes(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $pages = $controller->callBuildProviderParentAppointmentPages($this->createAppointments(41));
+
+        $this->assertCount(3, $pages);
+        $this->assertCount(18, $pages[0]['appointments']);
+        $this->assertCount(22, $pages[1]['appointments']);
+        $this->assertCount(1, $pages[2]['appointments']);
+        $this->assertSame(3, $pages[0]['chunks_total']);
+        $this->assertSame(3, $pages[1]['chunks_total']);
+        $this->assertSame(3, $pages[2]['chunks_total']);
+        $this->assertTrue($pages[0]['has_any_appointments']);
+    }
+
+    public function testResolveCustomerDisplayNameForParentExportDoesNotExposeContactFallbacks(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $this->assertSame(
+            'Adina Rossmeisl',
+            $controller->callResolveCustomerDisplayNameForParentExport([
+                'customer_first_name' => 'Adina',
+                'customer_last_name' => 'Rossmeisl',
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+        $this->assertSame(
+            '—',
+            $controller->callResolveCustomerDisplayNameForParentExport([
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+    }
+
     public function testBuildPrincipalPagesCreatesSingleEmptyPageWhenNoMetrics(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -646,6 +697,11 @@ class DashboardExportControllerTest extends TestCase
                 return $this->buildTeacherPages($teachers);
             }
 
+            public function callBuildProviderParentAppointmentPages(array $appointments): array
+            {
+                return $this->buildProviderParentAppointmentPages($appointments);
+            }
+
             public function callBuildPrincipalPages(array $metrics): array
             {
                 return $this->buildPrincipalPages($metrics);
@@ -679,6 +735,11 @@ class DashboardExportControllerTest extends TestCase
             public function callResolveCapacityGapLabel(): string
             {
                 return $this->resolveCapacityGapLabel();
+            }
+
+            public function callResolveCustomerDisplayNameForParentExport(array $appointment): string
+            {
+                return $this->resolveCustomerDisplayNameForParentExport($appointment);
             }
 
             protected function getConfiguredThreshold(): float

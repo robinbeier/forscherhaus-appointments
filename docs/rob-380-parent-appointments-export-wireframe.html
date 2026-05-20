@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<title>ROB-380 Wireframe - Eltern-Terminexport</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+:root{
+  --accent:#16A34A;
+  --ink:#111827;
+  --ink-muted:#6B7280;
+  --ink-soft:#9CA3AF;
+  --border:#E5E7EB;
+  --surface:#FFFFFF;
+  --muted-surface:#F9FAFB;
+  --radius:12pt;
+}
+@page{size:A4;margin:12mm;}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:10pt;}
+body{
+  margin:0;
+  font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+  color:var(--ink);
+  background:#E5E7EB;
+  line-height:1.45;
+}
+.wireframe-note{
+  max-width:210mm;
+  margin:16px auto;
+  padding:12px 16px;
+  box-sizing:border-box;
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--ink-muted);
+  font-size:13px;
+}
+.wireframe-note strong{color:var(--ink);}
+.page{
+  width:210mm;
+  min-height:297mm;
+  margin:16px auto;
+  background:#fff;
+  box-sizing:border-box;
+  padding:12mm;
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  gap:12pt;
+  page-break-inside:avoid;
+  break-inside:avoid;
+}
+.page--break{page-break-before:always;}
+.header{
+  display:flex;
+  align-items:flex-start;
+  gap:12pt;
+  padding:12pt 10pt 0;
+}
+.header__titles{
+  display:flex;
+  flex-direction:column;
+  gap:4pt;
+  max-width:75%;
+}
+.header__title{
+  margin:0;
+  font-size:20pt;
+  font-weight:600;
+  letter-spacing:0;
+}
+.header__meta{
+  margin:0;
+  font-size:9.6pt;
+  color:var(--ink-muted);
+}
+.header__logo{
+  margin-left:auto;
+  width:120px;
+  min-height:44px;
+  border:1px solid var(--border);
+  border-radius:6pt;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:var(--ink-soft);
+  font-size:9pt;
+}
+.content{
+  display:flex;
+  flex-direction:column;
+  gap:12pt;
+  padding:0 10pt;
+}
+.teacher-heading{
+  display:flex;
+  flex-direction:column;
+  gap:4pt;
+  padding-top:2pt;
+}
+.teacher-heading h2{
+  margin:0;
+  font-size:16pt;
+  font-weight:600;
+}
+.teacher-heading p{
+  margin:0;
+  color:var(--ink-muted);
+  font-size:9.2pt;
+}
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:0;
+  overflow:hidden;
+}
+.card__header{
+  padding:12pt 12pt 10pt;
+  border-bottom:1px solid var(--border);
+}
+.card__header h3{
+  margin:0;
+  font-size:11pt;
+  font-weight:600;
+}
+table{
+  width:100%;
+  table-layout:fixed;
+  border-collapse:separate;
+  border-spacing:0;
+  font-size:9.6pt;
+}
+thead{display:table-header-group;}
+thead th{
+  text-align:left;
+  font-size:8.8pt;
+  color:var(--ink-muted);
+  font-weight:600;
+  padding:8pt 10pt;
+  border-bottom:1px solid var(--border);
+  background:var(--muted-surface);
+}
+tbody{display:table-row-group;}
+tbody tr{page-break-inside:avoid;break-inside:avoid;}
+tbody td{
+  padding:7pt 10pt;
+  border-bottom:1px solid var(--border);
+  vertical-align:middle;
+}
+tbody tr:last-child td{border-bottom:none;}
+.col-name{width:44%;}
+.col-date{width:24%;}
+.col-time{width:16%;}
+.nowrap{white-space:nowrap;}
+.footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-size:8.6pt;
+  color:var(--ink-muted);
+  padding:6pt 10pt 0;
+  border-top:1px solid rgba(17,24,39,.12);
+}
+@media print{
+  body{background:#fff;}
+  .wireframe-note{display:none;}
+  .page{width:auto;min-height:calc(297mm - 24mm);margin:0;padding:0;box-shadow:none;}
+}
+</style>
+</head>
+<body>
+<div class="wireframe-note">
+  <strong>ROB-380 Design-Wireframe.</strong>
+  Dieses statische HTML zeigt nur den geplanten PDF-Inhalt. Der Download-Ort ist die Lehrkräfte-Backend-UI,
+  nicht der Schulleitungsdruckexport. Keine Statistik, kein Hinweisblock, keine zusätzliche Hinweis-Spalte.
+</div>
+
+<main class="page">
+  <header class="header">
+    <div class="header__titles">
+      <h1 class="header__title">Terminübersicht für Eltern</h1>
+      <p class="header__meta">Klassenleitungsgespräche · 13.04.2026 - 19.04.2026</p>
+    </div>
+    <div class="header__logo">Logo</div>
+  </header>
+
+  <section class="content">
+    <div class="teacher-heading">
+      <h2>Adina Rossmeisl</h2>
+    </div>
+
+    <section class="card" aria-label="Elterntermine">
+      <div class="card__header">
+        <h3>Elterntermine</h3>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="col-name">Eingetragener Name</th>
+            <th class="col-date">Datum</th>
+            <th class="col-time">Beginn</th>
+            <th class="col-time">Ende</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Familie Becker</td>
+            <td class="nowrap">Mo., 13.04.2026</td>
+            <td class="nowrap">14:00</td>
+            <td class="nowrap">14:25</td>
+          </tr>
+          <tr>
+            <td>Schneider</td>
+            <td class="nowrap">Mo., 13.04.2026</td>
+            <td class="nowrap">14:30</td>
+            <td class="nowrap">14:55</td>
+          </tr>
+          <tr>
+            <td>Nguyen / Tran</td>
+            <td class="nowrap">Mo., 13.04.2026</td>
+            <td class="nowrap">15:00</td>
+            <td class="nowrap">15:25</td>
+          </tr>
+          <tr>
+            <td>Müller</td>
+            <td class="nowrap">Mo., 13.04.2026</td>
+            <td class="nowrap">15:30</td>
+            <td class="nowrap">15:55</td>
+          </tr>
+          <tr>
+            <td>Yilmaz</td>
+            <td class="nowrap">Di., 14.04.2026</td>
+            <td class="nowrap">13:30</td>
+            <td class="nowrap">13:55</td>
+          </tr>
+          <tr>
+            <td>Fischer</td>
+            <td class="nowrap">Di., 14.04.2026</td>
+            <td class="nowrap">14:00</td>
+            <td class="nowrap">14:25</td>
+          </tr>
+          <tr>
+            <td>Kowalski</td>
+            <td class="nowrap">Di., 14.04.2026</td>
+            <td class="nowrap">14:30</td>
+            <td class="nowrap">14:55</td>
+          </tr>
+          <tr>
+            <td>Ali</td>
+            <td class="nowrap">Di., 14.04.2026</td>
+            <td class="nowrap">15:00</td>
+            <td class="nowrap">15:25</td>
+          </tr>
+          <tr>
+            <td>Hoffmann</td>
+            <td class="nowrap">Mi., 15.04.2026</td>
+            <td class="nowrap">14:00</td>
+            <td class="nowrap">14:25</td>
+          </tr>
+          <tr>
+            <td>Rossi</td>
+            <td class="nowrap">Mi., 15.04.2026</td>
+            <td class="nowrap">14:30</td>
+            <td class="nowrap">14:55</td>
+          </tr>
+          <tr>
+            <td>Öztürk</td>
+            <td class="nowrap">Mi., 15.04.2026</td>
+            <td class="nowrap">15:00</td>
+            <td class="nowrap">15:25</td>
+          </tr>
+          <tr>
+            <td>Weber</td>
+            <td class="nowrap">Mi., 15.04.2026</td>
+            <td class="nowrap">15:30</td>
+            <td class="nowrap">15:55</td>
+          </tr>
+          <tr>
+            <td>Krüger</td>
+            <td class="nowrap">Do., 16.04.2026</td>
+            <td class="nowrap">13:30</td>
+            <td class="nowrap">13:55</td>
+          </tr>
+          <tr>
+            <td>Benali</td>
+            <td class="nowrap">Do., 16.04.2026</td>
+            <td class="nowrap">14:00</td>
+            <td class="nowrap">14:25</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </section>
+
+  <footer class="footer">
+    <span>Stand: 20.05.2026, 08:15</span>
+    <span>1/2</span>
+  </footer>
+</main>
+
+<main class="page page--break">
+  <header class="header">
+    <div class="header__titles">
+      <h1 class="header__title">Terminübersicht für Eltern</h1>
+      <p class="header__meta">Klassenleitungsgespräche · 13.04.2026 - 19.04.2026</p>
+    </div>
+    <div class="header__logo">Logo</div>
+  </header>
+
+  <section class="content">
+    <div class="teacher-heading">
+      <h2>Adina Rossmeisl</h2>
+      <p>Fortsetzung</p>
+    </div>
+
+    <section class="card" aria-label="Elterntermine Fortsetzung">
+      <div class="card__header">
+        <h3>Elterntermine</h3>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="col-name">Eingetragener Name</th>
+            <th class="col-date">Datum</th>
+            <th class="col-time">Beginn</th>
+            <th class="col-time">Ende</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Schulz</td>
+            <td class="nowrap">Do., 16.04.2026</td>
+            <td class="nowrap">14:30</td>
+            <td class="nowrap">14:55</td>
+          </tr>
+          <tr>
+            <td>García</td>
+            <td class="nowrap">Do., 16.04.2026</td>
+            <td class="nowrap">15:00</td>
+            <td class="nowrap">15:25</td>
+          </tr>
+          <tr>
+            <td>Meier</td>
+            <td class="nowrap">Fr., 17.04.2026</td>
+            <td class="nowrap">13:30</td>
+            <td class="nowrap">13:55</td>
+          </tr>
+          <tr>
+            <td>Jansen</td>
+            <td class="nowrap">Fr., 17.04.2026</td>
+            <td class="nowrap">14:00</td>
+            <td class="nowrap">14:25</td>
+          </tr>
+          <tr>
+            <td>Demir</td>
+            <td class="nowrap">Fr., 17.04.2026</td>
+            <td class="nowrap">14:30</td>
+            <td class="nowrap">14:55</td>
+          </tr>
+          <tr>
+            <td>Wagner</td>
+            <td class="nowrap">Fr., 17.04.2026</td>
+            <td class="nowrap">15:00</td>
+            <td class="nowrap">15:25</td>
+          </tr>
+          <tr>
+            <td>Hernandez</td>
+            <td class="nowrap">Fr., 17.04.2026</td>
+            <td class="nowrap">15:30</td>
+            <td class="nowrap">15:55</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </section>
+
+  <footer class="footer">
+    <span>Stand: 20.05.2026, 08:15</span>
+    <span>2/2</span>
+  </footer>
+</main>
+</body>
+</html>
