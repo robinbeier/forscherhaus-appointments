@@ -2,12 +2,12 @@
 
 ## Current Status
 
-- Status: ROB-385 repo-only milestone in progress.
-- Branch: `codex/rob-385-backup-freshness`.
+- Status: ROB-386 repo-only milestone in progress.
+- Branch: `codex/rob-386-release-gates`.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
 - Live gates: Server/Kuma/Sentry writes are not approved by default.
-- Current start point for new work: ROB-385 repo-only PR.
+- Current start point for new work: ROB-386 repo-only PR.
 
 ## Roadmap Issue Status
 
@@ -16,9 +16,9 @@
 - ROB-383: completed by PR #281, Sentry redaction and event-context hardening.
 - ROB-384: completed by PR #283, Kuma deep-health secret-boundary documentation
   and header audit.
-- ROB-385: in progress, split backup creation freshness from restore
+- ROB-385: completed by PR #284, split backup creation freshness from restore
   verification signal.
-- ROB-386: Clean up production monitor runtime-name drift.
+- ROB-386: in progress, clean up production monitor runtime-name drift.
 - ROB-387: Decide privacy-safe parent booking confirmation PDF synthetic.
 - ROB-388: Long-horizon implementation coordinator for the full roadmap.
 - ROB-367: existing post-rebuild observation issue to receive final monitoring
@@ -122,7 +122,7 @@ handled before continuing to the next milestone.
 
 ### Milestone 4 - Backup Creation Vs Restore-Verify Freshness
 
-- Status: in progress on branch `codex/rob-385-backup-freshness`.
+- Status: completed by PR #284.
 - Done:
   - Confirmed `kuma_push_ops_jobs.sh` reads only
     `last_verify_success.utc`, so it proves restore-verification freshness,
@@ -133,11 +133,27 @@ handled before continuing to the next milestone.
   - Added the new Push env variable, cron template entry, desired-state monitor,
     docs, and unit coverage.
 - Pending:
-  - Final validation, PR creation, and babysitting.
+  - None for repo-only ROB-385.
+- Result:
+  - Babysat PR #284 until GitHub reported 7/7 checks green and clean
+    mergeability.
+  - Merged PR #284 into `origin/main` at `57cb8daa`.
 
 ### Milestone 5 - Runtime Monitor Naming Drift Cleanup
 
-- Status: not started.
+- Status: in progress on branch `codex/rob-386-release-gates`.
+- Done:
+  - Read-only production check confirmed `php8.5-fpm` is active and
+    `php8.3-fpm` is inactive/not listed.
+  - Renamed repo desired-state PHP-FPM log monitor to
+    `App - php8.5-fpm Log Errors`.
+  - Updated operator-facing monitoring docs to point diagnosis at
+    `php8.5-fpm`.
+  - Marked old `php8.3-fpm` references as historical or gated live-Kuma drift.
+  - Made the pre-wipe inventory helper use configurable service units with a
+    `php8.5-fpm` default.
+- Pending:
+  - Final validation, PR creation, and babysitting.
 
 ### Milestone 6 - Optional Booking Confirmation PDF Synthetic Decision
 
@@ -225,6 +241,39 @@ monitors, public shallow health returned `OK`, and full `pre_pr_quick` passed.
 Result: shell/PHP syntax passed, desired-state YAML parsed with 13 monitors,
 focused Kuma Push script PHPUnit coverage passed with 5 tests and 39
 assertions, and the full quick pre-PR gate passed.
+
+### 2026-05-20 - ROB-385 PR Babysitting And Merge
+
+- PR #284 watched with `.codex/skills/babysit-pr/SKILL.md`.
+- GitHub checks reached 7/7 passed.
+- PR mergeability reached `CLEAN`.
+- No review comments were surfaced by the watcher.
+- PR #284 merged into `origin/main` at `57cb8daa`.
+
+### 2026-05-20 - ROB-386 Runtime Name Evidence
+
+- `ssh ... systemctl is-active php8.5-fpm`
+- `ssh ... systemctl is-active php8.3-fpm`
+- `ssh ... systemctl list-unit-files --type=service --no-pager php8.5-fpm.service php8.3-fpm.service`
+
+Result: read-only production check showed `php8.5-fpm` active/enabled and
+`php8.3-fpm` inactive/not listed. No configuration contents, secrets, DB rows,
+or Kuma data were printed.
+
+### 2026-05-20 - ROB-386 Focused Validation
+
+- `bash -n scripts/ops/prepare_same_server_rebuild_backup.sh scripts/ops/kuma_push_php_fpm_logs.sh scripts/ops/kuma_push_host_services.sh`
+- `ruby -e "require 'yaml'; data = YAML.load_file('scripts/ops/uptime-kuma.monitors.yml'); raise 'bad monitors' unless data['monitors'].is_a?(Array); puts \"monitors #{data['monitors'].length}\""`
+- `rg -n "php8\\.3|php8\\.5" docs scripts README.md WORKFLOW.md AGENTS.md`
+- `git diff --check`
+- secret/Push-URL grep over changed ROB-386 docs and desired-state files
+- `bash ./scripts/ci/pre_pr_quick.sh`
+
+Result: shell syntax passed, desired-state YAML parsed with 13 monitors, runtime
+grep showed current operator-facing monitor/script paths aligned to
+`php8.5-fpm` with remaining `php8.3` references limited to historical or gated
+drift context, no secret values or live Push URLs were found, whitespace checks
+passed, and the full quick pre-PR gate passed.
 
 ## Known Risks
 

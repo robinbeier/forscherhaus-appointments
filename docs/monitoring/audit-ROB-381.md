@@ -89,7 +89,7 @@ current desired state:
 | `Host - Resources` | Push | Disk, memory, load thresholds | Capacity |
 | `Ops - Jobs Freshness` | Push | Restore-verify marker freshness | Backup/ops freshness |
 | `App - Log Errors` | Push | New CodeIgniter log lines matching `ERROR - ` | App error signal |
-| `App - php8.3-fpm Log Errors` | Push | PHP-FPM journal errors | Runtime error signal |
+| `App - php8.3-fpm Log Errors` | Push | PHP-FPM journal errors | Runtime error signal; historical live name captured during audit |
 | `App - PDF Renderer Log Errors` | Push | PDF renderer journal errors | PDF runtime error signal |
 | `App - Dashboard PDF Export` | Push | Dashboard PDF release gate as live synthetic | Business/PDF synthetic |
 | `Security - Scanner Activity` | Push | Common scanner patterns in Apache access logs | Security/noise context |

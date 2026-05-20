@@ -12,9 +12,11 @@ production server stays online as migration-level rollback.
 The current production server must remain unchanged until a parallel rebuild has
 been rehearsed and accepted.
 
-## Current Production Baseline
+## Historical Production Baseline
 
-Read-only inventory captured on 2026-05-14:
+Read-only inventory captured on 2026-05-14 before the same-server rebuild. Do
+not use this section as the current runtime source of truth after the accepted
+Ubuntu 26.04 rebuild.
 
 - host: `booking-server`
 - provider: Hetzner vServer on KVM
