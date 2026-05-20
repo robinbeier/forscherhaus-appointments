@@ -2,19 +2,20 @@
 
 ## Current Status
 
-- Status: prepared, not yet executing implementation milestones.
-- Branch: `codex/rob-381-monitoring-audit`.
+- Status: ROB-383 repo-only milestone shipped; next implementation milestone
+  is ROB-384.
+- Branch: merged via PR #281.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
 - Live gates: Server/Kuma/Sentry writes are not approved by default.
-- Current start point for new work: ROB-383 Sentry redaction and event-context
-  hardening.
+- Current start point for new work: ROB-384 Kuma deep-health secret-boundary
+  documentation and header audit.
 
 ## Roadmap Issue Status
 
 - ROB-381: audit and target concept source issue.
 - ROB-382: completed by PR #280, app-log noise classification.
-- ROB-383: Sentry redaction and event-context hardening.
+- ROB-383: completed by PR #281, Sentry redaction and event-context hardening.
 - ROB-384: Kuma deep-health secret-boundary documentation and header audit.
 - ROB-385: Split backup creation freshness from restore verification signal.
 - ROB-386: Clean up production monitor runtime-name drift.
@@ -89,7 +90,7 @@ handled before continuing to the next milestone.
 
 ### Milestone 2 - Sentry Redaction And Event Context Hardening
 
-- Status: in progress on branch `codex/rob-383-sentry-hardening`.
+- Status: completed by PR #281.
 - Done:
   - Added central Sentry extra/request/user scrubbing in `SentryBootstrap`.
   - Added safe digest helper for bearer-like correlation values.
@@ -98,8 +99,9 @@ handled before continuing to the next milestone.
   - Added a dry-run-by-default Sentry delivery smoke script gated by
     `SENTRY_SMOKE_SEND=1`.
   - Documented the Sentry data policy in `docs/observability.md`.
-- Pending:
-  - Full milestone validation and PR babysitting.
+  - Babysat PR #281 until GitHub reported 18/18 checks green and clean
+    mergeability.
+  - Merged PR #281 into `origin/main` at `900a39cd`.
 - Gate: secure Sentry token/connector needed only for live verification, not for
   repo-side code hardening.
 
@@ -161,6 +163,14 @@ Result: focused syntax and PHPUnit checks passed after tightening route
 scrubbing for booking-confirmation URLs. Sentry smoke dry-run passed without
 sending a live event. Full `pre_pr_quick` also passed.
 
+### 2026-05-20 - ROB-383 PR Babysitting And Merge
+
+- PR #281 watched with `.codex/skills/babysit-pr/SKILL.md`.
+- GitHub checks reached 18/18 passed.
+- PR mergeability reached `CLEAN`.
+- No review comments were surfaced by the watcher.
+- PR #281 merged into `origin/main` at `900a39cd`.
+
 ## Known Risks
 
 - Linear connector may be intermittently unavailable.
@@ -171,4 +181,6 @@ sending a live event. Full `pre_pr_quick` also passed.
 
 ## Final Shipped State
 
-Not shipped yet.
+ROB-383 shipped repo-only. Sentry live verification remains a later gated step
+that needs a secure token or connector path; no Server, Kuma, or Sentry live
+configuration was changed by this milestone.
