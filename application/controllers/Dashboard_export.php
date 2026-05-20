@@ -34,6 +34,10 @@ class Dashboard_export extends EA_Controller
 
     protected const TEACHER_PDF_CONTINUATION_PAGE_APPOINTMENTS = 14;
 
+    protected const PROVIDER_PARENT_PDF_FIRST_PAGE_APPOINTMENTS = 18;
+
+    protected const PROVIDER_PARENT_PDF_CONTINUATION_PAGE_APPOINTMENTS = 22;
+
     protected Dashboard_metrics $dashboardMetrics;
 
     protected Pdf_renderer $pdfRenderer;
@@ -43,6 +47,8 @@ class Dashboard_export extends EA_Controller
     protected Services_model $servicesModel;
 
     protected Appointments_model $appointmentsModel;
+
+    protected Providers_model $providersModel;
 
     /**
      * @var array<string, IntlDateFormatter|false>
@@ -66,6 +72,7 @@ class Dashboard_export extends EA_Controller
         $this->load->library('zip');
         $this->load->model('services_model');
         $this->load->model('appointments_model');
+        $this->load->model('providers_model');
         $this->load->helper('date');
 
         $this->dashboardMetrics = $this->dashboard_metrics;
@@ -73,6 +80,7 @@ class Dashboard_export extends EA_Controller
         $this->zipLibrary = $this->zip;
         $this->servicesModel = $this->services_model;
         $this->appointmentsModel = $this->appointments_model;
+        $this->providersModel = $this->providers_model;
     }
 
     /**
@@ -250,6 +258,46 @@ class Dashboard_export extends EA_Controller
         }
     }
 
+    /**
+     * Render the logged-in provider's parent appointment overview PDF.
+     */
+    public function provider_parent_appointments_pdf(): void
+    {
+        try {
+            $this->assertProvider();
+
+            $request_dto = $this->dashboardRequestDtoFactory()->buildProviderMetricsRequestFromGlobals();
+            $period = $request_dto->period;
+            $provider_id = (int) session('user_id');
+            $provider = $this->providersModel->find($provider_id);
+            $provider_name = $this->resolveProviderDisplayName($provider, $provider_id);
+            $appointments = $this->mapProviderParentAppointmentsForView(
+                $this->loadProviderParentAppointments($provider_id, $period->start, $period->end),
+            );
+
+            $view_data = [
+                'school_name' => $this->resolveSchoolName(),
+                'logo_data_url' => $this->resolveLogoDataUrl(),
+                'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
+                'period_label' => $this->formatPeriod($period->start, $period->end),
+                'provider_name' => $provider_name,
+                'appointments' => $appointments,
+                'appointment_pages' => $this->buildProviderParentAppointmentPages($appointments),
+            ];
+
+            $this->pdfRenderer->stream_view(
+                'exports/provider_parent_appointments_pdf',
+                $view_data,
+                $this->buildProviderParentAppointmentsPdfFilename($provider, $period->start, $period->end),
+                $this->buildPdfStreamOptions(APPPATH . '../storage/logs/provider_parent_appointments_pdf_dump.html'),
+            );
+        } catch (Throwable $exception) {
+            $this->captureExportException($exception, 'provider_parent_appointments_pdf');
+            log_message('error', 'Failed to render provider parent appointments export: ' . $exception->getMessage());
+            abort(400, $exception->getMessage());
+        }
+    }
+
     protected function captureExportException(Throwable $exception, string $exportType): void
     {
         if (!class_exists('SentryBootstrap')) {
@@ -275,6 +323,16 @@ class Dashboard_export extends EA_Controller
     protected function assertAdmin(): void
     {
         if (session('role_slug') !== DB_SLUG_ADMIN) {
+            abort(403, 'Forbidden');
+        }
+    }
+
+    /**
+     * Ensure the current user is an authenticated provider.
+     */
+    protected function assertProvider(): void
+    {
+        if (session('role_slug') !== DB_SLUG_PROVIDER || (int) session('user_id') <= 0) {
             abort(403, 'Forbidden');
         }
     }
@@ -1244,6 +1302,28 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
+     * Build a file name for the provider-only parent appointment PDF download.
+     */
+    protected function buildProviderParentAppointmentsPdfFilename(
+        array $provider,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): string {
+        $provider_id = (int) ($provider['id'] ?? session('user_id'));
+        $provider_name = $this->resolveProviderDisplayName($provider, $provider_id);
+        $provider_slug = $this->slugifyForFilename($provider_name, 'lehrkraft');
+        $id_part = $provider_id > 0 ? 'id-' . $provider_id : 'id-unbekannt';
+
+        return sprintf(
+            'terminuebersicht-eltern-%s-%s-%s-%s.pdf',
+            $id_part,
+            $provider_slug,
+            $start->format('Ymd'),
+            $end->format('Ymd'),
+        );
+    }
+
+    /**
      * Resolve the localized month abbreviation.
      *
      * @param int $month
@@ -1418,6 +1498,51 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
+     * Split provider-parent appointments into fixed-size PDF pages.
+     *
+     * @param array $appointments
+     *
+     * @return array
+     */
+    protected function buildProviderParentAppointmentPages(array $appointments): array
+    {
+        $appointments_all = array_values($appointments);
+        $has_any_appointments = !empty($appointments_all);
+
+        if (!$has_any_appointments) {
+            return [
+                [
+                    'chunk_index' => 0,
+                    'chunks_total' => 1,
+                    'appointments' => [],
+                    'has_any_appointments' => false,
+                ],
+            ];
+        }
+
+        $first_chunk = array_splice($appointments_all, 0, self::PROVIDER_PARENT_PDF_FIRST_PAGE_APPOINTMENTS);
+        $chunks = [$first_chunk];
+
+        while (!empty($appointments_all)) {
+            $chunks[] = array_splice($appointments_all, 0, self::PROVIDER_PARENT_PDF_CONTINUATION_PAGE_APPOINTMENTS);
+        }
+
+        $chunks_total = count($chunks);
+        $pages = [];
+
+        foreach ($chunks as $chunk_index => $chunk_appointments) {
+            $pages[] = [
+                'chunk_index' => $chunk_index,
+                'chunks_total' => $chunks_total,
+                'appointments' => $chunk_appointments,
+                'has_any_appointments' => $has_any_appointments,
+            ];
+        }
+
+        return $pages;
+    }
+
+    /**
      * Render one-teacher PDFs and stream them as a ZIP archive.
      *
      * @param array $teacher_reports
@@ -1483,6 +1608,20 @@ class Dashboard_export extends EA_Controller
         $output->_display();
 
         exit();
+    }
+
+    /**
+     * Resolve a provider display name with fallback.
+     */
+    protected function resolveProviderDisplayName(array $provider, int $provider_id): string
+    {
+        $name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
+
+        if ($name !== '') {
+            return $name;
+        }
+
+        return 'Lehrkraft ' . $provider_id;
     }
 
     /**
@@ -1598,6 +1737,79 @@ class Dashboard_export extends EA_Controller
         }
 
         return $grouped;
+    }
+
+    /**
+     * Load booked appointment rows for the logged-in provider's parent PDF.
+     *
+     * This intentionally selects only the columns shown in the PDF.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function loadProviderParentAppointments(
+        int $provider_id,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): array {
+        if ($provider_id <= 0) {
+            return [];
+        }
+
+        return $this->appointmentsModel
+            ->query()
+            ->select([
+                'appointments.start_datetime',
+                'appointments.end_datetime',
+                'customers.first_name AS customer_first_name',
+                'customers.last_name AS customer_last_name',
+            ])
+            ->join('users AS customers', 'customers.id = appointments.id_users_customer', 'left')
+            ->where('appointments.is_unavailability', false)
+            ->where('appointments.id_users_provider', $provider_id)
+            ->where('appointments.status', 'Booked')
+            ->where('appointments.start_datetime <', $end->setTime(23, 59, 59)->format('Y-m-d H:i:s'))
+            ->where('appointments.end_datetime >', $start->setTime(0, 0, 0)->format('Y-m-d H:i:s'))
+            ->order_by('appointments.start_datetime', 'ASC')
+            ->get()
+            ->result_array();
+    }
+
+    /**
+     * Map raw provider appointments into PDF rows.
+     *
+     * @param array $appointments
+     *
+     * @return array
+     */
+    protected function mapProviderParentAppointmentsForView(array $appointments): array
+    {
+        return array_map(function (array $appointment): array {
+            $start = new DateTimeImmutable($appointment['start_datetime']);
+            $end = new DateTimeImmutable($appointment['end_datetime']);
+
+            return [
+                'parent_name' => $this->resolveCustomerDisplayNameForParentExport($appointment),
+                'date' => $this->formatDate($start),
+                'start' => $this->formatTime($start),
+                'end' => $this->formatTime($end),
+            ];
+        }, $appointments);
+    }
+
+    /**
+     * Resolve the entered customer name for the parent-facing export without contact-data fallback.
+     */
+    protected function resolveCustomerDisplayNameForParentExport(array $appointment): string
+    {
+        $first_name = trim((string) ($appointment['customer_first_name'] ?? ''));
+        $last_name = trim((string) ($appointment['customer_last_name'] ?? ''));
+        $name = trim($first_name . ' ' . $last_name);
+
+        if ($name !== '') {
+            return $name;
+        }
+
+        return '—';
     }
 
     /**

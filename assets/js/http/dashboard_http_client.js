@@ -148,6 +148,10 @@ App.Http.Dashboard = (function () {
         return triggerDownload('dashboard/export/principal.pdf', filters);
     }
 
+    function downloadProviderParentAppointmentsExport(filters = {}) {
+        return triggerDownload('dashboard/export/provider-parent-appointments.pdf', filters);
+    }
+
     function triggerDownload(path, filters) {
         const params = new URLSearchParams();
 
@@ -204,5 +208,6 @@ App.Http.Dashboard = (function () {
         saveThreshold,
         downloadTeacherExport,
         downloadPrincipalExport,
+        downloadProviderParentAppointmentsExport,
     };
 })();
