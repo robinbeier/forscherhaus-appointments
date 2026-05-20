@@ -12,6 +12,17 @@ For agent-first production diagnostics and post-change validation, start with
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
 and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
 
+Deep-health monitor boundary:
+
+- `/health` is public shallow health.
+- `/index.php/healthz` is token-protected deep health.
+- The `App - Health Deep` and `App - PDF Renderer` Kuma JSON monitors require
+  an `X-Health-Token` header value configured only in Kuma or host-local files.
+- The desired-state YAML names that required header but must never contain the
+  real value.
+- A `401` from `/index.php/healthz` means the first audit target is the
+  header/config boundary, not database, storage, or PDF renderer health.
+
 Script inventory:
 
 - `kuma_push_app_logs.sh` monitors newly appended application log errors

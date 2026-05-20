@@ -22,7 +22,7 @@ a short pointer file for emergency orientation.
    high-signal result in Linear or the relevant runbook.
 5. Keep secrets out of normal output.
    Never print DB rows, Push URLs, tokens, passwords, `config.php`, Kuma DB
-   contents, or `/etc/fh` file contents.
+   contents, health-token values, or `/etc/fh` file contents.
 
 Default target:
 
@@ -45,7 +45,8 @@ Current accepted baseline:
 - Monitor: `https://monitor.dasforscherhaus-leg.de/`
 - Active app path: `/var/www/html/easyappointments`
 - Release archive path: `/root/releases`
-- Host-local secrets: `/etc/fh` and `/root/backups/uptime-kuma-push.env`
+- Host-local secrets: `/etc/fh`, `/etc/fh/healthz.token`, and
+  `/root/backups/uptime-kuma-push.env`
 - Core services: `apache2`, `php8.5-fpm`, `mariadb`, `docker`, `fail2ban`,
   `cron`, `unattended-upgrades`, `fh-pdf-renderer`
 - PDF renderer: Docker-backed `fh-pdf-renderer`, bound to `127.0.0.1:3003`
@@ -114,8 +115,17 @@ App route is down:
 Deep health fails:
 
 - Confirm the app homepage and PDF renderer health separately.
-- Check PHP-FPM env wiring and app log summary.
-- Do not print the health token or `/etc/fh` file contents.
+- Separate failure modes before changing anything:
+  - `401`: Kuma or the probe is missing the `X-Health-Token` header or using
+    the wrong host-local value.
+  - `503` with JSON dependency details: inspect the named dependency and app
+    logs.
+  - connection/TLS failure: route as availability or proxy issue before app
+    debugging.
+- Check PHP-FPM env wiring and app log summary after the status class is known.
+- Do not print the health token, Kuma header value, `/etc/fh` file contents,
+  Push URLs, Kuma DB rows, or raw production config. Record only whether the
+  header is present/configured and which sanitized status class was observed.
 
 PDF rendering fails:
 

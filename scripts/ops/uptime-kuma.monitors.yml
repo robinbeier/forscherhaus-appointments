@@ -34,6 +34,8 @@ monitors:
     - id: 4
       name: App - Health Deep
       type: json-query
+      secret_headers:
+          X-Health-Token: <host-local value; never store in git>
       interval: 30
       retry_interval: 30
       max_retries: 2
@@ -68,6 +70,8 @@ monitors:
     - id: 8
       name: App - PDF Renderer
       type: json-query
+      secret_headers:
+          X-Health-Token: <same host-local value as App - Health Deep>
       interval: 30
       retry_interval: 30
       max_retries: 2

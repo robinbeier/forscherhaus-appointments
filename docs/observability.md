@@ -75,6 +75,17 @@ Use Uptime Kuma for:
 - synthetic PDF export probes
 - cron or backup freshness signals
 
+Health endpoint boundaries:
+
+- `/health` is public shallow health and should not require a secret.
+- `/index.php/healthz` is token-protected deep health and must be queried with
+  the `X-Health-Token` header from Kuma or host-local config.
+- The deep-health token is a bearer-like operational secret. Do not print it,
+  paste it into Linear/chat, store it in desired-state YAML, or include it in
+  command examples. Use `<redacted>` when documenting probes.
+- If a deep-health monitor fails with `401`, treat that as a header/config
+  boundary issue, not an app dependency outage, until proven otherwise.
+
 Use Sentry for:
 
 - uncaught PHP exceptions

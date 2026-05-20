@@ -2,21 +2,20 @@
 
 ## Current Status
 
-- Status: ROB-383 repo-only milestone shipped; next implementation milestone
-  is ROB-384.
-- Branch: merged via PR #281.
+- Status: ROB-384 repo-only milestone in progress.
+- Branch: `codex/rob-384-kuma-secret-boundary`.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
 - Live gates: Server/Kuma/Sentry writes are not approved by default.
-- Current start point for new work: ROB-384 Kuma deep-health secret-boundary
-  documentation and header audit.
+- Current start point for new work: ROB-384 repo-only PR.
 
 ## Roadmap Issue Status
 
 - ROB-381: audit and target concept source issue.
 - ROB-382: completed by PR #280, app-log noise classification.
 - ROB-383: completed by PR #281, Sentry redaction and event-context hardening.
-- ROB-384: Kuma deep-health secret-boundary documentation and header audit.
+- ROB-384: in progress, Kuma deep-health secret-boundary documentation and
+  header audit.
 - ROB-385: Split backup creation freshness from restore verification signal.
 - ROB-386: Clean up production monitor runtime-name drift.
 - ROB-387: Decide privacy-safe parent booking confirmation PDF synthetic.
@@ -107,7 +106,17 @@ handled before continuing to the next milestone.
 
 ### Milestone 3 - Deep Health And Kuma Secret Boundary Cleanup
 
-- Status: not started.
+- Status: in progress on branch `codex/rob-384-kuma-secret-boundary`.
+- Done:
+  - Corrected Kuma desired-state docs so `App - Health Deep` and
+    `App - PDF Renderer` require `X-Health-Token` as a host/Kuma-local secret.
+  - Added non-secret `secret_headers` placeholders to
+    `scripts/ops/uptime-kuma.monitors.yml`.
+  - Added agent diagnosis guidance for `401` vs `503` deep-health failures.
+  - Updated the server-local agent README template to name the health token path
+    as secret-bearing without exposing its contents.
+- Pending:
+  - Final validation, PR creation, and babysitting.
 
 ### Milestone 4 - Backup Creation Vs Restore-Verify Freshness
 
@@ -170,6 +179,19 @@ sending a live event. Full `pre_pr_quick` also passed.
 - PR mergeability reached `CLEAN`.
 - No review comments were surfaced by the watcher.
 - PR #281 merged into `origin/main` at `900a39cd`.
+
+### 2026-05-20 - ROB-384 Focused Validation
+
+- `ruby -e "require 'yaml'; data = YAML.load_file('scripts/ops/uptime-kuma.monitors.yml'); raise 'bad monitors' unless data['monitors'].is_a?(Array); puts \"monitors #{data['monitors'].length}\""`
+- `git diff --check`
+- secret/Push-URL grep over changed ROB-384 docs and desired-state files
+- drift grep for deep-health/PDF monitors still documented as public-only
+- `curl -fsS --max-time 10 https://dasforscherhaus-leg.de/health`
+- `bash ./scripts/ci/pre_pr_quick.sh`
+
+Result: desired-state YAML parsed with 12 monitors, no secret-pattern hits in
+the changed files, no stale public-only wording for tokenized deep-health
+monitors, public shallow health returned `OK`, and full `pre_pr_quick` passed.
 
 ## Known Risks
 
