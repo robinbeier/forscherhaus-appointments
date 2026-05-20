@@ -28,7 +28,8 @@ Script inventory:
 - `kuma_push_app_logs.sh` monitors newly appended application log errors
 - `kuma_push_host_services.sh` monitors critical systemd services
 - `kuma_push_host_resources.sh` monitors disk, memory, and load thresholds
-- `kuma_push_ops_jobs.sh` monitors backup/job freshness
+- `kuma_push_ops_jobs.sh` monitors restore-verification marker freshness
+- `kuma_push_backup_creation.sh` monitors backup-creation marker freshness
 - `kuma_push_php_fpm_logs.sh` monitors recent PHP-FPM journal errors
 - `kuma_push_pdf_renderer_logs.sh` monitors recent `fh-pdf-renderer` journal errors
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
@@ -48,11 +49,30 @@ Required new Push URLs:
 - `KUMA_PUSH_URL_HOST_SERVICES`
 - `KUMA_PUSH_URL_HOST_RESOURCES`
 - `KUMA_PUSH_URL_OPS_JOBS`
+- `KUMA_PUSH_URL_BACKUP_CREATION`
 - `KUMA_PUSH_URL_APP_LOGS`
 - `KUMA_PUSH_URL_PHP_FPM_LOGS`
 - `KUMA_PUSH_URL_PDF_RENDERER_LOGS`
 - `KUMA_PUSH_URL_PDF_EXPORT`
 - `KUMA_PUSH_URL_SECURITY_SCANNER`
+
+Optional ops freshness env:
+
+- `KUMA_OPS_JOBS_VERIFY_FILE` default `/root/backups/easyappointments/last_verify_success.utc`
+- `KUMA_OPS_JOBS_MAX_VERIFY_AGE_MINUTES` default `1440`
+- `KUMA_BACKUP_CREATION_MARKER_FILE` default `/root/backups/easyappointments/last_backup_success.utc`
+- `KUMA_BACKUP_CREATION_MAX_AGE_MINUTES` default `1440`
+
+Freshness semantics:
+
+- `kuma_push_ops_jobs.sh` proves only that a restore-verification flow has
+  written a recent success marker.
+- `kuma_push_backup_creation.sh` proves only that a backup-creation flow has
+  written a recent success marker.
+- Neither script reads backup contents, lists dump directories, validates
+  off-host retention, or proves restoreability by itself.
+- Push messages include only marker basenames and ages, not backup filenames,
+  dump paths, DB rows, or archive contents.
 
 Optional php-fpm log env:
 

@@ -13,7 +13,7 @@ VERIFY_FILE="${KUMA_OPS_JOBS_VERIFY_FILE:-/root/backups/easyappointments/last_ve
 MAX_AGE_MINUTES="${KUMA_OPS_JOBS_MAX_VERIFY_AGE_MINUTES:-1440}"
 
 if [[ ! -f "$VERIFY_FILE" ]]; then
-  msg="CRIT verify_marker_missing=$(basename "$VERIFY_FILE")"
+  msg="CRIT restore_verify_marker_missing=$(basename "$VERIFY_FILE")"
   kuma_push_send "$KUMA_PUSH_URL_OPS_JOBS" "down" "$msg" "0"
   kuma_push_log "$msg"
   exit 0
@@ -23,7 +23,7 @@ marker="$(tr -d '\r\n' < "$VERIFY_FILE")"
 marker_epoch="$(date -u -d "$marker" +%s 2>/dev/null || true)"
 
 if [[ -z "$marker_epoch" ]]; then
-  msg="CRIT verify_marker_unparseable=$(basename "$VERIFY_FILE")"
+  msg="CRIT restore_verify_marker_unparseable=$(basename "$VERIFY_FILE")"
   kuma_push_send "$KUMA_PUSH_URL_OPS_JOBS" "down" "$msg" "0"
   kuma_push_log "$msg"
   exit 0
@@ -33,10 +33,10 @@ now_epoch="$(date -u +%s)"
 age_minutes="$(( (now_epoch - marker_epoch) / 60 ))"
 
 if (( age_minutes > MAX_AGE_MINUTES )); then
-  msg="CRIT verify_age_minutes=${age_minutes} max=${MAX_AGE_MINUTES}"
+  msg="CRIT restore_verify_age_minutes=${age_minutes} max=${MAX_AGE_MINUTES}"
   kuma_push_send "$KUMA_PUSH_URL_OPS_JOBS" "down" "$msg" "0"
 else
-  msg="OK verify_age_minutes=${age_minutes} max=${MAX_AGE_MINUTES}"
+  msg="OK restore_verify_age_minutes=${age_minutes} max=${MAX_AGE_MINUTES}"
   kuma_push_send "$KUMA_PUSH_URL_OPS_JOBS" "up" "$msg" "1"
 fi
 

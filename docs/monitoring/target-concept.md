@@ -98,8 +98,8 @@ postdeploy health and canary gates pass.
 | App - PDF Renderer | Show PDF dependency health independently | Kuma JSON | Availability | `checks.pdf_renderer.ok` from deep health | 30s | value not true | Check `fh-pdf-renderer`, container, renderer logs | Medium | Same health token boundary |
 | Host - Services | Detect inactive critical units | Kuma Push | Availability | `kuma_push_host_services.sh` | 60s | any configured service inactive | Check unit status; do not restart before logs | Low | Env controls service list; no secrets in msg |
 | Host - Resources | Detect disk/memory/load pressure | Kuma Push | Capacity | `kuma_push_host_resources.sh` | 60s | threshold breach | Identify path/process before cleanup | Medium | No process dumps in Push msg |
-| Ops - Restore Verify Freshness | Detect stale restore verification | Kuma Push | Backup | `kuma_push_ops_jobs.sh` marker age | 15m | marker missing, invalid, or > 1440m | Renew backup/restore verification | Medium | Marker path only; no backup contents |
-| Ops - Backup Creation Freshness | Prove fresh backup exists | Kuma Push | Backup | New or extended backup script | 15m-60m | latest expected backup too old/missing | Check backup job and storage | Medium | Do not print filenames if they reveal sensitive details beyond timestamp |
+| Ops - Restore Verify Freshness | Detect stale restore verification | Kuma Push | Backup | `kuma_push_ops_jobs.sh` restore-verify marker age | 15m | marker missing, invalid, or > 1440m | Renew backup/restore verification | Medium | Marker basename and age only; no backup contents |
+| Ops - Backup Creation Freshness | Prove backup creation job freshness | Kuma Push | Backup | `kuma_push_backup_creation.sh` backup-success marker age | 15m | marker missing, invalid, or > 1440m | Check backup creation job and storage | Medium | Marker basename and age only; no dump listing or backup contents |
 | App - Log Errors | Detect new unclassified app errors | Kuma Push | Error | `kuma_push_app_logs.sh` | 60s plus 30s stagger | new non-ignored `ERROR - ` lines | Classify with `prod_logs_summary.sh`; route to Sentry/issue if real | High until ROB-382 | Push URL secret; ignore regex targeted only |
 | App - PHP-FPM Log Errors | Detect PHP-FPM service errors | Kuma Push | Error | `journalctl -u php8.5-fpm` | 60s | error count > threshold | Inspect PHP-FPM journal and app health | Medium | Rename old php8.3 monitor display |
 | App - PDF Renderer Log Errors | Detect renderer service errors | Kuma Push | Error | `journalctl -u fh-pdf-renderer` | 60s | error count > threshold | Inspect renderer container/service | Medium | No PDF content in messages |
@@ -403,8 +403,8 @@ Marking: `Repo-only`, `Kuma`
 Marking: `Repo-only`, `Server`, `Kuma`
 
 - Rename or document `Ops - Jobs Freshness` as restore-verify freshness.
-- Add backup creation freshness if it is not already represented by the restore
-  verification marker.
+- Add backup creation freshness with a separate marker-based Push script; the
+  restore verification marker does not prove backup creation by itself.
 - Decide whether cron/fail2ban/unattended-upgrades belong in Host Services
   Push or remain doctor-only.
 
