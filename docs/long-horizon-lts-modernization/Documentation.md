@@ -236,12 +236,20 @@ Uptime Kuma:
   Decision: temporary restore inputs and the failed-deploy placeholder are no longer retained on the server. Provider snapshot retention remains operator-managed outside this repo.
   Next: continue normal post-rebuild observation.
 
+- 2026-05-20T15:03:26Z - Milestone 7 / ROB-367 - Completed post-rebuild observation after the accepted same-server rebuild.
+  Validation: operator approved read-only production checks for the observation window after the rebuild; `bash scripts/ops/prod_doctor.sh` showed Ubuntu 26.04 LTS on `booking-server`, app `200`, `www` `200`, monitor route `302`, PDF renderer health `200`, deep health `200`, Apache, PHP 8.5 FPM, MariaDB, Docker, fail2ban, cron, unattended-upgrades, and `fh-pdf-renderer` active, both Kuma and PDF renderer containers up, root disk `45%` used with `20` GiB available, `947` MiB memory available, `2047` MiB swap configured, host `node` and `npm` absent, and Uptime Kuma `12/12` latest green. `bash scripts/ops/prod_logs_summary.sh --since "36 hours ago"` showed `0` Apache, PHP-FPM, MariaDB, PDF renderer, Docker, and cron warnings. A read-only Kuma heartbeat summary showed all active monitors latest green; short historical non-green events existed for `App - Log Errors`, `Ops - Jobs Freshness`, and `Security - Scanner Activity`, but current state was green. Backup and restore marker checks used only marker basenames and ages; both markers were present and below the `1440` minute freshness threshold. The observation printed no Push URLs, health-token values, DB rows, Kuma DB rows, customer data, or secret-bearing file contents.
+  Decision: classify the post-rebuild state as stable with follow-ups. The accepted Ubuntu 26.04 operating model holds: PHP 8.5 FPM is the active runtime, MariaDB 11.8 remains healthy, the PDF renderer stays container-backed, Certbot/timers are active, Kuma is restored and green, and host Node remains intentionally absent. Follow-ups were created for live monitoring drift rather than mixing fixes into ROB-367: ROB-390 applies the live Kuma backup-creation vs restore-verification split, ROB-391 renames the stale live PHP-FPM monitor display from `php8.3-fpm` to `php8.5-fpm`, and ROB-392 tightens `prod_logs_summary.sh` so standalone stack/context lines are not counted as actionable app-log errors.
+  Next: handle ROB-390, ROB-391, and ROB-392 as separate narrow issues; keep any Server/Kuma/Sentry write actions behind explicit approval gates.
+
 ## Known Risks and Follow-Ups
 
 - PHP 8.5 is installed on the real Ubuntu 26.04 target host and the rebuilt
   host has passed final acceptance. Continue treating PHP 8.5 as the active
   server runtime and keep compatibility checks in future release gates.
 - The selected same-server Ubuntu 26.04 rebuild is accepted through ROB-369.
+- ROB-367 post-rebuild observation classified the server as stable with
+  follow-ups. Current app routes, deep health, PDF renderer health, service
+  state, resources, and latest Kuma monitor state were green on 2026-05-20.
 - Node 24 is validated locally and in Docker, but intentionally not installed
   on the rebuilt server while deployment remains artifact-based and the PDF
   renderer runs as a container. If server-side builds become necessary later,
@@ -265,6 +273,13 @@ Uptime Kuma:
 - Temporary restore inputs were removed after explicit operator approval:
   `/root/rebuild-restore-inputs` and
   `/var/www/html/easyappointments_placeholder_after_failed_deploy` are absent.
+- Live Kuma monitor drift remains after the repo-only monitoring roadmap:
+  `Ops - Jobs Freshness` still needs the ROB-385 live split into restore
+  verification and backup creation freshness, and the PHP-FPM log monitor
+  display still needs the ROB-386 `php8.5-fpm` rename. Track these as ROB-390
+  and ROB-391; do not print Push URLs or Kuma token values while applying them.
+- `prod_logs_summary.sh` can overcount case-insensitive app-log context lines
+  as actionable errors. Track the repo-only cleanup as ROB-392.
 - Old-server rollback is documented for the parallel-target model, but it is not
   the selected rollback path for the same-server rebuild.
 - The current Uptime Kuma live export restores successfully and preserves
