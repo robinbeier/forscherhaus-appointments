@@ -374,9 +374,8 @@ confirmation hash/URL, and the full quick pre-PR gate passed.
 ## Known Risks
 
 - Linear connector may be intermittently unavailable.
-- Live Sentry ingestion is verified, but Sentry alert configuration still needs
-  a token or UI path with alert-write permission. The first minimal alert-rule
-  API attempt stopped safely with HTTP `403` and did not change Sentry.
+- Live Sentry ingestion and the first minimal production issue alert are
+  verified. Future Sentry alert expansion should stay gated and observation-led.
 
 ## Final Shipped State
 
@@ -389,10 +388,9 @@ artifacts.
 
 Remaining live work is intentionally gated:
 
-- Sentry live ingestion was verified by the 2026-05-20 smoke gate; the next
-  live Sentry step is the minimal production issue alert described in
-  `docs/monitoring/sentry-alert-gate-2026-05-20.md`, after alert-write access
-  is available.
+- Sentry live ingestion was verified by the 2026-05-20 smoke gate; the minimal
+  production issue alert described in
+  `docs/monitoring/sentry-alert-gate-2026-05-20.md` is also completed.
 - Future Kuma live writes still require explicit Kuma access approval, but the
   ROB-390/ROB-391 live changes are closed.
 - Any server-side follow-up beyond read-only inspection needs a named
