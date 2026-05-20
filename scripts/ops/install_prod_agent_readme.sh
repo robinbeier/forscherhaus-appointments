@@ -92,6 +92,7 @@ Log paths:
 Secret-bearing paths. Do not print contents:
 
 - `/etc/fh`
+- `/etc/fh/healthz.token`
 - `/var/www/html/easyappointments/application/config/config.php`
 - `/root/backups/uptime-kuma-push.env`
 - `/var/lib/uptime-kuma-data/kuma.db`

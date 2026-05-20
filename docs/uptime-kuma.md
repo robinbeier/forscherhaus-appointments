@@ -18,6 +18,7 @@ Host-owned:
 - Uptime Kuma SQLite data directory
 - monitor history
 - Push tokens and full Push URLs
+- token header values for deep-health JSON monitors
 - notification credentials
 - maintenance state
 
@@ -37,11 +38,11 @@ Active monitors:
 | --- | --- | ---: | --- |
 | App-Homepage | `http` | 30s | public URL only |
 | App — Health Shallow | `keyword` | 30s | public URL only |
-| App - Health Deep | `json-query` | 30s | public URL only |
+| App - Health Deep | `json-query` | 30s | `X-Health-Token` header value in Kuma/host-local config only |
 | Host - Services | `push` | 60s | `KUMA_PUSH_URL_HOST_SERVICES` |
 | Host - Resources | `push` | 60s | `KUMA_PUSH_URL_HOST_RESOURCES` |
 | Ops - Jobs Freshness | `push` | 900s | `KUMA_PUSH_URL_OPS_JOBS` |
-| App - PDF Renderer | `json-query` | 30s | public URL only |
+| App - PDF Renderer | `json-query` | 30s | same `X-Health-Token` boundary as deep health |
 | App - Log Errors | `push` | 60s | `KUMA_PUSH_URL_APP_LOGS` |
 | App - php8.3-fpm Log Errors | `push` | 60s | `KUMA_PUSH_URL_PHP_FPM_LOGS` |
 | App - PDF Renderer Log Errors | `push` | 60s | `KUMA_PUSH_URL_PDF_RENDERER_LOGS` |
@@ -54,6 +55,37 @@ script defaults should target `php8.5-fpm`.
 
 The full non-secret monitor shape is mirrored in
 `scripts/ops/uptime-kuma.monitors.yml`.
+
+## Health Monitor Boundary
+
+`/health` and `/index.php/healthz` intentionally have different trust
+boundaries:
+
+- `/health` is the public shallow health route. It should only prove that the
+  web path can return `OK`.
+- `/index.php/healthz` is the application-owned deep health route. It requires
+  the `X-Health-Token` header and returns dependency checks for database, GD,
+  storage, and PDF renderer.
+- `App - Health Deep` and `App - PDF Renderer` both read from
+  `/index.php/healthz`; the latter checks the `checks.pdf_renderer.ok` JSON
+  value.
+
+The `X-Health-Token` value belongs only in Kuma monitor headers or host-local
+files such as `/etc/fh/healthz.token`. Do not copy the value into Git, Linear,
+chat, command transcripts, desired-state YAML, or runbook examples. The
+desired-state YAML may name the required header, but must keep the value as a
+host-local placeholder.
+
+For a live header audit, record only sanitized facts:
+
+- whether the header is configured for the deep-health monitors;
+- whether the latest Kuma status is green;
+- whether `/health` is independently green;
+- whether deep health fails with `401`, `503`, or a dependency-specific JSON
+  failure.
+
+Do not print the header value, Kuma database rows, Push URLs, or raw production
+configuration while auditing.
 
 ## New Server Startup
 
