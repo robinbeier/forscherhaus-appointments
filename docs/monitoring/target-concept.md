@@ -104,7 +104,7 @@ postdeploy health and canary gates pass.
 | App - php8.5-fpm Log Errors | Detect PHP-FPM service errors | Kuma Push | Error | `journalctl -u php8.5-fpm` | 60s | error count > threshold | Inspect PHP-FPM journal and app health | Medium | Live UI rename remains a Kuma gate if still stale |
 | App - PDF Renderer Log Errors | Detect renderer service errors | Kuma Push | Error | `journalctl -u fh-pdf-renderer` | 60s | error count > threshold | Inspect renderer container/service | Medium | No PDF content in messages |
 | App - Dashboard PDF Export | Prove live dashboard PDF path | Kuma Push script | Business/PDF | `kuma_push_pdf_export.sh` | 15m | gate rc != 0 or report missing | Check dashboard gate report, renderer, auth creds | Medium | Uses host-local gate credentials |
-| App - Booking Confirmation PDF | Optional parent PDF live synthetic | Script/Kuma | Business/PDF | Booking confirmation PDF gate | TBD | PDF cannot be downloaded/validated | Only build if privacy-safe stable synthetic data exists | Medium-high | Needs decision; avoid real family hashes |
+| App - Booking Confirmation PDF | No-go for live synthetic until privacy-safe target exists | Release gate/manual only | Business/PDF | Booking confirmation PDF gate | Manual/release only | PDF cannot be downloaded/validated in approved gate | Use release/restored-data gate; do not add Kuma monitor yet | Medium-high | No real family hashes or reusable bearer links |
 | Security - Scanner Activity | Track scanner spikes separately | Kuma Push | Security | Apache access log patterns | 60s | scanner count above threshold | Observe or tune ingress; not app downtime | Medium | No raw IPs in Push msg |
 | TLS/Certbot Freshness | Catch renewal/timer risk | Script or Kuma | Security/Availability | certbot cert/timer status | Daily | cert near expiry or timer missing | Run certbot validation; inspect Apache | Low | Public cert data only |
 | Sentry Production Errors | Alert on unexpected app exceptions | Sentry alert | Error | Sentry project | Continuous | new/high-frequency prod issue | Triage by release, area, operation | Medium | No PII; redaction required |
@@ -424,11 +424,25 @@ Marking: `Repo-only`, `Kuma`, `Server`
 
 Marking: `Needs decision`, `Repo-only`, `Kuma`
 
-Do this only if the parent-facing PDF becomes important enough to monitor live:
+Decision after ROB-387: do not run this as a live Kuma synthetic yet.
 
-- create a privacy-safe synthetic appointment/hash strategy;
-- run the existing booking confirmation PDF gate on schedule;
-- avoid real family/customer data.
+Reason:
+
+- the existing gate requires a confirmation hash or full confirmation URL;
+- that value is bearer-like access to a parent-facing confirmation page;
+- there is no current durable synthetic appointment/hash that is clearly safe
+  to reuse in production monitoring.
+
+Current safe use:
+
+- run the existing booking confirmation PDF gate during release/restore
+  validation with a non-production or explicitly approved host-local hash;
+- keep continuous monitoring on renderer health, dashboard PDF export, logs,
+  and Sentry PDF/export regressions.
+
+Only revisit as a separate gated issue if a privacy-safe synthetic target exists
+and all bearer-like values remain host-local. The detailed decision is in
+[Parent Booking Confirmation PDF Synthetic Decision](parent-confirmation-pdf-synthetic-decision.md).
 
 ### 7. ROB-367 Observation Tie-In
 
@@ -458,7 +472,7 @@ Recommended order:
    Labels: `Repo-only`, `Server`, `Kuma`.
 5. ROB-386: Production monitor runtime-name drift cleanup (`php8.3` to `php8.5`).
    Labels: `Repo-only`, `Kuma`, `Server`.
-6. ROB-387, optional: Privacy-safe parent confirmation PDF live synthetic.
+6. ROB-387: decide privacy-safe parent confirmation PDF live synthetic.
    Labels: `Needs decision`, `Repo-only`, `Kuma`.
 7. ROB-367: include monitoring soak and lessons learned.
    Labels: `Server`, `Kuma`, `Repo-only`.

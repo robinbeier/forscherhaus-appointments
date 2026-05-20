@@ -75,6 +75,12 @@ Use Uptime Kuma for:
 - synthetic PDF export probes
 - cron or backup freshness signals
 
+Do not add a parent booking-confirmation PDF live synthetic until the criteria
+in
+[Parent Booking Confirmation PDF Synthetic Decision](monitoring/parent-confirmation-pdf-synthetic-decision.md)
+are met. The existing booking confirmation PDF release gate requires a
+confirmation hash or URL and is not, by itself, a safe continuous Kuma monitor.
+
 Health endpoint boundaries:
 
 - `/health` is public shallow health and should not require a secret.

@@ -8,6 +8,12 @@ This release gate validates the parent-facing PDF export on the booking confirma
 
 It is intentionally read-only: no booking create/reschedule/cancel endpoints are called.
 
+This gate is not approved as a continuous live Uptime Kuma synthetic by itself.
+It requires an existing confirmation hash or URL, which is bearer-like access to
+a confirmation page. See
+[Parent Booking Confirmation PDF Synthetic Decision](monitoring/parent-confirmation-pdf-synthetic-decision.md)
+for the current monitoring decision and future go criteria.
+
 ## Run
 
 ```bash

@@ -2,12 +2,12 @@
 
 ## Current Status
 
-- Status: ROB-386 repo-only milestone in progress.
-- Branch: `codex/rob-386-release-gates`.
+- Status: ROB-387 repo-only milestone in progress.
+- Branch: `codex/rob-387-pdf-synthetic-decision`.
 - Scope: autonomous implementation roadmap for the ROB-381 monitoring audit,
   initially repo-only.
 - Live gates: Server/Kuma/Sentry writes are not approved by default.
-- Current start point for new work: ROB-386 repo-only PR.
+- Current start point for new work: ROB-387 repo-only decision PR.
 
 ## Roadmap Issue Status
 
@@ -18,8 +18,10 @@
   and header audit.
 - ROB-385: completed by PR #284, split backup creation freshness from restore
   verification signal.
-- ROB-386: in progress, clean up production monitor runtime-name drift.
-- ROB-387: Decide privacy-safe parent booking confirmation PDF synthetic.
+- ROB-386: completed by PR #285, clean up production monitor runtime-name
+  drift.
+- ROB-387: in progress, decide privacy-safe parent booking confirmation PDF
+  synthetic.
 - ROB-388: Long-horizon implementation coordinator for the full roadmap.
 - ROB-367: existing post-rebuild observation issue to receive final monitoring
   findings.
@@ -141,7 +143,7 @@ handled before continuing to the next milestone.
 
 ### Milestone 5 - Runtime Monitor Naming Drift Cleanup
 
-- Status: in progress on branch `codex/rob-386-release-gates`.
+- Status: completed by PR #285.
 - Done:
   - Read-only production check confirmed `php8.5-fpm` is active and
     `php8.3-fpm` is inactive/not listed.
@@ -153,11 +155,25 @@ handled before continuing to the next milestone.
   - Made the pre-wipe inventory helper use configurable service units with a
     `php8.5-fpm` default.
 - Pending:
-  - Final validation, PR creation, and babysitting.
+  - None for repo-only ROB-386.
+- Result:
+  - Babysat PR #285 until GitHub reported 7/7 checks green and clean
+    mergeability.
+  - Merged PR #285 into `origin/main` at `421536bd`.
 
 ### Milestone 6 - Optional Booking Confirmation PDF Synthetic Decision
 
-- Status: not started.
+- Status: in progress on branch `codex/rob-387-pdf-synthetic-decision`.
+- Decision:
+  - No live Kuma synthetic monitor for the parent booking confirmation PDF flow
+    yet.
+- Done:
+  - Confirmed the existing booking confirmation PDF gate requires an existing
+    confirmation hash or full confirmation URL.
+  - Classified those values as bearer-like parent-facing access.
+  - Added a dedicated decision document with future go criteria.
+- Pending:
+  - Final validation, PR creation, and babysitting.
 
 ### Milestone 7 - ROB-367 Observation Integration
 
@@ -274,6 +290,36 @@ grep showed current operator-facing monitor/script paths aligned to
 `php8.5-fpm` with remaining `php8.3` references limited to historical or gated
 drift context, no secret values or live Push URLs were found, whitespace checks
 passed, and the full quick pre-PR gate passed.
+
+### 2026-05-20 - ROB-386 PR Babysitting And Merge
+
+- PR #285 watched with `.codex/skills/babysit-pr/SKILL.md`.
+- GitHub checks reached 7/7 passed.
+- PR mergeability reached `CLEAN`.
+- No review comments were surfaced by the watcher.
+- PR #285 merged into `origin/main` at `421536bd`.
+
+### 2026-05-20 - ROB-387 Decision Evidence
+
+- `docs/release-gate-booking-confirmation-pdf.md`
+- `scripts/release-gate/booking_confirmation_pdf_gate.php`
+- `docs/monitoring/target-concept.md`
+
+Result: the existing booking confirmation PDF gate is suitable for release,
+restore, and explicitly approved one-off checks, but not for a continuous live
+Kuma monitor unless a privacy-safe synthetic confirmation target exists. No
+production confirmation hashes, URLs, customer names, or PDF contents were read
+or recorded.
+
+### 2026-05-20 - ROB-387 Focused Validation
+
+- `git diff --check`
+- secret/hash grep over changed ROB-387 docs
+- `bash ./scripts/ci/pre_pr_quick.sh`
+
+Result: whitespace checks passed, grep hits were limited to placeholders,
+public URLs, and documentation terms such as confirmation hash/URL, and the full
+quick pre-PR gate passed.
 
 ## Known Risks
 
