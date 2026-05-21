@@ -71,6 +71,61 @@ final class ProdSensitivePathsScriptTest extends TestCase
         }
     }
 
+    public function testProdDoctorStreamsSensitivePathHelper(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-sensitive-paths-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $curlLog = $workspace . '/curl.log';
+
+        mkdir($stubBin, 0777, true);
+
+        try {
+            $this->writeCurlStub($stubBin);
+            $this->writeSshStub($stubBin);
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/prod_doctor.sh', '--prod-ssh-target', 'prod.example'],
+                $this->repoRoot(),
+                $this->commandEnv($stubBin, $curlLog, 403),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('sensitive_path.storage_root=403', $result['stdout']);
+            self::assertStringContainsString('sensitive_path_failures=0', $result['stdout']);
+            self::assertStringNotContainsString('helper_missing', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('/storage/', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testProdValidateStreamsSensitivePathHelper(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-sensitive-paths-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $curlLog = $workspace . '/curl.log';
+
+        mkdir($stubBin, 0777, true);
+
+        try {
+            $this->writeCurlStub($stubBin);
+            $this->writeSshStub($stubBin);
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/prod_validate_after_change.sh', '--prod-ssh-target', 'prod.example'],
+                $this->repoRoot(),
+                $this->commandEnv($stubBin, $curlLog, 403),
+            );
+
+            self::assertNotSame(127, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('sensitive_path.storage_root=403', $result['stdout']);
+            self::assertStringNotContainsString('helper_missing', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('/storage/', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     private function writeCurlStub(string $stubBin): void
     {
         file_put_contents(
@@ -86,6 +141,9 @@ final class ProdSensitivePathsScriptTest extends TestCase
                 case "$1" in
                     -o)
                         output_file="$2"
+                        shift 2
+                        ;;
+                    -H)
                         shift 2
                         ;;
                     -w|--max-time)
@@ -108,6 +166,38 @@ final class ProdSensitivePathsScriptTest extends TestCase
             ,
         );
         chmod($stubBin . '/curl', 0755);
+    }
+
+    private function writeSshStub(string $stubBin): void
+    {
+        file_put_contents(
+            $stubBin . '/ssh',
+            <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            remote_cmd=''
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -o)
+                        shift 2
+                        ;;
+                    *)
+                        remote_cmd="$1"
+                        shift
+                        ;;
+                esac
+            done
+
+            if [[ -z "$remote_cmd" ]]; then
+                remote_cmd='bash -s'
+            fi
+
+            bash -c "$remote_cmd"
+            BASH
+            ,
+        );
+        chmod($stubBin . '/ssh', 0755);
     }
 
     /**
