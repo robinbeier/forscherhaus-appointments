@@ -166,6 +166,19 @@ else
     failures=$((failures + 1))
 fi
 
+section sensitive_paths
+if [[ -r /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh ]]; then
+    # shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
+    source /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh
+    prod_sensitive_paths_check_all "https://dasforscherhaus-leg.de"
+    if (( PROD_SENSITIVE_PATH_FAILURES > 0 )); then
+        failures=$((failures + PROD_SENSITIVE_PATH_FAILURES))
+    fi
+else
+    printf 'FAIL sensitive_path_check helper_missing\n' >&2
+    failures=$((failures + 1))
+fi
+
 section services
 for service in apache2 php8.5-fpm mariadb docker fail2ban cron unattended-upgrades fh-pdf-renderer; do
     check_eq "service.${service}" "$(systemctl is-active "$service" 2>/dev/null || true)" active
