@@ -2,7 +2,7 @@
 
 ## Current Status
 
-- Status: coordination package created.
+- Status: ROB-394 completed; ROB-395 review-ready.
 - Scope: ROB-394 through ROB-397, milestone-gated after the ROB-393 live
   hotfix.
 - Branch: `codex/rob-292-prod-security-hardening`.
@@ -12,8 +12,8 @@
 
 - ROB-292: broad hardening parent.
 - ROB-393: completed urgent live hotfix for public `storage`/session exposure.
-- ROB-394: pending, add production sensitive-path regression gates.
-- ROB-395: pending, persist production server threat model.
+- ROB-394: completed, add production sensitive-path regression gates.
+- ROB-395: review-ready, persist production server threat model.
 - ROB-396: pending, decide baseline server posture for headers, SSH, firewall.
 - ROB-397: pending, extend redacted production doctor with posture checks.
 
@@ -53,17 +53,17 @@ Sentry write requires a new explicit operator approval and rollback/stop plan.
 
 ### Milestone 1 - ROB-394 Sensitive-Path Regression Gates
 
-- Status: pending.
-- Next action:
-  - Design and implement redacted sensitive-path checks in the ops harness or a
-    shared helper.
+- Status: completed by PR #296.
+- Result:
+  - Added a shared redacted sensitive-path helper.
+  - Wired the helper into `prod_doctor.sh` and `prod_validate_after_change.sh`.
+  - Added focused regression coverage for HTTP 2xx exposure and redacted output.
 
 ### Milestone 2 - ROB-395 Production Server Threat Model
 
-- Status: pending.
+- Status: review-ready.
 - Next action:
-  - Add durable server threat-model documentation, linking ROB-393 through
-    ROB-397.
+  - Review and merge `docs/security/production-server-threat-model.md`.
 
 ### Milestone 3 - ROB-396 Baseline Server Posture Decision
 
@@ -92,3 +92,30 @@ Sentry write requires a new explicit operator approval and rollback/stop plan.
   - `git diff --check` passed.
   - Targeted secret-boundary grep over the package found only intentional
     policy terms and no secret values.
+
+### 2026-05-21 - ROB-394 Completion
+
+- PR #296 merged.
+- Validation:
+  - `bash -n` for changed shell scripts passed.
+  - Focused PHPUnit coverage for the sensitive-path helper passed.
+  - `bash ./scripts/ci/pre_pr_quick.sh` passed.
+
+### 2026-05-21 - ROB-395 Evidence Refresh
+
+- `prod_logs_summary.sh --since "24 hours ago"` completed read-only and
+  redacted, with no recent service warnings or app-error-like lines reported.
+- `prod_doctor.sh` completed read-only and redacted, confirming active core
+  services, green Kuma latest state, healthy endpoints, and host Node/npm
+  absent.
+- The new ROB-394 sensitive-path helper was not yet present on production,
+  which is expected before a separate deploy gate.
+
+### 2026-05-21 - ROB-395 Documentation Validation
+
+- Created `docs/security/production-server-threat-model.md`.
+- Validation:
+  - `git diff --check` passed.
+  - Prettier markdown check passed.
+  - Targeted secret-boundary grep had no secret-value matches.
+  - `bash ./scripts/ci/pre_pr_quick.sh` passed.
