@@ -2,7 +2,7 @@
 
 ## Current Status
 
-- Status: ROB-394 and ROB-395 completed; ROB-396 decision-ready.
+- Status: ROB-394 through ROB-396 completed; ROB-397 in progress.
 - Scope: ROB-394 through ROB-397, milestone-gated after the ROB-393 live
   hotfix.
 - Branch: `codex/rob-292-prod-security-hardening`.
@@ -14,9 +14,9 @@
 - ROB-393: completed urgent live hotfix for public `storage`/session exposure.
 - ROB-394: completed, add production sensitive-path regression gates.
 - ROB-395: completed, persist production server threat model.
-- ROB-396: decision-ready, decide baseline server posture for headers, SSH,
+- ROB-396: completed, decide baseline server posture for headers, SSH,
   firewall.
-- ROB-397: pending, extend redacted production doctor with posture checks.
+- ROB-397: in progress, extend redacted production doctor with posture checks.
 
 ## Decisions
 
@@ -71,7 +71,7 @@ Sentry write requires a new explicit operator approval and rollback/stop plan.
 
 ### Milestone 3 - ROB-396 Baseline Server Posture Decision
 
-- Status: decision-ready.
+- Status: completed by PR #298.
 - Result:
   - Added `docs/security/production-server-posture-decision.md`.
   - Re-checked headers, SSH policy classes, firewall status, public listener
@@ -81,10 +81,11 @@ Sentry write requires a new explicit operator approval and rollback/stop plan.
 
 ### Milestone 4 - ROB-397 Redacted Prod Doctor Posture Checks
 
-- Status: pending.
-- Next action:
-  - Extend `prod_doctor.sh` or related helpers with the safe posture classes
-    defined by ROB-396.
+- Status: in progress.
+- Result:
+  - Added advisory `prod_doctor.sh` posture output for safe ROB-396 classes.
+  - Kept the new posture facts non-failing so known hardening gaps can be used
+    as baseline evidence for later live gates.
 
 ## Validation Log
 
@@ -139,3 +140,18 @@ Sentry write requires a new explicit operator approval and rollback/stop plan.
   internal services without printing raw config or secrets.
 - Decision: ROB-396 remains docs-only. Header, SSH, HSTS, CSP and UFW changes
   are future separate gates with explicit approval.
+
+### 2026-05-21 - ROB-397 Posture Harness Implementation
+
+- Added `scripts/ops/lib/prod_posture.sh` as a redacted helper for header
+  presence, SSH effective policy flags, UFW status, listener classes, and
+  unexpected public listener count.
+- Wired `prod_doctor.sh` to stream the helper functions over SSH so a read-only
+  production run can report the new advisory posture classes before a deploy.
+- Updated ops docs to clarify that these facts are hardening hints, not failing
+  checks.
+- Read-only production validation at `2026-05-21T17:45:49Z` showed the new
+  `posture` section with header presence, SSH policy flags, UFW status,
+  listener classes, expected public listener count, and zero unexpected public
+  listeners. Output stayed class/flag-only and did not include raw config or
+  secrets.

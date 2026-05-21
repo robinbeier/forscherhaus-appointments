@@ -8,6 +8,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/prod_common.sh
 source "${SCRIPT_DIR}/lib/prod_common.sh"
+# shellcheck source=scripts/ops/lib/prod_posture.sh
+source "${SCRIPT_DIR}/lib/prod_posture.sh"
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
@@ -43,7 +45,21 @@ parse_args() {
 }
 
 run_remote() {
-    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" 'bash -s' <<'REMOTE'
+    local posture_functions
+    posture_functions="$(
+        declare -f prod_posture_header_specs
+        declare -f prod_posture_header_names
+        declare -f prod_posture_check_headers
+        declare -f prod_posture_check_ssh
+        declare -f prod_posture_ufw_status
+        declare -f prod_posture_listen_class
+        declare -f prod_posture_ss_listening_ports
+        declare -f prod_posture_check_firewall_and_ports
+    )"
+
+    {
+        printf '%s\n' "$posture_functions"
+        cat <<'REMOTE'
 set -euo pipefail
 
 section() {
@@ -117,6 +133,11 @@ else
     kv sensitive_path_check helper_missing
 fi
 
+section posture
+prod_posture_check_headers
+prod_posture_check_ssh
+prod_posture_check_firewall_and_ports
+
 section services
 for service in apache2 php8.5-fpm mariadb docker fail2ban cron unattended-upgrades fh-pdf-renderer; do
     kv "service.${service}" "$(systemctl is-active "$service" 2>/dev/null || true)"
@@ -188,6 +209,7 @@ for unit in apache2 php8.5-fpm mariadb fh-pdf-renderer docker cron; do
 done
 kv app_error_like_lines_24h "$(app_error_count)"
 REMOTE
+    } | ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" 'bash -s'
 }
 
 main() {
