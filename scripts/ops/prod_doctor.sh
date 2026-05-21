@@ -107,6 +107,16 @@ else
     kv deep_health_http health_token_missing
 fi
 
+section sensitive_paths
+if [[ -r /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh ]]; then
+    # shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
+    source /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh
+    prod_sensitive_paths_check_all "https://dasforscherhaus-leg.de"
+    kv sensitive_path_failures "${PROD_SENSITIVE_PATH_FAILURES:-0}"
+else
+    kv sensitive_path_check helper_missing
+fi
+
 section services
 for service in apache2 php8.5-fpm mariadb docker fail2ban cron unattended-upgrades fh-pdf-renderer; do
     kv "service.${service}" "$(systemctl is-active "$service" 2>/dev/null || true)"

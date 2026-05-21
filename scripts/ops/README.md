@@ -39,6 +39,8 @@ Script inventory:
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
 - `install_prod_agent_readme.sh` installs the server-local agent orientation file in explicit execute mode
+- `lib/prod_sensitive_paths.sh` checks fixed sensitive web path classes without
+  printing URLs, file contents, tokens, session data, or discovered filenames
 
 Default env file:
 
@@ -118,3 +120,15 @@ App log script behavior:
 `prod_logs_summary.sh` and `prod_validate_after_change.sh` use the same built-in
 classifier, so post-change validation reports actionable app log errors while
 also showing how many recent error-like lines were ignored as known noise.
+
+Sensitive-path validation:
+
+- `prod_doctor.sh` reports fixed sensitive path classes as HTTP status classes
+  only.
+- `prod_validate_after_change.sh` fails when any fixed sensitive path class
+  returns HTTP 2xx or when the probe itself cannot run.
+- The check covers the production web exposure classes for storage, session,
+  cache, log, vendor, root config, application, and system paths.
+- The check output intentionally uses stable class labels and never prints the
+  requested URLs, response bodies, tokens, session values, raw config, or
+  discovered filenames.
