@@ -2,7 +2,7 @@
 
 ## Current Status
 
-- Status: ROB-394 completed; ROB-395 review-ready.
+- Status: ROB-394 and ROB-395 completed; ROB-396 decision-ready.
 - Scope: ROB-394 through ROB-397, milestone-gated after the ROB-393 live
   hotfix.
 - Branch: `codex/rob-292-prod-security-hardening`.
@@ -13,8 +13,9 @@
 - ROB-292: broad hardening parent.
 - ROB-393: completed urgent live hotfix for public `storage`/session exposure.
 - ROB-394: completed, add production sensitive-path regression gates.
-- ROB-395: review-ready, persist production server threat model.
-- ROB-396: pending, decide baseline server posture for headers, SSH, firewall.
+- ROB-395: completed, persist production server threat model.
+- ROB-396: decision-ready, decide baseline server posture for headers, SSH,
+  firewall.
 - ROB-397: pending, extend redacted production doctor with posture checks.
 
 ## Decisions
@@ -61,23 +62,29 @@ Sentry write requires a new explicit operator approval and rollback/stop plan.
 
 ### Milestone 2 - ROB-395 Production Server Threat Model
 
-- Status: review-ready.
-- Next action:
-  - Review and merge `docs/security/production-server-threat-model.md`.
+- Status: completed by PR #297.
+- Result:
+  - Added `docs/security/production-server-threat-model.md`.
+  - Captured server-specific assets, trust boundaries, attacker stories,
+    findings/gaps, and follow-up backlog without secrets or raw production
+    config.
 
 ### Milestone 3 - ROB-396 Baseline Server Posture Decision
 
-- Status: pending.
-- Next action:
-  - Take read-only posture snapshots and produce an implement/defer/no-change
-    decision.
+- Status: decision-ready.
+- Result:
+  - Added `docs/security/production-server-posture-decision.md`.
+  - Re-checked headers, SSH policy classes, firewall status, public listener
+    classes, and loopback boundaries through redacted read-only evidence.
+  - Split live hardening into separate future gates instead of executing
+    server writes in ROB-396.
 
 ### Milestone 4 - ROB-397 Redacted Prod Doctor Posture Checks
 
 - Status: pending.
 - Next action:
-  - Extend `prod_doctor.sh` or related helpers after ROB-394 defines the safe
-    sensitive-path classification.
+  - Extend `prod_doctor.sh` or related helpers with the safe posture classes
+    defined by ROB-396.
 
 ## Validation Log
 
@@ -119,3 +126,16 @@ Sentry write requires a new explicit operator approval and rollback/stop plan.
   - Prettier markdown check passed.
   - Targeted secret-boundary grep had no secret-value matches.
   - `bash ./scripts/ci/pre_pr_quick.sh` passed.
+
+### 2026-05-21 - ROB-396 Read-Only Posture Evidence
+
+- `prod_logs_summary.sh --since "24 hours ago"` completed read-only and
+  redacted, with no recent service warnings or app-error-like lines reported.
+- `prod_doctor.sh` completed read-only and redacted, confirming active core
+  services, green Kuma latest state, healthy endpoints, certbot/timer presence,
+  and host Node/npm absent.
+- A focused sanitized SSH snapshot classified header presence, SSH effective
+  policy flags, UFW status, expected public listener classes, and loopback-only
+  internal services without printing raw config or secrets.
+- Decision: ROB-396 remains docs-only. Header, SSH, HSTS, CSP and UFW changes
+  are future separate gates with explicit approval.
