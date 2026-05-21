@@ -131,6 +131,9 @@ Sensitive-path validation:
   only.
 - `prod_validate_after_change.sh` fails when any fixed sensitive path class
   returns HTTP 2xx or when the probe itself cannot run.
+- Both scripts stream the local `lib/prod_sensitive_paths.sh` helper over SSH,
+  so the check does not depend on the active production app tree already
+  carrying the latest ops helper files.
 - The check covers the production web exposure classes for storage, session,
   cache, log, vendor, root config, application, and system paths.
 - The check output intentionally uses stable class labels and never prints the

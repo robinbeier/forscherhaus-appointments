@@ -27,15 +27,23 @@ Source: `bash scripts/ops/prod_doctor.sh`, read-only snapshot
   - `hsts=missing` and `csp=missing`, expected to remain out of scope.
 - No unexpected public listener class was reported.
 - No recent service warning class or app-error-like log class was reported.
-- `sensitive_path_check=helper_missing` was reported. This is a known
-  prerequisite gap for the required post-change validator, not an App/WWW header
-  finding.
+- `sensitive_path_check=helper_missing` was reported before the validator was
+  updated to stream the local sensitive-path helper. This was a known
+  validation-harness gap, not an App/WWW header finding.
 
 Source: focused sanitized read-only Apache prerequisite check,
 `2026-05-21T18:15Z`.
 
 - `apache.headers_module=present`
 - `apache.configtest=ok`
+
+Source: `bash scripts/ops/prod_validate_after_change.sh`, read-only snapshot
+`2026-05-21T18:39Z`, after the validator was updated to stream the local
+sensitive-path helper.
+
+- Sensitive path validation ran without a `helper_missing` class.
+- All fixed sensitive path classes returned non-2xx status classes.
+- `validation=passed`.
 
 ## Header Set
 
@@ -69,10 +77,9 @@ Before any live write:
   fail2ban, cron, and `fh-pdf-renderer` are healthy by redacted harness output.
 - `apache.headers_module=present`.
 - `apache2ctl configtest` is already clean before editing.
-- The production ops harness has the sensitive-path helper required by
-  `prod_validate_after_change.sh`, or the live gate is stopped before Apache
-  edit. A known `helper_missing` validator failure must not be mixed with an
-  Apache header change.
+- `prod_validate_after_change.sh` can run without a known unrelated
+  `helper_missing` failure because it streams the local sensitive-path helper
+  over SSH.
 - The target Apache include/vhost path can be identified without printing raw
   vhost config or secret-bearing files.
 - Rollback is clear before editing.
@@ -132,8 +139,8 @@ Stop and do not reload Apache if:
   behavior.
 - `apache.headers_module` is missing.
 - Pre-change `apache2ctl configtest` is not clean.
-- `prod_validate_after_change.sh` would have a known unrelated
-  `sensitive_path_check helper_missing` failure before the Apache change.
+- `prod_validate_after_change.sh` has a known unrelated failure before the
+  Apache change.
 - The target Apache scope cannot be identified without raw config dumps.
 - The rollback path is unclear.
 - Editing would require printing raw vhost config, `/etc/fh`, tokens, passwords,

@@ -8,6 +8,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/prod_common.sh
 source "${SCRIPT_DIR}/lib/prod_common.sh"
+# shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
+source "${SCRIPT_DIR}/lib/prod_sensitive_paths.sh"
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
@@ -50,7 +52,15 @@ parse_args() {
 }
 
 run_remote() {
-    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "WITH_CERTBOT_DRY_RUN='${WITH_CERTBOT_DRY_RUN}' bash -s" <<'REMOTE'
+    local sensitive_path_functions
+    sensitive_path_functions="$(
+        declare -f prod_sensitive_path_specs
+        declare -f prod_sensitive_paths_check_all
+    )"
+
+    {
+        printf '%s\n' "$sensitive_path_functions"
+        cat <<'REMOTE'
 set -euo pipefail
 
 failures=0
@@ -167,16 +177,9 @@ else
 fi
 
 section sensitive_paths
-if [[ -r /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh ]]; then
-    # shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
-    source /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh
-    prod_sensitive_paths_check_all "https://dasforscherhaus-leg.de"
-    if (( PROD_SENSITIVE_PATH_FAILURES > 0 )); then
-        failures=$((failures + PROD_SENSITIVE_PATH_FAILURES))
-    fi
-else
-    printf 'FAIL sensitive_path_check helper_missing\n' >&2
-    failures=$((failures + 1))
+prod_sensitive_paths_check_all "https://dasforscherhaus-leg.de"
+if (( PROD_SENSITIVE_PATH_FAILURES > 0 )); then
+    failures=$((failures + PROD_SENSITIVE_PATH_FAILURES))
 fi
 
 section services
@@ -282,6 +285,7 @@ if (( failures > 0 )); then
 fi
 printf 'validation=passed\n'
 REMOTE
+    } | ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "WITH_CERTBOT_DRY_RUN='${WITH_CERTBOT_DRY_RUN}' bash -s"
 }
 
 main() {

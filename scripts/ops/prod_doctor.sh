@@ -8,6 +8,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/prod_common.sh
 source "${SCRIPT_DIR}/lib/prod_common.sh"
+# shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
+source "${SCRIPT_DIR}/lib/prod_sensitive_paths.sh"
 # shellcheck source=scripts/ops/lib/prod_posture.sh
 source "${SCRIPT_DIR}/lib/prod_posture.sh"
 
@@ -45,8 +47,10 @@ parse_args() {
 }
 
 run_remote() {
-    local posture_functions
-    posture_functions="$(
+    local remote_functions
+    remote_functions="$(
+        declare -f prod_sensitive_path_specs
+        declare -f prod_sensitive_paths_check_all
         declare -f prod_posture_header_specs
         declare -f prod_posture_header_names
         declare -f prod_posture_check_headers
@@ -58,7 +62,7 @@ run_remote() {
     )"
 
     {
-        printf '%s\n' "$posture_functions"
+        printf '%s\n' "$remote_functions"
         cat <<'REMOTE'
 set -euo pipefail
 
@@ -124,14 +128,8 @@ else
 fi
 
 section sensitive_paths
-if [[ -r /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh ]]; then
-    # shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
-    source /var/www/html/easyappointments/scripts/ops/lib/prod_sensitive_paths.sh
-    prod_sensitive_paths_check_all "https://dasforscherhaus-leg.de"
-    kv sensitive_path_failures "${PROD_SENSITIVE_PATH_FAILURES:-0}"
-else
-    kv sensitive_path_check helper_missing
-fi
+prod_sensitive_paths_check_all "https://dasforscherhaus-leg.de"
+kv sensitive_path_failures "${PROD_SENSITIVE_PATH_FAILURES:-0}"
 
 section posture
 prod_posture_check_headers
