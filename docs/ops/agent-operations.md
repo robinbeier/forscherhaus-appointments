@@ -71,6 +71,12 @@ Read-only overall status:
 bash scripts/ops/prod_doctor.sh
 ```
 
+`prod_doctor.sh` includes an advisory `posture` section for security posture
+classes. These facts are read-only and redacted: header presence, selected SSH
+effective policy flags, UFW status, expected listener classes, loopback-only
+internal service classes, and unexpected public listener count. Missing headers
+or inactive UFW are hardening hints, not doctor failures.
+
 Redacted recent logs:
 
 ```bash
@@ -165,6 +171,8 @@ Stop and ask for operator direction if:
 - a command would delete or overwrite DB dumps, Kuma data, release archives, or
   provider snapshot evidence;
 - a command would print secret-bearing file contents;
+- a posture check would need raw Apache, SSH, firewall, listener-address, or
+  `/etc/fh` config instead of classes/flags;
 - app health and rollback direction are both unclear;
 - the observed server shape differs from the accepted Ubuntu 26.04 baseline;
 - a fix requires changing deployment model, host Node policy, Kuma monitor

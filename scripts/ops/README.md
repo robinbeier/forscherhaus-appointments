@@ -41,6 +41,10 @@ Script inventory:
 - `install_prod_agent_readme.sh` installs the server-local agent orientation file in explicit execute mode
 - `lib/prod_sensitive_paths.sh` checks fixed sensitive web path classes without
   printing URLs, file contents, tokens, session data, or discovered filenames
+- `lib/prod_posture.sh` reports advisory production posture classes for
+  headers, SSH policy flags, UFW status, listener classes, and unexpected
+  public listener count without printing raw config, listener addresses, or
+  secrets
 
 Default env file:
 
@@ -132,3 +136,17 @@ Sensitive-path validation:
 - The check output intentionally uses stable class labels and never prints the
   requested URLs, response bodies, tokens, session values, raw config, or
   discovered filenames.
+
+Security posture reporting:
+
+- `prod_doctor.sh` reports posture facts as advisory classes/flags only.
+- Header posture is presence-only for App, `www`, and Monitor surfaces; header
+  values are never printed.
+- SSH posture uses selected effective `sshd -T` policy flags only and never
+  prints keys, users, or raw sshd config.
+- Firewall and port posture reports UFW status, expected port classes,
+  loopback-only internal service classes, and unexpected public listener count;
+  it does not print raw listener addresses.
+- Missing headers, `PasswordAuthentication=yes`, forwarding enabled, or
+  `UFW inactive` are hardening hints for follow-up gates. They are not
+  `prod_doctor.sh` failures by themselves.
