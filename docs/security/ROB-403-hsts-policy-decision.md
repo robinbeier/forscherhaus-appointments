@@ -98,6 +98,9 @@ The first HSTS live gate should:
 8. Re-run `bash scripts/ops/prod_validate_after_change.sh`.
 9. Re-run `bash scripts/ops/prod_doctor.sh`.
 
+ROB-407 records the concrete follow-up live-gate plan for this first short
+host-only HSTS change.
+
 Expected target header:
 
 ```http
