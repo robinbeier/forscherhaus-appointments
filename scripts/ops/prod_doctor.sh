@@ -10,6 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/prod_common.sh"
 # shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
 source "${SCRIPT_DIR}/lib/prod_sensitive_paths.sh"
+# shellcheck source=scripts/ops/lib/prod_scanner_paths.sh
+source "${SCRIPT_DIR}/lib/prod_scanner_paths.sh"
 # shellcheck source=scripts/ops/lib/prod_posture.sh
 source "${SCRIPT_DIR}/lib/prod_posture.sh"
 
@@ -51,6 +53,8 @@ run_remote() {
     remote_functions="$(
         declare -f prod_sensitive_path_specs
         declare -f prod_sensitive_paths_check_all
+        declare -f prod_scanner_path_specs
+        declare -f prod_scanner_paths_check_all
         declare -f prod_posture_header_specs
         declare -f prod_posture_header_names
         declare -f prod_posture_check_headers
@@ -130,6 +134,10 @@ fi
 section sensitive_paths
 prod_sensitive_paths_check_all "https://dasforscherhaus-leg.de"
 kv sensitive_path_failures "${PROD_SENSITIVE_PATH_FAILURES:-0}"
+
+section scanner_paths
+PROD_SCANNER_PATH_EMIT_FAILURES=0 prod_scanner_paths_check_all "https://dasforscherhaus-leg.de"
+kv scanner_path_failures "${PROD_SCANNER_PATH_FAILURES:-0}"
 
 section posture
 prod_posture_check_headers

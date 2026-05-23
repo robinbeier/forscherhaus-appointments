@@ -10,10 +10,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/prod_common.sh"
 # shellcheck source=scripts/ops/lib/prod_sensitive_paths.sh
 source "${SCRIPT_DIR}/lib/prod_sensitive_paths.sh"
+# shellcheck source=scripts/ops/lib/prod_scanner_paths.sh
+source "${SCRIPT_DIR}/lib/prod_scanner_paths.sh"
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
 WITH_CERTBOT_DRY_RUN=0
+REQUIRE_SCANNER_BLOCKING=0
 
 usage() {
     cat <<'USAGE'
@@ -24,6 +27,8 @@ Run the standard post-change production validation gate.
 
 Options:
   --with-certbot-dry-run  Also run certbot renew dry-run with no random sleep.
+  --require-scanner-blocking
+                          Fail when fixed scanner probes return HTTP 2xx.
 USAGE
     prod_usage_common
 }
@@ -37,6 +42,10 @@ parse_args() {
                 ;;
             --with-certbot-dry-run)
                 WITH_CERTBOT_DRY_RUN=1
+                shift
+                ;;
+            --require-scanner-blocking)
+                REQUIRE_SCANNER_BLOCKING=1
                 shift
                 ;;
             -h|--help)
@@ -56,6 +65,8 @@ run_remote() {
     sensitive_path_functions="$(
         declare -f prod_sensitive_path_specs
         declare -f prod_sensitive_paths_check_all
+        declare -f prod_scanner_path_specs
+        declare -f prod_scanner_paths_check_all
     )"
 
     {
@@ -182,6 +193,13 @@ if (( PROD_SENSITIVE_PATH_FAILURES > 0 )); then
     failures=$((failures + PROD_SENSITIVE_PATH_FAILURES))
 fi
 
+section scanner_paths
+PROD_SCANNER_PATH_EMIT_FAILURES="${REQUIRE_SCANNER_BLOCKING}" prod_scanner_paths_check_all "https://dasforscherhaus-leg.de"
+printf 'scanner_path_failures=%s\n' "${PROD_SCANNER_PATH_FAILURES:-0}"
+if [[ "${REQUIRE_SCANNER_BLOCKING}" == "1" ]] && (( PROD_SCANNER_PATH_FAILURES > 0 )); then
+    failures=$((failures + PROD_SCANNER_PATH_FAILURES))
+fi
+
 section services
 for service in apache2 php8.5-fpm mariadb docker fail2ban cron unattended-upgrades fh-pdf-renderer; do
     check_eq "service.${service}" "$(systemctl is-active "$service" 2>/dev/null || true)" active
@@ -241,6 +259,8 @@ else
 fi
 if systemctl list-timers --all --no-pager 2>/dev/null | grep -Eq 'certbot|snap.certbot'; then
     printf 'certbot.timer=present\n'
+elif systemctl is-active certbot.timer >/dev/null 2>&1; then
+    printf 'certbot.timer=present\n'
 else
     printf 'FAIL certbot.timer missing\n' >&2
     failures=$((failures + 1))
@@ -285,7 +305,7 @@ if (( failures > 0 )); then
 fi
 printf 'validation=passed\n'
 REMOTE
-    } | ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "WITH_CERTBOT_DRY_RUN='${WITH_CERTBOT_DRY_RUN}' bash -s"
+    } | ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "WITH_CERTBOT_DRY_RUN='${WITH_CERTBOT_DRY_RUN}' REQUIRE_SCANNER_BLOCKING='${REQUIRE_SCANNER_BLOCKING}' bash -s"
 }
 
 main() {
@@ -293,6 +313,7 @@ main() {
     prod_require_cmd ssh
     prod_print_plan "prod-validate-after-change" "${PROD_SSH_TARGET}" "read-only"
     printf '  certbot dry-run : %s\n' "$([[ "${WITH_CERTBOT_DRY_RUN}" == "1" ]] && printf yes || printf no)"
+    printf '  scanner blocking: %s\n' "$([[ "${REQUIRE_SCANNER_BLOCKING}" == "1" ]] && printf required || printf advisory)"
     run_remote
 }
 
