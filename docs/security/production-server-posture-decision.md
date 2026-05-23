@@ -151,6 +151,9 @@ Recommended scope:
 
 - Decide separately whether to enable HSTS and whether to include subdomains.
 - Do not use `preload` by default.
+- ROB-403 recorded the recommended first policy as short host-only HSTS:
+  `Strict-Transport-Security: max-age=300`, without `includeSubDomains` and
+  without `preload`.
 
 Stop conditions:
 
