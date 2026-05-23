@@ -41,6 +41,8 @@ Script inventory:
 - `install_prod_agent_readme.sh` installs the server-local agent orientation file in explicit execute mode
 - `lib/prod_sensitive_paths.sh` checks fixed sensitive web path classes without
   printing URLs, file contents, tokens, session data, or discovered filenames
+- `lib/prod_scanner_paths.sh` checks fixed scanner probe classes without
+  printing URLs, response bodies, or raw scanner request paths
 - `lib/prod_posture.sh` reports advisory production posture classes for
   headers, SSH policy flags, UFW status, listener classes, and unexpected
   public listener count without printing raw config, listener addresses, or
@@ -139,6 +141,22 @@ Sensitive-path validation:
 - The check output intentionally uses stable class labels and never prints the
   requested URLs, response bodies, tokens, session values, raw config, or
   discovered filenames.
+
+Scanner-path validation:
+
+- `prod_doctor.sh` reports fixed scanner probe classes as HTTP status classes
+  only.
+- `prod_validate_after_change.sh` reports the same classes in advisory mode by
+  default so pre-ROB-405 production state does not break unrelated validation.
+- For the ROB-405 live gate, run
+  `bash scripts/ops/prod_validate_after_change.sh --require-scanner-blocking`;
+  this fails when any fixed scanner probe class returns HTTP 2xx or when a
+  probe itself cannot run.
+- The check covers known scanner classes for environment files, Git metadata,
+  WordPress/PHP info probes, server-status, vendor/phpunit, HNAP1, boaform,
+  cgi-bin, and phpinfo query-string probes.
+- Output intentionally uses stable class labels and never prints requested
+  URLs, response bodies, tokens, raw config, or discovered filenames.
 
 Security posture reporting:
 
