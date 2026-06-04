@@ -110,8 +110,8 @@ App log script behavior:
 - primes itself on first run to avoid an immediate false alarm from historical log lines
 - applies a built-in narrow classifier for known scanner/proxy noise that has
   been proven not to represent app downtime, currently:
-    - absolute-URI scanner 404s matching the observed `Azenvnet/index` route
-      shape
+    - absolute-URI/proxy scanner 404s matching observed route shapes such as
+      `Azenvnet/index`, `Wwwgooglecom/index`, and `127001:80/index`
     - CodeIgniter file-cache expiry races for `rate_limit_key_*` entries at
       `Cache_file.php 279`
 - supports `KUMA_APP_LOG_IGNORE_REGEX` for additional host-local expected noisy
