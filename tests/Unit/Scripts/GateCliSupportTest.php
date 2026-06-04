@@ -100,6 +100,18 @@ class GateCliSupportTest extends TestCase
             $this->assertStringContainsString("report '{$resolvedCwd}/reports/predeploy.json'", $result['stdout']);
             $expectedStageRoot = $appPath . '_ea_20260320_1200_stage';
             $this->assertStringContainsString(
+                "find '{$expectedStageRoot}' -type d -exec chmod 755 {} +",
+                $result['stdout'],
+            );
+            $this->assertStringContainsString(
+                "find '{$expectedStageRoot}' -type f -exec chmod 644 {} +",
+                $result['stdout'],
+            );
+            $this->assertStringNotContainsString(
+                "find '{$expectedStageRoot}' -type f -exec chmod 644 {} \\;",
+                $result['stdout'],
+            );
+            $this->assertStringContainsString(
                 "would generate zero-surprise stage config from '{$expectedStageRoot}/config-sample.php' -> '{$expectedStageRoot}/config.php'",
                 $result['stdout'],
             );

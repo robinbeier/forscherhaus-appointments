@@ -303,7 +303,7 @@ restore_runtime_script_permissions() {
 
   [[ -d "$ops_dir" ]] || return 0
 
-  find "$ops_dir" -type f -name '*.sh' -exec chmod 755 {} \;
+  find "$ops_dir" -type f -name '*.sh' -exec chmod 755 {} +
 }
 
 install_renderer_dependencies() {
@@ -1132,8 +1132,8 @@ validate_deploy_script_drift
 validate_breakglass_policy || die "[!] Zero-surprise breakglass policy validation failed."
 prepare_zero_surprise_stage_runtime
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
-run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} \\;"
-run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} \\;"
+run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
+run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
 restore_runtime_script_permissions
 run_zero_surprise_predeploy_replay || die "[!] Zero-surprise pre-deploy replay failed. Aborting before atomic switch."
 validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
@@ -1159,8 +1159,8 @@ else
 fi
 
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
-run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} \\;"
-run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} \\;"
+run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
+run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
 restore_runtime_script_permissions
 
 perform_atomic_switch
