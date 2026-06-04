@@ -49,6 +49,8 @@ Candidate classes are decision aids, not deletion commands.
   must be checked first.
 - `needs_retention_decision`: never delete automatically. Decide retention
   policy first.
+- `missing_rollback_directory`: stop before cleanup planning because no previous
+  release rollback directory was identified.
 - `keep_current_rollback`: keep the current previous release rollback directory.
 - `observe`: no cleanup pressure from that class right now.
 - `none`: no candidate in that class.

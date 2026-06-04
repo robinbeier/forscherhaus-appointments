@@ -252,7 +252,9 @@ current_release_id() {
 candidate_for_prev_dirs() {
     local count="$1"
 
-    if (( count <= 1 )); then
+    if (( count == 0 )); then
+        printf 'missing_rollback_directory'
+    elif (( count == 1 )); then
         printf 'keep_current_rollback'
     else
         printf 'needs_review'

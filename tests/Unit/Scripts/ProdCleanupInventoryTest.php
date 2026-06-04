@@ -88,6 +88,48 @@ final class ProdCleanupInventoryTest extends TestCase
         }
     }
 
+    public function testInventoryReportsMissingRollbackWhenNoPreviousReleaseExists(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-cleanup-inventory-no-rollback-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $webRoot = $workspace . '/web';
+        $appRoot = $webRoot . '/easyappointments';
+
+        mkdir($stubBin, 0777, true);
+        mkdir($appRoot, 0777, true);
+
+        try {
+            $this->writeSshStub($stubBin);
+            file_put_contents($appRoot . '/_RELEASE', "ea_current 2026-06-04T15:23:36Z\n");
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/prod_cleanup_inventory.sh', '--prod-ssh-target', 'prod.example'],
+                $this->repoRoot(),
+                [
+                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'CLEANUP_WEB_ROOT' => $webRoot,
+                    'CLEANUP_APP_ROOT' => $appRoot,
+                    'CLEANUP_RELEASES_DIR' => $workspace . '/releases',
+                    'CLEANUP_BACKUP_DIR' => $workspace . '/backups/easyappointments',
+                    'CLEANUP_REBUILD_RESTORE_INPUTS_DIR' => $workspace . '/rebuild-restore-inputs',
+                ],
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('release_dirs.prev.count=0', $result['stdout']);
+            self::assertStringContainsString(
+                'cleanup_candidate.prev_release_dirs=missing_rollback_directory',
+                $result['stdout'],
+            );
+            self::assertStringNotContainsString(
+                'cleanup_candidate.prev_release_dirs=keep_current_rollback',
+                $result['stdout'],
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     private function writeSshStub(string $stubBin): void
     {
         file_put_contents(
