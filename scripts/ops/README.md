@@ -126,6 +126,11 @@ App log script behavior:
 `prod_logs_summary.sh` and `prod_validate_after_change.sh` use the same built-in
 classifier, so post-change validation reports actionable app log errors while
 also showing how many recent error-like lines were ignored as known noise.
+`prod_validate_after_change.sh` separates current actionable app errors observed
+after the validation start timestamp from historical actionable entries still
+present in the 24h app-log window. Current actionable errors fail the gate;
+older 24h entries remain visible as context instead of keeping an otherwise
+recovered post-change validation red.
 
 Sensitive-path validation:
 
