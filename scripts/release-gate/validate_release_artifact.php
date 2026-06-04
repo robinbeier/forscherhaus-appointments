@@ -27,12 +27,12 @@ if (($root === '' && $archive === '') || ($root !== '' && $archive !== '')) {
 try {
     if ($root !== '') {
         ReleaseArtifactValidator::assertDirectoryIsValid($root);
-        fwrite(STDOUT, "[OK] Release artifact directory contains required files.\n");
+        fwrite(STDOUT, "[OK] Release artifact directory contains required files and no forbidden paths.\n");
         exit(0);
     }
 
     ReleaseArtifactValidator::assertArchiveEntriesAreValid(readArchiveEntries($archive));
-    fwrite(STDOUT, "[OK] Release artifact archive contains required files.\n");
+    fwrite(STDOUT, "[OK] Release artifact archive contains required files and no forbidden paths.\n");
     exit(0);
 } catch (Throwable $exception) {
     fwrite(STDERR, $exception->getMessage() . PHP_EOL);
