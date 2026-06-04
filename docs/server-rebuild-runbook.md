@@ -59,7 +59,7 @@ Apache currently serves:
 - `monitor.dasforscherhaus-leg.de`
 
 Uptime Kuma currently runs as Docker container `uptime-kuma` with image
-`louislam/uptime-kuma:2.3.2`, bound to `127.0.0.1:3001`.
+`louislam/uptime-kuma:2.4.0`, bound to `127.0.0.1:3001`.
 
 ## Target Baseline
 
