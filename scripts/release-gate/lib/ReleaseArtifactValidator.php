@@ -44,6 +44,17 @@ final class ReleaseArtifactValidator
     }
 
     /**
+     * Keep generated/local-only trees out of release artifacts. They can expose
+     * duplicate app/vendor surfaces when deployed under the public webroot.
+     *
+     * @return list<string>
+     */
+    public static function forbiddenPathPrefixes(): array
+    {
+        return ['build'];
+    }
+
+    /**
      * @param iterable<string> $entries
      * @return list<string>
      */
@@ -73,6 +84,35 @@ final class ReleaseArtifactValidator
     }
 
     /**
+     * @param iterable<string> $entries
+     * @return list<string>
+     */
+    public static function forbiddenArchivePaths(iterable $entries): array
+    {
+        $forbidden = [];
+
+        foreach ($entries as $entry) {
+            $normalizedEntry = self::normalizePath($entry);
+
+            if ($normalizedEntry === '') {
+                continue;
+            }
+
+            foreach (self::forbiddenPathPrefixes() as $forbiddenPrefix) {
+                if (
+                    $normalizedEntry === $forbiddenPrefix ||
+                    str_starts_with($normalizedEntry, $forbiddenPrefix . '/')
+                ) {
+                    $forbidden[] = $normalizedEntry;
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($forbidden));
+    }
+
+    /**
      * @return list<string>
      */
     public static function missingDirectoryPaths(string $root): array
@@ -92,13 +132,40 @@ final class ReleaseArtifactValidator
         return $missing;
     }
 
+    /**
+     * @return list<string>
+     */
+    public static function forbiddenDirectoryPaths(string $root): array
+    {
+        $forbidden = [];
+        $normalizedRoot = rtrim($root, '/\\');
+
+        foreach (self::forbiddenPathPrefixes() as $forbiddenPrefix) {
+            $absolutePath =
+                $normalizedRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $forbiddenPrefix);
+
+            if (file_exists($absolutePath)) {
+                $forbidden[] = $forbiddenPrefix;
+            }
+        }
+
+        return $forbidden;
+    }
+
     public static function assertDirectoryIsValid(string $root): void
     {
         $missing = self::missingDirectoryPaths($root);
+        $forbidden = self::forbiddenDirectoryPaths($root);
 
         if ($missing !== []) {
             throw new RuntimeException(
                 'Release artifact directory is missing required files: ' . implode(', ', $missing),
+            );
+        }
+
+        if ($forbidden !== []) {
+            throw new RuntimeException(
+                'Release artifact directory contains forbidden paths: ' . implode(', ', $forbidden),
             );
         }
     }
@@ -108,11 +175,19 @@ final class ReleaseArtifactValidator
      */
     public static function assertArchiveEntriesAreValid(iterable $entries): void
     {
+        $entries = is_array($entries) ? $entries : iterator_to_array($entries, false);
         $missing = self::missingArchivePaths($entries);
+        $forbidden = self::forbiddenArchivePaths($entries);
 
         if ($missing !== []) {
             throw new RuntimeException(
                 'Release artifact archive is missing required files: ' . implode(', ', $missing),
+            );
+        }
+
+        if ($forbidden !== []) {
+            throw new RuntimeException(
+                'Release artifact archive contains forbidden paths: ' . implode(', ', $forbidden),
             );
         }
     }

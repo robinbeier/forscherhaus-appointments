@@ -105,11 +105,12 @@ else
   echo "[DRY-RUN] Würde sicherstellen, dass assets/css, assets/js und assets/vendor danach keinen Diff haben"
 fi
 
-# 1) Stage befüllen (nur Root-config & storage ausschließen; ankern!)
+# 1) Stage befüllen (Root-config, runtime storage, and local build artifacts ausschließen; ankern!)
 if [[ "$DRYRUN" -eq 0 ]]; then
   rsync -a --delete \
     --exclude '/config.php' \
     --exclude '/storage' \
+    --exclude '/build' \
     --exclude '/.git' \
     --exclude '/.DS_Store' \
     --exclude '/node_modules' \
@@ -128,7 +129,7 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   mkdir -p "$STAGE/docker/nginx"
   cp docker/nginx/nginx.conf "$STAGE/docker/nginx/nginx.conf"
 else
-  echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docker)"
+  echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docker)"
   echo "[DRY-RUN] Würde docker/compose.zero-surprise.yml sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
 fi
 

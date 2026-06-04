@@ -29,6 +29,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
             }
 
             self::assertSame([], ReleaseArtifactValidator::missingDirectoryPaths($root));
+            self::assertSame([], ReleaseArtifactValidator::forbiddenDirectoryPaths($root));
         } finally {
             $this->removeDirectory($root);
         }
@@ -44,6 +45,28 @@ final class ReleaseArtifactValidatorTest extends TestCase
         $missing = ReleaseArtifactValidator::missingArchivePaths($entries);
 
         self::assertSame(['assets/vendor/jquery/jquery.min.js'], $missing);
+    }
+
+    public function testForbiddenDirectoryPathsDetectsLocalBuildTree(): void
+    {
+        $root = sys_get_temp_dir() . '/release-artifact-forbidden-' . bin2hex(random_bytes(4));
+        mkdir($root . '/build/vendor', 0777, true);
+
+        try {
+            self::assertSame(['build'], ReleaseArtifactValidator::forbiddenDirectoryPaths($root));
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testForbiddenArchivePathsDetectsLocalBuildTree(): void
+    {
+        $entries = ['./application/config/config.php', './build/', './build/vendor/autoload.php'];
+
+        self::assertSame(
+            ['build', 'build/vendor/autoload.php'],
+            ReleaseArtifactValidator::forbiddenArchivePaths($entries),
+        );
     }
 
     private function removeDirectory(string $path): void
