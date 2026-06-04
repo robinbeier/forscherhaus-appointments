@@ -212,7 +212,7 @@ app_log_snapshot_file_sizes() {
 
     while IFS= read -r -d '' file; do
         size="$(file_size_bytes "$file")"
-        printf '%s\t%s\n' "$size" "$file" >> "$output_file"
+        printf '%s\t%s\t%s\n' "$size" "$(app_log_prefix_hash "$file" "$size")" "$file" >> "$output_file"
     done < <(find "${APP_ROOT}/storage/logs" -maxdepth 1 -type f -mtime -1 -print0)
 }
 
@@ -224,12 +224,34 @@ file_size_bytes() {
         || printf '0'
 }
 
+app_log_prefix_hash() {
+    local file="$1"
+    local byte_count="$2"
+
+    if ! [[ "$byte_count" =~ ^[0-9]+$ ]] || (( byte_count <= 0 )); then
+        printf 'empty'
+        return
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        head -c "$byte_count" "$file" 2>/dev/null | sha256sum | awk '{ print $1 }'
+        return
+    fi
+
+    if command -v shasum >/dev/null 2>&1; then
+        head -c "$byte_count" "$file" 2>/dev/null | shasum -a 256 | awk '{ print $1 }'
+        return
+    fi
+
+    head -c "$byte_count" "$file" 2>/dev/null | cksum | awk '{ print $1 ":" $2 }'
+}
+
 app_log_snapshot_size_for_file() {
     local snapshot_file="$1"
     local target_file="$2"
 
     awk -F '\t' -v target_file="$target_file" '
-        $2 == target_file {
+        $3 == target_file {
             print $1
             found = 1
             exit
@@ -242,12 +264,32 @@ app_log_snapshot_size_for_file() {
     ' "$snapshot_file" 2>/dev/null || printf '0'
 }
 
+app_log_snapshot_hash_for_file() {
+    local snapshot_file="$1"
+    local target_file="$2"
+
+    awk -F '\t' -v target_file="$target_file" '
+        $3 == target_file {
+            print $2
+            found = 1
+            exit
+        }
+        END {
+            if (!found) {
+                print ""
+            }
+        }
+    ' "$snapshot_file" 2>/dev/null || printf ''
+}
+
 app_error_count_since_snapshot() {
     local snapshot_file="$1"
     local count=0
     local file
     local start_size
     local current_size
+    local start_hash
+    local current_prefix_hash
     local matches
     local tmp_delta
     local tmp_matches
@@ -260,6 +302,7 @@ app_error_count_since_snapshot() {
 
     while IFS= read -r -d '' file; do
         start_size="$(app_log_snapshot_size_for_file "$snapshot_file" "$file")"
+        start_hash="$(app_log_snapshot_hash_for_file "$snapshot_file" "$file")"
         current_size="$(file_size_bytes "$file")"
 
         if ! [[ "$start_size" =~ ^[0-9]+$ ]]; then
@@ -272,6 +315,13 @@ app_error_count_since_snapshot() {
 
         if (( current_size < start_size )); then
             start_size=0
+        fi
+
+        if (( start_size > 0 && current_size >= start_size )); then
+            current_prefix_hash="$(app_log_prefix_hash "$file" "$start_size")"
+            if [[ -n "$start_hash" && "$current_prefix_hash" != "$start_hash" ]]; then
+                start_size=0
+            fi
         fi
 
         if (( current_size == start_size )); then

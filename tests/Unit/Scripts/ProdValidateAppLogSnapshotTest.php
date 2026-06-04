@@ -135,6 +135,52 @@ final class ProdValidateAppLogSnapshotTest extends TestCase
         }
     }
 
+    public function testProdValidateDetectsRewrittenAppLogThatGrowsBackPastSnapshotSize(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-validate-app-log-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $logFile = $appRoot . '/storage/logs/log-2026-06-04.php';
+        $appendMarker = $workspace . '/append.done';
+
+        mkdir($stubBin, 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+
+        try {
+            $this->writeStubs($stubBin);
+            file_put_contents(
+                $logFile,
+                implode("\n", [
+                    "<?php defined('BASEPATH') OR exit('No direct script access allowed'); ?>",
+                    'ERROR - 2026-06-04 14:45:09 --> historical PDF renderer fallback before rewrite',
+                    str_repeat('historical padding ', 20),
+                    '',
+                ]),
+            );
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/prod_validate_after_change.sh', '--prod-ssh-target', 'prod.example'],
+                $this->repoRoot(),
+                array_merge($this->commandEnv($stubBin, $appRoot), [
+                    'APP_LOG_APPEND_FILE' => $logFile,
+                    'APP_LOG_APPEND_MARKER' => $appendMarker,
+                    'APP_LOG_APPEND_MODE' => 'replace-grow',
+                ]),
+            );
+
+            self::assertNotSame(0, $result['exit_code'], 'Rewritten log content should not trust the stale offset.');
+            self::assertStringContainsString('app_error_like_lines_current=1', $result['stdout']);
+            self::assertStringContainsString('app_error_like_lines_24h=1', $result['stdout']);
+            self::assertStringContainsString('FAIL app_error_like_lines_current expected=0 got=1', $result['stderr']);
+            self::assertStringNotContainsString(
+                'current failure after grow-back rewrite',
+                $result['stdout'] . $result['stderr'],
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     private function writeStubs(string $stubBin): void
     {
         $this->writeSshStub($stubBin);
@@ -189,6 +235,25 @@ final class ProdValidateAppLogSnapshotTest extends TestCase
             if [[ -n "${APP_LOG_APPEND_FILE:-}" && -n "${APP_LOG_APPEND_MARKER:-}" && ! -e "${APP_LOG_APPEND_MARKER}" ]]; then
                 if [[ "${APP_LOG_APPEND_MODE:-append}" == "replace" ]]; then
                     printf '%s\n' 'ERROR - 2026-06-04 14:56:00 --> current failure after truncation' > "${APP_LOG_APPEND_FILE}"
+                elif [[ "${APP_LOG_APPEND_MODE:-append}" == "replace-grow" ]]; then
+                    {
+                        printf '%s\n' 'ERROR - 2026-06-04 14:56:00 --> current failure after grow-back rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                        printf '%s\n' 'non-error padding after rewrite'
+                    } > "${APP_LOG_APPEND_FILE}"
                 else
                     {
                         printf '%s\n' 'ERROR - 2026-06-04 14:55:00 --> 404 Page Not Found: Azenvnet/index'
