@@ -38,6 +38,9 @@ Script inventory:
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
+- `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
+  releases, backups, sessions, cache, logs, uploads, and cleanup candidate
+  classes without deleting anything
 - `install_prod_agent_readme.sh` installs the server-local agent orientation file in explicit execute mode
 - `lib/prod_sensitive_paths.sh` checks fixed sensitive web path classes without
   printing URLs, file contents, tokens, session data, or discovered filenames

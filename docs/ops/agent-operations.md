@@ -149,6 +149,8 @@ Kuma is red:
 Disk, memory, or swap pressure:
 
 - Use `prod_doctor.sh` for resource facts first.
+- Use `prod_cleanup_inventory.sh` for read-only cleanup classification before
+  proposing any deletion.
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 
