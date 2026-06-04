@@ -286,7 +286,7 @@ class CiPathFilterMatrixTest extends TestCase
             'docker compose exec -e PLAYWRIGHT_INSTALL_MODE=browser-only -T php-fpm php scripts/ci/run_deep_runtime_suite.php',
             $deepRuntimeJob,
         );
-        self::assertStringContainsString('--integration-smoke-browser-bootstrap-timeout=600', $deepRuntimeJob);
+        self::assertStringContainsString('--integration-smoke-browser-bootstrap-timeout=900', $deepRuntimeJob);
     }
 
     public function testLdapSmokeScriptChangeTriggersLdapGuardrailFilter(): void
