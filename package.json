@@ -49,6 +49,7 @@
         "@babel/preset-env": "^7.29.0",
         "@eslint/eslintrc": "^3.3.5",
         "@eslint/js": "^10.0.1",
+        "@playwright/cli": "0.1.1",
         "@prettier/plugin-php": "^0.24.0",
         "babel-preset-minify": "^0.5.2",
         "del": "^8.0.1",
@@ -63,6 +64,7 @@
         "gulp-plumber": "^1.2.1",
         "gulp-rename": "^2.1.0",
         "gulp-sass": "^6.0.1",
+        "playwright": "1.59.0-alpha-1771104257000",
         "prettier": "^3.8.1",
         "sass": "^1.98.0",
         "zip-dir": "^2.0.0"

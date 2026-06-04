@@ -171,14 +171,21 @@ class CiPathFilterMatrixTest extends TestCase
 
         $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
         self::assertStringContainsString(
-            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'",
+            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
             $deepRuntimeJob,
         );
         self::assertSame(
             2,
-            substr_count($deepRuntimeJob, "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'"),
+            substr_count(
+                $deepRuntimeJob,
+                "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
+            ),
         );
         self::assertStringContainsString('Build runtime JS assets', $deepRuntimeJob);
+        self::assertStringContainsString(
+            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'\n        run: npx gulp scripts",
+            $deepRuntimeJob,
+        );
         self::assertStringContainsString('npx gulp scripts', $deepRuntimeJob);
     }
 
@@ -231,6 +238,77 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
+    }
+
+    public function testUptimeKumaDesiredStateDoesNotTriggerIntegrationSmoke(): void
+    {
+        $matches = $this->applyFilters([
+            'docker/compose.uptime-kuma.yml',
+            'docs/uptime-kuma.md',
+            'scripts/ops/uptime-kuma.monitors.yml',
+        ]);
+
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertTrue($matches['coverage_required']);
+        self::assertTrue($matches['api_contract']);
+        self::assertFalse($matches['integration_smoke']);
+    }
+
+    public function testMariaDbRestoreComposeDoesNotTriggerIntegrationSmoke(): void
+    {
+        $matches = $this->applyFilters(['docker/compose.mariadb-restore.yml']);
+
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertTrue($matches['coverage_required']);
+        self::assertTrue($matches['api_contract']);
+        self::assertFalse($matches['integration_smoke']);
+    }
+
+    public function testAppRuntimeDockerChangesStillTriggerIntegrationSmoke(): void
+    {
+        $paths = [
+            'docker/compose.ci-local.yml',
+            'docker/compose.php85-smoke.yml',
+            'docker/compose.zero-surprise.yml',
+            'docker/php-fpm/Dockerfile',
+            'docker/nginx/nginx.conf',
+            'docker/ldap/seed/00-readonly-bind-user.ldif',
+        ];
+
+        foreach ($paths as $path) {
+            $matches = $this->applyFilters([$path]);
+
+            self::assertTrue($matches['integration_smoke'], $path);
+        }
+    }
+
+    public function testDeepRuntimeWorkflowUsesContainerChromiumForPlaywrightSmoke(): void
+    {
+        $workflow = file_get_contents($this->workflowPath());
+        self::assertNotFalse($workflow);
+
+        $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
+
+        self::assertStringContainsString(
+            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
+            $deepRuntimeJob,
+        );
+        self::assertStringContainsString(
+            'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
+            $deepRuntimeJob,
+        );
+        self::assertStringContainsString('-e PLAYWRIGHT_MCP_BROWSER=chromium', $deepRuntimeJob);
+        self::assertStringContainsString('-e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium', $deepRuntimeJob);
+        self::assertStringContainsString(
+            '-e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready',
+            $deepRuntimeJob,
+        );
+        self::assertStringContainsString(
+            '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
+            $deepRuntimeJob,
+        );
+        self::assertStringContainsString('-e PLAYWRIGHT_USE_LOCAL_BINS=1', $deepRuntimeJob);
+        self::assertStringContainsString('--integration-smoke-browser-bootstrap-timeout=900', $deepRuntimeJob);
     }
 
     public function testLdapSmokeScriptChangeTriggersLdapGuardrailFilter(): void

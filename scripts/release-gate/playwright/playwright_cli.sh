@@ -33,7 +33,31 @@ normalize_browser() {
   echo "${browser}"
 }
 
+normalize_install_mode() {
+  local install_mode="${1:-}"
+
+  install_mode="$(printf '%s' "${install_mode}" | tr '[:upper:]' '[:lower:]')"
+  install_mode="${install_mode#"${install_mode%%[![:space:]]*}"}"
+  install_mode="${install_mode%"${install_mode##*[![:space:]]}"}"
+
+  case "${install_mode}" in
+    ""|auto)
+      echo "auto"
+      return
+      ;;
+    with-deps|browser-only)
+      echo "${install_mode}"
+      return
+      ;;
+    *)
+      echo "Error: unsupported PLAYWRIGHT_INSTALL_MODE '${install_mode}'. Use auto, with-deps, or browser-only." >&2
+      exit 1
+      ;;
+  esac
+}
+
 playwright_browser="$(normalize_browser "${PLAYWRIGHT_MCP_BROWSER:-}")"
+playwright_install_mode="$(normalize_install_mode "${PLAYWRIGHT_INSTALL_MODE:-auto}")"
 
 playwright_cli_name="@playwright/cli"
 
@@ -56,8 +80,13 @@ resolve_playwright_cli_version() {
 
 playwright_cli_version="${PLAYWRIGHT_CLI_VERSION:-$(default_playwright_cli_version)}"
 playwright_cli_package="${playwright_cli_name}@${playwright_cli_version}"
+playwright_executable_path="${PLAYWRIGHT_MCP_EXECUTABLE_PATH:-}"
 
-playwright_cli_cmd=(npx --yes --package "${playwright_cli_package}" playwright-cli)
+if [[ "${PLAYWRIGHT_USE_LOCAL_BINS:-0}" == "1" && -x "./node_modules/.bin/playwright-cli" ]]; then
+  playwright_cli_cmd=(./node_modules/.bin/playwright-cli)
+else
+  playwright_cli_cmd=(npx --yes --package "${playwright_cli_package}" playwright-cli)
+fi
 playwright_ready_dir="${PLAYWRIGHT_MCP_READY_DIR:-/tmp/playwright-cli}"
 
 resolve_playwright_runtime_package() {
@@ -97,6 +126,11 @@ resolve_playwright_runtime_package() {
 run_playwright_install() {
   local runtime_package
   runtime_package="$(resolve_playwright_runtime_package)"
+  if [[ "${PLAYWRIGHT_USE_LOCAL_BINS:-0}" == "1" && -x "./node_modules/.bin/playwright" ]]; then
+    ./node_modules/.bin/playwright "$@"
+    return
+  fi
+
   npx --yes --package "${runtime_package}" playwright "$@"
 }
 
@@ -111,10 +145,55 @@ resolve_playwright_ready_marker() {
   echo "${playwright_ready_dir}/${playwright_browser}-${cli_marker}-${version}.ready"
 }
 
+resolve_playwright_install_mode() {
+  if [[ "${playwright_install_mode}" != "auto" ]]; then
+    echo "${playwright_install_mode}"
+    return
+  fi
+
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "with-deps"
+    return
+  fi
+
+  echo "browser-only"
+}
+
 ensure_browser_installed() {
   local ready_marker
+  local marker_state
+  local runtime_package
+  local resolved_install_mode
+  local executable_state
 
-  ready_marker="$(resolve_playwright_ready_marker)"
+  runtime_package="$(resolve_playwright_runtime_package)"
+  resolved_install_mode="$(resolve_playwright_install_mode)"
+  executable_state="absent"
+  if [[ -n "${playwright_executable_path}" ]]; then
+    if [[ ! -x "${playwright_executable_path}" ]]; then
+      echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} install_mode=${resolved_install_mode} executable_path=missing ready_marker=not-applicable marker=missing" >&2
+      echo "Error: PLAYWRIGHT_MCP_EXECUTABLE_PATH is set but is not executable." >&2
+      exit 1
+    fi
+
+    executable_state="present"
+    ready_marker="${playwright_ready_dir}/${playwright_browser}-${playwright_cli_package//[^A-Za-z0-9._-]/_}-system-executable.ready"
+  else
+    ready_marker="$(resolve_playwright_ready_marker)"
+  fi
+
+  marker_state="missing"
+  if [[ -f "${ready_marker}" ]]; then
+    marker_state="present"
+  fi
+
+  echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} install_mode=${resolved_install_mode} executable_path=${executable_state} ready_marker=${ready_marker} marker=${marker_state}" >&2
+
+  if [[ -n "${playwright_executable_path}" ]]; then
+    mkdir -p "${playwright_ready_dir}"
+    touch "${ready_marker}"
+    return
+  fi
 
   if [[ -f "${ready_marker}" ]]; then
     return
@@ -122,9 +201,11 @@ ensure_browser_installed() {
 
   mkdir -p "${playwright_ready_dir}"
 
-  if [[ "$(uname -s)" == "Linux" ]]; then
+  if [[ "${resolved_install_mode}" == "with-deps" ]]; then
+    echo "[playwright-cli] browser install: mode=with-deps browser=${playwright_browser}" >&2
     DEBIAN_FRONTEND=noninteractive run_playwright_install install --with-deps "${playwright_browser}"
   else
+    echo "[playwright-cli] browser install: mode=browser-only browser=${playwright_browser}" >&2
     run_playwright_install install "${playwright_browser}"
   fi
 
