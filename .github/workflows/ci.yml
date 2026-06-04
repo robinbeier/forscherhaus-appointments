@@ -793,7 +793,8 @@ jobs:
         if: needs.changes.outputs.integration_smoke == 'true'
         run: >
           docker compose exec
-          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/firefox-esr
+          -e PLAYWRIGHT_MCP_BROWSER=chromium
+          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium
           -e PLAYWRIGHT_INSTALL_MODE=browser-only
           -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
           -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000
@@ -803,7 +804,8 @@ jobs:
       - name: Run deep runtime suite
         run: >
           docker compose exec
-          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/firefox-esr
+          -e PLAYWRIGHT_MCP_BROWSER=chromium
+          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium
           -e PLAYWRIGHT_INSTALL_MODE=browser-only
           -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
           -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000

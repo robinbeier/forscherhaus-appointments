@@ -282,7 +282,7 @@ class CiPathFilterMatrixTest extends TestCase
         }
     }
 
-    public function testDeepRuntimeWorkflowUsesContainerFirefoxForPlaywrightSmoke(): void
+    public function testDeepRuntimeWorkflowUsesContainerChromiumForPlaywrightSmoke(): void
     {
         $workflow = file_get_contents($this->workflowPath());
         self::assertNotFalse($workflow);
@@ -297,7 +297,8 @@ class CiPathFilterMatrixTest extends TestCase
             'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
             $deepRuntimeJob,
         );
-        self::assertStringContainsString('-e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/firefox-esr', $deepRuntimeJob);
+        self::assertStringContainsString('-e PLAYWRIGHT_MCP_BROWSER=chromium', $deepRuntimeJob);
+        self::assertStringContainsString('-e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium', $deepRuntimeJob);
         self::assertStringContainsString(
             '-e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready',
             $deepRuntimeJob,
