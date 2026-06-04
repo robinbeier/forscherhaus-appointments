@@ -6,6 +6,28 @@ WORKDIR "/var/www/html"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
+        chromium \
+        libasound2 \
+        libatk1.0-0 \
+        libcairo-gobject2 \
+        libcairo2 \
+        libdbus-1-3 \
+        libfontconfig1 \
+        libgdk-pixbuf-2.0-0 \
+        libglib2.0-0 \
+        libgtk-3-0 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libx11-xcb1 \
+        libxcb-shm0 \
+        libxcomposite1 \
+        libxcursor1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxi6 \
+        libxrandr2 \
+        libxrender1 \
         zip \
         unzip \
     && curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /tmp/install-php-extensions \

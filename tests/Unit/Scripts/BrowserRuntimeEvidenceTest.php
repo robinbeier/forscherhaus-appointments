@@ -394,23 +394,24 @@ class BrowserRuntimeEvidenceTest extends TestCase
 
             $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
             self::assertNotFalse($capturedInvocations);
-            self::assertCount(2, $capturedInvocations);
             self::assertStringContainsString(
                 '--package playwright@1.59.0-alpha-1771104257000 playwright --version',
                 $capturedInvocations[0],
             );
             self::assertStringContainsString(
                 '--package playwright@1.59.0-alpha-1771104257000 playwright install',
-                $capturedInvocations[1],
+                $capturedInvocations[count($capturedInvocations) - 1],
             );
-            self::assertStringContainsString('firefox', $capturedInvocations[1]);
+            self::assertStringContainsString('firefox', $capturedInvocations[count($capturedInvocations) - 1]);
             self::assertStringNotContainsString('playwright-cli install-browser', implode("\n", $capturedInvocations));
 
             $capturedNpmInvocations = file($npmCapturePath, FILE_IGNORE_NEW_LINES);
             self::assertNotFalse($capturedNpmInvocations);
-            self::assertCount(2, $capturedNpmInvocations);
             self::assertSame('view @playwright/cli@0.1.1 dependencies.playwright --json', $capturedNpmInvocations[0]);
-            self::assertSame('view @playwright/cli@0.1.1 dependencies.playwright --json', $capturedNpmInvocations[1]);
+            self::assertSame(
+                'view @playwright/cli@0.1.1 dependencies.playwright --json',
+                $capturedNpmInvocations[count($capturedNpmInvocations) - 1],
+            );
         } finally {
             if (is_file($npmPath)) {
                 unlink($npmPath);

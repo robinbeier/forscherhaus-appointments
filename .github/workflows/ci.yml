@@ -289,7 +289,12 @@ jobs:
               - 'application/**'
               - 'config/**'
               - 'database/**'
-              - 'docker/**'
+              - 'docker/compose.ci-local.yml'
+              - 'docker/compose.php85-smoke.yml'
+              - 'docker/compose.zero-surprise.yml'
+              - 'docker/ldap/**'
+              - 'docker/nginx/**'
+              - 'docker/php-fpm/**'
               - 'scripts/ci/run_deep_runtime_suite.php'
               - 'scripts/ci/assert_deep_runtime_suite.php'
               - 'scripts/ci/dashboard_integration_smoke.php'
@@ -686,16 +691,17 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v6
       - name: Setup Node.js
-        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
+        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
+      - name: Install Node.js dependencies
+        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'
+        run: npm ci --no-audit --no-fund
       - name: Build runtime JS assets
         if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
-        run: |
-          npm ci --no-audit --no-fund
-          npx gulp scripts
+        run: npx gulp scripts
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v8
         with:
@@ -783,9 +789,29 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
+      - name: Install Playwright smoke browser
+        if: needs.changes.outputs.integration_smoke == 'true'
+        run: >
+          docker compose exec
+          -e PLAYWRIGHT_MCP_BROWSER=chromium
+          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium
+          -e PLAYWRIGHT_INSTALL_MODE=browser-only
+          -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
+          -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000
+          -e PLAYWRIGHT_USE_LOCAL_BINS=1
+          -T php-fpm
+          bash scripts/release-gate/playwright/playwright_cli.sh install-browser
       - name: Run deep runtime suite
         run: >
-          docker compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php
+          docker compose exec
+          -e PLAYWRIGHT_MCP_BROWSER=chromium
+          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium
+          -e PLAYWRIGHT_INSTALL_MODE=browser-only
+          -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
+          -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000
+          -e PLAYWRIGHT_USE_LOCAL_BINS=1
+          -T php-fpm
+          php scripts/ci/run_deep_runtime_suite.php
           --suites=${{ steps.suites.outputs.requested }}
           --base-url=http://nginx --index-page=index.php
           --openapi-spec=/var/www/html/openapi.yml
@@ -793,6 +819,7 @@ jobs:
           --booking-search-days=14 --retry-count=1
           --start-date=2026-01-01 --end-date=2026-01-31
           --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
+          --integration-smoke-browser-bootstrap-timeout=900
           --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }}
           --report-dir=storage/logs/ci/deep-runtime-suite
       - name: Upload deep runtime suite artifacts

@@ -834,10 +834,32 @@ function writeReport(array $config, array $checks, ?array $failure, ?array $brow
         'browser_evidence' => $browserEvidence,
     ];
 
-    $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    $json = json_encode(jsonSafeValue($report), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     file_put_contents($outputPath, $json . PHP_EOL);
 
     return $outputPath;
+}
+
+function jsonSafeValue(mixed $value): mixed
+{
+    if (is_array($value)) {
+        $safe = [];
+        foreach ($value as $key => $item) {
+            $safe[$key] = jsonSafeValue($item);
+        }
+
+        return $safe;
+    }
+
+    if (!is_string($value)) {
+        return $value;
+    }
+
+    if (preg_match('//u', $value) === 1) {
+        return $value;
+    }
+
+    return mb_convert_encoding($value, 'UTF-8', 'UTF-8');
 }
 
 /**
