@@ -81,7 +81,11 @@ resolve_playwright_cli_version() {
 playwright_cli_version="${PLAYWRIGHT_CLI_VERSION:-$(default_playwright_cli_version)}"
 playwright_cli_package="${playwright_cli_name}@${playwright_cli_version}"
 
-playwright_cli_cmd=(npx --yes --package "${playwright_cli_package}" playwright-cli)
+if [[ "${PLAYWRIGHT_USE_LOCAL_BINS:-0}" == "1" && -x "./node_modules/.bin/playwright-cli" ]]; then
+  playwright_cli_cmd=(./node_modules/.bin/playwright-cli)
+else
+  playwright_cli_cmd=(npx --yes --package "${playwright_cli_package}" playwright-cli)
+fi
 playwright_ready_dir="${PLAYWRIGHT_MCP_READY_DIR:-/tmp/playwright-cli}"
 
 resolve_playwright_runtime_package() {
@@ -121,6 +125,11 @@ resolve_playwright_runtime_package() {
 run_playwright_install() {
   local runtime_package
   runtime_package="$(resolve_playwright_runtime_package)"
+  if [[ "${PLAYWRIGHT_USE_LOCAL_BINS:-0}" == "1" && -x "./node_modules/.bin/playwright" ]]; then
+    ./node_modules/.bin/playwright "$@"
+    return
+  fi
+
   npx --yes --package "${runtime_package}" playwright "$@"
 }
 

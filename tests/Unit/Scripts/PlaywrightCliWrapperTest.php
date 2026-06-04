@@ -213,6 +213,73 @@ class PlaywrightCliWrapperTest extends TestCase
         }
     }
 
+    public function testWrapperInstallBrowserCanUseLocalPlaywrightBinary(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-local-bin-' . bin2hex(random_bytes(4));
+        $nodeBinDir = $tempDir . '/node_modules/.bin';
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/playwright.log';
+        $npxCapturePath = $tempDir . '/npx.log';
+        $playwrightPath = $nodeBinDir . '/playwright';
+        $playwrightCliPath = $nodeBinDir . '/playwright-cli';
+        $npxPath = $binDir . '/npx';
+        $readyDir = $tempDir . '/ready';
+
+        mkdir($nodeBinDir, 0777, true);
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $playwrightPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.59.0-alpha-1771104257000\\n'\nfi\n",
+        );
+        file_put_contents(
+            $playwrightCliPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected playwright-cli invocation: %s\n' \"\$*\" >&2\nexit 1\n",
+        );
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($npxCapturePath) .
+                "\nexit 1\n",
+        );
+        chmod($playwrightPath, 0777);
+        chmod($playwrightCliPath, 0777);
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'cd %s && PATH=%s:$PATH PLAYWRIGHT_USE_LOCAL_BINS=1 PLAYWRIGHT_INSTALL_MODE=browser-only PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000 PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser',
+            escapeshellarg($tempDir),
+            escapeshellarg($binDir),
+            escapeshellarg($readyDir),
+            escapeshellarg($this->wrapperPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+            self::assertFileDoesNotExist($npxCapturePath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(2, $capturedInvocations);
+            self::assertStringContainsString('--version', $capturedInvocations[0]);
+            self::assertSame('install firefox', $capturedInvocations[1]);
+        } finally {
+            @unlink($playwrightPath);
+            @unlink($playwrightCliPath);
+            @unlink($npxPath);
+            @unlink($capturePath);
+            @unlink($npxCapturePath);
+            $this->removeDirectory($readyDir);
+            @rmdir($nodeBinDir);
+            @rmdir(dirname($nodeBinDir));
+            @rmdir($binDir);
+            @rmdir($tempDir);
+        }
+    }
+
     public function testWrapperDoesNotInjectEnvSessionWhenShortSessionFlagIsPresent(): void
     {
         $tempDir = sys_get_temp_dir() . '/pwcli-session-' . bin2hex(random_bytes(4));

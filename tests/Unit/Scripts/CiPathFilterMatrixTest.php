@@ -283,7 +283,7 @@ class CiPathFilterMatrixTest extends TestCase
         $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
 
         self::assertStringContainsString(
-            'docker compose exec -e PLAYWRIGHT_INSTALL_MODE=browser-only -T php-fpm php scripts/ci/run_deep_runtime_suite.php',
+            'docker compose exec -e PLAYWRIGHT_INSTALL_MODE=browser-only -e PLAYWRIGHT_USE_LOCAL_BINS=1 -T php-fpm php scripts/ci/run_deep_runtime_suite.php',
             $deepRuntimeJob,
         );
         self::assertStringContainsString('--integration-smoke-browser-bootstrap-timeout=900', $deepRuntimeJob);

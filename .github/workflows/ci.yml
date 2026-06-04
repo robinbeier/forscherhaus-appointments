@@ -790,7 +790,7 @@ jobs:
           exit 1
       - name: Run deep runtime suite
         run: >
-          docker compose exec -e PLAYWRIGHT_INSTALL_MODE=browser-only -T php-fpm php scripts/ci/run_deep_runtime_suite.php
+          docker compose exec -e PLAYWRIGHT_INSTALL_MODE=browser-only -e PLAYWRIGHT_USE_LOCAL_BINS=1 -T php-fpm php scripts/ci/run_deep_runtime_suite.php
           --suites=${{ steps.suites.outputs.requested }}
           --base-url=http://nginx --index-page=index.php
           --openapi-spec=/var/www/html/openapi.yml
