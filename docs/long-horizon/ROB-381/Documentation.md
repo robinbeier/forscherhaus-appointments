@@ -393,6 +393,13 @@ Remaining live work is intentionally gated:
   `docs/monitoring/sentry-alert-gate-2026-05-20.md` is also completed.
 - Future Kuma live writes still require explicit Kuma access approval, but the
   ROB-390/ROB-391 live changes are closed.
+- The 2026-06-04 ROB-420/421/422 live deploy gate completed successfully and is
+  recorded in `docs/monitoring/live-deploy-gate-2026-06-04-rob420-421-422.md`.
+  It deployed the no-`build/` artifact behavior, batched deploy chmod passes,
+  and the app-log validation split. The live app is healthy and `/build` now
+  returns `404`; the standard post-change validator still needs a small
+  follow-up because historical app-log entries can be classified as current when
+  timestamp timezones differ.
 - Any server-side follow-up beyond read-only inspection needs a named
   milestone and stop condition.
 
