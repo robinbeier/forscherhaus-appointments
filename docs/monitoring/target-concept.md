@@ -105,7 +105,7 @@ postdeploy health and canary gates pass.
 | App - PDF Renderer Log Errors | Detect renderer service errors | Kuma Push | Error | `journalctl -u fh-pdf-renderer` | 60s | error count > threshold | Inspect renderer container/service | Medium | No PDF content in messages |
 | App - Dashboard PDF Export | Prove live dashboard PDF path | Kuma Push script | Business/PDF | `kuma_push_pdf_export.sh` | 15m | gate rc != 0 or report missing | Check dashboard gate report, renderer, auth creds | Medium | Uses host-local gate credentials |
 | App - Booking Confirmation PDF | No-go for live synthetic until privacy-safe target exists | Release gate/manual only | Business/PDF | Booking confirmation PDF gate | Manual/release only | PDF cannot be downloaded/validated in approved gate | Use release/restored-data gate; do not add Kuma monitor yet | Medium-high | No real family hashes or reusable bearer links |
-| Security - Scanner Activity | Track scanner spikes separately | Kuma Push | Security | Apache access log patterns | 60s | scanner count above threshold | Observe or tune ingress; not app downtime | Medium | No raw IPs in Push msg |
+| Security - Scanner Activity | Track scanner spikes separately | Kuma Push | Security | Apache access log patterns | 60s | scanner count above threshold plus actionable status/source signal | Observe or tune ingress; not app downtime | Medium | No raw IPs in Push msg |
 | TLS/Certbot Freshness | Catch renewal/timer risk | Script or Kuma | Security/Availability | certbot cert/timer status | Daily | cert near expiry or timer missing | Run certbot validation; inspect Apache | Low | Public cert data only |
 | Sentry Production Errors | Alert on unexpected app exceptions | Sentry alert | Error | Sentry project | Continuous | new/high-frequency prod issue | Triage by release, area, operation | Medium | No PII; redaction required |
 | Sentry PDF/Export Regression | Escalate critical export/PDF failures | Sentry alert | Business/Error | Sentry tags `area`, `export_type` | Continuous | PDF/export issue in prod | Check renderer, gate reports, recent deploy | Low-medium | No HTML/customer data |
@@ -257,7 +257,9 @@ Keep deferred after ROB-387:
 ### Remove
 
 Remove none immediately. Reclassify `Security - Scanner Activity` as
-observation/security context, not app availability.
+observation/security context, not app availability. Fully blocked external
+bursts should stay telemetry-only; scanner-path 2xx responses or many-source
+bursts remain actionable.
 
 ### Push Monitor Secrets
 

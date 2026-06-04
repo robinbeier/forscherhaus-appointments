@@ -56,6 +56,13 @@ Repo desired monitor catalog:
 | App - Dashboard PDF Export | `push` | 900s | `KUMA_PUSH_URL_PDF_EXPORT` |
 | Security - Scanner Activity | `push` | 60s | `KUMA_PUSH_URL_SECURITY_SCANNER` |
 
+`Security - Scanner Activity` is telemetry-first. The push script still reports
+`scanner_activity`, but it only sends a red state when the threshold is exceeded
+and the burst is actionable: at least one scanner request returned `2xx`, or
+the number of distinct sources reaches `KUMA_SECURITY_SCANNER_SOURCE_THRESHOLD`
+(default `5`). Pure `3xx/4xx` bursts remain green and are logged in the push
+message without raw IPs or raw request paths.
+
 The accepted Ubuntu 26.04 rebuild runs PHP-FPM as `php8.5-fpm`. Repo desired
 state, host-local Push env, script defaults, and live Kuma monitor display names
 should all target `php8.5-fpm`.

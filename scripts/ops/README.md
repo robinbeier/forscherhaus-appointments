@@ -33,7 +33,7 @@ Script inventory:
 - `kuma_push_php_fpm_logs.sh` monitors recent PHP-FPM journal errors
 - `kuma_push_pdf_renderer_logs.sh` monitors recent `fh-pdf-renderer` journal errors
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
-- `kuma_push_apache_scanner_activity.sh` watches recent Apache access logs for common scanner probes
+- `kuma_push_apache_scanner_activity.sh` watches recent Apache access logs for common scanner probes and only alerts on actionable scanner activity
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
