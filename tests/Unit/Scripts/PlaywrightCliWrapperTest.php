@@ -148,6 +148,7 @@ class PlaywrightCliWrapperTest extends TestCase
             self::assertStringContainsString('cli_package=@playwright/cli@0.1.1', $stderr);
             self::assertStringContainsString('runtime_package=playwright@1.59.0-alpha-1771104257000', $stderr);
             self::assertStringContainsString('install_mode=with-deps', $stderr);
+            self::assertStringContainsString('executable_path=absent', $stderr);
             self::assertStringContainsString('ready_marker=' . $readyDir . '/', $stderr);
             self::assertStringContainsString('marker=missing', $stderr);
             self::assertStringContainsString('[playwright-cli] browser install: mode=', $stderr);
@@ -157,6 +158,105 @@ class PlaywrightCliWrapperTest extends TestCase
             @unlink($stderrPath);
             @rmdir($binDir);
             $this->removeDirectory($readyDir);
+            @rmdir($tempDir);
+        }
+    }
+
+    public function testWrapperSkipsBrowserInstallWhenExecutablePathIsPresent(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-executable-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $stderrPath = $tempDir . '/stderr.log';
+        $npxPath = $binDir . '/npx';
+        $executablePath = $tempDir . '/firefox-esr';
+        $readyDir = $tempDir . '/ready';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " . escapeshellarg($capturePath) . "\n",
+        );
+        file_put_contents($executablePath, "#!/usr/bin/env bash\nexit 0\n");
+        chmod($npxPath, 0777);
+        chmod($executablePath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_MCP_EXECUTABLE_PATH=%s PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000 PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser 2>%s',
+            escapeshellarg($binDir),
+            escapeshellarg($executablePath),
+            escapeshellarg($readyDir),
+            escapeshellarg($this->wrapperPath),
+            escapeshellarg($stderrPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileDoesNotExist($capturePath);
+            self::assertFileExists($stderrPath);
+
+            $stderr = file_get_contents($stderrPath);
+            self::assertIsString($stderr);
+            self::assertStringContainsString('executable_path=present', $stderr);
+            self::assertStringContainsString('marker=missing', $stderr);
+            self::assertStringNotContainsString('[playwright-cli] browser install:', $stderr);
+        } finally {
+            @unlink($npxPath);
+            @unlink($executablePath);
+            @unlink($capturePath);
+            @unlink($stderrPath);
+            $this->removeDirectory($readyDir);
+            @rmdir($binDir);
+            @rmdir($tempDir);
+        }
+    }
+
+    public function testWrapperFailsEarlyWhenExecutablePathIsMissing(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-missing-executable-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $stderrPath = $tempDir . '/stderr.log';
+        $npxPath = $binDir . '/npx';
+        $readyDir = $tempDir . '/ready';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " . escapeshellarg($capturePath) . "\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_MCP_EXECUTABLE_PATH=%s PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000 PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser 2>%s',
+            escapeshellarg($binDir),
+            escapeshellarg($tempDir . '/missing-firefox-esr'),
+            escapeshellarg($readyDir),
+            escapeshellarg($this->wrapperPath),
+            escapeshellarg($stderrPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(1, $exitCode);
+            self::assertFileDoesNotExist($capturePath);
+            self::assertFileExists($stderrPath);
+
+            $stderr = file_get_contents($stderrPath);
+            self::assertIsString($stderr);
+            self::assertStringContainsString('executable_path=missing', $stderr);
+            self::assertStringContainsString('ready_marker=not-applicable', $stderr);
+            self::assertStringContainsString(
+                'Error: PLAYWRIGHT_MCP_EXECUTABLE_PATH is set but is not executable.',
+                $stderr,
+            );
+        } finally {
+            @unlink($npxPath);
+            @unlink($capturePath);
+            @unlink($stderrPath);
+            $this->removeDirectory($readyDir);
+            @rmdir($binDir);
             @rmdir($tempDir);
         }
     }

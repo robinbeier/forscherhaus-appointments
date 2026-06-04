@@ -702,14 +702,6 @@ jobs:
       - name: Build runtime JS assets
         if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
         run: npx gulp scripts
-      - name: Cache Playwright smoke browsers
-        if: needs.changes.outputs.integration_smoke == 'true'
-        uses: actions/cache@v5
-        with:
-          path: .ci-playwright-browsers
-          key: playwright-smoke-browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-smoke-browsers-${{ runner.os }}-
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v8
         with:
@@ -801,18 +793,20 @@ jobs:
         if: needs.changes.outputs.integration_smoke == 'true'
         run: >
           docker compose exec
-          -e PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.ci-playwright-browsers
+          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/firefox-esr
           -e PLAYWRIGHT_INSTALL_MODE=browser-only
           -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
+          -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000
           -e PLAYWRIGHT_USE_LOCAL_BINS=1
           -T php-fpm
           bash scripts/release-gate/playwright/playwright_cli.sh install-browser
       - name: Run deep runtime suite
         run: >
           docker compose exec
-          -e PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.ci-playwright-browsers
+          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/firefox-esr
           -e PLAYWRIGHT_INSTALL_MODE=browser-only
           -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
+          -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000
           -e PLAYWRIGHT_USE_LOCAL_BINS=1
           -T php-fpm
           php scripts/ci/run_deep_runtime_suite.php

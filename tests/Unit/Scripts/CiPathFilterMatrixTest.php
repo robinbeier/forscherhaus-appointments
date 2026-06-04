@@ -282,7 +282,7 @@ class CiPathFilterMatrixTest extends TestCase
         }
     }
 
-    public function testDeepRuntimeWorkflowPreinstallsPlaywrightSmokeBrowser(): void
+    public function testDeepRuntimeWorkflowUsesContainerFirefoxForPlaywrightSmoke(): void
     {
         $workflow = file_get_contents($this->workflowPath());
         self::assertNotFalse($workflow);
@@ -293,18 +293,17 @@ class CiPathFilterMatrixTest extends TestCase
             "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
             $deepRuntimeJob,
         );
-        self::assertStringContainsString('path: .ci-playwright-browsers', $deepRuntimeJob);
-        self::assertStringContainsString('key: playwright-smoke-browsers-', $deepRuntimeJob);
         self::assertStringContainsString(
             'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
             $deepRuntimeJob,
         );
+        self::assertStringContainsString('-e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/firefox-esr', $deepRuntimeJob);
         self::assertStringContainsString(
-            '-e PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.ci-playwright-browsers',
+            '-e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready',
             $deepRuntimeJob,
         );
         self::assertStringContainsString(
-            '-e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready',
+            '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
             $deepRuntimeJob,
         );
         self::assertStringContainsString('-e PLAYWRIGHT_USE_LOCAL_BINS=1', $deepRuntimeJob);

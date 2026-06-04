@@ -80,6 +80,7 @@ resolve_playwright_cli_version() {
 
 playwright_cli_version="${PLAYWRIGHT_CLI_VERSION:-$(default_playwright_cli_version)}"
 playwright_cli_package="${playwright_cli_name}@${playwright_cli_version}"
+playwright_executable_path="${PLAYWRIGHT_MCP_EXECUTABLE_PATH:-}"
 
 if [[ "${PLAYWRIGHT_USE_LOCAL_BINS:-0}" == "1" && -x "./node_modules/.bin/playwright-cli" ]]; then
   playwright_cli_cmd=(./node_modules/.bin/playwright-cli)
@@ -163,17 +164,36 @@ ensure_browser_installed() {
   local marker_state
   local runtime_package
   local resolved_install_mode
+  local executable_state
 
-  ready_marker="$(resolve_playwright_ready_marker)"
   runtime_package="$(resolve_playwright_runtime_package)"
   resolved_install_mode="$(resolve_playwright_install_mode)"
+  executable_state="absent"
+  if [[ -n "${playwright_executable_path}" ]]; then
+    if [[ ! -x "${playwright_executable_path}" ]]; then
+      echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} install_mode=${resolved_install_mode} executable_path=missing ready_marker=not-applicable marker=missing" >&2
+      echo "Error: PLAYWRIGHT_MCP_EXECUTABLE_PATH is set but is not executable." >&2
+      exit 1
+    fi
+
+    executable_state="present"
+    ready_marker="${playwright_ready_dir}/${playwright_browser}-${playwright_cli_package//[^A-Za-z0-9._-]/_}-system-executable.ready"
+  else
+    ready_marker="$(resolve_playwright_ready_marker)"
+  fi
 
   marker_state="missing"
   if [[ -f "${ready_marker}" ]]; then
     marker_state="present"
   fi
 
-  echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} install_mode=${resolved_install_mode} ready_marker=${ready_marker} marker=${marker_state}" >&2
+  echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} install_mode=${resolved_install_mode} executable_path=${executable_state} ready_marker=${ready_marker} marker=${marker_state}" >&2
+
+  if [[ -n "${playwright_executable_path}" ]]; then
+    mkdir -p "${playwright_ready_dir}"
+    touch "${ready_marker}"
+    return
+  fi
 
   if [[ -f "${ready_marker}" ]]; then
     return

@@ -6,6 +6,7 @@ WORKDIR "/var/www/html"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
+        firefox-esr \
         libasound2 \
         libatk1.0-0 \
         libcairo-gobject2 \
