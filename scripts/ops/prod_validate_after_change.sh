@@ -114,6 +114,33 @@ REGEX
             | wc -l \
             | awk '{print $1}'
     }
+
+    app_log_filter_since_timestamp_file() {
+        local input_file="$1"
+        local output_file="$2"
+        local since_timestamp="$3"
+
+        awk -v since_timestamp="$since_timestamp" '
+            function entry_timestamp(line) {
+                if (substr(line, 1, 8) == "ERROR - ") {
+                    return substr(line, 9, 19)
+                }
+
+                if (substr(line, 1, 11) == "CRITICAL - ") {
+                    return substr(line, 12, 19)
+                }
+
+                return ""
+            }
+
+            {
+                timestamp = entry_timestamp($0)
+                if (timestamp != "" && timestamp >= since_timestamp) {
+                    print
+                }
+            }
+        ' "$input_file" > "$output_file" || true
+    }
 fi
 
 check_eq() {
@@ -149,7 +176,7 @@ warning_count() {
         | grep -vc '^-- No entries --' || true
 }
 
-app_error_count() {
+app_error_count_24h() {
     local count=0
     local file
     local matches
@@ -170,6 +197,38 @@ app_error_count() {
     done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
     printf '%s' "$count"
 }
+
+app_error_count_since_timestamp() {
+    local since_timestamp="$1"
+    local count=0
+    local file
+    local matches
+    local tmp_matches
+    local tmp_actionable
+    local tmp_current
+    if [[ ! -d /var/www/html/easyappointments/storage/logs ]]; then
+        printf 'missing'
+        return
+    fi
+    while IFS= read -r -d '' file; do
+        tmp_matches="$(mktemp)"
+        tmp_actionable="$(mktemp)"
+        tmp_current="$(mktemp)"
+        app_log_extract_error_like_file "$file" "$tmp_matches"
+        app_log_filter_actionable_file "$tmp_matches" "$tmp_actionable"
+        app_log_filter_since_timestamp_file "$tmp_actionable" "$tmp_current" "$since_timestamp"
+        matches="$(app_log_count_error_like_file "$tmp_current" || true)"
+        count=$((count + matches))
+        rm -f "$tmp_matches" "$tmp_actionable" "$tmp_current"
+    done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
+    printf '%s' "$count"
+}
+
+is_integer() {
+    [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+validation_started_at="$(date '+%Y-%m-%d %H:%M:%S')"
 
 section endpoints
 health_token=''
@@ -293,10 +352,20 @@ else
 fi
 
 section logs
+printf 'app_log_validation_started_at=%s\n' "$validation_started_at"
 for unit in apache2 php8.5-fpm mariadb fh-pdf-renderer docker cron; do
     check_zero "warnings_10m.${unit}" "$(warning_count "$unit")"
 done
-check_zero app_error_like_lines_24h "$(app_error_count)"
+current_app_errors="$(app_error_count_since_timestamp "$validation_started_at")"
+historical_app_errors="$(app_error_count_24h)"
+check_zero app_error_like_lines_current "$current_app_errors"
+printf 'app_error_like_lines_24h=%s\n' "$historical_app_errors"
+if [[ "$historical_app_errors" == "missing" ]]; then
+    printf 'FAIL app_error_like_lines_24h logs_missing\n' >&2
+    failures=$((failures + 1))
+elif is_integer "$historical_app_errors" && is_integer "$current_app_errors" && (( historical_app_errors > current_app_errors )); then
+    printf 'app_error_like_lines_24h_historical=%s\n' "$((historical_app_errors - current_app_errors))"
+fi
 
 section result
 if (( failures > 0 )); then

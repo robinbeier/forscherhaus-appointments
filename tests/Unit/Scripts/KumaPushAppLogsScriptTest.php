@@ -226,6 +226,48 @@ class KumaPushAppLogsScriptTest extends TestCase
         }
     }
 
+    public function testAppLogClassifierFiltersActionableErrorsSinceTimestamp(): void
+    {
+        $workspace = sys_get_temp_dir() . '/app-log-classifier-' . bin2hex(random_bytes(8));
+        $logFile = $workspace . '/log.php';
+
+        mkdir($workspace, 0777, true);
+
+        try {
+            file_put_contents(
+                $logFile,
+                implode("\n", [
+                    "<?php defined('BASEPATH') OR exit('No direct script access allowed'); ?>",
+                    'ERROR - 2026-06-04 14:45:09 --> Severity: Warning --> deploy-window PDF renderer restart',
+                    'ERROR - 2026-06-04 14:51:00 --> 404 Page Not Found: Azenvnet/index',
+                    'ERROR - 2026-06-04 14:52:00 --> Severity: Warning --> real post-change app failure',
+                    'CRITICAL - 2026-06-04 14:53:00 --> backend calendar unavailable',
+                    '',
+                ]),
+            );
+
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    '-c',
+                    'source scripts/ops/lib/app_log_classification.sh; matches="$(mktemp)"; actionable="$(mktemp)"; current="$(mktemp)"; app_log_extract_error_like_file "$1" "$matches"; app_log_filter_actionable_file "$matches" "$actionable"; app_log_filter_since_timestamp_file "$actionable" "$current" "2026-06-04 14:50:00"; printf "count=%s\n" "$(app_log_count_error_like_file "$current")"; cat "$current"; rm -f "$matches" "$actionable" "$current"',
+                    'bash',
+                    $logFile,
+                ],
+                $this->repoRoot(),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('count=2', $result['stdout']);
+            self::assertStringContainsString('real post-change app failure', $result['stdout']);
+            self::assertStringContainsString('backend calendar unavailable', $result['stdout']);
+            self::assertStringNotContainsString('deploy-window PDF renderer restart', $result['stdout']);
+            self::assertStringNotContainsString('Azenvnet/index', $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     /**
      * @param list<string> $command
      * @param array<string, string> $env

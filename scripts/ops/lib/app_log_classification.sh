@@ -44,3 +44,30 @@ app_log_count_error_like_file() {
     | wc -l \
     | awk '{print $1}'
 }
+
+app_log_filter_since_timestamp_file() {
+  local input_file="$1"
+  local output_file="$2"
+  local since_timestamp="$3"
+
+  awk -v since_timestamp="$since_timestamp" '
+    function entry_timestamp(line) {
+      if (substr(line, 1, 8) == "ERROR - ") {
+        return substr(line, 9, 19)
+      }
+
+      if (substr(line, 1, 11) == "CRITICAL - ") {
+        return substr(line, 12, 19)
+      }
+
+      return ""
+    }
+
+    {
+      timestamp = entry_timestamp($0)
+      if (timestamp != "" && timestamp >= since_timestamp) {
+        print
+      }
+    }
+  ' "$input_file" > "$output_file" || true
+}
