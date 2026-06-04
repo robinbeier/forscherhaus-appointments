@@ -6,7 +6,7 @@
 # live Kuma gate before the UI is expected to match exactly.
 
 container:
-    image: louislam/uptime-kuma:2.3.2
+    image: louislam/uptime-kuma:2.4.0
     listen: 127.0.0.1:3001
     data_path: /app/data
 

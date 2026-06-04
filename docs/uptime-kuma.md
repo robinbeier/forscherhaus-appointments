@@ -24,10 +24,11 @@ Host-owned:
 
 ## Production Snapshot
 
-Read-only inventory captured on 2026-05-14:
+Read-only inventory captured on 2026-05-14 and refreshed after the 2026-05-31
+2.4.0 maintenance update:
 
 - container: `uptime-kuma`
-- image: `louislam/uptime-kuma:2.3.2`
+- image: `louislam/uptime-kuma:2.4.0`
 - listen address: `127.0.0.1:3001`
 - data volume: `uptime-kuma_uptime-kuma-data` mounted at `/app/data`
 - database file: `/app/data/kuma.db`
@@ -243,6 +244,21 @@ live gate:
 - a current 12-monitor live export was validated on 2026-05-15;
 - ROB-390/ROB-391 moved the live state to 13 active monitors on 2026-05-20;
 - post-change validation showed 13 active monitors and 13 latest green.
+
+## 2026-05-31 2.4.0 Maintenance Update
+
+Uptime Kuma was updated from `2.3.2` to `2.4.0` after a server-local backup was
+created under `/root/backups/uptime-kuma`.
+
+Redacted result:
+
+- source and backup SQLite integrity checks returned `ok`;
+- the Compose image pin now targets `louislam/uptime-kuma:2.4.0`;
+- the container restarted healthy on `127.0.0.1:3001`;
+- post-change validation showed 13 active monitors and 13 latest green.
+
+The backup archive, SQLite backup, checksums, Push URLs, tokens, and database
+contents remain host-local and outside Git.
 
 Important limitation:
 
