@@ -289,7 +289,12 @@ jobs:
               - 'application/**'
               - 'config/**'
               - 'database/**'
-              - 'docker/**'
+              - 'docker/compose.ci-local.yml'
+              - 'docker/compose.php85-smoke.yml'
+              - 'docker/compose.zero-surprise.yml'
+              - 'docker/ldap/**'
+              - 'docker/nginx/**'
+              - 'docker/php-fpm/**'
               - 'scripts/ci/run_deep_runtime_suite.php'
               - 'scripts/ci/assert_deep_runtime_suite.php'
               - 'scripts/ci/dashboard_integration_smoke.php'
@@ -793,6 +798,7 @@ jobs:
           --booking-search-days=14 --retry-count=1
           --start-date=2026-01-01 --end-date=2026-01-31
           --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
+          --integration-smoke-browser-bootstrap-timeout=600
           --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }}
           --report-dir=storage/logs/ci/deep-runtime-suite
       - name: Upload deep runtime suite artifacts

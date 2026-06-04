@@ -113,8 +113,18 @@ resolve_playwright_ready_marker() {
 
 ensure_browser_installed() {
   local ready_marker
+  local marker_state
+  local runtime_package
 
   ready_marker="$(resolve_playwright_ready_marker)"
+  runtime_package="$(resolve_playwright_runtime_package)"
+
+  marker_state="missing"
+  if [[ -f "${ready_marker}" ]]; then
+    marker_state="present"
+  fi
+
+  echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} ready_marker=${ready_marker} marker=${marker_state}" >&2
 
   if [[ -f "${ready_marker}" ]]; then
     return
@@ -123,8 +133,10 @@ ensure_browser_installed() {
   mkdir -p "${playwright_ready_dir}"
 
   if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "[playwright-cli] browser install: mode=with-deps browser=${playwright_browser}" >&2
     DEBIAN_FRONTEND=noninteractive run_playwright_install install --with-deps "${playwright_browser}"
   else
+    echo "[playwright-cli] browser install: mode=browser-only browser=${playwright_browser}" >&2
     run_playwright_install install "${playwright_browser}"
   fi
 

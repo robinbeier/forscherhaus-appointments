@@ -233,6 +233,58 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testUptimeKumaDesiredStateDoesNotTriggerIntegrationSmoke(): void
+    {
+        $matches = $this->applyFilters([
+            'docker/compose.uptime-kuma.yml',
+            'docs/uptime-kuma.md',
+            'scripts/ops/uptime-kuma.monitors.yml',
+        ]);
+
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertTrue($matches['coverage_required']);
+        self::assertTrue($matches['api_contract']);
+        self::assertFalse($matches['integration_smoke']);
+    }
+
+    public function testMariaDbRestoreComposeDoesNotTriggerIntegrationSmoke(): void
+    {
+        $matches = $this->applyFilters(['docker/compose.mariadb-restore.yml']);
+
+        self::assertTrue($matches['deep_bootstrap_required']);
+        self::assertTrue($matches['coverage_required']);
+        self::assertTrue($matches['api_contract']);
+        self::assertFalse($matches['integration_smoke']);
+    }
+
+    public function testAppRuntimeDockerChangesStillTriggerIntegrationSmoke(): void
+    {
+        $paths = [
+            'docker/compose.ci-local.yml',
+            'docker/compose.php85-smoke.yml',
+            'docker/compose.zero-surprise.yml',
+            'docker/php-fpm/Dockerfile',
+            'docker/nginx/nginx.conf',
+            'docker/ldap/seed/00-readonly-bind-user.ldif',
+        ];
+
+        foreach ($paths as $path) {
+            $matches = $this->applyFilters([$path]);
+
+            self::assertTrue($matches['integration_smoke'], $path);
+        }
+    }
+
+    public function testDeepRuntimeWorkflowUsesLongerIntegrationSmokeBrowserBootstrapTimeout(): void
+    {
+        $workflow = file_get_contents($this->workflowPath());
+        self::assertNotFalse($workflow);
+
+        $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
+
+        self::assertStringContainsString('--integration-smoke-browser-bootstrap-timeout=600', $deepRuntimeJob);
+    }
+
     public function testLdapSmokeScriptChangeTriggersLdapGuardrailFilter(): void
     {
         $matches = $this->applyFilters(['scripts/ci/dashboard_integration_smoke.php']);

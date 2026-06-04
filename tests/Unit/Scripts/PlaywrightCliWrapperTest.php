@@ -109,6 +109,56 @@ class PlaywrightCliWrapperTest extends TestCase
         }
     }
 
+    public function testWrapperInstallBrowserEmitsBootstrapDiagnostics(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-diagnostics-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $stderrPath = $tempDir . '/stderr.log';
+        $npxPath = $binDir . '/npx';
+        $readyDir = $tempDir . '/ready';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.59.0-alpha-1771104257000\\n'\nfi\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000 PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser 2>%s',
+            escapeshellarg($binDir),
+            escapeshellarg($readyDir),
+            escapeshellarg($this->wrapperPath),
+            escapeshellarg($stderrPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($stderrPath);
+
+            $stderr = file_get_contents($stderrPath);
+            self::assertIsString($stderr);
+            self::assertStringContainsString('[playwright-cli] browser bootstrap:', $stderr);
+            self::assertStringContainsString('browser=firefox', $stderr);
+            self::assertStringContainsString('cli_package=@playwright/cli@0.1.1', $stderr);
+            self::assertStringContainsString('runtime_package=playwright@1.59.0-alpha-1771104257000', $stderr);
+            self::assertStringContainsString('ready_marker=' . $readyDir . '/', $stderr);
+            self::assertStringContainsString('marker=missing', $stderr);
+            self::assertStringContainsString('[playwright-cli] browser install: mode=', $stderr);
+        } finally {
+            @unlink($npxPath);
+            @unlink($capturePath);
+            @unlink($stderrPath);
+            @rmdir($binDir);
+            $this->removeDirectory($readyDir);
+            @rmdir($tempDir);
+        }
+    }
+
     public function testWrapperDoesNotInjectEnvSessionWhenShortSessionFlagIsPresent(): void
     {
         $tempDir = sys_get_temp_dir() . '/pwcli-session-' . bin2hex(random_bytes(4));
@@ -502,5 +552,32 @@ class PlaywrightCliWrapperTest extends TestCase
             @rmdir($binDir);
             @rmdir($tempDir);
         }
+    }
+
+    private function removeDirectory(string $directory): void
+    {
+        if (!is_dir($directory)) {
+            return;
+        }
+
+        $entries = scandir($directory);
+        if ($entries === false) {
+            return;
+        }
+
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $path = $directory . DIRECTORY_SEPARATOR . $entry;
+            if (is_dir($path)) {
+                $this->removeDirectory($path);
+            } else {
+                @unlink($path);
+            }
+        }
+
+        @rmdir($directory);
     }
 }
