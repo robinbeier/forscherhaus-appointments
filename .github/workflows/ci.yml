@@ -691,16 +691,25 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v6
       - name: Setup Node.js
-        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
+        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
+      - name: Install Node.js dependencies
+        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'
+        run: npm ci --no-audit --no-fund
       - name: Build runtime JS assets
         if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
-        run: |
-          npm ci --no-audit --no-fund
-          npx gulp scripts
+        run: npx gulp scripts
+      - name: Cache Playwright smoke browsers
+        if: needs.changes.outputs.integration_smoke == 'true'
+        uses: actions/cache@v5
+        with:
+          path: .ci-playwright-browsers
+          key: playwright-smoke-browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-smoke-browsers-${{ runner.os }}-
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v8
         with:
@@ -788,9 +797,25 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
+      - name: Install Playwright smoke browser
+        if: needs.changes.outputs.integration_smoke == 'true'
+        run: >
+          docker compose exec
+          -e PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.ci-playwright-browsers
+          -e PLAYWRIGHT_INSTALL_MODE=browser-only
+          -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
+          -e PLAYWRIGHT_USE_LOCAL_BINS=1
+          -T php-fpm
+          bash scripts/release-gate/playwright/playwright_cli.sh install-browser
       - name: Run deep runtime suite
         run: >
-          docker compose exec -e PLAYWRIGHT_INSTALL_MODE=browser-only -e PLAYWRIGHT_USE_LOCAL_BINS=1 -T php-fpm php scripts/ci/run_deep_runtime_suite.php
+          docker compose exec
+          -e PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.ci-playwright-browsers
+          -e PLAYWRIGHT_INSTALL_MODE=browser-only
+          -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
+          -e PLAYWRIGHT_USE_LOCAL_BINS=1
+          -T php-fpm
+          php scripts/ci/run_deep_runtime_suite.php
           --suites=${{ steps.suites.outputs.requested }}
           --base-url=http://nginx --index-page=index.php
           --openapi-spec=/var/www/html/openapi.yml

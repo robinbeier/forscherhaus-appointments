@@ -11,6 +11,7 @@
 /docker/openldap/
 /docker/openldap-parallel/
 /docker/openldap-legacy/
+/.ci-playwright-browsers/
 /node_modules/
 /npm-debug.log
 /assets/js/**/*.min.js

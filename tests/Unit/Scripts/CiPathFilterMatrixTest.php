@@ -171,14 +171,21 @@ class CiPathFilterMatrixTest extends TestCase
 
         $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
         self::assertStringContainsString(
-            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'",
+            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
             $deepRuntimeJob,
         );
         self::assertSame(
             2,
-            substr_count($deepRuntimeJob, "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'"),
+            substr_count(
+                $deepRuntimeJob,
+                "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
+            ),
         );
         self::assertStringContainsString('Build runtime JS assets', $deepRuntimeJob);
+        self::assertStringContainsString(
+            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'\n        run: npx gulp scripts",
+            $deepRuntimeJob,
+        );
         self::assertStringContainsString('npx gulp scripts', $deepRuntimeJob);
     }
 
@@ -275,7 +282,7 @@ class CiPathFilterMatrixTest extends TestCase
         }
     }
 
-    public function testDeepRuntimeWorkflowUsesLongerIntegrationSmokeBrowserBootstrapTimeout(): void
+    public function testDeepRuntimeWorkflowPreinstallsPlaywrightSmokeBrowser(): void
     {
         $workflow = file_get_contents($this->workflowPath());
         self::assertNotFalse($workflow);
@@ -283,9 +290,24 @@ class CiPathFilterMatrixTest extends TestCase
         $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
 
         self::assertStringContainsString(
-            'docker compose exec -e PLAYWRIGHT_INSTALL_MODE=browser-only -e PLAYWRIGHT_USE_LOCAL_BINS=1 -T php-fpm php scripts/ci/run_deep_runtime_suite.php',
+            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
             $deepRuntimeJob,
         );
+        self::assertStringContainsString('path: .ci-playwright-browsers', $deepRuntimeJob);
+        self::assertStringContainsString('key: playwright-smoke-browsers-', $deepRuntimeJob);
+        self::assertStringContainsString(
+            'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
+            $deepRuntimeJob,
+        );
+        self::assertStringContainsString(
+            '-e PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.ci-playwright-browsers',
+            $deepRuntimeJob,
+        );
+        self::assertStringContainsString(
+            '-e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready',
+            $deepRuntimeJob,
+        );
+        self::assertStringContainsString('-e PLAYWRIGHT_USE_LOCAL_BINS=1', $deepRuntimeJob);
         self::assertStringContainsString('--integration-smoke-browser-bootstrap-timeout=900', $deepRuntimeJob);
     }
 
