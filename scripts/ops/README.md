@@ -127,10 +127,13 @@ App log script behavior:
 classifier, so post-change validation reports actionable app log errors while
 also showing how many recent error-like lines were ignored as known noise.
 `prod_validate_after_change.sh` separates current actionable app errors observed
-after the validation start timestamp from historical actionable entries still
-present in the 24h app-log window. Current actionable errors fail the gate;
-older 24h entries remain visible as context instead of keeping an otherwise
-recovered post-change validation red.
+after the validation start from historical actionable entries still present in
+the 24h app-log window. The current-error check is based on a validation-start
+byte snapshot of app-log files, not on log timestamp string comparison, so host
+timezone and app log timezone drift cannot turn historical entries into current
+failures. Current actionable errors fail the gate; older 24h entries remain
+visible as context instead of keeping an otherwise recovered post-change
+validation red.
 
 Sensitive-path validation:
 

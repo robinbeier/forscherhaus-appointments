@@ -75,14 +75,15 @@ run_remote() {
 set -euo pipefail
 
 failures=0
+APP_ROOT="${APP_ROOT:-/var/www/html/easyappointments}"
 
 section() {
     printf '\n[%s]\n' "$1"
 }
 
-if [[ -r /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh ]]; then
+if [[ -r "${APP_ROOT}/scripts/ops/lib/app_log_classification.sh" ]]; then
     # shellcheck source=scripts/ops/lib/app_log_classification.sh
-    source /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh
+    source "${APP_ROOT}/scripts/ops/lib/app_log_classification.sh"
 else
     app_log_known_noise_regex() {
         cat <<'REGEX'
@@ -182,7 +183,7 @@ app_error_count_24h() {
     local matches
     local tmp_matches
     local tmp_actionable
-    if [[ ! -d /var/www/html/easyappointments/storage/logs ]]; then
+    if [[ ! -d "${APP_ROOT}/storage/logs" ]]; then
         printf 'missing'
         return
     fi
@@ -194,33 +195,100 @@ app_error_count_24h() {
         matches="$(app_log_count_error_like_file "$tmp_actionable" || true)"
         count=$((count + matches))
         rm -f "$tmp_matches" "$tmp_actionable"
-    done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
+    done < <(find "${APP_ROOT}/storage/logs" -maxdepth 1 -type f -mtime -1 -print0)
     printf '%s' "$count"
 }
 
-app_error_count_since_timestamp() {
-    local since_timestamp="$1"
+app_log_snapshot_file_sizes() {
+    local output_file="$1"
+    local file
+    local size
+
+    : > "$output_file"
+
+    if [[ ! -d "${APP_ROOT}/storage/logs" ]]; then
+        return
+    fi
+
+    while IFS= read -r -d '' file; do
+        size="$(file_size_bytes "$file")"
+        printf '%s\t%s\n' "$size" "$file" >> "$output_file"
+    done < <(find "${APP_ROOT}/storage/logs" -maxdepth 1 -type f -mtime -1 -print0)
+}
+
+file_size_bytes() {
+    local file="$1"
+
+    stat -c '%s' "$file" 2>/dev/null \
+        || stat -f '%z' "$file" 2>/dev/null \
+        || printf '0'
+}
+
+app_log_snapshot_size_for_file() {
+    local snapshot_file="$1"
+    local target_file="$2"
+
+    awk -F '\t' -v target_file="$target_file" '
+        $2 == target_file {
+            print $1
+            found = 1
+            exit
+        }
+        END {
+            if (!found) {
+                print 0
+            }
+        }
+    ' "$snapshot_file" 2>/dev/null || printf '0'
+}
+
+app_error_count_since_snapshot() {
+    local snapshot_file="$1"
     local count=0
     local file
+    local start_size
+    local current_size
     local matches
+    local tmp_delta
     local tmp_matches
     local tmp_actionable
-    local tmp_current
-    if [[ ! -d /var/www/html/easyappointments/storage/logs ]]; then
+
+    if [[ ! -d "${APP_ROOT}/storage/logs" ]]; then
         printf 'missing'
         return
     fi
+
     while IFS= read -r -d '' file; do
+        start_size="$(app_log_snapshot_size_for_file "$snapshot_file" "$file")"
+        current_size="$(file_size_bytes "$file")"
+
+        if ! [[ "$start_size" =~ ^[0-9]+$ ]]; then
+            start_size=0
+        fi
+
+        if ! [[ "$current_size" =~ ^[0-9]+$ ]]; then
+            current_size=0
+        fi
+
+        if (( current_size < start_size )); then
+            start_size=0
+        fi
+
+        if (( current_size == start_size )); then
+            continue
+        fi
+
+        tmp_delta="$(mktemp)"
         tmp_matches="$(mktemp)"
         tmp_actionable="$(mktemp)"
-        tmp_current="$(mktemp)"
-        app_log_extract_error_like_file "$file" "$tmp_matches"
+        tail -c +"$((start_size + 1))" "$file" > "$tmp_delta" 2>/dev/null || true
+        app_log_extract_error_like_file "$tmp_delta" "$tmp_matches"
         app_log_filter_actionable_file "$tmp_matches" "$tmp_actionable"
-        app_log_filter_since_timestamp_file "$tmp_actionable" "$tmp_current" "$since_timestamp"
-        matches="$(app_log_count_error_like_file "$tmp_current" || true)"
+        matches="$(app_log_count_error_like_file "$tmp_actionable" || true)"
         count=$((count + matches))
-        rm -f "$tmp_matches" "$tmp_actionable" "$tmp_current"
-    done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
+        rm -f "$tmp_delta" "$tmp_matches" "$tmp_actionable"
+    done < <(find "${APP_ROOT}/storage/logs" -maxdepth 1 -type f -mtime -1 -print0)
+
     printf '%s' "$count"
 }
 
@@ -229,6 +297,9 @@ is_integer() {
 }
 
 validation_started_at="$(date '+%Y-%m-%d %H:%M:%S')"
+app_log_snapshot="$(mktemp)"
+trap 'rm -f "$app_log_snapshot"' EXIT
+app_log_snapshot_file_sizes "$app_log_snapshot"
 
 section endpoints
 health_token=''
@@ -356,7 +427,7 @@ printf 'app_log_validation_started_at=%s\n' "$validation_started_at"
 for unit in apache2 php8.5-fpm mariadb fh-pdf-renderer docker cron; do
     check_zero "warnings_10m.${unit}" "$(warning_count "$unit")"
 done
-current_app_errors="$(app_error_count_since_timestamp "$validation_started_at")"
+current_app_errors="$(app_error_count_since_snapshot "$app_log_snapshot")"
 historical_app_errors="$(app_error_count_24h)"
 check_zero app_error_like_lines_current "$current_app_errors"
 printf 'app_error_like_lines_24h=%s\n' "$historical_app_errors"
