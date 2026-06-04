@@ -99,6 +99,7 @@ class PlaywrightCliWrapperTest extends TestCase
                 '--package playwright@1.59.0-alpha-1771104257000 playwright install',
                 $capturedInvocations[1],
             );
+            self::assertStringContainsString('--with-deps', $capturedInvocations[1]);
             self::assertStringContainsString('firefox', $capturedInvocations[1]);
             self::assertStringNotContainsString('playwright-cli install-browser', implode("\n", $capturedInvocations));
         } finally {
@@ -146,6 +147,7 @@ class PlaywrightCliWrapperTest extends TestCase
             self::assertStringContainsString('browser=firefox', $stderr);
             self::assertStringContainsString('cli_package=@playwright/cli@0.1.1', $stderr);
             self::assertStringContainsString('runtime_package=playwright@1.59.0-alpha-1771104257000', $stderr);
+            self::assertStringContainsString('install_mode=with-deps', $stderr);
             self::assertStringContainsString('ready_marker=' . $readyDir . '/', $stderr);
             self::assertStringContainsString('marker=missing', $stderr);
             self::assertStringContainsString('[playwright-cli] browser install: mode=', $stderr);
@@ -155,6 +157,58 @@ class PlaywrightCliWrapperTest extends TestCase
             @unlink($stderrPath);
             @rmdir($binDir);
             $this->removeDirectory($readyDir);
+            @rmdir($tempDir);
+        }
+    }
+
+    public function testWrapperInstallBrowserSupportsBrowserOnlyInstallMode(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/pwcli-browser-only-' . bin2hex(random_bytes(4));
+        $binDir = $tempDir . '/bin';
+        $capturePath = $tempDir . '/npx.log';
+        $stderrPath = $tempDir . '/stderr.log';
+        $npxPath = $binDir . '/npx';
+        $readyDir = $tempDir . '/ready';
+
+        mkdir($binDir, 0777, true);
+        file_put_contents(
+            $npxPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\n' \"\$*\" >> " .
+                escapeshellarg($capturePath) .
+                "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.59.0-alpha-1771104257000\\n'\nfi\n",
+        );
+        chmod($npxPath, 0777);
+
+        $command = sprintf(
+            'PATH=%s:$PATH PLAYWRIGHT_INSTALL_MODE=browser-only PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000 PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser 2>%s',
+            escapeshellarg($binDir),
+            escapeshellarg($readyDir),
+            escapeshellarg($this->wrapperPath),
+            escapeshellarg($stderrPath),
+        );
+        exec($command, $output, $exitCode);
+
+        try {
+            self::assertSame(0, $exitCode);
+            self::assertFileExists($capturePath);
+            self::assertFileExists($stderrPath);
+
+            $capturedInvocations = file($capturePath, FILE_IGNORE_NEW_LINES);
+            self::assertNotFalse($capturedInvocations);
+            self::assertCount(2, $capturedInvocations);
+            self::assertStringContainsString('playwright install firefox', $capturedInvocations[1]);
+            self::assertStringNotContainsString('--with-deps', $capturedInvocations[1]);
+
+            $stderr = file_get_contents($stderrPath);
+            self::assertIsString($stderr);
+            self::assertStringContainsString('install_mode=browser-only', $stderr);
+            self::assertStringContainsString('[playwright-cli] browser install: mode=browser-only', $stderr);
+        } finally {
+            @unlink($npxPath);
+            @unlink($capturePath);
+            @unlink($stderrPath);
+            $this->removeDirectory($readyDir);
+            @rmdir($binDir);
             @rmdir($tempDir);
         }
     }

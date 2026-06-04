@@ -33,7 +33,31 @@ normalize_browser() {
   echo "${browser}"
 }
 
+normalize_install_mode() {
+  local install_mode="${1:-}"
+
+  install_mode="$(printf '%s' "${install_mode}" | tr '[:upper:]' '[:lower:]')"
+  install_mode="${install_mode#"${install_mode%%[![:space:]]*}"}"
+  install_mode="${install_mode%"${install_mode##*[![:space:]]}"}"
+
+  case "${install_mode}" in
+    ""|auto)
+      echo "auto"
+      return
+      ;;
+    with-deps|browser-only)
+      echo "${install_mode}"
+      return
+      ;;
+    *)
+      echo "Error: unsupported PLAYWRIGHT_INSTALL_MODE '${install_mode}'. Use auto, with-deps, or browser-only." >&2
+      exit 1
+      ;;
+  esac
+}
+
 playwright_browser="$(normalize_browser "${PLAYWRIGHT_MCP_BROWSER:-}")"
+playwright_install_mode="$(normalize_install_mode "${PLAYWRIGHT_INSTALL_MODE:-auto}")"
 
 playwright_cli_name="@playwright/cli"
 
@@ -111,20 +135,36 @@ resolve_playwright_ready_marker() {
   echo "${playwright_ready_dir}/${playwright_browser}-${cli_marker}-${version}.ready"
 }
 
+resolve_playwright_install_mode() {
+  if [[ "${playwright_install_mode}" != "auto" ]]; then
+    echo "${playwright_install_mode}"
+    return
+  fi
+
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "with-deps"
+    return
+  fi
+
+  echo "browser-only"
+}
+
 ensure_browser_installed() {
   local ready_marker
   local marker_state
   local runtime_package
+  local resolved_install_mode
 
   ready_marker="$(resolve_playwright_ready_marker)"
   runtime_package="$(resolve_playwright_runtime_package)"
+  resolved_install_mode="$(resolve_playwright_install_mode)"
 
   marker_state="missing"
   if [[ -f "${ready_marker}" ]]; then
     marker_state="present"
   fi
 
-  echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} ready_marker=${ready_marker} marker=${marker_state}" >&2
+  echo "[playwright-cli] browser bootstrap: browser=${playwright_browser} cli_package=${playwright_cli_package} runtime_package=${runtime_package} install_mode=${resolved_install_mode} ready_marker=${ready_marker} marker=${marker_state}" >&2
 
   if [[ -f "${ready_marker}" ]]; then
     return
@@ -132,7 +172,7 @@ ensure_browser_installed() {
 
   mkdir -p "${playwright_ready_dir}"
 
-  if [[ "$(uname -s)" == "Linux" ]]; then
+  if [[ "${resolved_install_mode}" == "with-deps" ]]; then
     echo "[playwright-cli] browser install: mode=with-deps browser=${playwright_browser}" >&2
     DEBIAN_FRONTEND=noninteractive run_playwright_install install --with-deps "${playwright_browser}"
   else
