@@ -110,6 +110,7 @@ class KumaPushAppLogsScriptTest extends TestCase
                     'ERROR - 2026-05-19 11:31:14 --> 404 Page Not Found: Azenvnet/index',
                     'ERROR - 2026-06-03 06:42:22 --> 404 Page Not Found: Wwwgooglecom/index Trace: array (',
                     'ERROR - 2026-06-03 09:27:14 --> 404 Page Not Found: 127001:80/index Trace: array (',
+                    'ERROR - 2026-06-05 12:53:43 --> 404 Page Not Found: Index%2ephp/index Trace: array (',
                     'ERROR - 2026-05-20 06:45:10 --> Severity: Warning --> unlink(/var/www/html/easyappointments/storage/cache/rate_limit_key_203.0.113.10): No such file or directory /var/www/html/easyappointments/system/libraries/Cache/drivers/Cache_file.php 279',
                     '',
                 ]),
@@ -263,6 +264,7 @@ class KumaPushAppLogsScriptTest extends TestCase
             self::assertStringContainsString('backend calendar unavailable', $result['stdout']);
             self::assertStringNotContainsString('deploy-window PDF renderer restart', $result['stdout']);
             self::assertStringNotContainsString('Azenvnet/index', $result['stdout']);
+            self::assertStringNotContainsString('Index%2ephp/index', $result['stdout']);
         } finally {
             $this->removeDirectory($workspace);
         }
