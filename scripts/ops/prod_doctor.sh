@@ -139,6 +139,10 @@ section scanner_paths
 PROD_SCANNER_PATH_EMIT_FAILURES=0 prod_scanner_paths_check_all "https://dasforscherhaus-leg.de"
 kv scanner_path_failures "${PROD_SCANNER_PATH_FAILURES:-0}"
 
+section scanner_paths_monitor
+PROD_SCANNER_PATH_EMIT_FAILURES=0 prod_scanner_paths_check_all "https://monitor.dasforscherhaus-leg.de"
+kv scanner_path_monitor_failures "${PROD_SCANNER_PATH_FAILURES:-0}"
+
 section posture
 prod_posture_check_headers
 prod_posture_check_ssh

@@ -163,10 +163,11 @@ Scanner-path validation:
 - For the ROB-405 live gate, run
   `bash scripts/ops/prod_validate_after_change.sh --require-scanner-blocking`;
   this fails when any fixed scanner probe class returns HTTP 2xx or when a
-  probe itself cannot run.
+  probe itself cannot run. The gate checks both the App surface and the Monitor
+  vhost surface so monitor-only proxy fallthroughs are caught before review.
 - The check covers known scanner classes for environment files, Git metadata,
   WordPress/PHP info probes, server-status, vendor/phpunit, HNAP1, boaform,
-  cgi-bin, and phpinfo query-string probes.
+  cgi-bin, phpinfo query-string probes, and the `.env~` backup-suffix variant.
 - Output intentionally uses stable class labels and never prints requested
   URLs, response bodies, tokens, raw config, or discovered filenames.
 
