@@ -31,8 +31,9 @@ final class ProdScannerPathsScriptTest extends TestCase
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('scanner_path.root_env=200', $result['stdout']);
+            self::assertStringContainsString('scanner_path.root_env_tilde_backup=200', $result['stdout']);
             self::assertStringContainsString('scanner_query.phpinfo_page=200', $result['stdout']);
-            self::assertStringContainsString('failures=16', $result['stdout']);
+            self::assertStringContainsString('failures=17', $result['stdout']);
             self::assertStringContainsString('FAIL scanner_path.root_env public_http_200', $result['stderr']);
             self::assertStringNotContainsString('/.env', $result['stdout'] . $result['stderr']);
             self::assertStringNotContainsString('/?page=phpinfo', $result['stdout'] . $result['stderr']);
@@ -65,6 +66,7 @@ final class ProdScannerPathsScriptTest extends TestCase
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('scanner_path.root_env=403', $result['stdout']);
+            self::assertStringContainsString('scanner_path.root_env_tilde_backup=403', $result['stdout']);
             self::assertStringContainsString('scanner_query.phpinfo_page=403', $result['stdout']);
             self::assertStringContainsString('failures=0', $result['stdout']);
             self::assertSame('', $result['stderr']);
@@ -93,10 +95,17 @@ final class ProdScannerPathsScriptTest extends TestCase
 
             self::assertNotSame(127, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('scanner_path.root_env=403', $result['stdout']);
+            self::assertStringContainsString('scanner_path.root_env_tilde_backup=403', $result['stdout']);
             self::assertStringContainsString('scanner_query.phpinfo_page=403', $result['stdout']);
             self::assertStringContainsString('scanner_path_failures=0', $result['stdout']);
+            self::assertStringContainsString('scanner_path_monitor_failures=0', $result['stdout']);
             self::assertStringNotContainsString('/.env', $result['stdout'] . $result['stderr']);
             self::assertStringNotContainsString('/?page=phpinfo', $result['stdout'] . $result['stderr']);
+
+            $curlLogContents = file_get_contents($curlLog);
+            self::assertIsString($curlLogContents);
+            self::assertStringContainsString('https://dasforscherhaus-leg.de/.env~', $curlLogContents);
+            self::assertStringContainsString('https://monitor.dasforscherhaus-leg.de/.env~', $curlLogContents);
         } finally {
             $this->removeDirectory($workspace);
         }

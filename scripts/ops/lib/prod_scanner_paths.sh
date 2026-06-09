@@ -4,6 +4,7 @@ prod_scanner_path_specs() {
     cat <<'SPECS'
 scanner_path|root_env|/.env
 scanner_path|root_env_production|/.env.production
+scanner_path|root_env_tilde_backup|/.env~
 scanner_path|dotgit_config|/.git/config
 scanner_path|root_config|/config.php
 scanner_path|wp_config|/wp-config.php

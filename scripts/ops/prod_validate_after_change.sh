@@ -380,6 +380,13 @@ if [[ "${REQUIRE_SCANNER_BLOCKING}" == "1" ]] && (( PROD_SCANNER_PATH_FAILURES >
     failures=$((failures + PROD_SCANNER_PATH_FAILURES))
 fi
 
+section scanner_paths_monitor
+PROD_SCANNER_PATH_EMIT_FAILURES="${REQUIRE_SCANNER_BLOCKING}" prod_scanner_paths_check_all "https://monitor.dasforscherhaus-leg.de"
+printf 'scanner_path_monitor_failures=%s\n' "${PROD_SCANNER_PATH_FAILURES:-0}"
+if [[ "${REQUIRE_SCANNER_BLOCKING}" == "1" ]] && (( PROD_SCANNER_PATH_FAILURES > 0 )); then
+    failures=$((failures + PROD_SCANNER_PATH_FAILURES))
+fi
+
 section services
 for service in apache2 php8.5-fpm mariadb docker fail2ban cron unattended-upgrades fh-pdf-renderer; do
     check_eq "service.${service}" "$(systemctl is-active "$service" 2>/dev/null || true)" active

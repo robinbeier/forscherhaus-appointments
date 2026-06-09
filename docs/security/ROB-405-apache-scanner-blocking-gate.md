@@ -12,7 +12,7 @@ runtime changes.
 
 ## Baseline Evidence
 
-Source: production observations on 2026-05-21 and 2026-05-22.
+Source: production observations on 2026-05-21, 2026-05-22, and 2026-06-09.
 
 - Monitor #13 (`Security - Scanner Activity`) correctly turned red when the
   5-minute scanner count exceeded the threshold of 50.
@@ -29,6 +29,10 @@ Source: production observations on 2026-05-21 and 2026-05-22.
 - Responses were 403/404 for the counted scanner probes in the later samples;
   earlier query-style probes such as `/?page=phpinfo` reached normal app
   routing and returned 200.
+- On 2026-06-09 13:39-13:44 Berlin, Monitor #13 was red for a narrow
+  Monitor-vhost gap: `scanner_activity=88`, `success_2xx=1`, `blocked_4xx=87`,
+  `sources=1`. The actionable `2xx` was the `.env` backup-suffix probe
+  `/.env~` on the Monitor vhost. App and `www` returned non-2xx for that class.
 - Fail2ban is installed and active, but currently only the `sshd` jail is
   active.
 - Apache has `rewrite_module` loaded.
@@ -69,7 +73,7 @@ Do not execute this section without the separate approval above.
    <IfModule mod_rewrite.c>
        RewriteEngine On
 
-       RewriteCond %{REQUEST_URI} (^|/)(\.env($|[./_-])|\.environment$|\.git(/|$)|wp-config\.php$|wp-login\.php$|xmlrpc\.php$|phpinfo\.php$|server-status$|vendor/phpunit|boaform|HNAP1|cgi-bin) [NC,OR]
+       RewriteCond %{REQUEST_URI} (^|/)(\.env($|[./_~-])|\.environment$|\.git(/|$)|wp-config\.php$|wp-login\.php$|xmlrpc\.php$|phpinfo\.php$|server-status$|vendor/phpunit|boaform|HNAP1|cgi-bin) [NC,OR]
        RewriteCond %{QUERY_STRING} (^|&)(page=phpinfo|phpinfo=1)(&|$) [NC]
        RewriteRule ^ - [F]
    </IfModule>
@@ -129,6 +133,8 @@ Do not execute this section without the separate approval above.
   - `scanner_path.*=403|404`
   - `scanner_query.*=403|404`
   - `scanner_path_failures=0`
+  - `scanner_path_monitor_failures=0`
+- `/.env~` returns non-2xx on App, `www`, and Monitor surfaces.
 - `prod_validate_after_change.sh --require-scanner-blocking` passes.
 - `fail2ban-client status fh-apache-scanner` reports an active jail.
 - Monitor #13 stays active; it may still show red for bursts already above the
