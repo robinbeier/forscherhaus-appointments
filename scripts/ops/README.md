@@ -115,6 +115,8 @@ App log script behavior:
   been proven not to represent app downtime, currently:
     - absolute-URI/proxy scanner 404s matching observed route shapes such as
       `Azenvnet/index`, `Wwwgooglecom/index`, and `127001:80/index`
+    - numeric host:port scanner 404s matching observed route shapes such as
+      `1465618042:3333/index`
     - encoded index.php scanner 404s matching `Index%2ephp/index`
     - CodeIgniter file-cache expiry races for `rate_limit_key_*` entries at
       `Cache_file.php 279`

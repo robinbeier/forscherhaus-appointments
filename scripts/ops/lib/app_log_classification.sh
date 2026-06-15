@@ -2,7 +2,7 @@
 
 app_log_known_noise_regex() {
   cat <<'REGEX'
-ERROR - .*--> 404 Page Not Found: (Azenvnet|Wwwgooglecom|127001:80|[Ii]ndex%2[eE]php)/index|ERROR - .*--> Severity: Warning --> unlink\(.*/storage/cache/rate_limit_key_[^)]*\): No such file or directory .*/system/libraries/Cache/drivers/Cache_file\.php 279
+ERROR - .*--> 404 Page Not Found: (Azenvnet|Wwwgooglecom|127001:80|[0-9]{7,10}:[0-9]{2,5}|[Ii]ndex%2[eE]php)/index|ERROR - .*--> Severity: Warning --> unlink\(.*/storage/cache/rate_limit_key_[^)]*\): No such file or directory .*/system/libraries/Cache/drivers/Cache_file\.php 279
 REGEX
 }
 

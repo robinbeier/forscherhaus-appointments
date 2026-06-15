@@ -110,6 +110,7 @@ class KumaPushAppLogsScriptTest extends TestCase
                     'ERROR - 2026-05-19 11:31:14 --> 404 Page Not Found: Azenvnet/index',
                     'ERROR - 2026-06-03 06:42:22 --> 404 Page Not Found: Wwwgooglecom/index Trace: array (',
                     'ERROR - 2026-06-03 09:27:14 --> 404 Page Not Found: 127001:80/index Trace: array (',
+                    'ERROR - 2026-06-15 08:57:35 --> 404 Page Not Found: 1465618042:3333/index Trace: array (',
                     'ERROR - 2026-06-05 12:53:43 --> 404 Page Not Found: Index%2ephp/index Trace: array (',
                     'ERROR - 2026-05-20 06:45:10 --> Severity: Warning --> unlink(/var/www/html/easyappointments/storage/cache/rate_limit_key_203.0.113.10): No such file or directory /var/www/html/easyappointments/system/libraries/Cache/drivers/Cache_file.php 279',
                     '',
@@ -162,6 +163,54 @@ class KumaPushAppLogsScriptTest extends TestCase
             file_put_contents(
                 $logFile,
                 "ERROR - 2026-05-20 08:00:00 --> Severity: Warning --> unexpected app failure\n",
+                FILE_APPEND,
+            );
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('CRIT new_app_errors=1', $result['stdout']);
+            self::assertStringContainsString('status=down', $this->readFile($capturePath));
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testAppLogMonitorStillAlertsForUnknownNumeric404Routes(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $capturePath = $workspace . '/curl-args.log';
+        $today = gmdate('Y-m-d');
+        $logFile = $appRoot . '/storage/logs/log-' . $today . '.php';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+        mkdir($stateDir, 0777, true);
+
+        try {
+            $this->writeCurlStub($stubBin, $capturePath);
+            $this->writeEnvFile($envFile, $appRoot);
+            file_put_contents($logFile, '');
+
+            $primeResult = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
+
+            file_put_contents(
+                $logFile,
+                "ERROR - 2026-06-15 09:00:00 --> 404 Page Not Found: 1465618042:3333/book Trace: array (\n",
                 FILE_APPEND,
             );
 
