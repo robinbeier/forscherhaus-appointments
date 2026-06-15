@@ -153,7 +153,8 @@ production schedule runs:
 The `App - Log Errors` Push monitor is still an app-error monitor, not a
 scanner monitor. Its script ignores only built-in, narrow known-noise patterns
 for externally generated scanner/proxy traffic that was observed while `/`,
-`/health`, and `/index.php/healthz` remained green. Additional
+`/health`, and `/index.php/healthz` remained green, including the observed
+numeric host:port scanner form `1465618042:3333/index`. Additional
 `KUMA_APP_LOG_IGNORE_REGEX` values stay host-local and must not hide broad
 classes such as all 404s or all PHP warnings.
 
