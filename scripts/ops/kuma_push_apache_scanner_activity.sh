@@ -15,6 +15,9 @@ SOURCE_THRESHOLD="${KUMA_SECURITY_SCANNER_SOURCE_THRESHOLD:-5}"
 LOG_GLOB="${KUMA_SECURITY_SCANNER_LOG_GLOB:-/var/log/apache2/*access.log}"
 
 patterns='(wp-admin|wp-login|xmlrpc\.php|/\.env|/vendor/phpunit|/phpinfo|/config\.php|/server-status|/boaform|/HNAP1|/cgi-bin/)'
+direct_scanner_target_patterns='^/(wp-admin(/|$)|wp-login(\.php)?($|[./?])|xmlrpc\.php($|[./?])|\.env($|[./_~?-])|vendor/phpunit(/|$)|phpinfo(\.php)?($|[./?])|config\.php($|[./?])|server-status($|[./?])|boaform(/|$)|HNAP1(/|$)|cgi-bin(/|$))'
+query_scanner_marker_patterns='(wp-admin|wp-login|xmlrpc\.php|/\.env|(^|[^A-Za-z0-9_.-])\.env($|[^A-Za-z0-9_.-])|vendor/phpunit|phpinfo|config\.php|server-status|boaform|HNAP1|cgi-bin/)'
+apache_request_target_pattern='"[A-Za-z]+[[:space:]]+([^[:space:]"]+)[[:space:]]+HTTP/[0-9.]+"'
 
 parse_apache_access_log_epoch() {
   local raw_timestamp="$1"
@@ -28,10 +31,36 @@ parse_apache_access_log_epoch() {
   date -d "$raw_timestamp" +%s 2>/dev/null
 }
 
+extract_apache_request_target() {
+  local line="$1"
+
+  if [[ "$line" =~ $apache_request_target_pattern ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+}
+
+is_direct_scanner_request_target() {
+  local request_target="$1"
+  local request_path="${request_target%%\?*}"
+
+  [[ "$request_path" =~ $direct_scanner_target_patterns ]]
+}
+
+is_query_scanner_marker_target() {
+  local request_target="$1"
+
+  [[ "$request_target" == *\?* ]] || return 1
+
+  local request_query="${request_target#*\?}"
+  [[ "$request_query" =~ $query_scanner_marker_patterns ]]
+}
+
 now_epoch="$(date +%s)"
 cutoff_epoch=$((now_epoch - WINDOW_MINUTES * 60))
 count="0"
 success_2xx="0"
+direct_success_2xx="0"
+query_marker_2xx="0"
 redirect_3xx="0"
 blocked_4xx="0"
 other_status="0"
@@ -55,6 +84,12 @@ for log_file in $LOG_GLOB; do
         status_code="$(sed -n 's/.*" \([0-9][0-9][0-9]\) .*/\1/p' <<<"$line")"
         if [[ "$status_code" =~ ^2[0-9][0-9]$ ]]; then
           success_2xx=$((success_2xx + 1))
+          request_target="$(extract_apache_request_target "$line")"
+          if [[ -n "$request_target" ]] && is_direct_scanner_request_target "$request_target"; then
+            direct_success_2xx=$((direct_success_2xx + 1))
+          elif [[ -n "$request_target" ]] && is_query_scanner_marker_target "$request_target"; then
+            query_marker_2xx=$((query_marker_2xx + 1))
+          fi
         elif [[ "$status_code" =~ ^3[0-9][0-9]$ ]]; then
           redirect_3xx=$((redirect_3xx + 1))
         elif [[ "$status_code" =~ ^4[0-9][0-9]$ ]]; then
@@ -70,11 +105,11 @@ shopt -u nullglob
 
 source_count="${#scanner_sources[@]}"
 actionable="0"
-if (( count > THRESHOLD )) && (( success_2xx > 0 || source_count >= SOURCE_THRESHOLD )); then
+if (( count > THRESHOLD )) && (( direct_success_2xx > 0 || source_count >= SOURCE_THRESHOLD )); then
   actionable="1"
 fi
 
-metrics="scanner_activity=${count} window=${WINDOW_MINUTES}m threshold=${THRESHOLD} actionable=${actionable} success_2xx=${success_2xx} redirect_3xx=${redirect_3xx} blocked_4xx=${blocked_4xx} other_status=${other_status} sources=${source_count} source_threshold=${SOURCE_THRESHOLD}"
+metrics="scanner_activity=${count} window=${WINDOW_MINUTES}m threshold=${THRESHOLD} actionable=${actionable} success_2xx=${success_2xx} direct_success_2xx=${direct_success_2xx} query_marker_2xx=${query_marker_2xx} redirect_3xx=${redirect_3xx} blocked_4xx=${blocked_4xx} other_status=${other_status} sources=${source_count} source_threshold=${SOURCE_THRESHOLD}"
 
 if [[ "$actionable" == "1" ]]; then
   msg="WARN ${metrics}"
