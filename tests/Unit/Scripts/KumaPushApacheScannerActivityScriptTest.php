@@ -18,7 +18,7 @@ final class KumaPushApacheScannerActivityScriptTest extends TestCase
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
         self::assertStringContainsString(
-            'OK scanner_activity=1 window=5m threshold=0 actionable=0 success_2xx=0 redirect_3xx=0 blocked_4xx=1 other_status=0 sources=1 source_threshold=5',
+            'OK scanner_activity=1 window=5m threshold=0 actionable=0 success_2xx=0 direct_success_2xx=0 query_marker_2xx=0 redirect_3xx=0 blocked_4xx=1 other_status=0 sources=1 source_threshold=5',
             $result['stdout'],
         );
         self::assertStringContainsString('status=up', $result['curl_calls']);
@@ -78,8 +78,36 @@ final class KumaPushApacheScannerActivityScriptTest extends TestCase
             $result['stdout'],
         );
         self::assertStringContainsString('success_2xx=1', $result['stdout']);
+        self::assertStringContainsString('direct_success_2xx=1', $result['stdout']);
+        self::assertStringContainsString('query_marker_2xx=0', $result['stdout']);
         self::assertStringContainsString('status=down', $result['curl_calls']);
         self::assertStringContainsString('ping=0', $result['curl_calls']);
+    }
+
+    public function testQueryOnlyScannerSuccessAboveThresholdStaysGreenWithoutManySources(): void
+    {
+        $timestamp = gmdate('d/M/Y:H:i:s O');
+        $result = $this->runScannerScript(
+            [
+                '203.0.113.10 - - [' . $timestamp . '] "GET /?file=/.env HTTP/1.1" 200 123 "-" "scanner"',
+                '203.0.113.10 - - [' . $timestamp . '] "GET /?download=/.env HTTP/1.1" 200 123 "-" "scanner"',
+                '203.0.113.10 - - [' . $timestamp . '] "GET /?probe=/.env HTTP/1.1" 200 123 "-" "scanner"',
+                '203.0.113.10 - - [' . $timestamp . '] "GET /?debug=/.env HTTP/1.1" 200 123 "-" "scanner"',
+                '203.0.113.10 - - [' . $timestamp . '] "GET /?file=/.env HTTP/1.1" 302 123 "-" "scanner"',
+                '203.0.113.10 - - [' . $timestamp . '] "GET /.env HTTP/1.1" 403 123 "-" "scanner"',
+            ],
+            threshold: 5,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('OK scanner_activity=6 window=5m threshold=5 actionable=0', $result['stdout']);
+        self::assertStringContainsString('success_2xx=4', $result['stdout']);
+        self::assertStringContainsString('direct_success_2xx=0', $result['stdout']);
+        self::assertStringContainsString('query_marker_2xx=4', $result['stdout']);
+        self::assertStringContainsString('redirect_3xx=1 blocked_4xx=1', $result['stdout']);
+        self::assertStringContainsString('sources=1 source_threshold=5', $result['stdout']);
+        self::assertStringContainsString('status=up', $result['curl_calls']);
+        self::assertStringContainsString('ping=1', $result['curl_calls']);
     }
 
     public function testManySourceBlockedScannerBurstAboveThresholdGoesRed(): void
