@@ -72,7 +72,7 @@ app.post('/pdf', async (req, res) => {
         if (url) {
             await page.goto(url, {waitUntil: 'networkidle0', timeout: 30000});
         } else {
-            await page.setContent(html, {waitUntil: 'networkidle0', timeout: 30000});
+            await page.setContent(html, {waitUntil: 'networkidle2', timeout: 30000});
         }
 
         if (waitFor === 'chartsReady') {
