@@ -38,6 +38,8 @@ class Dashboard_export extends EA_Controller
 
     protected const PROVIDER_PARENT_PDF_CONTINUATION_PAGE_APPOINTMENTS = 22;
 
+    protected const PROVIDER_PREPARATION_PDF_APPOINTMENTS_PER_PAGE = 4;
+
     protected Dashboard_metrics $dashboardMetrics;
 
     protected Pdf_renderer $pdfRenderer;
@@ -298,6 +300,46 @@ class Dashboard_export extends EA_Controller
         }
     }
 
+    /**
+     * Render the logged-in provider's internal appointment preparation PDF.
+     */
+    public function provider_preparation_pdf(): void
+    {
+        try {
+            $this->assertProvider();
+
+            $request_dto = $this->dashboardRequestDtoFactory()->buildProviderMetricsRequestFromGlobals();
+            $period = $request_dto->period;
+            $provider_id = (int) session('user_id');
+            $provider = $this->providersModel->find($provider_id);
+            $appointments = $this->mapProviderParentAppointmentsForView(
+                $this->loadProviderParentAppointments($provider_id, $period->start, $period->end),
+            );
+
+            $view_data = [
+                'school_name' => $this->resolveSchoolName(),
+                'logo_data_url' => $this->resolveLogoDataUrl(),
+                'generated_at_text' => $this->formatGeneratedAt(new DateTimeImmutable('now')),
+                'period_label' => $this->formatPeriod($period->start, $period->end),
+                'provider_name' => $this->resolveProviderDisplayName($provider, $provider_id),
+                'appointment_pages' => $this->buildProviderPreparationAppointmentPages($appointments),
+            ];
+
+            $this->pdfRenderer->stream_view(
+                'exports/provider_preparation_pdf',
+                $view_data,
+                $this->buildProviderPreparationPdfFilename($provider, $period->start, $period->end),
+                $this->buildProviderPreparationPdfStreamOptions(
+                    APPPATH . '../storage/logs/provider_preparation_pdf_dump.html',
+                ),
+            );
+        } catch (Throwable $exception) {
+            $this->captureExportException($exception, 'provider_preparation_pdf');
+            log_message('error', 'Failed to render provider preparation export: ' . $exception->getMessage());
+            abort(400, $exception->getMessage());
+        }
+    }
+
     protected function captureExportException(Throwable $exception, string $exportType): void
     {
         if (!class_exists('SentryBootstrap')) {
@@ -351,6 +393,17 @@ class Dashboard_export extends EA_Controller
         }
 
         return $options;
+    }
+
+    /**
+     * Build explicit A4 landscape renderer options for the provider preparation PDF.
+     */
+    protected function buildProviderPreparationPdfStreamOptions(?string $debug_dump_path = null): array
+    {
+        return array_merge($this->buildPdfStreamOptions($debug_dump_path), [
+            'paper' => 'A4',
+            'orientation' => 'landscape',
+        ]);
     }
 
     /**
@@ -1324,6 +1377,28 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
+     * Build a file name for the provider-only preparation PDF download.
+     */
+    protected function buildProviderPreparationPdfFilename(
+        array $provider,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): string {
+        $provider_id = (int) ($provider['id'] ?? session('user_id'));
+        $provider_name = $this->resolveProviderDisplayName($provider, $provider_id);
+        $provider_slug = $this->slugifyForFilename($provider_name, 'lehrkraft');
+        $id_part = $provider_id > 0 ? 'id-' . $provider_id : 'id-unbekannt';
+
+        return sprintf(
+            'terminvorbereitung-lehrkraft-%s-%s-%s-%s.pdf',
+            $id_part,
+            $provider_slug,
+            $start->format('Ymd'),
+            $end->format('Ymd'),
+        );
+    }
+
+    /**
      * Resolve the localized month abbreviation.
      *
      * @param int $month
@@ -1536,6 +1611,45 @@ class Dashboard_export extends EA_Controller
                 'chunks_total' => $chunks_total,
                 'appointments' => $chunk_appointments,
                 'has_any_appointments' => $has_any_appointments,
+            ];
+        }
+
+        return $pages;
+    }
+
+    /**
+     * Split provider preparation appointments into pages with generous writing space.
+     *
+     * @param array $appointments
+     *
+     * @return array
+     */
+    protected function buildProviderPreparationAppointmentPages(array $appointments): array
+    {
+        $appointments_all = array_values($appointments);
+        $has_any_appointments = !empty($appointments_all);
+
+        if (!$has_any_appointments) {
+            return [
+                [
+                    'chunk_index' => 0,
+                    'chunks_total' => 1,
+                    'appointments' => [],
+                    'has_any_appointments' => false,
+                ],
+            ];
+        }
+
+        $chunks = array_chunk($appointments_all, self::PROVIDER_PREPARATION_PDF_APPOINTMENTS_PER_PAGE);
+        $chunks_total = count($chunks);
+        $pages = [];
+
+        foreach ($chunks as $chunk_index => $chunk_appointments) {
+            $pages[] = [
+                'chunk_index' => $chunk_index,
+                'chunks_total' => $chunks_total,
+                'appointments' => $chunk_appointments,
+                'has_any_appointments' => true,
             ];
         }
 

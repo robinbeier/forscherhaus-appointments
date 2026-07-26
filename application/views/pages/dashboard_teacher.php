@@ -1,4 +1,12 @@
-<?php extend('layouts/backend_layout'); ?>
+<?php
+$preparationPdfLabel = lang('dashboard_teacher_download_preparation_pdf');
+
+if ($preparationPdfLabel === 'dashboard_teacher_download_preparation_pdf') {
+    $preparationPdfLabel = 'Preparation PDF';
+}
+
+extend('layouts/backend_layout');
+?>
 
 <?php section('content'); ?>
 
@@ -13,7 +21,7 @@
             <div class="card">
                 <div class="card-body">
                     <form id="dashboard-teacher-filters" class="row gy-3 align-items-end">
-                        <div class="col-12 col-md-6 col-lg-4">
+                        <div class="col-12 col-md-6 col-lg-3">
                             <label class="form-label" for="dashboard-teacher-date-range">
                                 <?= lang('date_range') ?>
                             </label>
@@ -24,7 +32,17 @@
                                 autocomplete="off"
                             >
                         </div>
-                        <div class="col-12 col-md-6 col-lg-4">
+                        <div class="col-12 col-md-6 col-lg-3">
+                            <button
+                                type="button"
+                                class="btn btn-outline-primary w-100"
+                                id="dashboard-teacher-preparation-export"
+                            >
+                                <i class="fas fa-file-pdf me-2"></i>
+                                <?= html_escape($preparationPdfLabel) ?>
+                            </button>
+                        </div>
+                        <div class="col-12 col-md-6 col-lg-3">
                             <button
                                 type="button"
                                 class="btn btn-outline-primary w-100"
@@ -34,7 +52,7 @@
                                 PDF für Eltern herunterladen
                             </button>
                         </div>
-                        <div class="col-12 col-md-6 col-lg-4">
+                        <div class="col-12 col-md-6 col-lg-3">
                             <button type="submit" class="btn btn-primary w-100">
                                 <i class="fas fa-sync-alt me-2"></i>
                                 <?= lang('refresh') ?>
