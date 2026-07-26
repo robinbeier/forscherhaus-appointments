@@ -17,7 +17,6 @@
 App.Pages.Customers = (function () {
     const $customers = $('#customers');
     const $filterCustomers = $('#filter-customers');
-    const $filterProvider = $('#filter-provider');
     const $id = $('#customer-id');
     const $firstName = $('#first-name');
     const $lastName = $('#last-name');
@@ -91,7 +90,7 @@ App.Pages.Customers = (function () {
             $customers.find('#save-cancel-group').show();
             $customers.find('.record-details').find('input, select, textarea').prop('disabled', false);
             $customers.find('.record-details .form-label span').prop('hidden', false);
-            $filterCustomers.find('button, select').prop('disabled', true);
+            $filterCustomers.find('button').prop('disabled', true);
             $filterCustomers.find('.results').css('color', '#AAA');
         });
 
@@ -103,7 +102,7 @@ App.Pages.Customers = (function () {
             $customers.find('.record-details .form-label span').prop('hidden', false);
             $customers.find('#add-edit-delete-group').hide();
             $customers.find('#save-cancel-group').show();
-            $filterCustomers.find('button, select').prop('disabled', true);
+            $filterCustomers.find('button').prop('disabled', true);
             $filterCustomers.find('.results').css('color', '#AAA');
         });
 
@@ -189,7 +188,6 @@ App.Pages.Customers = (function () {
             App.Layouts.Backend.displayNotification(lang('customer_saved'));
             App.Pages.Customers.resetForm();
             $('#filter-customers .key').val('');
-            $filterProvider.val('');
             App.Pages.Customers.filter('', response.id, true);
         });
     }
@@ -270,7 +268,7 @@ App.Pages.Customers = (function () {
         $customers.find('.record-details .is-invalid').removeClass('is-invalid');
         $customers.find('.record-details #form-message').hide();
 
-        $filterCustomers.find('button, select').prop('disabled', false);
+        $filterCustomers.find('button').prop('disabled', false);
         $filterCustomers.find('.selected').removeClass('selected');
         $filterCustomers.find('.results').css('color', '');
     }
@@ -393,7 +391,7 @@ App.Pages.Customers = (function () {
      * @param {Boolean} show Optional (false), if true then the selected record will be displayed on the form.
      */
     function filter(keyword, selectId = null, show = false) {
-        App.Http.Customers.search(keyword, filterLimit, null, null, $filterProvider.val()).then((response) => {
+        App.Http.Customers.search(keyword, filterLimit).then((response) => {
             filterResults = response;
 
             $filterCustomers.find('.results').empty();

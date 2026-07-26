@@ -87,11 +87,10 @@ App.Http.Customers = (function () {
      * @param {Number} [limit]
      * @param {Number} [offset]
      * @param {String} [orderBy]
-     * @param {Number|String|null} [providerId]
      *
      * @return {Object}
      */
-    function search(keyword, limit = null, offset = null, orderBy = null, providerId = null) {
+    function search(keyword, limit = null, offset = null, orderBy = null) {
         const url = App.Utils.Url.siteUrl('customers/search');
 
         const data = {
@@ -100,7 +99,6 @@ App.Http.Customers = (function () {
             limit,
             offset,
             order_by: orderBy || undefined,
-            provider_id: providerId || undefined,
         };
 
         return $.post(url, data);
