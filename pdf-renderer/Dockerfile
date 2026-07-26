@@ -20,7 +20,7 @@ RUN npm ci --omit=dev || npm install --omit=dev
 # Install the browser revision required by the locked Puppeteer package.
 RUN PUPPETEER_CACHE_DIR=/home/pptruser/.cache/puppeteer npx puppeteer browsers install chrome
 
-COPY server.js ./
+COPY server.js server.test.js ./
 
 RUN chown -R pptruser:pptruser /app
 

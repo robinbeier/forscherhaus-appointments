@@ -528,7 +528,7 @@ class Pdf_renderer
             $fallbacks = [$fallbacks];
         }
 
-        $defaults = $this->defaultEndpointsForRuntime(array_merge($candidates, $fallbacks));
+        $defaults = $this->defaultEndpointsForRuntime();
 
         $candidates = array_merge($candidates, $fallbacks, $defaults);
 
@@ -562,21 +562,13 @@ class Pdf_renderer
      *
      * @return list<string>
      */
-    protected function defaultEndpointsForRuntime(array $candidates = []): array
+    protected function defaultEndpointsForRuntime(): array
     {
         if ($this->isContainerRuntime()) {
-            return ['http://pdf-renderer:3000', 'http://localhost:3003'];
-        }
-
-        if (
-            !$this->isLocalEnvironment() &&
-            !$this->shouldAllowNonLocalLoopbackFallback() &&
-            !$this->containsLoopbackEndpoint($candidates)
-        ) {
             return ['http://pdf-renderer:3000'];
         }
 
-        return ['http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'];
+        return ['http://127.0.0.1:3003', 'http://localhost:3003'];
     }
 
     protected function isContainerRuntime(): bool
@@ -611,21 +603,6 @@ class Pdf_renderer
             str_contains($content, 'kubepods');
     }
 
-    protected function containsLoopbackEndpoint(array $candidates): bool
-    {
-        foreach ($candidates as $candidate) {
-            if (!is_string($candidate)) {
-                continue;
-            }
-
-            if ($this->isLoopbackEndpoint($candidate)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     protected function isLoopbackEndpoint(string $endpoint): bool
     {
         $host = strtolower((string) parse_url($endpoint, PHP_URL_HOST));
@@ -635,17 +612,6 @@ class Pdf_renderer
         }
 
         return in_array($host, ['localhost', '127.0.0.1', '::1'], true);
-    }
-
-    /**
-     * Allow non-local loopback fallback only when explicitly enabled.
-     */
-    protected function shouldAllowNonLocalLoopbackFallback(): bool
-    {
-        $raw = env('PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK', env('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', 'false'));
-        $normalized = strtolower(trim((string) $raw));
-
-        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 
     /**

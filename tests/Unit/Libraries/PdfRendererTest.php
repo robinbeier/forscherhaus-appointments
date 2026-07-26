@@ -18,24 +18,24 @@ require_once APPPATH . 'libraries/Pdf_renderer.php';
 
 class PdfRendererTest extends TestCase
 {
-    public function testResolveEndpointsPreferHostLoopbackOutsideContainerRuntime(): void
+    public function testResolveEndpointsUseOnlyHostReachableDefaultsOutsideContainerRuntime(): void
     {
         $renderer = $this->createRenderer(false, false);
         $endpoints = $renderer->callResolveEndpoints([
             'fallback_urls' => [],
         ]);
 
-        $this->assertSame(['http://pdf-renderer:3000'], $endpoints);
+        $this->assertSame(['http://127.0.0.1:3003', 'http://localhost:3003'], $endpoints);
     }
 
-    public function testResolveEndpointsPreferServiceNameInsideContainerRuntime(): void
+    public function testResolveEndpointsUseOnlyDockerDnsDefaultInsideContainerRuntime(): void
     {
         $renderer = $this->createRenderer(false, true);
         $endpoints = $renderer->callResolveEndpoints([
             'fallback_urls' => [],
         ]);
 
-        $this->assertSame(['http://pdf-renderer:3000', 'http://localhost:3003'], $endpoints);
+        $this->assertSame(['http://pdf-renderer:3000'], $endpoints);
     }
 
     public function testResolveEndpointsKeepConfiguredEndpointFirstAndRuntimeAwareFallbacksAfterwards(): void
@@ -46,7 +46,7 @@ class PdfRendererTest extends TestCase
             'fallback_urls' => [],
         ]);
 
-        $this->assertSame(['http://example.com:3000', 'http://pdf-renderer:3000'], $endpoints);
+        $this->assertSame(['http://example.com:3000', 'http://127.0.0.1:3003', 'http://localhost:3003'], $endpoints);
     }
 
     public function testResolveEndpointsUseApacheServerVariableWhenPhpEnvironmentMapIsEmpty(): void
@@ -67,10 +67,7 @@ class PdfRendererTest extends TestCase
                 'fallback_urls' => [],
             ]);
 
-            $this->assertSame(
-                ['http://localhost:3003', 'http://127.0.0.1:3003', 'http://pdf-renderer:3000'],
-                $endpoints,
-            );
+            $this->assertSame(['http://localhost:3003', 'http://127.0.0.1:3003'], $endpoints);
         } finally {
             if ($hadEnv) {
                 $_ENV['PDF_RENDERER_URL'] = $envValue;
@@ -92,38 +89,14 @@ class PdfRendererTest extends TestCase
         }
     }
 
-    public function testResolveEndpointsAllowExplicitNonLocalLoopbackFallbacks(): void
+    public function testResolveEndpointsDeduplicateExplicitHostFallbacks(): void
     {
-        $hadEnv = array_key_exists('PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK', $_ENV);
-        $envValue = $_ENV['PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK'] ?? null;
-        $processValue = getenv('PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK');
-        putenv('PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK=1');
+        $renderer = $this->createRenderer(false, false);
+        $endpoints = $renderer->callResolveEndpoints([
+            'fallback_urls' => ['http://127.0.0.1:3003/', 'http://localhost:3003'],
+        ]);
 
-        try {
-            $_ENV['PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK'] = '1';
-
-            $renderer = $this->createRenderer(false, false);
-            $endpoints = $renderer->callResolveEndpoints([
-                'fallback_urls' => [],
-            ]);
-
-            $this->assertSame(
-                ['http://127.0.0.1:3003', 'http://localhost:3003', 'http://pdf-renderer:3000'],
-                $endpoints,
-            );
-        } finally {
-            if ($hadEnv) {
-                $_ENV['PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK'] = $envValue;
-            } else {
-                unset($_ENV['PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK']);
-            }
-
-            if ($processValue === false) {
-                putenv('PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK');
-            } else {
-                putenv('PDF_RENDERER_ALLOW_LOOPBACK_FALLBACK=' . $processValue);
-            }
-        }
+        $this->assertSame(['http://127.0.0.1:3003', 'http://localhost:3003'], $endpoints);
     }
 
     public function testBuildRendererRequestOptionsShortensNonPrimaryLoopbackFallbacks(): void
@@ -252,6 +225,34 @@ class PdfRendererTest extends TestCase
         }
     }
 
+    public function testRenderHtmlRecoversFromPrimaryTimeoutThroughReachableFallback(): void
+    {
+        $renderer = $this->createFlowRenderer([
+            'http://primary.example:3000' => new RuntimeException('primary navigation timeout'),
+            'http://127.0.0.1:3003' => '%PDF-fallback',
+            'http://localhost:3003' => new RuntimeException('must not be reached'),
+        ]);
+
+        $this->assertSame('%PDF-fallback', $renderer->render_html('<html><body>test</body></html>'));
+        $this->assertSame(['http://primary.example:3000', 'http://127.0.0.1:3003'], $renderer->attemptedEndpoints);
+    }
+
+    public function testRenderHtmlReportsCompleteFailureAfterAllReachableEndpointsFail(): void
+    {
+        $renderer = $this->createFlowRenderer([
+            'http://primary.example:3000' => new RuntimeException('primary navigation timeout'),
+            'http://127.0.0.1:3003' => new RuntimeException('loopback unavailable'),
+        ]);
+
+        try {
+            $renderer->render_html('<html><body>test</body></html>');
+            $this->fail('Expected renderer failure.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('PDF rendering failed for all configured endpoints.', $exception->getMessage());
+            $this->assertSame(['http://primary.example:3000', 'http://127.0.0.1:3003'], $renderer->attemptedEndpoints);
+        }
+    }
+
     private function createRenderer(bool $isLocalEnvironment, bool $isContainerRuntime): object
     {
         return new class ($isLocalEnvironment, $isContainerRuntime) extends Pdf_renderer {
@@ -287,6 +288,41 @@ class PdfRendererTest extends TestCase
 
                 return $this->buildRendererRequestOptions($endpoint, $payload, $isPrimary);
             }
+        };
+    }
+
+    private function createFlowRenderer(array $outcomes): object
+    {
+        return new class ($outcomes) extends Pdf_renderer {
+            public array $attemptedEndpoints = [];
+
+            private array $outcomes;
+
+            public function __construct(array $outcomes)
+            {
+                $this->outcomes = $outcomes;
+                $this->endpoints = array_keys($outcomes);
+                $this->defaultPaper = 'A4';
+                $this->defaultOrientation = 'portrait';
+                $this->defaultMargin = [];
+                $this->defaultWaitFor = null;
+            }
+
+            protected function callRenderer(string $endpoint, array $payload, bool $isPrimary = false): string
+            {
+                $this->attemptedEndpoints[] = $endpoint;
+                $outcome = $this->outcomes[$endpoint];
+
+                if ($outcome instanceof Throwable) {
+                    throw $outcome;
+                }
+
+                return $outcome;
+            }
+
+            protected function captureRendererFailure(Throwable $exception): void {}
+
+            protected function logRendererFailure(string $endpoint, Throwable $exception): void {}
         };
     }
 }
