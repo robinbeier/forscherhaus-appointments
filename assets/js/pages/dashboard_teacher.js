@@ -32,6 +32,7 @@ App.Pages.DashboardTeacher = (function () {
     const $tableWrapper = $('#dashboard-teacher-table-wrapper');
     const $tableBody = $('#dashboard-teacher-table-body');
     const $parentExport = $('#dashboard-teacher-parent-export');
+    const $preparationExport = $('#dashboard-teacher-preparation-export');
 
     const savedRangeStart = vars('dashboard_saved_range_start') || '';
     const savedRangeEnd = vars('dashboard_saved_range_end') || '';
@@ -46,6 +47,7 @@ App.Pages.DashboardTeacher = (function () {
 
         $filters.on('submit', onFiltersSubmit);
         $parentExport.on('click', onParentExportClick);
+        $preparationExport.on('click', onPreparationExportClick);
 
         loadMetrics();
     }
@@ -67,6 +69,20 @@ App.Pages.DashboardTeacher = (function () {
 
         hideError();
         App.Http.Dashboard.downloadProviderParentAppointmentsExport(filters);
+    }
+
+    function onPreparationExportClick(event) {
+        event.preventDefault();
+
+        const filters = getFilters();
+
+        if (!filters) {
+            showError(lang('filter_period_required'));
+            return;
+        }
+
+        hideError();
+        App.Http.Dashboard.downloadProviderPreparationExport(filters);
     }
 
     function applyInitialRange() {

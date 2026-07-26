@@ -172,6 +172,7 @@ $route['dashboard/export/teacher.zip']['get'] = 'dashboard_export/teacher_zip';
 $route['dashboard/export/teacher.pdf']['get'] = 'dashboard_export/teacher_pdf';
 $route['dashboard/export/provider-parent-appointments.pdf']['get'] =
     'dashboard_export/provider_parent_appointments_pdf';
+$route['dashboard/export/provider-preparation.pdf']['get'] = 'dashboard_export/provider_preparation_pdf';
 $route['healthz']['get'] = 'healthz/index';
 
 /* End of file routes.php */

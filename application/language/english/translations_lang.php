@@ -600,6 +600,7 @@ $lang['secret_header'] = 'Secret Header';
 $lang['search'] = 'Search';
 $lang['dashboard_teacher_pdf_title'] = 'Teacher Report';
 $lang['dashboard_teacher_dashboard_title'] = 'Teacher Dashboard';
+$lang['dashboard_teacher_download_preparation_pdf'] = 'Preparation PDF';
 $lang['dashboard_teacher_pdf_progress_title'] = 'Class Size Progress';
 $lang['dashboard_teacher_pdf_metric_class_size'] = 'Class Size';
 $lang['dashboard_teacher_pdf_metric_booked'] = 'Booked';

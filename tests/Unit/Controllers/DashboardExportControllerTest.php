@@ -24,6 +24,52 @@ require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
 class DashboardExportControllerTest extends TestCase
 {
+    public function testProviderPreparationExportKeepsProviderAuthenticationAndSessionScope(): void
+    {
+        $method = new \ReflectionMethod(Dashboard_export::class, 'provider_preparation_pdf');
+        $source_lines = file(APPPATH . 'controllers/Dashboard_export.php');
+
+        $this->assertIsArray($source_lines);
+
+        $source = implode(
+            '',
+            array_slice(
+                $source_lines,
+                $method->getStartLine() - 1,
+                $method->getEndLine() - $method->getStartLine() + 1,
+            ),
+        );
+
+        $this->assertStringContainsString('$this->assertProvider();', $source);
+        $this->assertStringContainsString("\$provider_id = (int) session('user_id');", $source);
+        $this->assertStringContainsString('$this->loadProviderParentAppointments($provider_id,', $source);
+        $this->assertStringNotContainsString("request('provider_id", $source);
+        $this->assertStringNotContainsString('provider_ids', $source);
+    }
+
+    public function testProviderAppointmentLoaderKeepsBookedPeriodAndSortContract(): void
+    {
+        $method = new \ReflectionMethod(Dashboard_export::class, 'loadProviderParentAppointments');
+        $source_lines = file(APPPATH . 'controllers/Dashboard_export.php');
+
+        $this->assertIsArray($source_lines);
+
+        $source = implode(
+            '',
+            array_slice(
+                $source_lines,
+                $method->getStartLine() - 1,
+                $method->getEndLine() - $method->getStartLine() + 1,
+            ),
+        );
+
+        $this->assertStringContainsString("->where('appointments.id_users_provider', \$provider_id)", $source);
+        $this->assertStringContainsString("->where('appointments.status', 'Booked')", $source);
+        $this->assertStringContainsString("->where('appointments.start_datetime <'", $source);
+        $this->assertStringContainsString("->where('appointments.end_datetime >'", $source);
+        $this->assertStringContainsString("->order_by('appointments.start_datetime', 'ASC')", $source);
+    }
+
     public function testResolveThresholdAcceptsValidValues(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -176,6 +222,35 @@ class DashboardExportControllerTest extends TestCase
         $this->assertTrue($pages[0]['has_any_appointments']);
     }
 
+    public function testBuildProviderPreparationAppointmentPagesUsesFourAppointmentsPerPage(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $pages = $controller->callBuildProviderPreparationAppointmentPages($this->createAppointments(9));
+
+        $this->assertCount(3, $pages);
+        $this->assertCount(4, $pages[0]['appointments']);
+        $this->assertCount(4, $pages[1]['appointments']);
+        $this->assertCount(1, $pages[2]['appointments']);
+        $this->assertSame(3, $pages[0]['chunks_total']);
+        $this->assertSame(3, $pages[1]['chunks_total']);
+        $this->assertSame(3, $pages[2]['chunks_total']);
+        $this->assertTrue($pages[0]['has_any_appointments']);
+    }
+
+    public function testBuildProviderPreparationAppointmentPagesCreatesSingleEmptyPage(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $pages = $controller->callBuildProviderPreparationAppointmentPages([]);
+
+        $this->assertCount(1, $pages);
+        $this->assertSame([], $pages[0]['appointments']);
+        $this->assertSame(0, $pages[0]['chunk_index']);
+        $this->assertSame(1, $pages[0]['chunks_total']);
+        $this->assertFalse($pages[0]['has_any_appointments']);
+    }
+
     public function testResolveCustomerDisplayNameForParentExportDoesNotExposeContactFallbacks(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -196,6 +271,30 @@ class DashboardExportControllerTest extends TestCase
                 'customer_phone_number' => '123456',
             ]),
         );
+    }
+
+    public function testMapProviderParentAppointmentsForViewUsesCustomerNameAndDropsExtraPii(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapProviderParentAppointmentsForView([
+            [
+                'start_datetime' => '2026-08-20 14:00:00',
+                'end_datetime' => '2026-08-20 14:20:00',
+                'customer_first_name' => 'Adina',
+                'customer_last_name' => 'Rossmeisl',
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+                'notes' => 'Must not reach either PDF view.',
+            ],
+        ]);
+
+        $this->assertCount(1, $mapped);
+        $this->assertSame('Adina Rossmeisl', $mapped[0]['parent_name']);
+        $this->assertSame(['parent_name', 'date', 'start', 'end'], array_keys($mapped[0]));
+        $this->assertArrayNotHasKey('customer_email', $mapped[0]);
+        $this->assertArrayNotHasKey('customer_phone_number', $mapped[0]);
+        $this->assertArrayNotHasKey('notes', $mapped[0]);
     }
 
     public function testBuildPrincipalPagesCreatesSingleEmptyPageWhenNoMetrics(): void
@@ -511,6 +610,22 @@ class DashboardExportControllerTest extends TestCase
         );
     }
 
+    public function testBuildProviderPreparationPdfStreamOptionsUsesA4Landscape(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $options = $controller->callBuildProviderPreparationPdfStreamOptions('/tmp/provider-preparation.html');
+
+        $this->assertSame(
+            [
+                'attachment' => true,
+                'paper' => 'A4',
+                'orientation' => 'landscape',
+            ],
+            $options,
+        );
+    }
+
     public function testMapMetricsForViewPreservesSharedStatusReasonsAndAfter15Fields(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -702,6 +817,11 @@ class DashboardExportControllerTest extends TestCase
                 return $this->buildProviderParentAppointmentPages($appointments);
             }
 
+            public function callBuildProviderPreparationAppointmentPages(array $appointments): array
+            {
+                return $this->buildProviderPreparationAppointmentPages($appointments);
+            }
+
             public function callBuildPrincipalPages(array $metrics): array
             {
                 return $this->buildPrincipalPages($metrics);
@@ -710,6 +830,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildPdfStreamOptions(string $debugDumpPath): array
             {
                 return $this->buildPdfStreamOptions($debugDumpPath);
+            }
+
+            public function callBuildProviderPreparationPdfStreamOptions(string $debugDumpPath): array
+            {
+                return $this->buildProviderPreparationPdfStreamOptions($debugDumpPath);
             }
 
             public function callBuildSummary(array $metrics, float $threshold): array
@@ -740,6 +865,11 @@ class DashboardExportControllerTest extends TestCase
             public function callResolveCustomerDisplayNameForParentExport(array $appointment): string
             {
                 return $this->resolveCustomerDisplayNameForParentExport($appointment);
+            }
+
+            public function callMapProviderParentAppointmentsForView(array $appointments): array
+            {
+                return $this->mapProviderParentAppointmentsForView($appointments);
             }
 
             protected function getConfiguredThreshold(): float
