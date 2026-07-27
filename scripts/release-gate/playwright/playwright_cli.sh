@@ -82,25 +82,6 @@ playwright_install_mode="$(normalize_install_mode "${PLAYWRIGHT_INSTALL_MODE:-au
 
 playwright_cli_name="@playwright/cli"
 
-resolve_playwright_cli_version() {
-  local metadata
-  local version
-
-  if ! command -v npm >/dev/null 2>&1; then
-    default_playwright_cli_version
-    return
-  fi
-
-  metadata="$(npm view "${playwright_cli_name}" version --json 2>/dev/null || true)"
-  version="$(printf '%s' "${metadata}" | normalize_npm_json_scalar)"
-  if [[ -z "${version}" || "${version}" == "null" ]]; then
-    default_playwright_cli_version
-    return
-  fi
-
-  echo "${version}"
-}
-
 playwright_cli_version="${PLAYWRIGHT_CLI_VERSION:-$(default_playwright_cli_version)}"
 playwright_cli_package="${playwright_cli_name}@${playwright_cli_version}"
 playwright_executable_path="${PLAYWRIGHT_MCP_EXECUTABLE_PATH:-}"
