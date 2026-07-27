@@ -70,6 +70,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `assets/js/pages/installation.js`
 - Path prefixes:
   - `application/controllers/Installation.php`
+  - `application/libraries/Instance.php`
   - `application/views/pages/installation.php`
   - `assets/js/pages/installation.js`
 

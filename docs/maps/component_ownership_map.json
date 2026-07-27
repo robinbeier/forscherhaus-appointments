@@ -34,6 +34,7 @@
         "assets/js/pages/login.js"
       ],
       "depends_on": [
+        "booking-public",
         "integrations-sync",
         "people-services-admin",
         "scheduling-backoffice",
@@ -53,6 +54,7 @@
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
       "folder_prefixes": [
         "application/controllers/Installation.php",
+        "application/libraries/Instance.php",
         "application/views/pages/installation.php",
         "assets/js/pages/installation.js"
       ],
@@ -444,9 +446,13 @@
         "scripts/release-gate/provider_ui_smoke.php"
       ],
       "depends_on": [
-        "dashboard-exports",
+        "api-v1",
         "booking-public",
-        "api-v1"
+        "dashboard-exports",
+        "installation-bootstrap",
+        "people-services-admin",
+        "settings-compliance",
+        "shared-core"
       ]
     }
   ]

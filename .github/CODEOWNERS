@@ -58,6 +58,7 @@
 /application/libraries/Dashboard_request_dto_factory.php @robinbeier
 /application/libraries/Email_messages.php @robinbeier
 /application/libraries/Google_sync.php @robinbeier
+/application/libraries/Instance.php @robinbeier
 /application/libraries/Integrations_request_dto_factory.php @robinbeier
 /application/libraries/Ldap_client.php @robinbeier
 /application/libraries/Notifications.php @robinbeier
