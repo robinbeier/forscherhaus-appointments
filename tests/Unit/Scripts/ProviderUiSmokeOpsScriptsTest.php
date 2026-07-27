@@ -60,7 +60,8 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
             self::assertSame(1, $result['exit_code'], $result['stderr']);
             $events = (string) file_get_contents($workspace . '/events.log');
             self::assertMatchesRegularExpression(
-                '/preflight.*verify.*arm.*activate.*credential_stream.*gate.*deactivate.*verify.*disarm/s',
+                '/preflight.*verify.*view_hash_before.*arm.*activate.*credential_stream.*gate.*' .
+                    'view_hash_after.*deactivate.*verify.*disarm/s',
                 $events,
             );
             self::assertStringNotContainsString('provider-ui-test-secret', $events);
@@ -69,6 +70,80 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         } finally {
             $this->removeDirectory($workspace);
         }
+    }
+
+    public function testOrchestratorFailsClosedWhenActiveViewChangesDuringGate(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, [
+                'PROD_SMOKE_GATE_EXIT' => '0',
+                'PROD_SMOKE_DEPLOYED_VIEW_SHA256_AFTER' => str_repeat('b', 64),
+            ]);
+
+            self::assertSame(2, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('active deployed PDF view changed during the gate', $result['stderr']);
+
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertMatchesRegularExpression(
+                '/view_hash_before.*activate.*gate.*view_hash_after.*deactivate.*verify.*disarm/s',
+                $events,
+            );
+            self::assertStringNotContainsString('provider-ui-test-secret', $events);
+            self::assertStringNotContainsString('provider-ui-test-secret', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testOrchestratorStopsBeforeActivationWhenRemoteViewHashIsInvalid(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, [
+                'PROD_SMOKE_DEPLOYED_VIEW_SHA256' => 'not-a-sha256',
+            ]);
+
+            self::assertSame(20, $result['exit_code']);
+            self::assertStringContainsString(
+                'active deployed PDF view could not be bound to the operator gate',
+                $result['stderr'],
+            );
+
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertMatchesRegularExpression('/preflight.*verify.*view_hash_before/s', $events);
+            self::assertStringNotContainsString("arm\n", $events);
+            self::assertStringNotContainsString("activate\n", $events);
+            self::assertStringNotContainsString("credential_stream\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testOrchestratorStopsBeforeActivationWhenRemoteViewIsSymlinked(): void
+    {
+        $this->assertUnsafeRemoteViewStopsBeforeActivation(
+            'symlink',
+            'deployed provider preparation view is unavailable or unsafe',
+        );
+    }
+
+    public function testOrchestratorStopsBeforeActivationWhenRemoteViewHasMultipleHardLinks(): void
+    {
+        $this->assertUnsafeRemoteViewStopsBeforeActivation(
+            'hardlink',
+            'deployed provider preparation view link count is unsafe',
+        );
+    }
+
+    public function testOrchestratorStopsBeforeActivationWhenRemoteViewIsOversized(): void
+    {
+        $this->assertUnsafeRemoteViewStopsBeforeActivation(
+            'oversized',
+            'deployed provider preparation view size is unsafe',
+        );
     }
 
     public function testCleanupFailureOverridesGateResultAndLeavesTimerArmed(): void
@@ -104,6 +179,11 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         $stubBin = $workspace . '/bin';
         $pwcli = $workspace . '/playwright_cli.sh';
         $events = $workspace . '/events.log';
+        $deployedViewSha256 = hash_file(
+            'sha256',
+            $this->repoRoot() . '/application/views/exports/provider_preparation_pdf.php',
+        );
+        self::assertIsString($deployedViewSha256);
 
         return $this->runCommand(
             [
@@ -121,6 +201,8 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
                 [
                     'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
                     'PROD_SMOKE_TEST_EVENTS' => $events,
+                    'PROD_SMOKE_TEST_HASH_COUNT' => $workspace . '/hash-count',
+                    'PROD_SMOKE_DEPLOYED_VIEW_SHA256' => $deployedViewSha256,
                     'PROVIDER_UI_SMOKE_PHP_BIN' => $stubBin . '/php',
                     'PROVIDER_UI_SMOKE_CURL_BIN' => $stubBin . '/curl',
                     'PROVIDER_UI_SMOKE_NPX_BIN' => $stubBin . '/npx',
@@ -178,9 +260,19 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
                 exit 0
             fi
 
+            deployed_view_sha256=''
+            for argument in "$@"; do
+                case "${argument}" in
+                    --deployed-view-sha256=*)
+                        deployed_view_sha256="${argument#*=}"
+                    ;;
+                esac
+            done
+
             credential_input="$(cat)"
             [[ "${credential_input}" == *'PROVIDER_UI_SMOKE_USERNAME=__ea_provider_ui_smoke_v1'* ]]
             [[ "${credential_input}" == *'PROVIDER_UI_SMOKE_PASSWORD=provider-ui-test-secret'* ]]
+            [[ "${deployed_view_sha256}" == "${PROD_SMOKE_DEPLOYED_VIEW_SHA256}" ]]
             printf 'gate\n' >>"${PROD_SMOKE_TEST_EVENTS}"
             exit "${PROD_SMOKE_GATE_EXIT:-0}"
             BASH
@@ -209,10 +301,47 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
 
             if [[ "${remote_command}" == *'remote_preflight=passed'* ]]; then
                 printf 'preflight\n' >>"${PROD_SMOKE_TEST_EVENTS}"
-                printf 'remote_preflight=passed host_node_npm=absent cleanup_lease=inactive\n'
+                case "${PROD_SMOKE_REMOTE_VIEW_STATE:-safe}" in
+                    symlink)
+                        [[ "${remote_command}" == *'! -L "${deployed_view}"'* ]] || exit 99
+                        printf 'ERROR: deployed provider preparation view is unavailable or unsafe\n' >&2
+                        exit 1
+                        ;;
+                    hardlink)
+                        [[ "${remote_command}" == *"stat -Lc '%h' \"\${deployed_view}\""* ]] || exit 99
+                        printf 'ERROR: deployed provider preparation view link count is unsafe\n' >&2
+                        exit 1
+                        ;;
+                    oversized)
+                        [[ "${remote_command}" == *'deployed_view_size <= 262144'* ]] || exit 99
+                        printf 'ERROR: deployed provider preparation view size is unsafe\n' >&2
+                        exit 1
+                        ;;
+                    safe)
+                        printf 'remote_preflight=passed host_node_npm=absent cleanup_lease=inactive\n'
+                        ;;
+                    *)
+                        exit 99
+                        ;;
+                esac
             elif [[ "${remote_command}" == *"provider_ui_smoke_principal.sh' 'verify'"* ]]; then
                 printf 'verify\n' >>"${PROD_SMOKE_TEST_EVENTS}"
                 printf 'provider_ui_smoke_wrapper action=verify result=ok\n'
+            elif [[ "${remote_command}" == *'sha256sum --'* ]]; then
+                hash_call=0
+                if [[ -f "${PROD_SMOKE_TEST_HASH_COUNT}" ]]; then
+                    read -r hash_call <"${PROD_SMOKE_TEST_HASH_COUNT}"
+                fi
+                hash_call=$((hash_call + 1))
+                printf '%s\n' "${hash_call}" >"${PROD_SMOKE_TEST_HASH_COUNT}"
+                if (( hash_call == 1 )); then
+                    printf 'view_hash_before\n' >>"${PROD_SMOKE_TEST_EVENTS}"
+                    printf '%s\n' "${PROD_SMOKE_DEPLOYED_VIEW_SHA256}"
+                else
+                    printf 'view_hash_after\n' >>"${PROD_SMOKE_TEST_EVENTS}"
+                    printf '%s\n' \
+                        "${PROD_SMOKE_DEPLOYED_VIEW_SHA256_AFTER:-${PROD_SMOKE_DEPLOYED_VIEW_SHA256}}"
+                fi
             elif [[ "${remote_command}" == *'systemd-run'* ]]; then
                 printf 'arm\n' >>"${PROD_SMOKE_TEST_EVENTS}"
                 printf 'cleanup_lease=armed duration=10m\n'
@@ -242,6 +371,30 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         );
 
         return $workspace;
+    }
+
+    private function assertUnsafeRemoteViewStopsBeforeActivation(string $state, string $expectedError): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, ['PROD_SMOKE_REMOTE_VIEW_STATE' => $state]);
+
+            self::assertSame(20, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString($expectedError, $result['stderr']);
+            self::assertStringContainsString('remote read-only preflight failed', $result['stderr']);
+
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertStringContainsString("preflight\n", $events);
+            self::assertStringNotContainsString("verify\n", $events);
+            self::assertStringNotContainsString("view_hash_before\n", $events);
+            self::assertStringNotContainsString("arm\n", $events);
+            self::assertStringNotContainsString("activate\n", $events);
+            self::assertStringNotContainsString("credential_stream\n", $events);
+            self::assertStringNotContainsString("gate\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
     }
 
     private function writeExecutable(string $path, string $contents): void

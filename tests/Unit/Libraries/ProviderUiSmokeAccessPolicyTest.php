@@ -24,6 +24,24 @@ class ProviderUiSmokeAccessPolicyTest extends TestCase
         $this->assertFalse(Provider_ui_smoke_access_policy::isReservedUsername('provider'));
     }
 
+    public function testRecognizesMariaDbPadSpaceVariantsAcrossLoginAndSessionSurfaces(): void
+    {
+        $padded_username = strtoupper(Provider_ui_smoke_access_policy::USERNAME) . '   ';
+
+        $this->assertTrue(Provider_ui_smoke_access_policy::isReservedIdentity($padded_username, null, null));
+        $this->assertTrue(Provider_ui_smoke_access_policy::isReservedIdentity(null, $padded_username, null));
+        $this->assertTrue(Provider_ui_smoke_access_policy::isReservedIdentity(null, null, $padded_username));
+        $this->assertTrue(Provider_ui_smoke_access_policy::isReservedUsername($padded_username));
+
+        $this->assertFalse(
+            Provider_ui_smoke_access_policy::isReservedUsername(' ' . Provider_ui_smoke_access_policy::USERNAME),
+        );
+        $this->assertFalse(
+            Provider_ui_smoke_access_policy::isReservedUsername(Provider_ui_smoke_access_policy::USERNAME . "\t"),
+        );
+        $this->assertFalse(Provider_ui_smoke_access_policy::isReservedUsername('provider   '));
+    }
+
     public function testOnlyAllowsTheProviderDashboardExportsAndLogoutWithExactVerbs(): void
     {
         $this->assertTrue(Provider_ui_smoke_access_policy::isAllowedRoute('Dashboard', 'index', 'GET'));

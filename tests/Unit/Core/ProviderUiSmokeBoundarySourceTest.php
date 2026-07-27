@@ -12,8 +12,11 @@ class ProviderUiSmokeBoundarySourceTest extends TestCase
 
         $this->assertIsString($source);
         $this->assertStringContainsString('$this->enforce_provider_ui_smoke_boundary();', $source);
+        $this->assertStringContainsString("\$session_username = session('username');", $source);
+        $this->assertStringContainsString('$login_username = is_string($requested_username)', $source);
         $this->assertStringContainsString("\$_SERVER['PHP_AUTH_USER']", $source);
         $this->assertStringContainsString("request('username')", $source);
+        $this->assertStringContainsString('Provider_ui_smoke_access_policy::isReservedIdentity(', $source);
         $this->assertStringContainsString('Provider_ui_smoke_access_policy::hasActiveLease', $source);
         $this->assertStringContainsString('session_destroy();', $source);
         $this->assertStringContainsString("abort(403, 'Forbidden');", $source);

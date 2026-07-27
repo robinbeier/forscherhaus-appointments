@@ -130,19 +130,31 @@ The orchestrator:
 1. checks local runtime dependencies and prepares Playwright;
 2. checks the app endpoint;
 3. performs a read-only remote preflight, including credential/state
-   permissions, deployed-wrapper shape, dormant principal verification,
-   production Node/npm absence, and absence of an existing cleanup lease;
+   permissions, deployed-wrapper/template shape, dormant principal
+   verification, production Node/npm absence, and absence of an existing
+   cleanup lease;
 4. arms a transient `fh-provider-ui-smoke-cleanup.timer` with
    `systemd-run --on-active=10m`;
 5. activates the synthetic lease;
-6. streams `ssh ... cat` directly into the local gate's standard input;
-7. always deactivates and verifies from an `EXIT`/signal cleanup handler;
-8. stops and resets the transient cleanup unit only after synchronous
+6. binds the locally reviewed four-line preparation template to the active
+   deployment by SHA-256, then streams `ssh ... cat` directly into the local
+   gate's standard input;
+7. re-reads the active template SHA-256 after the browser/PDF assertions and
+   fails closed if the deployment changed during the gate;
+8. always deactivates and verifies from an `EXIT`/signal cleanup handler;
+9. stops and resets the transient cleanup unit only after synchronous
    `deactivate` and dormant `verify` both pass.
 
 During operator-to-gate transfer, the credential is never stored in a local
 temporary file, shell variable, command argument, process title, report, or
 log. The production path is the only visible argument to `cat`.
+
+The remote template itself is neither copied nor executed on the operator
+workstation. Only its validated lowercase SHA-256 digest crosses the SSH
+boundary. The gate requires an exact digest match with the clean operator
+checkout and independently verifies the four note-line elements and their
+four-row layout there. A stale checkout, a stale deployment, a symlink/hard-link
+template, or a release switch during the run is therefore a hard gate failure.
 
 The transient systemd timer is independent of the operator shell. It runs the
 same secret-free server-local `deactivate` wrapper if the workstation loses
@@ -160,8 +172,9 @@ The gate uses only the synthetic fixture and verifies:
 - a cancelled in-period appointment and a booked out-of-period appointment do
   not enter the result;
 - an empty period produces the expected empty UI/PDF state;
-- the preparation PDF is landscape and contains the synthetic parent name,
-  date/time, and four empty note lines;
+- the preparation PDF is landscape and contains the synthetic parent name and
+  date/time; the exact active template is bound to the reviewed four-empty-line
+  source contract by the bracketed SHA-256 check;
 - the preparation PDF contains no email address, phone number, or appointment
   note marker;
 - the existing parent PDF still contains its expected synthetic appointment

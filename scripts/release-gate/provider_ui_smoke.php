@@ -17,8 +17,10 @@ use ReleaseGate\GateAssertions;
 use ReleaseGate\GateHttpClient;
 use ReleaseGate\GateProcessRunner;
 use ReleaseGate\ProviderUiSmokeContract;
+use function ReleaseGate\assertProviderUiSmokeDeployedPreparationView;
 use function ReleaseGate\buildPlaywrightSessionArguments;
 use function ReleaseGate\inspectProviderUiSmokePdf;
+use function ReleaseGate\normalizeProviderUiSmokeSha256;
 use function ReleaseGate\normalizeCookieRecordsForPlaywright;
 use function ReleaseGate\parseProviderUiSmokeRunCodeResult;
 use function ReleaseGate\prepareConfiguredPlaywrightCommandArguments;
@@ -149,6 +151,14 @@ try {
         ];
     });
 
+    $runCheck(
+        'preparation_four_note_lines_active_deployment',
+        static fn(): array => assertProviderUiSmokeDeployedPreparationView(
+            $repoRoot . '/application/views/exports/provider_preparation_pdf.php',
+            $config['deployed_view_sha256'],
+        ),
+    );
+
     $runCheck('auth_login_validate', static function () use (&$httpClient, $config, &$credentials): array {
         if (!is_array($credentials)) {
             throw new RuntimeException('Provider UI smoke credentials were not loaded.');
@@ -215,26 +225,6 @@ try {
         return [
             'dashboard_status' => $dashboard->statusCode,
             'forbidden_markers_absent' => true,
-        ];
-    });
-
-    $runCheck('preparation_four_note_lines_source_regression', static function () use ($repoRoot): array {
-        $view = file_get_contents($repoRoot . '/application/views/exports/provider_preparation_pdf.php');
-
-        if (!is_string($view)) {
-            throw new RuntimeException('Provider preparation PDF deployed view is not readable.');
-        }
-
-        if (
-            substr_count($view, 'class="notes__line"') !== 4 ||
-            !str_contains($view, 'grid-template-rows:repeat(4,1fr)')
-        ) {
-            throw new GateAssertionException('Provider preparation PDF four-line source regression is missing.');
-        }
-
-        return [
-            'source_regression_present' => true,
-            'note_line_count' => 4,
         ];
     });
 
@@ -663,6 +653,7 @@ function providerUiSmokeParseOptions(string $repoRoot, string $defaultOutputPath
         'base-url:',
         'index-page::',
         'credentials-file:',
+        'deployed-view-sha256:',
         'pwcli-path::',
         'browser::',
         'bootstrap-timeout::',
@@ -691,6 +682,9 @@ function providerUiSmokeParseOptions(string $repoRoot, string $defaultOutputPath
         providerUiSmokeHasExplicitEmptyOption('index-page') ? '' : 'index.php',
     );
     $credentialsFile = providerUiSmokeRequiredOption($options, 'credentials-file');
+    $deployedViewSha256 = normalizeProviderUiSmokeSha256(
+        providerUiSmokeRequiredOption($options, 'deployed-view-sha256'),
+    );
     $pwcliPath = providerUiSmokeResolvePath(
         providerUiSmokeOptionalValue($options, 'pwcli-path', $defaultPwcliPath),
         $repoRoot,
@@ -713,6 +707,7 @@ function providerUiSmokeParseOptions(string $repoRoot, string $defaultOutputPath
         'base_url' => rtrim($baseUrl, '/'),
         'index_page' => trim($indexPage, '/'),
         'credentials_file' => $credentialsFile,
+        'deployed_view_sha256' => $deployedViewSha256,
         'pwcli_path' => $pwcliPath,
         'browser' => $browser,
         'bootstrap_timeout' => providerUiSmokePositiveInt($options, 'bootstrap-timeout', 90),
@@ -1058,11 +1053,13 @@ function providerUiSmokePrintUsage(): void
         'Provider UI Smoke Gate',
         '',
         'Usage:',
-        '  php scripts/release-gate/provider_ui_smoke.php --base-url=URL --credentials-file=- [options]',
+        '  php scripts/release-gate/provider_ui_smoke.php --base-url=URL --credentials-file=- \\',
+        '    --deployed-view-sha256=HEX [options]',
         '',
         'Required:',
         '  --base-url=URL',
         '  --credentials-file=-|PATH      INI on stdin, or a root-owned regular file without group/other access',
+        '  --deployed-view-sha256=HEX     Active production preparation-view SHA-256 from the ops wrapper',
         '',
         'Credential INI (exactly these two keys):',
         '  PROVIDER_UI_SMOKE_USERNAME=reserved-account',

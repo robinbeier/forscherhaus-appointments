@@ -62,6 +62,17 @@ class ProviderUiSmokeGateContractTest extends TestCase
         self::assertStringNotContainsString("'stderr' =>", $gate);
     }
 
+    public function testGateConsumesCredentialStreamBeforeDeploymentHashAssertion(): void
+    {
+        $gate = $this->readRepoFile('scripts/release-gate/provider_ui_smoke.php');
+        $credentialCheck = strpos($gate, "\$runCheck('credentials_contract'");
+        $deploymentCheck = strpos($gate, "'preparation_four_note_lines_active_deployment'");
+
+        self::assertIsInt($credentialCheck);
+        self::assertIsInt($deploymentCheck);
+        self::assertLessThan($deploymentCheck, $credentialCheck);
+    }
+
     public function testStandaloneGateContractMatchesApplicationFixtureConstants(): void
     {
         $contract = $this->readRepoFile('scripts/release-gate/lib/ProviderUiSmokeContract.php');

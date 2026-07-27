@@ -132,6 +132,54 @@ function countProviderUiSmokeAppointmentRows(string $text): int
     return $rows;
 }
 
+function normalizeProviderUiSmokeSha256(string $digest): string
+{
+    $normalized = strtolower(trim($digest));
+
+    if (preg_match('/\A[a-f0-9]{64}\z/D', $normalized) !== 1) {
+        throw new \InvalidArgumentException('Provider UI smoke deployed-view SHA-256 is invalid.');
+    }
+
+    return $normalized;
+}
+
+/**
+ * Bind the locally reviewed four-line template to the exact bytes in the active
+ * deployment. The operator brackets the browser run with remote SHA-256 reads,
+ * so this function never reads or executes production source on the workstation.
+ *
+ * @return array{active_deployment_matched:bool,note_line_count:int}
+ */
+function assertProviderUiSmokeDeployedPreparationView(string $reviewedViewPath, string $deployedSha256): array
+{
+    $expectedSha256 = normalizeProviderUiSmokeSha256($deployedSha256);
+
+    if (!is_file($reviewedViewPath) || is_link($reviewedViewPath) || !is_readable($reviewedViewPath)) {
+        throw new RuntimeException('Provider preparation PDF reviewed checkout view is unavailable or unsafe.');
+    }
+
+    $view = file_get_contents($reviewedViewPath);
+    if (!is_string($view)) {
+        throw new RuntimeException('Provider preparation PDF reviewed checkout view is not readable.');
+    }
+
+    if (!hash_equals($expectedSha256, hash('sha256', $view))) {
+        throw new GateAssertionException(
+            'Provider preparation PDF reviewed checkout does not match the active deployment.',
+        );
+    }
+
+    $noteLineCount = substr_count($view, 'class="notes__line"');
+    if ($noteLineCount !== 4 || !str_contains($view, 'grid-template-rows:repeat(4,1fr)')) {
+        throw new GateAssertionException('Provider preparation PDF four-line source regression is missing.');
+    }
+
+    return [
+        'active_deployment_matched' => true,
+        'note_line_count' => $noteLineCount,
+    ];
+}
+
 /**
  * @return array{bytes:int,pages:int,landscape:bool,text:string}
  */

@@ -16,6 +16,7 @@ source "${SCRIPT_DIR}/lib/prod_common.sh"
 
 readonly CLEANUP_UNIT='fh-provider-ui-smoke-cleanup'
 readonly CLEANUP_HARD_EXIT=90
+readonly PREPARATION_VIEW_RELATIVE_PATH='application/views/exports/provider_preparation_pdf.php'
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
@@ -40,6 +41,7 @@ PDFTOTEXT_BIN="${PROVIDER_UI_SMOKE_PDFTOTEXT_BIN:-pdftotext}"
 
 REMOTE_CLEANUP_ARMED=0
 REMOTE_CLEANUP_REQUIRED=0
+DEPLOYED_VIEW_SHA256=''
 
 usage() {
     cat <<'USAGE'
@@ -228,7 +230,7 @@ remote_static_preflight() {
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "
 set -euo pipefail
 [[ \"\$(id -u)\" == '0' ]] || { printf 'ERROR: root SSH is required\n' >&2; exit 1; }
-for required_command in bash php systemctl systemd-run stat cat flock; do
+for required_command in bash php systemctl systemd-run stat sha256sum cat flock; do
     command -v \"\${required_command}\" >/dev/null 2>&1 || {
         printf 'ERROR: a required remote command is unavailable\n' >&2
         exit 1
@@ -253,6 +255,21 @@ fi
 wrapper_size=\"\$(stat -Lc '%s' '${wrapper}')\"
 [[ \"\${wrapper_size}\" =~ ^[0-9]+$ ]] && (( wrapper_size > 0 && wrapper_size <= 131072 )) || {
     printf 'ERROR: deployed principal wrapper size is unsafe\n' >&2
+    exit 1
+}
+deployed_view='${APP_ROOT}/${PREPARATION_VIEW_RELATIVE_PATH}'
+[[ -f \"\${deployed_view}\" && ! -L \"\${deployed_view}\" ]] || {
+    printf 'ERROR: deployed provider preparation view is unavailable or unsafe\n' >&2
+    exit 1
+}
+[[ \"\$(stat -Lc '%h' \"\${deployed_view}\")\" == '1' ]] || {
+    printf 'ERROR: deployed provider preparation view link count is unsafe\n' >&2
+    exit 1
+}
+deployed_view_size=\"\$(stat -Lc '%s' \"\${deployed_view}\")\"
+[[ \"\${deployed_view_size}\" =~ ^[0-9]+$ ]] \
+    && (( deployed_view_size > 0 && deployed_view_size <= 262144 )) || {
+    printf 'ERROR: deployed provider preparation view size is unsafe\n' >&2
     exit 1
 }
 [[ -f '${CREDENTIALS_FILE}' && ! -L '${CREDENTIALS_FILE}' ]] || {
@@ -318,6 +335,32 @@ if systemctl is-active --quiet '${CLEANUP_UNIT}.timer' \
 fi
 printf 'remote_preflight=passed host_node_npm=absent cleanup_lease=inactive\n'
 "
+}
+
+remote_deployed_view_sha256() {
+    local deployed_view
+
+    deployed_view="${APP_ROOT}/${PREPARATION_VIEW_RELATIVE_PATH}"
+    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "
+set -euo pipefail
+[[ -f '${deployed_view}' && ! -L '${deployed_view}' ]]
+[[ \"\$(stat -Lc '%h' '${deployed_view}')\" == '1' ]]
+deployed_view_size=\"\$(stat -Lc '%s' '${deployed_view}')\"
+[[ \"\${deployed_view_size}\" =~ ^[0-9]+$ ]]
+(( deployed_view_size > 0 && deployed_view_size <= 262144 ))
+hash_output=\"\$(sha256sum -- '${deployed_view}')\"
+deployed_view_sha256=\"\${hash_output%% *}\"
+[[ \"\${deployed_view_sha256}\" =~ ^[a-f0-9]{64}$ ]]
+printf '%s\n' \"\${deployed_view_sha256}\"
+"
+}
+
+read_remote_deployed_view_sha256() {
+    local deployed_view_sha256
+
+    deployed_view_sha256="$(remote_deployed_view_sha256)" || return 1
+    [[ "${deployed_view_sha256}" =~ ^[a-f0-9]{64}$ ]] || return 1
+    printf '%s\n' "${deployed_view_sha256}"
 }
 
 local_preflight() {
@@ -452,6 +495,7 @@ stream_credentials_to_gate() {
         "--base-url=${BASE_URL}"
         "--index-page=${INDEX_PAGE}"
         "--credentials-file=-"
+        "--deployed-view-sha256=${DEPLOYED_VIEW_SHA256}"
         "--pwcli-path=${PWCLI_PATH}"
         "--browser=${BROWSER}"
         "--bootstrap-timeout=${BOOTSTRAP_TIMEOUT}"
@@ -491,6 +535,7 @@ exec cat -- '${CREDENTIALS_FILE}'" \
 
 main() {
     local arm_status
+    local deployed_view_sha256_after
     local gate_status
 
     parse_args "$@"
@@ -508,6 +553,9 @@ main() {
     fi
     if ! remote_principal verify; then
         die "remote principal is not dormant and clean" 20
+    fi
+    if ! DEPLOYED_VIEW_SHA256="$(read_remote_deployed_view_sha256)"; then
+        die "active deployed PDF view could not be bound to the operator gate" 20
     fi
 
     trap cleanup_remote_lease EXIT
@@ -534,10 +582,19 @@ main() {
         die "remote smoke lease activation failed" 21
     fi
 
-    set +e
-    stream_credentials_to_gate
-    gate_status=$?
-    set -e
+    if stream_credentials_to_gate; then
+        gate_status=0
+    else
+        gate_status=$?
+    fi
+
+    if ! deployed_view_sha256_after="$(read_remote_deployed_view_sha256)"; then
+        printf 'ERROR: active deployed PDF view could not be rechecked after the gate\n' >&2
+        gate_status=2
+    elif [[ "${deployed_view_sha256_after}" != "${DEPLOYED_VIEW_SHA256}" ]]; then
+        printf 'ERROR: active deployed PDF view changed during the gate\n' >&2
+        gate_status=2
+    fi
 
     return "${gate_status}"
 }

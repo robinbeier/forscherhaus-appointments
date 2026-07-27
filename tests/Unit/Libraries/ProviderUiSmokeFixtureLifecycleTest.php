@@ -403,16 +403,16 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         );
     }
 
-    public function testCaseVariantLoginStillMapsToTheReservedIdentityBoundary(): void
+    public function testCaseAndPadSpaceVariantLoginStillMapsToTheReservedIdentityBoundary(): void
     {
         $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
         $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
         $this->CI->load->library('accounts');
-        $case_variant = strtoupper(Provider_ui_smoke_access_policy::USERNAME);
-        $session_data = $this->CI->accounts->check_login($case_variant, str_repeat('a', 64));
+        $database_equivalent_variant = strtoupper(Provider_ui_smoke_access_policy::USERNAME) . '   ';
+        $session_data = $this->CI->accounts->check_login($database_equivalent_variant, str_repeat('a', 64));
 
         $this->assertIsArray($session_data);
-        $this->assertSame($case_variant, $session_data['username']);
+        $this->assertSame($database_equivalent_variant, $session_data['username']);
         $this->assertTrue(Provider_ui_smoke_access_policy::isReservedUsername($session_data['username']));
         $this->assertTrue(Provider_ui_smoke_access_policy::isReservedIdentity($session_data['username'], null, null));
     }

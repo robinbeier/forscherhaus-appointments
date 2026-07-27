@@ -49,11 +49,14 @@ final class Provider_ui_smoke_access_policy
     }
 
     /**
-     * Match the database's case-insensitive username semantics for the reserved ASCII identity.
+     * Match the database's case-insensitive PAD SPACE semantics for the reserved ASCII identity.
+     *
+     * MariaDB ignores trailing ASCII spaces when comparing the VARCHAR username. The request
+     * and session checks must therefore classify the same padded spellings as reserved.
      */
     public static function isReservedUsername(?string $username): bool
     {
-        return is_string($username) && strcasecmp($username, self::USERNAME) === 0;
+        return is_string($username) && strcasecmp(rtrim($username, ' '), self::USERNAME) === 0;
     }
 
     /**
