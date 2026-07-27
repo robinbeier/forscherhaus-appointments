@@ -137,9 +137,7 @@ class BookingReadAvailabilityControllerFlowTest extends TestCase
     private function createBookingController(): Booking
     {
         $controller = new class extends Booking {
-            public function __construct()
-            {
-            }
+            public function __construct() {}
         };
 
         $this->wireBookingDependencies($controller);
@@ -168,6 +166,7 @@ class BookingReadAvailabilityControllerFlowTest extends TestCase
         $CI->load->library('booking_request_dto_factory');
 
         $controller->load = $CI->load;
+        $controller->db = $CI->db;
         $controller->input = $CI->input;
         $controller->output = $CI->output;
         $controller->cache = new class {

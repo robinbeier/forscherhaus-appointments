@@ -77,7 +77,7 @@ class Login extends EA_Controller
 
             $user_data = $this->accounts->check_login($username, $password);
 
-            if (empty($user_data)) {
+            if (empty($user_data) && !Provider_ui_smoke_access_policy::isReservedUsername($username)) {
                 $user_data = $this->ldap_client->check_login($username, $password);
             }
 

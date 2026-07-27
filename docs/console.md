@@ -92,6 +92,14 @@ It is especially important, because it can be automatically executed on a regula
 
 This way the app provider schedules will always be updated. 
 
+##### Provider UI Smoke
+
+The root-only `provider_ui_smoke` lifecycle supports the isolated production
+Provider UI release gate. Operators must use the guarded wrappers rather than
+calling it directly. See
+[`release-gate-provider-ui-smoke.md`](release-gate-provider-ui-smoke.md) for
+bootstrap, activation, cleanup, and rollback rules.
+
 
 ##### Help 
 

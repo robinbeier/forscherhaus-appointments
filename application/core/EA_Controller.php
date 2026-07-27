@@ -1,5 +1,7 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 
+require_once __DIR__ . '/Provider_ui_smoke_access_policy.php';
+
 /* ----------------------------------------------------------------------------
  * Easy!Appointments - Online Appointment Scheduler
  *
@@ -82,6 +84,7 @@ class EA_Controller extends CI_Controller
         $this->load->library('accounts');
 
         $this->ensure_user_exists();
+        $this->enforce_provider_ui_smoke_boundary();
         $this->configure_timezone();
         $this->configure_language();
         $this->load_common_html_vars();
@@ -103,6 +106,117 @@ class EA_Controller extends CI_Controller
 
             abort(403, 'Forbidden');
         }
+    }
+
+    /**
+     * Keep the reserved production smoke identity away from every real-data surface.
+     *
+     * This boundary deliberately checks the current database role and lease instead
+     * of trusting session role data, which becomes stale when the short smoke run is
+     * deactivated. It also recognizes login POSTs and API Basic Auth before those
+     * authentication mechanisms create a session.
+     */
+    private function enforce_provider_ui_smoke_boundary(): void
+    {
+        $controller = (string) $this->router->class;
+        $method = (string) $this->router->method;
+        $http_method = strtoupper($this->input->method(true));
+        $session_username = session('username');
+        $session_username = is_string($session_username) ? $session_username : null;
+        $basic_auth_username = $_SERVER['PHP_AUTH_USER'] ?? null;
+        $basic_auth_username = is_string($basic_auth_username) ? $basic_auth_username : null;
+        $login_username = null;
+
+        if (strtolower($controller) === 'login' && strtolower($method) === 'validate' && $http_method === 'POST') {
+            $requested_username = request('username');
+            $login_username = is_string($requested_username) ? $requested_username : null;
+        }
+
+        if (
+            !Provider_ui_smoke_access_policy::isReservedIdentity(
+                $session_username,
+                $login_username,
+                $basic_auth_username,
+            )
+        ) {
+            return;
+        }
+
+        if (Provider_ui_smoke_access_policy::isReservedUsername($basic_auth_username)) {
+            abort(403, 'Forbidden');
+        }
+
+        if (Provider_ui_smoke_access_policy::isReservedUsername($session_username)) {
+            if (Provider_ui_smoke_access_policy::isLogoutRoute($controller, $method, $http_method)) {
+                return;
+            }
+
+            $principal = $this->load_provider_ui_smoke_principal((int) session('user_id'));
+
+            if (
+                $principal === null ||
+                $principal['role_slug'] !== DB_SLUG_PROVIDER ||
+                session('role_slug') !== DB_SLUG_PROVIDER ||
+                empty($principal['password']) ||
+                empty($principal['salt']) ||
+                !Provider_ui_smoke_access_policy::hasActiveLease((string) $principal['notes'])
+            ) {
+                session_destroy();
+
+                abort(403, 'Forbidden');
+            }
+
+            if (!Provider_ui_smoke_access_policy::isAllowedRoute($controller, $method, $http_method)) {
+                abort(403, 'Forbidden');
+            }
+
+            return;
+        }
+
+        if (Provider_ui_smoke_access_policy::isReservedUsername($login_username)) {
+            $principal = $this->load_provider_ui_smoke_principal();
+
+            if (
+                $principal === null ||
+                $principal['role_slug'] !== DB_SLUG_PROVIDER ||
+                empty($principal['password']) ||
+                empty($principal['salt']) ||
+                !Provider_ui_smoke_access_policy::hasActiveLease((string) $principal['notes'])
+            ) {
+                abort(403, 'Forbidden');
+            }
+
+            return;
+        }
+
+        abort(403, 'Forbidden');
+    }
+
+    /**
+     * Load the reserved identity with strict cardinality and current database role.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function load_provider_ui_smoke_principal(?int $user_id = null): ?array
+    {
+        $this->db
+            ->select('users.id, users.notes, roles.slug AS role_slug, user_settings.password, user_settings.salt')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
+            ->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME);
+
+        if ($user_id !== null) {
+            $this->db->where('users.id', $user_id);
+        }
+
+        $query = $this->db->get();
+
+        if ($query->num_rows() !== 1) {
+            return null;
+        }
+
+        return $query->row_array();
     }
 
     /**

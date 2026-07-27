@@ -9,6 +9,10 @@ mirrored in `scripts/ops/uptime-kuma.monitors.yml`.
 For agent-first production diagnostics and post-change validation, start with
 `docs/ops/agent-operations.md` and the `prod_*.sh` scripts in this directory.
 
+For the on-demand, synthetic-only production Provider UI browser smoke, use
+`docs/release-gate-provider-ui-smoke.md`. It deliberately runs Playwright on the
+operator workstation, not on the production host or in Kuma.
+
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
 and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
 
@@ -38,6 +42,11 @@ Script inventory:
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
+- `provider_ui_smoke_principal.sh` is the server-local root-only bootstrap and
+  lifecycle wrapper for the permanently dormant Provider UI smoke principal
+- `prod_provider_ui_smoke.sh` runs the operator-side Provider UI smoke with a
+  short synthetic lease, shell cleanup, and an independent ten-minute systemd
+  cleanup timer
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything
