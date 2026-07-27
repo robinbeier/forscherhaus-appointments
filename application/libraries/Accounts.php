@@ -73,7 +73,7 @@ class Accounts
         return [
             'user_id' => $user['id'],
             'user_email' => $user['email'],
-            'username' => $username,
+            'username' => $user_settings['username'],
             'timezone' => !empty($user['timezone']) ? $user['timezone'] : $default_timezone,
             'language' => !empty($user['language']) ? $user['language'] : Config::LANGUAGE,
             'role_slug' => $role['slug'],

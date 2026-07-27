@@ -16,10 +16,29 @@ class ProviderUiSmokeBoundarySourceTest extends TestCase
         $this->assertStringContainsString('$login_username = is_string($requested_username)', $source);
         $this->assertStringContainsString("\$_SERVER['PHP_AUTH_USER']", $source);
         $this->assertStringContainsString("request('username')", $source);
-        $this->assertStringContainsString('Provider_ui_smoke_access_policy::isReservedIdentity(', $source);
+        $this->assertStringContainsString(
+            '$session_is_reserved = Provider_ui_smoke_access_policy::isReservedUsername($session_username)',
+            $source,
+        );
+        $this->assertStringContainsString('$this->is_provider_ui_smoke_auth_username($login_username)', $source);
+        $this->assertStringContainsString('$this->is_provider_ui_smoke_auth_username($basic_auth_username)', $source);
         $this->assertStringContainsString('Provider_ui_smoke_access_policy::hasActiveLease', $source);
         $this->assertStringContainsString('session_destroy();', $source);
         $this->assertStringContainsString("abort(403, 'Forbidden');", $source);
+    }
+
+    public function testDatabaseLoginCanonicalizesTheSessionBeforeStableIdentityValidation(): void
+    {
+        $controller_source = file_get_contents(APPPATH . 'core/EA_Controller.php');
+        $accounts_source = file_get_contents(APPPATH . 'libraries/Accounts.php');
+
+        $this->assertIsString($controller_source);
+        $this->assertIsString($accounts_source);
+        $this->assertStringContainsString("'username' => \$user_settings['username']", $accounts_source);
+        $this->assertStringContainsString(
+            '$principal = $this->load_provider_ui_smoke_principal((int) session(\'user_id\'));',
+            $controller_source,
+        );
     }
 
     public function testDormantOrExpiredReservedLoginCannotReachAccountsCheckLogin(): void
@@ -41,7 +60,7 @@ class ProviderUiSmokeBoundarySourceTest extends TestCase
         $this->assertIsString($controller_source);
         $this->assertIsString($api_source);
         $this->assertStringContainsString(
-            'Provider_ui_smoke_access_policy::isReservedUsername($basic_auth_username)',
+            '$basic_auth_is_reserved = $this->is_provider_ui_smoke_auth_username($basic_auth_username)',
             $controller_source,
         );
         $this->assertStringContainsString("abort(403, 'Forbidden');", $controller_source);
@@ -54,7 +73,7 @@ class ProviderUiSmokeBoundarySourceTest extends TestCase
 
         $this->assertIsString($source);
         $this->assertStringContainsString(
-            'empty($user_data) && !Provider_ui_smoke_access_policy::isReservedUsername($username)',
+            'empty($user_data) && !$this->is_provider_ui_smoke_auth_username($username)',
             $source,
         );
         $this->assertStringContainsString(

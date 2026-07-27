@@ -57,6 +57,25 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertStringNotContainsString('$this->synchronization', $source);
     }
 
+    public function testActivationSnapshotsStateOnlyAfterTheLifecycleLock(): void
+    {
+        $source = file_get_contents(APPPATH . 'libraries/Provider_ui_smoke_fixture.php');
+
+        $this->assertIsString($source);
+        $lock_position = strpos($source, '$this->acquireLock();');
+        $snapshot_position = strpos(
+            $source,
+            '$state_file_existed_before = file_exists($state_file) || is_link($state_file);',
+        );
+        $transaction_position = strpos($source, '$this->CI->db->trans_begin()');
+
+        $this->assertIsInt($lock_position);
+        $this->assertIsInt($snapshot_position);
+        $this->assertIsInt($transaction_position);
+        $this->assertTrue($lock_position < $snapshot_position);
+        $this->assertTrue($snapshot_position < $transaction_position);
+    }
+
     public function testConsoleExposesOnlyTheFiveBoundedLifecycleActions(): void
     {
         $source = file_get_contents(APPPATH . 'controllers/Console.php');

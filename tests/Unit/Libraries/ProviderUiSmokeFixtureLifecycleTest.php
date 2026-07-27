@@ -82,6 +82,16 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
             rmdir($this->temporaryDirectory);
         }
 
+        session([
+            'user_id' => null,
+            'user_email' => null,
+            'username' => null,
+            'timezone' => null,
+            'language' => null,
+            'role_slug' => null,
+        ]);
+        get_instance()->output->set_output('');
+
         parent::tearDown();
     }
 
@@ -179,6 +189,75 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
                 ->num_rows(),
         );
+    }
+
+    public function testConcurrentActivationsPreserveTheWinningStateFile(): void
+    {
+        $lock_name = 'fh-provider-ui-smoke-v1';
+        $processes = [];
+        $lock_held = false;
+        $results = [];
+
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $lock = $this->CI->db->query('SELECT GET_LOCK(?, 10) AS acquired', [$lock_name])->row_array();
+        $this->assertSame(1, (int) ($lock['acquired'] ?? 0));
+        $lock_held = true;
+
+        try {
+            $processes[] = $this->startLifecycleProcess('activate');
+            $processes[] = $this->startLifecycleProcess('activate');
+            $this->awaitLifecycleLockWaiters($lock_name, 2);
+
+            $release = $this->CI->db->query('SELECT RELEASE_LOCK(?) AS released', [$lock_name])->row_array();
+            $this->assertSame(1, (int) ($release['released'] ?? 0));
+            $lock_held = false;
+
+            foreach ($processes as $process) {
+                $results[] = $this->finishLifecycleProcess($process);
+            }
+
+            $processes = [];
+        } finally {
+            if ($lock_held) {
+                $this->CI->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+            }
+
+            foreach ($processes as $process) {
+                $this->stopLifecycleProcess($process);
+            }
+        }
+
+        $exit_codes = array_column($results, 'exit_code');
+        sort($exit_codes);
+
+        $this->assertSame([0, 1], $exit_codes);
+        $this->assertCount(
+            1,
+            array_filter(
+                $results,
+                static fn(array $result): bool => str_contains(
+                    $result['stdout'],
+                    'provider_ui_smoke action=activate state=active result=ok',
+                ),
+            ),
+        );
+        $this->assertCount(
+            1,
+            array_filter(
+                $results,
+                static fn(array $result): bool => str_contains(
+                    $result['stdout'],
+                    'provider_ui_smoke action=activate state=error result=error',
+                ),
+            ),
+        );
+        $this->assertFileExists($this->stateFile);
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+        $this->assertIsArray($state);
+        $this->assertSame(Provider_ui_smoke_access_policy::FIXTURE_KEY, $state['fixture_key'] ?? null);
+        $this->assertSame(DB_SLUG_PROVIDER, $this->loadPrincipal()['role_slug']);
+        $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+        $this->assertFileDoesNotExist($this->stateFile);
     }
 
     public function testInstallFailsClosedOnAnExistingSyntheticMarkerWithoutLeavingAPrincipal(): void
@@ -412,9 +491,141 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $session_data = $this->CI->accounts->check_login($database_equivalent_variant, str_repeat('a', 64));
 
         $this->assertIsArray($session_data);
-        $this->assertSame($database_equivalent_variant, $session_data['username']);
+        $this->assertSame(Provider_ui_smoke_access_policy::USERNAME, $session_data['username']);
+        $this->assertTrue(Provider_ui_smoke_access_policy::isReservedUsername($database_equivalent_variant));
         $this->assertTrue(Provider_ui_smoke_access_policy::isReservedUsername($session_data['username']));
         $this->assertTrue(Provider_ui_smoke_access_policy::isReservedIdentity($session_data['username'], null, null));
+    }
+
+    public function testAccentInsensitiveVariantCanonicalizesToTheReservedStableIdentity(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $this->CI->load->library('accounts');
+        $database_equivalent_variant = str_replace('__ea_', '__eá_', Provider_ui_smoke_access_policy::USERNAME);
+        $session_data = $this->CI->accounts->check_login($database_equivalent_variant, str_repeat('a', 64));
+        $principal = $this->loadPrincipal();
+
+        $this->assertIsArray($session_data);
+        $this->assertFalse(Provider_ui_smoke_access_policy::isReservedUsername($database_equivalent_variant));
+        $this->assertSame(Provider_ui_smoke_access_policy::USERNAME, $session_data['username']);
+        $this->assertTrue(Provider_ui_smoke_access_policy::isReservedUsername($session_data['username']));
+        $this->assertSame((int) $principal['id'], (int) $session_data['user_id']);
+
+        $controller = new class extends \EA_Controller {
+            public function __construct() {}
+
+            public function matchesProviderUiSmokeUsername(?string $username): bool
+            {
+                return $this->is_provider_ui_smoke_auth_username($username);
+            }
+        };
+        $controller->db = $this->CI->db;
+        $controller->accounts = $this->CI->accounts;
+
+        $this->assertTrue($controller->matchesProviderUiSmokeUsername($database_equivalent_variant));
+        $this->assertTrue($controller->matchesProviderUiSmokeUsername(Provider_ui_smoke_access_policy::USERNAME));
+        $this->assertFalse($controller->matchesProviderUiSmokeUsername('administrator'));
+    }
+
+    public function testAccentInsensitiveReservedLoginWithWrongPasswordNeverCallsLdap(): void
+    {
+        require_once APPPATH . 'libraries/Auth_request_dto_factory.php';
+        require_once APPPATH . 'controllers/Login.php';
+
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $this->CI->load->library('accounts');
+        $database_equivalent_variant = str_replace('__ea_', '__eá_', Provider_ui_smoke_access_policy::USERNAME);
+        $ldap_client = new class {
+            public bool $called = false;
+
+            /**
+             * @return array<string, mixed>|null
+             */
+            public function check_login(string $username, string $password): ?array
+            {
+                $this->called = true;
+
+                return null;
+            }
+        };
+        $request_factory = new class ($database_equivalent_variant) extends \Auth_request_dto_factory {
+            public function __construct(private readonly string $username) {}
+
+            public function buildLoginValidateRequestDto(): \LoginValidateRequestDto
+            {
+                return new \LoginValidateRequestDto($this->username, 'intentionally-wrong-password');
+            }
+        };
+        $controller = new class extends \Login {
+            public \Auth_request_dto_factory $auth_request_dto_factory;
+
+            public function __construct() {}
+        };
+        $controller->accounts = $this->CI->accounts;
+        $controller->db = $this->CI->db;
+        $controller->ldap_client = $ldap_client;
+        $controller->auth_request_dto_factory = $request_factory;
+
+        $controller->validate();
+
+        $this->assertFalse($ldap_client->called);
+    }
+
+    public function testAccentInsensitiveReservedLoginCreatesCanonicalGuardedSession(): void
+    {
+        require_once APPPATH . 'libraries/Auth_request_dto_factory.php';
+        require_once APPPATH . 'controllers/Login.php';
+
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $this->CI->load->library('accounts');
+        $database_equivalent_variant = str_replace('__ea_', '__eá_', Provider_ui_smoke_access_policy::USERNAME);
+        $ldap_client = new class {
+            public bool $called = false;
+
+            /**
+             * @return array<string, mixed>|null
+             */
+            public function check_login(string $username, string $password): ?array
+            {
+                $this->called = true;
+
+                return null;
+            }
+        };
+        $request_factory = new class ($database_equivalent_variant) extends \Auth_request_dto_factory {
+            public function __construct(private readonly string $username) {}
+
+            public function buildLoginValidateRequestDto(): \LoginValidateRequestDto
+            {
+                return new \LoginValidateRequestDto($this->username, str_repeat('a', 64));
+            }
+        };
+        $controller = new class extends \Login {
+            public \Auth_request_dto_factory $auth_request_dto_factory;
+
+            public function __construct() {}
+        };
+        $controller->accounts = $this->CI->accounts;
+        $controller->db = $this->CI->db;
+        $controller->session = $this->CI->session;
+        $controller->ldap_client = $ldap_client;
+        $controller->auth_request_dto_factory = $request_factory;
+
+        $controller->validate();
+
+        $principal = $this->loadPrincipal();
+        $response = json_decode((string) get_instance()->output->get_output(), true);
+        $this->assertFalse($ldap_client->called);
+        $this->assertSame(['success' => true], $response);
+        $this->assertSame(Provider_ui_smoke_access_policy::USERNAME, session('username'));
+        $this->assertTrue(Provider_ui_smoke_access_policy::isReservedUsername(session('username')));
+        $this->assertSame((int) $principal['id'], (int) session('user_id'));
+        $this->assertSame(DB_SLUG_PROVIDER, session('role_slug'));
+        $this->assertTrue(Provider_ui_smoke_access_policy::isAllowedRoute('dashboard', 'index', 'GET'));
+        $this->assertFalse(Provider_ui_smoke_access_policy::isAllowedRoute('customers', 'index', 'GET'));
     }
 
     /**
@@ -438,5 +649,100 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
     private function markerCount(string $table, string $field, string $value): int
     {
         return $this->CI->db->get_where($table, [$field => $value])->num_rows();
+    }
+
+    /**
+     * @return array{process: resource, stdout: resource, stderr: resource}
+     */
+    private function startLifecycleProcess(string $action): array
+    {
+        $descriptor_spec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $process = proc_open(
+            ['php', 'index.php', 'console', 'provider_ui_smoke', $action, $this->credentialFile, $this->stateFile],
+            $descriptor_spec,
+            $pipes,
+            dirname(__DIR__, 3),
+        );
+
+        $this->assertIsResource($process);
+        fclose($pipes[0]);
+
+        return [
+            'process' => $process,
+            'stdout' => $pipes[1],
+            'stderr' => $pipes[2],
+        ];
+    }
+
+    private function awaitLifecycleLockWaiters(string $lock_name, int $expected): void
+    {
+        $deadline = microtime(true) + 15;
+
+        do {
+            $row = $this->CI->db
+                ->query(
+                    "SELECT COUNT(*) AS waiters
+                    FROM information_schema.PROCESSLIST
+                    WHERE ID <> CONNECTION_ID()
+                    AND COMMAND = 'Query'
+                    AND INFO LIKE ?",
+                    ['SELECT GET_LOCK(%' . $lock_name . '%'],
+                )
+                ->row_array();
+
+            if ((int) ($row['waiters'] ?? 0) >= $expected) {
+                return;
+            }
+
+            usleep(20000);
+        } while (microtime(true) < $deadline);
+
+        $this->fail('Concurrent lifecycle commands did not reach the advisory lock.');
+    }
+
+    /**
+     * @param array{process: resource, stdout: resource, stderr: resource} $process
+     * @return array{exit_code: int, stdout: string, stderr: string}
+     */
+    private function finishLifecycleProcess(array $process): array
+    {
+        $stdout = stream_get_contents($process['stdout']);
+        $stderr = stream_get_contents($process['stderr']);
+        fclose($process['stdout']);
+        fclose($process['stderr']);
+
+        return [
+            'exit_code' => proc_close($process['process']),
+            'stdout' => $stdout === false ? '' : $stdout,
+            'stderr' => $stderr === false ? '' : $stderr,
+        ];
+    }
+
+    /**
+     * @param array{process: resource, stdout: resource, stderr: resource} $process
+     */
+    private function stopLifecycleProcess(array $process): void
+    {
+        foreach (['stdout', 'stderr'] as $pipe) {
+            if (is_resource($process[$pipe])) {
+                fclose($process[$pipe]);
+            }
+        }
+
+        if (!is_resource($process['process'])) {
+            return;
+        }
+
+        $status = proc_get_status($process['process']);
+
+        if (($status['running'] ?? false) === true) {
+            proc_terminate($process['process']);
+        }
+
+        proc_close($process['process']);
     }
 }

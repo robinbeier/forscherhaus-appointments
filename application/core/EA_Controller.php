@@ -132,21 +132,19 @@ class EA_Controller extends CI_Controller
             $login_username = is_string($requested_username) ? $requested_username : null;
         }
 
-        if (
-            !Provider_ui_smoke_access_policy::isReservedIdentity(
-                $session_username,
-                $login_username,
-                $basic_auth_username,
-            )
-        ) {
+        $session_is_reserved = Provider_ui_smoke_access_policy::isReservedUsername($session_username);
+        $login_is_reserved = $this->is_provider_ui_smoke_auth_username($login_username);
+        $basic_auth_is_reserved = $this->is_provider_ui_smoke_auth_username($basic_auth_username);
+
+        if (!$session_is_reserved && !$login_is_reserved && !$basic_auth_is_reserved) {
             return;
         }
 
-        if (Provider_ui_smoke_access_policy::isReservedUsername($basic_auth_username)) {
+        if ($basic_auth_is_reserved) {
             abort(403, 'Forbidden');
         }
 
-        if (Provider_ui_smoke_access_policy::isReservedUsername($session_username)) {
+        if ($session_is_reserved) {
             if (Provider_ui_smoke_access_policy::isLogoutRoute($controller, $method, $http_method)) {
                 return;
             }
@@ -173,7 +171,7 @@ class EA_Controller extends CI_Controller
             return;
         }
 
-        if (Provider_ui_smoke_access_policy::isReservedUsername($login_username)) {
+        if ($login_is_reserved) {
             $principal = $this->load_provider_ui_smoke_principal();
 
             if (
@@ -190,6 +188,37 @@ class EA_Controller extends CI_Controller
         }
 
         abort(403, 'Forbidden');
+    }
+
+    /**
+     * Resolve pre-session authentication names through the database collation and
+     * compare the resulting stable user ID with the canonical smoke principal.
+     *
+     * This deliberately avoids attempting to reproduce MariaDB's Unicode collation
+     * rules in PHP. The textual policy remains a fail-closed fallback when the
+     * permanent principal has not been installed yet.
+     */
+    protected function is_provider_ui_smoke_auth_username(?string $username): bool
+    {
+        if (Provider_ui_smoke_access_policy::isReservedUsername($username)) {
+            return true;
+        }
+
+        if (!is_string($username) || $username === '' || !$this->db->table_exists('user_settings')) {
+            return false;
+        }
+
+        $principal = $this->load_provider_ui_smoke_principal();
+
+        if ($principal === null) {
+            return false;
+        }
+
+        $matched_user = $this->accounts->get_user_by_username($username);
+
+        return is_array($matched_user) &&
+            isset($matched_user['id']) &&
+            (int) $matched_user['id'] === (int) $principal['id'];
     }
 
     /**

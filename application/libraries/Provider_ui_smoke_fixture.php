@@ -101,7 +101,6 @@ final class Provider_ui_smoke_fixture
 
         $this->assertRootCli();
         $this->assertSafeAbsolutePath($state_file);
-        $state_file_existed_before = file_exists($state_file) || is_link($state_file);
 
         $credentials = null;
 
@@ -112,6 +111,8 @@ final class Provider_ui_smoke_fixture
         $this->acquireLock();
 
         try {
+            $state_file_existed_before = file_exists($state_file) || is_link($state_file);
+
             if (!$this->CI->db->trans_begin()) {
                 throw new RuntimeException('Provider UI smoke transaction could not start.');
             }
