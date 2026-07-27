@@ -241,11 +241,16 @@ jobs:
               - 'composer.json'
               - '.github/workflows/ci.yml'
             pdf_renderer_latency_required:
+              - 'application/controllers/Dashboard_export.php'
+              - 'application/libraries/Pdf_renderer.php'
+              - 'application/views/exports/dashboard_teacher_pdf.php'
               - 'pdf-renderer/**'
               - 'docker-compose.yml'
               - 'scripts/ci/check_pdf_renderer_latency.php'
               - 'scripts/ci/config/pdf_renderer_latency_policy.php'
+              - 'scripts/release-gate/dashboard_release_gate.php'
               - 'tests/Unit/Scripts/PdfRendererLatencyGateTest.php'
+              - 'tests/Unit/Views/DashboardTeacherPdfViewTest.php'
               - '.github/workflows/ci.yml'
             api_contract:
               - 'application/controllers/api/**'
@@ -1111,17 +1116,20 @@ jobs:
           echo "pdf-renderer health check timed out" >&2
           docker compose logs pdf-renderer || true
           exit 1
+      - name: Run PDF renderer regression tests
+        run: docker compose exec -T pdf-renderer npm test
       - name: Evaluate PDF renderer latency
         run: |
-          set +e
+          status=0
           php scripts/ci/check_pdf_renderer_latency.php \
             --base-url=http://localhost:3003 \
-            --output-json=storage/logs/ci/pdf-renderer-latency-latest.json
-          status=$?
-          set -e
+            --output-json=storage/logs/ci/pdf-renderer-latency-latest.json \
+            || status=$?
 
-          if [ "$status" -ne 0 ]; then
-            echo "::warning::pdf-renderer-latency exited with status ${status}; see storage/logs/ci/pdf-renderer-latency-latest.json."
+          if [ "$status" -eq 1 ]; then
+            echo "::warning::pdf-renderer latency is above the advisory threshold."
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
           fi
       - name: Upload PDF renderer latency artifacts
         if: always()

@@ -86,13 +86,20 @@ tbody tr:last-child td{border-bottom:none;}
 </style>
 </head>
 <body>
+<?php if (!empty($logo_data_url)): ?>
+<svg aria-hidden="true" width="0" height="0" style="position:absolute;overflow:hidden">
+  <defs>
+    <image
+      id="teacher-logo-image"
+      href="<?= html_escape($logo_data_url) ?>"
+      width="1200"
+      height="630"
+      preserveAspectRatio="xMidYMid meet"
+    />
+  </defs>
+</svg>
+<?php endif; ?>
 <?php
-/** @var string|null $school_name */
-/** @var string|null $logo_data_url */
-/** @var string|null $generated_at_text */
-/** @var string|null $period_label */
-/** @var array|null $teachers */
-/** @var array|null $teacher_pages */
 $teachers = $teachers ?? [];
 $teacherPages = $teacher_pages ?? [];
 $teacherCount = count($teachers);
@@ -133,7 +140,9 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
         <?php endif; ?>
       </div>
       <?php if (!empty($logo_data_url)): ?>
-        <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
+        <svg class="logo header__logo" viewBox="0 0 1200 630" role="img" aria-label="<?= html_escape(
+            $schoolName,
+        ) ?>"><use href="#teacher-logo-image"></use></svg>
       <?php endif; ?>
     </header>
     <p class="open-summary"><?= html_escape($noDataLabel) ?></p>
@@ -170,9 +179,9 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
           <?php endif; ?>
         </div>
         <?php if (!empty($logo_data_url)): ?>
-          <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape(
-    $schoolName,
-) ?>" class="logo header__logo" />
+          <svg class="logo header__logo" viewBox="0 0 1200 630" role="img" aria-label="<?= html_escape(
+              $schoolName,
+          ) ?>"><use href="#teacher-logo-image"></use></svg>
         <?php endif; ?>
       </header>
 
@@ -279,7 +288,7 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
         <span><?= $teacherPageNumber ?>/<?= $teacherPageCount ?></span>
       </footer>
     </div>
-  <?php
+<?php
   endforeach; ?>
 <?php endif; ?>
 <script>window.chartsReady = true;</script>

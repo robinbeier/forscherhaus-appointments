@@ -66,6 +66,7 @@ class PlaywrightCliWrapperTest extends TestCase
         $binDir = $tempDir . '/bin';
         $capturePath = $tempDir . '/npx.log';
         $npxPath = $binDir . '/npx';
+        $npmPath = $binDir . '/npm';
 
         mkdir($binDir, 0777, true);
         file_put_contents(
@@ -75,6 +76,16 @@ class PlaywrightCliWrapperTest extends TestCase
                 "\nif [[ \"\$*\" == *\"--version\"* ]]; then\n  printf 'Version 1.0.0\\n'\nfi\n",
         );
         chmod($npxPath, 0777);
+        file_put_contents(
+            $npmPath,
+            "#!/usr/bin/env bash\nset -euo pipefail\n" .
+                "if [[ \"\$*\" == \"view @playwright/cli@0.1.1 dependencies.playwright --json\" ]]; then\n" .
+                "  printf '[\\n  \"1.59.0-alpha-1771104257000\"\\n]\\n'\n" .
+                "  exit 0\n" .
+                "fi\n" .
+                "exit 1\n",
+        );
+        chmod($npmPath, 0777);
 
         $command = sprintf(
             'PATH=%s:$PATH PLAYWRIGHT_MCP_READY_DIR=%s bash %s install-browser',
@@ -104,6 +115,7 @@ class PlaywrightCliWrapperTest extends TestCase
             self::assertStringNotContainsString('playwright-cli install-browser', implode("\n", $capturedInvocations));
         } finally {
             @unlink($npxPath);
+            @unlink($npmPath);
             @unlink($capturePath);
             @rmdir($binDir);
             @rmdir($tempDir);
