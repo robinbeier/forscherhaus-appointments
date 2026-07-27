@@ -34,7 +34,6 @@
         "assets/js/pages/login.js"
       ],
       "depends_on": [
-        "booking-public",
         "integrations-sync",
         "people-services-admin",
         "scheduling-backoffice",

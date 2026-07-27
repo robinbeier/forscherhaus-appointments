@@ -29,7 +29,6 @@ class Login extends EA_Controller
 
         $this->load->library('accounts');
         $this->load->library('ldap_client');
-        $this->load->library('email_messages');
 
         script_vars([
             'dest_url' => session('dest_url', site_url('calendar')),

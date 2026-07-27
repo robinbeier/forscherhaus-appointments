@@ -8,7 +8,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 
 | Component | Role | Depends On | Path Prefixes | Key Files |
 |---|---|---|---:|---:|
-| `auth-session` | Access & Session | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
+| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 4 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 7 | 4 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
@@ -28,7 +28,6 @@ This map defines component boundaries, path ownership scope, and dependency edge
 Authentication, recovery and account-session flows for backend users.
 
 Dependencies:
-- `booking-public`
 - `integrations-sync`
 - `people-services-admin`
 - `scheduling-backoffice`
