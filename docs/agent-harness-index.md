@@ -29,7 +29,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Ownership scope | `docs/ownership-map.md` | Generated view of ownership and key paths. |
 | Canonical architecture/ownership map source | `docs/maps/component_ownership_map.json` | Machine-readable source of truth. |
 | Write-path contract harness | `docs/ci-write-contracts.md` | Focused contract-smoke reference. |
-| Release gates | `docs/release-gate-zero-surprise.md`, `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md` | Dedicated gate behavior and usage. |
+| Release gates | `docs/release-gate-zero-surprise.md`, `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-provider-ui-smoke.md` | Dedicated gate behavior and usage. |
 
 ## Validation Routing
 
@@ -46,6 +46,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 - Scope-specific checks:
   - write-path contracts: `docs/ci-write-contracts.md`
   - integration smoke browser evidence: `docs/release-gate-dashboard.md`
+  - production provider UI smoke: `docs/release-gate-provider-ui-smoke.md`
   - architecture boundaries entry points: `AGENTS.md`
 
 ## Scheduled Hygiene

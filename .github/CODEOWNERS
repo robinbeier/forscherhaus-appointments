@@ -17,6 +17,7 @@
 /application/controllers/Caldav.php @robinbeier
 /application/controllers/Calendar.php @robinbeier
 /application/controllers/Consents.php @robinbeier
+/application/controllers/Console.php @robinbeier
 /application/controllers/Customers.php @robinbeier
 /application/controllers/Dashboard.php @robinbeier
 /application/controllers/Dashboard_export.php @robinbeier
@@ -41,6 +42,7 @@
 /application/controllers/Unavailabilities.php @robinbeier
 /application/controllers/Webhooks.php @robinbeier
 /application/controllers/api/v1/** @robinbeier
+/application/core/Provider_ui_smoke_access_policy.php @robinbeier
 /application/libraries/Accounts.php @robinbeier
 /application/libraries/Api.php @robinbeier
 /application/libraries/Api_request_dto_factory.php @robinbeier
@@ -56,10 +58,12 @@
 /application/libraries/Dashboard_request_dto_factory.php @robinbeier
 /application/libraries/Email_messages.php @robinbeier
 /application/libraries/Google_sync.php @robinbeier
+/application/libraries/Instance.php @robinbeier
 /application/libraries/Integrations_request_dto_factory.php @robinbeier
 /application/libraries/Ldap_client.php @robinbeier
 /application/libraries/Notifications.php @robinbeier
 /application/libraries/Pdf_renderer.php @robinbeier
+/application/libraries/Provider_ui_smoke_fixture.php @robinbeier
 /application/libraries/Provider_utilization.php @robinbeier
 /application/libraries/Request_normalizer.php @robinbeier
 /application/libraries/Synchronization.php @robinbeier
@@ -137,7 +141,10 @@
 /assets/js/pages/webhooks.js @robinbeier
 /docs/release-gate-booking-confirmation-pdf.md @robinbeier
 /docs/release-gate-dashboard.md @robinbeier
+/docs/release-gate-provider-ui-smoke.md @robinbeier
 /docs/rest-api.md @robinbeier
 /openapi.yml @robinbeier
 /scripts/ci/** @robinbeier
+/scripts/ops/prod_provider_ui_smoke.sh @robinbeier
+/scripts/ops/provider_ui_smoke_principal.sh @robinbeier
 /scripts/release-gate/** @robinbeier

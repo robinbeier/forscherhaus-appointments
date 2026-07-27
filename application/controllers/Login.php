@@ -29,7 +29,6 @@ class Login extends EA_Controller
 
         $this->load->library('accounts');
         $this->load->library('ldap_client');
-        $this->load->library('email_messages');
 
         script_vars([
             'dest_url' => session('dest_url', site_url('calendar')),
@@ -77,7 +76,7 @@ class Login extends EA_Controller
 
             $user_data = $this->accounts->check_login($username, $password);
 
-            if (empty($user_data)) {
+            if (empty($user_data) && !$this->is_provider_ui_smoke_auth_username($username)) {
                 $user_data = $this->ldap_client->check_login($username, $password);
             }
 

@@ -74,6 +74,7 @@ Primary references:
 - [Zero-surprise restore-dump replay + live canary](docs/release-gate-zero-surprise.md)
 - [Dashboard release gate](docs/release-gate-dashboard.md)
 - [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
+- [Production Provider UI smoke](docs/release-gate-provider-ui-smoke.md)
 - [Deployment runbook](docs/deployment.md)
 - [Fresh server rebuild runbook](docs/server-rebuild-runbook.md)
 - [Agent Harness Index](docs/agent-harness-index.md)

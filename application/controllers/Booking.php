@@ -211,6 +211,11 @@ class Booking extends EA_Controller
                 return;
             }
 
+            $this->assertNotProviderUiSmokeBookingTarget(
+                (int) $results[0]['id_users_provider'],
+                (int) $results[0]['id_services'],
+            );
+
             // Make sure the appointment can still be rescheduled.
 
             $start_datetime = strtotime($results[0]['start_datetime']);
@@ -545,6 +550,11 @@ class Booking extends EA_Controller
     {
         $appointment = $register_request->appointment;
 
+        $this->assertNotProviderUiSmokeBookingTarget(
+            (int) $appointment['id_users_provider'],
+            (int) $appointment['id_services'],
+        );
+
         $appointment_start = new DateTime($appointment['start_datetime']);
 
         $date = $appointment_start->format('Y-m-d');
@@ -652,6 +662,8 @@ class Booking extends EA_Controller
             $service_id = $request_dto->serviceId;
             $selected_date = $request_dto->selectedDate;
 
+            $this->assertNotProviderUiSmokeBookingTarget($provider_id, $service_id);
+
             // Do not continue if there was no provider selected (more likely there is no provider in the system).
 
             if (empty($provider_id)) {
@@ -740,6 +752,8 @@ class Booking extends EA_Controller
             $number_of_days_in_month = (int) $selected_date->format('t');
             $unavailable_dates = [];
 
+            $this->assertNotProviderUiSmokeBookingTarget($provider_id, $service_id);
+
             $provider_ids =
                 $provider_id === ANY_PROVIDER ? $this->search_providers_by_service($service_id) : [$provider_id];
 
@@ -817,6 +831,62 @@ class Booking extends EA_Controller
         }
 
         return $provider_list;
+    }
+
+    /**
+     * Keep the temporary production smoke fixture outside the public booking surface,
+     * even if somebody guesses its numeric provider or service ID.
+     */
+    private function assertNotProviderUiSmokeBookingTarget(string|int|null $provider_id, ?int $service_id): void
+    {
+        if ($this->isProviderUiSmokeBookingTarget($provider_id, $service_id)) {
+            abort(404, 'Not Found');
+        }
+    }
+
+    /**
+     * Detect only the exact reserved provider identity or exact synthetic service markers.
+     */
+    protected function isProviderUiSmokeBookingTarget(string|int|null $provider_id, ?int $service_id): bool
+    {
+        $normalized_provider_id = null;
+
+        if (is_int($provider_id)) {
+            $normalized_provider_id = $provider_id;
+        } elseif (is_string($provider_id)) {
+            $provider_id_candidate = trim($provider_id);
+
+            if (preg_match('/^\d+$/D', $provider_id_candidate) === 1) {
+                $normalized_provider_id = (int) $provider_id_candidate;
+            }
+        }
+
+        if ($normalized_provider_id !== null && $normalized_provider_id > 0) {
+            $reserved_provider_count = $this->db
+                ->from('users')
+                ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
+                ->where('users.id', $normalized_provider_id)
+                ->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME)
+                ->count_all_results();
+
+            if ($reserved_provider_count !== 0) {
+                return true;
+            }
+        }
+
+        if ($service_id === null || $service_id <= 0) {
+            return false;
+        }
+
+        $this->db
+            ->from('services')
+            ->where('id', $service_id)
+            ->group_start()
+            ->where('name', Provider_ui_smoke_access_policy::SERVICE_NAME)
+            ->or_where('description', Provider_ui_smoke_access_policy::SERVICE_DESCRIPTION)
+            ->group_end();
+
+        return $this->db->count_all_results() !== 0;
     }
 
     protected function bookingRequestDtoFactory(): Booking_request_dto_factory

@@ -9,7 +9,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | Component | Role | Depends On | Path Prefixes | Key Files |
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
-| `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 3 | 3 |
+| `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 4 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 7 | 4 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 18 | 3 |
@@ -19,7 +19,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | dashboard-exports, booking-public, api-v1 | 5 | 3 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 11 | 6 |
 
 ## Component Details
 
@@ -64,6 +64,7 @@ Dependencies:
 
 Path prefixes:
 - `application/controllers/Installation.php`
+- `application/libraries/Instance.php`
 - `application/views/pages/installation.php`
 - `assets/js/pages/installation.js`
 
@@ -351,18 +352,31 @@ Key files:
 CI workflows, smoke/release gates, and quality automation scripts.
 
 Dependencies:
-- `dashboard-exports`
-- `booking-public`
 - `api-v1`
+- `booking-public`
+- `dashboard-exports`
+- `installation-bootstrap`
+- `people-services-admin`
+- `settings-compliance`
+- `shared-core`
 
 Path prefixes:
+- `application/controllers/Console.php`
+- `application/core/Provider_ui_smoke_access_policy.php`
+- `application/libraries/Provider_ui_smoke_fixture.php`
 - `scripts/ci/`
+- `scripts/ops/prod_provider_ui_smoke.sh`
+- `scripts/ops/provider_ui_smoke_principal.sh`
 - `scripts/release-gate/`
 - `.github/workflows/ci.yml`
 - `docs/release-gate-dashboard.md`
 - `docs/release-gate-booking-confirmation-pdf.md`
+- `docs/release-gate-provider-ui-smoke.md`
 
 Key files:
+- `application/controllers/Console.php`
+- `application/libraries/Provider_ui_smoke_fixture.php`
 - `.github/workflows/ci.yml`
 - `scripts/ci/dashboard_integration_smoke.php`
 - `scripts/release-gate/dashboard_release_gate.php`
+- `scripts/release-gate/provider_ui_smoke.php`

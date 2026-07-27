@@ -340,6 +340,7 @@ class BookingControllerFlowTest extends TestCase
         $CI->load->library('availability');
 
         $controller->load = $CI->load;
+        $controller->db = $CI->db;
         $controller->input = $CI->input;
         $controller->output = $CI->output;
         if ($injectCache) {
