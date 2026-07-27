@@ -348,12 +348,21 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Manual approval required: yes
 - Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
+  - `application/controllers/Console.php`
+  - `application/libraries/Provider_ui_smoke_fixture.php`
   - `.github/workflows/ci.yml`
   - `scripts/ci/dashboard_integration_smoke.php`
   - `scripts/release-gate/dashboard_release_gate.php`
+  - `scripts/release-gate/provider_ui_smoke.php`
 - Path prefixes:
+  - `application/controllers/Console.php`
+  - `application/core/Provider_ui_smoke_access_policy.php`
+  - `application/libraries/Provider_ui_smoke_fixture.php`
   - `scripts/ci/`
+  - `scripts/ops/prod_provider_ui_smoke.sh`
+  - `scripts/ops/provider_ui_smoke_principal.sh`
   - `scripts/release-gate/`
   - `.github/workflows/ci.yml`
   - `docs/release-gate-dashboard.md`
   - `docs/release-gate-booking-confirmation-pdf.md`
+  - `docs/release-gate-provider-ui-smoke.md`
