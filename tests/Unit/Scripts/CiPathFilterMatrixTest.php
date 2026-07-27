@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class CiPathFilterMatrixTest extends TestCase
@@ -238,6 +239,47 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
+    }
+
+    #[DataProvider('rendererRegressionTriggerPathProvider')]
+    public function testRendererRegressionPathsTriggerRendererRegressionJob(string $path): void
+    {
+        $matches = $this->applyFilters([$path]);
+
+        self::assertTrue($matches['pdf_renderer_latency_required']);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function rendererRegressionTriggerPathProvider(): array
+    {
+        return [
+            'dashboard export controller' => ['application/controllers/Dashboard_export.php'],
+            'pdf renderer library' => ['application/libraries/Pdf_renderer.php'],
+            'teacher pdf view' => ['application/views/exports/dashboard_teacher_pdf.php'],
+            'renderer source' => ['pdf-renderer/server.js'],
+            'renderer regression test' => ['pdf-renderer/server.test.js'],
+            'dashboard release gate' => ['scripts/release-gate/dashboard_release_gate.php'],
+            'latency gate' => ['scripts/ci/check_pdf_renderer_latency.php'],
+            'latency policy' => ['scripts/ci/config/pdf_renderer_latency_policy.php'],
+            'view payload regression test' => ['tests/Unit/Views/DashboardTeacherPdfViewTest.php'],
+        ];
+    }
+
+    public function testRendererRegressionAndLatencyStepsAreBlocking(): void
+    {
+        $workflow = file_get_contents($this->workflowPath());
+        self::assertNotFalse($workflow);
+
+        $job = $this->extractJobBlock($workflow, 'pdf-renderer-latency', 'architecture-ownership-map');
+
+        self::assertStringContainsString('docker compose exec -T pdf-renderer npm test', $job);
+        self::assertStringContainsString('php scripts/ci/check_pdf_renderer_latency.php', $job);
+        self::assertStringContainsString('elif [ "$status" -ne 0 ]; then', $job);
+        self::assertStringContainsString('exit "$status"', $job);
+        self::assertStringNotContainsString('pdf-renderer-latency exited with status', $job);
+        self::assertStringNotContainsString('set +e', $job);
     }
 
     public function testUptimeKumaDesiredStateDoesNotTriggerIntegrationSmoke(): void

@@ -87,12 +87,6 @@ tbody tr:last-child td{border-bottom:none;}
 </head>
 <body>
 <?php
-/** @var string|null $school_name */
-/** @var string|null $logo_data_url */
-/** @var string|null $generated_at_text */
-/** @var string|null $period_label */
-/** @var array|null $teachers */
-/** @var array|null $teacher_pages */
 $teachers = $teachers ?? [];
 $teacherPages = $teacher_pages ?? [];
 $teacherCount = count($teachers);
@@ -133,7 +127,7 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
         <?php endif; ?>
       </div>
       <?php if (!empty($logo_data_url)): ?>
-        <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
+        <img alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
       <?php endif; ?>
     </header>
     <p class="open-summary"><?= html_escape($noDataLabel) ?></p>
@@ -170,9 +164,7 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
           <?php endif; ?>
         </div>
         <?php if (!empty($logo_data_url)): ?>
-          <img src="<?= html_escape($logo_data_url) ?>" alt="<?= html_escape(
-    $schoolName,
-) ?>" class="logo header__logo" />
+          <img alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
         <?php endif; ?>
       </header>
 
@@ -279,9 +271,25 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
         <span><?= $teacherPageNumber ?>/<?= $teacherPageCount ?></span>
       </footer>
     </div>
-  <?php
+<?php
   endforeach; ?>
 <?php endif; ?>
-<script>window.chartsReady = true;</script>
+<script>
+window.chartsReady = false;
+(() => {
+  const logoDataUrl = <?= json_encode(
+      $logo_data_url ?? null,
+      JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+  ) ?>;
+  const logos = Array.from(document.querySelectorAll('img.logo'));
+  const readiness = logos.map((logo) => {
+    logo.src = logoDataUrl;
+    return typeof logo.decode === 'function' ? logo.decode().catch(() => undefined) : Promise.resolve();
+  });
+  Promise.all(readiness).then(() => {
+    window.chartsReady = true;
+  });
+})();
+</script>
 </body>
 </html>

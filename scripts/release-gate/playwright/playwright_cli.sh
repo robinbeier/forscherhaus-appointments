@@ -18,6 +18,27 @@ default_playwright_runtime_package() {
   echo "playwright@1.59.0-alpha-1771104257000"
 }
 
+normalize_npm_json_scalar() {
+  node -e '
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+});
+process.stdin.on("end", () => {
+  try {
+    const parsed = JSON.parse(input);
+    const values = Array.isArray(parsed) ? parsed : [parsed];
+    if (values.length === 1 && typeof values[0] === "string") {
+      process.stdout.write(values[0].trim());
+    }
+  } catch {
+    // Invalid or unexpected metadata is handled by the caller fallback.
+  }
+});
+'
+}
+
 normalize_browser() {
   local browser="${1:-}"
 
@@ -61,23 +82,6 @@ playwright_install_mode="$(normalize_install_mode "${PLAYWRIGHT_INSTALL_MODE:-au
 
 playwright_cli_name="@playwright/cli"
 
-resolve_playwright_cli_version() {
-  local version
-
-  if ! command -v npm >/dev/null 2>&1; then
-    default_playwright_cli_version
-    return
-  fi
-
-  version="$(npm view "${playwright_cli_name}" version --json 2>/dev/null | tr -d '"' | tr -d '\r\n')"
-  if [[ -z "${version}" || "${version}" == "null" ]]; then
-    default_playwright_cli_version
-    return
-  fi
-
-  echo "${version}"
-}
-
 playwright_cli_version="${PLAYWRIGHT_CLI_VERSION:-$(default_playwright_cli_version)}"
 playwright_cli_package="${playwright_cli_name}@${playwright_cli_version}"
 playwright_executable_path="${PLAYWRIGHT_MCP_EXECUTABLE_PATH:-}"
@@ -91,6 +95,7 @@ playwright_ready_dir="${PLAYWRIGHT_MCP_READY_DIR:-/tmp/playwright-cli}"
 
 resolve_playwright_runtime_package() {
   local cli_version
+  local metadata
   local runtime_package
 
   if [[ -n "${PLAYWRIGHT_RUNTIME_PACKAGE:-}" ]]; then
@@ -105,11 +110,8 @@ resolve_playwright_runtime_package() {
 
   cli_version="${PLAYWRIGHT_CLI_VERSION:-${playwright_cli_version}}"
 
-  runtime_package="$(
-    npm view "${playwright_cli_name}@${cli_version}" dependencies.playwright --json 2>/dev/null \
-      | tr -d '"' \
-      | tr -d '\r\n'
-  )"
+  metadata="$(npm view "${playwright_cli_name}@${cli_version}" dependencies.playwright --json 2>/dev/null || true)"
+  runtime_package="$(printf '%s' "${metadata}" | normalize_npm_json_scalar)"
 
   if [[ -z "${runtime_package}" || "${runtime_package}" == "null" ]]; then
     default_playwright_runtime_package
