@@ -67,7 +67,8 @@ class DashboardTeacherPdfViewTest extends TestCase
         $this->assertLessThan(2 * 1024 * 1024, strlen($payload));
         $this->assertSame(1, substr_count($output, $logo_data_url));
         $this->assertSame(60, substr_count($output, 'class="logo header__logo"'));
-        $this->assertSame(60, substr_count($output, 'href="#teacher-logo-image"'));
+        $this->assertSame(1, substr_count($output, 'logo.src = logoDataUrl'));
+        $this->assertStringContainsString('logo.decode().catch', $output);
         $this->assertStringContainsString('window.chartsReady = true', $output);
     }
 }

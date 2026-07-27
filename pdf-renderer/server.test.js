@@ -118,19 +118,25 @@ test('renders a 60-page combined report with one shared logo payload', {timeout:
                 `<tr><td>Synthetic ${pageIndex + 1}-${rowIndex + 1}</td><td>27.07.2026</td><td>08:00</td></tr>`,
         ).join('');
 
-        return `<section class="page"><svg class="logo" viewBox="0 0 1 1"><use href="#logo-image"></use></svg><h1>Synthetic Teacher ${
+        return `<section class="page"><img class="logo" alt=""><h1>Synthetic Teacher ${
             pageIndex + 1
         }</h1><table>${rows}</table></section>`;
     }).join('');
     const html = `<!doctype html><html><head><style>
         @page{size:A4;margin:12mm}
         .page{break-after:page;min-height:250mm}
-        .logo{width:120px;height:64px}
+        .logo{width:120px;max-height:64px;object-fit:contain}
         table{width:100%;border-collapse:collapse}
         td{padding:4px;border-bottom:1px solid #ddd}
-    </style></head><body><svg aria-hidden="true" width="0" height="0" style="position:absolute">
-        <defs><image id="logo-image" href="${logoDataUrl}" width="1" height="1"/></defs>
-    </svg>${pages}<script>window.chartsReady=true;</script></body></html>`;
+    </style></head><body>${pages}<script>
+        window.chartsReady=false;
+        const logoDataUrl=${JSON.stringify(logoDataUrl)};
+        const logos=Array.from(document.querySelectorAll('img.logo'));
+        Promise.all(logos.map((logo) => {
+            logo.src=logoDataUrl;
+            return logo.decode().catch(() => undefined);
+        })).then(() => { window.chartsReady=true; });
+    </script></body></html>`;
     const payload = JSON.stringify({html, waitFor: 'chartsReady'});
 
     try {
@@ -148,7 +154,8 @@ test('renders a 60-page combined report with one shared logo payload', {timeout:
 
         assert.equal(response.status, 200, renderer.output());
         assert.equal(body.subarray(0, 5).toString(), '%PDF-');
-        assert.ok(body.includes(Buffer.from('/Subtype /Image')), 'rendered PDF did not contain the shared logo image');
+        const imageObjectCount = body.toString('latin1').match(/\/Subtype \/Image/g)?.length || 0;
+        assert.ok(imageObjectCount >= 1, 'rendered PDF did not contain the shared logo image');
         assert.ok(durationMs < 20000, `60-page render took ${durationMs}ms`);
     } finally {
         await stopRenderer(renderer.child);

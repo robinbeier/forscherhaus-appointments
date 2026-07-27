@@ -86,19 +86,6 @@ tbody tr:last-child td{border-bottom:none;}
 </style>
 </head>
 <body>
-<?php if (!empty($logo_data_url)): ?>
-<svg aria-hidden="true" width="0" height="0" style="position:absolute;overflow:hidden">
-  <defs>
-    <image
-      id="teacher-logo-image"
-      href="<?= html_escape($logo_data_url) ?>"
-      width="1200"
-      height="630"
-      preserveAspectRatio="xMidYMid meet"
-    />
-  </defs>
-</svg>
-<?php endif; ?>
 <?php
 $teachers = $teachers ?? [];
 $teacherPages = $teacher_pages ?? [];
@@ -140,9 +127,7 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
         <?php endif; ?>
       </div>
       <?php if (!empty($logo_data_url)): ?>
-        <svg class="logo header__logo" viewBox="0 0 1200 630" role="img" aria-label="<?= html_escape(
-            $schoolName,
-        ) ?>"><use href="#teacher-logo-image"></use></svg>
+        <img alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
       <?php endif; ?>
     </header>
     <p class="open-summary"><?= html_escape($noDataLabel) ?></p>
@@ -179,9 +164,7 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
           <?php endif; ?>
         </div>
         <?php if (!empty($logo_data_url)): ?>
-          <svg class="logo header__logo" viewBox="0 0 1200 630" role="img" aria-label="<?= html_escape(
-              $schoolName,
-          ) ?>"><use href="#teacher-logo-image"></use></svg>
+          <img alt="<?= html_escape($schoolName) ?>" class="logo header__logo" />
         <?php endif; ?>
       </header>
 
@@ -291,6 +274,22 @@ $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military'
 <?php
   endforeach; ?>
 <?php endif; ?>
-<script>window.chartsReady = true;</script>
+<script>
+window.chartsReady = false;
+(() => {
+  const logoDataUrl = <?= json_encode(
+      $logo_data_url ?? null,
+      JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+  ) ?>;
+  const logos = Array.from(document.querySelectorAll('img.logo'));
+  const readiness = logos.map((logo) => {
+    logo.src = logoDataUrl;
+    return typeof logo.decode === 'function' ? logo.decode().catch(() => undefined) : Promise.resolve();
+  });
+  Promise.all(readiness).then(() => {
+    window.chartsReady = true;
+  });
+})();
+</script>
 </body>
 </html>
