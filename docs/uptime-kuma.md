@@ -24,13 +24,13 @@ Host-owned:
 
 ## Production Snapshot
 
-Read-only inventory captured on 2026-05-14 and refreshed after the 2026-05-31
-2.4.0 maintenance update:
+Read-only inventory captured on 2026-05-14 and refreshed after the 2026-08-01
+2.5.0 maintenance update:
 
 - container: `uptime-kuma`
-- image: `louislam/uptime-kuma:2.4.0`
+- image: `louislam/uptime-kuma:2.5.0`
 - listen address: `127.0.0.1:3001`
-- data volume: `uptime-kuma_uptime-kuma-data` mounted at `/app/data`
+- data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
 - database file: `/app/data/kuma.db`
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
@@ -268,6 +268,26 @@ Important limitation:
 - the tested historical backup contains the earlier 7-monitor state, not the
   later 12- or 13-monitor production state; restore mechanics are proven, but
   any future full-history migration should use a fresh approved live backup.
+
+## 2026-08-01 2.5.0 Maintenance Update
+
+Uptime Kuma was updated from `2.4.0` to `2.5.0` after a fresh server-local
+SQLite backup and full data archive were created under
+`/root/backups/uptime-kuma` and their checksums were verified.
+
+Redacted result:
+
+- source, backup, and post-update SQLite integrity checks returned `ok`;
+- the production and repository Compose image pins target
+  `louislam/uptime-kuma:2.5.0`;
+- the container restarted healthy on `127.0.0.1:3001` and reported version
+  `2.5.0`;
+- post-change validation showed 13 active monitors and 13 latest green;
+- the unused `2.3.2` image was removed to restore safe disk headroom, while
+  `2.4.0` remains available locally as the immediate rollback image.
+
+The backup archive, SQLite backup, Compose backup, checksums, Push URLs, tokens,
+and database contents remain host-local and outside Git.
 
 ## 2026-05-15 Live Export
 

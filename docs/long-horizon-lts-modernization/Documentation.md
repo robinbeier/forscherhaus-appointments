@@ -79,9 +79,9 @@ Rebuilt target host:
 Uptime Kuma:
 
 - Container: `uptime-kuma`.
-- Image: `louislam/uptime-kuma:2.4.0`.
+- Image: `louislam/uptime-kuma:2.5.0`.
 - Port binding: `127.0.0.1:3001 -> 3001`.
-- Data mount: Docker volume to `/app/data`.
+- Data mount: `/var/lib/uptime-kuma-data` bind-mounted to `/app/data`.
 - Production state includes `kuma.db` and must remain outside Git.
 - Repo has app push monitor scripts in `scripts/ops`.
 
