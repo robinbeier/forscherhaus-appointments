@@ -93,9 +93,22 @@ does not install host-level Node.js, add:
 - generated predeploy report validates
 - renderer dependency lockfile exists before switch when using the default
   host-managed renderer mode
+- stage and current live runtime config permissions satisfy the fail-closed
+  contract below after every generic ownership/mode pass
+
+The runtime config contract is deliberately narrower than the generic release
+permissions: the app root is `root:root` with mode `0755`, while root
+`config.php` is `root:<web-user-primary-group>` with mode `0440`. Both paths
+must be non-symlinks, `config.php` must be a regular file with exactly one
+hardlink, the web user must be able to read but not write it, and the web user
+must not be able to replace it through a writable app root. The verification
+prints only these metadata results and never reads or prints config contents.
+If hardening cannot establish and verify the complete contract, it restores the
+previous ownership/mode metadata before the deploy aborts.
 
 After the atomic switch, `deploy_ea.sh` verifies:
 
+- the active and previous release still satisfy the runtime config contract
 - PDF renderer service restart
 - renderer health endpoint
 - app deep-health contract
@@ -112,7 +125,12 @@ During a successful deploy, the old app directory is moved to:
 ```
 
 If post-switch validation fails, the failed release is moved aside and the
-previous app directory is restored. The deploy exits with:
+previous app directory is restored. Automatic rollback re-applies and verifies
+the runtime config contract for both the restored app and the failed release
+before health checks; an unverifiable permission state is a rollback failure.
+The printed manual fallback command calls the same tested rollback script, so
+its directory switch and fail-closed hardening/verification do not drift from
+the automatic path. The deploy exits with:
 
 - `0` when deployment succeeds
 - `30` when deployment failed and automatic rollback succeeded

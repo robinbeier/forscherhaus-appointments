@@ -64,6 +64,8 @@ final class ReleaseArtifactValidatorTest extends TestCase
             'application/views/exports/provider_preparation_pdf.php',
             'application/views/pages/dashboard_teacher.php',
             'scripts/ops/lib/prod_common.sh',
+            'scripts/ops/runtime_config_permissions.sh',
+            'scripts/ops/runtime_config_rollback.sh',
             'scripts/ops/prod_provider_ui_smoke.sh',
             'scripts/ops/provider_ui_smoke_principal.sh',
             'scripts/release-gate/lib/GateAssertions.php',

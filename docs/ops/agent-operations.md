@@ -90,6 +90,15 @@ Post-change validation:
 bash scripts/ops/prod_validate_after_change.sh
 ```
 
+Runtime config permission verification is metadata-only and must be run as
+root so it can test readability as the configured web user without printing
+the file:
+
+```bash
+bash /var/www/html/easyappointments/scripts/ops/runtime_config_permissions.sh verify \
+  --app-root /var/www/html/easyappointments --runtime-user www-data
+```
+
 Optional Certbot renewal simulation:
 
 ```bash

@@ -306,6 +306,33 @@ restore_runtime_script_permissions() {
   find "$ops_dir" -type f -name '*.sh' -exec chmod 755 {} +
 }
 
+apply_runtime_config_permissions() {
+  local action="$1"
+  local app_root="$2"
+  local helper_root="${3:-$app_root}"
+  local helper_path="${helper_root}/scripts/ops/runtime_config_permissions.sh"
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] bash '$helper_path' '$action' --app-root '$app_root' --runtime-user '$WEBUSER'"
+    return 0
+  fi
+
+  [[ -f "$helper_path" ]] || {
+    echo "[!] Runtime config permission helper missing: $helper_path"
+    return 1
+  }
+
+  bash "$helper_path" "$action" --app-root "$app_root" --runtime-user "$WEBUSER"
+}
+
+harden_and_verify_runtime_config() {
+  local app_root="$1"
+  local helper_root="${2:-$app_root}"
+
+  apply_runtime_config_permissions harden "$app_root" "$helper_root" \
+    && apply_runtime_config_permissions verify "$app_root" "$helper_root"
+}
+
 install_renderer_dependencies() {
   local renderer_dir="${STAGE_ROOT}/pdf-renderer"
   local state_home="${RENDERER_STATE_DIR}/home"
@@ -840,6 +867,7 @@ rollback_after_failure() {
   local failed_path="$failed_base"
   local renderer_result="skipped"
   local deep_result="skipped"
+  local config_result="skipped"
   local rollback_ok=1
   local rollback_result="rollback_failed_or_unverifiable"
   local incident_event="deploy_rollback"
@@ -856,33 +884,20 @@ rollback_after_failure() {
   echo "    Restore source     : $PREV"
 
   if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] mv '$APP' '$failed_path'"
-    echo "[DRY-RUN] mv '$PREV' '$APP'"
+    echo "[DRY-RUN] bash '$APP/scripts/ops/runtime_config_rollback.sh' --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
     exit "$EXIT_ROLLBACK_SUCCESS"
   fi
 
-  if [[ ! -d "$APP" ]]; then
-    echo "[!] Rollback failed: active app path missing: $APP"
+  config_result="ok"
+  if ! bash "$APP/scripts/ops/runtime_config_rollback.sh" \
+    --active "$APP" \
+    --previous "$PREV" \
+    --failed "$failed_path" \
+    --runtime-user "$WEBUSER"; then
+    echo "[!] Rollback failed: release switch or runtime config permissions are unverifiable."
+    config_result="failed"
     rollback_ok=0
-  fi
-  if [[ ! -d "$PREV" ]]; then
-    echo "[!] Rollback failed: previous app path missing: $PREV"
-    rollback_ok=0
-  fi
-
-  if [[ "$rollback_ok" -eq 1 ]]; then
-    if ! mv "$APP" "$failed_path"; then
-      echo "[!] Rollback failed: could not move broken app to $failed_path"
-      rollback_ok=0
-    fi
-  fi
-
-  if [[ "$rollback_ok" -eq 1 ]]; then
-    if ! mv "$PREV" "$APP"; then
-      echo "[!] Rollback failed: could not restore $PREV to $APP"
-      rollback_ok=0
-    fi
   fi
 
   if [[ "$rollback_ok" -eq 1 ]]; then
@@ -909,6 +924,7 @@ rollback_after_failure() {
   echo "    Failure reason      : $reason"
   echo "    Failed release path : $failed_path"
   echo "    Restored app path   : $APP"
+  echo "    Config permission   : $config_result"
   echo "    Renderer check      : $renderer_result"
   echo "    Deep health check   : $deep_result"
 
@@ -1135,6 +1151,10 @@ run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
 run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
 run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
 restore_runtime_script_permissions
+if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
+  harden_and_verify_runtime_config "$STAGE_ROOT" "$STAGE_ROOT" \
+    || die "[!] Zero-surprise stage runtime config permission contract failed."
+fi
 run_zero_surprise_predeploy_replay || die "[!] Zero-surprise pre-deploy replay failed. Aborting before atomic switch."
 validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
 
@@ -1163,7 +1183,19 @@ run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
 run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
 restore_runtime_script_permissions
 
+harden_and_verify_runtime_config "$STAGE_ROOT" "$STAGE_ROOT" \
+  || die "[!] Staged runtime config permission contract failed."
+harden_and_verify_runtime_config "$APP" "$STAGE_ROOT" \
+  || die "[!] Current live runtime config permission contract failed before atomic switch."
+
 perform_atomic_switch
+
+if ! apply_runtime_config_permissions verify "$APP" "$APP"; then
+  rollback_after_failure "active runtime config permission contract failed after atomic switch"
+fi
+if ! apply_runtime_config_permissions verify "$PREV" "$APP"; then
+  rollback_after_failure "previous runtime config permission contract failed after atomic switch"
+fi
 
 if ! restart_renderer_service; then
   rollback_after_failure "renderer service restart failed"
@@ -1206,4 +1238,5 @@ echo "    Log            : $LOG"
 
 echo
 echo "Rollback (manual fallback):"
-echo "  mv '$APP' '${APP}_failed_${REL}' && mv '$PREV' '$APP'"
+MANUAL_FAILED_PATH="${APP}_failed_${REL}"
+echo "  bash '$APP/scripts/ops/runtime_config_rollback.sh' --active '$APP' --previous '$PREV' --failed '$MANUAL_FAILED_PATH' --runtime-user '$WEBUSER'"

@@ -31,6 +31,8 @@ final class ReleaseArtifactValidator
             'application/views/pages/dashboard_teacher.php',
             'deploy_ea.sh',
             'scripts/ops/lib/prod_common.sh',
+            'scripts/ops/runtime_config_permissions.sh',
+            'scripts/ops/runtime_config_rollback.sh',
             'scripts/ops/prod_provider_ui_smoke.sh',
             'scripts/ops/provider_ui_smoke_principal.sh',
             'scripts/release-gate/dashboard_release_gate.php',
