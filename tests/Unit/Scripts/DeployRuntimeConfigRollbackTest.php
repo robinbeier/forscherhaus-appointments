@@ -85,6 +85,12 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
         probe_deep_health_contract() { return 0; }
         emit_zero_surprise_incident() { return 0; }
 
+        deploy_timing_init deploy 0 preparation_artifact
+        deploy_timing_transition predeploy
+        deploy_timing_transition permissions_stage
+        deploy_timing_transition switch
+        DEPLOY_TIMING_SWITCH_STATE="complete"
+        deploy_timing_transition postdeploy_validation
         verify_post_switch_runtime_config_contracts
 
         exit 99
@@ -113,6 +119,48 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
         self::assertStringNotContainsString('Deployment completed', $result['stdout']);
         self::assertFileDoesNotExist($this->maliciousSentinel);
         self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $result['stdout'] . $result['stderr']);
+
+        $deployTiming = array_values(
+            array_filter(
+                $this->deployTimingEvents($result['stdout']),
+                static fn(array $event): bool => $event['mode'] === 'deploy',
+            ),
+        );
+        $phaseEvents = array_values(
+            array_filter($deployTiming, static fn(array $event): bool => $event['event'] === 'phase'),
+        );
+        self::assertSame(
+            ['preparation_artifact', 'predeploy', 'permissions_stage', 'switch', 'postdeploy_validation', 'rollback'],
+            array_column($phaseEvents, 'phase'),
+        );
+        self::assertSame(['ok', 'ok', 'ok', 'ok', 'failed', 'ok'], array_column($phaseEvents, 'status'));
+        self::assertSame('rollback_succeeded', $deployTiming[array_key_last($deployTiming)]['outcome']);
+        self::assertSame(30, $deployTiming[array_key_last($deployTiming)]['exit_code']);
+    }
+
+    public function testManualRollbackEmitsSuccessfulSecretFreeTimingSummary(): void
+    {
+        $result = $this->runRollbackMode();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertDirectoryExists($this->activePath);
+        self::assertDirectoryDoesNotExist($this->previousPath);
+        self::assertDirectoryExists($this->failedPath);
+        self::assertFileExists($this->activePath . '/PREVIOUS_RELEASE_MARKER');
+        self::assertFileExists($this->failedPath . '/ACTIVE_RELEASE_MARKER');
+
+        $events = $this->deployTimingEvents($result['stdout']);
+        self::assertCount(2, $events);
+        self::assertSame('manual_rollback', $events[0]['mode']);
+        self::assertSame('rollback', $events[0]['phase']);
+        self::assertSame('ok', $events[0]['status']);
+        self::assertSame('manual_rollback_succeeded', $events[1]['outcome']);
+        self::assertSame(0, $events[1]['exit_code']);
+        self::assertStringNotContainsString(
+            $this->workspace,
+            implode("\n", $this->deployTimingLines($result['stdout'])),
+        );
+        self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $result['stdout'] . $result['stderr']);
     }
 
     public function testRollbackFailsBeforeMovingAnythingWhenFailedTargetAlreadyExists(): void
@@ -127,6 +175,12 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
         self::assertDirectoryExists($this->previousPath);
         self::assertFileExists($this->activePath . '/ACTIVE_RELEASE_MARKER');
         self::assertFileExists($this->previousPath . '/PREVIOUS_RELEASE_MARKER');
+
+        $events = $this->deployTimingEvents($result['stdout']);
+        self::assertSame('rollback', $events[0]['phase']);
+        self::assertSame('failed', $events[0]['status']);
+        self::assertSame('manual_rollback_failed', $events[1]['outcome']);
+        self::assertSame($result['exit_code'], $events[1]['exit_code']);
     }
 
     public function testRollbackFailsClosedWhenRestoredConfigCannotBeHardenedAfterSwitch(): void
@@ -251,6 +305,37 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
             'stdout' => is_string($stdout) ? $stdout : '',
             'stderr' => is_string($stderr) ? $stderr : '',
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function deployTimingLines(string $output): array
+    {
+        return array_values(
+            array_filter(
+                preg_split('/\R/', $output) ?: [],
+                static fn(string $line): bool => str_starts_with($line, 'DEPLOY_TIMING '),
+            ),
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function deployTimingEvents(string $output): array
+    {
+        $events = [];
+        foreach ($this->deployTimingLines($output) as $line) {
+            $payload = json_decode(substr($line, strlen('DEPLOY_TIMING ')), true, 512, JSON_THROW_ON_ERROR);
+            self::assertIsArray($payload);
+            self::assertSame('deploy_timing.v1', $payload['schema'] ?? null);
+            $events[] = $payload;
+        }
+
+        self::assertNotSame([], $events);
+
+        return $events;
     }
 
     private function removeDirectory(string $path): void

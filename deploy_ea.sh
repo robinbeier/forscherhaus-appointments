@@ -51,7 +51,175 @@ DEEP_HEALTH_SLEEP_SECONDS=2
 EXIT_ROLLBACK_SUCCESS=30
 EXIT_ROLLBACK_FAILED=31
 
+DEPLOY_TIMING_SCHEMA="deploy_timing.v1"
+DEPLOY_TIMING_ACTIVE=0
+DEPLOY_TIMING_SUMMARY_EMITTED=0
+DEPLOY_TIMING_SWITCH_STATE="not_started"
+DEPLOY_TIMING_MODE=""
+DEPLOY_TIMING_DRY_RUN="false"
+DEPLOY_TIMING_PHASE=""
+DEPLOY_TIMING_START_MS=0
+DEPLOY_TIMING_PHASE_START_MS=0
+
 SYSTEMCTL_BASE=(/bin/systemctl)
+
+deploy_monotonic_ms() {
+  local uptime
+  local seconds
+  local fraction
+
+  if [[ -r /proc/uptime ]]; then
+    IFS=' ' read -r uptime _ < /proc/uptime
+    if [[ "$uptime" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+      seconds="${BASH_REMATCH[1]}"
+      fraction="${BASH_REMATCH[2]}000"
+      printf '%d\n' "$((10#$seconds * 1000 + 10#${fraction:0:3}))"
+      return 0
+    fi
+  fi
+
+  if command -v php >/dev/null 2>&1; then
+    php -r 'echo intdiv(hrtime(true), 1000000), PHP_EOL;'
+    return $?
+  fi
+
+  echo "[!] Monotonic deploy timing requires readable /proc/uptime or PHP hrtime()." >&2
+  return 1
+}
+
+deploy_timing_now_ms() {
+  local now
+
+  now="$(deploy_monotonic_ms 2>/dev/null || true)"
+  if [[ "$now" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$now"
+    return 0
+  fi
+
+  printf '%s\n' "$DEPLOY_TIMING_PHASE_START_MS"
+}
+
+emit_deploy_timing_phase() {
+  local phase="$1"
+  local status="$2"
+  local duration_ms="$3"
+  local elapsed_ms="$4"
+
+  printf 'DEPLOY_TIMING {"schema":"%s","event":"phase","mode":"%s","phase":"%s","status":"%s","duration_ms":%d,"elapsed_ms":%d,"dry_run":%s}\n' \
+    "$DEPLOY_TIMING_SCHEMA" \
+    "$DEPLOY_TIMING_MODE" \
+    "$phase" \
+    "$status" \
+    "$duration_ms" \
+    "$elapsed_ms" \
+    "$DEPLOY_TIMING_DRY_RUN"
+}
+
+emit_deploy_timing_summary() {
+  local outcome="$1"
+  local exit_code="$2"
+  local total_ms="$3"
+
+  printf 'DEPLOY_TIMING {"schema":"%s","event":"summary","mode":"%s","outcome":"%s","exit_code":%d,"total_ms":%d,"dry_run":%s}\n' \
+    "$DEPLOY_TIMING_SCHEMA" \
+    "$DEPLOY_TIMING_MODE" \
+    "$outcome" \
+    "$exit_code" \
+    "$total_ms" \
+    "$DEPLOY_TIMING_DRY_RUN"
+}
+
+deploy_timing_complete_phase() {
+  local status="$1"
+  local now
+  local duration_ms
+  local elapsed_ms
+
+  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 && -n "$DEPLOY_TIMING_PHASE" ]] || return 0
+
+  now="$(deploy_timing_now_ms)"
+  duration_ms="$((now - DEPLOY_TIMING_PHASE_START_MS))"
+  elapsed_ms="$((now - DEPLOY_TIMING_START_MS))"
+  (( duration_ms >= 0 )) || duration_ms=0
+  (( elapsed_ms >= 0 )) || elapsed_ms=0
+
+  emit_deploy_timing_phase "$DEPLOY_TIMING_PHASE" "$status" "$duration_ms" "$elapsed_ms"
+  DEPLOY_TIMING_PHASE=""
+}
+
+deploy_timing_transition() {
+  local next_phase="$1"
+
+  deploy_timing_complete_phase ok
+  DEPLOY_TIMING_PHASE="$next_phase"
+  DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)"
+}
+
+deploy_timing_begin_rollback() {
+  deploy_timing_complete_phase failed
+  DEPLOY_TIMING_PHASE="rollback"
+  DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)"
+}
+
+deploy_timing_finish() {
+  local phase_status="$1"
+  local outcome="$2"
+  local exit_code="$3"
+  local now
+  local total_ms
+
+  deploy_timing_complete_phase "$phase_status"
+  now="$(deploy_timing_now_ms)"
+  total_ms="$((now - DEPLOY_TIMING_START_MS))"
+  (( total_ms >= 0 )) || total_ms=0
+  emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms"
+
+  DEPLOY_TIMING_SUMMARY_EMITTED=1
+  DEPLOY_TIMING_ACTIVE=0
+  trap - EXIT
+}
+
+deploy_timing_on_exit() {
+  local exit_code="$?"
+  local outcome="failed_pre_switch"
+
+  trap - EXIT
+  if [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 && "$DEPLOY_TIMING_SUMMARY_EMITTED" -eq 0 ]]; then
+    case "$DEPLOY_TIMING_SWITCH_STATE" in
+      partial)
+        outcome="failed_switch_recovery_required"
+        ;;
+      complete)
+        outcome="failed_post_switch"
+        ;;
+    esac
+    deploy_timing_finish failed "$outcome" "$exit_code"
+  fi
+
+  exit "$exit_code"
+}
+
+deploy_timing_init() {
+  local mode="$1"
+  local dry_run="$2"
+  local initial_phase="$3"
+  local now
+
+  now="$(deploy_monotonic_ms)" || return 1
+  DEPLOY_TIMING_MODE="$mode"
+  if [[ "$dry_run" -eq 1 ]]; then
+    DEPLOY_TIMING_DRY_RUN="true"
+  else
+    DEPLOY_TIMING_DRY_RUN="false"
+  fi
+  DEPLOY_TIMING_PHASE="$initial_phase"
+  DEPLOY_TIMING_START_MS="$now"
+  DEPLOY_TIMING_PHASE_START_MS="$now"
+  DEPLOY_TIMING_ACTIVE=1
+  DEPLOY_TIMING_SUMMARY_EMITTED=0
+  DEPLOY_TIMING_SWITCH_STATE="not_started"
+  trap deploy_timing_on_exit EXIT
+}
 
 usage() {
   cat <<'USAGE'
@@ -852,11 +1020,14 @@ perform_atomic_switch() {
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] mv '$APP' '$PREV'"
     echo "[DRY-RUN] mv '$STAGE_ROOT' '$APP'"
+    DEPLOY_TIMING_SWITCH_STATE="complete"
     return 0
   fi
 
   mv "$APP" "$PREV"
+  DEPLOY_TIMING_SWITCH_STATE="partial"
   mv "$STAGE_ROOT" "$APP"
+  DEPLOY_TIMING_SWITCH_STATE="complete"
 }
 
 is_positive_integer() {
@@ -1438,6 +1609,8 @@ rollback_after_failure() {
   local incident_report=""
   local incident_report_root="$APP"
 
+  deploy_timing_begin_rollback
+
   if [[ -e "$failed_path" ]]; then
     failed_path="${failed_base}_$(date -u +%Y%m%d_%H%M%S)"
   fi
@@ -1450,6 +1623,7 @@ rollback_after_failure() {
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
+    deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
     exit "$EXIT_ROLLBACK_SUCCESS"
   fi
 
@@ -1508,6 +1682,7 @@ rollback_after_failure() {
       "$incident_report" \
       "$incident_report_root"
     echo "[!] Rollback succeeded, deployment remains failed."
+    deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
     exit "$EXIT_ROLLBACK_SUCCESS"
   fi
 
@@ -1523,6 +1698,7 @@ rollback_after_failure() {
     "$incident_report" \
     "$incident_report_root"
   echo "[!] Rollback failed or unverifiable. Manual intervention required."
+  deploy_timing_finish failed rollback_failed "$EXIT_ROLLBACK_FAILED"
   exit "$EXIT_ROLLBACK_FAILED"
 }
 
@@ -1547,8 +1723,15 @@ case "${1:-}" in
     ;;
   --runtime-config-rollback)
     shift
-    runtime_config_rollback_cli "$@"
-    exit $?
+    deploy_timing_init manual_rollback 0 rollback \
+      || die "[!] Could not initialize monotonic rollback timing."
+    runtime_config_rollback_cli "$@" || {
+      rollback_exit_code="$?"
+      deploy_timing_finish failed manual_rollback_failed "$rollback_exit_code"
+      exit "$rollback_exit_code"
+    }
+    deploy_timing_finish ok manual_rollback_succeeded 0
+    exit 0
     ;;
 esac
 
@@ -1659,6 +1842,9 @@ else
   exec > >(tee -a "$LOG") 2>&1
 fi
 
+deploy_timing_init deploy "$DRYRUN" preparation_artifact \
+  || die "[!] Could not initialize monotonic deploy timing."
+
 echo "[i] Deploy Easy!Appointments"
 echo "    Release              : $REL"
 echo "    Archive              : $ARCHIVE"
@@ -1738,6 +1924,7 @@ fi
 
 validate_stage_release_artifact
 validate_deploy_script_drift
+deploy_timing_transition predeploy
 validate_breakglass_policy || die "[!] Zero-surprise breakglass policy validation failed."
 prepare_zero_surprise_stage_runtime
 run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
@@ -1750,6 +1937,8 @@ if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
 fi
 run_zero_surprise_predeploy_replay || die "[!] Zero-surprise pre-deploy replay failed. Aborting before atomic switch."
 validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
+
+deploy_timing_transition permissions_stage
 
 run_shell "cp '$APP/config.php' '$STAGE_ROOT/config.php'"
 run_shell "mkdir -p '$STAGE_ROOT/storage'"
@@ -1781,7 +1970,9 @@ harden_and_verify_runtime_config "$STAGE_ROOT" \
 harden_and_verify_runtime_config "$APP" \
   || die "[!] Current live runtime config permission contract failed before atomic switch."
 
+deploy_timing_transition switch
 perform_atomic_switch
+deploy_timing_transition postdeploy_validation
 
 verify_post_switch_runtime_config_contracts
 
@@ -1828,3 +2019,5 @@ echo
 echo "Rollback (manual fallback):"
 MANUAL_FAILED_PATH="${APP}_failed_${REL}"
 echo "  bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$MANUAL_FAILED_PATH' --runtime-user '$WEBUSER'"
+
+deploy_timing_finish ok succeeded 0

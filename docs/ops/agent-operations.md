@@ -103,6 +103,14 @@ The host deploy script must be a root-owned regular non-symlink file with no
 group/world write bit beneath a canonical root-controlled ancestor chain. Never
 run a privileged permission or rollback mode from a deployed release tree.
 
+Deploy and rollback timing evidence is emitted as `DEPLOY_TIMING ` plus JSON
+using the fixed `deploy_timing.v1` schema. For baseline collection, extract only
+those prefixed lines from the operator log and validate the five core phases,
+terminal success summary, and `dry_run=false`. Do not copy the surrounding log:
+it can contain operational paths and other sensitive context. The canonical
+phase definitions and five-comparable-deploy measurement plan are in
+`docs/deployment.md`.
+
 Optional Certbot renewal simulation:
 
 ```bash
