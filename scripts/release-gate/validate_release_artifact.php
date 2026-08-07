@@ -109,8 +109,12 @@ function readArchiveEntryTypes(string $archivePath, array $paths): array
 function readCanonicalArchiveHardlinkTarget(string $line): string
 {
     $matches = [];
+    $separatorPattern = '[[:space:]]link to[[:space:]]+';
 
-    if (preg_match('~[[:space:]]link to[[:space:]]+(.+)$~', $line, $matches) !== 1) {
+    if (
+        preg_match_all('~' . $separatorPattern . '~', $line) !== 1 ||
+        preg_match('~' . $separatorPattern . '(.+)$~', $line, $matches) !== 1
+    ) {
         throw new RuntimeException('Release artifact archive contains a malformed or non-canonical hardlink target.');
     }
 

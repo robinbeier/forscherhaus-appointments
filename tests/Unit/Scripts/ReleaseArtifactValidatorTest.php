@@ -305,6 +305,51 @@ final class ReleaseArtifactValidatorTest extends TestCase
         self::assertStringNotContainsString($configMarker, $result['stderr']);
     }
 
+    public function testArchiveCliRejectsAmbiguousHardlinkAliasWithAbsoluteTarget(): void
+    {
+        $configMarker = 'SENSITIVE_CONFIG_CONTENT_MUST_NOT_BE_PRINTED';
+        $result = $this->runArchiveCliWithFakeListing(
+            ['./application/config/config.php', './alias link to marker'],
+            [...$this->validArchiveTypeLines(), 'h alias link to marker link to /outside-host-file'],
+            $configMarker,
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('malformed or non-canonical hardlink target', $result['stderr']);
+        self::assertStringNotContainsString($configMarker, $result['stdout']);
+        self::assertStringNotContainsString($configMarker, $result['stderr']);
+    }
+
+    public function testArchiveCliRejectsAmbiguousHardlinkAliasWithParentTarget(): void
+    {
+        $configMarker = 'SENSITIVE_CONFIG_CONTENT_MUST_NOT_BE_PRINTED';
+        $result = $this->runArchiveCliWithFakeListing(
+            ['./application/config/config.php', './alias link to marker'],
+            [...$this->validArchiveTypeLines(), 'h alias link to marker link to ../outside-host-file'],
+            $configMarker,
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('malformed or non-canonical hardlink target', $result['stderr']);
+        self::assertStringNotContainsString($configMarker, $result['stdout']);
+        self::assertStringNotContainsString($configMarker, $result['stderr']);
+    }
+
+    public function testArchiveCliRejectsAmbiguousHardlinkTargetName(): void
+    {
+        $configMarker = 'SENSITIVE_CONFIG_CONTENT_MUST_NOT_BE_PRINTED';
+        $result = $this->runArchiveCliWithFakeListing(
+            ['./application/config/config.php', './unlisted-config-alias.php'],
+            [...$this->validArchiveTypeLines(), 'h unlisted-config-alias.php link to safe link to target'],
+            $configMarker,
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('malformed or non-canonical hardlink target', $result['stderr']);
+        self::assertStringNotContainsString($configMarker, $result['stdout']);
+        self::assertStringNotContainsString($configMarker, $result['stderr']);
+    }
+
     public function testArchiveCliRejectsCanonicalAliasAndDuplicateAncestorTogether(): void
     {
         $result = $this->runArchiveCliWithFakeListing(
