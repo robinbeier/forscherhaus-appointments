@@ -45,6 +45,8 @@ class GateCliSupportTest extends TestCase
         $this->assertStringContainsString('--zero-surprise-dump-file PATH', $result['stdout']);
         $this->assertStringContainsString('--zero-surprise-breakglass-file PATH', $result['stdout']);
         $this->assertStringContainsString('--zero-surprise-incident-webhook-file PATH', $result['stdout']);
+        $this->assertStringContainsString('--runtime-config-permissions harden|verify', $result['stdout']);
+        $this->assertStringContainsString('--runtime-config-rollback --active PATH', $result['stdout']);
     }
 
     public function testDeployDryRunNormalizesRelativeZeroSurprisePathsBeforeStageReplay(): void
@@ -121,11 +123,11 @@ class GateCliSupportTest extends TestCase
             );
 
             $genericPermissionPass = "find '{$expectedStageRoot}' -type f -exec chmod 644 {} +";
-            $stageHarden = "bash '{$expectedStageRoot}/scripts/ops/runtime_config_permissions.sh' 'harden' --app-root '{$expectedStageRoot}' --runtime-user 'www-data'";
-            $liveHarden = "bash '{$expectedStageRoot}/scripts/ops/runtime_config_permissions.sh' 'harden' --app-root '{$appPath}' --runtime-user 'www-data'";
+            $stageHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$expectedStageRoot}' --runtime-user 'www-data'";
+            $liveHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$appPath}' --runtime-user 'www-data'";
             $atomicMove = "mv '{$appPath}' '{$appPath}_prev_ea_20260320_1200'";
-            $activeVerify = "bash '{$appPath}/scripts/ops/runtime_config_permissions.sh' 'verify' --app-root '{$appPath}' --runtime-user 'www-data'";
-            $previousVerify = "bash '{$appPath}/scripts/ops/runtime_config_permissions.sh' 'verify' --app-root '{$appPath}_prev_ea_20260320_1200' --runtime-user 'www-data'";
+            $activeVerify = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'verify' --app-root '{$appPath}' --runtime-user 'www-data'";
+            $previousVerify = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'verify' --app-root '{$appPath}_prev_ea_20260320_1200' --runtime-user 'www-data'";
 
             $firstGenericPassPosition = strpos($result['stdout'], $genericPermissionPass);
             $this->assertIsInt($firstGenericPassPosition);
@@ -157,33 +159,12 @@ class GateCliSupportTest extends TestCase
 
             $manualFailedPath = $appPath . '_failed_ea_20260320_1200';
             $this->assertStringContainsString(
-                "bash '{$appPath}/scripts/ops/runtime_config_rollback.sh' --active '{$appPath}' --previous '{$appPath}_prev_ea_20260320_1200' --failed '{$manualFailedPath}' --runtime-user 'www-data'",
+                "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-rollback --active '{$appPath}' --previous '{$appPath}_prev_ea_20260320_1200' --failed '{$manualFailedPath}' --runtime-user 'www-data'",
                 $result['stdout'],
             );
         } finally {
             $this->removeDirectory($workspace);
         }
-    }
-
-    public function testAutomaticRollbackRehardensRestoredAndFailedRuntimeConfigsBeforeHealthChecks(): void
-    {
-        $source = file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
-        $this->assertIsString($source);
-
-        $rollbackStart = strpos($source, 'rollback_after_failure() {');
-        $rollbackEnd = strpos($source, "\nwhile [[ \$# -gt 0 ]]", $rollbackStart);
-        $this->assertIsInt($rollbackStart);
-        $this->assertIsInt($rollbackEnd);
-
-        $rollback = substr($source, $rollbackStart, $rollbackEnd - $rollbackStart);
-        $rollbackCommand = strpos($rollback, 'bash "$APP/scripts/ops/runtime_config_rollback.sh"');
-        $rendererRestart = strpos($rollback, 'if restart_renderer_service && probe_renderer_health; then');
-
-        $this->assertIsInt($rollbackCommand);
-        $this->assertIsInt($rendererRestart);
-        $this->assertLessThan($rendererRestart, $rollbackCommand);
-        $this->assertStringContainsString('release switch or runtime config permissions are unverifiable', $rollback);
-        $this->assertStringContainsString('rollback_ok=0', $rollback);
     }
 
     public function testClassifyAssertionExitCodeReturnsRuntimeForPreflightChecks(): void

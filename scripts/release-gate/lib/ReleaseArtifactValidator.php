@@ -31,8 +31,6 @@ final class ReleaseArtifactValidator
             'application/views/pages/dashboard_teacher.php',
             'deploy_ea.sh',
             'scripts/ops/lib/prod_common.sh',
-            'scripts/ops/runtime_config_permissions.sh',
-            'scripts/ops/runtime_config_rollback.sh',
             'scripts/ops/prod_provider_ui_smoke.sh',
             'scripts/ops/provider_ui_smoke_principal.sh',
             'scripts/release-gate/dashboard_release_gate.php',
@@ -151,10 +149,7 @@ final class ReleaseArtifactValidator
         $normalizedRoot = rtrim($root, '/\\');
 
         foreach (self::requiredPaths() as $requiredPath) {
-            $absolutePath =
-                $normalizedRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $requiredPath);
-
-            if (!is_file($absolutePath)) {
+            if (!self::isRequiredDirectoryPathSafe($normalizedRoot, $requiredPath)) {
                 $missing[] = $requiredPath;
             }
         }
@@ -189,7 +184,8 @@ final class ReleaseArtifactValidator
 
         if ($missing !== []) {
             throw new RuntimeException(
-                'Release artifact directory is missing required files: ' . implode(', ', $missing),
+                'Release artifact directory is missing required regular non-symlink files or has symlink ancestors: ' .
+                    implode(', ', $missing),
             );
         }
 
@@ -203,11 +199,12 @@ final class ReleaseArtifactValidator
     /**
      * @param iterable<string> $entries
      */
-    public static function assertArchiveEntriesAreValid(iterable $entries): void
+    public static function assertArchiveEntriesAreValid(iterable $entries, array $entryTypes): void
     {
         $entries = is_array($entries) ? $entries : iterator_to_array($entries, false);
         $missing = self::missingArchivePaths($entries);
         $forbidden = self::forbiddenArchivePaths($entries);
+        $invalidTypes = self::invalidArchivePathTypes($entryTypes);
 
         if ($missing !== []) {
             throw new RuntimeException(
@@ -220,6 +217,65 @@ final class ReleaseArtifactValidator
                 'Release artifact archive contains forbidden paths: ' . implode(', ', $forbidden),
             );
         }
+
+        if ($invalidTypes !== []) {
+            throw new RuntimeException(
+                'Release artifact archive required paths are not unique regular non-symlink files with safe directory ancestors: ' .
+                    implode(', ', $invalidTypes),
+            );
+        }
+    }
+
+    /**
+     * Paths whose archive entry types affect a required file's trust boundary.
+     * Required files must occur exactly once as regular files. Explicit parent
+     * entries, when present, must occur exactly once as directories.
+     *
+     * @return list<string>
+     */
+    public static function archiveTypePaths(): array
+    {
+        $paths = [];
+
+        foreach (self::requiredPaths() as $requiredPath) {
+            $paths[$requiredPath] = true;
+            $parent = dirname($requiredPath);
+
+            while ($parent !== '.' && $parent !== '') {
+                $paths[$parent] = true;
+                $parent = dirname($parent);
+            }
+        }
+
+        return array_keys($paths);
+    }
+
+    /**
+     * @param array<string,list<string>> $entryTypes
+     * @return list<string>
+     */
+    public static function invalidArchivePathTypes(array $entryTypes): array
+    {
+        $invalid = [];
+        $requiredFiles = array_fill_keys(self::requiredPaths(), true);
+
+        foreach (self::archiveTypePaths() as $path) {
+            $types = $entryTypes[$path] ?? [];
+
+            if (isset($requiredFiles[$path])) {
+                if (count($types) !== 1 || $types[0] !== '-') {
+                    $invalid[] = $path;
+                }
+
+                continue;
+            }
+
+            if ($types !== [] && (count($types) !== 1 || $types[0] !== 'd')) {
+                $invalid[] = $path;
+            }
+        }
+
+        return $invalid;
     }
 
     private static function normalizePath(string $path): string
@@ -228,5 +284,30 @@ final class ReleaseArtifactValidator
         $normalized = ltrim($normalized, './');
 
         return trim($normalized, '/');
+    }
+
+    private static function isRequiredDirectoryPathSafe(string $root, string $requiredPath): bool
+    {
+        if ($root === '' || !is_dir($root) || is_link($root)) {
+            return false;
+        }
+
+        $components = explode('/', $requiredPath);
+        $current = $root;
+        $lastIndex = count($components) - 1;
+
+        foreach ($components as $index => $component) {
+            $current .= DIRECTORY_SEPARATOR . $component;
+
+            if ($index === $lastIndex) {
+                return is_file($current) && !is_link($current);
+            }
+
+            if (!is_dir($current) || is_link($current)) {
+                return false;
+            }
+        }
+
+        return false;
     }
 }

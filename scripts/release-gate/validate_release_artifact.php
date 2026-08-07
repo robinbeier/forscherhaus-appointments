@@ -31,7 +31,10 @@ try {
         exit(0);
     }
 
-    ReleaseArtifactValidator::assertArchiveEntriesAreValid(readArchiveEntries($archive));
+    ReleaseArtifactValidator::assertArchiveEntriesAreValid(
+        readArchiveEntries($archive),
+        readArchiveEntryTypes($archive, ReleaseArtifactValidator::archiveTypePaths()),
+    );
     fwrite(STDOUT, "[OK] Release artifact archive contains required files and no forbidden paths.\n");
     exit(0);
 } catch (Throwable $exception) {
@@ -44,8 +47,60 @@ try {
  */
 function readArchiveEntries(string $archivePath): array
 {
-    if (!is_file($archivePath)) {
-        throw new RuntimeException('Release artifact archive not found: ' . $archivePath);
+    if (!is_file($archivePath) || is_link($archivePath)) {
+        throw new RuntimeException('Release artifact archive must be a regular non-symlink file: ' . $archivePath);
+    }
+
+    $stdout = runTarCommand(['tar', '-tzf', $archivePath], $archivePath);
+    $entries = preg_split('/\r?\n/', $stdout) ?: [];
+
+    return array_values(array_filter($entries, static fn(string $entry): bool => trim($entry) !== ''));
+}
+
+/**
+ * @param list<string> $paths
+ * @return array<string,list<string>>
+ */
+function readArchiveEntryTypes(string $archivePath, array $paths): array
+{
+    $stdout = runTarCommand(['tar', '-tvzf', $archivePath], $archivePath);
+    $lines = preg_split('/\r?\n/', $stdout) ?: [];
+    $types = [];
+
+    foreach ($lines as $line) {
+        if ($line === '') {
+            continue;
+        }
+
+        $entryType = $line[0] ?? '';
+
+        foreach ($paths as $path) {
+            $pathPattern = preg_quote($path, '~');
+            $matches = preg_match(
+                '~(?:^|[[:space:]])(?:\./)?' . $pathPattern . '/?(?:[[:space:]]+(?:->|link to)[[:space:]].*)?$~',
+                $line,
+            );
+
+            if ($matches !== 1) {
+                continue;
+            }
+
+            $types[$path] ??= [];
+            $types[$path][] = $entryType;
+            break;
+        }
+    }
+
+    return $types;
+}
+
+/**
+ * @param list<string> $command
+ */
+function runTarCommand(array $command, string $archivePath): string
+{
+    if (!is_file($archivePath) || is_link($archivePath)) {
+        throw new RuntimeException('Release artifact archive must be a regular non-symlink file: ' . $archivePath);
     }
 
     $descriptorSpec = [
@@ -54,7 +109,7 @@ function readArchiveEntries(string $archivePath): array
         2 => ['pipe', 'w'],
     ];
 
-    $process = proc_open(['tar', '-tzf', $archivePath], $descriptorSpec, $pipes, dirname($archivePath));
+    $process = proc_open($command, $descriptorSpec, $pipes, dirname($archivePath));
 
     if (!is_resource($process)) {
         throw new RuntimeException('Could not open tar process for release artifact validation.');
@@ -72,7 +127,5 @@ function readArchiveEntries(string $archivePath): array
         throw new RuntimeException('Could not list release artifact archive contents: ' . trim((string) $stderr));
     }
 
-    $entries = preg_split('/\r?\n/', (string) $stdout) ?: [];
-
-    return array_values(array_filter($entries, static fn(string $entry): bool => trim($entry) !== ''));
+    return (string) $stdout;
 }

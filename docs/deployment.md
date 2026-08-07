@@ -103,8 +103,14 @@ must be non-symlinks, `config.php` must be a regular file with exactly one
 hardlink, the web user must be able to read but not write it, and the web user
 must not be able to replace it through a writable app root. The verification
 prints only these metadata results and never reads or prints config contents.
-If hardening cannot establish and verify the complete contract, it restores the
-previous ownership/mode metadata before the deploy aborts.
+Privileged permission and rollback modes execute only through the root-owned,
+non-symlink host script (normally `/root/deploy_ea.sh`), never through code in
+stage, active, previous, or failed release trees. Its ancestor chain and every
+release parent must be canonical, root-controlled, and non-writable by the web
+user. Hardening locks the app root before inspecting `config.php`, pins device
+and inode identities across every metadata mutation, and restores prior
+ownership/mode metadata only while those identities still match. Otherwise it
+leaves the root-protected state in place and fails for manual intervention.
 
 After the atomic switch, `deploy_ea.sh` verifies:
 
@@ -128,9 +134,10 @@ If post-switch validation fails, the failed release is moved aside and the
 previous app directory is restored. Automatic rollback re-applies and verifies
 the runtime config contract for both the restored app and the failed release
 before health checks; an unverifiable permission state is a rollback failure.
-The printed manual fallback command calls the same tested rollback script, so
-its directory switch and fail-closed hardening/verification do not drift from
-the automatic path. The deploy exits with:
+The printed manual fallback command calls the same trusted host-script mode as
+automatic rollback, so its directory switch and fail-closed
+hardening/verification do not drift from the automatic path. The deploy exits
+with:
 
 - `0` when deployment succeeds
 - `30` when deployment failed and automatic rollback succeeded

@@ -95,9 +95,13 @@ root so it can test readability as the configured web user without printing
 the file:
 
 ```bash
-bash /var/www/html/easyappointments/scripts/ops/runtime_config_permissions.sh verify \
+bash /root/deploy_ea.sh --runtime-config-permissions verify \
   --app-root /var/www/html/easyappointments --runtime-user www-data
 ```
+
+The host deploy script must be a root-owned regular non-symlink file with no
+group/world write bit beneath a canonical root-controlled ancestor chain. Never
+run a privileged permission or rollback mode from a deployed release tree.
 
 Optional Certbot renewal simulation:
 

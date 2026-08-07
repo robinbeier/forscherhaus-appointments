@@ -17,16 +17,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
         mkdir($root, 0777, true);
 
         try {
-            foreach (ReleaseArtifactValidator::requiredPaths() as $requiredPath) {
-                $absolutePath = $root . '/' . $requiredPath;
-                $directory = dirname($absolutePath);
-
-                if (!is_dir($directory)) {
-                    mkdir($directory, 0777, true);
-                }
-
-                file_put_contents($absolutePath, 'ok');
-            }
+            $this->createCompleteArtifactTree($root);
 
             self::assertSame([], ReleaseArtifactValidator::missingDirectoryPaths($root));
             self::assertSame([], ReleaseArtifactValidator::forbiddenDirectoryPaths($root));
@@ -64,8 +55,6 @@ final class ReleaseArtifactValidatorTest extends TestCase
             'application/views/exports/provider_preparation_pdf.php',
             'application/views/pages/dashboard_teacher.php',
             'scripts/ops/lib/prod_common.sh',
-            'scripts/ops/runtime_config_permissions.sh',
-            'scripts/ops/runtime_config_rollback.sh',
             'scripts/ops/prod_provider_ui_smoke.sh',
             'scripts/ops/provider_ui_smoke_principal.sh',
             'scripts/release-gate/lib/GateAssertions.php',
@@ -116,8 +105,163 @@ final class ReleaseArtifactValidatorTest extends TestCase
         );
     }
 
+    public function testDirectoryValidationRejectsRequiredFileSymlink(): void
+    {
+        $root = sys_get_temp_dir() . '/release-artifact-symlink-file-' . bin2hex(random_bytes(4));
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            $outside = $root . '/outside-deploy.sh';
+            file_put_contents($outside, 'outside');
+            unlink($root . '/deploy_ea.sh');
+            symlink($outside, $root . '/deploy_ea.sh');
+
+            self::assertContains('deploy_ea.sh', ReleaseArtifactValidator::missingDirectoryPaths($root));
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testDirectoryValidationRejectsSymlinkAncestor(): void
+    {
+        $root = sys_get_temp_dir() . '/release-artifact-symlink-parent-' . bin2hex(random_bytes(4));
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            rename($root . '/scripts/ops', $root . '/real-ops');
+            symlink($root . '/real-ops', $root . '/scripts/ops');
+
+            $invalid = ReleaseArtifactValidator::missingDirectoryPaths($root);
+            self::assertContains('scripts/ops/lib/prod_common.sh', $invalid);
+            self::assertContains('scripts/ops/prod_provider_ui_smoke.sh', $invalid);
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testArchiveTypeValidationRejectsSymlinkAndDuplicateRequiredFiles(): void
+    {
+        $entryTypes = [];
+        $requiredFiles = array_fill_keys(ReleaseArtifactValidator::requiredPaths(), true);
+
+        foreach (ReleaseArtifactValidator::archiveTypePaths() as $path) {
+            $entryTypes[$path] = [isset($requiredFiles[$path]) ? '-' : 'd'];
+        }
+
+        $entryTypes['deploy_ea.sh'] = ['l'];
+        $entryTypes['application/controllers/Booking.php'] = ['-', '-'];
+
+        $invalid = ReleaseArtifactValidator::invalidArchivePathTypes($entryTypes);
+        self::assertContains('deploy_ea.sh', $invalid);
+        self::assertContains('application/controllers/Booking.php', $invalid);
+    }
+
+    public function testArchiveCliRejectsRequiredSymlinkEntry(): void
+    {
+        $workspace = sys_get_temp_dir() . '/release-artifact-archive-symlink-' . bin2hex(random_bytes(4));
+        $root = $workspace . '/root';
+        $archive = $workspace . '/release.tar.gz';
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            $outside = $root . '/outside-deploy.sh';
+            file_put_contents($outside, 'outside');
+            unlink($root . '/deploy_ea.sh');
+            symlink('outside-deploy.sh', $root . '/deploy_ea.sh');
+
+            $tar = $this->runCommand(['tar', '-czf', $archive, '-C', $root, '.']);
+            self::assertSame(0, $tar['exit_code'], $tar['stderr']);
+
+            $result = $this->runCommand([
+                'php',
+                dirname(__DIR__, 3) . '/scripts/release-gate/validate_release_artifact.php',
+                '--archive=' . $archive,
+            ]);
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('deploy_ea.sh', $result['stderr']);
+            self::assertStringContainsString('regular non-symlink', $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testArchiveCliAcceptsUniqueRegularRequiredFiles(): void
+    {
+        $workspace = sys_get_temp_dir() . '/release-artifact-archive-regular-' . bin2hex(random_bytes(4));
+        $root = $workspace . '/root';
+        $archive = $workspace . '/release.tar.gz';
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            $tar = $this->runCommand(['tar', '-czf', $archive, '-C', $root, '.']);
+            self::assertSame(0, $tar['exit_code'], $tar['stderr']);
+
+            $result = $this->runCommand([
+                'php',
+                dirname(__DIR__, 3) . '/scripts/release-gate/validate_release_artifact.php',
+                '--archive=' . $archive,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('Release artifact archive contains required files', $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    private function createCompleteArtifactTree(string $root): void
+    {
+        foreach (ReleaseArtifactValidator::requiredPaths() as $requiredPath) {
+            $absolutePath = $root . '/' . $requiredPath;
+            $directory = dirname($absolutePath);
+
+            if (!is_dir($directory)) {
+                mkdir($directory, 0777, true);
+            }
+
+            file_put_contents($absolutePath, 'ok');
+        }
+    }
+
+    /**
+     * @param list<string> $command
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runCommand(array $command): array
+    {
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3));
+        self::assertIsResource($process);
+
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [
+            'exit_code' => proc_close($process),
+            'stdout' => is_string($stdout) ? $stdout : '',
+            'stderr' => is_string($stderr) ? $stderr : '',
+        ];
+    }
+
     private function removeDirectory(string $path): void
     {
+        if (is_link($path) || is_file($path)) {
+            @unlink($path);
+            return;
+        }
+
         if (!is_dir($path)) {
             return;
         }
@@ -132,12 +276,15 @@ final class ReleaseArtifactValidatorTest extends TestCase
 
             $childPath = $path . '/' . $entry;
 
+            if (is_link($childPath) || is_file($childPath)) {
+                @unlink($childPath);
+                continue;
+            }
+
             if (is_dir($childPath)) {
                 $this->removeDirectory($childPath);
                 continue;
             }
-
-            @unlink($childPath);
         }
 
         @rmdir($path);

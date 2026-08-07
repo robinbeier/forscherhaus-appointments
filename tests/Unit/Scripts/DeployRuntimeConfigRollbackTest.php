@@ -6,13 +6,15 @@ namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
 
-final class RuntimeConfigRollbackScriptTest extends TestCase
+final class DeployRuntimeConfigRollbackTest extends TestCase
 {
     private string $workspace;
     private string $activePath;
     private string $previousPath;
     private string $failedPath;
-    private string $rollbackScript;
+    private string $trustedDeployScript;
+    private string $maliciousSentinel;
+    private int $runtimeUserId;
     private int $runtimeGroupId;
 
     protected function setUp(): void
@@ -20,7 +22,7 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
         parent::setUp();
 
         if (PHP_OS_FAMILY !== 'Linux') {
-            $this->markTestSkipped('The production rollback helper targets Linux metadata semantics.');
+            $this->markTestSkipped('The production rollback contract targets Linux metadata semantics.');
         }
 
         $uid = $this->runCommand(['id', '-u']);
@@ -28,21 +30,29 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
             $this->markTestSkipped('Root is required to exercise rollback ownership semantics.');
         }
 
+        $runtimeUser = $this->runCommand(['id', '-u', 'www-data']);
         $runtimeGroup = $this->runCommand(['id', '-g', 'www-data']);
-        if ($runtimeGroup['exit_code'] !== 0) {
+        if ($runtimeUser['exit_code'] !== 0 || $runtimeGroup['exit_code'] !== 0) {
             $this->markTestSkipped('The www-data runtime user is unavailable.');
         }
 
+        $this->runtimeUserId = (int) trim($runtimeUser['stdout']);
         $this->runtimeGroupId = (int) trim($runtimeGroup['stdout']);
-        $this->workspace = sys_get_temp_dir() . '/runtime-config-rollback-' . bin2hex(random_bytes(6));
+        $this->workspace = '/rob442-runtime-rollback-' . bin2hex(random_bytes(6));
         $this->activePath = $this->workspace . '/app';
         $this->previousPath = $this->workspace . '/app_prev_release';
         $this->failedPath = $this->workspace . '/app_failed_release';
+        $this->maliciousSentinel = $this->workspace . '/release-helper-executed';
+        $trustedRoot = $this->workspace . '/trusted';
+        $this->trustedDeployScript = $trustedRoot . '/deploy_ea.sh';
 
-        $repoRoot = dirname(__DIR__, 3);
-        $this->createReleaseTree($this->activePath, $repoRoot, 'ACTIVE_RELEASE_MARKER');
-        $this->createReleaseTree($this->previousPath, $repoRoot, 'PREVIOUS_RELEASE_MARKER');
-        $this->rollbackScript = $this->activePath . '/scripts/ops/runtime_config_rollback.sh';
+        mkdir($trustedRoot, 0755, true);
+        copy(dirname(__DIR__, 3) . '/deploy_ea.sh', $this->trustedDeployScript);
+        chmod($this->trustedDeployScript, 0755);
+        $this->createReleaseTree($this->activePath, 'ACTIVE_RELEASE_MARKER');
+        $this->createReleaseTree($this->previousPath, 'PREVIOUS_RELEASE_MARKER');
+        self::assertSame(0, $this->runPermissionMode('harden', $this->activePath)['exit_code']);
+        self::assertSame(0, $this->runPermissionMode('harden', $this->previousPath)['exit_code']);
     }
 
     protected function tearDown(): void
@@ -54,11 +64,45 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
         parent::tearDown();
     }
 
-    public function testRollbackSwitchesTreesAndHardensBothConfigsThroughTheProductionScript(): void
+    public function testAutomaticPostSwitchPermissionFailureRunsRollbackAndStopsDeployment(): void
     {
-        $result = $this->runRollback();
+        chmod($this->activePath . '/config.php', 0644);
+        $releaseId = 'ea_process_test';
+        $this->failedPath = $this->activePath . '_failed_' . $releaseId;
 
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        APP="$2"
+        PREV="$3"
+        REL="$4"
+        WEBUSER="www-data"
+        DRYRUN=0
+        ZERO_SURPRISE_CANARY_REPORT=""
+        restart_renderer_service() { return 0; }
+        probe_renderer_health() { return 0; }
+        reload_services() { return 0; }
+        probe_deep_health_contract() { return 0; }
+        emit_zero_surprise_incident() { return 0; }
+
+        if ! apply_runtime_config_permissions verify "$APP"; then
+          rollback_after_failure "active runtime config permission contract failed after atomic switch"
+        fi
+
+        exit 99
+        BASH;
+        $result = $this->runCommand([
+            'bash',
+            '-c',
+            $script,
+            'bash',
+            $this->trustedDeployScript,
+            $this->activePath,
+            $this->previousPath,
+            $releaseId,
+        ]);
+
+        self::assertSame(30, $result['exit_code'], $result['stderr']);
         self::assertDirectoryExists($this->activePath);
         self::assertDirectoryDoesNotExist($this->previousPath);
         self::assertDirectoryExists($this->failedPath);
@@ -66,15 +110,18 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
         self::assertFileExists($this->failedPath . '/ACTIVE_RELEASE_MARKER');
         $this->assertPermissionContract($this->activePath);
         $this->assertPermissionContract($this->failedPath);
-        self::assertStringContainsString('rollback switch and permission contracts verified', $result['stdout']);
+        self::assertStringContainsString('Starting automatic rollback', $result['stdout']);
+        self::assertStringContainsString('Rollback succeeded, deployment remains failed', $result['stdout']);
+        self::assertStringNotContainsString('Deployment completed', $result['stdout']);
+        self::assertFileDoesNotExist($this->maliciousSentinel);
         self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $result['stdout'] . $result['stderr']);
     }
 
     public function testRollbackFailsBeforeMovingAnythingWhenFailedTargetAlreadyExists(): void
     {
-        mkdir($this->failedPath, 0777, true);
+        mkdir($this->failedPath, 0755, true);
 
-        $result = $this->runRollback();
+        $result = $this->runRollbackMode();
 
         self::assertNotSame(0, $result['exit_code']);
         self::assertStringContainsString('failed release target already exists', $result['stderr']);
@@ -88,7 +135,7 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
     {
         link($this->previousPath . '/config.php', $this->workspace . '/previous-config-hardlink.php');
 
-        $result = $this->runRollback();
+        $result = $this->runRollbackMode();
 
         self::assertNotSame(0, $result['exit_code']);
         self::assertStringContainsString(
@@ -105,23 +152,31 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
         self::assertIsArray($restoredConfigMetadata);
         self::assertSame(2, $restoredConfigMetadata['nlink']);
         $this->assertPermissionContract($this->failedPath);
+        self::assertFileDoesNotExist($this->maliciousSentinel);
         self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $result['stdout'] . $result['stderr']);
     }
 
-    private function createReleaseTree(string $path, string $repoRoot, string $marker): void
+    private function createReleaseTree(string $path, string $marker): void
     {
         mkdir($path . '/scripts/ops', 0777, true);
         file_put_contents($path . '/config.php', "SENSITIVE_TEST_MARKER\n");
         file_put_contents($path . '/' . $marker, '');
-        copy(
-            $repoRoot . '/scripts/ops/runtime_config_permissions.sh',
+        file_put_contents(
             $path . '/scripts/ops/runtime_config_permissions.sh',
+            "#!/usr/bin/env bash\ntouch '" . $this->maliciousSentinel . "'\n",
         );
-        copy($repoRoot . '/scripts/ops/runtime_config_rollback.sh', $path . '/scripts/ops/runtime_config_rollback.sh');
-        chmod($path, 0777);
-        chmod($path . '/config.php', 0666);
-        chmod($path . '/scripts/ops/runtime_config_permissions.sh', 0755);
-        chmod($path . '/scripts/ops/runtime_config_rollback.sh', 0755);
+        $this->setRuntimeOwned($path, 0777);
+        $this->setRuntimeOwned($path . '/config.php', 0666);
+        $this->setRuntimeOwned($path . '/scripts', 0777);
+        $this->setRuntimeOwned($path . '/scripts/ops', 0777);
+        $this->setRuntimeOwned($path . '/scripts/ops/runtime_config_permissions.sh', 0755);
+    }
+
+    private function setRuntimeOwned(string $path, int $mode): void
+    {
+        chown($path, $this->runtimeUserId);
+        chgrp($path, $this->runtimeGroupId);
+        chmod($path, $mode);
     }
 
     private function assertPermissionContract(string $path): void
@@ -139,11 +194,29 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
     /**
      * @return array{exit_code:int,stdout:string,stderr:string}
      */
-    private function runRollback(): array
+    private function runPermissionMode(string $action, string $appRoot): array
     {
         return $this->runCommand([
             'bash',
-            $this->rollbackScript,
+            $this->trustedDeployScript,
+            '--runtime-config-permissions',
+            $action,
+            '--app-root',
+            $appRoot,
+            '--runtime-user',
+            'www-data',
+        ]);
+    }
+
+    /**
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runRollbackMode(): array
+    {
+        return $this->runCommand([
+            'bash',
+            $this->trustedDeployScript,
+            '--runtime-config-rollback',
             '--active',
             $this->activePath,
             '--previous',
@@ -166,7 +239,6 @@ final class RuntimeConfigRollbackScriptTest extends TestCase
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
-
         $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3));
         self::assertIsResource($process);
 

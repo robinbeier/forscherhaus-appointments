@@ -57,6 +57,10 @@ usage() {
   cat <<'USAGE'
 Usage: deploy_ea.sh --rel REL [options]
 
+Trusted maintenance modes:
+  deploy_ea.sh --runtime-config-permissions harden|verify --app-root PATH --runtime-user USER
+  deploy_ea.sh --runtime-config-rollback --active PATH --previous PATH --failed PATH --runtime-user USER
+
 Required:
   --rel REL                    Release-ID (e.g. ea_20251005_2000)
 
@@ -196,7 +200,8 @@ validate_stage_release_artifact() {
     return 0
   fi
 
-  [[ -f "$validator_script" ]] || die "[!] Missing release artifact validator in stage: $validator_script"
+  [[ -f "$validator_script" && ! -L "$validator_script" ]] \
+    || die "[!] Release artifact validator must be a regular non-symlink file: $validator_script"
 
   php "$validator_script" --root="$STAGE_ROOT" \
     || die "[!] Extracted stage is missing required release artifacts."
@@ -210,7 +215,8 @@ validate_deploy_script_drift() {
     return 0
   fi
 
-  [[ -f "$stage_deploy_script" ]] || die "[!] Missing deploy script in staged release: $stage_deploy_script"
+  [[ -f "$stage_deploy_script" && ! -L "$stage_deploy_script" ]] \
+    || die "[!] Staged deploy script must be a regular non-symlink file: $stage_deploy_script"
 
   cmp -s "$CURRENT_SCRIPT_PATH" "$stage_deploy_script" \
     || die "[!] Host deploy script drift detected: '$CURRENT_SCRIPT_PATH' does not match '$stage_deploy_script'. Sync the host deploy script from the merged repo before deploying."
@@ -306,31 +312,415 @@ restore_runtime_script_permissions() {
   find "$ops_dir" -type f -name '*.sh' -exec chmod 755 {} +
 }
 
-apply_runtime_config_permissions() {
-  local action="$1"
-  local app_root="$2"
-  local helper_root="${3:-$app_root}"
-  local helper_path="${helper_root}/scripts/ops/runtime_config_permissions.sh"
+runtime_config_path_identity() {
+  stat -c '%d:%i' -- "$1"
+}
+
+runtime_config_path_matches() {
+  local path="$1"
+  local expected_identity="$2"
+  local expected_type="$3"
+
+  case "$expected_type" in
+    directory)
+      [[ -d "$path" && ! -L "$path" ]] || return 1
+      ;;
+    file)
+      [[ -f "$path" && ! -L "$path" ]] || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  [[ "$(runtime_config_path_identity "$path" 2>/dev/null || true)" == "$expected_identity" ]]
+}
+
+runtime_user_can_write_path() {
+  local runtime_user="$1"
+  local path="$2"
+
+  runuser -u "$runtime_user" -- php -r 'exit(is_writable($argv[1]) ? 0 : 1);' "$path"
+}
+
+validate_root_controlled_ancestors() {
+  local target_path="$1"
+  local runtime_user="$2"
+  local cursor
+  local owner
+  local mode
+  local index
+  local -a ancestors=()
+
+  cursor="$(dirname "$target_path")"
+  while true; do
+    ancestors+=("$cursor")
+    [[ "$cursor" == "/" ]] && break
+    cursor="$(dirname "$cursor")"
+  done
+
+  for ((index = ${#ancestors[@]} - 1; index >= 0; index--)); do
+    cursor="${ancestors[$index]}"
+    [[ -d "$cursor" && ! -L "$cursor" ]] || {
+      echo "[!] Runtime config permission contract failed: ancestor must be a non-symlink directory: $cursor" >&2
+      return 1
+    }
+
+    owner="$(stat -c '%u' -- "$cursor")" || {
+      echo "[!] Runtime config permission contract failed: could not read ancestor owner: $cursor" >&2
+      return 1
+    }
+    mode="$(stat -c '%a' -- "$cursor")" || {
+      echo "[!] Runtime config permission contract failed: could not read ancestor mode: $cursor" >&2
+      return 1
+    }
+
+    [[ "$owner" == "0" ]] || {
+      echo "[!] Runtime config permission contract failed: ancestor must be root-owned: $cursor" >&2
+      return 1
+    }
+    (( (8#$mode & 0022) == 0 )) || {
+      echo "[!] Runtime config permission contract failed: ancestor must not be group/world-writable: $cursor" >&2
+      return 1
+    }
+    if runtime_user_can_write_path "$runtime_user" "$cursor"; then
+      echo "[!] Runtime config permission contract failed: ancestor is writable by runtime user: $cursor" >&2
+      return 1
+    fi
+  done
+}
+
+validate_trusted_deploy_script() {
+  local script_path="$1"
+  local runtime_user="$2"
+  local canonical_path
+  local owner
+  local mode
 
   if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] bash '$helper_path' '$action' --app-root '$app_root' --runtime-user '$WEBUSER'"
+    echo "[DRY-RUN] verify root-owned non-symlink deploy script and ancestors: '$script_path'"
     return 0
   fi
 
-  [[ -f "$helper_path" ]] || {
-    echo "[!] Runtime config permission helper missing: $helper_path"
+  [[ "$EUID" -eq 0 ]] || {
+    echo "[!] Trusted deploy script validation requires root privileges." >&2
+    return 1
+  }
+  id -u "$runtime_user" >/dev/null 2>&1 || {
+    echo "[!] Runtime user does not exist: $runtime_user" >&2
+    return 1
+  }
+  [[ -f "$script_path" && ! -L "$script_path" ]] || {
+    echo "[!] Trusted deploy script must be a regular non-symlink file: $script_path" >&2
     return 1
   }
 
-  bash "$helper_path" "$action" --app-root "$app_root" --runtime-user "$WEBUSER"
+  canonical_path="$(realpath -e -- "$script_path")" || {
+    echo "[!] Could not canonicalize trusted deploy script: $script_path" >&2
+    return 1
+  }
+  [[ "$canonical_path" == "$script_path" ]] || {
+    echo "[!] Trusted deploy script path must be canonical and symlink-free: $script_path" >&2
+    return 1
+  }
+
+  owner="$(stat -c '%u' -- "$script_path")" || return 1
+  mode="$(stat -c '%a' -- "$script_path")" || return 1
+  [[ "$owner" == "0" ]] || {
+    echo "[!] Trusted deploy script must be root-owned: $script_path" >&2
+    return 1
+  }
+  (( (8#$mode & 0022) == 0 )) || {
+    echo "[!] Trusted deploy script must not be group/world-writable: $script_path" >&2
+    return 1
+  }
+  if runtime_user_can_write_path "$runtime_user" "$script_path"; then
+    echo "[!] Trusted deploy script is writable by runtime user: $script_path" >&2
+    return 1
+  fi
+
+  validate_root_controlled_ancestors "$script_path" "$runtime_user"
+}
+
+restore_runtime_config_transaction() {
+  local exit_code="$?"
+  local restore_ok=1
+
+  trap - EXIT
+
+  if [[ "${RUNTIME_CONFIG_TX_ACTIVE:-0}" -eq 1 ]]; then
+    if [[ "${RUNTIME_CONFIG_TX_CONFIG_MUTATED:-0}" -eq 1 ]]; then
+      if runtime_config_path_matches \
+        "$RUNTIME_CONFIG_TX_CONFIG_PATH" \
+        "$RUNTIME_CONFIG_TX_CONFIG_IDENTITY" \
+        file; then
+        chown --no-dereference "$RUNTIME_CONFIG_TX_CONFIG_OWNER" -- "$RUNTIME_CONFIG_TX_CONFIG_PATH" \
+          || restore_ok=0
+        chmod "$RUNTIME_CONFIG_TX_CONFIG_MODE" -- "$RUNTIME_CONFIG_TX_CONFIG_PATH" \
+          || restore_ok=0
+        runtime_config_path_matches \
+          "$RUNTIME_CONFIG_TX_CONFIG_PATH" \
+          "$RUNTIME_CONFIG_TX_CONFIG_IDENTITY" \
+          file \
+          || restore_ok=0
+      else
+        echo "[!] Refusing to restore replaced config.php path; manual intervention required." >&2
+        restore_ok=0
+      fi
+    fi
+
+    if [[ "$restore_ok" -eq 1 && "${RUNTIME_CONFIG_TX_APP_MUTATED:-0}" -eq 1 ]]; then
+      if runtime_config_path_matches \
+        "$RUNTIME_CONFIG_TX_APP_PATH" \
+        "$RUNTIME_CONFIG_TX_APP_IDENTITY" \
+        directory; then
+        chown --no-dereference "$RUNTIME_CONFIG_TX_APP_OWNER" -- "$RUNTIME_CONFIG_TX_APP_PATH" \
+          || restore_ok=0
+        chmod "$RUNTIME_CONFIG_TX_APP_MODE" -- "$RUNTIME_CONFIG_TX_APP_PATH" \
+          || restore_ok=0
+        runtime_config_path_matches \
+          "$RUNTIME_CONFIG_TX_APP_PATH" \
+          "$RUNTIME_CONFIG_TX_APP_IDENTITY" \
+          directory \
+          || restore_ok=0
+      else
+        echo "[!] Refusing to restore replaced app root path; manual intervention required." >&2
+        restore_ok=0
+      fi
+    fi
+
+    if [[ "$restore_ok" -eq 1 ]]; then
+      echo "[i] Restored prior runtime config permission metadata after failed hardening." >&2
+    else
+      echo "[!] Failed to restore pinned runtime config metadata; manual intervention required." >&2
+      exit 2
+    fi
+  fi
+
+  exit "$exit_code"
+}
+
+runtime_config_permissions_contract() {
+  local action="$1"
+  local app_root="$2"
+  local runtime_user="$3"
+  local canonical_root
+  local root_uid
+  local root_gid
+  local runtime_uid
+  local runtime_gid
+  local app_owner
+  local app_mode
+  local config_path
+  local config_owner
+  local config_mode
+  local config_links
+
+  while [[ "$app_root" != "/" && "$app_root" == */ ]]; do
+    app_root="${app_root%/}"
+  done
+
+  [[ "$app_root" == /* && "$app_root" != "/" ]] || {
+    echo "[!] Runtime config permission contract failed: app root must be an absolute non-root path." >&2
+    return 1
+  }
+  [[ -d "$app_root" && ! -L "$app_root" ]] || {
+    echo "[!] Runtime config permission contract failed: app root must be a non-symlink directory: $app_root" >&2
+    return 1
+  }
+  canonical_root="$(realpath -e -- "$app_root")" || {
+    echo "[!] Runtime config permission contract failed: could not canonicalize app root: $app_root" >&2
+    return 1
+  }
+  [[ "$canonical_root" == "$app_root" ]] || {
+    echo "[!] Runtime config permission contract failed: app root path must be canonical and symlink-free: $app_root" >&2
+    return 1
+  }
+
+  root_uid="$(id -u root)" || return 1
+  root_gid="$(id -g root)" || return 1
+  runtime_uid="$(id -u "$runtime_user")" || {
+    echo "[!] Runtime config permission contract failed: runtime user does not exist: $runtime_user" >&2
+    return 1
+  }
+  runtime_gid="$(id -g "$runtime_user")" || return 1
+  [[ "$runtime_uid" != "$root_uid" ]] || {
+    echo "[!] Runtime config permission contract failed: runtime user must not be root." >&2
+    return 1
+  }
+
+  validate_root_controlled_ancestors "$app_root" "$runtime_user" || return 1
+
+  RUNTIME_CONFIG_TX_ACTIVE=0
+  RUNTIME_CONFIG_TX_APP_MUTATED=0
+  RUNTIME_CONFIG_TX_CONFIG_MUTATED=0
+  RUNTIME_CONFIG_TX_APP_PATH="$app_root"
+  RUNTIME_CONFIG_TX_APP_IDENTITY="$(runtime_config_path_identity "$app_root")" || return 1
+  RUNTIME_CONFIG_TX_APP_OWNER="$(stat -c '%u:%g' -- "$app_root")" || return 1
+  RUNTIME_CONFIG_TX_APP_MODE="$(stat -c '%a' -- "$app_root")" || return 1
+  RUNTIME_CONFIG_TX_CONFIG_PATH=""
+  RUNTIME_CONFIG_TX_CONFIG_IDENTITY=""
+  RUNTIME_CONFIG_TX_CONFIG_OWNER=""
+  RUNTIME_CONFIG_TX_CONFIG_MODE=""
+
+  if [[ "$action" == "harden" ]]; then
+    RUNTIME_CONFIG_TX_ACTIVE=1
+    RUNTIME_CONFIG_TX_APP_MUTATED=1
+    trap restore_runtime_config_transaction EXIT
+
+    chmod 0555 -- "$app_root" || return 1
+    runtime_config_path_matches "$app_root" "$RUNTIME_CONFIG_TX_APP_IDENTITY" directory || return 1
+    chown --no-dereference "$root_uid:$root_gid" -- "$app_root" || return 1
+    runtime_config_path_matches "$app_root" "$RUNTIME_CONFIG_TX_APP_IDENTITY" directory || return 1
+    chmod 0755 -- "$app_root" || return 1
+    runtime_config_path_matches "$app_root" "$RUNTIME_CONFIG_TX_APP_IDENTITY" directory || return 1
+  fi
+
+  config_path="$app_root/config.php"
+  [[ -f "$config_path" && ! -L "$config_path" ]] || {
+    echo "[!] Runtime config permission contract failed: config.php must be a regular non-symlink file: $config_path" >&2
+    return 1
+  }
+
+  RUNTIME_CONFIG_TX_CONFIG_PATH="$config_path"
+  RUNTIME_CONFIG_TX_CONFIG_IDENTITY="$(runtime_config_path_identity "$config_path")" || return 1
+  RUNTIME_CONFIG_TX_CONFIG_OWNER="$(stat -c '%u:%g' -- "$config_path")" || return 1
+  RUNTIME_CONFIG_TX_CONFIG_MODE="$(stat -c '%a' -- "$config_path")" || return 1
+  config_links="$(stat -c '%h' -- "$config_path")" || return 1
+  [[ "$config_links" == "1" ]] || {
+    echo "[!] Runtime config permission contract failed: config.php must have exactly one hardlink (observed: $config_links)" >&2
+    return 1
+  }
+
+  if [[ "$action" == "harden" ]]; then
+    RUNTIME_CONFIG_TX_CONFIG_MUTATED=1
+    chmod 0400 -- "$config_path" || return 1
+    runtime_config_path_matches "$config_path" "$RUNTIME_CONFIG_TX_CONFIG_IDENTITY" file || return 1
+    chown --no-dereference "$root_uid:$runtime_gid" -- "$config_path" || return 1
+    runtime_config_path_matches "$config_path" "$RUNTIME_CONFIG_TX_CONFIG_IDENTITY" file || return 1
+    chmod 0440 -- "$config_path" || return 1
+    runtime_config_path_matches "$config_path" "$RUNTIME_CONFIG_TX_CONFIG_IDENTITY" file || return 1
+  fi
+
+  app_owner="$(stat -c '%u:%g' -- "$app_root")" || return 1
+  app_mode="$(stat -c '%a' -- "$app_root")" || return 1
+  config_owner="$(stat -c '%u:%g' -- "$config_path")" || return 1
+  config_mode="$(stat -c '%a' -- "$config_path")" || return 1
+  config_links="$(stat -c '%h' -- "$config_path")" || return 1
+
+  [[ "$app_owner" == "$root_uid:$root_gid" ]] || {
+    echo "[!] Runtime config permission contract failed: app root owner must be $root_uid:$root_gid (observed: $app_owner)" >&2
+    return 1
+  }
+  [[ "$app_mode" == "755" ]] || {
+    echo "[!] Runtime config permission contract failed: app root mode must be 755 (observed: $app_mode)" >&2
+    return 1
+  }
+  [[ "$config_owner" == "$root_uid:$runtime_gid" ]] || {
+    echo "[!] Runtime config permission contract failed: config.php owner must be $root_uid:$runtime_gid (observed: $config_owner)" >&2
+    return 1
+  }
+  [[ "$config_mode" == "440" ]] || {
+    echo "[!] Runtime config permission contract failed: config.php mode must be 440 (observed: $config_mode)" >&2
+    return 1
+  }
+  [[ "$config_links" == "1" ]] || {
+    echo "[!] Runtime config permission contract failed: config.php must have exactly one hardlink (observed: $config_links)" >&2
+    return 1
+  }
+
+  if ! runuser -u "$runtime_user" -- php -r 'exit(is_readable($argv[1]) ? 0 : 1);' "$config_path"; then
+    echo "[!] Runtime config permission contract failed: config.php is not readable by runtime user: $runtime_user" >&2
+    return 1
+  fi
+  if runtime_user_can_write_path "$runtime_user" "$config_path"; then
+    echo "[!] Runtime config permission contract failed: config.php is writable by runtime user: $runtime_user" >&2
+    return 1
+  fi
+  if runtime_user_can_write_path "$runtime_user" "$app_root"; then
+    echo "[!] Runtime config permission contract failed: app root is writable by runtime user: $runtime_user" >&2
+    return 1
+  fi
+
+  runtime_config_path_matches "$app_root" "$RUNTIME_CONFIG_TX_APP_IDENTITY" directory || return 1
+  runtime_config_path_matches "$config_path" "$RUNTIME_CONFIG_TX_CONFIG_IDENTITY" file || return 1
+  validate_root_controlled_ancestors "$app_root" "$runtime_user" || return 1
+
+  RUNTIME_CONFIG_TX_ACTIVE=0
+  trap - EXIT
+
+  echo "[OK] Runtime config permission contract verified: app_owner=$app_owner app_mode=$app_mode config_owner=$config_owner config_mode=$config_mode config_links=$config_links runtime_user=$runtime_user readable=yes writable=no replaceable=no"
+}
+
+runtime_config_permissions_cli() {
+  local action="${1:-}"
+  local app_root=""
+  local runtime_user=""
+
+  [[ -n "$action" ]] && shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --app-root)
+        [[ $# -ge 2 ]] || return 1
+        app_root="$2"
+        shift 2
+        ;;
+      --runtime-user)
+        [[ $# -ge 2 ]] || return 1
+        runtime_user="$2"
+        shift 2
+        ;;
+      *)
+        echo "[!] Unknown runtime config permission option: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  [[ "$action" == "harden" || "$action" == "verify" ]] || {
+    echo "[!] Runtime config permission action must be harden or verify." >&2
+    return 1
+  }
+  [[ -n "$app_root" && -n "$runtime_user" ]] || {
+    echo "[!] Runtime config permission mode requires --app-root and --runtime-user." >&2
+    return 1
+  }
+  [[ "$EUID" -eq 0 ]] || {
+    echo "[!] Runtime config permission mode requires root privileges." >&2
+    return 1
+  }
+
+  for command_name in chmod chown id php realpath runuser stat; do
+    command -v "$command_name" >/dev/null 2>&1 || {
+      echo "[!] Required command missing: $command_name" >&2
+      return 1
+    }
+  done
+
+  validate_trusted_deploy_script "$CURRENT_SCRIPT_PATH" "$runtime_user" || return 1
+  runtime_config_permissions_contract "$action" "$app_root" "$runtime_user"
+}
+
+apply_runtime_config_permissions() {
+  local action="$1"
+  local app_root="$2"
+
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-permissions '$action' --app-root '$app_root' --runtime-user '$WEBUSER'"
+    return 0
+  fi
+
+  bash "$CURRENT_SCRIPT_PATH" \
+    --runtime-config-permissions "$action" \
+    --app-root "$app_root" \
+    --runtime-user "$WEBUSER"
 }
 
 harden_and_verify_runtime_config() {
   local app_root="$1"
-  local helper_root="${2:-$app_root}"
 
-  apply_runtime_config_permissions harden "$app_root" "$helper_root" \
-    && apply_runtime_config_permissions verify "$app_root" "$helper_root"
+  apply_runtime_config_permissions harden "$app_root" \
+    && apply_runtime_config_permissions verify "$app_root"
 }
 
 install_renderer_dependencies() {
@@ -861,6 +1251,180 @@ run_zero_surprise_live_canary() {
   return 0
 }
 
+runtime_config_rollback_contract() {
+  local active_path="$1"
+  local previous_path="$2"
+  local failed_path="$3"
+  local runtime_user="$4"
+  local active_identity
+  local previous_identity
+  local common_parent
+  local canonical_path
+  local permission_ok=1
+
+  for path_name in active_path previous_path failed_path; do
+    while [[ "${!path_name}" != "/" && "${!path_name}" == */ ]]; do
+      printf -v "$path_name" '%s' "${!path_name%/}"
+    done
+    [[ "${!path_name}" == /* && "${!path_name}" != "/" ]] || {
+      echo "[!] Runtime config rollback failed: release paths must be absolute non-root paths: ${!path_name}" >&2
+      return 1
+    }
+  done
+
+  [[ "$active_path" != "$previous_path" && "$active_path" != "$failed_path" && "$previous_path" != "$failed_path" ]] \
+    || {
+      echo "[!] Runtime config rollback failed: active, previous, and failed paths must be distinct." >&2
+      return 1
+    }
+
+  for existing_path in "$active_path" "$previous_path"; do
+    [[ -d "$existing_path" && ! -L "$existing_path" ]] || {
+      echo "[!] Runtime config rollback failed: release must be a non-symlink directory: $existing_path" >&2
+      return 1
+    }
+    canonical_path="$(realpath -e -- "$existing_path")" || return 1
+    [[ "$canonical_path" == "$existing_path" ]] || {
+      echo "[!] Runtime config rollback failed: release path must be canonical and symlink-free: $existing_path" >&2
+      return 1
+    }
+    validate_root_controlled_ancestors "$existing_path" "$runtime_user" || return 1
+  done
+
+  [[ ! -e "$failed_path" && ! -L "$failed_path" ]] || {
+    echo "[!] Runtime config rollback failed: failed release target already exists: $failed_path" >&2
+    return 1
+  }
+
+  common_parent="$(dirname "$active_path")"
+  [[ "$(dirname "$previous_path")" == "$common_parent" && "$(dirname "$failed_path")" == "$common_parent" ]] \
+    || {
+      echo "[!] Runtime config rollback failed: release paths must share one trusted parent." >&2
+      return 1
+    }
+  canonical_path="$(realpath -e -- "$common_parent")" || return 1
+  [[ "$canonical_path" == "$common_parent" ]] || {
+    echo "[!] Runtime config rollback failed: release parent must be canonical and symlink-free: $common_parent" >&2
+    return 1
+  }
+
+  active_identity="$(runtime_config_path_identity "$active_path")" || return 1
+  previous_identity="$(runtime_config_path_identity "$previous_path")" || return 1
+
+  mv -- "$active_path" "$failed_path" || {
+    echo "[!] Runtime config rollback failed: could not move active release to failed path." >&2
+    return 1
+  }
+  runtime_config_path_matches "$failed_path" "$active_identity" directory || {
+    echo "[!] Runtime config rollback failed: failed path identity does not match prior active release." >&2
+    return 1
+  }
+
+  if ! mv -- "$previous_path" "$active_path"; then
+    echo "[!] Runtime config rollback failed: could not restore previous release." >&2
+    if [[ ! -e "$active_path" ]] \
+      && runtime_config_path_matches "$failed_path" "$active_identity" directory \
+      && mv -- "$failed_path" "$active_path"; then
+      echo "[i] Restored the original active release after rollback switch failure." >&2
+    else
+      echo "[!] Could not restore the original active release; manual intervention required." >&2
+    fi
+    return 1
+  fi
+
+  runtime_config_path_matches "$active_path" "$previous_identity" directory || {
+    echo "[!] Runtime config rollback failed: restored app identity does not match previous release." >&2
+    return 1
+  }
+  runtime_config_path_matches "$failed_path" "$active_identity" directory || {
+    echo "[!] Runtime config rollback failed: failed release identity changed after switch." >&2
+    return 1
+  }
+
+  if ! bash "$CURRENT_SCRIPT_PATH" \
+    --runtime-config-permissions harden \
+    --app-root "$active_path" \
+    --runtime-user "$runtime_user" \
+    || ! bash "$CURRENT_SCRIPT_PATH" \
+      --runtime-config-permissions verify \
+      --app-root "$active_path" \
+      --runtime-user "$runtime_user"; then
+    echo "[!] Restored release runtime config permissions are unverifiable." >&2
+    permission_ok=0
+  fi
+
+  if ! bash "$CURRENT_SCRIPT_PATH" \
+    --runtime-config-permissions harden \
+    --app-root "$failed_path" \
+    --runtime-user "$runtime_user" \
+    || ! bash "$CURRENT_SCRIPT_PATH" \
+      --runtime-config-permissions verify \
+      --app-root "$failed_path" \
+      --runtime-user "$runtime_user"; then
+    echo "[!] Failed release runtime config permissions are unverifiable." >&2
+    permission_ok=0
+  fi
+
+  [[ "$permission_ok" -eq 1 ]] || return 1
+
+  echo "[OK] Runtime config rollback switch and permission contracts verified."
+}
+
+runtime_config_rollback_cli() {
+  local active_path=""
+  local previous_path=""
+  local failed_path=""
+  local runtime_user=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --active)
+        [[ $# -ge 2 ]] || return 1
+        active_path="$2"
+        shift 2
+        ;;
+      --previous)
+        [[ $# -ge 2 ]] || return 1
+        previous_path="$2"
+        shift 2
+        ;;
+      --failed)
+        [[ $# -ge 2 ]] || return 1
+        failed_path="$2"
+        shift 2
+        ;;
+      --runtime-user)
+        [[ $# -ge 2 ]] || return 1
+        runtime_user="$2"
+        shift 2
+        ;;
+      *)
+        echo "[!] Unknown runtime config rollback option: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  [[ -n "$active_path" && -n "$previous_path" && -n "$failed_path" && -n "$runtime_user" ]] || {
+    echo "[!] Runtime config rollback mode requires --active, --previous, --failed, and --runtime-user." >&2
+    return 1
+  }
+  [[ "$EUID" -eq 0 ]] || {
+    echo "[!] Runtime config rollback mode requires root privileges." >&2
+    return 1
+  }
+
+  for command_name in chmod chown id mv php realpath runuser stat; do
+    command -v "$command_name" >/dev/null 2>&1 || {
+      echo "[!] Required command missing: $command_name" >&2
+      return 1
+    }
+  done
+
+  validate_trusted_deploy_script "$CURRENT_SCRIPT_PATH" "$runtime_user" || return 1
+  runtime_config_rollback_contract "$active_path" "$previous_path" "$failed_path" "$runtime_user"
+}
+
 rollback_after_failure() {
   local reason="$1"
   local failed_base="${APP}_failed_${REL}"
@@ -884,13 +1448,14 @@ rollback_after_failure() {
   echo "    Restore source     : $PREV"
 
   if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] bash '$APP/scripts/ops/runtime_config_rollback.sh' --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
+    echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
     exit "$EXIT_ROLLBACK_SUCCESS"
   fi
 
   config_result="ok"
-  if ! bash "$APP/scripts/ops/runtime_config_rollback.sh" \
+  if ! bash "$CURRENT_SCRIPT_PATH" \
+    --runtime-config-rollback \
     --active "$APP" \
     --previous "$PREV" \
     --failed "$failed_path" \
@@ -961,6 +1526,23 @@ rollback_after_failure() {
   exit "$EXIT_ROLLBACK_FAILED"
 }
 
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
+case "${1:-}" in
+  --runtime-config-permissions)
+    shift
+    runtime_config_permissions_cli "$@"
+    exit $?
+    ;;
+  --runtime-config-rollback)
+    shift
+    runtime_config_rollback_cli "$@"
+    exit $?
+    ;;
+esac
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rel) REL="$2"; shift 2;;
@@ -1030,6 +1612,8 @@ absolutize_path_var ZERO_SURPRISE_BREAKGLASS_FILE
 absolutize_path_var ZERO_SURPRISE_CANARY_CREDENTIALS_FILE
 absolutize_path_var ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE
 resolve_reload_services
+validate_trusted_deploy_script "$CURRENT_SCRIPT_PATH" "$WEBUSER" \
+  || die "[!] Host deploy script trust contract failed."
 
 if [[ "$DRYRUN" -eq 0 ]]; then
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
@@ -1152,7 +1736,7 @@ run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
 run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
 restore_runtime_script_permissions
 if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
-  harden_and_verify_runtime_config "$STAGE_ROOT" "$STAGE_ROOT" \
+  harden_and_verify_runtime_config "$STAGE_ROOT" \
     || die "[!] Zero-surprise stage runtime config permission contract failed."
 fi
 run_zero_surprise_predeploy_replay || die "[!] Zero-surprise pre-deploy replay failed. Aborting before atomic switch."
@@ -1183,17 +1767,17 @@ run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
 run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
 restore_runtime_script_permissions
 
-harden_and_verify_runtime_config "$STAGE_ROOT" "$STAGE_ROOT" \
+harden_and_verify_runtime_config "$STAGE_ROOT" \
   || die "[!] Staged runtime config permission contract failed."
-harden_and_verify_runtime_config "$APP" "$STAGE_ROOT" \
+harden_and_verify_runtime_config "$APP" \
   || die "[!] Current live runtime config permission contract failed before atomic switch."
 
 perform_atomic_switch
 
-if ! apply_runtime_config_permissions verify "$APP" "$APP"; then
+if ! apply_runtime_config_permissions verify "$APP"; then
   rollback_after_failure "active runtime config permission contract failed after atomic switch"
 fi
-if ! apply_runtime_config_permissions verify "$PREV" "$APP"; then
+if ! apply_runtime_config_permissions verify "$PREV"; then
   rollback_after_failure "previous runtime config permission contract failed after atomic switch"
 fi
 
@@ -1239,4 +1823,4 @@ echo "    Log            : $LOG"
 echo
 echo "Rollback (manual fallback):"
 MANUAL_FAILED_PATH="${APP}_failed_${REL}"
-echo "  bash '$APP/scripts/ops/runtime_config_rollback.sh' --active '$APP' --previous '$PREV' --failed '$MANUAL_FAILED_PATH' --runtime-user '$WEBUSER'"
+echo "  bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$MANUAL_FAILED_PATH' --runtime-user '$WEBUSER'"
