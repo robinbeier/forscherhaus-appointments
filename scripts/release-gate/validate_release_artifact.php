@@ -66,7 +66,7 @@ function readArchiveEntryTypes(string $archivePath, array $paths): array
     $stdout = runTarCommand(['tar', '-tvzf', $archivePath], $archivePath);
     $lines = preg_split('/\r?\n/', $stdout) ?: [];
     $types = [];
-    $requiredPaths = ReleaseArtifactValidator::requiredPaths();
+    $requiredPaths = array_fill_keys(ReleaseArtifactValidator::requiredPaths(), true);
 
     foreach ($lines as $line) {
         if ($line === '') {
@@ -95,21 +95,44 @@ function readArchiveEntryTypes(string $archivePath, array $paths): array
             continue;
         }
 
-        foreach ($requiredPaths as $requiredPath) {
-            $targetPattern = preg_quote($requiredPath, '~');
-            $isAlias = preg_match('~[[:space:]]link to[[:space:]]+(?:\./)?' . $targetPattern . '/?$~', $line);
+        $hardlinkTarget = readCanonicalArchiveHardlinkTarget($line);
 
-            if ($isAlias !== 1) {
-                continue;
-            }
-
-            $types[$requiredPath] ??= [];
-            $types[$requiredPath][] = 'hardlink-alias';
-            break;
+        if (isset($requiredPaths[$hardlinkTarget])) {
+            $types[$hardlinkTarget] ??= [];
+            $types[$hardlinkTarget][] = 'hardlink-alias';
         }
     }
 
     return $types;
+}
+
+function readCanonicalArchiveHardlinkTarget(string $line): string
+{
+    $matches = [];
+
+    if (preg_match('~[[:space:]]link to[[:space:]]+(.+)$~', $line, $matches) !== 1) {
+        throw new RuntimeException('Release artifact archive contains a malformed or non-canonical hardlink target.');
+    }
+
+    $target = $matches[1];
+
+    if (str_starts_with($target, './')) {
+        $target = substr($target, 2);
+    }
+
+    if ($target === '' || str_starts_with($target, '/')) {
+        throw new RuntimeException('Release artifact archive contains a malformed or non-canonical hardlink target.');
+    }
+
+    foreach (explode('/', $target) as $component) {
+        if ($component === '' || $component === '.' || $component === '..') {
+            throw new RuntimeException(
+                'Release artifact archive contains a malformed or non-canonical hardlink target.',
+            );
+        }
+    }
+
+    return $target;
 }
 
 /**

@@ -238,10 +238,12 @@ final class ReleaseArtifactValidatorTest extends TestCase
         $workspace = sys_get_temp_dir() . '/release-artifact-archive-hardlink-' . bin2hex(random_bytes(4));
         $root = $workspace . '/root';
         $archive = $workspace . '/release.tar.gz';
+        $configMarker = 'SENSITIVE_CONFIG_CONTENT_MUST_NOT_BE_PRINTED';
         mkdir($root, 0777, true);
 
         try {
             $this->createCompleteArtifactTree($root);
+            file_put_contents($root . '/application/config/config.php', $configMarker);
             link($root . '/application/config/config.php', $root . '/unlisted-config-alias.php');
             $tar = $this->runCommand([
                 'tar',
@@ -263,6 +265,95 @@ final class ReleaseArtifactValidatorTest extends TestCase
             self::assertNotSame(0, $result['exit_code']);
             self::assertStringContainsString('application/config/config.php', $result['stderr']);
             self::assertStringContainsString('hardlink aliases', $result['stderr']);
+            self::assertStringNotContainsString($configMarker, $result['stdout']);
+            self::assertStringNotContainsString($configMarker, $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testArchiveCliRejectsHardlinkTargetWithRepeatedSeparator(): void
+    {
+        $configMarker = 'SENSITIVE_CONFIG_CONTENT_MUST_NOT_BE_PRINTED';
+        $result = $this->runArchiveCliWithFakeListing(
+            ['./application/config/config.php', './unlisted-config-alias.php'],
+            [...$this->validArchiveTypeLines(), 'h unlisted-config-alias.php link to ./application//config/config.php'],
+            $configMarker,
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('malformed or non-canonical hardlink target', $result['stderr']);
+        self::assertStringNotContainsString($configMarker, $result['stdout']);
+        self::assertStringNotContainsString($configMarker, $result['stderr']);
+    }
+
+    public function testArchiveCliRejectsHardlinkTargetWithDotSegment(): void
+    {
+        $configMarker = 'SENSITIVE_CONFIG_CONTENT_MUST_NOT_BE_PRINTED';
+        $result = $this->runArchiveCliWithFakeListing(
+            ['./application/config/config.php', './unlisted-config-alias.php'],
+            [
+                ...$this->validArchiveTypeLines(),
+                'h unlisted-config-alias.php link to ./application/./config/config.php',
+            ],
+            $configMarker,
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('malformed or non-canonical hardlink target', $result['stderr']);
+        self::assertStringNotContainsString($configMarker, $result['stdout']);
+        self::assertStringNotContainsString($configMarker, $result['stderr']);
+    }
+
+    public function testArchiveCliRejectsCanonicalAliasAndDuplicateAncestorTogether(): void
+    {
+        $result = $this->runArchiveCliWithFakeListing(
+            ['./application/config/config.php', './unlisted-config-alias.php'],
+            [
+                ...$this->validArchiveTypeLines(),
+                'h unlisted-config-alias.php link to ./application/config/config.php',
+                'd application',
+            ],
+        );
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('application/config/config.php', $result['stderr']);
+        self::assertStringContainsString('application', $result['stderr']);
+        self::assertStringContainsString('hardlink aliases', $result['stderr']);
+        self::assertStringContainsString('safe directory ancestors', $result['stderr']);
+    }
+
+    public function testArchiveCliAcceptsCanonicalHardlinkUnrelatedToRequiredPaths(): void
+    {
+        $workspace = sys_get_temp_dir() . '/release-artifact-archive-safe-hardlink-' . bin2hex(random_bytes(4));
+        $root = $workspace . '/root';
+        $archive = $workspace . '/release.tar.gz';
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            file_put_contents($root . '/unlisted-original.txt', 'not a required file');
+            link($root . '/unlisted-original.txt', $root . '/unlisted-alias.txt');
+            $tar = $this->runCommand([
+                'tar',
+                '-czf',
+                $archive,
+                '-C',
+                $root,
+                ...ReleaseArtifactValidator::requiredPaths(),
+                'unlisted-original.txt',
+                'unlisted-alias.txt',
+            ]);
+            self::assertSame(0, $tar['exit_code'], $tar['stderr']);
+
+            $result = $this->runCommand([
+                'php',
+                dirname(__DIR__, 3) . '/scripts/release-gate/validate_release_artifact.php',
+                '--archive=' . $archive,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('Release artifact archive contains required files', $result['stdout']);
         } finally {
             $this->removeDirectory($workspace);
         }
@@ -319,17 +410,84 @@ final class ReleaseArtifactValidatorTest extends TestCase
     }
 
     /**
-     * @param list<string> $command
+     * @return list<string>
+     */
+    private function validArchiveTypeLines(): array
+    {
+        $requiredFiles = array_fill_keys(ReleaseArtifactValidator::requiredPaths(), true);
+
+        return array_map(
+            static fn(string $path): string => (isset($requiredFiles[$path]) ? '-' : 'd') . ' ' . $path,
+            ReleaseArtifactValidator::archiveTypePaths(),
+        );
+    }
+
+    /**
+     * @param list<string> $additionalEntries
+     * @param list<string> $typeLines
      * @return array{exit_code:int,stdout:string,stderr:string}
      */
-    private function runCommand(array $command): array
+    private function runArchiveCliWithFakeListing(
+        array $additionalEntries,
+        array $typeLines,
+        string $archiveContents = 'archive fixture',
+    ): array {
+        $workspace = sys_get_temp_dir() . '/release-artifact-fake-tar-' . bin2hex(random_bytes(4));
+        $binDirectory = $workspace . '/bin';
+        $archive = $workspace . '/release.tar.gz';
+        mkdir($binDirectory, 0777, true);
+
+        try {
+            file_put_contents($archive, $archiveContents);
+            file_put_contents(
+                $archive . '.entries',
+                implode("\n", [...ReleaseArtifactValidator::requiredPaths(), ...$additionalEntries]) . "\n",
+            );
+            file_put_contents($archive . '.types', implode("\n", $typeLines) . "\n");
+            file_put_contents(
+                $binDirectory . '/tar',
+                <<<'SH'
+                #!/bin/sh
+                case "$1" in
+                    -tzf) /bin/cat "${2}.entries" ;;
+                    -tvzf) /bin/cat "${2}.types" ;;
+                    *) exit 64 ;;
+                esac
+                SH
+                ,
+            );
+            chmod($binDirectory . '/tar', 0755);
+
+            $environment = getenv();
+            self::assertIsArray($environment);
+            $environment['PATH'] = $binDirectory . PATH_SEPARATOR . ($environment['PATH'] ?? '');
+
+            return $this->runCommand(
+                [
+                    'php',
+                    dirname(__DIR__, 3) . '/scripts/release-gate/validate_release_artifact.php',
+                    '--archive=' . $archive,
+                ],
+                $environment,
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    /**
+     * @param list<string> $command
+     * @param array<string,string>|null $environment
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runCommand(array $command, ?array $environment = null): array
     {
         $descriptorSpec = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
-        $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3));
+        $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3), $environment);
         self::assertIsResource($process);
 
         fclose($pipes[0]);
