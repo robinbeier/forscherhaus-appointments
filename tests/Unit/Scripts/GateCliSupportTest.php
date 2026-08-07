@@ -45,6 +45,8 @@ class GateCliSupportTest extends TestCase
         $this->assertStringContainsString('--zero-surprise-dump-file PATH', $result['stdout']);
         $this->assertStringContainsString('--zero-surprise-breakglass-file PATH', $result['stdout']);
         $this->assertStringContainsString('--zero-surprise-incident-webhook-file PATH', $result['stdout']);
+        $this->assertStringContainsString('--runtime-config-permissions harden|verify', $result['stdout']);
+        $this->assertStringContainsString('--runtime-config-rollback --active PATH', $result['stdout']);
     }
 
     public function testDeployDryRunNormalizesRelativeZeroSurprisePathsBeforeStageReplay(): void
@@ -119,9 +121,66 @@ class GateCliSupportTest extends TestCase
                 "restore executable bits for '{$expectedStageRoot}/scripts/ops' shell scripts when present",
                 $result['stdout'],
             );
+
+            $genericPermissionPass = "find '{$expectedStageRoot}' -type f -exec chmod 644 {} +";
+            $stageHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$expectedStageRoot}' --runtime-user 'www-data'";
+            $liveHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$appPath}' --runtime-user 'www-data'";
+            $atomicMove = "mv '{$appPath}' '{$appPath}_prev_ea_20260320_1200'";
+            $activeVerify = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'verify' --app-root '{$appPath}' --runtime-user 'www-data'";
+            $previousVerify = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'verify' --app-root '{$appPath}_prev_ea_20260320_1200' --runtime-user 'www-data'";
+
+            $firstGenericPassPosition = strpos($result['stdout'], $genericPermissionPass);
+            $this->assertIsInt($firstGenericPassPosition);
+            $firstStageHardenPosition = strpos($result['stdout'], $stageHarden, $firstGenericPassPosition + 1);
+            $this->assertIsInt($firstStageHardenPosition);
+            $secondGenericPassPosition = strpos(
+                $result['stdout'],
+                $genericPermissionPass,
+                $firstStageHardenPosition + 1,
+            );
+            $this->assertIsInt($secondGenericPassPosition);
+            $secondStageHardenPosition = strpos($result['stdout'], $stageHarden, $secondGenericPassPosition + 1);
+            $this->assertIsInt($secondStageHardenPosition);
+            $liveHardenPosition = strpos($result['stdout'], $liveHarden, $secondStageHardenPosition + 1);
+            $this->assertIsInt($liveHardenPosition);
+            $atomicMovePosition = strpos($result['stdout'], $atomicMove, $liveHardenPosition + 1);
+            $this->assertIsInt($atomicMovePosition);
+            $activeVerifyPosition = strpos($result['stdout'], $activeVerify, $atomicMovePosition + 1);
+            $this->assertIsInt($activeVerifyPosition);
+            $previousVerifyPosition = strpos($result['stdout'], $previousVerify, $activeVerifyPosition + 1);
+            $this->assertIsInt($previousVerifyPosition);
+
+            $this->assertLessThan($firstStageHardenPosition, $firstGenericPassPosition);
+            $this->assertLessThan($secondStageHardenPosition, $secondGenericPassPosition);
+            $this->assertLessThan($liveHardenPosition, $secondStageHardenPosition);
+            $this->assertLessThan($atomicMovePosition, $liveHardenPosition);
+            $this->assertLessThan($activeVerifyPosition, $atomicMovePosition);
+            $this->assertLessThan($previousVerifyPosition, $activeVerifyPosition);
+
+            $manualFailedPath = $appPath . '_failed_ea_20260320_1200';
+            $this->assertStringContainsString(
+                "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-rollback --active '{$appPath}' --previous '{$appPath}_prev_ea_20260320_1200' --failed '{$manualFailedPath}' --runtime-user 'www-data'",
+                $result['stdout'],
+            );
         } finally {
             $this->removeDirectory($workspace);
         }
+    }
+
+    public function testDeployTopLevelInvokesProductionPostSwitchConfigVerificationAfterAtomicSwitch(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $this->assertIsString($source);
+
+        $atomicSwitch = strrpos($source, "\nperform_atomic_switch\n");
+        $this->assertIsInt($atomicSwitch);
+        $postSwitchVerification = strpos($source, "\nverify_post_switch_runtime_config_contracts\n", $atomicSwitch + 1);
+        $this->assertIsInt($postSwitchVerification);
+        $rendererRestart = strpos($source, "\nif ! restart_renderer_service; then", $postSwitchVerification + 1);
+        $this->assertIsInt($rendererRestart);
+
+        $this->assertLessThan($postSwitchVerification, $atomicSwitch);
+        $this->assertLessThan($rendererRestart, $postSwitchVerification);
     }
 
     public function testClassifyAssertionExitCodeReturnsRuntimeForPreflightChecks(): void
