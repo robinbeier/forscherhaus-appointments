@@ -141,6 +141,21 @@ final class ReleaseArtifactValidatorTest extends TestCase
         }
     }
 
+    public function testDirectoryValidationRejectsUnlistedHardlinkAliasForRequiredFile(): void
+    {
+        $root = sys_get_temp_dir() . '/release-artifact-hardlink-alias-' . bin2hex(random_bytes(4));
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            link($root . '/deploy_ea.sh', $root . '/unlisted-deploy-alias.sh');
+
+            self::assertContains('deploy_ea.sh', ReleaseArtifactValidator::missingDirectoryPaths($root));
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
     public function testArchiveTypeValidationRejectsSymlinkAndDuplicateRequiredFiles(): void
     {
         $entryTypes = [];
@@ -152,10 +167,14 @@ final class ReleaseArtifactValidatorTest extends TestCase
 
         $entryTypes['deploy_ea.sh'] = ['l'];
         $entryTypes['application/controllers/Booking.php'] = ['-', '-'];
+        $entryTypes['application/config/config.php'] = ['-', 'hardlink-alias'];
+        $entryTypes['application'] = ['d', 'd'];
 
         $invalid = ReleaseArtifactValidator::invalidArchivePathTypes($entryTypes);
         self::assertContains('deploy_ea.sh', $invalid);
         self::assertContains('application/controllers/Booking.php', $invalid);
+        self::assertContains('application/config/config.php', $invalid);
+        self::assertContains('application', $invalid);
     }
 
     public function testArchiveCliRejectsRequiredSymlinkEntry(): void
@@ -209,6 +228,77 @@ final class ReleaseArtifactValidatorTest extends TestCase
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('Release artifact archive contains required files', $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testArchiveCliRejectsUnlistedHardlinkAliasToRequiredRegularEntry(): void
+    {
+        $workspace = sys_get_temp_dir() . '/release-artifact-archive-hardlink-' . bin2hex(random_bytes(4));
+        $root = $workspace . '/root';
+        $archive = $workspace . '/release.tar.gz';
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            link($root . '/application/config/config.php', $root . '/unlisted-config-alias.php');
+            $tar = $this->runCommand([
+                'tar',
+                '-czf',
+                $archive,
+                '-C',
+                $root,
+                ...ReleaseArtifactValidator::requiredPaths(),
+                'unlisted-config-alias.php',
+            ]);
+            self::assertSame(0, $tar['exit_code'], $tar['stderr']);
+
+            $result = $this->runCommand([
+                'php',
+                dirname(__DIR__, 3) . '/scripts/release-gate/validate_release_artifact.php',
+                '--archive=' . $archive,
+            ]);
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('application/config/config.php', $result['stderr']);
+            self::assertStringContainsString('hardlink aliases', $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testArchiveCliRejectsDuplicateRequiredAncestor(): void
+    {
+        $workspace = sys_get_temp_dir() . '/release-artifact-archive-duplicate-parent-' . bin2hex(random_bytes(4));
+        $root = $workspace . '/root';
+        $archive = $workspace . '/release.tar.gz';
+        mkdir($root, 0777, true);
+
+        try {
+            $this->createCompleteArtifactTree($root);
+            $tar = $this->runCommand([
+                'tar',
+                '--no-recursion',
+                '-czf',
+                $archive,
+                '-C',
+                $root,
+                'application',
+                'application',
+                ...ReleaseArtifactValidator::requiredPaths(),
+            ]);
+            self::assertSame(0, $tar['exit_code'], $tar['stderr']);
+
+            $result = $this->runCommand([
+                'php',
+                dirname(__DIR__, 3) . '/scripts/release-gate/validate_release_artifact.php',
+                '--archive=' . $archive,
+            ]);
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('application', $result['stderr']);
+            self::assertStringContainsString('safe directory ancestors', $result['stderr']);
         } finally {
             $this->removeDirectory($workspace);
         }

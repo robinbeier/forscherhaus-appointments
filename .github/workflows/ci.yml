@@ -423,6 +423,13 @@ jobs:
           TEST_NAME: Test
         with:
           configuration: phpunit.xml
+      - name: ROB-442 root deployment regression tests
+        run: |
+          sudo php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
+            tests/Unit/Scripts/DeployRuntimeConfigPermissionsTest.php \
+            tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
+            tests/Unit/Scripts/GateCliSupportTest.php \
+            tests/Unit/Scripts/ReleaseArtifactValidatorTest.php
 
   js-lint-changed:
     runs-on: ubuntu-latest

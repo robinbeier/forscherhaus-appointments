@@ -111,6 +111,9 @@ user. Hardening locks the app root before inspecting `config.php`, pins device
 and inode identities across every metadata mutation, and restores prior
 ownership/mode metadata only while those identities still match. Otherwise it
 leaves the root-protected state in place and fails for manual intervention.
+Operationally, config writers must be quiescent before this pass: changing
+Unix ownership or mode cannot revoke writes through an already-open writable
+descriptor.
 
 After the atomic switch, `deploy_ea.sh` verifies:
 

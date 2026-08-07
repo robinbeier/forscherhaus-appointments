@@ -1526,6 +1526,15 @@ rollback_after_failure() {
   exit "$EXIT_ROLLBACK_FAILED"
 }
 
+verify_post_switch_runtime_config_contracts() {
+  if ! apply_runtime_config_permissions verify "$APP"; then
+    rollback_after_failure "active runtime config permission contract failed after atomic switch"
+  fi
+  if ! apply_runtime_config_permissions verify "$PREV"; then
+    rollback_after_failure "previous runtime config permission contract failed after atomic switch"
+  fi
+}
+
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
   return 0
 fi
@@ -1774,12 +1783,7 @@ harden_and_verify_runtime_config "$APP" \
 
 perform_atomic_switch
 
-if ! apply_runtime_config_permissions verify "$APP"; then
-  rollback_after_failure "active runtime config permission contract failed after atomic switch"
-fi
-if ! apply_runtime_config_permissions verify "$PREV"; then
-  rollback_after_failure "previous runtime config permission contract failed after atomic switch"
-fi
+verify_post_switch_runtime_config_contracts
 
 if ! restart_renderer_service; then
   rollback_after_failure "renderer service restart failed"

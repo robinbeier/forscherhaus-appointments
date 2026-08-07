@@ -85,9 +85,7 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
         probe_deep_health_contract() { return 0; }
         emit_zero_surprise_incident() { return 0; }
 
-        if ! apply_runtime_config_permissions verify "$APP"; then
-          rollback_after_failure "active runtime config permission contract failed after atomic switch"
-        fi
+        verify_post_switch_runtime_config_contracts
 
         exit 99
         BASH;

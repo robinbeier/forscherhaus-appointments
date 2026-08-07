@@ -184,7 +184,7 @@ final class ReleaseArtifactValidator
 
         if ($missing !== []) {
             throw new RuntimeException(
-                'Release artifact directory is missing required regular non-symlink files or has symlink ancestors: ' .
+                'Release artifact directory is missing required regular non-symlink files with exactly one hardlink or has symlink ancestors: ' .
                     implode(', ', $missing),
             );
         }
@@ -220,7 +220,7 @@ final class ReleaseArtifactValidator
 
         if ($invalidTypes !== []) {
             throw new RuntimeException(
-                'Release artifact archive required paths are not unique regular non-symlink files with safe directory ancestors: ' .
+                'Release artifact archive required paths are not unique regular non-symlink files without hardlink aliases and with safe directory ancestors: ' .
                     implode(', ', $invalidTypes),
             );
         }
@@ -288,7 +288,9 @@ final class ReleaseArtifactValidator
 
     private static function isRequiredDirectoryPathSafe(string $root, string $requiredPath): bool
     {
-        if ($root === '' || !is_dir($root) || is_link($root)) {
+        $rootMetadata = $root === '' ? false : @lstat($root);
+
+        if (!is_array($rootMetadata) || ($rootMetadata['mode'] & 0170000) !== 0040000) {
             return false;
         }
 
@@ -298,12 +300,17 @@ final class ReleaseArtifactValidator
 
         foreach ($components as $index => $component) {
             $current .= DIRECTORY_SEPARATOR . $component;
+            $metadata = @lstat($current);
 
-            if ($index === $lastIndex) {
-                return is_file($current) && !is_link($current);
+            if (!is_array($metadata)) {
+                return false;
             }
 
-            if (!is_dir($current) || is_link($current)) {
+            if ($index === $lastIndex) {
+                return ($metadata['mode'] & 0170000) === 0100000 && (int) $metadata['nlink'] === 1;
+            }
+
+            if (($metadata['mode'] & 0170000) !== 0040000) {
                 return false;
             }
         }

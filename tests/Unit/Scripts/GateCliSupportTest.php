@@ -167,6 +167,22 @@ class GateCliSupportTest extends TestCase
         }
     }
 
+    public function testDeployTopLevelInvokesProductionPostSwitchConfigVerificationAfterAtomicSwitch(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $this->assertIsString($source);
+
+        $atomicSwitch = strrpos($source, "\nperform_atomic_switch\n");
+        $this->assertIsInt($atomicSwitch);
+        $postSwitchVerification = strpos($source, "\nverify_post_switch_runtime_config_contracts\n", $atomicSwitch + 1);
+        $this->assertIsInt($postSwitchVerification);
+        $rendererRestart = strpos($source, "\nif ! restart_renderer_service; then", $postSwitchVerification + 1);
+        $this->assertIsInt($rendererRestart);
+
+        $this->assertLessThan($postSwitchVerification, $atomicSwitch);
+        $this->assertLessThan($rendererRestart, $postSwitchVerification);
+    }
+
     public function testClassifyAssertionExitCodeReturnsRuntimeForPreflightChecks(): void
     {
         $checks = [

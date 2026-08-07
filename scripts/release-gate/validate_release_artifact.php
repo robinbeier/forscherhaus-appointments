@@ -66,6 +66,7 @@ function readArchiveEntryTypes(string $archivePath, array $paths): array
     $stdout = runTarCommand(['tar', '-tvzf', $archivePath], $archivePath);
     $lines = preg_split('/\r?\n/', $stdout) ?: [];
     $types = [];
+    $requiredPaths = ReleaseArtifactValidator::requiredPaths();
 
     foreach ($lines as $line) {
         if ($line === '') {
@@ -87,6 +88,23 @@ function readArchiveEntryTypes(string $archivePath, array $paths): array
 
             $types[$path] ??= [];
             $types[$path][] = $entryType;
+            break;
+        }
+
+        if ($entryType !== 'h') {
+            continue;
+        }
+
+        foreach ($requiredPaths as $requiredPath) {
+            $targetPattern = preg_quote($requiredPath, '~');
+            $isAlias = preg_match('~[[:space:]]link to[[:space:]]+(?:\./)?' . $targetPattern . '/?$~', $line);
+
+            if ($isAlias !== 1) {
+                continue;
+            }
+
+            $types[$requiredPath] ??= [];
+            $types[$requiredPath][] = 'hardlink-alias';
             break;
         }
     }
