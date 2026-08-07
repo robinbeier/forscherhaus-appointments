@@ -20,7 +20,7 @@ erhalten.
 - Der endgültige `main`-Commit enthält diesen Bericht selbst. Seine SHA wird
   deshalb nicht selbstreferenziell eingebettet, sondern im Abschlussbeleg mit
   `git rev-parse main` und `git rev-parse origin/main` nachgewiesen.
-- Es gibt 5 registrierte Worktrees einschließlich des Hauptarbeitsbaums.
+- Es gibt 6 registrierte Worktrees einschließlich des Hauptarbeitsbaums.
 - Kein vorhandener Branch oder Worktree wurde entfernt.
 - Die Remote-Referenzen wurden vor der Integration und nach der Veröffentlichung
   mit `git fetch --prune origin` aktualisiert.
@@ -52,6 +52,7 @@ upstream	https://github.com/alextselegidis/easyappointments.git (push)
 | `/Users/robinbeier/Developers/forscherhaus-appointments` | `main` | Berichtscommit; SHA siehe Abschlussbeleg | Kanonischer Integrationsbranch | Im vorhandenen Worktree auf `main` fortsetzen |
 | `/Users/robinbeier/.codex/worktrees/1308/forscherhaus-appointments` | `codex/provider-ui-smoke` | `c7550de1` | Provider-UI-Smoke-Test und Release-Gate-Härtung | Im vorhandenen Worktree auf `codex/provider-ui-smoke` fortsetzen |
 | `/Users/robinbeier/.codex/worktrees/2455/forscherhaus-appointments` | `detached` | `55fe4cee` | Prüf-/Snapshot-Worktree ohne eigenen Branch | Vor Änderungen neuen Branch vom genannten HEAD anlegen |
+| `/Users/robinbeier/.codex/worktrees/5522/forscherhaus-appointments` | `detached` | `55fe4cee` | Prüf-/Snapshot-Worktree ohne eigenen Branch | Vor Änderungen neuen Branch vom genannten HEAD anlegen |
 | `/Users/robinbeier/.codex/worktrees/6119ae57-5a7e-4443-a3ac-b8f9ff60cbfe/forscherhaus-appointments` | `detached` | `c58ff909` | Prüf-/Snapshot-Worktree ohne eigenen Branch | Vor Änderungen neuen Branch vom genannten HEAD anlegen |
 | `/Users/robinbeier/.codex/worktrees/b8b0/forscherhaus-appointments` | `codex/rob-398-app-www-security-headers` | `a86b8d68` | ROB-398: app www security headers | Im vorhandenen Worktree auf `codex/rob-398-app-www-security-headers` fortsetzen |
 
