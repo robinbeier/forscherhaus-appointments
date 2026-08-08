@@ -270,6 +270,33 @@ class GateCliSupportTest extends TestCase
         }
     }
 
+    public function testDeployTimingClockFailurePreservesSignalExitStatus(): void
+    {
+        $repoRoot = dirname(__DIR__, 3);
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        SENSITIVE_FIXTURE_PATH="/fixtures/customer-alpha/config.php"
+        deploy_timing_init deploy 0 preparation_artifact
+        deploy_timing_transition switch
+        DEPLOY_TIMING_SWITCH_STATE="complete"
+        deploy_timing_now_ms() { return 74; }
+        trap 'exit 143' TERM
+        kill -TERM "$$"
+        builtin printf 'SIGNAL_HANDLER_RETURNED\n'
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $repoRoot . '/deploy_ea.sh']);
+
+        $this->assertSame(143, $result['exit_code'], $result['stderr']);
+        $this->assertStringNotContainsString('SIGNAL_HANDLER_RETURNED', $result['stdout']);
+        $this->assertStringNotContainsString('"exit_code":74', $result['stdout']);
+        foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+            $this->assertStringNotContainsString('customer-alpha', $timingLine);
+            $this->assertStringNotContainsString('config.php', $timingLine);
+        }
+    }
+
     public function testDeployTimingMarksSecondAtomicMoveFailureAsRecoveryRequired(): void
     {
         $repoRoot = dirname(__DIR__, 3);

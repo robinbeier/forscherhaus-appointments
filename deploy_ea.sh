@@ -90,13 +90,19 @@ deploy_monotonic_ms() {
 deploy_timing_now_ms() {
   local now
 
-  now="$(deploy_monotonic_ms 2>/dev/null || true)"
-  if [[ "$now" =~ ^[0-9]+$ ]]; then
-    printf '%s\n' "$now"
-    return 0
+  if ! now="$(deploy_monotonic_ms 2>/dev/null)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
+    return 1
   fi
 
-  printf '%s\n' "$DEPLOY_TIMING_PHASE_START_MS"
+  printf '%s\n' "$now"
+  return 0
+}
+
+deploy_timing_disable() {
+  DEPLOY_TIMING_ACTIVE=0
+  DEPLOY_TIMING_SUMMARY_EMITTED=0
+  DEPLOY_TIMING_PHASE=""
+  return 0
 }
 
 emit_deploy_timing_phase() {
@@ -143,11 +149,20 @@ deploy_timing_complete_phase() {
   local duration_ms
   local elapsed_ms
 
-  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 && -n "$DEPLOY_TIMING_PHASE" ]] || return 0
+  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && -n "${DEPLOY_TIMING_PHASE:-}" ]] || return 0
 
-  now="$(deploy_timing_now_ms)"
-  duration_ms="$((now - DEPLOY_TIMING_PHASE_START_MS))"
-  elapsed_ms="$((now - DEPLOY_TIMING_START_MS))"
+  if ! now="$(deploy_timing_now_ms)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
+    deploy_timing_disable
+    return 0
+  fi
+  if [[ ! "${DEPLOY_TIMING_PHASE_START_MS:-}" =~ ^[0-9]+$ \
+    || ! "${DEPLOY_TIMING_START_MS:-}" =~ ^[0-9]+$ ]]; then
+    deploy_timing_disable
+    return 0
+  fi
+
+  duration_ms="$((10#$now - 10#$DEPLOY_TIMING_PHASE_START_MS))"
+  elapsed_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
   (( duration_ms >= 0 )) || duration_ms=0
   (( elapsed_ms >= 0 )) || elapsed_ms=0
 
@@ -159,20 +174,30 @@ deploy_timing_complete_phase() {
 deploy_timing_transition() {
   local next_phase="$1"
 
-  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 ]] || return 0
+  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
 
   deploy_timing_complete_phase ok || true
+  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
+  if ! DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)" \
+    || [[ ! "$DEPLOY_TIMING_PHASE_START_MS" =~ ^[0-9]+$ ]]; then
+    deploy_timing_disable
+    return 0
+  fi
   DEPLOY_TIMING_PHASE="$next_phase"
-  DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)"
   return 0
 }
 
 deploy_timing_begin_rollback() {
-  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 ]] || return 0
+  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
 
   deploy_timing_complete_phase failed || true
+  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
+  if ! DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)" \
+    || [[ ! "$DEPLOY_TIMING_PHASE_START_MS" =~ ^[0-9]+$ ]]; then
+    deploy_timing_disable
+    return 0
+  fi
   DEPLOY_TIMING_PHASE="rollback"
-  DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)"
   return 0
 }
 
@@ -183,11 +208,20 @@ deploy_timing_finish() {
   local now
   local total_ms
 
-  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 ]] || return 0
+  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
 
   deploy_timing_complete_phase "$phase_status" || true
-  now="$(deploy_timing_now_ms)"
-  total_ms="$((now - DEPLOY_TIMING_START_MS))"
+  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
+  if ! now="$(deploy_timing_now_ms)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
+    deploy_timing_disable
+    return 0
+  fi
+  if [[ ! "${DEPLOY_TIMING_START_MS:-}" =~ ^[0-9]+$ ]]; then
+    deploy_timing_disable
+    return 0
+  fi
+
+  total_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
   (( total_ms >= 0 )) || total_ms=0
   emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms" || true
 
@@ -202,8 +236,8 @@ deploy_timing_on_exit() {
   local outcome="failed_pre_switch"
 
   trap - EXIT
-  if [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 && "$DEPLOY_TIMING_SUMMARY_EMITTED" -eq 0 ]]; then
-    case "$DEPLOY_TIMING_SWITCH_STATE" in
+  if [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "0" ]]; then
+    case "${DEPLOY_TIMING_SWITCH_STATE:-not_started}" in
       partial)
         outcome="failed_switch_recovery_required"
         ;;
@@ -223,14 +257,12 @@ deploy_timing_init() {
   local initial_phase="$3"
   local now
 
-  if ! now="$(deploy_monotonic_ms)"; then
-    DEPLOY_TIMING_ACTIVE=0
-    DEPLOY_TIMING_SUMMARY_EMITTED=0
-    DEPLOY_TIMING_PHASE=""
+  if ! now="$(deploy_monotonic_ms)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
+    deploy_timing_disable
     return 0
   fi
   DEPLOY_TIMING_MODE="$mode"
-  if [[ "$dry_run" -eq 1 ]]; then
+  if [[ "$dry_run" == "1" ]]; then
     DEPLOY_TIMING_DRY_RUN="true"
   else
     DEPLOY_TIMING_DRY_RUN="false"

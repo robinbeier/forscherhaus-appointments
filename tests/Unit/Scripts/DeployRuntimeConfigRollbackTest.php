@@ -211,6 +211,48 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
         }
     }
 
+    public function testTimingClockFailureAfterSwitchDoesNotStopGateOrAutomaticRollback(): void
+    {
+        $result = $this->runAutomaticRollbackWithTimingFault('clock_failure');
+
+        $this->assertTimingFaultReachedGateAndPreservedExit($result, 30);
+        self::assertStringContainsString('Rollback succeeded, deployment remains failed', $result['stdout']);
+        self::assertDirectoryExists($this->activePath);
+        self::assertDirectoryDoesNotExist($this->previousPath);
+        self::assertDirectoryExists($this->failedPath);
+        self::assertFileExists($this->activePath . '/PREVIOUS_RELEASE_MARKER');
+        self::assertFileExists($this->failedPath . '/ACTIVE_RELEASE_MARKER');
+        $this->assertPermissionContract($this->activePath);
+        $this->assertPermissionContract($this->failedPath);
+    }
+
+    public function testInvalidTimingStateAfterSwitchDoesNotStopGateOrAutomaticRollback(): void
+    {
+        $result = $this->runAutomaticRollbackWithTimingFault('invalid_state');
+
+        $this->assertTimingFaultReachedGateAndPreservedExit($result, 30);
+        self::assertStringContainsString('Rollback succeeded, deployment remains failed', $result['stdout']);
+        self::assertStringNotContainsString('unbound variable', $result['stderr']);
+        self::assertDirectoryExists($this->activePath);
+        self::assertDirectoryDoesNotExist($this->previousPath);
+        self::assertDirectoryExists($this->failedPath);
+    }
+
+    public function testTimingClockFailurePreservesAutomaticRollbackFailureExit(): void
+    {
+        link($this->previousPath . '/config.php', $this->workspace . '/previous-config-hardlink.php');
+
+        $result = $this->runAutomaticRollbackWithTimingFault('clock_failure');
+
+        $this->assertTimingFaultReachedGateAndPreservedExit($result, 31);
+        self::assertStringContainsString('Rollback failed or unverifiable', $result['stdout']);
+        self::assertDirectoryExists($this->activePath);
+        self::assertDirectoryDoesNotExist($this->previousPath);
+        self::assertDirectoryExists($this->failedPath);
+        self::assertFileExists($this->activePath . '/PREVIOUS_RELEASE_MARKER');
+        self::assertFileExists($this->failedPath . '/ACTIVE_RELEASE_MARKER');
+    }
+
     public function testManualRollbackEmitsSuccessfulSecretFreeTimingSummary(): void
     {
         $result = $this->runRollbackMode();
@@ -351,6 +393,85 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
             '--runtime-user',
             'www-data',
         ]);
+    }
+
+    /**
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runAutomaticRollbackWithTimingFault(string $fault): array
+    {
+        chmod($this->activePath . '/config.php', 0644);
+        $releaseId = 'ea_timing_' . $fault;
+        $this->failedPath = $this->activePath . '_failed_' . $releaseId;
+
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        APP="$2"
+        PREV="$3"
+        REL="$4"
+        TIMING_FAULT="$5"
+        WEBUSER="www-data"
+        DRYRUN=0
+        ZERO_SURPRISE_CANARY_REPORT=""
+        restart_renderer_service() { return 0; }
+        probe_renderer_health() { return 0; }
+        reload_services() { return 0; }
+        probe_deep_health_contract() { return 0; }
+        emit_zero_surprise_incident() { return 0; }
+
+        deploy_timing_init deploy 0 preparation_artifact
+        deploy_timing_transition predeploy
+        deploy_timing_transition permissions_stage
+        deploy_timing_transition switch
+        DEPLOY_TIMING_SWITCH_STATE="complete"
+        case "$TIMING_FAULT" in
+          clock_failure)
+            deploy_timing_now_ms() { return 74; }
+            ;;
+          invalid_state)
+            DEPLOY_TIMING_PHASE_START_MS="not_numeric"
+            ;;
+          *)
+            exit 98
+            ;;
+        esac
+        deploy_timing_transition postdeploy_validation
+        builtin printf 'POST_SWITCH_GATE_REACHED\n'
+        verify_post_switch_runtime_config_contracts
+
+        exit 99
+        BASH;
+
+        return $this->runCommand([
+            'bash',
+            '-c',
+            $script,
+            'bash',
+            $this->trustedDeployScript,
+            $this->activePath,
+            $this->previousPath,
+            $releaseId,
+            $fault,
+        ]);
+    }
+
+    /**
+     * @param array{exit_code:int,stdout:string,stderr:string} $result
+     */
+    private function assertTimingFaultReachedGateAndPreservedExit(array $result, int $expectedExit): void
+    {
+        self::assertSame($expectedExit, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('POST_SWITCH_GATE_REACHED', $result['stdout']);
+        self::assertStringContainsString('Starting automatic rollback', $result['stdout']);
+        self::assertStringNotContainsString('"exit_code":74', $result['stdout']);
+        self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $result['stdout'] . $result['stderr']);
+        self::assertFileDoesNotExist($this->maliciousSentinel);
+
+        foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+            self::assertStringNotContainsString($this->workspace, $timingLine);
+            self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $timingLine);
+        }
     }
 
     /**
