@@ -92,8 +92,10 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         $marker = rawurlencode(CustomersUiSmokeContract::SEARCH_MARKER);
         $validEmpty = $this->executeActualCustomersSearch('');
         $validMarker = $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER);
+        $inheritedKey = $this->executeActualCustomersSearch('', true);
         self::assertSame('csrf_token=token&keyword=&limit=20&offset=&order_by=', $validEmpty);
         self::assertSame('csrf_token=token&keyword=' . $marker . '&limit=20&offset=&order_by=', $validMarker);
+        self::assertSame($validEmpty . '&inherited=value', $inheritedKey);
 
         foreach (
             [
@@ -101,9 +103,11 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                 'actual marker client body' => [$validMarker, 'continue'],
                 'unknown key' => [$validEmpty . '&unexpected=value', 'abort'],
                 'prototype key' => [$validEmpty . '&__proto__=polluted', 'abort'],
+                'inherited key serialized by transport' => [$inheritedKey, 'abort'],
                 'duplicate key' => [$validEmpty . '&keyword=duplicate', 'abort'],
                 'non-empty order' => ['csrf_token=token&keyword=&limit=20&offset=&order_by=first_name', 'abort'],
                 'missing offset' => ['csrf_token=token&keyword=&limit=20&order_by=', 'abort'],
+                'missing order' => ['csrf_token=token&keyword=&limit=20&offset=', 'abort'],
                 'wrong limit' => ['csrf_token=token&keyword=&limit=40&offset=&order_by=', 'abort'],
                 'non-empty offset' => ['csrf_token=token&keyword=&limit=20&offset=20&order_by=', 'abort'],
             ]
@@ -214,28 +218,23 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         return trim($stdout);
     }
 
-    private function executeActualCustomersSearch(string $keyword): string
+    private function executeActualCustomersSearch(string $keyword, bool $addInheritedKey = false): string
     {
         $clientPath = __DIR__ . '/../../../assets/js/http/customers_http_client.js';
-        $jqueryPath = __DIR__ . '/../../../node_modules/jquery/dist/jquery.js';
         $nodeScript = <<<'JS'
         const fs = require('fs');
 
-        const jQuerySource = fs.readFileSync(process.argv[2], 'utf8');
-        const serializerStart = jQuerySource.indexOf('var\n\trbracket =');
-        const serializerEnd = jQuerySource.indexOf('\njQuery.fn.extend( {', serializerStart);
-        if (serializerStart < 0 || serializerEnd < 0) {
-            throw new Error('jQuery serializer source is unavailable');
-        }
-
-        const jQuery = {
-            each: (value, callback) => {
-                Object.keys(value).forEach((key) => callback.call(value[key], key, value[key]));
-            },
-            isPlainObject: (value) => value !== null && Object.getPrototypeOf(value) === Object.prototype,
+        const serializeScalarForm = (data) => {
+            const pairs = [];
+            for (const key in data) {
+                const value = data[key];
+                if (value !== null && !['string', 'number', 'undefined'].includes(typeof value)) {
+                    throw new Error('Customers search emitted a non-scalar form value');
+                }
+                pairs.push(encodeURIComponent(key) + '=' + encodeURIComponent(value == null ? '' : value));
+            }
+            return pairs.join('&');
         };
-        const toType = (value) => (value === null ? 'null' : typeof value === 'object' ? 'object' : typeof value);
-        eval(jQuerySource.slice(serializerStart, serializerEnd));
 
         let emitted = null;
         global.App = {Http: {}, Utils: {Url: {siteUrl: (path) => path}}};
@@ -245,19 +244,35 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                 if (url !== 'customers/search') {
                     throw new Error('unexpected Customers client route');
                 }
-                emitted = jQuery.param(data);
+                const expectedKeys = ['csrf_token', 'keyword', 'limit', 'offset', 'order_by'];
+                if (JSON.stringify(Object.keys(data)) !== JSON.stringify(expectedKeys)) {
+                    throw new Error('Customers search emitted an unexpected form shape');
+                }
+                if (
+                    data.csrf_token !== 'token' ||
+                    data.keyword !== process.argv[2] ||
+                    data.limit !== 20 ||
+                    data.offset !== null ||
+                    data.order_by !== undefined
+                ) {
+                    throw new Error('Customers search emitted unexpected form values');
+                }
+                emitted = serializeScalarForm(data);
                 return Promise.resolve([]);
             },
         };
         eval(fs.readFileSync(process.argv[1], 'utf8'));
-        App.Http.Customers.search(process.argv[3], 20, null, null);
+        if (process.argv[3] === 'inherited') {
+            Object.prototype.inherited = 'value';
+        }
+        App.Http.Customers.search(process.argv[2], 20, null, null);
         if (emitted === null) {
             throw new Error('Customers client did not emit a request');
         }
         process.stdout.write(emitted);
         JS;
         $process = proc_open(
-            ['node', '-e', $nodeScript, $clientPath, $jqueryPath, $keyword],
+            ['node', '-e', $nodeScript, $clientPath, $keyword, $addInheritedKey ? 'inherited' : 'clean'],
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
         );
