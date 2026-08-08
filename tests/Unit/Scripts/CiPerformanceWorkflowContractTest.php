@@ -7,8 +7,73 @@ namespace Tests\Unit\Scripts;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
+require_once __DIR__ . '/../../../scripts/ci/measure_ci_performance_baseline.php';
+
 class CiPerformanceWorkflowContractTest extends TestCase
 {
+    public function testVersionedWorkloadContractCoversEveryWorkflowJobDefinition(): void
+    {
+        $workflow = Yaml::parseFile(__DIR__ . '/../../../.github/workflows/ci.yml');
+        self::assertIsArray($workflow);
+        self::assertIsArray($workflow['jobs'] ?? null);
+        $jobs = $workflow['jobs'];
+        $policy = loadCiPerformanceBaselinePolicy(
+            __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
+        );
+
+        self::assertSame(1, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-08T01:16:14Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(
+            array_keys($jobs),
+            array_keys($policy['comparison_profile']['consumer_conclusions']),
+            'Every workflow job must have an explicit expected conclusion in the full-gate profile.',
+        );
+        self::assertSame(
+            $policy['workload_contract']['workflow_jobs_sha256'],
+            fingerprintCiPerformanceBaselineWorkflowJobs($jobs),
+        );
+
+        $fingerprint = fingerprintCiPerformanceBaselineWorkflowJobs($jobs);
+        foreach (array_keys($jobs) as $jobName) {
+            $mutation = $jobs;
+            $mutation[$jobName]['x-ci-performance-contract-probe'] = true;
+            self::assertNotSame(
+                $fingerprint,
+                fingerprintCiPerformanceBaselineWorkflowJobs($mutation),
+                'Workflow job definition is not covered by the workload contract: ' . $jobName,
+            );
+        }
+    }
+
+    public function testWorkloadContractFailsClosedWhenAWorkflowJobChangesWithoutAPolicyUpdate(): void
+    {
+        $workflow = Yaml::parseFile(__DIR__ . '/../../../.github/workflows/ci.yml');
+        self::assertIsArray($workflow);
+        self::assertIsArray($workflow['jobs'] ?? null);
+        $workflow['jobs']['build-test']['x-ci-performance-contract-probe'] = true;
+        $workflowPath = tempnam(sys_get_temp_dir(), 'ci-workload-contract-');
+        self::assertNotFalse($workflowPath);
+        self::assertNotFalse(
+            file_put_contents($workflowPath, json_encode(['jobs' => $workflow['jobs']], JSON_THROW_ON_ERROR)),
+        );
+        $policy = loadCiPerformanceBaselinePolicy(
+            __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
+        );
+
+        try {
+            assertCiPerformanceBaselineWorkflowContract($policy, $workflowPath);
+            self::fail('A changed workflow job must not match an unchanged workload contract.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('workload contract mismatch:', $e->getMessage());
+            self::assertStringContainsString(
+                'increment workload_contract.version and cohort_epoch_utc',
+                $e->getMessage(),
+            );
+        } finally {
+            @unlink($workflowPath);
+        }
+    }
+
     public function testBuildTestRunsTheGeneralSuiteFailClosedBeforePinnedRob444Tests(): void
     {
         $job = $this->workflowJob('build-test');

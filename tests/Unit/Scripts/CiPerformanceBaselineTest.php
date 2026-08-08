@@ -47,8 +47,33 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertSame(7, $policy['cohort_size']);
         self::assertSame(5, $policy['minimum_samples']);
         self::assertSame('nearest_rank', $policy['percentile_method']);
+        self::assertSame(1, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-08T01:16:14Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertMatchesRegularExpression(
+            '/^sha256:[a-f0-9]{64}$/',
+            $policy['workload_contract']['workflow_jobs_sha256'],
+        );
         self::assertContains('deep-runtime-suite', $policy['required_success_jobs']);
         self::assertSame('coverage-delta', $policy['critical_path_jobs'][4]);
+        self::assertSame(2, $policy['comparison_profile']['profile_version']);
+        foreach (
+            [
+                'changes',
+                'build-test',
+                'js-lint-changed',
+                'phpstan-application',
+                'typed-request-dto',
+                'architecture-ownership-map',
+                'architecture-boundaries',
+            ]
+            as $fullGateJob
+        ) {
+            self::assertSame(
+                'success',
+                $policy['comparison_profile']['consumer_conclusions'][$fullGateJob],
+                $fullGateJob,
+            );
+        }
         self::assertSame('success', $policy['comparison_profile']['consumer_conclusions']['api-contract-openapi']);
         self::assertSame('skipped', $policy['comparison_profile']['consumer_conclusions']['heavy-job-duration-trends']);
         self::assertSame(
@@ -69,6 +94,9 @@ class CiPerformanceBaselineTest extends TestCase
             fingerprintCiPerformanceBaselineComparisonProfile($policy['comparison_profile']),
             $documentation,
         );
+        self::assertStringContainsString('0 valid post-epoch baseline samples', $documentation);
+        self::assertStringContainsString('they are not ROB-446 baseline samples', $documentation);
+        self::assertStringContainsString($policy['workload_contract']['workflow_jobs_sha256'], $documentation);
     }
 
     public function testBuildRunSampleMeasuresElapsedQueueJobsAndPhases(): void
@@ -76,7 +104,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 123,
-            'created_at' => '2026-08-07T22:00:00Z',
+            'created_at' => '2026-08-08T01:20:00Z',
             'conclusion' => 'success',
             'html_url' => 'https://example.test/actions/runs/123',
             'head_branch' => 'codex/example',
@@ -118,6 +146,37 @@ class CiPerformanceBaselineTest extends TestCase
             $sample['comparison_profile']['fingerprint'],
         );
         self::assertSame($policy['comparison_profile'], $sample['comparison_profile']['components']);
+        self::assertSame($policy['workload_contract'], $sample['workload_contract']);
+    }
+
+    public function testBuildRunSampleRejectsRunsBeforeTheWorkloadContractEpoch(): void
+    {
+        $policy = $this->policy();
+        $run = [
+            'id' => 122,
+            'created_at' => '2026-08-07T22:35:00Z',
+            'conclusion' => 'success',
+            'run_attempt' => 1,
+            'event' => 'pull_request',
+        ];
+        $jobs = [
+            $this->job('changes', 2, 10),
+            $this->job('deep-check-bootstrap', 12, 55),
+            $this->job('deep-check-seed-snapshot', 57, 267),
+            $this->job('deep-runtime-suite', 57, 324, [$this->step('Build runtime JS assets', 58, 62)]),
+            $this->job('coverage-shard-unit', 57, 86),
+            $this->job('coverage-shard-integration', 269, 486),
+            $this->job('coverage-delta', 488, 519),
+            ...$this->profileConsumerJobs(),
+        ];
+
+        $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy, $this->profileLog());
+
+        self::assertFalse($candidate['eligible']);
+        self::assertContains(
+            'workload_contract_mismatch: run predates cohort epoch 2026-08-08T01:16:14Z',
+            $candidate['reasons'],
+        );
     }
 
     public function testBuildRunSampleExcludesDraftOrPartialProfiles(): void
@@ -125,7 +184,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 456,
-            'created_at' => '2026-08-07T22:00:00Z',
+            'created_at' => '2026-08-08T01:20:00Z',
         ];
         $jobs = [
             $this->job('changes', 2, 10),
@@ -148,7 +207,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 321,
-            'created_at' => '2026-08-07T22:00:00Z',
+            'created_at' => '2026-08-08T01:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -182,7 +241,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $validRun = [
             'id' => 654,
-            'created_at' => '2026-08-07T22:00:00Z',
+            'created_at' => '2026-08-08T01:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -215,7 +274,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 789,
-            'created_at' => '2026-08-07T22:00:00Z',
+            'created_at' => '2026-08-08T01:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -247,7 +306,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 987,
-            'created_at' => '2026-08-07T22:00:00Z',
+            'created_at' => '2026-08-08T01:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -464,6 +523,91 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertStringContainsString('Unknown CLI option', $report['error']['message']);
     }
 
+    public function testWorkflowRunPageSizeAcceptsOneHundredAndRejectsLargerValues(): void
+    {
+        $config = ciPerformanceBaselineDefaultConfig();
+        parseCiPerformanceBaselineCliOptions(
+            ['measure_ci_performance_baseline.php', '--repo=owner/repository', '--per-page=100'],
+            $config,
+        );
+        self::assertSame(100, $config['per_page']);
+
+        foreach ([101, 200] as $pageSize) {
+            $config = ciPerformanceBaselineDefaultConfig();
+            try {
+                parseCiPerformanceBaselineCliOptions(
+                    ['measure_ci_performance_baseline.php', '--repo=owner/repository', '--per-page=' . $pageSize],
+                    $config,
+                );
+                self::fail('Expected --per-page=' . $pageSize . ' to be rejected.');
+            } catch (\RuntimeException $e) {
+                self::assertSame(
+                    '--per-page must not exceed GitHub API maximum 100.',
+                    $e->getMessage(),
+                    (string) $pageSize,
+                );
+            }
+        }
+    }
+
+    public function testWorkflowRunPaginationContinuesAfterAFullOneHundredRunPage(): void
+    {
+        $policy = $this->policy();
+        $runs = [];
+        for ($runId = 1; $runId <= 100; $runId++) {
+            $runs[] = [
+                'id' => $runId,
+                'created_at' => '2026-08-07T22:00:00Z',
+                'conclusion' => 'success',
+                'run_attempt' => 1,
+                'event' => 'pull_request',
+            ];
+        }
+        $runs[] = [
+            'id' => 101,
+            'created_at' => '2026-08-08T01:20:00Z',
+            'conclusion' => 'success',
+            'run_attempt' => 1,
+            'event' => 'pull_request',
+        ];
+        $eligibleJobs = [
+            $this->job('changes', 2, 10),
+            $this->job('deep-check-bootstrap', 12, 55),
+            $this->job('deep-check-seed-snapshot', 57, 267),
+            $this->job('deep-runtime-suite', 57, 324, [$this->step('Build runtime JS assets', 58, 62)]),
+            $this->job('coverage-shard-unit', 57, 86),
+            $this->job('coverage-shard-integration', 269, 486),
+            $this->job('coverage-delta', 488, 519),
+            ...$this->profileConsumerJobs(),
+        ];
+        $requestJson = static function (string $path) use ($runs, $eligibleJobs): array {
+            if (str_contains($path, '/actions/workflows/')) {
+                parse_str((string) parse_url($path, PHP_URL_QUERY), $query);
+                $page = (int) ($query['page'] ?? 1);
+
+                return ['workflow_runs' => array_slice($runs, ($page - 1) * 100, 100)];
+            }
+
+            if (preg_match('~/actions/runs/(?<run_id>[0-9]+)/jobs~', $path, $matches) === 1) {
+                return ['jobs' => (int) $matches['run_id'] === 101 ? $eligibleJobs : []];
+            }
+
+            throw new \RuntimeException('Unexpected fixture path: ' . $path);
+        };
+        $requestText = fn(string $path): string => $this->profileLog();
+        $config = ciPerformanceBaselineDefaultConfig();
+        $config['repo'] = 'owner/repository';
+        $config['per_page'] = 100;
+        $config['max_runs'] = 101;
+
+        $cohort = fetchCiPerformanceBaselineCohort($requestJson, $requestText, $config, $policy);
+
+        self::assertSame(101, $cohort['runs_scanned']);
+        self::assertCount(1, $cohort['samples']);
+        self::assertSame(101, $cohort['samples'][0]['run_id']);
+        self::assertCount(100, $cohort['exclusions']);
+    }
+
     /**
      * @return array{exit_code:int,stdout:string,stderr:string,json_path:string,summary_path:string,report:array<string,mixed>}
      */
@@ -480,7 +624,7 @@ class CiPerformanceBaselineTest extends TestCase
 
         $run = [
             'id' => 123,
-            'created_at' => '2026-08-07T22:00:00Z',
+            'created_at' => '2026-08-08T01:20:00Z',
             'conclusion' => 'success',
             'html_url' => 'https://example.test/actions/runs/123',
             'head_branch' => 'codex/example',
@@ -590,6 +734,10 @@ class CiPerformanceBaselineTest extends TestCase
     private function profileConsumerJobs(): array
     {
         return [
+            $this->job('build-test', 12, 100),
+            $this->job('js-lint-changed', 12, 31),
+            $this->job('phpstan-application', 12, 45),
+            $this->job('typed-request-dto', 12, 29),
             $this->job('typed-request-contracts', 12, 30),
             $this->job('api-contract-openapi', 57, 90),
             $this->job('write-contract-booking', 57, 91),
@@ -597,6 +745,8 @@ class CiPerformanceBaselineTest extends TestCase
             $this->job('booking-controller-flows', 57, 93),
             $this->job('integration-smoke', 57, 94),
             $this->job('pdf-renderer-latency', 57, 95),
+            $this->job('architecture-ownership-map', 12, 20),
+            $this->job('architecture-boundaries', 12, 35),
             $this->job('heavy-job-duration-trends', 55, 55, [], 'skipped'),
         ];
     }
@@ -693,7 +843,7 @@ class CiPerformanceBaselineTest extends TestCase
 
     private function timestamp(int $afterSeconds): string
     {
-        return gmdate('Y-m-d\TH:i:s\Z', strtotime('2026-08-07T22:00:00Z') + $afterSeconds);
+        return gmdate('Y-m-d\TH:i:s\Z', strtotime('2026-08-08T01:20:00Z') + $afterSeconds);
     }
 
     private function repoPolicyPath(): string

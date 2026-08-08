@@ -1,8 +1,9 @@
 # CI Performance Baseline
 
-Canonical measurement contract and provisional ROB-444 cohort. This document
-describes elapsed CI time only; it does not relax a gate, optimize a job, define
-an enforcement goal, or claim an improvement.
+Canonical measurement contract and legacy ROB-444 diagnostic evidence. There
+is currently no established post-change baseline. This document describes
+elapsed CI time only; it does not relax a gate, optimize a job, define an
+enforcement goal, or claim an improvement.
 
 ## Comparison Contract
 
@@ -15,9 +16,14 @@ an enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
+- Workload contract v1 starts at cohort epoch `2026-08-08T01:16:14Z`, the first
+  run created from the expanded `build-test` workload. Runs before this instant
+  are excluded as `workload_contract_mismatch` even when their deep-runtime
+  flags happen to match.
 - Selection is fail-closed: a run is comparable only when its complete profile
-  fingerprint equals the policy fingerprint. Missing jobs, job-log fields, or
-  later Jobs API pages therefore cannot silently produce a match.
+  fingerprint equals the policy fingerprint and it is on or after the workload
+  epoch. Missing jobs, job-log fields, or later API pages therefore cannot
+  silently produce a match.
 - The terminal job is recorded per sample but is not an eligibility condition.
   Normal timing variance may make a different successful job end last without
   excluding the run.
@@ -29,21 +35,38 @@ profile, selected run IDs, exclusions, raw samples, median, p75, critical path,
 and fully observed phase rankings in
 `ci-performance-baseline-latest.json`.
 
+## Versioned Workload Contract
+
+Workload contract v1 pins the canonicalized definitions of every job in
+`.github/workflows/ci.yml` to
+`sha256:cb33cc29d160ae3c7ef2b67fc4a56ad085b16a02f7d0fb41a66dcd2b080d80f3`.
+The workflow contract test also requires every job to have an explicit expected
+`success` or `skipped` conclusion in the comparison profile. This covers the
+always-active `build-test`, JavaScript lint, PHPStan, typed request DTO, and both
+architecture jobs as well as the deep, coverage, contract, write-path, browser,
+and diagnostic jobs.
+
+Any future change to a measured active job definition makes the runtime check
+and workflow contract test fail closed. The maintainer must review the complete
+workload and deliberately increment `workload_contract.version`, move
+`cohort_epoch_utc`, and update `workflow_jobs_sha256`. Moving the epoch restarts
+the cohort; values from an earlier workload contract remain diagnostic only.
+
 ## Profile Fingerprint
 
-Profile version 1 has fingerprint
-`sha256:81dd2023f9a1cd9c9e8682bfce8928b63193e7f8226de71b800216cfa1cc6db6`.
+Profile version 2 has fingerprint
+`sha256:ae9650c696c293d7663d8a39f59c18a5ec334737af17c3300d6b48c913f0d76d`.
 The hash uses canonical JSON with sorted object keys and ordered suite lists.
-Baseline and after-runs must have this exact fingerprint.
+Baseline and after-runs must have this exact fingerprint and workload-contract
+version.
 
 Its inputs are:
 
-- Consumer conclusions `success`: `typed-request-contracts`,
-  `deep-check-bootstrap`, `deep-check-seed-snapshot`, `deep-runtime-suite`,
-  `coverage-shard-unit`, `coverage-shard-integration`, `coverage-delta`,
-  `api-contract-openapi`, `write-contract-booking`, `write-contract-api`,
-  `booking-controller-flows`, `integration-smoke`, and
-  `pdf-renderer-latency`.
+- Consumer conclusions `success`: every workflow job except
+  `heavy-job-duration-trends`, including `changes`, `build-test`,
+  `js-lint-changed`, `phpstan-application`, `typed-request-dto`, both
+  architecture jobs, and all deep-runtime, coverage, contract, write-path,
+  browser, and PDF jobs.
 - Consumer conclusion `skipped`: `heavy-job-duration-trends`, as expected on a
   pull request.
 - Requested suites, in order: `api-contract-openapi`,
@@ -62,14 +85,26 @@ Its inputs are:
 Consumer conclusions and the successful `Build runtime JS assets` step come
 from the Jobs API. Requested suites and runtime mode flags come from the
 `deep-runtime-suite` job log. The Jobs API is read page by page at 100 jobs per
-page before the profile is evaluated.
+page before the profile is evaluated. Workflow-run pages accept at most
+GitHub's API maximum of 100; larger `--per-page` values fail before fetching so
+a capped 100-result page cannot be mistaken for the final page.
 
-## Provisional Homogeneous Cohort
+## Current Post-Epoch Cohort
 
-Captured on 2026-08-08 from GitHub Actions. Only four runs in the inspected,
-unchanged workflow period are currently proven to match the complete profile.
-All happened to end with `coverage-delta` as the latest job; that observation
-does not constrain later samples with the same fingerprint.
+There are currently **0 valid post-epoch baseline samples out of the required
+5**. Run
+[31232249260](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/31232249260)
+was created at the epoch from the expanded workflow, but it was a draft-PR run
+whose full-profile jobs were intentionally skipped. It is not a baseline
+sample. No baseline median or p75 is established.
+
+## Legacy Diagnostic Runs (Not A Baseline)
+
+Captured on 2026-08-08 from GitHub Actions. These four runs were homogeneous
+under the earlier deep-profile definition, but all predate workload contract
+v1 and its expanded `build-test` workload. The selector now excludes every one
+with `workload_contract_mismatch`. Their values are retained only to explain
+earlier diagnosis; they are not ROB-446 baseline samples.
 
 | Run | Created (UTC) | Branch | End-to-end | Initial queue |
 | --- | --- | --- | ---: | ---: |
@@ -78,16 +113,17 @@ does not constrain later samples with the same fingerprint.
 | [31222354173](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/31222354173) | 2026-08-07 22:02 | `codex/rob-442-harden-config-permissions` | 8m 53s | 3s |
 | [31220381778](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/31220381778) | 2026-08-07 21:31 | `codex/rob-442-harden-config-permissions` | 8m 34s | 2s |
 
-The three previously mixed `codex/provider-ui-smoke` runs are excluded: their
+All four happened to end with `coverage-delta`; that legacy observation does
+not constrain future post-epoch samples. The three previously mixed
+`codex/provider-ui-smoke` runs are also excluded: their
 `api-contract-openapi` and `pdf-renderer-latency` consumers were skipped, so
 their fingerprints differ. Draft, partial, cancelled, failed, and retried runs
-are also ineligible. The cohort remains `insufficient_data`; it is not a final
-baseline.
+are ineligible.
 
-## Provisional Descriptive Values
+## Legacy Diagnostic Values
 
-These values describe the four homogeneous samples but are not an activatable
-baseline until the minimum of five matching runs is reached.
+These values describe only the four pre-epoch runs. They must not be used as an
+activatable baseline or combined with future post-epoch runs.
 
 | Metric | Median | p75 | Observed range |
 | --- | ---: | ---: | ---: |
@@ -105,9 +141,9 @@ The 10m 14s maximum had only 2s initial queue while
 `coverage-shard-integration` took 4m 59s. Queue is visible but is not the
 dominant observed driver.
 
-## Observed Critical Path And Largest Shares
+## Legacy Observed Critical Path And Largest Shares
 
-The dependency graph and all four terminal observations identify:
+The earlier dependency graph and all four legacy terminal observations identify:
 
 `changes -> deep-check-bootstrap -> deep-check-seed-snapshot -> coverage-shard-integration -> coverage-delta`
 
@@ -117,7 +153,7 @@ counts from the selected samples. If normal variation makes
 `deep-runtime-suite` finish after `coverage-delta`, the run remains eligible and
 the observed terminal path changes instead of silently biasing the cohort.
 
-The three largest fully observed phases all have a provisional median of
+The three largest fully observed legacy phases all have a diagnostic median of
 183.5s (34.9% of 526s):
 
 | Phase | Median | p75 |
@@ -130,23 +166,23 @@ These shares overlap because jobs run in parallel and must not be added. On the
 critical path, the seed and integration service starts are the two dominant
 serial phases.
 
-## Queue And Cache Conditions
+## Legacy Queue And Cache Conditions
 
-- npm cache: every provisional cohort run reported a primary-key hit in all six
+- npm cache: every legacy cohort run reported a primary-key hit in all six
   Node jobs.
-- Composer download cache: every provisional cohort run reported a miss in
+- Composer download cache: every legacy cohort run reported a miss in
   `deep-check-bootstrap`.
 - GitHub-hosted jobs start with fresh runner filesystems and Docker services.
   The dominant service-start phases therefore reflect a cold-runner condition,
   not a warm local stack.
 
-A later comparison must report these conditions and may not discard slow or
-cold-cache samples merely to improve a number.
+A post-epoch comparison must report these conditions afresh and may not import
+these values or discard slow/cold-cache samples merely to improve a number.
 
 ## ROB-446 Activation Boundary
 
-ROB-446 remains blocked in Backlog. Its goal cannot be activated from four
-samples or from the earlier mixed cohort. After ROB-444 re-review, a fifth
-representative full-profile PR run can satisfy the minimum; only then may the
-homogeneous median and p75 be finalized. This document neither starts a goal
-nor claims a 15% improvement.
+ROB-446 remains blocked in Backlog. Its goal cannot be activated from the four
+pre-epoch runs, the earlier mixed cohort, or the draft run. At least five
+representative full-profile PR runs created on or after workload-contract epoch
+v1 are required before a baseline median and p75 may be finalized. The current
+count is 0/5. This document neither starts a goal nor claims a 15% improvement.

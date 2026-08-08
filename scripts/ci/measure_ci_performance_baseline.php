@@ -32,6 +32,10 @@ function runCiPerformanceBaselineCli(array $argv): int
         }
 
         $policy = loadCiPerformanceBaselinePolicy($config['policy']);
+        assertCiPerformanceBaselineWorkflowContract(
+            $policy,
+            dirname(__DIR__, 2) . '/.github/workflows/' . basename((string) $config['workflow_file']),
+        );
         if ($config['api_fixture'] === null) {
             $requestJson = buildCiPerformanceBaselineGitHubApiRequestClosure($config);
             $requestText = buildCiPerformanceBaselineGitHubLogRequestClosure($config);
@@ -108,7 +112,7 @@ function ciPerformanceBaselineUsage(): string
         '  --policy=PATH          Baseline policy config PHP file path.',
         '  --output-json=PATH     JSON report path.',
         '  --output-summary=PATH  Optional markdown summary output path.',
-        '  --per-page=N           Workflow runs requested per GitHub API page.',
+        '  --per-page=N           Workflow runs requested per GitHub API page (maximum: 100).',
         '  --max-runs=N           Maximum successful workflow runs to inspect.',
         '  --token-env=NAME       Environment variable holding the GitHub token.',
         '  --api-fixture=PATH     Read deterministic workflow/job responses from JSON instead of GitHub.',
@@ -185,10 +189,14 @@ function parseCiPerformanceBaselineCliOptions(array $argv, array &$config): void
                 continue;
             }
 
-            $config[$key] = normalizeCiPerformanceBaselinePositiveInt(
+            $value = normalizeCiPerformanceBaselinePositiveInt(
                 requireCiPerformanceBaselineNonEmptyCliValue($arg, $prefix),
                 rtrim($prefix, '='),
             );
+            if ($key === 'per_page' && $value > 100) {
+                throw new RuntimeException('--per-page must not exceed GitHub API maximum 100.');
+            }
+            $config[$key] = $value;
             $matched = true;
             break;
         }
@@ -244,6 +252,7 @@ function loadCiPerformanceBaselinePolicy(string $path): array
             'minimum_samples',
         ),
         'percentile_method' => (string) ($policy['percentile_method'] ?? ''),
+        'workload_contract' => normalizeCiPerformanceBaselineWorkloadContract($policy['workload_contract'] ?? null),
         'required_success_jobs' => normalizeCiPerformanceBaselineJobList(
             $policy['required_success_jobs'] ?? null,
             'required_success_jobs',
@@ -272,6 +281,89 @@ function loadCiPerformanceBaselinePolicy(string $path): array
     }
 
     return $normalized;
+}
+
+/**
+ * @return array{version:int,cohort_epoch_utc:string,workflow_jobs_sha256:string}
+ */
+function normalizeCiPerformanceBaselineWorkloadContract(mixed $value): array
+{
+    if (!is_array($value) || array_is_list($value)) {
+        throw new RuntimeException('workload_contract must be a map.');
+    }
+
+    $version = normalizeCiPerformanceBaselinePositivePolicyInt($value['version'] ?? null, 'workload_contract.version');
+    $cohortEpoch = $value['cohort_epoch_utc'] ?? null;
+    if (
+        !is_string($cohortEpoch) ||
+        preg_match('/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/', $cohortEpoch) !== 1 ||
+        strtotime($cohortEpoch) === false
+    ) {
+        throw new RuntimeException('workload_contract.cohort_epoch_utc must be an ISO-8601 UTC timestamp.');
+    }
+
+    $workflowJobsSha256 = $value['workflow_jobs_sha256'] ?? null;
+    if (!is_string($workflowJobsSha256) || preg_match('/^sha256:[a-f0-9]{64}$/', $workflowJobsSha256) !== 1) {
+        throw new RuntimeException('workload_contract.workflow_jobs_sha256 must be a sha256 fingerprint.');
+    }
+
+    return [
+        'version' => $version,
+        'cohort_epoch_utc' => $cohortEpoch,
+        'workflow_jobs_sha256' => $workflowJobsSha256,
+    ];
+}
+
+/**
+ * @param array<string, mixed> $policy
+ */
+function assertCiPerformanceBaselineWorkflowContract(array $policy, string $workflowPath): void
+{
+    if (!is_file($workflowPath)) {
+        throw new RuntimeException('Missing workflow file for workload contract: ' . $workflowPath);
+    }
+
+    if (!class_exists(\Symfony\Component\Yaml\Yaml::class)) {
+        $autoload = dirname(__DIR__, 2) . '/vendor/autoload.php';
+        if (is_file($autoload)) {
+            require_once $autoload;
+        }
+    }
+    if (!class_exists(\Symfony\Component\Yaml\Yaml::class)) {
+        throw new RuntimeException('Symfony YAML is required to verify the CI workload contract.');
+    }
+
+    $workflow = \Symfony\Component\Yaml\Yaml::parseFile($workflowPath);
+    $jobs = is_array($workflow) ? $workflow['jobs'] ?? null : null;
+    if (!is_array($jobs) || $jobs === [] || array_is_list($jobs)) {
+        throw new RuntimeException('Workflow workload contract requires a non-empty jobs map.');
+    }
+
+    $expected = (string) ($policy['workload_contract']['workflow_jobs_sha256'] ?? '');
+    $observed = fingerprintCiPerformanceBaselineWorkflowJobs($jobs);
+    if ($observed !== $expected) {
+        throw new RuntimeException(
+            sprintf(
+                'workload contract mismatch: expected %s, observed %s; review all measured jobs and increment ' .
+                    'workload_contract.version and cohort_epoch_utc before updating workflow_jobs_sha256.',
+                $expected,
+                $observed,
+            ),
+        );
+    }
+}
+
+/**
+ * @param array<string, mixed> $jobs
+ */
+function fingerprintCiPerformanceBaselineWorkflowJobs(array $jobs): string
+{
+    $encoded = json_encode(
+        canonicalizeCiPerformanceBaselineValue($jobs),
+        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+    );
+
+    return 'sha256:' . hash('sha256', $encoded);
 }
 
 function normalizeCiPerformanceBaselinePositivePolicyInt(mixed $value, string $field): int
@@ -318,8 +410,8 @@ function normalizeCiPerformanceBaselineComparisonProfile(mixed $value): array
     }
 
     $profileVersion = $value['profile_version'] ?? null;
-    if ($profileVersion !== 1) {
-        throw new RuntimeException('comparison_profile.profile_version must be 1.');
+    if ($profileVersion !== 2) {
+        throw new RuntimeException('comparison_profile.profile_version must be 2.');
     }
 
     $consumerConclusions = normalizeCiPerformanceBaselineStringMap(
@@ -745,6 +837,17 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
         $reasons[] = 'workflow conclusion was not success';
     }
 
+    $cohortEpoch = ciPerformanceBaselineTimestamp(
+        $policy['workload_contract']['cohort_epoch_utc'] ?? null,
+        'workload_contract.cohort_epoch_utc',
+    );
+    if ($createdAt < $cohortEpoch) {
+        $reasons[] = sprintf(
+            'workload_contract_mismatch: run predates cohort epoch %s',
+            (string) $policy['workload_contract']['cohort_epoch_utc'],
+        );
+    }
+
     $runAttempt = $run['run_attempt'] ?? null;
     if (!is_int($runAttempt)) {
         $reasons[] = 'workflow run_attempt was missing or invalid';
@@ -872,6 +975,7 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
             'head_branch' => (string) ($run['head_branch'] ?? ''),
             'head_sha' => (string) ($run['head_sha'] ?? ''),
             'run_attempt' => $runAttempt,
+            'workload_contract' => $policy['workload_contract'],
             'comparison_profile' => [
                 'fingerprint' => $observedFingerprint,
                 'components' => $comparisonProfile,
@@ -922,7 +1026,7 @@ function buildCiPerformanceBaselineComparisonProfile(
     $includeLdap = extractCiPerformanceBaselineBooleanFlag($deepRuntimeLog, 'integration-smoke-include-ldap');
 
     return [
-        'profile_version' => 1,
+        'profile_version' => 2,
         'consumer_conclusions' => $consumerConclusions,
         'requested_suites' => $requestedSuites,
         'change_flags' => [
@@ -1204,6 +1308,7 @@ function buildCiPerformanceBaselineMethodSummary(array $policy): array
         'cohort_size' => $policy['cohort_size'],
         'minimum_samples' => $policy['minimum_samples'],
         'percentile_method' => $policy['percentile_method'],
+        'workload_contract' => $policy['workload_contract'],
         'required_success_jobs' => $policy['required_success_jobs'],
         'tracked_jobs' => $policy['tracked_jobs'],
         'critical_path_jobs' => $policy['critical_path_jobs'],
@@ -1239,6 +1344,11 @@ function renderCiPerformanceBaselineSummary(array $report): string
         sprintf(
             'Comparison profile: `%s`.',
             (string) ($report['method']['comparison_profile']['fingerprint'] ?? 'missing'),
+        ),
+        sprintf(
+            'Workload contract: v%d; cohort epoch `%s`.',
+            (int) ($report['method']['workload_contract']['version'] ?? 0),
+            (string) ($report['method']['workload_contract']['cohort_epoch_utc'] ?? 'missing'),
         ),
         '',
         sprintf(
