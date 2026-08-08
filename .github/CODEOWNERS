@@ -42,6 +42,7 @@
 /application/controllers/Unavailabilities.php @robinbeier
 /application/controllers/Webhooks.php @robinbeier
 /application/controllers/api/v1/** @robinbeier
+/application/core/Customers_ui_smoke_access_policy.php @robinbeier
 /application/core/Provider_ui_smoke_access_policy.php @robinbeier
 /application/libraries/Accounts.php @robinbeier
 /application/libraries/Api.php @robinbeier
@@ -53,6 +54,7 @@
 /application/libraries/Booking_slot_analytics.php @robinbeier
 /application/libraries/Caldav_sync.php @robinbeier
 /application/libraries/Calendar_request_dto_factory.php @robinbeier
+/application/libraries/Customers_ui_smoke_fixture.php @robinbeier
 /application/libraries/Dashboard_heatmap.php @robinbeier
 /application/libraries/Dashboard_metrics.php @robinbeier
 /application/libraries/Dashboard_request_dto_factory.php @robinbeier
@@ -140,11 +142,14 @@
 /assets/js/pages/services.js @robinbeier
 /assets/js/pages/webhooks.js @robinbeier
 /docs/release-gate-booking-confirmation-pdf.md @robinbeier
+/docs/release-gate-customers-ui-smoke.md @robinbeier
 /docs/release-gate-dashboard.md @robinbeier
 /docs/release-gate-provider-ui-smoke.md @robinbeier
 /docs/rest-api.md @robinbeier
 /openapi.yml @robinbeier
 /scripts/ci/** @robinbeier
+/scripts/ops/customers_ui_smoke_principals.sh @robinbeier
+/scripts/ops/prod_customers_ui_smoke.sh @robinbeier
 /scripts/ops/prod_provider_ui_smoke.sh @robinbeier
 /scripts/ops/provider_ui_smoke_principal.sh @robinbeier
 /scripts/release-gate/** @robinbeier

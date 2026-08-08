@@ -100,6 +100,13 @@ calling it directly. See
 [`release-gate-provider-ui-smoke.md`](release-gate-provider-ui-smoke.md) for
 bootstrap, activation, cleanup, and rollback rules.
 
+##### Customers UI Smoke
+
+The root-only `customers_ui_smoke` lifecycle manages four isolated dormant
+principals for the Customers role matrix. Operators must use the guarded
+wrappers. See
+[`release-gate-customers-ui-smoke.md`](release-gate-customers-ui-smoke.md).
+
 
 ##### Help 
 

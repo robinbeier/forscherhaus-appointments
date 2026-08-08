@@ -83,6 +83,38 @@ final class ReleaseArtifactValidatorTest extends TestCase
         self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
+    public function testRequiredPathsCoverCompleteCustomersUiSmokeRuntimeSurface(): void
+    {
+        $requiredPaths = ReleaseArtifactValidator::requiredPaths();
+        $customersUiSmokePaths = [
+            'application/controllers/Console.php',
+            'application/controllers/Customers.php',
+            'application/controllers/Login.php',
+            'application/core/EA_Controller.php',
+            'application/core/Customers_ui_smoke_access_policy.php',
+            'application/libraries/Customers_ui_smoke_fixture.php',
+            'application/views/pages/customers.php',
+            'assets/js/http/customers_http_client.min.js',
+            'assets/js/pages/customers.min.js',
+            'scripts/ops/customers_ui_smoke_principals.sh',
+            'scripts/ops/prod_customers_ui_smoke.sh',
+            'scripts/release-gate/customers_ui_smoke.php',
+            'scripts/release-gate/lib/CustomersUiSmokeContract.php',
+            'scripts/release-gate/lib/CustomersUiSmokeGateRuntime.php',
+            'scripts/release-gate/playwright/customers_ui_smoke.js',
+            'scripts/release-gate/playwright/playwright_cli.sh',
+        ];
+
+        foreach ($customersUiSmokePaths as $path) {
+            self::assertContains($path, $requiredPaths);
+        }
+
+        $missingPath = 'scripts/ops/prod_customers_ui_smoke.sh';
+        $entries = array_values(array_filter($requiredPaths, static fn(string $path): bool => $path !== $missingPath));
+
+        self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));
+    }
+
     public function testForbiddenDirectoryPathsDetectsLocalBuildTree(): void
     {
         $root = sys_get_temp_dir() . '/release-artifact-forbidden-' . bin2hex(random_bytes(4));
