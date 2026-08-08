@@ -8,6 +8,73 @@ use RuntimeException;
 use Throwable;
 
 require_once __DIR__ . '/CustomersUiSmokeContract.php';
+require_once __DIR__ . '/GateAssertions.php';
+
+final class CustomersUiSmokeBrowserFlowException extends RuntimeException
+{
+    /**
+     * @param array<string, bool|int> $safeDetails
+     */
+    public function __construct(public readonly array $safeDetails)
+    {
+        $validatedDetails = customersUiSmokeValidateBrowserResult($safeDetails);
+
+        if ($validatedDetails['ok'] !== false) {
+            throw new GateAssertionException('Customers UI smoke browser failure result is unexpectedly successful.');
+        }
+
+        parent::__construct('Customers UI smoke browser assertions failed.');
+    }
+}
+
+/**
+ * @param array<string, mixed> $result
+ * @return array<string, bool|int>
+ */
+function customersUiSmokeValidateBrowserResult(array $result): array
+{
+    $booleanFields = [
+        'ok',
+        'network_policy_installed',
+        'page_loaded',
+        'initial_search_empty',
+        'synthetic_search_empty',
+        'empty_state_visible',
+        'script_vars_safe',
+        'dom_safe',
+        'response_bodies_safe',
+    ];
+    $integerFields = [
+        'search_response_count',
+        'blocked_request_count',
+        'page_error_count',
+        'console_error_count',
+        'flow_error_count',
+    ];
+    $expectedFields = [...$booleanFields, ...$integerFields];
+    $actualFields = array_keys($result);
+    sort($expectedFields);
+    sort($actualFields);
+
+    if ($actualFields !== $expectedFields) {
+        throw new GateAssertionException('Customers UI smoke browser result has an unexpected field set.');
+    }
+
+    foreach ($booleanFields as $field) {
+        if (!is_bool($result[$field] ?? null)) {
+            throw new GateAssertionException('Customers UI smoke browser result contains a non-boolean field.');
+        }
+    }
+
+    foreach ($integerFields as $field) {
+        if (!is_int($result[$field] ?? null) || (int) $result[$field] < 0) {
+            throw new GateAssertionException('Customers UI smoke browser result contains an invalid count.');
+        }
+    }
+
+    /** @var array<string, bool|int> $result */
+    return $result;
+}
 
 /**
  * @param array<int, array<string, mixed>> $cookies
