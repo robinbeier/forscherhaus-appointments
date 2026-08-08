@@ -147,6 +147,7 @@ remote_principal() {
 
 local_contract_sha256() {
     "${PHP_BIN}" -r '
+        array_shift($argv);
         $root = array_shift($argv);
         $hashes = [];
         foreach ($argv as $relative) {
@@ -164,6 +165,7 @@ remote_contract_sha256() {
     for relative in "${CONTRACT_PATHS[@]}"; do quoted_paths+=("'${relative}'"); done
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
         "exec php -r '\
+            array_shift(\$argv);\
             \$root = array_shift(\$argv);\
             \$hashes = [];\
             foreach (\$argv as \$relative) {\

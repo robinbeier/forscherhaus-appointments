@@ -40,6 +40,29 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         self::assertStringContainsString('remote path is not normalized', $result['output']);
     }
 
+    public function testOperatorContractHashesMatchThroughRealLocalAndRemotePhpCliForms(): void
+    {
+        $result = $this->runOperatorContractHashHarness(dirname(__DIR__, 3));
+
+        self::assertSame(22, $result['exit_code'], $result['output']);
+        self::assertStringContainsString('independent cleanup timer could not be armed', $result['output']);
+        self::assertStringContainsString('remote_hash_executed' . PHP_EOL, $result['ssh_log']);
+        self::assertStringContainsString('cleanup_arm_stopped' . PHP_EOL, $result['ssh_log']);
+        self::assertStringNotContainsString('contract bundle could not be hashed', $result['output']);
+        self::assertStringNotContainsString('deployed Customers contract does not match', $result['output']);
+    }
+
+    public function testOperatorRemoteContractHashFailsClosedForMissingRoot(): void
+    {
+        $missingRoot = sys_get_temp_dir() . '/rob441-missing-' . bin2hex(random_bytes(8));
+        $result = $this->runOperatorContractHashHarness($missingRoot);
+
+        self::assertSame(20, $result['exit_code'], $result['output']);
+        self::assertStringContainsString('deployed contract bundle could not be hashed', $result['output']);
+        self::assertStringContainsString('remote_hash_executed' . PHP_EOL, $result['ssh_log']);
+        self::assertStringNotContainsString('cleanup_arm_stopped' . PHP_EOL, $result['ssh_log']);
+    }
+
     public function testReleaseGateRejectsMissingConfigurationWithoutStartingRuntime(): void
     {
         $result = $this->runCommand(['php', 'scripts/release-gate/customers_ui_smoke.php']);
@@ -104,14 +127,14 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
      * @param list<string> $command
      * @return array{exit_code:int,output:string}
      */
-    private function runCommand(array $command): array
+    private function runCommand(array $command, ?array $environment = null): array
     {
         $descriptorSpec = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
-        $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3));
+        $process = proc_open($command, $descriptorSpec, $pipes, dirname(__DIR__, 3), $environment);
         self::assertIsResource($process);
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);
@@ -123,6 +146,85 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             'exit_code' => proc_close($process),
             'output' => ($stdout === false ? '' : $stdout) . ($stderr === false ? '' : $stderr),
         ];
+    }
+
+    /**
+     * @return array{exit_code:int,output:string,ssh_log:string}
+     */
+    private function runOperatorContractHashHarness(string $remoteRoot): array
+    {
+        $harnessDir = sys_get_temp_dir() . '/rob441-contract-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($harnessDir, 0700));
+        $sshLog = $harnessDir . '/ssh.log';
+        $sshPath = $harnessDir . '/ssh';
+        $curlPath = $harnessDir . '/curl';
+        $npxPath = $harnessDir . '/npx';
+        $pwcliPath = $harnessDir . '/playwright_cli.sh';
+
+        $this->writeExecutable(
+            $sshPath,
+            <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            remote_command="${!#}"
+            if [[ "${remote_command}" == *'exec php -r'* ]]; then
+                printf 'remote_hash_executed\n' >> "${ROB441_SSH_LOG}"
+                exec bash -c "${remote_command}"
+            fi
+            if [[ "${remote_command}" == *'--on-active=10m'* ]]; then
+                printf 'cleanup_arm_stopped\n' >> "${ROB441_SSH_LOG}"
+                exit 75
+            fi
+            exit 0
+            BASH
+            ,
+        );
+        $this->writeExecutable($curlPath, "#!/usr/bin/env bash\nexit 0\n");
+        $this->writeExecutable($npxPath, "#!/usr/bin/env bash\nexit 0\n");
+        $this->writeExecutable($pwcliPath, "#!/usr/bin/env bash\nexit 0\n");
+
+        $baseEnvironment = getenv();
+        self::assertIsArray($baseEnvironment);
+        $path = $harnessDir . PATH_SEPARATOR . ($baseEnvironment['PATH'] ?? '');
+
+        try {
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    'scripts/ops/prod_customers_ui_smoke.sh',
+                    '--prod-ssh-target',
+                    'root@test.invalid',
+                    '--app-root',
+                    $remoteRoot,
+                    '--pwcli-path',
+                    $pwcliPath,
+                ],
+                array_merge($baseEnvironment, [
+                    'PATH' => $path,
+                    'ROB441_SSH_LOG' => $sshLog,
+                    'CUSTOMERS_UI_SMOKE_PHP_BIN' => PHP_BINARY,
+                    'CUSTOMERS_UI_SMOKE_CURL_BIN' => $curlPath,
+                    'CUSTOMERS_UI_SMOKE_NPX_BIN' => $npxPath,
+                ]),
+            );
+            $sshLogContent = file_exists($sshLog) ? file_get_contents($sshLog) : '';
+            self::assertIsString($sshLogContent);
+
+            return $result + ['ssh_log' => $sshLogContent];
+        } finally {
+            foreach ([$sshLog, $sshPath, $curlPath, $npxPath, $pwcliPath] as $pathToRemove) {
+                if (file_exists($pathToRemove)) {
+                    self::assertTrue(unlink($pathToRemove));
+                }
+            }
+            self::assertTrue(rmdir($harnessDir));
+        }
+    }
+
+    private function writeExecutable(string $path, string $contents): void
+    {
+        self::assertNotFalse(file_put_contents($path, $contents));
+        self::assertTrue(chmod($path, 0700));
     }
 
     private function read(string $relativePath): string
