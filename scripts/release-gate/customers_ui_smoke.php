@@ -17,6 +17,8 @@ use ReleaseGate\GateHttpClient;
 use ReleaseGate\GateProcessRunner;
 use function ReleaseGate\buildPlaywrightSessionArguments;
 use function ReleaseGate\customersUiSmokeFinalizeCleanup;
+use function ReleaseGate\customersUiSmokeStorageStatesRemoved;
+use function ReleaseGate\customersUiSmokeTemporaryArtifactsRemoved;
 use function ReleaseGate\customersUiSmokeWithStorageState;
 use function ReleaseGate\normalizeCookieRecordsForPlaywright;
 use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
@@ -39,6 +41,8 @@ $checks = [];
 $sessions = [];
 $tempDirectory = null;
 $cleanupOk = true;
+$storageStatesRemoved = true;
+$temporaryArtifactsRemoved = true;
 $exitCode = CUSTOMERS_UI_SMOKE_SUCCESS;
 $failureCode = null;
 $credentials = null;
@@ -332,7 +336,6 @@ try {
                         (bool) ($result['dom_safe'] ?? false) &&
                         (bool) ($result['response_bodies_safe'] ?? false),
                     'browser_closed' => true,
-                    'storage_state_removed' => !is_file($statePath),
                     'blocked_request_count' => (int) ($result['blocked_request_count'] ?? -1),
                 ];
             });
@@ -358,10 +361,13 @@ try {
         $close = customersUiSmokeRunPwcli($config, $sessionId, ['close'], $repoRoot, max(15, $config['open_timeout']));
         customersUiSmokeAssertProcessSucceeded($close, 'Close Customers UI smoke browser during cleanup');
     });
+    $storageStatesRemoved = customersUiSmokeStorageStatesRemoved($tempDirectory);
+    $temporaryArtifactsRemoved = customersUiSmokeTemporaryArtifactsRemoved($tempDirectory);
+    $cleanupOk = $cleanupOk && $storageStatesRemoved && $temporaryArtifactsRemoved;
 
     putenv('PLAYWRIGHT_MCP_OUTPUT_DIR');
 }
-if (!$cleanupOk && $exitCode === CUSTOMERS_UI_SMOKE_SUCCESS) {
+if (!$cleanupOk) {
     $exitCode = CUSTOMERS_UI_SMOKE_RUNTIME_FAILURE;
     $failureCode = 'cleanup_failed';
 }
@@ -374,7 +380,11 @@ $report = [
     'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
     'role_counts' => ['authorized' => 3, 'denied' => 1],
     'checks' => $checks,
-    'cleanup' => ['status' => $cleanupOk ? 'pass' : 'fail', 'temporary_artifacts_removed' => $cleanupOk],
+    'cleanup' => [
+        'status' => $cleanupOk ? 'pass' : 'fail',
+        'temporary_artifacts_removed' => $temporaryArtifactsRemoved,
+        'storage_state_removed' => $storageStatesRemoved,
+    ],
 ];
 
 if ($config['output_json'] !== null) {

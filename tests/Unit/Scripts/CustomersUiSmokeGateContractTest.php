@@ -39,6 +39,25 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         self::assertStringContainsString("CustomersUiSmokeContract::SEARCH_MARKER . '-not-allowed'", $gate);
         self::assertStringContainsString("putenv('PLAYWRIGHT_MCP_OUTPUT_DIR=' . \$tempDirectory)", $gate);
         self::assertStringContainsString('customersUiSmokeFinalizeCleanup(', $gate);
+        $finalize = strrpos($gate, '$cleanupOk = customersUiSmokeFinalizeCleanup(');
+        $artifactsStatus = strrpos(
+            $gate,
+            '$temporaryArtifactsRemoved = customersUiSmokeTemporaryArtifactsRemoved($tempDirectory);',
+        );
+        $storageStatus = strrpos(
+            $gate,
+            '$storageStatesRemoved = customersUiSmokeStorageStatesRemoved($tempDirectory);',
+        );
+        $reportStatus = strrpos($gate, "'storage_state_removed' => \$storageStatesRemoved");
+        self::assertIsInt($finalize);
+        self::assertIsInt($artifactsStatus);
+        self::assertIsInt($storageStatus);
+        self::assertIsInt($reportStatus);
+        self::assertLessThan($storageStatus, $finalize);
+        self::assertLessThan($artifactsStatus, $finalize);
+        self::assertLessThan($reportStatus, $storageStatus);
+        self::assertLessThan($reportStatus, $artifactsStatus);
+        self::assertStringContainsString("\$failureCode = 'cleanup_failed';", $gate);
         self::assertStringNotContainsString("['screenshot'", $gate);
         self::assertStringNotContainsString("['network'", $gate);
         self::assertStringNotContainsString("['tracing-start'", $gate);
@@ -49,10 +68,13 @@ final class CustomersUiSmokeGateContractTest extends TestCase
     public function testPlaywrightFlowAllowsOnlyCustomersAssetsAndExactEmptySearches(): void
     {
         $snippet = $this->readRepoFile('scripts/release-gate/playwright/customers_ui_smoke.js');
+        $client = $this->readRepoFile('assets/js/http/customers_http_client.js');
 
         self::assertStringContainsString("context.route('**/*', routeHandler)", $snippet);
         self::assertStringContainsString("route.abort('blockedbyclient')", $snippet);
         self::assertStringContainsString("['', config.search_marker].includes(values.keyword)", $snippet);
+        self::assertStringContainsString('order_by: orderBy || undefined', $client);
+        self::assertStringContainsString('Object.create(null)', $snippet);
         self::assertStringContainsString('script_vars_safe', $snippet);
         self::assertStringContainsString('dom_safe', $snippet);
         self::assertStringContainsString('response_bodies_safe', $snippet);
@@ -63,6 +85,32 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         self::assertStringNotContainsString('context.tracing', $snippet);
         self::assertStringNotContainsString('error.message', $snippet);
         self::assertStringNotContainsString('message.text()', $snippet);
+    }
+
+    public function testPlaywrightSearchPolicyExecutesExactClientBodyContractFailClosed(): void
+    {
+        $marker = rawurlencode(CustomersUiSmokeContract::SEARCH_MARKER);
+        $validEmpty = $this->executeActualCustomersSearch('');
+        $validMarker = $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER);
+        self::assertSame('csrf_token=token&keyword=&limit=20&offset=&order_by=', $validEmpty);
+        self::assertSame('csrf_token=token&keyword=' . $marker . '&limit=20&offset=&order_by=', $validMarker);
+
+        foreach (
+            [
+                'actual empty client body' => [$validEmpty, 'continue'],
+                'actual marker client body' => [$validMarker, 'continue'],
+                'unknown key' => [$validEmpty . '&unexpected=value', 'abort'],
+                'prototype key' => [$validEmpty . '&__proto__=polluted', 'abort'],
+                'duplicate key' => [$validEmpty . '&keyword=duplicate', 'abort'],
+                'non-empty order' => ['csrf_token=token&keyword=&limit=20&offset=&order_by=first_name', 'abort'],
+                'missing offset' => ['csrf_token=token&keyword=&limit=20&order_by=', 'abort'],
+                'wrong limit' => ['csrf_token=token&keyword=&limit=40&offset=&order_by=', 'abort'],
+                'non-empty offset' => ['csrf_token=token&keyword=&limit=20&offset=20&order_by=', 'abort'],
+            ]
+            as $label => [$body, $expectedAction]
+        ) {
+            self::assertSame($expectedAction, $this->executeBrowserSearchPolicy($body), $label);
+        }
     }
 
     public function testPrivateTempDirectoryCleanupRejectsSymlinksAndRemovesFiles(): void
@@ -89,5 +137,138 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         self::assertIsString($content);
 
         return $content;
+    }
+
+    private function executeBrowserSearchPolicy(string $body): string
+    {
+        $snippetPath = __DIR__ . '/../../../scripts/release-gate/playwright/customers_ui_smoke.js';
+        $nodeScript = <<<'JS'
+        const fs = require('fs');
+
+        (async () => {
+            const config = {
+                customers_url: 'https://example.test/index.php/customers',
+                allowed_origin: 'https://example.test',
+                customers_route_path: '/index.php/customers',
+                search_route_path: '/index.php/customers/search',
+                asset_path_prefix: '/assets/',
+                favicon_path: '/assets/img/favicon.ico',
+                search_marker: '__EA_CUSTOMERS_UI_SMOKE_V1_EMPTY_SEARCH__',
+                forbidden_keys: [],
+                forbidden_response_markers: [],
+                open_timeout_ms: 100,
+            };
+            const source = fs
+                .readFileSync(process.argv[1], 'utf8')
+                .replace('__CUSTOMERS_UI_SMOKE_CONFIG__', JSON.stringify(config))
+                .replace(/;\s*$/, '');
+            const smoke = eval('(' + source + ')');
+            const body = process.argv[2];
+            let action = 'missing';
+            let routeHandler;
+            const context = {
+                route: async (_pattern, handler) => {
+                    routeHandler = handler;
+                },
+            };
+            const page = {
+                context: () => context,
+                on: () => {},
+                waitForResponse: () => new Promise(() => {}),
+                goto: async () => {
+                    const request = {
+                        method: () => 'POST',
+                        url: () => config.allowed_origin + config.search_route_path,
+                        postData: () => body,
+                    };
+                    await routeHandler({
+                        request: () => request,
+                        continue: async () => {
+                            action = 'continue';
+                        },
+                        abort: async () => {
+                            action = 'abort';
+                        },
+                    });
+                    throw new Error('policy probe complete');
+                },
+            };
+
+            await smoke(page);
+            process.stdout.write(action);
+        })().catch(() => process.exit(1));
+        JS;
+        $process = proc_open(
+            ['node', '-e', $nodeScript, $snippetPath, $body],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), is_string($stderr) ? $stderr : '');
+        self::assertIsString($stdout);
+
+        return trim($stdout);
+    }
+
+    private function executeActualCustomersSearch(string $keyword): string
+    {
+        $clientPath = __DIR__ . '/../../../assets/js/http/customers_http_client.js';
+        $jqueryPath = __DIR__ . '/../../../node_modules/jquery/dist/jquery.js';
+        $nodeScript = <<<'JS'
+        const fs = require('fs');
+
+        const jQuerySource = fs.readFileSync(process.argv[2], 'utf8');
+        const serializerStart = jQuerySource.indexOf('var\n\trbracket =');
+        const serializerEnd = jQuerySource.indexOf('\njQuery.fn.extend( {', serializerStart);
+        if (serializerStart < 0 || serializerEnd < 0) {
+            throw new Error('jQuery serializer source is unavailable');
+        }
+
+        const jQuery = {
+            each: (value, callback) => {
+                Object.keys(value).forEach((key) => callback.call(value[key], key, value[key]));
+            },
+            isPlainObject: (value) => value !== null && Object.getPrototypeOf(value) === Object.prototype,
+        };
+        const toType = (value) => (value === null ? 'null' : typeof value === 'object' ? 'object' : typeof value);
+        eval(jQuerySource.slice(serializerStart, serializerEnd));
+
+        let emitted = null;
+        global.App = {Http: {}, Utils: {Url: {siteUrl: (path) => path}}};
+        global.vars = (key) => (key === 'csrf_token' ? 'token' : undefined);
+        global.$ = {
+            post: (url, data) => {
+                if (url !== 'customers/search') {
+                    throw new Error('unexpected Customers client route');
+                }
+                emitted = jQuery.param(data);
+                return Promise.resolve([]);
+            },
+        };
+        eval(fs.readFileSync(process.argv[1], 'utf8'));
+        App.Http.Customers.search(process.argv[3], 20, null, null);
+        if (emitted === null) {
+            throw new Error('Customers client did not emit a request');
+        }
+        process.stdout.write(emitted);
+        JS;
+        $process = proc_open(
+            ['node', '-e', $nodeScript, $clientPath, $jqueryPath, $keyword],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), is_string($stderr) ? $stderr : '');
+        self::assertIsString($stdout);
+
+        return trim($stdout);
     }
 }

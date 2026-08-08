@@ -12,6 +12,8 @@ require_once __DIR__ . '/../../../scripts/release-gate/lib/CustomersUiSmokeContr
 require_once __DIR__ . '/../../../scripts/release-gate/lib/CustomersUiSmokeGateRuntime.php';
 
 use function ReleaseGate\customersUiSmokeFinalizeCleanup;
+use function ReleaseGate\customersUiSmokeStorageStatesRemoved;
+use function ReleaseGate\customersUiSmokeTemporaryArtifactsRemoved;
 use function ReleaseGate\customersUiSmokeWithStorageState;
 
 final class CustomersUiSmokeGateRuntimeTest extends TestCase
@@ -58,7 +60,7 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
                 $this->tempDirectory,
                 'admin',
                 [['name' => 'ea-cookie', 'value' => 'token', 'domain' => 'example.test', 'path' => '/']],
-                static function (string $statePath) use (&$capturedStatePath): void {
+                static function (string $statePath) use (&$capturedStatePath): array {
                     $capturedStatePath = $statePath;
                     self::assertFileExists($statePath);
 
@@ -73,6 +75,124 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
 
         self::assertNotSame('', $capturedStatePath);
         self::assertFileDoesNotExist($capturedStatePath);
+        self::assertTrue(customersUiSmokeFinalizeCleanup([], $this->tempDirectory, static function (): void {}));
+        self::assertTrue(customersUiSmokeTemporaryArtifactsRemoved($this->tempDirectory));
+    }
+
+    public function testStorageStateSuccessIsReportedOnlyAfterRemoval(): void
+    {
+        $capturedStatePath = '';
+
+        $details = customersUiSmokeWithStorageState(
+            $this->tempDirectory,
+            'admin',
+            [['name' => 'ea-cookie', 'value' => 'token', 'domain' => 'example.test', 'path' => '/']],
+            static function (string $statePath) use (&$capturedStatePath): array {
+                $capturedStatePath = $statePath;
+                self::assertFileExists($statePath);
+
+                return ['browser_closed' => true];
+            },
+        );
+
+        self::assertFileDoesNotExist($capturedStatePath);
+        self::assertTrue($details['storage_state_removed']);
+    }
+
+    public function testStorageStateSetupFailureAfterWriteStillRemovesFile(): void
+    {
+        try {
+            customersUiSmokeWithStorageState(
+                $this->tempDirectory,
+                'admin',
+                [['name' => 'ea-cookie', 'value' => 'token', 'domain' => 'example.test', 'path' => '/']],
+                static fn(string $statePath): array => ['browser_closed' => is_file($statePath)],
+                static fn(string $statePath, int $mode): bool => false,
+            );
+
+            self::fail('A synthetic chmod failure must escape the storage-state helper.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Customers UI smoke browser storage state could not be written safely.',
+                $exception->getMessage(),
+            );
+        }
+
+        self::assertFileDoesNotExist($this->tempDirectory . '/admin-storage-state.json');
+    }
+
+    public function testStorageStateSymlinkIsUnlinkedWithoutTouchingTarget(): void
+    {
+        $outside = tempnam(sys_get_temp_dir(), 'fh-customers-ui-smoke-target-');
+        self::assertIsString($outside);
+
+        try {
+            $details = customersUiSmokeWithStorageState(
+                $this->tempDirectory,
+                'admin',
+                [['name' => 'ea-cookie', 'value' => 'token', 'domain' => 'example.test', 'path' => '/']],
+                static function (string $statePath) use ($outside): array {
+                    self::assertTrue(unlink($statePath));
+                    self::assertTrue(symlink($outside, $statePath));
+
+                    return ['browser_closed' => true];
+                },
+            );
+
+            self::assertTrue($details['storage_state_removed']);
+            self::assertFileExists($outside);
+            self::assertFalse(is_link($this->tempDirectory . '/admin-storage-state.json'));
+        } finally {
+            unlink($outside);
+        }
+    }
+
+    public function testCallbackAndCleanupFailurePrioritizesCleanupAndReportsArtifactsRemaining(): void
+    {
+        $capturedStatePath = '';
+
+        try {
+            customersUiSmokeWithStorageState(
+                $this->tempDirectory,
+                'admin',
+                [['name' => 'ea-cookie', 'value' => 'token', 'domain' => 'example.test', 'path' => '/']],
+                static function (string $statePath) use (&$capturedStatePath): array {
+                    $capturedStatePath = $statePath;
+                    self::assertTrue(unlink($statePath));
+                    self::assertTrue(mkdir($statePath, 0700));
+
+                    throw new RuntimeException('synthetic browser failure');
+                },
+            );
+
+            self::fail('A remaining storage-state path must fail closed.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Customers UI smoke browser storage state could not be removed.',
+                $exception->getMessage(),
+            );
+        }
+
+        self::assertFalse(customersUiSmokeFinalizeCleanup([], $this->tempDirectory, static function (): void {}));
+        self::assertFalse(customersUiSmokeStorageStatesRemoved($this->tempDirectory));
+        self::assertFalse(customersUiSmokeTemporaryArtifactsRemoved($this->tempDirectory));
+        self::assertTrue(rmdir($capturedStatePath));
+    }
+
+    public function testUnrelatedArtifactFailsCleanupWithoutChangingRemovedStorageStateStatus(): void
+    {
+        $details = customersUiSmokeWithStorageState(
+            $this->tempDirectory,
+            'admin',
+            [['name' => 'ea-cookie', 'value' => 'token', 'domain' => 'example.test', 'path' => '/']],
+            static fn(string $statePath): array => ['browser_closed' => is_file($statePath)],
+        );
+        self::assertTrue($details['storage_state_removed']);
+
+        self::assertTrue(mkdir($this->tempDirectory . '/unrelated-artifact', 0700));
+        self::assertFalse(customersUiSmokeFinalizeCleanup([], $this->tempDirectory, static function (): void {}));
+        self::assertTrue(customersUiSmokeStorageStatesRemoved($this->tempDirectory));
+        self::assertFalse(customersUiSmokeTemporaryArtifactsRemoved($this->tempDirectory));
     }
 
     public function testFinalizeCleanupReturnsFalseWhenClosingRemainingSessionFails(): void

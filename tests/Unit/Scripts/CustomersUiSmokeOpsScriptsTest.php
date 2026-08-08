@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use ReleaseGate\ReleaseArtifactValidator;
+
+require_once __DIR__ . '/../../../scripts/release-gate/lib/ReleaseArtifactValidator.php';
 
 final class CustomersUiSmokeOpsScriptsTest extends TestCase
 {
@@ -65,6 +68,23 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         self::assertStringContainsString('exec cat -- \'${CREDENTIALS_FILE}\'', $source);
         self::assertStringNotContainsString('source "${CREDENTIALS_FILE}"', $source);
         self::assertStringNotContainsString('sshpass', $source);
+    }
+
+    public function testOperatorContractBindsCustomersRuntimeAssetsRequiredByReleaseArtifact(): void
+    {
+        $source = $this->read('scripts/ops/prod_customers_ui_smoke.sh');
+        self::assertSame(1, preg_match('/readonly CONTRACT_PATHS=\((?<paths>.*?)\n\)/s', $source, $match));
+        $pathCount = preg_match_all("/^\\s+'([^']+)'$/m", $match['paths'], $pathMatches);
+        self::assertIsInt($pathCount);
+        self::assertGreaterThan(0, $pathCount);
+
+        $contractPaths = $pathMatches[1];
+        $releasePaths = ReleaseArtifactValidator::requiredPaths();
+
+        foreach (['assets/js/http/customers_http_client.min.js', 'assets/js/pages/customers.min.js'] as $runtimeAsset) {
+            self::assertContains($runtimeAsset, $contractPaths);
+            self::assertContains($runtimeAsset, $releasePaths);
+        }
     }
 
     public function testPrincipalWrapperKeepsCredentialOutOfArgumentsAndLogs(): void

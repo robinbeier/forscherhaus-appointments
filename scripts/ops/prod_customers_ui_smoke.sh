@@ -26,7 +26,9 @@ readonly CONTRACT_PATHS=(
     'application/libraries/Customers_ui_smoke_fixture.php'
     'application/views/pages/customers.php'
     'assets/js/http/customers_http_client.js'
+    'assets/js/http/customers_http_client.min.js'
     'assets/js/pages/customers.js'
+    'assets/js/pages/customers.min.js'
     'scripts/ops/customers_ui_smoke_principals.sh'
 )
 

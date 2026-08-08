@@ -42,7 +42,7 @@ async (page) => {
             return null;
         }
 
-        const values = {};
+        const values = Object.create(null);
         for (const pair of body.split('&')) {
             const separator = pair.indexOf('=');
             const rawKey = separator === -1 ? pair : pair.slice(0, separator);
@@ -68,12 +68,20 @@ async (page) => {
         }
 
         const values = parseForm(request.postData() || '');
-        if (!values || !values.csrf_token || !['', config.search_marker].includes(values.keyword)) {
+        if (!values) {
             return false;
         }
 
-        const allowedKeys = new Set(['csrf_token', 'keyword', 'limit', 'offset']);
-        return Object.keys(values).every((key) => allowedKeys.has(key));
+        const expectedKeys = ['csrf_token', 'keyword', 'limit', 'offset', 'order_by'];
+        return (
+            Object.keys(values).length === expectedKeys.length &&
+            expectedKeys.every((key) => Object.prototype.hasOwnProperty.call(values, key)) &&
+            values.csrf_token !== '' &&
+            ['', config.search_marker].includes(values.keyword) &&
+            values.limit === '20' &&
+            values.offset === '' &&
+            values.order_by === ''
+        );
     };
     const routeHandler = async (route) => {
         const request = route.request();
