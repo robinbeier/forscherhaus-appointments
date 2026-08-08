@@ -237,7 +237,12 @@ jobs:
             heavy_job_trends_required:
               - 'scripts/ci/check_heavy_job_duration_trends.php'
               - 'scripts/ci/config/heavy_job_duration_trend_policy.php'
+              - 'scripts/ci/measure_ci_performance_baseline.php'
+              - 'scripts/ci/config/ci_performance_baseline_policy.php'
               - 'tests/Unit/Scripts/HeavyJobDurationTrendTest.php'
+              - 'tests/Unit/Scripts/CiPerformanceBaselineTest.php'
+              - 'tests/Unit/Scripts/CiPerformanceWorkflowContractTest.php'
+              - 'docs/ci-performance-baseline.md'
               - 'composer.json'
               - '.github/workflows/ci.yml'
             pdf_renderer_latency_required:
@@ -1082,16 +1087,33 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "::warning::heavy-job-duration-trends exited with status ${status}; see storage/logs/ci/heavy-job-duration-trends-latest.json."
           fi
+      - name: Measure full-gate PR performance baseline
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set +e
+          php scripts/ci/measure_ci_performance_baseline.php \
+            --output-json=storage/logs/ci/ci-performance-baseline-latest.json
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::ci-performance-baseline exited with status ${status}; see storage/logs/ci/ci-performance-baseline-latest.json."
+          fi
       - name: Upload heavy job trend artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: heavy-job-duration-trends-artifacts
-          path: storage/logs/ci/heavy-job-duration-trends-latest.json
+          path: |
+            storage/logs/ci/heavy-job-duration-trends-latest.json
+            storage/logs/ci/ci-performance-baseline-latest.json
           if-no-files-found: warn
       - name: Diagnostics (heavy job trend report)
         if: always()
-        run: cat storage/logs/ci/heavy-job-duration-trends-latest.json || true
+        run: |
+          cat storage/logs/ci/heavy-job-duration-trends-latest.json || true
+          cat storage/logs/ci/ci-performance-baseline-latest.json || true
 
   pdf-renderer-latency:
     needs:
