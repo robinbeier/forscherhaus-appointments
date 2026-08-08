@@ -422,12 +422,37 @@ jobs:
           php_version: 8.4
           php_extensions: gd
           version: 2
+      - name: Prepare root test configuration
+        run: |
+          test ! -e config.php
+          install -m 0600 config-sample.php config.php
       - name: PHPUnit Tests
-        uses: php-actions/phpunit@v4
-        env:
-          TEST_NAME: Test
-        with:
-          configuration: phpunit.xml
+        run: |
+          set -o pipefail
+          mkdir -p storage/logs/ci
+          if ! APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
+              --configuration phpunit.xml \
+              --fail-on-empty-test-suite \
+              | tee storage/logs/ci/phpunit-general.log; then
+            echo "::error::The general PHPUnit suite failed." >&2
+            exit 1
+          fi
+          grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-general.log
+      - name: ROB-444 CI baseline regression tests
+        run: |
+          set -o pipefail
+          if ! php -d memory_limit=512M vendor/bin/phpunit \
+              --no-configuration \
+              --bootstrap vendor/autoload.php \
+              --fail-on-empty-test-suite \
+              tests/Unit/Scripts/CiPerformanceBaselineTest.php \
+              tests/Unit/Scripts/CiPerformanceWorkflowContractTest.php \
+              tests/Unit/Scripts/CiPathFilterMatrixTest.php \
+              | tee storage/logs/ci/phpunit-rob444.log; then
+            echo "::error::The ROB-444 PHPUnit suite failed." >&2
+            exit 1
+          fi
+          grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-rob444.log
       - name: ROB-442 root deployment regression tests
         run: |
           sudo php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \

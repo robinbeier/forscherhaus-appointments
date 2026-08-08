@@ -49,6 +49,12 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertSame('nearest_rank', $policy['percentile_method']);
         self::assertContains('deep-runtime-suite', $policy['required_success_jobs']);
         self::assertSame('coverage-delta', $policy['critical_path_jobs'][4]);
+        self::assertSame('success', $policy['comparison_profile']['consumer_conclusions']['api-contract-openapi']);
+        self::assertSame('skipped', $policy['comparison_profile']['consumer_conclusions']['heavy-job-duration-trends']);
+        self::assertSame(
+            900,
+            $policy['comparison_profile']['mode_flags']['integration_smoke_browser_bootstrap_timeout'],
+        );
     }
 
     public function testBuildRunSampleMeasuresElapsedQueueJobsAndPhases(): void
@@ -62,20 +68,25 @@ class CiPerformanceBaselineTest extends TestCase
             'head_branch' => 'codex/example',
             'head_sha' => str_repeat('a', 40),
             'run_attempt' => 1,
+            'event' => 'pull_request',
         ];
         $jobs = [
             $this->job('changes', 2, 10),
             $this->job('deep-check-bootstrap', 12, 55),
             $this->job('deep-check-seed-snapshot', 57, 267, [$this->step('Start seed snapshot services', 60, 242)]),
-            $this->job('deep-runtime-suite', 57, 324, [$this->step('Start deep runtime services', 63, 250)]),
+            $this->job('deep-runtime-suite', 57, 324, [
+                $this->step('Build runtime JS assets', 58, 62),
+                $this->step('Start deep runtime services', 63, 250),
+            ]),
             $this->job('coverage-shard-unit', 57, 86),
             $this->job('coverage-shard-integration', 269, 486, [
                 $this->step('Start coverage shard services', 275, 459),
             ]),
             $this->job('coverage-delta', 488, 519),
+            ...$this->profileConsumerJobs(),
         ];
 
-        $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy);
+        $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy, $this->profileLog());
         $sample = $candidate['sample'];
 
         self::assertTrue($candidate['eligible']);
@@ -87,6 +98,10 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertSame(
             184.0,
             $sample['tracked_step_durations_seconds']['coverage-shard-integration :: Start coverage shard services'],
+        );
+        self::assertSame(
+            fingerprintCiPerformanceBaselineComparisonProfile($policy['comparison_profile']),
+            $sample['comparison_profile']['fingerprint'],
         );
     }
 
@@ -111,6 +126,62 @@ class CiPerformanceBaselineTest extends TestCase
 
         self::assertFalse($candidate['eligible']);
         self::assertContains('required job not successful: coverage-delta', $candidate['reasons']);
+    }
+
+    public function testBuildRunSampleRejectsAChangedConsumerProfile(): void
+    {
+        $policy = $this->policy();
+        $run = [
+            'id' => 789,
+            'created_at' => '2026-08-07T22:00:00Z',
+            'conclusion' => 'success',
+            'run_attempt' => 1,
+            'event' => 'pull_request',
+        ];
+        $jobs = [
+            $this->job('changes', 2, 10),
+            $this->job('deep-check-bootstrap', 12, 55),
+            $this->job('deep-check-seed-snapshot', 57, 267),
+            $this->job('deep-runtime-suite', 57, 324, [$this->step('Build runtime JS assets', 58, 62)]),
+            $this->job('coverage-shard-unit', 57, 86),
+            $this->job('coverage-shard-integration', 269, 486),
+            $this->job('coverage-delta', 488, 519),
+            ...array_map(
+                fn(array $job): array => ($job['name'] ?? null) === 'pdf-renderer-latency'
+                    ? $this->job('pdf-renderer-latency', 55, 55, [], 'skipped')
+                    : $job,
+                $this->profileConsumerJobs(),
+            ),
+        ];
+
+        $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy, $this->profileLog());
+
+        self::assertFalse($candidate['eligible']);
+        self::assertStringStartsWith('comparison profile fingerprint mismatch:', $candidate['reasons'][0]);
+    }
+
+    public function testFingerprintCoversEveryComparisonProfileSection(): void
+    {
+        $profile = $this->policy()['comparison_profile'];
+        $fingerprint = fingerprintCiPerformanceBaselineComparisonProfile($profile);
+        $mutations = [];
+
+        $mutation = $profile;
+        $mutation['consumer_conclusions']['pdf-renderer-latency'] = 'skipped';
+        $mutations[] = $mutation;
+        $mutation = $profile;
+        $mutation['requested_suites'] = array_slice($mutation['requested_suites'], 0, -1);
+        $mutations[] = $mutation;
+        $mutation = $profile;
+        $mutation['change_flags']['ldap_guardrail_required'] = false;
+        $mutations[] = $mutation;
+        $mutation = $profile;
+        $mutation['mode_flags']['integration_smoke_browser_bootstrap_timeout'] = 600;
+        $mutations[] = $mutation;
+
+        foreach ($mutations as $mutation) {
+            self::assertNotSame($fingerprint, fingerprintCiPerformanceBaselineComparisonProfile($mutation));
+        }
     }
 
     public function testEvaluationUsesNearestRankP75AndRanksCompletePhases(): void
@@ -179,7 +250,7 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertStringNotContainsString('median 0s', $summary);
     }
 
-    public function testCliProcessWritesPassJsonAndSummaryToRequestedPaths(): void
+    public function testCliProcessPaginatesJobsAndWritesPassJsonAndSummaryToRequestedPaths(): void
     {
         $result = $this->runCliProcessWithFixture(2, 2, 'pass');
         $report = $result['report'];
@@ -189,6 +260,10 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertSame('owner/repository', $report['repository']);
         self::assertSame(2, $report['selection']['eligible_runs']);
         self::assertSame(519, $report['metrics']['workflow_elapsed']['median_seconds']);
+        self::assertSame(
+            $report['method']['comparison_profile']['fingerprint'],
+            $report['runs'][0]['comparison_profile']['fingerprint'],
+        );
         self::assertStringContainsString('[PASS] ci-performance-baseline', $result['stdout']);
         self::assertFileExists($result['summary_path']);
         self::assertStringContainsString(
@@ -255,6 +330,7 @@ class CiPerformanceBaselineTest extends TestCase
             'head_branch' => 'codex/example',
             'head_sha' => str_repeat('a', 40),
             'run_attempt' => 1,
+            'event' => 'pull_request',
         ];
         $secondRun = $run;
         $secondRun['id'] = 124;
@@ -264,20 +340,38 @@ class CiPerformanceBaselineTest extends TestCase
             $this->job('changes', 2, 10),
             $this->job('deep-check-bootstrap', 12, 55),
             $this->job('deep-check-seed-snapshot', 57, 267, [$this->step('Start seed snapshot services', 60, 242)]),
-            $this->job('deep-runtime-suite', 57, 324, [$this->step('Start deep runtime services', 63, 250)]),
+            $this->job('deep-runtime-suite', 57, 324, [
+                $this->step('Build runtime JS assets', 58, 62),
+                $this->step('Start deep runtime services', 63, 250),
+            ]),
             $this->job('coverage-shard-unit', 57, 86),
             $this->job('coverage-shard-integration', 269, 486, [
                 $this->step('Start coverage shard services', 275, 459),
             ]),
             $this->job('coverage-delta', 488, 519),
+            ...$this->profileConsumerJobs(),
         ];
+        $fillerJobs = [];
+        for ($index = 0; $index < 100; $index++) {
+            $fillerJobs[] = $this->job('page-one-skipped-' . $index, 1, 1, [], 'skipped');
+        }
+        $pagedJobs = [...$fillerJobs, ...$jobs];
+        $deepRuntimeJobId = null;
+        foreach ($jobs as $job) {
+            if ($job['name'] === 'deep-runtime-suite') {
+                $deepRuntimeJobId = (string) $job['id'];
+                break;
+            }
+        }
+        self::assertNotNull($deepRuntimeJobId);
         $apiFixturePath = $fixtureDir . '/api-fixture.json';
         file_put_contents(
             $apiFixturePath,
             json_encode(
                 [
                     'workflow_runs' => $name === 'insufficient' ? [] : [$run, $secondRun],
-                    'jobs_by_run_id' => ['123' => $jobs, '124' => $jobs],
+                    'jobs_by_run_id' => ['123' => $pagedJobs, '124' => $pagedJobs],
+                    'job_logs_by_job_id' => [$deepRuntimeJobId => $this->profileLog()],
                 ],
                 JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR,
             ),
@@ -331,36 +425,35 @@ class CiPerformanceBaselineTest extends TestCase
      */
     private function policy(): array
     {
+        return loadCiPerformanceBaselinePolicy($this->repoPolicyPath());
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function profileConsumerJobs(): array
+    {
         return [
-            'cohort_size' => 7,
-            'minimum_samples' => 5,
-            'percentile_method' => 'nearest_rank',
-            'required_success_jobs' => [
-                'changes',
-                'deep-check-bootstrap',
-                'deep-check-seed-snapshot',
-                'deep-runtime-suite',
-                'coverage-shard-unit',
-                'coverage-shard-integration',
-                'coverage-delta',
-            ],
-            'tracked_jobs' => [
-                'changes',
-                'deep-check-bootstrap',
-                'deep-check-seed-snapshot',
-                'deep-runtime-suite',
-                'coverage-shard-unit',
-                'coverage-shard-integration',
-                'coverage-delta',
-            ],
-            'critical_path_jobs' => [
-                'changes',
-                'deep-check-bootstrap',
-                'deep-check-seed-snapshot',
-                'coverage-shard-integration',
-                'coverage-delta',
-            ],
+            $this->job('typed-request-contracts', 12, 30),
+            $this->job('api-contract-openapi', 57, 90),
+            $this->job('write-contract-booking', 57, 91),
+            $this->job('write-contract-api', 57, 92),
+            $this->job('booking-controller-flows', 57, 93),
+            $this->job('integration-smoke', 57, 94),
+            $this->job('pdf-renderer-latency', 57, 95),
+            $this->job('heavy-job-duration-trends', 55, 55, [], 'skipped'),
         ];
+    }
+
+    private function profileLog(): string
+    {
+        return implode(' ', [
+            'php scripts/ci/run_deep_runtime_suite.php',
+            '--suites=api-contract-openapi,write-contract-booking,write-contract-api,booking-controller-flows,integration-smoke',
+            '--integration-smoke-include-ldap=true',
+            '--integration-smoke-browser-bootstrap-timeout=900',
+            '--integration-smoke-browser-evidence=on-failure',
+        ]);
     }
 
     /**
@@ -377,6 +470,7 @@ class CiPerformanceBaselineTest extends TestCase
         $createdAfterSeconds = max(0, $startedAfterSeconds - 2);
 
         return [
+            'id' => (int) sprintf('%u', crc32($name)),
             'name' => $name,
             'conclusion' => $conclusion,
             'created_at' => $this->timestamp($createdAfterSeconds),

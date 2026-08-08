@@ -32,11 +32,15 @@ function runCiPerformanceBaselineCli(array $argv): int
         }
 
         $policy = loadCiPerformanceBaselinePolicy($config['policy']);
-        $request =
-            $config['api_fixture'] === null
-                ? buildCiPerformanceBaselineGitHubApiRequestClosure($config)
-                : buildCiPerformanceBaselineFixtureRequestClosure((string) $config['api_fixture']);
-        $cohort = fetchCiPerformanceBaselineCohort($request, $config, $policy);
+        if ($config['api_fixture'] === null) {
+            $requestJson = buildCiPerformanceBaselineGitHubApiRequestClosure($config);
+            $requestText = buildCiPerformanceBaselineGitHubLogRequestClosure($config);
+        } else {
+            $fixture = loadCiPerformanceBaselineFixture((string) $config['api_fixture']);
+            $requestJson = buildCiPerformanceBaselineFixtureRequestClosure($fixture);
+            $requestText = buildCiPerformanceBaselineFixtureLogRequestClosure($fixture);
+        }
+        $cohort = fetchCiPerformanceBaselineCohort($requestJson, $requestText, $config, $policy);
         $evaluation = evaluateCiPerformanceBaseline($policy, $cohort['samples']);
         $report = [
             'schema_version' => 1,
@@ -249,6 +253,7 @@ function loadCiPerformanceBaselinePolicy(string $path): array
             $policy['critical_path_jobs'] ?? null,
             'critical_path_jobs',
         ),
+        'comparison_profile' => normalizeCiPerformanceBaselineComparisonProfile($policy['comparison_profile'] ?? null),
     ];
 
     if ($normalized['minimum_samples'] > $normalized['cohort_size']) {
@@ -301,6 +306,94 @@ function normalizeCiPerformanceBaselineJobList(mixed $value, string $field): arr
     }
 
     return $jobs;
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function normalizeCiPerformanceBaselineComparisonProfile(mixed $value): array
+{
+    if (!is_array($value)) {
+        throw new RuntimeException('comparison_profile must be an array.');
+    }
+
+    $profileVersion = $value['profile_version'] ?? null;
+    if ($profileVersion !== 1) {
+        throw new RuntimeException('comparison_profile.profile_version must be 1.');
+    }
+
+    $consumerConclusions = normalizeCiPerformanceBaselineStringMap(
+        $value['consumer_conclusions'] ?? null,
+        'comparison_profile.consumer_conclusions',
+    );
+    foreach ($consumerConclusions as $jobName => $conclusion) {
+        if (!in_array($conclusion, ['success', 'skipped'], true)) {
+            throw new RuntimeException(
+                'comparison_profile.consumer_conclusions.' . $jobName . ' must be success or skipped.',
+            );
+        }
+    }
+
+    return [
+        'profile_version' => $profileVersion,
+        'consumer_conclusions' => $consumerConclusions,
+        'requested_suites' => normalizeCiPerformanceBaselineJobList(
+            $value['requested_suites'] ?? null,
+            'comparison_profile.requested_suites',
+        ),
+        'change_flags' => normalizeCiPerformanceBaselineScalarMap(
+            $value['change_flags'] ?? null,
+            'comparison_profile.change_flags',
+        ),
+        'mode_flags' => normalizeCiPerformanceBaselineScalarMap(
+            $value['mode_flags'] ?? null,
+            'comparison_profile.mode_flags',
+        ),
+    ];
+}
+
+/**
+ * @return array<string, string>
+ */
+function normalizeCiPerformanceBaselineStringMap(mixed $value, string $field): array
+{
+    if (!is_array($value) || $value === [] || array_is_list($value)) {
+        throw new RuntimeException($field . ' must be a non-empty map.');
+    }
+
+    $normalized = [];
+    foreach ($value as $key => $item) {
+        if (!is_string($key) || trim($key) === '' || !is_string($item) || trim($item) === '') {
+            throw new RuntimeException($field . ' must contain non-empty string keys and values.');
+        }
+        $normalized[trim($key)] = trim($item);
+    }
+
+    return $normalized;
+}
+
+/**
+ * @return array<string, bool|int|float|string>
+ */
+function normalizeCiPerformanceBaselineScalarMap(mixed $value, string $field): array
+{
+    if (!is_array($value) || $value === [] || array_is_list($value)) {
+        throw new RuntimeException($field . ' must be a non-empty map.');
+    }
+
+    $normalized = [];
+    foreach ($value as $key => $item) {
+        if (
+            !is_string($key) ||
+            trim($key) === '' ||
+            (!is_bool($item) && !is_int($item) && !is_float($item) && !is_string($item))
+        ) {
+            throw new RuntimeException($field . ' must contain scalar values with non-empty string keys.');
+        }
+        $normalized[trim($key)] = $item;
+    }
+
+    return $normalized;
 }
 
 /**
@@ -362,9 +455,56 @@ function buildCiPerformanceBaselineGitHubApiRequestClosure(array $config): Closu
 }
 
 /**
- * @return Closure(string): array<string, mixed>
+ * @param array<string, mixed> $config
+ * @return Closure(string): string
  */
-function buildCiPerformanceBaselineFixtureRequestClosure(string $path): Closure
+function buildCiPerformanceBaselineGitHubLogRequestClosure(array $config): Closure
+{
+    $token = getenv((string) $config['token_env']);
+    if (!is_string($token) || trim($token) === '') {
+        throw new RuntimeException('Missing GitHub token in environment variable ' . $config['token_env'] . '.');
+    }
+
+    $baseUrl = rtrim((string) $config['github_api_url'], '/');
+
+    return static function (string $path) use ($token, $baseUrl): string {
+        $curl = curl_init($baseUrl . $path);
+        if ($curl === false) {
+            throw new RuntimeException('Failed to initialize curl for GitHub log request.');
+        }
+
+        curl_setopt_array($curl, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/vnd.github+json',
+                'Authorization: Bearer ' . $token,
+                'User-Agent: forscherhaus-ci-performance-baseline',
+                'X-GitHub-Api-Version: 2022-11-28',
+            ],
+        ]);
+
+        $response = curl_exec($curl);
+        $httpCode = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $error = curl_error($curl);
+
+        if ($response === false) {
+            throw new RuntimeException('GitHub log request failed: ' . $error);
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            throw new RuntimeException(sprintf('GitHub log request %s failed with HTTP %d.', $path, $httpCode));
+        }
+
+        return $response;
+    };
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function loadCiPerformanceBaselineFixture(string $path): array
 {
     if (!is_file($path)) {
         throw new RuntimeException('Missing CI performance baseline API fixture: ' . $path);
@@ -380,6 +520,15 @@ function buildCiPerformanceBaselineFixtureRequestClosure(string $path): Closure
         throw new RuntimeException('CI performance baseline API fixture must contain a JSON object.');
     }
 
+    return $fixture;
+}
+
+/**
+ * @param array<string, mixed> $fixture
+ * @return Closure(string): array<string, mixed>
+ */
+function buildCiPerformanceBaselineFixtureRequestClosure(array $fixture): Closure
+{
     $workflowRuns = $fixture['workflow_runs'] ?? null;
     $jobsByRunId = $fixture['jobs_by_run_id'] ?? null;
     if (!is_array($workflowRuns) || !is_array($jobsByRunId)) {
@@ -402,7 +551,15 @@ function buildCiPerformanceBaselineFixtureRequestClosure(string $path): Closure
                 throw new RuntimeException('API fixture is missing jobs for run ' . $runId . '.');
             }
 
-            return ['jobs' => $jobsByRunId[$runId]];
+            $query = [];
+            parse_str((string) parse_url($requestPath, PHP_URL_QUERY), $query);
+            $page = max(1, (int) ($query['page'] ?? 1));
+            $perPage = max(1, (int) ($query['per_page'] ?? 100));
+
+            return [
+                'total_count' => count($jobsByRunId[$runId]),
+                'jobs' => array_slice($jobsByRunId[$runId], ($page - 1) * $perPage, $perPage),
+            ];
         }
 
         throw new RuntimeException('API fixture does not support request path ' . $requestPath . '.');
@@ -410,20 +567,50 @@ function buildCiPerformanceBaselineFixtureRequestClosure(string $path): Closure
 }
 
 /**
- * @param Closure(string): array<string, mixed> $request
+ * @param array<string, mixed> $fixture
+ * @return Closure(string): string
+ */
+function buildCiPerformanceBaselineFixtureLogRequestClosure(array $fixture): Closure
+{
+    $logsByJobId = $fixture['job_logs_by_job_id'] ?? null;
+    if (!is_array($logsByJobId)) {
+        throw new RuntimeException('CI performance baseline API fixture needs job_logs_by_job_id.');
+    }
+
+    return static function (string $requestPath) use ($logsByJobId): string {
+        if (preg_match('~/actions/jobs/(?<job_id>[0-9]+)/logs$~', $requestPath, $matches) !== 1) {
+            throw new RuntimeException('API fixture does not support log request path ' . $requestPath . '.');
+        }
+
+        $jobId = $matches['job_id'];
+        if (!array_key_exists($jobId, $logsByJobId) || !is_string($logsByJobId[$jobId])) {
+            throw new RuntimeException('API fixture is missing logs for job ' . $jobId . '.');
+        }
+
+        return $logsByJobId[$jobId];
+    };
+}
+
+/**
+ * @param Closure(string): array<string, mixed> $requestJson
+ * @param Closure(string): string $requestText
  * @param array<string, mixed> $config
  * @param array<string, mixed> $policy
  * @return array{runs_scanned:int,samples:array<int, array<string, mixed>>,exclusions:array<int, array<string, mixed>>}
  */
-function fetchCiPerformanceBaselineCohort(Closure $request, array $config, array $policy): array
-{
+function fetchCiPerformanceBaselineCohort(
+    Closure $requestJson,
+    Closure $requestText,
+    array $config,
+    array $policy,
+): array {
     $samples = [];
     $exclusions = [];
     $runsScanned = 0;
     $page = 1;
 
     while ($runsScanned < $config['max_runs'] && count($samples) < $policy['cohort_size']) {
-        $payload = $request(
+        $payload = $requestJson(
             sprintf(
                 '/repos/%s/actions/workflows/%s/runs?%s',
                 $config['repo'],
@@ -449,13 +636,35 @@ function fetchCiPerformanceBaselineCohort(Closure $request, array $config, array
 
             $runsScanned++;
             $runId = (int) $run['id'];
-            $jobPayload = $request(sprintf('/repos/%s/actions/runs/%d/jobs?per_page=100', $config['repo'], $runId));
-            $jobs = $jobPayload['jobs'] ?? null;
-            if (!is_array($jobs)) {
-                throw new RuntimeException('GitHub API response for workflow jobs is missing jobs[].');
+            $jobs = fetchCiPerformanceBaselineJobs($requestJson, (string) $config['repo'], $runId);
+            $deepRuntimeLog = '';
+            $logError = null;
+            foreach ($jobs as $job) {
+                if (!is_array($job) || ($job['name'] ?? null) !== 'deep-runtime-suite') {
+                    continue;
+                }
+
+                $jobId = (int) ($job['id'] ?? 0);
+                if ($jobId < 1) {
+                    $logError = 'deep-runtime-suite job did not expose a job id';
+                    break;
+                }
+
+                try {
+                    $deepRuntimeLog = $requestText(sprintf('/repos/%s/actions/jobs/%d/logs', $config['repo'], $jobId));
+                } catch (Throwable $e) {
+                    $logError = 'failed to read deep-runtime-suite log: ' . $e->getMessage();
+                }
+                break;
             }
 
-            $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy);
+            $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy, $deepRuntimeLog);
+            if ($logError !== null) {
+                $candidate['eligible'] = false;
+                $candidate['sample'] = [];
+                $candidate['reasons'][] = $logError;
+                $candidate['reasons'] = array_values(array_unique($candidate['reasons']));
+            }
             if ($candidate['eligible'] === true) {
                 $samples[] = $candidate['sample'];
             } else {
@@ -486,12 +695,46 @@ function fetchCiPerformanceBaselineCohort(Closure $request, array $config, array
 }
 
 /**
+ * @param Closure(string): array<string, mixed> $request
+ * @return array<int, mixed>
+ */
+function fetchCiPerformanceBaselineJobs(Closure $request, string $repo, int $runId): array
+{
+    $jobs = [];
+    $page = 1;
+    $perPage = 100;
+
+    while (true) {
+        $payload = $request(
+            sprintf(
+                '/repos/%s/actions/runs/%d/jobs?%s',
+                $repo,
+                $runId,
+                http_build_query(['per_page' => $perPage, 'page' => $page]),
+            ),
+        );
+        $pageJobs = $payload['jobs'] ?? null;
+        if (!is_array($pageJobs)) {
+            throw new RuntimeException('GitHub API response for workflow jobs is missing jobs[].');
+        }
+
+        array_push($jobs, ...$pageJobs);
+        if (count($pageJobs) < $perPage) {
+            break;
+        }
+        $page++;
+    }
+
+    return $jobs;
+}
+
+/**
  * @param array<string, mixed> $run
  * @param array<int, mixed> $jobs
  * @param array<string, mixed> $policy
  * @return array{eligible:bool,reasons:array<int, string>,sample:array<string, mixed>}
  */
-function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $policy): array
+function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $policy, string $deepRuntimeLog = ''): array
 {
     $reasons = [];
     $runId = (int) ($run['id'] ?? 0);
@@ -522,6 +765,22 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
         if (!is_array($job) || ($job['conclusion'] ?? null) !== 'success') {
             $reasons[] = 'required job not successful: ' . $requiredJob;
         }
+    }
+
+    $comparisonProfile = buildCiPerformanceBaselineComparisonProfile(
+        $run,
+        $jobsByName,
+        $deepRuntimeLog,
+        $policy['comparison_profile'],
+    );
+    $expectedFingerprint = fingerprintCiPerformanceBaselineComparisonProfile($policy['comparison_profile']);
+    $observedFingerprint = fingerprintCiPerformanceBaselineComparisonProfile($comparisonProfile);
+    if ($observedFingerprint !== $expectedFingerprint) {
+        $reasons[] = sprintf(
+            'comparison profile fingerprint mismatch: expected %s, observed %s',
+            $expectedFingerprint,
+            $observedFingerprint,
+        );
     }
 
     $activeJobs = [];
@@ -619,6 +878,10 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
             'head_branch' => (string) ($run['head_branch'] ?? ''),
             'head_sha' => (string) ($run['head_sha'] ?? ''),
             'run_attempt' => (int) ($run['run_attempt'] ?? 1),
+            'comparison_profile' => [
+                'fingerprint' => $observedFingerprint,
+                'components' => $comparisonProfile,
+            ],
             'workflow_elapsed_seconds' => (float) ($lastCompletedAt - $createdAt),
             'initial_queue_seconds' => (float) ($firstStartedAt - $createdAt),
             'max_job_queue_seconds' => max(array_column($activeJobs, 'queue_seconds')),
@@ -627,6 +890,148 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
             'tracked_step_durations_seconds' => $stepDurations,
         ],
     ];
+}
+
+/**
+ * @param array<string, mixed> $run
+ * @param array<string, array<string, mixed>> $jobsByName
+ * @param array<string, mixed> $expectedProfile
+ * @return array<string, mixed>
+ */
+function buildCiPerformanceBaselineComparisonProfile(
+    array $run,
+    array $jobsByName,
+    string $deepRuntimeLog,
+    array $expectedProfile,
+): array {
+    $consumerConclusions = [];
+    foreach (array_keys($expectedProfile['consumer_conclusions']) as $jobName) {
+        $conclusion = $jobsByName[$jobName]['conclusion'] ?? null;
+        $consumerConclusions[$jobName] = is_string($conclusion) && $conclusion !== '' ? $conclusion : 'missing';
+    }
+
+    $requestedSuites = extractCiPerformanceBaselineRequestedSuites($deepRuntimeLog);
+    $isActive = static fn(string $jobName): bool => isset($consumerConclusions[$jobName]) &&
+        !in_array($consumerConclusions[$jobName], ['missing', 'skipped'], true);
+
+    $deepRuntimeAssetBuildRequired = false;
+    foreach ($jobsByName['deep-runtime-suite']['steps'] ?? [] as $step) {
+        if (
+            is_array($step) &&
+            ($step['name'] ?? null) === 'Build runtime JS assets' &&
+            ($step['conclusion'] ?? null) === 'success'
+        ) {
+            $deepRuntimeAssetBuildRequired = true;
+            break;
+        }
+    }
+    $includeLdap = extractCiPerformanceBaselineBooleanFlag($deepRuntimeLog, 'integration-smoke-include-ldap');
+
+    return [
+        'profile_version' => 1,
+        'consumer_conclusions' => $consumerConclusions,
+        'requested_suites' => $requestedSuites,
+        'change_flags' => [
+            'request_contracts_required' => $isActive('typed-request-contracts'),
+            'deep_bootstrap_required' => $isActive('deep-check-bootstrap'),
+            'deep_runtime_asset_build_required' => $deepRuntimeAssetBuildRequired,
+            'coverage_required' =>
+                $isActive('coverage-shard-unit') &&
+                $isActive('coverage-shard-integration') &&
+                $isActive('coverage-delta'),
+            'heavy_job_trends_required' => $isActive('heavy-job-duration-trends'),
+            'api_contract' => $isActive('api-contract-openapi'),
+            'write_contract_booking' => $isActive('write-contract-booking'),
+            'write_contract_api' => $isActive('write-contract-api'),
+            'booking_flows' => $isActive('booking-controller-flows'),
+            'integration_smoke' => $isActive('integration-smoke'),
+            'ldap_guardrail_required' => $includeLdap === true && ($run['event'] ?? null) === 'pull_request',
+            'pdf_renderer_latency_required' => $isActive('pdf-renderer-latency'),
+        ],
+        'mode_flags' => [
+            'event' => (string) ($run['event'] ?? 'missing'),
+            'run_attempt' => (int) ($run['run_attempt'] ?? 1),
+            'integration_smoke_include_ldap' => $includeLdap,
+            'integration_smoke_browser_bootstrap_timeout' => extractCiPerformanceBaselineIntegerFlag(
+                $deepRuntimeLog,
+                'integration-smoke-browser-bootstrap-timeout',
+            ),
+            'integration_smoke_browser_evidence' => extractCiPerformanceBaselineStringFlag(
+                $deepRuntimeLog,
+                'integration-smoke-browser-evidence',
+            ),
+        ],
+    ];
+}
+
+/**
+ * @return array<int, string>
+ */
+function extractCiPerformanceBaselineRequestedSuites(string $log): array
+{
+    if (preg_match('/--suites=([a-z0-9,-]+)/', $log, $matches) !== 1) {
+        return [];
+    }
+
+    return array_values(array_filter(explode(',', $matches[1]), static fn(string $suite): bool => $suite !== ''));
+}
+
+function extractCiPerformanceBaselineBooleanFlag(string $log, string $flag): ?bool
+{
+    if (preg_match('/--' . preg_quote($flag, '/') . '=(true|false)/', $log, $matches) !== 1) {
+        return null;
+    }
+
+    return $matches[1] === 'true';
+}
+
+function extractCiPerformanceBaselineIntegerFlag(string $log, string $flag): ?int
+{
+    if (preg_match('/--' . preg_quote($flag, '/') . '=([0-9]+)/', $log, $matches) !== 1) {
+        return null;
+    }
+
+    return (int) $matches[1];
+}
+
+function extractCiPerformanceBaselineStringFlag(string $log, string $flag): ?string
+{
+    if (preg_match('/--' . preg_quote($flag, '/') . '=([a-z0-9_-]+)/', $log, $matches) !== 1) {
+        return null;
+    }
+
+    return $matches[1];
+}
+
+/**
+ * @param array<string, mixed> $profile
+ */
+function fingerprintCiPerformanceBaselineComparisonProfile(array $profile): string
+{
+    $encoded = json_encode(
+        canonicalizeCiPerformanceBaselineValue($profile),
+        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+    );
+
+    return 'sha256:' . hash('sha256', $encoded);
+}
+
+function canonicalizeCiPerformanceBaselineValue(mixed $value): mixed
+{
+    if (!is_array($value)) {
+        return $value;
+    }
+
+    if (array_is_list($value)) {
+        return array_map('canonicalizeCiPerformanceBaselineValue', $value);
+    }
+
+    ksort($value, SORT_STRING);
+    foreach ($value as $key => $item) {
+        $value[$key] = canonicalizeCiPerformanceBaselineValue($item);
+    }
+
+    return $value;
 }
 
 function ciPerformanceBaselineTimestamp(mixed $value, string $field): int
@@ -783,6 +1188,10 @@ function buildCiPerformanceBaselineMethodSummary(array $policy): array
         'required_success_jobs' => $policy['required_success_jobs'],
         'tracked_jobs' => $policy['tracked_jobs'],
         'critical_path_jobs' => $policy['critical_path_jobs'],
+        'comparison_profile' => [
+            'fingerprint' => fingerprintCiPerformanceBaselineComparisonProfile($policy['comparison_profile']),
+            'components' => $policy['comparison_profile'],
+        ],
     ];
 }
 
@@ -806,6 +1215,11 @@ function renderCiPerformanceBaselineSummary(array $report): string
             'Status: `%s`; %d comparable successful full-gate PR runs.',
             (string) ($report['status'] ?? 'unknown'),
             (int) ($workflow['sample_count'] ?? 0),
+        ),
+        '',
+        sprintf(
+            'Comparison profile: `%s`.',
+            (string) ($report['method']['comparison_profile']['fingerprint'] ?? 'missing'),
         ),
         '',
         sprintf(
