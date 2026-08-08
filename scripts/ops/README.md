@@ -182,13 +182,20 @@ Scanner-path validation:
 - For the ROB-405 live gate, run
   `bash scripts/ops/prod_validate_after_change.sh --require-scanner-blocking`;
   this fails when any fixed scanner probe class returns HTTP 2xx or when a
-  probe itself cannot run. The gate checks both the App surface and the Monitor
-  vhost surface so monitor-only proxy fallthroughs are caught before review.
+  probe itself cannot run. Default-, unmatched- and dynamically resolved
+  IP-literal-host probes are stricter: only HTTP `403/404` passes on both HTTP
+  and TLS, so redirects cannot hide an unprotected default vhost. These probes
+  use the public default-route interface rather than loopback. The gate also
+  checks the App and Monitor vhost surfaces.
 - The check covers known scanner classes for environment files, Git metadata,
   WordPress/PHP info probes, server-status, vendor/phpunit, HNAP1, boaform,
   cgi-bin, phpinfo query-string probes, and the `.env~` backup-suffix variant.
 - Output intentionally uses stable class labels and never prints requested
   URLs, response bodies, tokens, raw config, or discovered filenames.
+- The default-host extension uses only synthetic unmatched-host input and a
+  runtime-derived public-interface address. Neither value is printed or
+  retained. TLS certificate verification is intentionally separate from this
+  status-only IP-literal/default-vhost probe.
 
 Security posture reporting:
 

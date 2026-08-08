@@ -46,6 +46,10 @@ Before any live write:
 
 - A separate operator approval explicitly authorizes ROB-405 live Apache and
   Fail2ban changes, config tests, reloads, and post-change validation.
+- Before this combined procedure may change any default HTTP/TLS vhost, either
+  a separate ROB-429 live approval or one approval explicitly covering both
+  ROB-405 and ROB-429 default/unmatched/IP-literal-host hardening is required.
+  A ROB-405-only approval is insufficient for this procedure.
 - The current production baseline still matches `docs/ops/agent-operations.md`.
 - `bash scripts/ops/prod_doctor.sh` completes without a new unrelated blocker.
 - `bash scripts/ops/prod_validate_after_change.sh` passes before the change.
@@ -55,7 +59,8 @@ Before any live write:
 
 ## Live Procedure
 
-Do not execute this section without the separate approval above.
+This is a combined ROB-405/ROB-429 live procedure. Do not execute any live-write
+step in this section with a ROB-405-only approval.
 
 1. Capture read-only baseline:
    - `bash scripts/ops/prod_doctor.sh`
@@ -73,27 +78,29 @@ Do not execute this section without the separate approval above.
    <IfModule mod_rewrite.c>
        RewriteEngine On
 
-       RewriteCond %{REQUEST_URI} (^|/)(\.env($|[./_~-])|\.environment$|\.git(/|$)|wp-config\.php$|wp-login\.php$|xmlrpc\.php$|phpinfo\.php$|server-status$|vendor/phpunit|boaform|HNAP1|cgi-bin) [NC,OR]
+       RewriteCond %{REQUEST_URI} (^|/)(\.env($|[./_~-])|\.environment$|\.git(/|$)|wp-admin(/|$)|wp-config\.php$|wp-login\.php$|xmlrpc\.php$|phpinfo\.php$|server-status$|vendor/phpunit|boaform|HNAP1|cgi-bin) [NC,OR]
        RewriteCond %{QUERY_STRING} (^|&)(page=phpinfo|phpinfo=1)(&|$) [NC]
        RewriteRule ^ - [F]
    </IfModule>
    ```
 
 4. Enable the Apache conf with `a2enconf fh-scanner-path-blocking`.
-5. Include the same conf inside each App/WWW and Monitor vhost before the
-   existing redirect/proxy rules:
+5. Include the same conf inside each App/WWW, Monitor, and default HTTP/TLS
+   vhost before the existing redirect/proxy rules:
 
    ```apache
    Include /etc/apache2/conf-available/fh-scanner-path-blocking.conf
    ```
 
    This is required because the scanner-blocking rewrite must run in vhost
-   context for HTTPS App, HTTPS Monitor, and query-string probes.
+   context. The default-vhost includes are the ROB-429 extension: they cover
+   default, unmatched, and IP-literal hosts before any redirect can turn a
+   scanner probe into `301`.
 6. Create `/etc/fail2ban/filter.d/fh-apache-scanner.conf`:
 
    ```ini
    [Definition]
-   failregex = ^<HOST> .*"(GET|POST|HEAD) [^"]*(/\.env|/\.environment|/\.git/|/wp-config\.php|/wp-login\.php|/xmlrpc\.php|phpinfo|/server-status|/vendor/phpunit|/boaform|/HNAP1|/cgi-bin/|\?(page=phpinfo|phpinfo=1))[^"]*" (403|404)\b
+   failregex = ^<HOST> .*"(GET|POST|HEAD) [^"]*(/\.env|/\.environment|/\.git/|/wp-admin|/wp-config\.php|/wp-login\.php|/xmlrpc\.php|phpinfo|/server-status|/vendor/phpunit|/boaform|/HNAP1|/cgi-bin/|\?(page=phpinfo|phpinfo=1))[^"]*" (403|404)\b
    ignoreregex =
    ```
 
@@ -134,6 +141,15 @@ Do not execute this section without the separate approval above.
   - `scanner_query.*=403|404`
   - `scanner_path_failures=0`
   - `scanner_path_monitor_failures=0`
+- Direct WordPress-like probes in every default-host context return exactly
+  `403/404`:
+  - `scanner_host.http_default.*=403|404`
+  - `scanner_host.http_unmatched.*=403|404`
+  - `scanner_host.http_ip_literal.*=403|404`
+  - `scanner_host.https_default.*=403|404`
+  - `scanner_host.https_unmatched.*=403|404`
+  - `scanner_host.https_ip_literal.*=403|404`
+  - `scanner_host_context_failures=0`
 - `/.env~` returns non-2xx on App, `www`, and Monitor surfaces.
 - `prod_validate_after_change.sh --require-scanner-blocking` passes.
 - `fail2ban-client status fh-apache-scanner` reports an active jail.
@@ -163,6 +179,8 @@ Stop and roll back if after reload:
 - New app-log or PHP-FPM error classes appear.
 - Legitimate operator or Kuma traffic is banned by `fh-apache-scanner`.
 - The scanner validator returns HTTP 2xx for any fixed scanner class.
+- The default-host validator returns anything other than `403/404`, including
+  redirects, or cannot derive the local IP-literal context.
 
 ## Rollback
 
