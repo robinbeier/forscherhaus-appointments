@@ -121,6 +121,14 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
             },
             'invalid count',
         ];
+        yield 'missing required counter' => [
+            static function (array $result): array {
+                unset($result['flow_error_count']);
+
+                return $result;
+            },
+            'unexpected field set',
+        ];
     }
 
     public function testStorageStateIsRemovedWhenBrowserStepFailsAfterWrite(): void
