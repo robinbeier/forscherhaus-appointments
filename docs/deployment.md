@@ -125,6 +125,64 @@ After the atomic switch, `deploy_ea.sh` verifies:
 
 Any post-switch failure triggers automatic rollback to the previous app path.
 
+## Deploy Timing Baseline
+
+`deploy_ea.sh` emits one machine-readable line per completed timing phase and
+one terminal summary. Each line starts with `DEPLOY_TIMING ` followed by a JSON
+object using schema `deploy_timing.v1`. Durations come from a monotonic clock;
+production Linux reads `/proc/uptime` without starting a subprocess. The PHP
+`hrtime()` fallback exists for non-Linux local rehearsal only.
+
+The measured end-to-end boundary starts after the deploy invocation and trusted
+log stream have been accepted. It ends at success, pre-switch failure,
+post-switch failure, or rollback completion. Off-host archive build and upload
+are outside this host-side measurement. The stable deploy phases are:
+
+| Phase | Included work |
+| --- | --- |
+| `preparation_artifact` | Archive checks, prerequisites, staged extraction, artifact validation, and host/stage deploy-script drift check. |
+| `predeploy` | Breakglass validation when applicable, isolated stage runtime preparation, zero-surprise replay, and report validation. |
+| `permissions_stage` | Live config/storage staging, renderer dependency preparation, final generic permissions, and fail-closed stage/live runtime-config contracts. |
+| `switch` | Atomic live-to-previous and stage-to-live directory switch. |
+| `postdeploy_validation` | Active/previous permission checks, renderer restart/health, deep health, live canary, release marker, reloads, and the non-blocking localhost check. |
+| `rollback` | Automatic or manual rollback switch, permission contracts, renderer recovery, and health validation. This phase is recorded only when rollback runs. |
+
+Phase events contain only fixed schema/mode/phase/status values, monotonic
+`duration_ms`/`elapsed_ms`, and the `dry_run` boolean. Summary events add only a
+fixed outcome, numeric exit code, and `total_ms`. They deliberately omit release
+IDs, URLs, paths, credentials, config contents, customer data, and free-form
+error text. Export only the `DEPLOY_TIMING ` lines for baseline analysis; the
+surrounding operator log remains sensitive.
+
+Timing is strictly observational: clock or output-write failures disable or drop
+telemetry records but never change deploy, validation, rollback, or exit status.
+
+If the live app has already moved to the previous-release path but the staged
+release cannot move into place, the `switch` phase fails and the summary outcome
+is `failed_switch_recovery_required`. This distinct state is neither reported as
+a pre-switch failure nor treated as a successful atomic switch; existing manual
+recovery and rollback controls remain authoritative.
+
+Baseline collection requires at least five later, successful, representative
+production deploys under a separate live approval. Keep a measurement only when
+all of the following are comparable:
+
+1. schema `deploy_timing.v1`, the same renderer deploy mode, and the same enabled
+   Zero-Surprise/canary gates;
+2. the normal artifact-based production path on the same host class, without
+   concurrent maintenance known to distort the run;
+3. `dry_run=false`, outcome `succeeded`, exit code `0`, and all five core phases
+   present exactly once in the documented order;
+4. the secret-free timing lines are retained together as one sample, while any
+   rollback or failed run is kept as diagnostic evidence but excluded from the
+   successful baseline set.
+
+After five comparable samples, calculate the median `total_ms` and each phase
+median, retain the individual samples and collection conditions, and review
+obvious environmental outliers without silently deleting them. ROB-447 remains
+blocked until that evidence exists; this instrumentation does not set an
+optimization target or claim an improvement.
+
 ## Rollback Model
 
 During a successful deploy, the old app directory is moved to:

@@ -162,6 +162,199 @@ class GateCliSupportTest extends TestCase
                 "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-rollback --active '{$appPath}' --previous '{$appPath}_prev_ea_20260320_1200' --failed '{$manualFailedPath}' --runtime-user 'www-data'",
                 $result['stdout'],
             );
+
+            $timingEvents = $this->deployTimingEvents($result['stdout']);
+            $phaseEvents = array_values(
+                array_filter(
+                    $timingEvents,
+                    static fn(array $event): bool => $event['event'] === 'phase' && $event['mode'] === 'deploy',
+                ),
+            );
+            $this->assertSame(
+                ['preparation_artifact', 'predeploy', 'permissions_stage', 'switch', 'postdeploy_validation'],
+                array_column($phaseEvents, 'phase'),
+            );
+            $this->assertSame(['ok', 'ok', 'ok', 'ok', 'ok'], array_column($phaseEvents, 'status'));
+            $this->assertSame([true, true, true, true, true], array_column($phaseEvents, 'dry_run'));
+
+            $elapsed = array_column($phaseEvents, 'elapsed_ms');
+            $sortedElapsed = $elapsed;
+            sort($sortedElapsed);
+            $this->assertSame($sortedElapsed, $elapsed);
+
+            $summaryEvents = array_values(
+                array_filter(
+                    $timingEvents,
+                    static fn(array $event): bool => $event['event'] === 'summary' && $event['mode'] === 'deploy',
+                ),
+            );
+            $this->assertCount(1, $summaryEvents);
+            $this->assertSame('succeeded', $summaryEvents[0]['outcome']);
+            $this->assertSame(0, $summaryEvents[0]['exit_code']);
+            $this->assertTrue($summaryEvents[0]['dry_run']);
+
+            foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+                $this->assertStringNotContainsString($workspace, $timingLine);
+                $this->assertStringNotContainsString('ea_20260320_1200', $timingLine);
+                $this->assertStringNotContainsString('dump.sql.gz', $timingLine);
+                $this->assertStringNotContainsString('predeploy.ini', $timingLine);
+                $this->assertStringNotContainsString('canary.ini', $timingLine);
+            }
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testDeployTimingMarksPreSwitchFailureWithoutLeakingContext(): void
+    {
+        $repoRoot = dirname(__DIR__, 3);
+        $script = <<<'BASH'
+        source "$1"
+        SENSITIVE_FIXTURE_PATH="/fixtures/customer-alpha/config.php"
+        deploy_timing_init deploy 0 preparation_artifact
+        deploy_timing_transition predeploy
+        exit 23
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $repoRoot . '/deploy_ea.sh']);
+
+        $this->assertSame(23, $result['exit_code']);
+        $events = $this->deployTimingEvents($result['stdout']);
+        $this->assertSame('preparation_artifact', $events[0]['phase']);
+        $this->assertSame('ok', $events[0]['status']);
+        $this->assertSame('predeploy', $events[1]['phase']);
+        $this->assertSame('failed', $events[1]['status']);
+        $this->assertSame('failed_pre_switch', $events[2]['outcome']);
+        $this->assertSame(23, $events[2]['exit_code']);
+
+        foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+            $this->assertStringNotContainsString('customer-alpha', $timingLine);
+            $this->assertStringNotContainsString('config.php', $timingLine);
+        }
+    }
+
+    public function testDeployTimingWriteFailureBeforeSwitchDoesNotStopGateExecution(): void
+    {
+        $repoRoot = dirname(__DIR__, 3);
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        SENSITIVE_FIXTURE_PATH="/fixtures/customer-alpha/config.php"
+        deploy_timing_init deploy 0 preparation_artifact
+        TIMING_WRITE_FAILURES=1
+        printf() {
+          if [[ "${1:-}" == DEPLOY_TIMING\ * && "$TIMING_WRITE_FAILURES" -gt 0 ]]; then
+            TIMING_WRITE_FAILURES="$((TIMING_WRITE_FAILURES - 1))"
+            return 74
+          fi
+          builtin printf "$@"
+        }
+        deploy_timing_transition predeploy
+        builtin printf 'PRE_SWITCH_GATE_REACHED\n'
+        deploy_timing_transition permissions_stage
+        deploy_timing_finish ok succeeded 0
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $repoRoot . '/deploy_ea.sh']);
+
+        $this->assertSame(0, $result['exit_code'], $result['stderr']);
+        $this->assertStringContainsString('PRE_SWITCH_GATE_REACHED', $result['stdout']);
+        $events = $this->deployTimingEvents($result['stdout']);
+        $this->assertSame('predeploy', $events[0]['phase']);
+        $this->assertSame('permissions_stage', $events[1]['phase']);
+        $this->assertSame('succeeded', $events[2]['outcome']);
+
+        foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+            $this->assertStringNotContainsString('customer-alpha', $timingLine);
+            $this->assertStringNotContainsString('config.php', $timingLine);
+        }
+    }
+
+    public function testDeployTimingClockFailurePreservesSignalExitStatus(): void
+    {
+        $repoRoot = dirname(__DIR__, 3);
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        SENSITIVE_FIXTURE_PATH="/fixtures/customer-alpha/config.php"
+        deploy_timing_init deploy 0 preparation_artifact
+        deploy_timing_transition switch
+        DEPLOY_TIMING_SWITCH_STATE="complete"
+        deploy_timing_now_ms() { return 74; }
+        trap 'exit 143' TERM
+        kill -TERM "$$"
+        builtin printf 'SIGNAL_HANDLER_RETURNED\n'
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $repoRoot . '/deploy_ea.sh']);
+
+        $this->assertSame(143, $result['exit_code'], $result['stderr']);
+        $this->assertStringNotContainsString('SIGNAL_HANDLER_RETURNED', $result['stdout']);
+        $this->assertStringNotContainsString('"exit_code":74', $result['stdout']);
+        foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+            $this->assertStringNotContainsString('customer-alpha', $timingLine);
+            $this->assertStringNotContainsString('config.php', $timingLine);
+        }
+    }
+
+    public function testDeployTimingMarksSecondAtomicMoveFailureAsRecoveryRequired(): void
+    {
+        $repoRoot = dirname(__DIR__, 3);
+        $workspace = sys_get_temp_dir() . '/deploy-ea-switch-customer-alpha-' . bin2hex(random_bytes(4));
+        $appPath = $workspace . '/app';
+        $previousPath = $workspace . '/previous';
+        $missingStagePath = $workspace . '/missing-stage';
+        mkdir($appPath, 0777, true);
+        file_put_contents($appPath . '/SENSITIVE_CUSTOMER_MARKER', 'fixture');
+
+        $script = <<<'BASH'
+        source "$1"
+        APP="$2"
+        PREV="$3"
+        STAGE_ROOT="$4"
+        DRYRUN=0
+        deploy_timing_init deploy 0 preparation_artifact
+        deploy_timing_transition predeploy
+        deploy_timing_transition permissions_stage
+        deploy_timing_transition switch
+        perform_atomic_switch
+        exit 99
+        BASH;
+
+        try {
+            $result = $this->runCommand([
+                'bash',
+                '-c',
+                $script,
+                'bash',
+                $repoRoot . '/deploy_ea.sh',
+                $appPath,
+                $previousPath,
+                $missingStagePath,
+            ]);
+
+            $this->assertNotSame(0, $result['exit_code']);
+            $this->assertDirectoryDoesNotExist($appPath);
+            $this->assertDirectoryExists($previousPath);
+            $this->assertFileExists($previousPath . '/SENSITIVE_CUSTOMER_MARKER');
+
+            $events = $this->deployTimingEvents($result['stdout']);
+            $phaseEvents = array_values(
+                array_filter($events, static fn(array $event): bool => $event['event'] === 'phase'),
+            );
+            $this->assertSame(
+                ['preparation_artifact', 'predeploy', 'permissions_stage', 'switch'],
+                array_column($phaseEvents, 'phase'),
+            );
+            $this->assertSame(['ok', 'ok', 'ok', 'failed'], array_column($phaseEvents, 'status'));
+            $this->assertSame('failed_switch_recovery_required', $events[array_key_last($events)]['outcome']);
+            $this->assertSame($result['exit_code'], $events[array_key_last($events)]['exit_code']);
+
+            foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+                $this->assertStringNotContainsString($workspace, $timingLine);
+                $this->assertStringNotContainsString('customer-alpha', $timingLine);
+                $this->assertStringNotContainsString('SENSITIVE_CUSTOMER_MARKER', $timingLine);
+            }
         } finally {
             $this->removeDirectory($workspace);
         }
@@ -307,6 +500,58 @@ class GateCliSupportTest extends TestCase
             'stdout' => is_string($stdout) ? $stdout : '',
             'stderr' => is_string($stderr) ? $stderr : '',
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function deployTimingLines(string $output): array
+    {
+        return array_values(
+            array_filter(
+                preg_split('/\R/', $output) ?: [],
+                static fn(string $line): bool => str_starts_with($line, 'DEPLOY_TIMING '),
+            ),
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function deployTimingEvents(string $output): array
+    {
+        $events = [];
+        foreach ($this->deployTimingLines($output) as $line) {
+            $payload = json_decode(substr($line, strlen('DEPLOY_TIMING ')), true, 512, JSON_THROW_ON_ERROR);
+            $this->assertIsArray($payload);
+            $this->assertSame('deploy_timing.v1', $payload['schema'] ?? null);
+            $this->assertContains($payload['event'] ?? null, ['phase', 'summary']);
+
+            if (($payload['event'] ?? null) === 'phase') {
+                $this->assertSame(
+                    ['schema', 'event', 'mode', 'phase', 'status', 'duration_ms', 'elapsed_ms', 'dry_run'],
+                    array_keys($payload),
+                );
+                $this->assertIsInt($payload['duration_ms']);
+                $this->assertGreaterThanOrEqual(0, $payload['duration_ms']);
+                $this->assertIsInt($payload['elapsed_ms']);
+                $this->assertGreaterThanOrEqual(0, $payload['elapsed_ms']);
+            } else {
+                $this->assertSame(
+                    ['schema', 'event', 'mode', 'outcome', 'exit_code', 'total_ms', 'dry_run'],
+                    array_keys($payload),
+                );
+                $this->assertIsInt($payload['exit_code']);
+                $this->assertIsInt($payload['total_ms']);
+                $this->assertGreaterThanOrEqual(0, $payload['total_ms']);
+            }
+
+            $events[] = $payload;
+        }
+
+        $this->assertNotSame([], $events);
+
+        return $events;
     }
 
     private function removeDirectory(string $path): void
