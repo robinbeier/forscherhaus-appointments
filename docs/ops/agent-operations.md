@@ -110,6 +110,8 @@ terminal success summary, and `dry_run=false`. Do not copy the surrounding log:
 it can contain operational paths and other sensitive context. The canonical
 phase definitions and five-comparable-deploy measurement plan are in
 `docs/deployment.md`.
+Timing collection is fail-open: a missing timing record is an observability gap,
+never authority to skip or change deploy, validation, or rollback behavior.
 
 Optional Certbot renewal simulation:
 

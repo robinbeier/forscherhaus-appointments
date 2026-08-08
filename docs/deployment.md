@@ -154,6 +154,9 @@ IDs, URLs, paths, credentials, config contents, customer data, and free-form
 error text. Export only the `DEPLOY_TIMING ` lines for baseline analysis; the
 surrounding operator log remains sensitive.
 
+Timing is strictly observational: clock or output-write failures disable or drop
+telemetry records but never change deploy, validation, rollback, or exit status.
+
 If the live app has already moved to the previous-release path but the staged
 release cannot move into place, the `switch` phase fails and the summary outcome
 is `failed_switch_recovery_required`. This distinct state is neither reported as

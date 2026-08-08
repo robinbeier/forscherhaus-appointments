@@ -105,14 +105,18 @@ emit_deploy_timing_phase() {
   local duration_ms="$3"
   local elapsed_ms="$4"
 
-  printf 'DEPLOY_TIMING {"schema":"%s","event":"phase","mode":"%s","phase":"%s","status":"%s","duration_ms":%d,"elapsed_ms":%d,"dry_run":%s}\n' \
+  if ! printf 'DEPLOY_TIMING {"schema":"%s","event":"phase","mode":"%s","phase":"%s","status":"%s","duration_ms":%d,"elapsed_ms":%d,"dry_run":%s}\n' \
     "$DEPLOY_TIMING_SCHEMA" \
     "$DEPLOY_TIMING_MODE" \
     "$phase" \
     "$status" \
     "$duration_ms" \
     "$elapsed_ms" \
-    "$DEPLOY_TIMING_DRY_RUN"
+    "$DEPLOY_TIMING_DRY_RUN"; then
+    return 0
+  fi
+
+  return 0
 }
 
 emit_deploy_timing_summary() {
@@ -120,13 +124,17 @@ emit_deploy_timing_summary() {
   local exit_code="$2"
   local total_ms="$3"
 
-  printf 'DEPLOY_TIMING {"schema":"%s","event":"summary","mode":"%s","outcome":"%s","exit_code":%d,"total_ms":%d,"dry_run":%s}\n' \
+  if ! printf 'DEPLOY_TIMING {"schema":"%s","event":"summary","mode":"%s","outcome":"%s","exit_code":%d,"total_ms":%d,"dry_run":%s}\n' \
     "$DEPLOY_TIMING_SCHEMA" \
     "$DEPLOY_TIMING_MODE" \
     "$outcome" \
     "$exit_code" \
     "$total_ms" \
-    "$DEPLOY_TIMING_DRY_RUN"
+    "$DEPLOY_TIMING_DRY_RUN"; then
+    return 0
+  fi
+
+  return 0
 }
 
 deploy_timing_complete_phase() {
@@ -143,22 +151,29 @@ deploy_timing_complete_phase() {
   (( duration_ms >= 0 )) || duration_ms=0
   (( elapsed_ms >= 0 )) || elapsed_ms=0
 
-  emit_deploy_timing_phase "$DEPLOY_TIMING_PHASE" "$status" "$duration_ms" "$elapsed_ms"
+  emit_deploy_timing_phase "$DEPLOY_TIMING_PHASE" "$status" "$duration_ms" "$elapsed_ms" || true
   DEPLOY_TIMING_PHASE=""
+  return 0
 }
 
 deploy_timing_transition() {
   local next_phase="$1"
 
-  deploy_timing_complete_phase ok
+  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 ]] || return 0
+
+  deploy_timing_complete_phase ok || true
   DEPLOY_TIMING_PHASE="$next_phase"
   DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)"
+  return 0
 }
 
 deploy_timing_begin_rollback() {
-  deploy_timing_complete_phase failed
+  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 ]] || return 0
+
+  deploy_timing_complete_phase failed || true
   DEPLOY_TIMING_PHASE="rollback"
   DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)"
+  return 0
 }
 
 deploy_timing_finish() {
@@ -168,15 +183,18 @@ deploy_timing_finish() {
   local now
   local total_ms
 
-  deploy_timing_complete_phase "$phase_status"
+  [[ "$DEPLOY_TIMING_ACTIVE" -eq 1 ]] || return 0
+
+  deploy_timing_complete_phase "$phase_status" || true
   now="$(deploy_timing_now_ms)"
   total_ms="$((now - DEPLOY_TIMING_START_MS))"
   (( total_ms >= 0 )) || total_ms=0
-  emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms"
+  emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms" || true
 
   DEPLOY_TIMING_SUMMARY_EMITTED=1
   DEPLOY_TIMING_ACTIVE=0
   trap - EXIT
+  return 0
 }
 
 deploy_timing_on_exit() {
@@ -193,7 +211,7 @@ deploy_timing_on_exit() {
         outcome="failed_post_switch"
         ;;
     esac
-    deploy_timing_finish failed "$outcome" "$exit_code"
+    deploy_timing_finish failed "$outcome" "$exit_code" || true
   fi
 
   exit "$exit_code"
@@ -205,7 +223,12 @@ deploy_timing_init() {
   local initial_phase="$3"
   local now
 
-  now="$(deploy_monotonic_ms)" || return 1
+  if ! now="$(deploy_monotonic_ms)"; then
+    DEPLOY_TIMING_ACTIVE=0
+    DEPLOY_TIMING_SUMMARY_EMITTED=0
+    DEPLOY_TIMING_PHASE=""
+    return 0
+  fi
   DEPLOY_TIMING_MODE="$mode"
   if [[ "$dry_run" -eq 1 ]]; then
     DEPLOY_TIMING_DRY_RUN="true"
@@ -219,6 +242,7 @@ deploy_timing_init() {
   DEPLOY_TIMING_SUMMARY_EMITTED=0
   DEPLOY_TIMING_SWITCH_STATE="not_started"
   trap deploy_timing_on_exit EXIT
+  return 0
 }
 
 usage() {

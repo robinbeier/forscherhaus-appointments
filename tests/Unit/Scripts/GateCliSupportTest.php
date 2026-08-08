@@ -233,6 +233,43 @@ class GateCliSupportTest extends TestCase
         }
     }
 
+    public function testDeployTimingWriteFailureBeforeSwitchDoesNotStopGateExecution(): void
+    {
+        $repoRoot = dirname(__DIR__, 3);
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        SENSITIVE_FIXTURE_PATH="/fixtures/customer-alpha/config.php"
+        deploy_timing_init deploy 0 preparation_artifact
+        TIMING_WRITE_FAILURES=1
+        printf() {
+          if [[ "${1:-}" == DEPLOY_TIMING\ * && "$TIMING_WRITE_FAILURES" -gt 0 ]]; then
+            TIMING_WRITE_FAILURES="$((TIMING_WRITE_FAILURES - 1))"
+            return 74
+          fi
+          builtin printf "$@"
+        }
+        deploy_timing_transition predeploy
+        builtin printf 'PRE_SWITCH_GATE_REACHED\n'
+        deploy_timing_transition permissions_stage
+        deploy_timing_finish ok succeeded 0
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $repoRoot . '/deploy_ea.sh']);
+
+        $this->assertSame(0, $result['exit_code'], $result['stderr']);
+        $this->assertStringContainsString('PRE_SWITCH_GATE_REACHED', $result['stdout']);
+        $events = $this->deployTimingEvents($result['stdout']);
+        $this->assertSame('predeploy', $events[0]['phase']);
+        $this->assertSame('permissions_stage', $events[1]['phase']);
+        $this->assertSame('succeeded', $events[2]['outcome']);
+
+        foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+            $this->assertStringNotContainsString('customer-alpha', $timingLine);
+            $this->assertStringNotContainsString('config.php', $timingLine);
+        }
+    }
+
     public function testDeployTimingMarksSecondAtomicMoveFailureAsRecoveryRequired(): void
     {
         $repoRoot = dirname(__DIR__, 3);

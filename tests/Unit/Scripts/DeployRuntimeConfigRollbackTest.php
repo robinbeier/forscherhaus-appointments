@@ -138,6 +138,79 @@ final class DeployRuntimeConfigRollbackTest extends TestCase
         self::assertSame(30, $deployTiming[array_key_last($deployTiming)]['exit_code']);
     }
 
+    public function testTimingWriteFailuresAfterSwitchDoNotStopGateOrAutomaticRollback(): void
+    {
+        chmod($this->activePath . '/config.php', 0644);
+        $releaseId = 'ea_timing_write_failure';
+        $this->failedPath = $this->activePath . '_failed_' . $releaseId;
+
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        APP="$2"
+        PREV="$3"
+        REL="$4"
+        WEBUSER="www-data"
+        DRYRUN=0
+        ZERO_SURPRISE_CANARY_REPORT=""
+        restart_renderer_service() { return 0; }
+        probe_renderer_health() { return 0; }
+        reload_services() { return 0; }
+        probe_deep_health_contract() { return 0; }
+        emit_zero_surprise_incident() { return 0; }
+
+        deploy_timing_init deploy 0 preparation_artifact
+        deploy_timing_transition predeploy
+        deploy_timing_transition permissions_stage
+        deploy_timing_transition switch
+        DEPLOY_TIMING_SWITCH_STATE="complete"
+        TIMING_WRITE_FAILURES=4
+        printf() {
+          if [[ "${1:-}" == DEPLOY_TIMING\ * && "$TIMING_WRITE_FAILURES" -gt 0 ]]; then
+            TIMING_WRITE_FAILURES="$((TIMING_WRITE_FAILURES - 1))"
+            return 74
+          fi
+          builtin printf "$@"
+        }
+        deploy_timing_transition postdeploy_validation
+        builtin printf 'POST_SWITCH_GATE_REACHED\n'
+        verify_post_switch_runtime_config_contracts
+
+        exit 99
+        BASH;
+        $result = $this->runCommand([
+            'bash',
+            '-c',
+            $script,
+            'bash',
+            $this->trustedDeployScript,
+            $this->activePath,
+            $this->previousPath,
+            $releaseId,
+        ]);
+
+        self::assertSame(30, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('POST_SWITCH_GATE_REACHED', $result['stdout']);
+        self::assertStringContainsString('Starting automatic rollback', $result['stdout']);
+        self::assertStringContainsString('Rollback succeeded, deployment remains failed', $result['stdout']);
+        self::assertDirectoryExists($this->activePath);
+        self::assertDirectoryDoesNotExist($this->previousPath);
+        self::assertDirectoryExists($this->failedPath);
+        self::assertFileExists($this->activePath . '/PREVIOUS_RELEASE_MARKER');
+        self::assertFileExists($this->failedPath . '/ACTIVE_RELEASE_MARKER');
+        $this->assertPermissionContract($this->activePath);
+        $this->assertPermissionContract($this->failedPath);
+        self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $result['stdout'] . $result['stderr']);
+
+        $events = $this->deployTimingEvents($result['stdout']);
+        self::assertContains('deploy', array_column($events, 'mode'));
+        self::assertContains('manual_rollback', array_column($events, 'mode'));
+        foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
+            self::assertStringNotContainsString($this->workspace, $timingLine);
+            self::assertStringNotContainsString('SENSITIVE_TEST_MARKER', $timingLine);
+        }
+    }
+
     public function testManualRollbackEmitsSuccessfulSecretFreeTimingSummary(): void
     {
         $result = $this->runRollbackMode();
