@@ -18,6 +18,9 @@ an enforcement goal, or claim an improvement.
 - Selection is fail-closed: a run is comparable only when its complete profile
   fingerprint equals the policy fingerprint. Missing jobs, job-log fields, or
   later Jobs API pages therefore cannot silently produce a match.
+- The terminal job is recorded per sample but is not an eligibility condition.
+  Normal timing variance may make a different successful job end last without
+  excluding the run.
 
 The executable definition is
 `scripts/ci/config/ci_performance_baseline_policy.php`. The advisory
@@ -29,7 +32,7 @@ and fully observed phase rankings in
 ## Profile Fingerprint
 
 Profile version 1 has fingerprint
-`sha256:e0b633bf7a177491bc473807cc8a4fcbebad5daa8183e66b20caba6185e05c06`.
+`sha256:81dd2023f9a1cd9c9e8682bfce8928b63193e7f8226de71b800216cfa1cc6db6`.
 The hash uses canonical JSON with sorted object keys and ordered suite lists.
 Baseline and after-runs must have this exact fingerprint.
 
@@ -50,8 +53,11 @@ Its inputs are:
   build, coverage, API contract, both write contracts, booking flows,
   integration smoke, LDAP guardrail, and PDF renderer latency; heavy-job
   trends are inactive on pull requests.
-- Mode flags: `event=pull_request`, `run_attempt=1`, LDAP included,
-  browser-bootstrap timeout `900`, and browser evidence `on-failure`.
+- Mode flags: `event=pull_request`, `run_attempt=1`, booking search horizon
+  `14`, retry count `1`, date window `2026-01-01` through `2026-01-31`, LDAP
+  included, browser-bootstrap timeout `900`, browser evidence `on-failure`,
+  and Playwright runtime package
+  `playwright@1.59.0-alpha-1771104257000`.
 
 Consumer conclusions and the successful `Build runtime JS assets` step come
 from the Jobs API. Requested suites and runtime mode flags come from the
@@ -62,7 +68,8 @@ page before the profile is evaluated.
 
 Captured on 2026-08-08 from GitHub Actions. Only four runs in the inspected,
 unchanged workflow period are currently proven to match the complete profile.
-All ended with `coverage-delta` as the latest job.
+All happened to end with `coverage-delta` as the latest job; that observation
+does not constrain later samples with the same fingerprint.
 
 | Run | Created (UTC) | Branch | End-to-end | Initial queue |
 | --- | --- | --- | ---: | ---: |
@@ -98,14 +105,17 @@ The 10m 14s maximum had only 2s initial queue while
 `coverage-shard-integration` took 4m 59s. Queue is visible but is not the
 dominant observed driver.
 
-## Critical Path And Largest Shares
+## Observed Critical Path And Largest Shares
 
 The dependency graph and all four terminal observations identify:
 
 `changes -> deep-check-bootstrap -> deep-check-seed-snapshot -> coverage-shard-integration -> coverage-delta`
 
 `deep-runtime-suite` runs in parallel after `deep-check-bootstrap`; it is a
-large job but did not terminate these runs.
+large job but did not terminate these runs. The report records terminal-job
+counts from the selected samples. If normal variation makes
+`deep-runtime-suite` finish after `coverage-delta`, the run remains eligible and
+the observed terminal path changes instead of silently biasing the cohort.
 
 The three largest fully observed phases all have a provisional median of
 183.5s (34.9% of 526s):

@@ -55,6 +55,20 @@ class CiPerformanceBaselineTest extends TestCase
             900,
             $policy['comparison_profile']['mode_flags']['integration_smoke_browser_bootstrap_timeout'],
         );
+        self::assertSame(14, $policy['comparison_profile']['mode_flags']['booking_search_days']);
+        self::assertSame(1, $policy['comparison_profile']['mode_flags']['retry_count']);
+        self::assertSame('2026-01-01', $policy['comparison_profile']['mode_flags']['start_date']);
+        self::assertSame('2026-01-31', $policy['comparison_profile']['mode_flags']['end_date']);
+        self::assertSame(
+            'playwright@1.59.0-alpha-1771104257000',
+            $policy['comparison_profile']['mode_flags']['playwright_runtime_package'],
+        );
+        $documentation = file_get_contents(__DIR__ . '/../../../docs/ci-performance-baseline.md');
+        self::assertNotFalse($documentation);
+        self::assertStringContainsString(
+            fingerprintCiPerformanceBaselineComparisonProfile($policy['comparison_profile']),
+            $documentation,
+        );
     }
 
     public function testBuildRunSampleMeasuresElapsedQueueJobsAndPhases(): void
@@ -103,6 +117,7 @@ class CiPerformanceBaselineTest extends TestCase
             fingerprintCiPerformanceBaselineComparisonProfile($policy['comparison_profile']),
             $sample['comparison_profile']['fingerprint'],
         );
+        self::assertSame($policy['comparison_profile'], $sample['comparison_profile']['components']);
     }
 
     public function testBuildRunSampleExcludesDraftOrPartialProfiles(): void
@@ -126,6 +141,73 @@ class CiPerformanceBaselineTest extends TestCase
 
         self::assertFalse($candidate['eligible']);
         self::assertContains('required job not successful: coverage-delta', $candidate['reasons']);
+    }
+
+    public function testBuildRunSampleAllowsDeepRuntimeToBeTheObservedTerminalJob(): void
+    {
+        $policy = $this->policy();
+        $run = [
+            'id' => 321,
+            'created_at' => '2026-08-07T22:00:00Z',
+            'conclusion' => 'success',
+            'run_attempt' => 1,
+            'event' => 'pull_request',
+        ];
+        $jobs = [
+            $this->job('changes', 2, 10),
+            $this->job('deep-check-bootstrap', 12, 55),
+            $this->job('deep-check-seed-snapshot', 57, 267),
+            $this->job('deep-runtime-suite', 57, 530, [$this->step('Build runtime JS assets', 58, 62)]),
+            $this->job('coverage-shard-unit', 57, 86),
+            $this->job('coverage-shard-integration', 269, 486),
+            $this->job('coverage-delta', 488, 519),
+            ...$this->profileConsumerJobs(),
+        ];
+
+        $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy, $this->profileLog());
+
+        self::assertTrue($candidate['eligible'], implode('; ', $candidate['reasons']));
+        self::assertSame(530.0, $candidate['sample']['workflow_elapsed_seconds']);
+        self::assertSame(['deep-runtime-suite'], $candidate['sample']['latest_jobs']);
+
+        $evaluation = evaluateCiPerformanceBaseline($policy, [$candidate['sample']]);
+        self::assertSame(
+            ['deep-runtime-suite' => 1],
+            $evaluation['metrics']['critical_path']['observed_terminal_job_counts'],
+        );
+    }
+
+    public function testBuildRunSampleRejectsMissingAndNullRunAttempts(): void
+    {
+        $policy = $this->policy();
+        $validRun = [
+            'id' => 654,
+            'created_at' => '2026-08-07T22:00:00Z',
+            'conclusion' => 'success',
+            'run_attempt' => 1,
+            'event' => 'pull_request',
+        ];
+        $jobs = [
+            $this->job('changes', 2, 10),
+            $this->job('deep-check-bootstrap', 12, 55),
+            $this->job('deep-check-seed-snapshot', 57, 267),
+            $this->job('deep-runtime-suite', 57, 324, [$this->step('Build runtime JS assets', 58, 62)]),
+            $this->job('coverage-shard-unit', 57, 86),
+            $this->job('coverage-shard-integration', 269, 486),
+            $this->job('coverage-delta', 488, 519),
+            ...$this->profileConsumerJobs(),
+        ];
+
+        $missingAttempt = $validRun;
+        unset($missingAttempt['run_attempt']);
+        $nullAttempt = $validRun;
+        $nullAttempt['run_attempt'] = null;
+
+        foreach (['missing' => $missingAttempt, 'null' => $nullAttempt] as $case => $run) {
+            $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy, $this->profileLog());
+            self::assertFalse($candidate['eligible'], $case);
+            self::assertContains('workflow run_attempt was missing or invalid', $candidate['reasons'], $case);
+        }
     }
 
     public function testBuildRunSampleRejectsAChangedConsumerProfile(): void
@@ -160,28 +242,81 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertStringStartsWith('comparison profile fingerprint mismatch:', $candidate['reasons'][0]);
     }
 
+    public function testBuildRunSampleRejectsChangedOrMissingRuntimeLoadInputs(): void
+    {
+        $policy = $this->policy();
+        $run = [
+            'id' => 987,
+            'created_at' => '2026-08-07T22:00:00Z',
+            'conclusion' => 'success',
+            'run_attempt' => 1,
+            'event' => 'pull_request',
+        ];
+        $jobs = [
+            $this->job('changes', 2, 10),
+            $this->job('deep-check-bootstrap', 12, 55),
+            $this->job('deep-check-seed-snapshot', 57, 267),
+            $this->job('deep-runtime-suite', 57, 324, [$this->step('Build runtime JS assets', 58, 62)]),
+            $this->job('coverage-shard-unit', 57, 86),
+            $this->job('coverage-shard-integration', 269, 486),
+            $this->job('coverage-delta', 488, 519),
+            ...$this->profileConsumerJobs(),
+        ];
+        $loadInputs = [
+            '--booking-search-days=14' => '--booking-search-days=7',
+            '--retry-count=1' => '--retry-count=0',
+            '--start-date=2026-01-01' => '--start-date=2026-02-01',
+            '--end-date=2026-01-31' => '--end-date=2026-02-28',
+            'PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000' =>
+                'PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.58.0',
+        ];
+
+        foreach ($loadInputs as $expected => $changed) {
+            foreach (['changed' => $changed, 'missing' => ''] as $case => $replacement) {
+                $log = str_replace($expected, $replacement, $this->profileLog());
+                $candidate = buildCiPerformanceBaselineRunSample($run, $jobs, $policy, $log);
+
+                self::assertFalse($candidate['eligible'], $expected . ' ' . $case);
+                self::assertStringStartsWith(
+                    'comparison profile fingerprint mismatch:',
+                    $candidate['reasons'][0],
+                    $expected . ' ' . $case,
+                );
+            }
+        }
+    }
+
     public function testFingerprintCoversEveryComparisonProfileSection(): void
     {
         $profile = $this->policy()['comparison_profile'];
         $fingerprint = fingerprintCiPerformanceBaselineComparisonProfile($profile);
-        $mutations = [];
 
-        $mutation = $profile;
-        $mutation['consumer_conclusions']['pdf-renderer-latency'] = 'skipped';
-        $mutations[] = $mutation;
-        $mutation = $profile;
-        $mutation['requested_suites'] = array_slice($mutation['requested_suites'], 0, -1);
-        $mutations[] = $mutation;
-        $mutation = $profile;
-        $mutation['change_flags']['ldap_guardrail_required'] = false;
-        $mutations[] = $mutation;
-        $mutation = $profile;
-        $mutation['mode_flags']['integration_smoke_browser_bootstrap_timeout'] = 600;
-        $mutations[] = $mutation;
-
-        foreach ($mutations as $mutation) {
-            self::assertNotSame($fingerprint, fingerprintCiPerformanceBaselineComparisonProfile($mutation));
+        foreach ($this->comparisonProfileScalarMutations($profile) as $path => $mutation) {
+            self::assertNotSame(
+                $fingerprint,
+                fingerprintCiPerformanceBaselineComparisonProfile($mutation),
+                sprintf('Comparison profile leaf "%s" must affect the fingerprint.', $path),
+            );
         }
+
+        $reorderedSuites = $profile;
+        [$reorderedSuites['requested_suites'][0], $reorderedSuites['requested_suites'][1]] = [
+            $reorderedSuites['requested_suites'][1],
+            $reorderedSuites['requested_suites'][0],
+        ];
+        self::assertNotSame(
+            $fingerprint,
+            fingerprintCiPerformanceBaselineComparisonProfile($reorderedSuites),
+            'Requested suite order must affect the fingerprint.',
+        );
+
+        $missingSuite = $profile;
+        array_pop($missingSuite['requested_suites']);
+        self::assertNotSame($fingerprint, fingerprintCiPerformanceBaselineComparisonProfile($missingSuite));
+
+        $additionalSuite = $profile;
+        $additionalSuite['requested_suites'][] = 'unexpected-suite';
+        self::assertNotSame($fingerprint, fingerprintCiPerformanceBaselineComparisonProfile($additionalSuite));
     }
 
     public function testEvaluationUsesNearestRankP75AndRanksCompletePhases(): void
@@ -248,6 +383,27 @@ class CiPerformanceBaselineTest extends TestCase
             $summary,
         );
         self::assertStringNotContainsString('median 0s', $summary);
+    }
+
+    public function testEvaluationKeepsTheFourOfFiveBoundaryFailClosed(): void
+    {
+        $policy = $this->policy();
+        $sample = [
+            'workflow_elapsed_seconds' => 500.0,
+            'initial_queue_seconds' => 3.0,
+            'max_job_queue_seconds' => 8.0,
+            'latest_jobs' => ['coverage-delta'],
+            'tracked_job_durations_seconds' => [],
+            'tracked_step_durations_seconds' => [],
+        ];
+
+        $fourSamples = evaluateCiPerformanceBaseline($policy, array_fill(0, 4, $sample));
+        $fiveSamples = evaluateCiPerformanceBaseline($policy, array_fill(0, 5, $sample));
+
+        self::assertSame('insufficient_data', $fourSamples['status']);
+        self::assertSame(4, $fourSamples['metrics']['workflow_elapsed']['sample_count']);
+        self::assertSame('pass', $fiveSamples['status']);
+        self::assertSame(5, $fiveSamples['metrics']['workflow_elapsed']['sample_count']);
     }
 
     public function testCliProcessPaginatesJobsAndWritesPassJsonAndSummaryToRequestedPaths(): void
@@ -448,12 +604,54 @@ class CiPerformanceBaselineTest extends TestCase
     private function profileLog(): string
     {
         return implode(' ', [
+            '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
             'php scripts/ci/run_deep_runtime_suite.php',
             '--suites=api-contract-openapi,write-contract-booking,write-contract-api,booking-controller-flows,integration-smoke',
+            '--booking-search-days=14',
+            '--retry-count=1',
+            '--start-date=2026-01-01',
+            '--end-date=2026-01-31',
             '--integration-smoke-include-ldap=true',
             '--integration-smoke-browser-bootstrap-timeout=900',
             '--integration-smoke-browser-evidence=on-failure',
         ]);
+    }
+
+    /**
+     * @param array<string|int, mixed> $profile
+     * @return array<string, array<string|int, mixed>>
+     */
+    private function comparisonProfileScalarMutations(array $profile): array
+    {
+        $mutations = [];
+        $walk = function (array $value, array $path = []) use (&$walk, &$mutations, $profile): void {
+            foreach ($value as $key => $item) {
+                $itemPath = [...$path, $key];
+                if (is_array($item)) {
+                    $walk($item, $itemPath);
+                    continue;
+                }
+
+                $mutation = $profile;
+                $target = &$mutation;
+                foreach (array_slice($itemPath, 0, -1) as $pathPart) {
+                    $target = &$target[$pathPart];
+                }
+                $leafKey = $itemPath[array_key_last($itemPath)];
+                $target[$leafKey] = match (true) {
+                    is_bool($item) => !$item,
+                    is_int($item) => $item + 1,
+                    is_string($item) => $item . '-changed',
+                    default => throw new \LogicException('Unsupported comparison profile scalar type.'),
+                };
+                unset($target);
+
+                $mutations[implode('.', array_map('strval', $itemPath))] = $mutation;
+            }
+        };
+        $walk($profile);
+
+        return $mutations;
     }
 
     /**

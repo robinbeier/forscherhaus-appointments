@@ -73,9 +73,14 @@ return [
         'mode_flags' => [
             'event' => 'pull_request',
             'run_attempt' => 1,
+            'booking_search_days' => 14,
+            'retry_count' => 1,
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-01-31',
             'integration_smoke_include_ldap' => true,
             'integration_smoke_browser_bootstrap_timeout' => 900,
             'integration_smoke_browser_evidence' => 'on-failure',
+            'playwright_runtime_package' => 'playwright@1.59.0-alpha-1771104257000',
         ],
     ],
 ];

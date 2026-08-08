@@ -745,7 +745,10 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
         $reasons[] = 'workflow conclusion was not success';
     }
 
-    if ((int) ($run['run_attempt'] ?? 1) !== 1) {
+    $runAttempt = $run['run_attempt'] ?? null;
+    if (!is_int($runAttempt)) {
+        $reasons[] = 'workflow run_attempt was missing or invalid';
+    } elseif ($runAttempt !== 1) {
         $reasons[] = 'workflow run attempt was not 1';
     }
 
@@ -827,15 +830,6 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
         }
     }
 
-    $criticalTerminalJob = $policy['critical_path_jobs'][count($policy['critical_path_jobs']) - 1];
-    if (!in_array($criticalTerminalJob, $latestJobs, true)) {
-        return [
-            'eligible' => false,
-            'reasons' => ['critical path terminal job was not latest: ' . $criticalTerminalJob],
-            'sample' => [],
-        ];
-    }
-
     $trackedJobs = [];
     $stepDurations = [];
     foreach ($policy['tracked_jobs'] as $jobName) {
@@ -877,7 +871,7 @@ function buildCiPerformanceBaselineRunSample(array $run, array $jobs, array $pol
             'created_at' => (string) ($run['created_at'] ?? ''),
             'head_branch' => (string) ($run['head_branch'] ?? ''),
             'head_sha' => (string) ($run['head_sha'] ?? ''),
-            'run_attempt' => (int) ($run['run_attempt'] ?? 1),
+            'run_attempt' => $runAttempt,
             'comparison_profile' => [
                 'fingerprint' => $observedFingerprint,
                 'components' => $comparisonProfile,
@@ -950,7 +944,11 @@ function buildCiPerformanceBaselineComparisonProfile(
         ],
         'mode_flags' => [
             'event' => (string) ($run['event'] ?? 'missing'),
-            'run_attempt' => (int) ($run['run_attempt'] ?? 1),
+            'run_attempt' => is_int($run['run_attempt'] ?? null) ? $run['run_attempt'] : 'missing',
+            'booking_search_days' => extractCiPerformanceBaselineIntegerFlag($deepRuntimeLog, 'booking-search-days'),
+            'retry_count' => extractCiPerformanceBaselineIntegerFlag($deepRuntimeLog, 'retry-count'),
+            'start_date' => extractCiPerformanceBaselineStringFlag($deepRuntimeLog, 'start-date'),
+            'end_date' => extractCiPerformanceBaselineStringFlag($deepRuntimeLog, 'end-date'),
             'integration_smoke_include_ldap' => $includeLdap,
             'integration_smoke_browser_bootstrap_timeout' => extractCiPerformanceBaselineIntegerFlag(
                 $deepRuntimeLog,
@@ -959,6 +957,10 @@ function buildCiPerformanceBaselineComparisonProfile(
             'integration_smoke_browser_evidence' => extractCiPerformanceBaselineStringFlag(
                 $deepRuntimeLog,
                 'integration-smoke-browser-evidence',
+            ),
+            'playwright_runtime_package' => extractCiPerformanceBaselineEnvironmentValue(
+                $deepRuntimeLog,
+                'PLAYWRIGHT_RUNTIME_PACKAGE',
             ),
         ],
     ];
@@ -997,6 +999,15 @@ function extractCiPerformanceBaselineIntegerFlag(string $log, string $flag): ?in
 function extractCiPerformanceBaselineStringFlag(string $log, string $flag): ?string
 {
     if (preg_match('/--' . preg_quote($flag, '/') . '=([a-z0-9_-]+)/', $log, $matches) !== 1) {
+        return null;
+    }
+
+    return $matches[1];
+}
+
+function extractCiPerformanceBaselineEnvironmentValue(string $log, string $name): ?string
+{
+    if (preg_match('/(?:^|\\s)(?:-e\\s+)?' . preg_quote($name, '/') . '=([^\\s]+)/', $log, $matches) !== 1) {
         return null;
     }
 
@@ -1065,6 +1076,7 @@ function evaluateCiPerformanceBaseline(array $policy, array $samples): array
     $status = count($samples) >= $policy['minimum_samples'] ? 'pass' : 'insufficient_data';
     $jobSamples = array_fill_keys($policy['tracked_jobs'], []);
     $stepSamples = [];
+    $observedTerminalJobCounts = [];
 
     foreach ($samples as $sample) {
         foreach ($policy['tracked_jobs'] as $jobName) {
@@ -1076,7 +1088,15 @@ function evaluateCiPerformanceBaseline(array $policy, array $samples): array
         foreach ($sample['tracked_step_durations_seconds'] as $stepName => $duration) {
             $stepSamples[$stepName][] = (float) $duration;
         }
+
+        foreach ($sample['latest_jobs'] ?? [] as $jobName) {
+            if (!is_string($jobName) || $jobName === '') {
+                continue;
+            }
+            $observedTerminalJobCounts[$jobName] = ($observedTerminalJobCounts[$jobName] ?? 0) + 1;
+        }
     }
+    arsort($observedTerminalJobCounts, SORT_NUMERIC);
 
     $jobs = [];
     foreach ($jobSamples as $jobName => $durations) {
@@ -1106,9 +1126,8 @@ function evaluateCiPerformanceBaseline(array $policy, array $samples): array
                 array_map(static fn(array $sample): float => (float) $sample['max_job_queue_seconds'], $samples),
             ),
             'critical_path' => [
-                'jobs' => $policy['critical_path_jobs'],
-                'terminal_job' => $policy['critical_path_jobs'][count($policy['critical_path_jobs']) - 1],
-                'terminal_job_latest_samples' => count($samples),
+                'reference_jobs' => $policy['critical_path_jobs'],
+                'observed_terminal_job_counts' => $observedTerminalJobCounts,
             ],
             'jobs' => $jobs,
             'phases' => $steps,
@@ -1230,7 +1249,11 @@ function renderCiPerformanceBaselineSummary(array $report): string
             formatCiPerformanceBaselineOptionalSeconds($queue['p75_seconds'] ?? null),
         ),
         '',
-        'Critical path: `' . implode(' -> ', $criticalPath['jobs']) . '`.',
+        'Reference dependency path: `' . implode(' -> ', $criticalPath['reference_jobs']) . '`.',
+        sprintf(
+            'Observed terminal jobs: %s.',
+            formatCiPerformanceBaselineTerminalJobCounts($criticalPath['observed_terminal_job_counts']),
+        ),
         '',
         '| Job | Samples | Median | p75 |',
         '| --- | ---: | ---: | ---: |',
@@ -1278,6 +1301,23 @@ function formatCiPerformanceBaselineOptionalSeconds(mixed $seconds): string
     }
 
     return formatCiPerformanceBaselineSeconds((float) $seconds);
+}
+
+/**
+ * @param array<string, int> $counts
+ */
+function formatCiPerformanceBaselineTerminalJobCounts(array $counts): string
+{
+    if ($counts === []) {
+        return 'n/a';
+    }
+
+    $parts = [];
+    foreach ($counts as $jobName => $count) {
+        $parts[] = sprintf('`%s` (%d)', $jobName, $count);
+    }
+
+    return implode(', ', $parts);
 }
 
 /**

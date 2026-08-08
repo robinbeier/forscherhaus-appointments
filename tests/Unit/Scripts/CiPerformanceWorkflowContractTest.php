@@ -5,41 +5,62 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 class CiPerformanceWorkflowContractTest extends TestCase
 {
     public function testBuildTestRunsTheGeneralSuiteFailClosedBeforePinnedRob444Tests(): void
     {
-        $workflow = file_get_contents(__DIR__ . '/../../../.github/workflows/ci.yml');
-        self::assertNotFalse($workflow);
+        $job = $this->workflowJob('build-test');
+        $steps = $this->namedSteps($job);
 
-        $start = strpos($workflow, "\n  build-test:\n");
-        $end = strpos($workflow, "\n  js-lint-changed:\n", (int) $start + 1);
-        self::assertNotFalse($start);
-        self::assertNotFalse($end);
-        $job = substr($workflow, (int) $start, (int) $end - (int) $start);
+        foreach ($steps as $step) {
+            self::assertArrayNotHasKey('continue-on-error', $step);
+            self::assertStringNotContainsString('php-actions/phpunit', (string) ($step['uses'] ?? ''));
+        }
 
-        self::assertStringNotContainsString('php-actions/phpunit', $job);
-        self::assertStringNotContainsString('continue-on-error:', $job);
-        self::assertStringNotContainsString('|| true', $job);
+        $requiredOrder = [
+            'Prepare root test configuration',
+            'Start build-test database',
+            'Wait for build-test MySQL readiness',
+            'Install deterministic build-test instance',
+            'PHPUnit Tests',
+            'ROB-444 CI baseline regression tests',
+            'ROB-442 root deployment regression tests',
+            'Diagnostics (build-test database)',
+            'Cleanup build-test database',
+        ];
+        $stepNames = array_keys($steps);
+        self::assertSame(
+            $requiredOrder,
+            array_values(
+                array_filter($stepNames, static fn(string $name): bool => in_array($name, $requiredOrder, true)),
+            ),
+        );
 
-        $preparePosition = strpos($job, '- name: Prepare root test configuration');
-        $generalPosition = strpos($job, '- name: PHPUnit Tests');
-        $rob444Position = strpos($job, '- name: ROB-444 CI baseline regression tests');
-        $rob442Position = strpos($job, '- name: ROB-442 root deployment regression tests');
-        self::assertNotFalse($preparePosition);
-        self::assertNotFalse($generalPosition);
-        self::assertNotFalse($rob444Position);
-        self::assertNotFalse($rob442Position);
-        self::assertLessThan($generalPosition, $preparePosition);
-        self::assertLessThan($rob444Position, $generalPosition);
-        self::assertLessThan($rob442Position, $rob444Position);
-
-        $prepare = substr($job, $preparePosition, $generalPosition - $preparePosition);
+        $prepare = $this->stepRun($steps, 'Prepare root test configuration');
         self::assertStringContainsString('test ! -e config.php', $prepare);
         self::assertStringContainsString('install -m 0600 config-sample.php config.php', $prepare);
+        self::assertStringContainsString(
+            'sed -i "s/const DB_HOST = \'mysql\';/const DB_HOST = \'127.0.0.1\';/" config.php',
+            $prepare,
+        );
+        self::assertStringContainsString('grep -Fq "const DB_HOST = \'127.0.0.1\';" config.php', $prepare);
 
-        $general = substr($job, $generalPosition, $rob444Position - $generalPosition);
+        self::assertSame('docker compose up -d mysql', $this->stepRun($steps, 'Start build-test database'));
+        self::assertSame(
+            'bash scripts/ci/wait_for_mysql_readiness.sh',
+            $this->stepRun($steps, 'Wait for build-test MySQL readiness'),
+        );
+
+        $installDatabase = $this->stepRun($steps, 'Install deterministic build-test instance');
+        self::assertStringContainsString('for attempt in 1 2 3; do', $installDatabase);
+        self::assertStringContainsString('if php index.php console install; then', $installDatabase);
+        self::assertStringContainsString('console install failed after 3 attempts.', $installDatabase);
+        self::assertStringContainsString('exit 1', $installDatabase);
+
+        $general = $this->stepRun($steps, 'PHPUnit Tests');
+        self::assertStringNotContainsString('|| true', $general);
         self::assertStringContainsString('if ! APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit', $general);
         self::assertStringContainsString('--configuration phpunit.xml', $general);
         self::assertStringContainsString('--fail-on-empty-test-suite', $general);
@@ -51,7 +72,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             $general,
         );
 
-        $rob444 = substr($job, $rob444Position, $rob442Position - $rob444Position);
+        $rob444 = $this->stepRun($steps, 'ROB-444 CI baseline regression tests');
+        self::assertStringNotContainsString('|| true', $rob444);
         self::assertStringContainsString('if ! php -d memory_limit=512M vendor/bin/phpunit', $rob444);
         self::assertStringContainsString('--no-configuration', $rob444);
         self::assertStringContainsString('--bootstrap vendor/autoload.php', $rob444);
@@ -79,53 +101,129 @@ class CiPerformanceWorkflowContractTest extends TestCase
             "grep -Eq '^(OK \\([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-rob444.log",
             $rob444,
         );
+
+        $diagnostics = $steps['Diagnostics (build-test database)'];
+        self::assertSame('failure()', $diagnostics['if'] ?? null);
+        self::assertStringContainsString(
+            'docker compose logs --no-color --timestamps mysql || true',
+            $this->stepRun($steps, 'Diagnostics (build-test database)'),
+        );
+
+        $cleanup = $steps['Cleanup build-test database'];
+        self::assertSame('always()', $cleanup['if'] ?? null);
+        self::assertSame(
+            'docker compose down -v --remove-orphans',
+            $this->stepRun($steps, 'Cleanup build-test database'),
+        );
     }
 
     public function testBaselineMeasurementStaysInsideTheExistingAdvisorySignalJob(): void
     {
-        $workflow = file_get_contents(__DIR__ . '/../../../.github/workflows/ci.yml');
-        self::assertNotFalse($workflow);
+        $job = $this->workflowJob('heavy-job-duration-trends');
+        $steps = $this->namedSteps($job);
+        $condition = (string) ($job['if'] ?? '');
 
-        $start = strpos($workflow, "\n  heavy-job-duration-trends:\n");
-        $end = strpos($workflow, "\n  pdf-renderer-latency:\n", (int) $start + 1);
-        self::assertNotFalse($start);
-        self::assertNotFalse($end);
-        $job = substr($workflow, (int) $start, (int) $end - (int) $start);
+        self::assertStringContainsString("github.event_name == 'push'", $condition);
+        self::assertStringContainsString("github.ref == 'refs/heads/main'", $condition);
+        foreach ($steps as $step) {
+            self::assertArrayNotHasKey('continue-on-error', $step);
+        }
 
-        self::assertStringContainsString("github.event_name == 'push'", $job);
-        self::assertStringContainsString("github.ref == 'refs/heads/main'", $job);
-        self::assertStringContainsString('Measure full-gate PR performance baseline', $job);
-        self::assertStringContainsString('set +e', $job);
-        self::assertStringContainsString('ci-performance-baseline exited with status', $job);
-        self::assertStringContainsString('ci-performance-baseline-latest.json', $job);
-        self::assertStringNotContainsString('continue-on-error:', $job);
-
-        $measurementPosition = strpos($job, '- name: Measure full-gate PR performance baseline');
-        $uploadPosition = strpos($job, '- name: Upload heavy job trend artifacts');
-        $diagnosticsPosition = strpos($job, '- name: Diagnostics (heavy job trend report)');
-        self::assertNotFalse($measurementPosition);
-        self::assertNotFalse($uploadPosition);
-        self::assertNotFalse($diagnosticsPosition);
-        self::assertLessThan($uploadPosition, $measurementPosition);
-        self::assertLessThan($diagnosticsPosition, $uploadPosition);
-
-        $upload = substr($job, $uploadPosition, $diagnosticsPosition - $uploadPosition);
-        $pathStart = strpos($upload, "          path: |\n");
-        $pathEnd = strpos($upload, '          if-no-files-found:', (int) $pathStart);
-        self::assertNotFalse($pathStart);
-        self::assertNotFalse($pathEnd);
-        $pathBlock = substr(
-            $upload,
-            (int) $pathStart + strlen("          path: |\n"),
-            (int) $pathEnd - ((int) $pathStart + strlen("          path: |\n")),
+        $requiredOrder = [
+            'Measure full-gate PR performance baseline',
+            'Upload heavy job trend artifacts',
+            'Diagnostics (heavy job trend report)',
+        ];
+        $stepNames = array_keys($steps);
+        self::assertSame(
+            $requiredOrder,
+            array_values(
+                array_filter($stepNames, static fn(string $name): bool => in_array($name, $requiredOrder, true)),
+            ),
         );
-        $paths = array_values(array_filter(array_map('trim', explode("\n", $pathBlock))));
+
+        $measurement = $this->stepRun($steps, 'Measure full-gate PR performance baseline');
+        self::assertStringContainsString('set +e', $measurement);
+        self::assertStringContainsString('ci-performance-baseline exited with status', $measurement);
+        self::assertStringContainsString('ci-performance-baseline-latest.json', $measurement);
+
+        $upload = $steps['Upload heavy job trend artifacts'];
+        self::assertSame('actions/upload-artifact@v7', $upload['uses'] ?? null);
         self::assertSame(
             [
                 'storage/logs/ci/heavy-job-duration-trends-latest.json',
                 'storage/logs/ci/ci-performance-baseline-latest.json',
             ],
-            $paths,
+            array_values(array_filter(array_map('trim', explode("\n", (string) ($upload['with']['path'] ?? ''))))),
         );
+    }
+
+    public function testDeepRuntimeWorkloadProfileInputsStayExplicitInTheWorkflow(): void
+    {
+        $steps = $this->namedSteps($this->workflowJob('deep-runtime-suite'));
+        $installBrowser = $this->stepRun($steps, 'Install Playwright smoke browser');
+        $deepRuntime = $this->stepRun($steps, 'Run deep runtime suite');
+
+        self::assertStringContainsString(
+            '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
+            $installBrowser,
+        );
+        foreach (
+            [
+                '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
+                '--booking-search-days=14',
+                '--retry-count=1',
+                '--start-date=2026-01-01',
+                '--end-date=2026-01-31',
+                '--integration-smoke-browser-bootstrap-timeout=900',
+            ]
+            as $profileInput
+        ) {
+            self::assertStringContainsString($profileInput, $deepRuntime);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function workflowJob(string $jobName): array
+    {
+        $workflow = Yaml::parseFile(__DIR__ . '/../../../.github/workflows/ci.yml');
+        self::assertIsArray($workflow);
+        self::assertIsArray($workflow['jobs'] ?? null);
+        self::assertArrayHasKey($jobName, $workflow['jobs']);
+        self::assertIsArray($workflow['jobs'][$jobName]);
+
+        return $workflow['jobs'][$jobName];
+    }
+
+    /**
+     * @param array<string, mixed> $job
+     * @return array<string, array<string, mixed>>
+     */
+    private function namedSteps(array $job): array
+    {
+        self::assertIsArray($job['steps'] ?? null);
+        $namedSteps = [];
+
+        foreach ($job['steps'] as $step) {
+            self::assertIsArray($step);
+            self::assertIsString($step['name'] ?? null);
+            self::assertArrayNotHasKey($step['name'], $namedSteps, 'Workflow step names must be unique within a job.');
+            $namedSteps[$step['name']] = $step;
+        }
+
+        return $namedSteps;
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $steps
+     */
+    private function stepRun(array $steps, string $stepName): string
+    {
+        self::assertArrayHasKey($stepName, $steps);
+        self::assertIsString($steps[$stepName]['run'] ?? null);
+
+        return trim($steps[$stepName]['run']);
     }
 }
