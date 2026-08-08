@@ -11,6 +11,7 @@ require_once __DIR__ . '/lib/PlaywrightCookieRecords.php';
 require_once __DIR__ . '/lib/PlaywrightRunCodePayload.php';
 
 use ReleaseGate\CustomersUiSmokeContract;
+use ReleaseGate\CustomersUiSmokeBrowserFlowException;
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateHttpClient;
@@ -19,6 +20,7 @@ use function ReleaseGate\buildPlaywrightSessionArguments;
 use function ReleaseGate\customersUiSmokeFinalizeCleanup;
 use function ReleaseGate\customersUiSmokeStorageStatesRemoved;
 use function ReleaseGate\customersUiSmokeTemporaryArtifactsRemoved;
+use function ReleaseGate\customersUiSmokeValidateBrowserResult;
 use function ReleaseGate\customersUiSmokeWithStorageState;
 use function ReleaseGate\normalizeCookieRecordsForPlaywright;
 use function ReleaseGate\parsePlaywrightRunCodeJsonPayload;
@@ -53,11 +55,19 @@ $runCheck = static function (string $name, callable $callback) use (&$checks): a
     try {
         $details = $callback();
     } catch (Throwable $exception) {
+        $assertionFailure =
+            $exception instanceof GateAssertionException || $exception instanceof CustomersUiSmokeBrowserFlowException;
+        $details = ['assertion_failure' => $assertionFailure];
+
+        if ($exception instanceof CustomersUiSmokeBrowserFlowException) {
+            $details = [...$details, ...$exception->safeDetails];
+        }
+
         $checks[] = [
             'name' => $name,
             'status' => 'fail',
             'duration_ms' => (int) round((microtime(true) - $started) * 1000),
-            'details' => ['assertion_failure' => $exception instanceof GateAssertionException],
+            'details' => $details,
         ];
 
         throw $exception;
@@ -307,14 +317,16 @@ try {
                     max(90, $config['open_timeout'] * 3),
                 );
                 customersUiSmokeAssertProcessSucceeded($runCode, 'Customers UI smoke browser flow');
-                $result = parsePlaywrightRunCodeJsonPayload(
-                    (string) ($runCode['stdout'] ?? ''),
-                    '__CUSTOMERS_UI_SMOKE_GATE__',
-                    'Customers UI smoke',
+                $result = customersUiSmokeValidateBrowserResult(
+                    parsePlaywrightRunCodeJsonPayload(
+                        (string) ($runCode['stdout'] ?? ''),
+                        '__CUSTOMERS_UI_SMOKE_GATE__',
+                        'Customers UI smoke',
+                    ),
                 );
 
-                if (($result['ok'] ?? false) !== true) {
-                    throw new GateAssertionException('Customers UI smoke browser assertions failed.');
+                if ($result['ok'] !== true) {
+                    throw new CustomersUiSmokeBrowserFlowException($result);
                 }
 
                 $close = customersUiSmokeRunPwcli(
@@ -342,16 +354,15 @@ try {
         });
     }
 } catch (Throwable $exception) {
-    $failureCode = $exception instanceof GateAssertionException ? 'assertion_failed' : 'runtime_error';
-    $exitCode =
-        $exception instanceof GateAssertionException
-            ? CUSTOMERS_UI_SMOKE_ASSERTION_FAILURE
-            : CUSTOMERS_UI_SMOKE_RUNTIME_FAILURE;
+    $assertionFailure =
+        $exception instanceof GateAssertionException || $exception instanceof CustomersUiSmokeBrowserFlowException;
+    $failureCode = $assertionFailure ? 'assertion_failed' : 'runtime_error';
+    $exitCode = $assertionFailure ? CUSTOMERS_UI_SMOKE_ASSERTION_FAILURE : CUSTOMERS_UI_SMOKE_RUNTIME_FAILURE;
     $checks[] = [
         'name' => 'gate_failure',
         'status' => 'fail',
         'duration_ms' => 0,
-        'details' => ['assertion_failure' => $exception instanceof GateAssertionException],
+        'details' => ['assertion_failure' => $assertionFailure],
     ];
 } finally {
     $cleanupOk = customersUiSmokeFinalizeCleanup($sessions, $tempDirectory, static function (string $sessionId) use (

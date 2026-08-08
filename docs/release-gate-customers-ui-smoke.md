@@ -130,6 +130,11 @@ produces no screenshots, traces, network logs, cookies, response bodies, names,
 contact fields, or database identifiers. The whole directory is removed in
 `finally`, including after a browser assertion or runtime failure.
 
+For a structured browser assertion failure, the JSON report retains only the
+fixed browser-result booleans and non-negative counters in the failed
+`browser_role_<role>` check. Unknown fields, strings, invalid counters, and raw
+browser output are rejected and are never copied into the report.
+
 ## Cleanup And Exit Codes
 
 The shell `EXIT`/signal handler always calls `deactivate` and `verify`. An

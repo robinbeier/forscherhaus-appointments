@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\CustomersUiSmokeContract;
 
@@ -27,8 +28,9 @@ final class CustomersUiSmokeGateExecutionTest extends TestCase
     public function testFailureReportSeparatesStorageStateFromOverallArtifactCleanup(): void
     {
         foreach ([false, true] as $leaveUnrelatedArtifact) {
-            $report = $this->runFailingBrowserGate($leaveUnrelatedArtifact);
+            [$report, $result] = $this->runBrowserGate(null, $leaveUnrelatedArtifact);
 
+            self::assertSame(2, $result['exit_code'], $result['stderr']);
             self::assertSame('fail', $report['status']);
             self::assertSame($leaveUnrelatedArtifact ? 'cleanup_failed' : 'runtime_error', $report['failure_code']);
             self::assertSame($leaveUnrelatedArtifact ? 'fail' : 'pass', $report['cleanup']['status']);
@@ -38,17 +40,121 @@ final class CustomersUiSmokeGateExecutionTest extends TestCase
     }
 
     /**
-     * @return array<string, mixed>
+     * @param array<string, bool|int> $payload
      */
-    private function runFailingBrowserGate(bool $leaveUnrelatedArtifact): array
+    #[DataProvider('browserFailureStagesProvider')]
+    public function testFunctionalBrowserFailurePreservesOnlyValidatedStageDetails(
+        array $payload,
+        string $expectedFailedStage,
+    ): void {
+        [$report, $result] = $this->runBrowserGate($payload, false);
+
+        self::assertSame(1, $result['exit_code'], $result['stderr']);
+        self::assertSame('assertion_failed', $report['failure_code']);
+        $browserCheck = $this->checkByName($report, 'browser_role_admin');
+        self::assertSame('fail', $browserCheck['status']);
+        self::assertTrue($browserCheck['details']['assertion_failure']);
+        self::assertFalse($browserCheck['details'][$expectedFailedStage]);
+        self::assertSame($payload, array_diff_key($browserCheck['details'], ['assertion_failure' => true]));
+        self::assertSame('pass', $report['cleanup']['status']);
+        self::assertTrue($report['cleanup']['storage_state_removed']);
+        self::assertTrue($report['cleanup']['temporary_artifacts_removed']);
+    }
+
+    /**
+     * @return iterable<string, array{0: array<string, bool|int>, 1: string}>
+     */
+    public static function browserFailureStagesProvider(): iterable
     {
-        $suffix = $leaveUnrelatedArtifact ? 'cleanup-failure' : 'cleanup-success';
+        $navigationFailure = self::validBrowserPayload();
+        $navigationFailure['ok'] = false;
+        $navigationFailure['page_loaded'] = false;
+        $navigationFailure['initial_search_empty'] = false;
+        $navigationFailure['synthetic_search_empty'] = false;
+        $navigationFailure['empty_state_visible'] = false;
+        $navigationFailure['script_vars_safe'] = false;
+        $navigationFailure['dom_safe'] = false;
+        $navigationFailure['search_response_count'] = 0;
+        $navigationFailure['flow_error_count'] = 1;
+        yield 'navigation stage' => [$navigationFailure, 'page_loaded'];
+
+        $syntheticSearchFailure = self::validBrowserPayload();
+        $syntheticSearchFailure['ok'] = false;
+        $syntheticSearchFailure['synthetic_search_empty'] = false;
+        $syntheticSearchFailure['empty_state_visible'] = false;
+        $syntheticSearchFailure['search_response_count'] = 1;
+        $syntheticSearchFailure['flow_error_count'] = 1;
+        yield 'synthetic search stage' => [$syntheticSearchFailure, 'synthetic_search_empty'];
+    }
+
+    public function testInvalidBrowserPayloadFailsClosedWithoutExportingUnknownOrRawValues(): void
+    {
+        $payload = self::validBrowserPayload();
+        $payload['ok'] = false;
+        $payload['username'] = 'real-person@example.test';
+        [$report, $result] = $this->runBrowserGate($payload, false);
+
+        self::assertSame(1, $result['exit_code'], $result['stderr']);
+        self::assertSame('assertion_failed', $report['failure_code']);
+        $browserCheck = $this->checkByName($report, 'browser_role_admin');
+        self::assertSame(['assertion_failure' => true], $browserCheck['details']);
+        $encodedReport = json_encode($report, JSON_THROW_ON_ERROR);
+        self::assertStringNotContainsString('username', $encodedReport);
+        self::assertStringNotContainsString('real-person', $encodedReport);
+        self::assertStringNotContainsString('__CUSTOMERS_UI_SMOKE_GATE__', $encodedReport);
+    }
+
+    public function testCleanupFailureStillOverridesFunctionalBrowserFailure(): void
+    {
+        $payload = self::validBrowserPayload();
+        $payload['ok'] = false;
+        $payload['flow_error_count'] = 1;
+        [$report, $result] = $this->runBrowserGate($payload, true);
+
+        self::assertSame(2, $result['exit_code'], $result['stderr']);
+        self::assertSame('cleanup_failed', $report['failure_code']);
+        self::assertSame('fail', $report['cleanup']['status']);
+        self::assertTrue($report['cleanup']['storage_state_removed']);
+        self::assertFalse($report['cleanup']['temporary_artifacts_removed']);
+    }
+
+    public function testSuccessReportKeepsExistingAggregatedBrowserDetails(): void
+    {
+        [$report, $result] = $this->runBrowserGate(self::validBrowserPayload(), false);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('pass', $report['status']);
+        self::assertNull($report['failure_code']);
+        self::assertSame(
+            [
+                'page_loaded' => true,
+                'initial_search_empty' => true,
+                'synthetic_search_empty' => true,
+                'containment_ok' => true,
+                'browser_closed' => true,
+                'blocked_request_count' => 0,
+                'storage_state_removed' => true,
+            ],
+            $this->checkByName($report, 'browser_role_admin')['details'],
+        );
+        self::assertSame('pass', $report['cleanup']['status']);
+    }
+
+    /**
+     * @param array<string, mixed>|null $payload
+     * @return array{0: array<string, mixed>, 1: array{exit_code: int, stdout: string, stderr: string}}
+     */
+    private function runBrowserGate(?array $payload, bool $leaveUnrelatedArtifact): array
+    {
+        $suffix = bin2hex(random_bytes(4));
         $routerPath = $this->workspace . '/router-' . $suffix . '.php';
         $pwcliPath = $this->workspace . '/pwcli-' . $suffix . '.sh';
         $recordPath = $this->workspace . '/output-dir-' . $suffix . '.txt';
         $reportPath = $this->workspace . '/report-' . $suffix . '.json';
         self::assertNotFalse(file_put_contents($routerPath, $this->routerSource()));
-        self::assertNotFalse(file_put_contents($pwcliPath, $this->pwcliSource($recordPath, $leaveUnrelatedArtifact)));
+        self::assertNotFalse(
+            file_put_contents($pwcliPath, $this->pwcliSource($recordPath, $leaveUnrelatedArtifact, $payload)),
+        );
         self::assertTrue(chmod($pwcliPath, 0700));
 
         [$server, $baseUrl] = $this->startServer($routerPath);
@@ -74,7 +180,6 @@ final class CustomersUiSmokeGateExecutionTest extends TestCase
             proc_close($server);
         }
 
-        self::assertSame(2, $result['exit_code'], $result['stderr']);
         self::assertFileExists($reportPath);
         $report = json_decode((string) file_get_contents($reportPath), true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($report);
@@ -89,7 +194,7 @@ final class CustomersUiSmokeGateExecutionTest extends TestCase
             self::assertTrue($gateTempDirectory === '' || !file_exists($gateTempDirectory));
         }
 
-        return $report;
+        return [$report, $result];
     }
 
     /**
@@ -173,7 +278,10 @@ final class CustomersUiSmokeGateExecutionTest extends TestCase
         return implode("\n", $lines) . "\n";
     }
 
-    private function pwcliSource(string $recordPath, bool $leaveUnrelatedArtifact): string
+    /**
+     * @param array<string, mixed>|null $payload
+     */
+    private function pwcliSource(string $recordPath, bool $leaveUnrelatedArtifact, ?array $payload): string
     {
         $script = <<<'BASH'
         #!/usr/bin/env bash
@@ -191,16 +299,61 @@ final class CustomersUiSmokeGateExecutionTest extends TestCase
             if [[ "$leave_artifact" == '1' ]]; then
                 mkdir -p "${PLAYWRIGHT_MCP_OUTPUT_DIR}/unrelated-artifact"
             fi
-            exit 1
+            __RUN_CODE_RESULT__
         fi
         exit 0
         BASH;
 
         return str_replace(
-            ['__RECORD_PATH__', '__LEAVE_ARTIFACT__'],
-            [escapeshellarg($recordPath), $leaveUnrelatedArtifact ? '1' : '0'],
+            ['__RECORD_PATH__', '__LEAVE_ARTIFACT__', '__RUN_CODE_RESULT__'],
+            [
+                escapeshellarg($recordPath),
+                $leaveUnrelatedArtifact ? '1' : '0',
+                $payload === null
+                    ? 'exit 1'
+                    : 'printf \'%s\\n\' ' .
+                        escapeshellarg('__CUSTOMERS_UI_SMOKE_GATE__' . json_encode($payload, JSON_THROW_ON_ERROR)),
+            ],
             $script,
         );
+    }
+
+    /**
+     * @param array<string, mixed> $report
+     * @return array<string, mixed>
+     */
+    private function checkByName(array $report, string $name): array
+    {
+        foreach ($report['checks'] ?? [] as $check) {
+            if (is_array($check) && ($check['name'] ?? null) === $name) {
+                return $check;
+            }
+        }
+
+        self::fail('Expected Customers UI smoke check was not found: ' . $name);
+    }
+
+    /**
+     * @return array<string, bool|int>
+     */
+    private static function validBrowserPayload(): array
+    {
+        return [
+            'ok' => true,
+            'network_policy_installed' => true,
+            'page_loaded' => true,
+            'initial_search_empty' => true,
+            'synthetic_search_empty' => true,
+            'empty_state_visible' => true,
+            'script_vars_safe' => true,
+            'dom_safe' => true,
+            'response_bodies_safe' => true,
+            'search_response_count' => 2,
+            'blocked_request_count' => 0,
+            'page_error_count' => 0,
+            'console_error_count' => 0,
+            'flow_error_count' => 0,
+        ];
     }
 
     private function routerSource(): string

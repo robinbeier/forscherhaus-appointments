@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use ReleaseGate\CustomersUiSmokeBrowserFlowException;
 use ReleaseGate\CustomersUiSmokeContract;
+use ReleaseGate\GateAssertionException;
 use RuntimeException;
 
 require_once __DIR__ . '/../../../scripts/release-gate/lib/CustomersUiSmokeContract.php';
@@ -14,6 +17,7 @@ require_once __DIR__ . '/../../../scripts/release-gate/lib/CustomersUiSmokeGateR
 use function ReleaseGate\customersUiSmokeFinalizeCleanup;
 use function ReleaseGate\customersUiSmokeStorageStatesRemoved;
 use function ReleaseGate\customersUiSmokeTemporaryArtifactsRemoved;
+use function ReleaseGate\customersUiSmokeValidateBrowserResult;
 use function ReleaseGate\customersUiSmokeWithStorageState;
 
 final class CustomersUiSmokeGateRuntimeTest extends TestCase
@@ -49,6 +53,74 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
         }
 
         rmdir($this->tempDirectory);
+    }
+
+    public function testBrowserResultAcceptsOnlyKnownBooleansAndNonNegativeCounts(): void
+    {
+        $result = $this->validBrowserResult();
+
+        self::assertSame($result, customersUiSmokeValidateBrowserResult($result));
+    }
+
+    public function testBrowserFlowExceptionCarriesOnlyValidatedSafeDetails(): void
+    {
+        $result = $this->validBrowserResult();
+        $result['ok'] = false;
+        $result['initial_search_empty'] = false;
+
+        $exception = new CustomersUiSmokeBrowserFlowException(customersUiSmokeValidateBrowserResult($result));
+
+        self::assertSame($result, $exception->safeDetails);
+        self::assertInstanceOf(RuntimeException::class, $exception);
+    }
+
+    /** @param callable(array<string, bool|int>): array<string, mixed> $mutate */
+    #[DataProvider('invalidBrowserResultProvider')]
+    public function testBrowserResultRejectsUnsafeOrInvalidFields(callable $mutate, string $expectedMessage): void
+    {
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage($expectedMessage);
+
+        customersUiSmokeValidateBrowserResult($mutate($this->validBrowserResult()));
+    }
+
+    /**
+     * @return iterable<string, array{0: callable(array<string, bool|int>): array<string, mixed>, 1: string}>
+     */
+    public static function invalidBrowserResultProvider(): iterable
+    {
+        yield 'unknown PII-like string' => [
+            static function (array $result): array {
+                $result['username'] = 'real-person@example.test';
+
+                return $result;
+            },
+            'unexpected field set',
+        ];
+        yield 'known boolean encoded as string' => [
+            static function (array $result): array {
+                $result['page_loaded'] = 'yes';
+
+                return $result;
+            },
+            'non-boolean field',
+        ];
+        yield 'negative counter' => [
+            static function (array $result): array {
+                $result['flow_error_count'] = -1;
+
+                return $result;
+            },
+            'invalid count',
+        ];
+        yield 'counter encoded as string' => [
+            static function (array $result): array {
+                $result['search_response_count'] = '1';
+
+                return $result;
+            },
+            'invalid count',
+        ];
     }
 
     public function testStorageStateIsRemovedWhenBrowserStepFailsAfterWrite(): void
@@ -221,5 +293,28 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
         self::assertFalse($cleanupOk);
         self::assertDirectoryExists($this->tempDirectory);
         self::assertDirectoryExists($this->tempDirectory . '/leftover');
+    }
+
+    /**
+     * @return array<string, bool|int>
+     */
+    private function validBrowserResult(): array
+    {
+        return [
+            'ok' => true,
+            'network_policy_installed' => true,
+            'page_loaded' => true,
+            'initial_search_empty' => true,
+            'synthetic_search_empty' => true,
+            'empty_state_visible' => true,
+            'script_vars_safe' => true,
+            'dom_safe' => true,
+            'response_bodies_safe' => true,
+            'search_response_count' => 2,
+            'blocked_request_count' => 0,
+            'page_error_count' => 0,
+            'console_error_count' => 0,
+            'flow_error_count' => 0,
+        ];
     }
 }
