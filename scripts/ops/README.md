@@ -13,6 +13,10 @@ For the on-demand, synthetic-only production Provider UI browser smoke, use
 `docs/release-gate-provider-ui-smoke.md`. It deliberately runs Playwright on the
 operator workstation, not on the production host or in Kuma.
 
+For the on-demand, no-customer-data Customers UI role smoke, use
+`docs/release-gate-customers-ui-smoke.md`. It is likewise operator-side and
+never belongs in Kuma or cron.
+
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
 and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
 
@@ -47,6 +51,10 @@ Script inventory:
 - `prod_provider_ui_smoke.sh` runs the operator-side Provider UI smoke with a
   short synthetic lease, shell cleanup, and an independent ten-minute systemd
   cleanup timer
+- `customers_ui_smoke_principals.sh` manages the four root-protected dormant
+  Customers role principals
+- `prod_customers_ui_smoke.sh` runs their operator-side Customers view/search
+  smoke with no customer fixture and independent ten-minute cleanup
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything

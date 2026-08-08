@@ -1,6 +1,7 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 
 require_once __DIR__ . '/Provider_ui_smoke_access_policy.php';
+require_once __DIR__ . '/Customers_ui_smoke_access_policy.php';
 
 /* ----------------------------------------------------------------------------
  * Easy!Appointments - Online Appointment Scheduler
@@ -85,6 +86,7 @@ class EA_Controller extends CI_Controller
 
         $this->ensure_user_exists();
         $this->enforce_provider_ui_smoke_boundary();
+        $this->enforce_customers_ui_smoke_boundary();
         $this->configure_timezone();
         $this->configure_language();
         $this->load_common_html_vars();
@@ -246,6 +248,145 @@ class EA_Controller extends CI_Controller
         }
 
         return $query->row_array();
+    }
+
+    /**
+     * Keep every Customers UI smoke role away from non-Customers and write routes.
+     */
+    private function enforce_customers_ui_smoke_boundary(): void
+    {
+        $controller = (string) $this->router->class;
+        $method = (string) $this->router->method;
+        $httpMethod = strtoupper($this->input->method(true));
+        $sessionUsername = session('username');
+        $sessionUsername = is_string($sessionUsername) ? $sessionUsername : null;
+        $basicAuthUsername = $_SERVER['PHP_AUTH_USER'] ?? null;
+        $basicAuthUsername = is_string($basicAuthUsername) ? $basicAuthUsername : null;
+        $loginUsername = null;
+
+        if (strtolower($controller) === 'login' && strtolower($method) === 'validate' && $httpMethod === 'POST') {
+            $requestedUsername = request('username');
+            $loginUsername = is_string($requestedUsername) ? $requestedUsername : null;
+        }
+
+        $sessionIsReserved = Customers_ui_smoke_access_policy::isReservedUsername($sessionUsername);
+        $loginIsReserved = $this->is_customers_ui_smoke_auth_username($loginUsername);
+        $basicAuthIsReserved = $this->is_customers_ui_smoke_auth_username($basicAuthUsername);
+
+        if (!$sessionIsReserved && !$loginIsReserved && !$basicAuthIsReserved) {
+            return;
+        }
+
+        if ($basicAuthIsReserved) {
+            abort(403, 'Forbidden');
+        }
+
+        if ($sessionIsReserved) {
+            if (Customers_ui_smoke_access_policy::isLogoutRoute($controller, $method, $httpMethod)) {
+                return;
+            }
+
+            $principal = $this->load_customers_ui_smoke_principal((int) session('user_id'));
+            $targetRole = is_array($principal)
+                ? Customers_ui_smoke_access_policy::roleForUsername((string) $principal['username'])
+                : null;
+
+            if (
+                $principal === null ||
+                $targetRole === null ||
+                $principal['role_slug'] !== $targetRole ||
+                session('role_slug') !== $targetRole ||
+                empty($principal['password']) ||
+                empty($principal['salt']) ||
+                !Customers_ui_smoke_access_policy::hasActiveLease((string) $principal['notes'], $targetRole)
+            ) {
+                session_destroy();
+                abort(403, 'Forbidden');
+            }
+
+            if (!Customers_ui_smoke_access_policy::isAllowedRoute($controller, $method, $httpMethod)) {
+                abort(403, 'Forbidden');
+            }
+
+            return;
+        }
+
+        if ($loginIsReserved) {
+            $principal = $this->load_customers_ui_smoke_principal(null, $loginUsername);
+            $targetRole = is_array($principal)
+                ? Customers_ui_smoke_access_policy::roleForUsername((string) $principal['username'])
+                : null;
+
+            if (
+                $principal === null ||
+                $targetRole === null ||
+                $principal['role_slug'] !== $targetRole ||
+                empty($principal['password']) ||
+                empty($principal['salt']) ||
+                !Customers_ui_smoke_access_policy::hasActiveLease((string) $principal['notes'], $targetRole)
+            ) {
+                abort(403, 'Forbidden');
+            }
+
+            return;
+        }
+
+        abort(403, 'Forbidden');
+    }
+
+    protected function is_customers_ui_smoke_auth_username(?string $username): bool
+    {
+        if (Customers_ui_smoke_access_policy::isReservedUsername($username)) {
+            return true;
+        }
+
+        if (!is_string($username) || $username === '' || !$this->db->table_exists('user_settings')) {
+            return false;
+        }
+
+        return $this->load_customers_ui_smoke_principal(null, $username) !== null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function load_customers_ui_smoke_principal(?int $userId = null, ?string $authUsername = null): ?array
+    {
+        if ($authUsername !== null) {
+            $matchedUser = $this->accounts->get_user_by_username($authUsername);
+
+            if (!is_array($matchedUser) || !isset($matchedUser['id'])) {
+                return null;
+            }
+
+            $userId = (int) $matchedUser['id'];
+        }
+
+        if ($userId === null || $userId <= 0) {
+            return null;
+        }
+
+        $query = $this->db
+            ->select(
+                'users.id, users.notes, roles.slug AS role_slug, user_settings.username, ' .
+                    'user_settings.password, user_settings.salt',
+            )
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
+            ->where('users.id', $userId)
+            ->where_in('user_settings.username', array_values(Customers_ui_smoke_access_policy::USERNAMES_BY_ROLE))
+            ->get();
+
+        if ($query->num_rows() !== 1) {
+            return null;
+        }
+
+        $principal = $query->row_array();
+
+        return Customers_ui_smoke_access_policy::roleForUsername((string) $principal['username']) !== null
+            ? $principal
+            : null;
     }
 
     /**

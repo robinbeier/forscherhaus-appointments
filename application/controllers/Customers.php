@@ -175,6 +175,18 @@ class Customers extends EA_Controller
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
 
+            $sessionUsername = session('username');
+
+            if (is_string($sessionUsername) && Customers_ui_smoke_access_policy::isReservedUsername($sessionUsername)) {
+                if (!Customers_ui_smoke_access_policy::isSafeSearchKeyword($request_dto->keyword)) {
+                    abort(403, 'Forbidden');
+                }
+
+                json_response([]);
+
+                return;
+            }
+
             $customers = $this->customers_model->search(
                 $request_dto->keyword,
                 $request_dto->limit,

@@ -75,6 +75,7 @@ Primary references:
 - [Dashboard release gate](docs/release-gate-dashboard.md)
 - [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
 - [Production Provider UI smoke](docs/release-gate-provider-ui-smoke.md)
+- [Production Customers UI smoke](docs/release-gate-customers-ui-smoke.md)
 - [Deployment runbook](docs/deployment.md)
 - [Fresh server rebuild runbook](docs/server-rebuild-runbook.md)
 - [Agent Harness Index](docs/agent-harness-index.md)

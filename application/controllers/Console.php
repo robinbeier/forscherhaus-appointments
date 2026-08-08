@@ -37,6 +37,7 @@ class Console extends EA_Controller
         $this->load->dbutil();
 
         $this->load->library('instance');
+        $this->load->library('customers_ui_smoke_fixture');
         $this->load->library('provider_ui_smoke_fixture');
 
         $this->load->model('admins_model');
@@ -199,6 +200,36 @@ class Console extends EA_Controller
     }
 
     /**
+     * Manage the isolated Customers UI smoke principals.
+     */
+    public function customers_ui_smoke(string $action = ''): void
+    {
+        if (!in_array($action, ['install', 'verify', 'activate', 'deactivate', 'remove'], true)) {
+            $this->exit_customers_ui_smoke_error('invalid', 64);
+        }
+
+        $credentialFile = $GLOBALS['argv'][4] ?? Customers_ui_smoke_fixture::DEFAULT_CREDENTIAL_FILE;
+        $stateFile = $GLOBALS['argv'][5] ?? Customers_ui_smoke_fixture::DEFAULT_STATE_FILE;
+
+        if (!is_string($credentialFile) || !is_string($stateFile) || isset($GLOBALS['argv'][6])) {
+            $this->exit_customers_ui_smoke_error('invalid', 64);
+        }
+
+        try {
+            $state = $this->customers_ui_smoke_fixture->run($action, $credentialFile, $stateFile);
+            response('customers_ui_smoke action=' . $action . ' state=' . $state . ' result=ok' . PHP_EOL);
+        } catch (Throwable) {
+            $this->exit_customers_ui_smoke_error($action, 1);
+        }
+    }
+
+    private function exit_customers_ui_smoke_error(string $action, int $exitCode): never
+    {
+        fwrite(STDOUT, 'customers_ui_smoke action=' . $action . ' state=error result=error' . PHP_EOL);
+        exit($exitCode);
+    }
+
+    /**
      * Show help information about the console capabilities.
      *
      * Use this method to see the available commands.
@@ -227,6 +258,7 @@ class Console extends EA_Controller
             '⇾ php index.php console install',
             '⇾ php index.php console backup',
             '⇾ php index.php console sync',
+            '⇾ php index.php console customers_ui_smoke <install|verify|activate|deactivate|remove>',
             '⇾ php index.php console provider_ui_smoke <install|verify|activate|deactivate|remove>',
             '',
             '',
