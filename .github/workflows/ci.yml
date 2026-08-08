@@ -237,7 +237,12 @@ jobs:
             heavy_job_trends_required:
               - 'scripts/ci/check_heavy_job_duration_trends.php'
               - 'scripts/ci/config/heavy_job_duration_trend_policy.php'
+              - 'scripts/ci/measure_ci_performance_baseline.php'
+              - 'scripts/ci/config/ci_performance_baseline_policy.php'
               - 'tests/Unit/Scripts/HeavyJobDurationTrendTest.php'
+              - 'tests/Unit/Scripts/CiPerformanceBaselineTest.php'
+              - 'tests/Unit/Scripts/CiPerformanceWorkflowContractTest.php'
+              - 'docs/ci-performance-baseline.md'
               - 'composer.json'
               - '.github/workflows/ci.yml'
             pdf_renderer_latency_required:
@@ -417,12 +422,54 @@ jobs:
           php_version: 8.4
           php_extensions: gd
           version: 2
+      - name: Prepare root test configuration
+        run: |
+          test ! -e config.php
+          install -m 0600 config-sample.php config.php
+          sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
+          grep -Fq "const DB_HOST = '127.0.0.1';" config.php
+      - name: Start build-test database
+        run: docker compose up -d mysql
+      - name: Wait for build-test MySQL readiness
+        run: bash scripts/ci/wait_for_mysql_readiness.sh
+      - name: Install deterministic build-test instance
+        run: |
+          for attempt in 1 2 3; do
+            if php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
       - name: PHPUnit Tests
-        uses: php-actions/phpunit@v4
-        env:
-          TEST_NAME: Test
-        with:
-          configuration: phpunit.xml
+        run: |
+          set -o pipefail
+          mkdir -p storage/logs/ci
+          if ! APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
+              --configuration phpunit.xml \
+              --fail-on-empty-test-suite \
+              | tee storage/logs/ci/phpunit-general.log; then
+            echo "::error::The general PHPUnit suite failed." >&2
+            exit 1
+          fi
+          grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-general.log
+      - name: ROB-444 CI baseline regression tests
+        run: |
+          set -o pipefail
+          if ! php -d memory_limit=512M vendor/bin/phpunit \
+              --no-configuration \
+              --bootstrap vendor/autoload.php \
+              --fail-on-empty-test-suite \
+              tests/Unit/Scripts/CiPerformanceBaselineTest.php \
+              tests/Unit/Scripts/CiPerformanceWorkflowContractTest.php \
+              tests/Unit/Scripts/CiPathFilterMatrixTest.php \
+              | tee storage/logs/ci/phpunit-rob444.log; then
+            echo "::error::The ROB-444 PHPUnit suite failed." >&2
+            exit 1
+          fi
+          grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-rob444.log
       - name: ROB-442 root deployment regression tests
         run: |
           sudo php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
@@ -430,6 +477,14 @@ jobs:
             tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
             tests/Unit/Scripts/GateCliSupportTest.php \
             tests/Unit/Scripts/ReleaseArtifactValidatorTest.php
+      - name: Diagnostics (build-test database)
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --timestamps mysql || true
+      - name: Cleanup build-test database
+        if: always()
+        run: docker compose down -v --remove-orphans
 
   js-lint-changed:
     runs-on: ubuntu-latest
@@ -1082,16 +1137,33 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "::warning::heavy-job-duration-trends exited with status ${status}; see storage/logs/ci/heavy-job-duration-trends-latest.json."
           fi
+      - name: Measure full-gate PR performance baseline
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set +e
+          php scripts/ci/measure_ci_performance_baseline.php \
+            --output-json=storage/logs/ci/ci-performance-baseline-latest.json
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::ci-performance-baseline exited with status ${status}; see storage/logs/ci/ci-performance-baseline-latest.json."
+          fi
       - name: Upload heavy job trend artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: heavy-job-duration-trends-artifacts
-          path: storage/logs/ci/heavy-job-duration-trends-latest.json
+          path: |
+            storage/logs/ci/heavy-job-duration-trends-latest.json
+            storage/logs/ci/ci-performance-baseline-latest.json
           if-no-files-found: warn
       - name: Diagnostics (heavy job trend report)
         if: always()
-        run: cat storage/logs/ci/heavy-job-duration-trends-latest.json || true
+        run: |
+          cat storage/logs/ci/heavy-job-duration-trends-latest.json || true
+          cat storage/logs/ci/ci-performance-baseline-latest.json || true
 
   pdf-renderer-latency:
     needs:

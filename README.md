@@ -211,6 +211,9 @@ CI note:
   `booking-controller-flows`, and `coverage-delta` are blocking.
 - `heavy-job-duration-trends` and `pdf-renderer-latency` are non-blocking
   signal jobs.
+- The heavy-job signal also publishes the versioned full-gate PR measurement
+  contract and current cohort status described in
+  [CI Performance Baseline](docs/ci-performance-baseline.md).
 - Full job wiring lives in `.github/workflows/ci.yml`; the compact local
   command map and cross-links live in [AGENTS.md](AGENTS.md); specialized
   runtime details stay in the topic docs linked from

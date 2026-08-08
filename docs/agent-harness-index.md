@@ -23,6 +23,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Extended local command matrix + compact guardrails | `AGENTS.md` | Cross-topic command hub without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
+| CI performance measurement and baseline | `docs/ci-performance-baseline.md` | Versioned workload epoch, timing definitions, exclusions, and post-epoch cohort status. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
 | Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |
