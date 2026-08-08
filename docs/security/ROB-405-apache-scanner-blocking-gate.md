@@ -46,6 +46,10 @@ Before any live write:
 
 - A separate operator approval explicitly authorizes ROB-405 live Apache and
   Fail2ban changes, config tests, reloads, and post-change validation.
+- Before this combined procedure may change any default HTTP/TLS vhost, either
+  a separate ROB-429 live approval or one approval explicitly covering both
+  ROB-405 and ROB-429 default/unmatched/IP-literal-host hardening is required.
+  A ROB-405-only approval is insufficient for this procedure.
 - The current production baseline still matches `docs/ops/agent-operations.md`.
 - `bash scripts/ops/prod_doctor.sh` completes without a new unrelated blocker.
 - `bash scripts/ops/prod_validate_after_change.sh` passes before the change.
@@ -55,7 +59,8 @@ Before any live write:
 
 ## Live Procedure
 
-Do not execute this section without the separate approval above.
+This is a combined ROB-405/ROB-429 live procedure. Do not execute any live-write
+step in this section with a ROB-405-only approval.
 
 1. Capture read-only baseline:
    - `bash scripts/ops/prod_doctor.sh`
