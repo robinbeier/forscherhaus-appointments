@@ -67,6 +67,10 @@ run_remote() {
         declare -f prod_sensitive_paths_check_all
         declare -f prod_scanner_path_specs
         declare -f prod_scanner_paths_check_all
+        declare -f prod_scanner_default_host_path_specs
+        declare -f prod_scanner_public_ipv4_address
+        declare -f prod_scanner_host_context_specs
+        declare -f prod_scanner_host_contexts_check_all
     )"
 
     {
@@ -385,6 +389,13 @@ PROD_SCANNER_PATH_EMIT_FAILURES="${REQUIRE_SCANNER_BLOCKING}" prod_scanner_paths
 printf 'scanner_path_monitor_failures=%s\n' "${PROD_SCANNER_PATH_FAILURES:-0}"
 if [[ "${REQUIRE_SCANNER_BLOCKING}" == "1" ]] && (( PROD_SCANNER_PATH_FAILURES > 0 )); then
     failures=$((failures + PROD_SCANNER_PATH_FAILURES))
+fi
+
+section scanner_host_contexts
+PROD_SCANNER_PATH_EMIT_FAILURES="${REQUIRE_SCANNER_BLOCKING}" prod_scanner_host_contexts_check_all
+printf 'scanner_host_context_failures=%s\n' "${PROD_SCANNER_HOST_CONTEXT_FAILURES:-0}"
+if [[ "${REQUIRE_SCANNER_BLOCKING}" == "1" ]] && (( PROD_SCANNER_HOST_CONTEXT_FAILURES > 0 )); then
+    failures=$((failures + PROD_SCANNER_HOST_CONTEXT_FAILURES))
 fi
 
 section services
