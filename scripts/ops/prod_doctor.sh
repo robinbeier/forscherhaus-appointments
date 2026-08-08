@@ -55,6 +55,10 @@ run_remote() {
         declare -f prod_sensitive_paths_check_all
         declare -f prod_scanner_path_specs
         declare -f prod_scanner_paths_check_all
+        declare -f prod_scanner_default_host_path_specs
+        declare -f prod_scanner_public_ipv4_address
+        declare -f prod_scanner_host_context_specs
+        declare -f prod_scanner_host_contexts_check_all
         declare -f prod_posture_header_specs
         declare -f prod_posture_header_names
         declare -f prod_posture_check_headers
@@ -142,6 +146,10 @@ kv scanner_path_failures "${PROD_SCANNER_PATH_FAILURES:-0}"
 section scanner_paths_monitor
 PROD_SCANNER_PATH_EMIT_FAILURES=0 prod_scanner_paths_check_all "https://monitor.dasforscherhaus-leg.de"
 kv scanner_path_monitor_failures "${PROD_SCANNER_PATH_FAILURES:-0}"
+
+section scanner_host_contexts
+PROD_SCANNER_PATH_EMIT_FAILURES=0 prod_scanner_host_contexts_check_all
+kv scanner_host_context_failures "${PROD_SCANNER_HOST_CONTEXT_FAILURES:-0}"
 
 section posture
 prod_posture_check_headers
