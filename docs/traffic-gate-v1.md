@@ -133,6 +133,10 @@ identity must survive with a non-decreasing size, including when current is
 renamed to `.1`. Missing identities, truncation, duplicate identities, corrupt
 gzip, unsupported format, malformed timestamps, or a wholly unparseable set
 make the evidence incomplete and exit `21`.
+Gzip members are inflated incrementally from the captured compressed-byte
+prefix, including concatenated members, with bounded record buffering. CRC,
+trailer, member-completion, or record-boundary failures remain incomplete
+evidence instead of producing a partial decision.
 
 The wrapper preserves the complete original argument vector and, for every
 non-help invocation, scans it for output candidates before semantic validation

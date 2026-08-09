@@ -25,6 +25,9 @@ final class TrafficGateV1
     ];
 
     private const SAFE_METHODS = ['GET', 'HEAD'];
+    private const GZIP_COMPRESSED_CHUNK_BYTES = 256;
+    private const MAX_GZIP_DECODED_CHUNK_BYTES = 300_000;
+    private const MAX_LOG_RECORD_BYTES = 1_000_000;
     private const ACTIVE_HTTP_STATE_PATHS = ['/proc/net/tcp', '/proc/net/tcp6'];
     private const BACKOFFICE_PREFIXES = [
         'about',
@@ -876,26 +879,7 @@ final class TrafficGateV1
 
         $gzip = str_ends_with($path, '.gz');
         if ($gzip) {
-            $compressed = file_get_contents($path, false, null, 0, $entry['size']);
-            if (
-                !is_string($compressed) ||
-                strlen($compressed) !== $entry['size'] ||
-                !str_starts_with($compressed, "\x1f\x8b")
-            ) {
-                throw new RuntimeException('traffic gzip member is incomplete');
-            }
-            $decoded = self::decodeGzipMembers($compressed);
-            if ($decoded !== '' && !str_ends_with($decoded, "\n")) {
-                throw new RuntimeException('traffic gzip member is incomplete');
-            }
-            if ($decoded !== '') {
-                $lines = explode("\n", $decoded);
-                array_pop($lines);
-                foreach ($lines as $line) {
-                    $consumeLine(rtrim($line, "\r"), $entry['size']);
-                }
-            }
-            unset($compressed, $decoded);
+            self::readGzipEntry($path, $entry['size'], $consumeLine);
         } else {
             $handle = fopen($path, 'rb');
             if ($handle === false) {
@@ -933,24 +917,97 @@ final class TrafficGateV1
         }
     }
 
-    private static function decodeGzipMembers(string $compressed): string
+    /** @param callable(string,int):void $consumeLine */
+    private static function readGzipEntry(string $path, int $compressedSize, callable $consumeLine): void
     {
-        $decoded = '';
-        while ($compressed !== '') {
-            $context = @inflate_init(ZLIB_ENCODING_GZIP);
-            if ($context === false) {
-                throw new RuntimeException('traffic gzip member is incomplete');
-            }
-            $member = @inflate_add($context, $compressed, ZLIB_FINISH);
-            $consumed = inflate_get_read_len($context);
-            if (!is_string($member) || $consumed <= 0 || $consumed > strlen($compressed)) {
-                throw new RuntimeException('traffic gzip member is incomplete');
-            }
-            $decoded .= $member;
-            $compressed = substr($compressed, $consumed);
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            throw new RuntimeException('traffic gzip member could not be opened');
+        }
+        $remaining = $compressedSize;
+        $compressed = '';
+        $lineBuffer = '';
+        $context = @inflate_init(ZLIB_ENCODING_GZIP);
+        if ($context === false) {
+            fclose($handle);
+            throw new RuntimeException('traffic gzip member is incomplete');
         }
 
-        return $decoded;
+        try {
+            while (true) {
+                if ($compressed === '' && $remaining > 0) {
+                    $chunk = fread($handle, min(self::GZIP_COMPRESSED_CHUNK_BYTES, $remaining));
+                    if (!is_string($chunk) || $chunk === '') {
+                        throw new RuntimeException('traffic gzip member is incomplete');
+                    }
+                    $remaining -= strlen($chunk);
+                    $compressed = $chunk;
+                }
+
+                $beforeRead = inflate_get_read_len($context);
+                $decoded = @inflate_add($context, $compressed, $remaining === 0 ? ZLIB_FINISH : ZLIB_SYNC_FLUSH);
+                $consumed = inflate_get_read_len($context) - $beforeRead;
+                $status = inflate_get_status($context);
+                if (
+                    !is_string($decoded) ||
+                    strlen($decoded) > self::MAX_GZIP_DECODED_CHUNK_BYTES ||
+                    $consumed < 0 ||
+                    $consumed > strlen($compressed) ||
+                    ($compressed !== '' && $consumed === 0)
+                ) {
+                    throw new RuntimeException('traffic gzip member is incomplete');
+                }
+                $compressed = substr($compressed, $consumed);
+                self::consumeDecodedGzipChunk($decoded, $lineBuffer, $consumeLine, $compressedSize);
+
+                if ($status === ZLIB_STREAM_END) {
+                    if ($compressed === '' && $remaining === 0) {
+                        break;
+                    }
+                    $context = @inflate_init(ZLIB_ENCODING_GZIP);
+                    if ($context === false) {
+                        throw new RuntimeException('traffic gzip member is incomplete');
+                    }
+                    continue;
+                }
+                if ($status < 0 || $compressed !== '' || $remaining === 0) {
+                    throw new RuntimeException('traffic gzip member is incomplete');
+                }
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        if ($lineBuffer !== '') {
+            throw new RuntimeException('traffic gzip member is incomplete');
+        }
+    }
+
+    /** @param callable(string,int):void $consumeLine */
+    private static function consumeDecodedGzipChunk(
+        string $decoded,
+        string &$lineBuffer,
+        callable $consumeLine,
+        int $compressedSize,
+    ): void {
+        if ($decoded === '') {
+            return;
+        }
+        $lineBuffer .= $decoded;
+        $start = 0;
+        while (($newline = strpos($lineBuffer, "\n", $start)) !== false) {
+            if ($newline - $start > self::MAX_LOG_RECORD_BYTES) {
+                throw new RuntimeException('traffic gzip record is too large');
+            }
+            $consumeLine(rtrim(substr($lineBuffer, $start, $newline - $start), "\r"), $compressedSize);
+            $start = $newline + 1;
+        }
+        if ($start > 0) {
+            $lineBuffer = substr($lineBuffer, $start);
+        }
+        if (strlen($lineBuffer) > self::MAX_LOG_RECORD_BYTES) {
+            throw new RuntimeException('traffic gzip record is too large');
+        }
     }
 
     /**

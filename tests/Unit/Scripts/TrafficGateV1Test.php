@@ -872,6 +872,169 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame(['advisory', 0], [$report['decision'], $report['exit_code']]);
     }
 
+    public function testConcatenatedGzipMembersCanSplitOneLogicalRecord(): void
+    {
+        $line = $this->line('127.0.0.1', '-', 'GET', '/health', 200) . "\n";
+        $split = intdiv(strlen($line), 2);
+        $first = gzencode(substr($line, 0, $split));
+        $second = gzencode(substr($line, $split));
+        self::assertIsString($first);
+        self::assertIsString($second);
+        self::assertNotFalse(file_put_contents($this->workspace . '/app-access.log.2.gz', $first . $second));
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $report = TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+
+        self::assertSame(1, $report['counts']['lines_seen']);
+        self::assertSame(1, $report['counts']['documented_health']);
+        self::assertSame(['allow', 0], [$report['decision'], $report['exit_code']]);
+    }
+
+    public function testLargeGzipExpansionStreamsWithinBoundedMemory(): void
+    {
+        $line = $this->line('127.0.0.1', '-', 'GET', '/health', 200, str_repeat('a', 4096)) . "\n";
+        $path = $this->workspace . '/app-access.log.2.gz';
+        $handle = gzopen($path, 'wb9');
+        self::assertNotFalse($handle);
+        for ($index = 0; $index < 10_000; $index++) {
+            if (gzwrite($handle, $line) !== strlen($line)) {
+                throw new RuntimeException('large gzip fixture could not be written');
+            }
+        }
+        self::assertTrue(gzclose($handle));
+
+        $runner = $this->workspace . '/large-gzip-runner.php';
+        self::assertNotFalse(
+            file_put_contents(
+                $runner,
+                <<<'PHP'
+                <?php
+                require $argv[3];
+                $entries = \Ops\TrafficGateV1::captureLogSet($argv[1]);
+                $catalog = \Ops\TrafficGateV1::loadCatalog($argv[2]);
+                $report = \Ops\TrafficGateV1::evaluate(
+                    $entries,
+                    $entries,
+                    $catalog,
+                    'deploy',
+                    'normal',
+                    1786298400,
+                    1786298401,
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                );
+                exit($report['counts']['lines_seen'] === 10000 ? 0 : 2);
+                PHP
+                ,
+            ),
+        );
+
+        $result = $this->runCommand([
+            'php',
+            '-d',
+            'memory_limit=32M',
+            $runner,
+            $this->workspace,
+            dirname(__DIR__, 3) . '/scripts/ops/config/traffic_gate_catalog.v1.json',
+            dirname(__DIR__, 3) . '/scripts/ops/lib/TrafficGateV1.php',
+        ]);
+
+        self::assertSame(0, $result['exit_code'], $result['output']);
+    }
+
+    public function testOversizedGzipRecordFailsClosedBeforeUnboundedBuffering(): void
+    {
+        $encoded = gzencode(str_repeat('x', 1_000_001));
+        self::assertIsString($encoded);
+        self::assertNotFalse(file_put_contents($this->workspace . '/app-access.log.2.gz', $encoded));
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+    }
+
+    public function testTruncatedGzipMemberFailsClosed(): void
+    {
+        $encoded = gzencode($this->line('127.0.0.1', '-', 'GET', '/health', 200) . "\n");
+        self::assertIsString($encoded);
+        self::assertNotFalse(file_put_contents($this->workspace . '/app-access.log.2.gz', substr($encoded, 0, -4)));
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+    }
+
+    public function testGzipCrcCorruptionFailsClosed(): void
+    {
+        $encoded = gzencode($this->line('127.0.0.1', '-', 'GET', '/health', 200) . "\n");
+        self::assertIsString($encoded);
+        $encoded[strlen($encoded) - 8] = chr(ord($encoded[strlen($encoded) - 8]) ^ 1);
+        self::assertNotFalse(file_put_contents($this->workspace . '/app-access.log.2.gz', $encoded));
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+    }
+
+    public function testTruncatedSecondConcatenatedGzipMemberFailsClosed(): void
+    {
+        $first = gzencode($this->line('127.0.0.1', '-', 'GET', '/health', 200) . "\n");
+        $second = gzencode($this->line('203.0.113.10', '-', 'GET', '/.env', 404) . "\n");
+        self::assertIsString($first);
+        self::assertIsString($second);
+        self::assertNotFalse(
+            file_put_contents($this->workspace . '/app-access.log.2.gz', $first . substr($second, 0, -4)),
+        );
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+    }
+
     public function testCorruptGzipFailsClosed(): void
     {
         $this->write('app-access.log', [$this->line('127.0.0.1', '-', 'GET', '/health', 200)]);
