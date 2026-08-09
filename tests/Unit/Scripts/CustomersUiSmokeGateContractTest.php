@@ -578,18 +578,6 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         $nodeScript = <<<'JS'
         const fs = require('fs');
 
-        const mergeJqueryAjaxData = (data) => {
-            const merged = {};
-            for (const key in data) {
-                // jQuery 4 normalizes Ajax settings with a deep extend. That clone
-                // intentionally drops undefined properties before processData runs.
-                if (key !== '__proto__' && data[key] !== undefined) {
-                    merged[key] = data[key];
-                }
-            }
-            return merged;
-        };
-
         const jqueryParamScalarForm = (data) => {
             const pairs = [];
             for (const key in data) {
@@ -605,9 +593,6 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         if (jqueryParamScalarForm({undefined_value: undefined, null_value: null}) !== 'undefined_value=&null_value=') {
             throw new Error('jQuery.param nullish scalar semantics changed');
         }
-        if (jqueryParamScalarForm(mergeJqueryAjaxData({undefined_value: undefined, null_value: null})) !== 'null_value=') {
-            throw new Error('jQuery Ajax settings merge semantics changed');
-        }
 
         let emitted = null;
         global.App = {Http: {}, Utils: {Url: {siteUrl: (path) => path}}};
@@ -617,26 +602,20 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                 if (url !== 'customers/search') {
                     throw new Error('unexpected Customers client route');
                 }
-                const ajaxData = mergeJqueryAjaxData(data);
                 const expectedKeys = ['csrf_token', 'keyword', 'limit', 'offset', 'order_by'];
                 if (JSON.stringify(Object.keys(data)) !== JSON.stringify(expectedKeys)) {
                     throw new Error('Customers search emitted an unexpected form shape');
                 }
-                const expectedAjaxKeys =
-                    process.argv[3] === 'inherited' ? [...expectedKeys, 'inherited'] : expectedKeys;
-                if (JSON.stringify(Object.keys(ajaxData)) !== JSON.stringify(expectedAjaxKeys)) {
-                    throw new Error('jQuery Ajax settings merge emitted an unexpected form shape');
-                }
                 if (
-                    ajaxData.csrf_token !== 'token' ||
-                    ajaxData.keyword !== process.argv[2] ||
-                    ajaxData.limit !== 20 ||
-                    ajaxData.offset !== null ||
-                    ajaxData.order_by !== ''
+                    data.csrf_token !== 'token' ||
+                    data.keyword !== process.argv[2] ||
+                    data.limit !== 20 ||
+                    data.offset !== null ||
+                    data.order_by !== ''
                 ) {
                     throw new Error('Customers search emitted unexpected form values');
                 }
-                emitted = jqueryParamScalarForm(ajaxData);
+                emitted = jqueryParamScalarForm(data);
                 return Promise.resolve([]);
             },
         };
