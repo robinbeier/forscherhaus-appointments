@@ -133,10 +133,12 @@ object using schema `deploy_timing.v1`. These stdout lines are observational,
 not authoritative: wrappers, SSH capture, or log forwarding may duplicate them.
 For a real root-run deploy, the authoritative secret-free source is the unique
 `/var/log/fh-deploy-timing/<run_id>.jsonl` file. The directory is root-owned mode
-`0700`; each run file is root-owned mode `0600` with one hardlink. Durations come
-from a monotonic clock; production Linux reads `/proc/uptime` without starting a
-subprocess. The PHP `hrtime()` fallback exists for non-Linux local rehearsal
-only.
+`0700`; each run file is root-owned mode `0600` with one hardlink. An existing
+directory must already satisfy this contract and is never normalized by the
+deploy. Only a missing canonical target beneath a root-controlled ancestor
+chain is created. Durations come from a monotonic clock; production Linux reads
+`/proc/uptime` without starting a subprocess. The PHP `hrtime()` fallback exists
+for non-Linux local rehearsal only.
 
 The measured end-to-end boundary starts after the deploy invocation and trusted
 log stream have been accepted. It ends at success, pre-switch failure,
@@ -166,8 +168,10 @@ php scripts/ops/validate_deploy_timing_sample.php \
 
 The validator fails closed unless the protected source contains one run with
 sequences `1` through `6`, all five successful core phases in order, and exactly
-one successful summary. Missing, duplicate, mixed-run, out-of-order, dry-run, or
-unexpected-field records invalidate the complete sample. Each phase duration
+one successful summary. The JSONL may omit its final newline or contain exactly
+one; internal or additional trailing blank records are invalid. Missing,
+duplicate, mixed-run, out-of-order, dry-run, or unexpected-field records
+invalidate the complete sample. Each phase duration
 must fit inside its monotonic `elapsed_ms` window. The validator derives the
 unattributed interval as `total_ms - sum(duration_ms)` and permits at most
 `30 ms`, the highest clock-read seam observed across accepted baseline samples

@@ -120,6 +120,55 @@ final class ValidateDeployTimingSampleTest extends TestCase
         DeployTimingSampleValidator::validateLines($lines);
     }
 
+    public function testAuthoritativeFileAcceptsZeroOrOneFinalNewline(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+
+        foreach (['', PHP_EOL] as $suffix) {
+            [$directory, $file] = $this->createProtectedTimingFixture(implode(PHP_EOL, $this->validLines()) . $suffix);
+
+            try {
+                $result = DeployTimingSampleValidator::validateFile($file);
+
+                self::assertSame(6, $result['records']);
+            } finally {
+                $this->removeTimingFixture($directory);
+            }
+        }
+    }
+
+    public function testAuthoritativeFileRejectsAnAdditionalTrailingBlankRecord(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture(
+            implode(PHP_EOL, $this->validLines()) . PHP_EOL . PHP_EOL,
+        );
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('empty record');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testAuthoritativeFileRejectsAnInternalBlankRecord(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $lines = $this->validLines();
+        array_splice($lines, 3, 0, ['']);
+        [$directory, $file] = $this->createProtectedTimingFixture(implode(PHP_EOL, $lines) . PHP_EOL);
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('empty record');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
     public function testNonRootOwnedAuthoritativeFileIsRejected(): void
     {
         $this->requireRootLinuxForSourceProtection();
@@ -398,6 +447,179 @@ final class ValidateDeployTimingSampleTest extends TestCase
         }
     }
 
+    public function testDeployTimingPreparationAcceptsAnExistingProtectedDirectoryWithoutChangingIt(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $directory = '/rob445-deploy-timing-existing-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($directory, 0700));
+        self::assertTrue(chmod($directory, 0700));
+        $before = $this->directoryAuthorityMetadata($directory);
+
+        try {
+            $result = $this->runTimingPreparation($directory);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('accepted', $result['stdout']);
+            self::assertSame($before, $this->directoryAuthorityMetadata($directory));
+            $files = glob($directory . '/*.jsonl');
+            self::assertIsArray($files);
+            self::assertCount(1, $files);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testDeployTimingPreparationRejectsExistingNonRootDirectoryWithoutChangingIt(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $directory = '/rob445-deploy-timing-owner-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($directory, 0700));
+        self::assertTrue(chown($directory, 65534));
+        $before = $this->directoryAuthorityMetadata($directory);
+
+        try {
+            $result = $this->runTimingPreparation($directory);
+
+            self::assertStringContainsString('rejected', $result['stdout']);
+            self::assertSame($before, $this->directoryAuthorityMetadata($directory));
+            self::assertSame([], glob($directory . '/*.jsonl'));
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testDeployTimingPreparationRejectsExistingUnsafeModeWithoutChangingIt(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $directory = '/rob445-deploy-timing-mode-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($directory, 0700));
+        self::assertTrue(chmod($directory, 0755));
+        $before = $this->directoryAuthorityMetadata($directory);
+
+        try {
+            $result = $this->runTimingPreparation($directory);
+
+            self::assertStringContainsString('rejected', $result['stdout']);
+            self::assertSame($before, $this->directoryAuthorityMetadata($directory));
+            self::assertSame([], glob($directory . '/*.jsonl'));
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testDeployTimingPreparationRejectsSymlinkedDirectoryWithoutChangingIt(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $target = '/rob445-deploy-timing-target-' . bin2hex(random_bytes(6));
+        $alias = '/rob445-deploy-timing-alias-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($target, 0700));
+        self::assertTrue(chmod($target, 0700));
+        self::assertTrue(symlink($target, $alias));
+        $before = $this->directoryAuthorityMetadata($target);
+
+        try {
+            $result = $this->runTimingPreparation($alias);
+
+            self::assertStringContainsString('rejected', $result['stdout']);
+            self::assertTrue(is_link($alias));
+            self::assertSame($target, readlink($alias));
+            self::assertSame($before, $this->directoryAuthorityMetadata($target));
+            self::assertSame([], glob($target . '/*.jsonl'));
+        } finally {
+            if (is_link($alias)) {
+                unlink($alias);
+            }
+            $this->removeTimingFixture($target);
+        }
+    }
+
+    public function testDeployTimingPreparationRejectsNonCanonicalDirectoryWithoutChangingIt(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $directory = '/rob445-deploy-timing-canonical-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($directory, 0700));
+        self::assertTrue(chmod($directory, 0755));
+        $nonCanonical = $directory . '/../' . basename($directory);
+        $before = $this->directoryAuthorityMetadata($directory);
+
+        try {
+            $result = $this->runTimingPreparation($nonCanonical);
+
+            self::assertStringContainsString('rejected', $result['stdout']);
+            self::assertSame($before, $this->directoryAuthorityMetadata($directory));
+            self::assertSame([], glob($directory . '/*.jsonl'));
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testDeployTimingPreparationCreatesAMissingCanonicalDirectoryRootOnly(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $directory = '/rob445-deploy-timing-missing-' . bin2hex(random_bytes(6));
+
+        try {
+            $result = $this->runTimingPreparation($directory);
+
+            self::assertStringContainsString('accepted', $result['stdout']);
+            self::assertDirectoryExists($directory);
+            self::assertSame(['uid' => 0, 'mode' => 0700], $this->directoryAuthorityMetadata($directory));
+            $files = glob($directory . '/*.jsonl');
+            self::assertIsArray($files);
+            self::assertCount(1, $files);
+            $fileStat = lstat($files[0]);
+            self::assertIsArray($fileStat);
+            self::assertSame(0, $fileStat['uid']);
+            self::assertSame(0600, $fileStat['mode'] & 0777);
+            self::assertSame(1, $fileStat['nlink']);
+        } finally {
+            if (is_dir($directory)) {
+                $this->removeTimingFixture($directory);
+            }
+        }
+    }
+
+    public function testDeployTimingPreparationRejectsAMissingNonCanonicalDirectory(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $parent = '/rob445-deploy-timing-parent-' . bin2hex(random_bytes(6));
+        $target = '/rob445-deploy-timing-new-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($parent, 0700));
+        $nonCanonical = $parent . '/../' . basename($target);
+
+        try {
+            $result = $this->runTimingPreparation($nonCanonical);
+
+            self::assertStringContainsString('rejected', $result['stdout']);
+            self::assertDirectoryDoesNotExist($target);
+        } finally {
+            if (is_dir($target)) {
+                $this->removeTimingFixture($target);
+            }
+            $this->removeTimingFixture($parent);
+        }
+    }
+
+    public function testDeployTimingPreparationRejectsAMissingDirectoryBelowWritableParent(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $parent = '/rob445-deploy-timing-parent-' . bin2hex(random_bytes(6));
+        $directory = $parent . '/timing';
+        self::assertTrue(mkdir($parent, 0700));
+        self::assertTrue(chmod($parent, 0722));
+        $before = $this->directoryAuthorityMetadata($parent);
+
+        try {
+            $result = $this->runTimingPreparation($directory);
+
+            self::assertStringContainsString('rejected', $result['stdout']);
+            self::assertDirectoryDoesNotExist($directory);
+            self::assertSame($before, $this->directoryAuthorityMetadata($parent));
+        } finally {
+            $this->removeTimingFixture($parent);
+        }
+    }
+
     /**
      * @return list<string>
      */
@@ -467,13 +689,13 @@ final class ValidateDeployTimingSampleTest extends TestCase
     /**
      * @return array{string,string}
      */
-    private function createProtectedTimingFixture(): array
+    private function createProtectedTimingFixture(?string $contents = null): array
     {
         $directory = '/rob445-timing-source-' . bin2hex(random_bytes(6));
         self::assertTrue(mkdir($directory, 0700));
         self::assertTrue(chmod($directory, 0700));
         $file = $directory . '/sample.jsonl';
-        self::assertNotFalse(file_put_contents($file, implode(PHP_EOL, $this->validLines()) . PHP_EOL));
+        self::assertNotFalse(file_put_contents($file, $contents ?? implode(PHP_EOL, $this->validLines()) . PHP_EOL));
         self::assertTrue(chmod($file, 0600));
 
         return [$directory, $file];
@@ -496,6 +718,40 @@ final class ValidateDeployTimingSampleTest extends TestCase
         self::assertTrue(chmod($file, 0600));
 
         return [$root, $ancestor, $directory, $file];
+    }
+
+    /**
+     * @return array{uid:int,mode:int}
+     */
+    private function directoryAuthorityMetadata(string $directory): array
+    {
+        clearstatcache(true, $directory);
+        $stat = lstat($directory);
+        self::assertIsArray($stat);
+
+        return ['uid' => $stat['uid'], 'mode' => $stat['mode'] & 0777];
+    }
+
+    /**
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runTimingPreparation(string $directory): array
+    {
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_DIR="$2"
+        DEPLOY_TIMING_AUTHORITATIVE_ENABLED=1
+        DEPLOY_TIMING_DRY_RUN=false
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        if deploy_timing_prepare_authoritative_source; then
+          builtin printf 'accepted\n'
+        else
+          builtin printf 'rejected\n'
+        fi
+        BASH;
+
+        return $this->runCommand(['bash', '-c', $script, 'bash', dirname(__DIR__, 3) . '/deploy_ea.sh', $directory]);
     }
 
     private function removeTimingFixture(string $directory): void

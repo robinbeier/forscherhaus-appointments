@@ -121,16 +121,11 @@ deploy_timing_new_run_id() {
   printf '%s\n' "$run_id"
 }
 
-deploy_timing_validate_root_protected_directory() {
+deploy_timing_validate_root_controlled_directory_chain() {
   local directory="$1"
-  local canonical
   local cursor
   local mode
   local owner
-
-  [[ "$directory" == /* && "$directory" != "/" && -d "$directory" && ! -L "$directory" ]] || return 1
-  canonical="$(realpath -e -- "$directory" 2>/dev/null)" || return 1
-  [[ "$canonical" == "$directory" ]] || return 1
 
   cursor="$directory"
   while true; do
@@ -139,10 +134,37 @@ deploy_timing_validate_root_protected_directory() {
     mode="$(stat -c '%a' -- "$cursor" 2>/dev/null)" || return 1
     [[ "$owner" == "0" ]] || return 1
     (( (8#$mode & 0022) == 0 )) || return 1
-    [[ "$cursor" != "$directory" || "$mode" == "700" ]] || return 1
     [[ "$cursor" == "/" ]] && break
     cursor="$(dirname "$cursor")"
   done
+}
+
+deploy_timing_validate_root_protected_directory() {
+  local directory="$1"
+  local canonical
+  local mode
+
+  [[ "$directory" == /* && "$directory" != "/" && -d "$directory" && ! -L "$directory" ]] || return 1
+  canonical="$(realpath -e -- "$directory" 2>/dev/null)" || return 1
+  [[ "$canonical" == "$directory" ]] || return 1
+  mode="$(stat -c '%a' -- "$directory" 2>/dev/null)" || return 1
+  [[ "$mode" == "700" ]] || return 1
+  deploy_timing_validate_root_controlled_directory_chain "$directory"
+}
+
+deploy_timing_validate_missing_root_protected_directory_target() {
+  local directory="$1"
+  local canonical
+  local parent
+  local canonical_parent
+
+  [[ "$directory" == /* && "$directory" != "/" && ! -e "$directory" && ! -L "$directory" ]] || return 1
+  canonical="$(realpath -m -- "$directory" 2>/dev/null)" || return 1
+  [[ "$canonical" == "$directory" ]] || return 1
+  parent="$(dirname "$directory")"
+  canonical_parent="$(realpath -e -- "$parent" 2>/dev/null)" || return 1
+  [[ "$canonical_parent" == "$parent" ]] || return 1
+  deploy_timing_validate_root_controlled_directory_chain "$parent"
 }
 
 deploy_timing_prepare_authoritative_source() {
@@ -158,14 +180,13 @@ deploy_timing_prepare_authoritative_source() {
   [[ "$DEPLOY_TIMING_DRY_RUN" == "false" && "$EUID" -eq 0 ]] || return 0
   [[ "$directory" == /* && "$directory" != "/" ]] || return 1
 
-  if [[ -e "$directory" ]]; then
-    [[ -d "$directory" && ! -L "$directory" ]] || return 1
+  if [[ -e "$directory" || -L "$directory" ]]; then
+    deploy_timing_validate_root_protected_directory "$directory" || return 1
   else
+    deploy_timing_validate_missing_root_protected_directory_target "$directory" || return 1
     (umask 077; mkdir --mode=0700 -- "$directory") || return 1
+    deploy_timing_validate_root_protected_directory "$directory" || return 1
   fi
-  chown root:root -- "$directory" || return 1
-  chmod 0700 -- "$directory" || return 1
-  deploy_timing_validate_root_protected_directory "$directory" || return 1
 
   file="$directory/${DEPLOY_TIMING_RUN_ID}.jsonl"
   (umask 077; set -o noclobber; : > "$file") 2>/dev/null || return 1

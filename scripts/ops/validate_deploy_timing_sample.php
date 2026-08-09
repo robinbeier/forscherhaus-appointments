@@ -30,7 +30,10 @@ final class DeployTimingSampleValidator
             throw new RuntimeException('timing source is empty or unreadable');
         }
 
-        $lines = preg_split('/\R/', rtrim($contents, "\r\n"));
+        $lines = preg_split('/\r\n|\n|\r/', $contents);
+        if (is_array($lines) && $lines[array_key_last($lines)] === '') {
+            array_pop($lines);
+        }
         if (!is_array($lines) || in_array('', $lines, true)) {
             throw new RuntimeException('timing source contains an empty record');
         }
