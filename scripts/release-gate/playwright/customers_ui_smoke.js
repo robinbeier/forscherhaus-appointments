@@ -97,19 +97,14 @@ async (page) => {
             values.order_by === ''
         );
     };
+    let activeSearchCategory = 'initial_search_post';
     const classifyRequest = (request, parsedUrl, method, path) => {
         if (!parsedUrl) {
             return 'cross_origin';
         }
 
-        if (method === 'POST' && path === normalizedPath(config.search_route_path)) {
-            const values = parseForm(request.postData() || '');
-            if (values && values.keyword === '') {
-                return 'initial_search_post';
-            }
-            if (values && values.keyword === config.search_marker) {
-                return 'synthetic_search_post';
-            }
+        if (method === 'POST' && path === normalizedPath(config.search_route_path) && activeSearchCategory !== null) {
+            return activeSearchCategory;
         }
 
         if (path === normalizedPath(config.customers_route_path)) {
@@ -266,6 +261,7 @@ async (page) => {
             config.forbidden_response_markers,
         );
 
+        activeSearchCategory = 'synthetic_search_post';
         await page.locator('#filter-customers .key').fill(config.search_marker);
         const syntheticSearchPromise = page.waitForResponse(
             (response) => isSearchResponse(response, config.search_marker),
@@ -273,6 +269,7 @@ async (page) => {
         );
         await page.locator('#filter-customers form').press('Enter');
         result.synthetic_search_empty = await readSafeEmptySearch(await syntheticSearchPromise, config.search_marker);
+        activeSearchCategory = null;
 
         await page.waitForFunction(
             () =>

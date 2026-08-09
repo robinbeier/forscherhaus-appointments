@@ -167,17 +167,88 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         );
     }
 
+    public function testActualPlaywrightSnippetRejectsForbiddenMarkersInEitherSearchResponse(): void
+    {
+        $initialBody = $this->executeActualCustomersSearch('');
+        $syntheticBody = $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER);
+
+        foreach (['initial', 'synthetic'] as $contaminatedStage) {
+            $execution = $this->executeFullBrowserFlow(
+                $initialBody,
+                $syntheticBody,
+                'success',
+                $contaminatedStage === 'initial' ? '["customer_filter_providers"]' : '[]',
+                $contaminatedStage === 'synthetic' ? '["customer_filter_providers"]' : '[]',
+            );
+
+            self::assertFalse($execution['result']['response_bodies_safe'], $contaminatedStage);
+            self::assertFalse($execution['result']['ok'], $contaminatedStage);
+            self::assertSame(2, $execution['result']['search_response_count'], $contaminatedStage);
+            self::assertTrue($execution['result']['initial_search_body_read'], $contaminatedStage);
+            self::assertTrue($execution['result']['synthetic_search_body_read'], $contaminatedStage);
+        }
+    }
+
+    public function testActualPlaywrightSnippetClassifiesMalformedSearchPostsByActiveStage(): void
+    {
+        $initialBody = $this->executeActualCustomersSearch('');
+        $syntheticBody = $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER);
+        $cases = [
+            'initial duplicate keyword' => ['initial', $initialBody . '&keyword=duplicate'],
+            'initial invalid encoding' => ['initial', str_replace('csrf_token=token', 'csrf_token=%ZZ', $initialBody)],
+            'synthetic duplicate keyword' => ['synthetic', $syntheticBody . '&keyword=duplicate'],
+            'synthetic invalid encoding' => [
+                'synthetic',
+                str_replace('csrf_token=token', 'csrf_token=%ZZ', $syntheticBody),
+            ],
+        ];
+
+        foreach ($cases as $label => [$stage, $malformedBody]) {
+            $execution = $this->executeFullBrowserFlow(
+                $stage === 'initial' ? $malformedBody : $initialBody,
+                $stage === 'synthetic' ? $malformedBody : $syntheticBody,
+                'malformed-' . $stage,
+            );
+            $counter = 'blocked_' . $stage . '_search_post_count';
+            $seen = $stage . '_search_request_seen';
+            $allowed = $stage . '_search_request_allowed';
+            $classifiedCount = array_sum(
+                array_intersect_key(
+                    $execution['result'],
+                    array_flip([
+                        'blocked_initial_search_post_count',
+                        'blocked_synthetic_search_post_count',
+                        'blocked_navigation_count',
+                        'blocked_static_asset_count',
+                        'blocked_other_same_origin_count',
+                        'blocked_cross_origin_count',
+                    ]),
+                ),
+            );
+
+            self::assertSame('abort', $execution['route_actions'][$stage . '_search_post'], $label);
+            self::assertSame(1, $execution['result']['blocked_request_count'], $label);
+            self::assertSame(1, $execution['result'][$counter], $label);
+            self::assertSame(0, $execution['result']['blocked_other_same_origin_count'], $label);
+            self::assertSame($execution['result']['blocked_request_count'], $classifiedCount, $label);
+            self::assertTrue($execution['result'][$seen], $label);
+            self::assertFalse($execution['result'][$allowed], $label);
+            self::assertSame(1, $execution['result']['flow_error_count'], $label);
+            self::assertFalse($execution['result']['ok'], $label);
+        }
+    }
+
     public function testActualPlaywrightSnippetClassifiesBlockedRequestsWithoutRawDetails(): void
     {
         $execution = $this->executeFullBrowserFlow(
             $this->executeActualCustomersSearch(''),
             $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER),
-            true,
+            'blocked',
         );
 
-        self::assertSame(6, $execution['result']['blocked_request_count']);
+        self::assertSame(5, $execution['result']['blocked_request_count']);
         self::assertSame(1, $execution['result']['blocked_initial_search_post_count']);
-        self::assertSame(1, $execution['result']['blocked_synthetic_search_post_count']);
+        self::assertSame(0, $execution['result']['blocked_synthetic_search_post_count']);
         self::assertSame(1, $execution['result']['blocked_navigation_count']);
         self::assertSame(1, $execution['result']['blocked_static_asset_count']);
         self::assertSame(1, $execution['result']['blocked_other_same_origin_count']);
@@ -186,7 +257,7 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         self::assertFalse($execution['result']['initial_search_request_allowed']);
         self::assertFalse($execution['result']['initial_search_response_seen']);
         self::assertFalse($execution['result']['initial_search_body_read']);
-        self::assertTrue($execution['result']['synthetic_search_request_seen']);
+        self::assertFalse($execution['result']['synthetic_search_request_seen']);
         self::assertFalse($execution['result']['synthetic_search_request_allowed']);
         self::assertFalse($execution['result']['synthetic_search_response_seen']);
         self::assertFalse($execution['result']['synthetic_search_body_read']);
@@ -306,7 +377,9 @@ final class CustomersUiSmokeGateContractTest extends TestCase
     private function executeFullBrowserFlow(
         string $initialBody,
         string $syntheticBody,
-        bool $exerciseBlockedCategories = false,
+        string $mode = 'success',
+        string $initialResponseBody = '[]',
+        string $syntheticResponseBody = '[]',
     ): array {
         $snippetPath = __DIR__ . '/../../../scripts/release-gate/playwright/customers_ui_smoke.js';
         $nodeScript = <<<'JS'
@@ -334,7 +407,11 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                 initial: process.argv[2],
                 synthetic: process.argv[3],
             };
-            const exerciseBlockedCategories = process.argv[4] === 'blocked';
+            const mode = process.argv[4];
+            const responseBodies = {
+                initial: process.argv[5],
+                synthetic: process.argv[6],
+            };
             const routeActions = {};
             const responseWaiters = [];
             let routeHandler = null;
@@ -385,21 +462,13 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                 on: () => {},
                 waitForResponse: (predicate) => new Promise((resolve) => responseWaiters.push({predicate, resolve})),
                 goto: async () => {
-                    if (exerciseBlockedCategories) {
+                    if (mode === 'blocked') {
                         await dispatch(
                             'initial_search_post',
                             request(
                                 'POST',
                                 config.allowed_origin + config.search_route_path,
                                 bodies.initial + '&unexpected=value',
-                            ),
-                        );
-                        await dispatch(
-                            'synthetic_search_post',
-                            request(
-                                'POST',
-                                config.allowed_origin + config.search_route_path,
-                                bodies.synthetic.replace('limit=20', 'limit=40'),
                             ),
                         );
                         await dispatch('navigation', request('POST', config.customers_url));
@@ -409,12 +478,20 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                         throw new Error('blocked classification complete');
                     }
 
+                    if (mode === 'malformed-initial') {
+                        await dispatch(
+                            'initial_search_post',
+                            request('POST', config.allowed_origin + config.search_route_path, bodies.initial),
+                        );
+                        throw new Error('initial classification complete');
+                    }
+
                     await dispatch('navigation', request('GET', config.customers_url));
                     await dispatch('static_asset', request('GET', config.allowed_origin + '/assets/js/app.js'));
                     await dispatch(
                         'initial_search_post',
                         request('POST', config.allowed_origin + config.search_route_path, bodies.initial),
-                        '[]',
+                        responseBodies.initial,
                     );
                     return {status: () => 200};
                 },
@@ -430,8 +507,11 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                         await dispatch(
                             'synthetic_search_post',
                             request('POST', config.allowed_origin + config.search_route_path, bodies.synthetic),
-                            '[]',
+                            mode === 'malformed-synthetic' ? null : responseBodies.synthetic,
                         );
+                        if (mode === 'malformed-synthetic') {
+                            throw new Error('synthetic classification complete');
+                        }
                     },
                     isVisible: async () => selector === '#filter-customers .results em',
                 }),
@@ -472,7 +552,9 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                 $snippetPath,
                 $initialBody,
                 $syntheticBody,
-                $exerciseBlockedCategories ? 'blocked' : 'success',
+                $mode,
+                $initialResponseBody,
+                $syntheticResponseBody,
             ],
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
