@@ -617,20 +617,26 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                 if (url !== 'customers/search') {
                     throw new Error('unexpected Customers client route');
                 }
+                const ajaxData = mergeJqueryAjaxData(data);
                 const expectedKeys = ['csrf_token', 'keyword', 'limit', 'offset', 'order_by'];
                 if (JSON.stringify(Object.keys(data)) !== JSON.stringify(expectedKeys)) {
                     throw new Error('Customers search emitted an unexpected form shape');
                 }
+                const expectedAjaxKeys =
+                    process.argv[3] === 'inherited' ? [...expectedKeys, 'inherited'] : expectedKeys;
+                if (JSON.stringify(Object.keys(ajaxData)) !== JSON.stringify(expectedAjaxKeys)) {
+                    throw new Error('jQuery Ajax settings merge emitted an unexpected form shape');
+                }
                 if (
-                    data.csrf_token !== 'token' ||
-                    data.keyword !== process.argv[2] ||
-                    data.limit !== 20 ||
-                    data.offset !== null ||
-                    data.order_by !== ''
+                    ajaxData.csrf_token !== 'token' ||
+                    ajaxData.keyword !== process.argv[2] ||
+                    ajaxData.limit !== 20 ||
+                    ajaxData.offset !== null ||
+                    ajaxData.order_by !== ''
                 ) {
                     throw new Error('Customers search emitted unexpected form values');
                 }
-                emitted = jqueryParamScalarForm(data);
+                emitted = jqueryParamScalarForm(ajaxData);
                 return Promise.resolve([]);
             },
         };
