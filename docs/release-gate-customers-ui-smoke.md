@@ -135,6 +135,13 @@ fixed browser-result booleans and non-negative counters in the failed
 `browser_role_<role>` check. Unknown fields, strings, invalid counters, and raw
 browser output are rejected and are never copied into the report.
 
+The failure-only browser details distinguish initial and synthetic search
+request/response stages and count blocked requests in six fixed classes:
+initial search POST, synthetic search POST, Customers navigation, static asset,
+other same-origin, and cross-origin. They never include a URL, method/path pair,
+request or response body, console text, credential, or DOM content. Successful
+check details remain aggregated as before.
+
 ## Cleanup And Exit Codes
 
 The shell `EXIT`/signal handler always calls `deactivate` and `verify`. An

@@ -11,8 +11,22 @@ async (page) => {
         script_vars_safe: false,
         dom_safe: false,
         response_bodies_safe: false,
+        initial_search_request_seen: false,
+        initial_search_request_allowed: false,
+        initial_search_response_seen: false,
+        initial_search_body_read: false,
+        synthetic_search_request_seen: false,
+        synthetic_search_request_allowed: false,
+        synthetic_search_response_seen: false,
+        synthetic_search_body_read: false,
         search_response_count: 0,
         blocked_request_count: 0,
+        blocked_initial_search_post_count: 0,
+        blocked_synthetic_search_post_count: 0,
+        blocked_navigation_count: 0,
+        blocked_static_asset_count: 0,
+        blocked_other_same_origin_count: 0,
+        blocked_cross_origin_count: 0,
         page_error_count: 0,
         console_error_count: 0,
         flow_error_count: 0,
@@ -83,6 +97,55 @@ async (page) => {
             values.order_by === ''
         );
     };
+    const classifyRequest = (request, parsedUrl, method, path) => {
+        if (!parsedUrl) {
+            return 'cross_origin';
+        }
+
+        if (method === 'POST' && path === normalizedPath(config.search_route_path)) {
+            const values = parseForm(request.postData() || '');
+            if (values && values.keyword === '') {
+                return 'initial_search_post';
+            }
+            if (values && values.keyword === config.search_marker) {
+                return 'synthetic_search_post';
+            }
+        }
+
+        if (path === normalizedPath(config.customers_route_path)) {
+            return 'navigation';
+        }
+
+        if (parsedUrl.pathname.startsWith(config.asset_path_prefix) || path === normalizedPath(config.favicon_path)) {
+            return 'static_asset';
+        }
+
+        return 'other_same_origin';
+    };
+    const recordBlockedRequest = (category) => {
+        result.blocked_request_count += 1;
+
+        switch (category) {
+            case 'initial_search_post':
+                result.blocked_initial_search_post_count += 1;
+                return;
+            case 'synthetic_search_post':
+                result.blocked_synthetic_search_post_count += 1;
+                return;
+            case 'navigation':
+                result.blocked_navigation_count += 1;
+                return;
+            case 'static_asset':
+                result.blocked_static_asset_count += 1;
+                return;
+            case 'other_same_origin':
+                result.blocked_other_same_origin_count += 1;
+                return;
+            case 'cross_origin':
+                result.blocked_cross_origin_count += 1;
+                return;
+        }
+    };
     const routeHandler = async (route) => {
         const request = route.request();
         const method = request.method().toUpperCase();
@@ -95,7 +158,7 @@ async (page) => {
 
         const parsed = parseAllowedUrl(url);
         if (!parsed) {
-            result.blocked_request_count += 1;
+            recordBlockedRequest('cross_origin');
             await route.abort('blockedbyclient');
             return;
         }
@@ -108,28 +171,49 @@ async (page) => {
             method === 'GET' && path === normalizedPath(config.customers_route_path) && parsed.search === '';
         const customersSearch =
             method === 'POST' && path === normalizedPath(config.search_route_path) && isAllowedSearch(request, parsed);
+        const category = classifyRequest(request, parsed, method, path);
+
+        if (category === 'initial_search_post') {
+            result.initial_search_request_seen = true;
+            result.initial_search_request_allowed = customersSearch;
+        } else if (category === 'synthetic_search_post') {
+            result.synthetic_search_request_seen = true;
+            result.synthetic_search_request_allowed = customersSearch;
+        }
 
         if (staticAsset || customersPage || customersSearch) {
             await route.continue();
             return;
         }
 
-        result.blocked_request_count += 1;
+        recordBlockedRequest(category);
         await route.abort('blockedbyclient');
     };
     const isSearchResponse = (response, expectedKeyword) => {
         const parsed = parseAllowedUrl(response.url());
         const values = parseForm(response.request().postData() || '');
-        return (
+        const matches =
             parsed &&
             normalizedPath(parsed.pathname) === normalizedPath(config.search_route_path) &&
             response.request().method().toUpperCase() === 'POST' &&
             values &&
-            values.keyword === expectedKeyword
-        );
+            values.keyword === expectedKeyword;
+
+        if (matches && expectedKeyword === '') {
+            result.initial_search_response_seen = true;
+        } else if (matches && expectedKeyword === config.search_marker) {
+            result.synthetic_search_response_seen = true;
+        }
+
+        return matches;
     };
-    const readSafeEmptySearch = async (response) => {
+    const readSafeEmptySearch = async (response, expectedKeyword) => {
         const body = await response.text();
+        if (expectedKeyword === '') {
+            result.initial_search_body_read = true;
+        } else if (expectedKeyword === config.search_marker) {
+            result.synthetic_search_body_read = true;
+        }
         result.search_response_count += 1;
         if (config.forbidden_response_markers.some((key) => body.includes(key))) {
             result.response_bodies_safe = false;
@@ -168,7 +252,7 @@ async (page) => {
             Boolean(pageResponse) &&
             pageResponse.status() === 200 &&
             (await page.locator('#customers-page').count()) === 1;
-        result.initial_search_empty = await readSafeEmptySearch(await initialSearchPromise);
+        result.initial_search_empty = await readSafeEmptySearch(await initialSearchPromise, '');
 
         result.script_vars_safe = await page.evaluate((forbiddenKeys) => {
             if (typeof window.vars !== 'function') {
@@ -188,7 +272,7 @@ async (page) => {
             {timeout: config.open_timeout_ms},
         );
         await page.locator('#filter-customers form').press('Enter');
-        result.synthetic_search_empty = await readSafeEmptySearch(await syntheticSearchPromise);
+        result.synthetic_search_empty = await readSafeEmptySearch(await syntheticSearchPromise, config.search_marker);
 
         await page.waitForFunction(
             () =>

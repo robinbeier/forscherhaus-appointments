@@ -43,10 +43,24 @@ function customersUiSmokeValidateBrowserResult(array $result): array
         'script_vars_safe',
         'dom_safe',
         'response_bodies_safe',
+        'initial_search_request_seen',
+        'initial_search_request_allowed',
+        'initial_search_response_seen',
+        'initial_search_body_read',
+        'synthetic_search_request_seen',
+        'synthetic_search_request_allowed',
+        'synthetic_search_response_seen',
+        'synthetic_search_body_read',
     ];
     $integerFields = [
         'search_response_count',
         'blocked_request_count',
+        'blocked_initial_search_post_count',
+        'blocked_synthetic_search_post_count',
+        'blocked_navigation_count',
+        'blocked_static_asset_count',
+        'blocked_other_same_origin_count',
+        'blocked_cross_origin_count',
         'page_error_count',
         'console_error_count',
         'flow_error_count',
@@ -70,6 +84,22 @@ function customersUiSmokeValidateBrowserResult(array $result): array
         if (!is_int($result[$field] ?? null) || (int) $result[$field] < 0) {
             throw new GateAssertionException('Customers UI smoke browser result contains an invalid count.');
         }
+    }
+
+    $blockedCategoryFields = [
+        'blocked_initial_search_post_count',
+        'blocked_synthetic_search_post_count',
+        'blocked_navigation_count',
+        'blocked_static_asset_count',
+        'blocked_other_same_origin_count',
+        'blocked_cross_origin_count',
+    ];
+    $classifiedBlockedCount = array_sum(
+        array_map(static fn(string $field): int => $result[$field], $blockedCategoryFields),
+    );
+
+    if ($classifiedBlockedCount !== $result['blocked_request_count']) {
+        throw new GateAssertionException('Customers UI smoke browser result contains inconsistent blocked counts.');
     }
 
     /** @var array<string, bool|int> $result */
