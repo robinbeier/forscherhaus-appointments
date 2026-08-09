@@ -526,10 +526,27 @@ class GateCliSupportTest extends TestCase
             $this->assertIsArray($payload);
             $this->assertSame('deploy_timing.v1', $payload['schema'] ?? null);
             $this->assertContains($payload['event'] ?? null, ['phase', 'summary']);
+            $this->assertMatchesRegularExpression(
+                '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/',
+                $payload['run_id'] ?? '',
+            );
+            $this->assertIsInt($payload['sequence'] ?? null);
+            $this->assertGreaterThan(0, $payload['sequence']);
 
             if (($payload['event'] ?? null) === 'phase') {
                 $this->assertSame(
-                    ['schema', 'event', 'mode', 'phase', 'status', 'duration_ms', 'elapsed_ms', 'dry_run'],
+                    [
+                        'schema',
+                        'run_id',
+                        'sequence',
+                        'event',
+                        'mode',
+                        'phase',
+                        'status',
+                        'duration_ms',
+                        'elapsed_ms',
+                        'dry_run',
+                    ],
                     array_keys($payload),
                 );
                 $this->assertIsInt($payload['duration_ms']);
@@ -538,7 +555,7 @@ class GateCliSupportTest extends TestCase
                 $this->assertGreaterThanOrEqual(0, $payload['elapsed_ms']);
             } else {
                 $this->assertSame(
-                    ['schema', 'event', 'mode', 'outcome', 'exit_code', 'total_ms', 'dry_run'],
+                    ['schema', 'run_id', 'sequence', 'event', 'mode', 'outcome', 'exit_code', 'total_ms', 'dry_run'],
                     array_keys($payload),
                 );
                 $this->assertIsInt($payload['exit_code']);

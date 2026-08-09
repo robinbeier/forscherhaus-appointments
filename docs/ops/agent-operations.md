@@ -103,13 +103,14 @@ The host deploy script must be a root-owned regular non-symlink file with no
 group/world write bit beneath a canonical root-controlled ancestor chain. Never
 run a privileged permission or rollback mode from a deployed release tree.
 
-Deploy and rollback timing evidence is emitted as `DEPLOY_TIMING ` plus JSON
-using the fixed `deploy_timing.v1` schema. For baseline collection, extract only
-those prefixed lines from the operator log and validate the five core phases,
-terminal success summary, and `dry_run=false`. Do not copy the surrounding log:
-it can contain operational paths and other sensitive context. The canonical
-phase definitions and five-comparable-deploy measurement plan are in
-`docs/deployment.md`.
+Deploy and rollback timing is mirrored to stdout as `DEPLOY_TIMING ` plus JSON
+using the fixed `deploy_timing.v1` schema, but stdout/SSH capture is not
+authoritative. For a baseline candidate, use only the root-protected per-run
+JSONL under `/var/log/fh-deploy-timing` and validate it with
+`scripts/ops/validate_deploy_timing_sample.php`. Do not copy the surrounding
+operator log: it can contain operational paths and other sensitive context. The
+canonical source contract, phase definitions, and five-comparable-deploy
+measurement plan are in `docs/deployment.md`.
 Timing collection is fail-open: a missing timing record is an observability gap,
 never authority to skip or change deploy, validation, or rollback behavior.
 

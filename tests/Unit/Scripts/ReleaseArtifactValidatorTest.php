@@ -83,6 +83,14 @@ final class ReleaseArtifactValidatorTest extends TestCase
         self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
+    public function testRequiredPathsIncludeDeployTimingValidator(): void
+    {
+        self::assertContains(
+            'scripts/ops/validate_deploy_timing_sample.php',
+            ReleaseArtifactValidator::requiredPaths(),
+        );
+    }
+
     public function testRequiredPathsCoverCompleteCustomersUiSmokeRuntimeSurface(): void
     {
         $requiredPaths = ReleaseArtifactValidator::requiredPaths();

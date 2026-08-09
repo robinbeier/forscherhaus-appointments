@@ -129,9 +129,14 @@ Any post-switch failure triggers automatic rollback to the previous app path.
 
 `deploy_ea.sh` emits one machine-readable line per completed timing phase and
 one terminal summary. Each line starts with `DEPLOY_TIMING ` followed by a JSON
-object using schema `deploy_timing.v1`. Durations come from a monotonic clock;
-production Linux reads `/proc/uptime` without starting a subprocess. The PHP
-`hrtime()` fallback exists for non-Linux local rehearsal only.
+object using schema `deploy_timing.v1`. These stdout lines are observational,
+not authoritative: wrappers, SSH capture, or log forwarding may duplicate them.
+For a real root-run deploy, the authoritative secret-free source is the unique
+`/var/log/fh-deploy-timing/<run_id>.jsonl` file. The directory is root-owned mode
+`0700`; each run file is root-owned mode `0600` with one hardlink. Durations come
+from a monotonic clock; production Linux reads `/proc/uptime` without starting a
+subprocess. The PHP `hrtime()` fallback exists for non-Linux local rehearsal
+only.
 
 The measured end-to-end boundary starts after the deploy invocation and trusted
 log stream have been accepted. It ends at success, pre-switch failure,
@@ -147,15 +152,28 @@ are outside this host-side measurement. The stable deploy phases are:
 | `postdeploy_validation` | Active/previous permission checks, renderer restart/health, deep health, live canary, release marker, reloads, and the non-blocking localhost check. |
 | `rollback` | Automatic or manual rollback switch, permission contracts, renderer recovery, and health validation. This phase is recorded only when rollback runs. |
 
-Phase events contain only fixed schema/mode/phase/status values, monotonic
-`duration_ms`/`elapsed_ms`, and the `dry_run` boolean. Summary events add only a
-fixed outcome, numeric exit code, and `total_ms`. They deliberately omit release
-IDs, URLs, paths, credentials, config contents, customer data, and free-form
-error text. Export only the `DEPLOY_TIMING ` lines for baseline analysis; the
-surrounding operator log remains sensitive.
+Every record contains the same random UUIDv4 `run_id` and a sequence starting at
+`1`. Phase events contain only fixed schema/sequence/mode/phase/status values,
+monotonic `duration_ms`/`elapsed_ms`, and the `dry_run` boolean. Summary events
+add only a fixed outcome, numeric exit code, and `total_ms`. They deliberately
+omit release IDs, URLs, paths, credentials, config contents, customer data, and
+free-form error text. Validate the authoritative file before baseline use:
+
+```bash
+php scripts/ops/validate_deploy_timing_sample.php \
+  --file=/var/log/fh-deploy-timing/<run_id>.jsonl
+```
+
+The validator fails closed unless the protected source contains one run with
+sequences `1` through `6`, all five successful core phases in order, and exactly
+one successful summary. Missing, duplicate, mixed-run, out-of-order, dry-run, or
+unexpected-field records invalidate the complete sample. Do not reconstruct or
+deduplicate a sample from stdout or the surrounding sensitive operator log.
 
 Timing is strictly observational: clock or output-write failures disable or drop
 telemetry records but never change deploy, validation, rollback, or exit status.
+An unavailable or invalid authoritative source makes the run unusable for the
+baseline; it does not weaken or alter deploy gates.
 
 If the live app has already moved to the previous-release path but the staged
 release cannot move into place, the `switch` phase fails and the summary outcome
@@ -173,9 +191,10 @@ all of the following are comparable:
    concurrent maintenance known to distort the run;
 3. `dry_run=false`, outcome `succeeded`, exit code `0`, and all five core phases
    present exactly once in the documented order;
-4. the secret-free timing lines are retained together as one sample, while any
-   rollback or failed run is kept as diagnostic evidence but excluded from the
-   successful baseline set.
+4. the root-protected authoritative JSONL passes
+   `validate_deploy_timing_sample.php` without reconstruction or deduplication,
+   while any rollback or failed run is kept as diagnostic evidence but excluded
+   from the successful baseline set.
 
 After five comparable samples, calculate the median `total_ms` and each phase
 median, retain the individual samples and collection conditions, and review

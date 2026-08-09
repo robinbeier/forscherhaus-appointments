@@ -35,6 +35,7 @@ final class ReleaseArtifactValidator
             'application/views/pages/customers.php',
             'deploy_ea.sh',
             'scripts/ops/lib/prod_common.sh',
+            'scripts/ops/validate_deploy_timing_sample.php',
             'scripts/ops/customers_ui_smoke_principals.sh',
             'scripts/ops/prod_customers_ui_smoke.sh',
             'scripts/ops/prod_provider_ui_smoke.sh',
