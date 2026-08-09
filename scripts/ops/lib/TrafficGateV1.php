@@ -25,11 +25,47 @@ final class TrafficGateV1
     ];
 
     private const SAFE_METHODS = ['GET', 'HEAD'];
+    private const ACTIVE_HTTP_STATE_PATHS = ['/proc/net/tcp', '/proc/net/tcp6'];
+    private const BACKOFFICE_PREFIXES = [
+        'about',
+        'account',
+        'admins',
+        'api_settings',
+        'appointments',
+        'backend',
+        'backend_api',
+        'blocked_periods',
+        'booking_settings',
+        'business_settings',
+        'caldav',
+        'calendar',
+        'consents',
+        'customers',
+        'dashboard',
+        'dashboard/export',
+        'dashboard_export',
+        'general_settings',
+        'google',
+        'google_analytics_settings',
+        'integrations',
+        'ldap_settings',
+        'legal_settings',
+        'localization',
+        'matomo_analytics_settings',
+        'providers',
+        'secretaries',
+        'service_categories',
+        'services',
+        'unavailabilities',
+        'update',
+        'user',
+        'webhooks',
+    ];
 
     /**
      * @return array<string, mixed>
      */
-    public static function loadCatalog(string $path): array
+    public static function loadCatalog(string $path, ?string $monitorSourcesPath = null): array
     {
         if ($path === '' || is_link($path) || !is_file($path) || !is_readable($path)) {
             throw new RuntimeException('traffic catalog is unavailable');
@@ -76,8 +112,75 @@ final class TrafficGateV1
         foreach ($sourceCidrs as $cidr) {
             self::assertLoopbackCidr($cidr);
         }
+        $catalog['documented_sources']['monitor_exact_cidrs'] = [];
+        if ($monitorSourcesPath !== null) {
+            $catalog['documented_sources']['monitor_exact_cidrs'] = self::loadMonitorSources($monitorSourcesPath);
+        }
 
         return $catalog;
+    }
+
+    /** @return list<string> */
+    private static function loadMonitorSources(string $path): array
+    {
+        if ($path === '' || is_link($path) || !is_file($path) || !is_readable($path)) {
+            throw new RuntimeException('traffic monitor source catalog is unavailable');
+        }
+        $stat = lstat($path);
+        if (
+            !is_array($stat) ||
+            (int) ($stat['nlink'] ?? 0) !== 1 ||
+            (int) ($stat['uid'] ?? -1) !== 0 ||
+            (((int) ($stat['mode'] ?? 0)) & 0027) !== 0
+        ) {
+            throw new RuntimeException('traffic monitor source catalog permissions are unsafe');
+        }
+        $contents = file_get_contents($path);
+        if (!is_string($contents)) {
+            throw new RuntimeException('traffic monitor source catalog is unreadable');
+        }
+        return self::parseMonitorSourcesPayload($contents);
+    }
+
+    /** @return list<string> */
+    public static function parseMonitorSourcesPayload(string $contents): array
+    {
+        try {
+            $sources = json_decode($contents, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            throw new RuntimeException('traffic monitor source catalog is invalid');
+        }
+        $actualKeys = is_array($sources) && !array_is_list($sources) ? array_keys($sources) : [];
+        $requiredKeys = ['schema', 'version', 'exact_cidrs'];
+        if (
+            !is_array($sources) ||
+            array_is_list($sources) ||
+            array_diff($requiredKeys, $actualKeys) !== [] ||
+            array_diff($actualKeys, $requiredKeys) !== [] ||
+            ($sources['schema'] ?? null) !== 'traffic_gate_monitor_sources.v1' ||
+            !is_string($sources['version'] ?? null) ||
+            preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/', $sources['version']) !== 1 ||
+            !is_array($sources['exact_cidrs'] ?? null) ||
+            !array_is_list($sources['exact_cidrs']) ||
+            $sources['exact_cidrs'] === []
+        ) {
+            throw new RuntimeException('traffic monitor source catalog schema is invalid');
+        }
+        $seen = [];
+        foreach ($sources['exact_cidrs'] as $cidr) {
+            self::assertExactCidr($cidr);
+            if (isset($seen[$cidr])) {
+                throw new RuntimeException('traffic monitor source catalog contains duplicates');
+            }
+            $seen[$cidr] = true;
+        }
+
+        return $sources['exact_cidrs'];
+    }
+
+    public static function captureProductionActiveHttpConnections(): int
+    {
+        return self::captureActiveHttpConnections(self::ACTIVE_HTTP_STATE_PATHS);
     }
 
     /**
@@ -142,6 +245,61 @@ final class TrafficGateV1
         return $entries;
     }
 
+    /** @param list<string> $paths */
+    public static function captureActiveHttpConnections(array $paths): int
+    {
+        if ($paths === [] || !array_is_list($paths) || count(array_unique($paths)) !== count($paths)) {
+            throw new RuntimeException('traffic active-request signal is incomplete');
+        }
+        $active = 0;
+        foreach ($paths as $path) {
+            if (
+                !is_string($path) ||
+                $path === '' ||
+                $path[0] !== '/' ||
+                is_link($path) ||
+                !is_file($path) ||
+                !is_readable($path)
+            ) {
+                throw new RuntimeException('traffic active-request signal is unavailable');
+            }
+            $contents = file_get_contents($path);
+            if (!is_string($contents) || strlen($contents) > 2_000_000) {
+                throw new RuntimeException('traffic active-request signal is unreadable');
+            }
+            $lines = preg_split('/\r?\n/', $contents);
+            if (!is_array($lines) || $lines === [] || !str_contains((string) array_shift($lines), 'local_address')) {
+                throw new RuntimeException('traffic active-request signal is invalid');
+            }
+            foreach ($lines as $line) {
+                if (trim($line) === '') {
+                    continue;
+                }
+                $fields = preg_split('/\s+/', trim($line));
+                if (!is_array($fields) || count($fields) < 4) {
+                    throw new RuntimeException('traffic active-request signal is invalid');
+                }
+                $local = $fields[1];
+                $state = strtoupper($fields[3]);
+                $separator = strrpos($local, ':');
+                if (
+                    $separator === false ||
+                    preg_match('/^(?:[A-Fa-f0-9]{8}|[A-Fa-f0-9]{32})$/', substr($local, 0, $separator)) !== 1 ||
+                    preg_match('/^[A-Fa-f0-9]{4}$/', substr($local, $separator + 1)) !== 1 ||
+                    preg_match('/^[A-Fa-f0-9]{2}$/', $state) !== 1
+                ) {
+                    throw new RuntimeException('traffic active-request signal is invalid');
+                }
+                $port = hexdec(substr($local, $separator + 1));
+                if ($state === '01' && in_array($port, [80, 443], true)) {
+                    $active++;
+                }
+            }
+        }
+
+        return $active;
+    }
+
     /**
      * @param list<array{path:string,slot:string,device:int,inode:int,size:int,mtime:int}> $before
      * @param list<array{path:string,slot:string,device:int,inode:int,size:int,mtime:int}> $after
@@ -183,17 +341,25 @@ final class TrafficGateV1
             'authenticated' => 0,
             'customers_or_sensitive' => 0,
             'scanner_success' => 0,
+            'pre_window_completion' => 0,
             'rotation_errors' => $rotationComplete ? 0 : 1,
         ];
 
         $parseableEvidence = false;
+        $beforeSizes = [];
+        foreach ($before as $entry) {
+            $beforeSizes[$entry['device'] . ':' . $entry['inode']] = $entry['size'];
+        }
         foreach ($after as $entry) {
-            self::readEntry($entry, function (string $line) use (
+            $identity = $entry['device'] . ':' . $entry['inode'];
+            $initialSize = $beforeSizes[$identity] ?? 0;
+            self::readEntry($entry, function (string $line, int $recordEndOffset) use (
                 &$counts,
                 &$parseableEvidence,
                 $catalog,
                 $windowStartEpoch,
                 $windowEndEpoch,
+                $initialSize,
             ): void {
                 $counts['lines_seen']++;
                 $parsed = self::parseLine($line);
@@ -206,7 +372,10 @@ final class TrafficGateV1
                     return;
                 }
                 if ($parsed['epoch'] < $windowStartEpoch) {
-                    return;
+                    if ($recordEndOffset <= $initialSize) {
+                        return;
+                    }
+                    $counts['pre_window_completion']++;
                 }
 
                 $counts['lines_in_window']++;
@@ -271,6 +440,7 @@ final class TrafficGateV1
             $counts['source_unknown'] > 0 ||
             $counts['method_unknown'] > 0 ||
             $counts['target_unknown'] > 0;
+        $alwaysHard = $alwaysHard || $counts['pre_window_completion'] > 0;
         if ($alwaysHard || ($mode === 'normal' && $counts['public_read'] > 0)) {
             return ['hard_stop', 20];
         }
@@ -294,6 +464,11 @@ final class TrafficGateV1
         $status = $parsed['status'];
         $queryPresent = $parsed['query_present'];
         $loopback = self::matchesSourceCidrs($parsed['source'], $catalog['documented_sources']['loopback_cidrs']);
+        $documentedMonitor = self::matchesSourceCidrs(
+            $parsed['source'],
+            $catalog['documented_sources']['monitor_exact_cidrs'] ?? [],
+        );
+        $documentedSource = $loopback || $documentedMonitor;
 
         if ($status >= 500) {
             $overlays[] = 'status_5xx';
@@ -333,14 +508,14 @@ final class TrafficGateV1
         if ($scanner) {
             if ($status === 403 || $status === 404) {
                 if (
-                    $loopback &&
+                    $documentedSource &&
                     !$queryPresent &&
                     self::matchesCatalogRules($catalog['documented_periodic_ops'], $method, $path, $status)
                 ) {
                     return ['class' => 'documented_periodic_ops', 'overlays' => []];
                 }
                 return [
-                    'class' => $loopback ? 'business_or_authenticated' : 'denied_external',
+                    'class' => $documentedSource ? 'business_or_authenticated' : 'denied_external',
                     'overlays' => [],
                 ];
             }
@@ -352,14 +527,14 @@ final class TrafficGateV1
         }
 
         if (
-            $loopback &&
+            $documentedSource &&
             !$queryPresent &&
             self::matchesCatalogRules($catalog['documented_health'], $method, $path, $status)
         ) {
             return ['class' => 'documented_health', 'overlays' => []];
         }
         if (
-            $loopback &&
+            $documentedSource &&
             !$queryPresent &&
             self::matchesCatalogRules($catalog['documented_periodic_ops'], $method, $path, $status)
         ) {
@@ -455,7 +630,42 @@ final class TrafficGateV1
             return ['', '', $queryPresent, true];
         }
 
+        [$path, $pathUnknown] = self::canonicalizeTargetComponent($path);
+        [$query, $queryUnknown] = self::canonicalizeTargetComponent($query);
+        if (
+            $pathUnknown ||
+            $queryUnknown ||
+            $path === '' ||
+            $path[0] !== '/' ||
+            preg_match('/[?#\\\\]/', $path) === 1
+        ) {
+            return ['', '', $queryPresent, true];
+        }
+
         return [$path, $query, $queryPresent, false];
+    }
+
+    /** @return array{string,bool} */
+    private static function canonicalizeTargetComponent(string $value): array
+    {
+        for ($iteration = 0; $iteration < 3; $iteration++) {
+            if (preg_match('/%(?![A-Fa-f0-9]{2})/', $value) === 1) {
+                return ['', true];
+            }
+            if (!str_contains($value, '%')) {
+                break;
+            }
+            $decoded = rawurldecode($value);
+            if ($decoded === $value) {
+                break;
+            }
+            $value = $decoded;
+        }
+        if (str_contains($value, '%') || preg_match('/[\x00-\x20\x7f]/', $value) === 1) {
+            return ['', true];
+        }
+
+        return [$value, false];
     }
 
     /** @param list<string> $cidrs */
@@ -491,6 +701,16 @@ final class TrafficGateV1
 
     private static function isCustomersOrSensitive(string $path): bool
     {
+        $normalized = preg_replace('#^/index\.php/#i', '/', $path);
+        if (!is_string($normalized)) {
+            return true;
+        }
+        foreach (self::BACKOFFICE_PREFIXES as $prefix) {
+            if (preg_match('#^/' . preg_quote($prefix, '#') . '(?:/|$)#i', $normalized) === 1) {
+                return true;
+            }
+        }
+
         return preg_match(
             '#^/(?:index\.php/)?(?:customers|login|logout|recovery|account|calendar|appointments|providers|admins|secretaries|services|settings|backend|api|installation|booking/register)(?:/|$)#i',
             $path,
@@ -585,6 +805,21 @@ final class TrafficGateV1
         }
     }
 
+    private static function assertExactCidr(mixed $cidr): void
+    {
+        if (!is_string($cidr) || preg_match('~^(?<network>[^/]+)/(?<prefix>[0-9]{1,3})$~', $cidr, $match) !== 1) {
+            throw new RuntimeException('traffic monitor source CIDR is invalid');
+        }
+        $packed = @inet_pton($match['network']);
+        if (!is_string($packed)) {
+            throw new RuntimeException('traffic monitor source CIDR is invalid');
+        }
+        $prefix = (int) $match['prefix'];
+        if ((strlen($packed) === 4 && $prefix !== 32) || (strlen($packed) === 16 && $prefix !== 128)) {
+            throw new RuntimeException('traffic monitor source CIDR must identify one address');
+        }
+    }
+
     /**
      * @param list<array{path:string,slot:string,device:int,inode:int,size:int,mtime:int}> $before
      * @param list<array{path:string,slot:string,device:int,inode:int,size:int,mtime:int}> $after
@@ -600,7 +835,11 @@ final class TrafficGateV1
         }
         foreach ($before as $entry) {
             $identity = $entry['device'] . ':' . $entry['inode'];
-            if (!isset($afterByIdentity[$identity]) || $afterByIdentity[$identity]['size'] < $entry['size']) {
+            if (
+                !isset($afterByIdentity[$identity]) ||
+                $afterByIdentity[$identity]['size'] < $entry['size'] ||
+                (str_ends_with($entry['slot'], '.gz') && $afterByIdentity[$identity]['size'] !== $entry['size'])
+            ) {
                 return false;
             }
         }
@@ -645,7 +884,7 @@ final class TrafficGateV1
                 $lines = explode("\n", $decoded);
                 array_pop($lines);
                 foreach ($lines as $line) {
-                    $consumeLine(rtrim($line, "\r"));
+                    $consumeLine(rtrim($line, "\r"), $entry['size']);
                 }
             }
             unset($compressed, $decoded);
@@ -656,16 +895,18 @@ final class TrafficGateV1
             }
             try {
                 $remaining = $entry['size'];
+                $offset = 0;
                 while ($remaining > 0) {
                     $line = fgets($handle, $remaining + 1);
                     if ($line === false || $line === '' || strlen($line) > $remaining) {
                         throw new RuntimeException('traffic log member is incomplete');
                     }
                     $remaining -= strlen($line);
+                    $offset += strlen($line);
                     if (!str_ends_with($line, "\n")) {
                         throw new RuntimeException('traffic log record was partial at cutoff');
                     }
-                    $consumeLine(rtrim($line, "\r\n"));
+                    $consumeLine(rtrim($line, "\r\n"), $offset);
                 }
             } finally {
                 fclose($handle);

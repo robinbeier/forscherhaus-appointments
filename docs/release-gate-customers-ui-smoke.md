@@ -130,6 +130,12 @@ unauthenticated public `GET`/`HEAD` reads become advisory. See
 contract. Traffic-gate failure maps to smoke preflight exit `20`, before any
 lease or cleanup timer exists.
 
+The passive snapshot also requires the root-protected exact monitor-source
+catalog and complete kernel active-connection signals described in the traffic
+gate contract. These prerequisites must be established read-only before later
+production activation; missing or broad source evidence fails closed and is not
+replaced by User-Agent matching.
+
 Credentials stream directly from remote `cat` into the local gate's standard
 input. They never enter a local file, variable, command argument, report, or
 process title. The orchestrator rechecks the deployed contract digest after the

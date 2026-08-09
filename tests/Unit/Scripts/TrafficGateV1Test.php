@@ -18,6 +18,9 @@ final class TrafficGateV1Test extends TestCase
     private const PRODUCER_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
     private string $workspace;
+    private string $monitorSourcesPath;
+    /** @var list<string> */
+    private array $tcpStatePaths;
     /** @var array<string, mixed> */
     private array $catalog;
 
@@ -28,6 +31,25 @@ final class TrafficGateV1Test extends TestCase
         $canonicalWorkspace = realpath($this->workspace);
         self::assertIsString($canonicalWorkspace);
         $this->workspace = $canonicalWorkspace;
+        $this->monitorSourcesPath = $this->workspace . '/monitor-sources.json';
+        self::assertNotFalse(
+            file_put_contents(
+                $this->monitorSourcesPath,
+                json_encode(
+                    [
+                        'schema' => 'traffic_gate_monitor_sources.v1',
+                        'version' => '2026-08-09.1',
+                        'exact_cidrs' => ['198.51.100.23/32', '2001:db8::23/128'],
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        );
+        self::assertTrue(chmod($this->monitorSourcesPath, 0600));
+        $this->tcpStatePaths = [$this->workspace . '/tcp', $this->workspace . '/tcp6'];
+        foreach ($this->tcpStatePaths as $path) {
+            self::assertNotFalse(file_put_contents($path, "  sl  local_address rem_address   st\n"));
+        }
         $this->catalog = TrafficGateV1::loadCatalog(
             dirname(__DIR__, 3) . '/scripts/ops/config/traffic_gate_catalog.v1.json',
         );
@@ -132,6 +154,114 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame(1, $report['counts']['public_read']);
     }
 
+    public function testExactRuntimeMonitorSourceRecognizesOnlyTheConfiguredHost(): void
+    {
+        $catalog = $this->catalog;
+        $payload = file_get_contents($this->monitorSourcesPath);
+        self::assertIsString($payload);
+        $catalog['documented_sources']['monitor_exact_cidrs'] = TrafficGateV1::parseMonitorSourcesPayload($payload);
+        foreach (
+            [
+                ['/health', 200, 'documented_health'],
+                ['/index.php/healthz', 200, 'documented_health'],
+                ['/', 200, 'documented_periodic_ops'],
+            ]
+            as [$path, $status, $class]
+        ) {
+            $this->write('app-access.log', [$this->line('198.51.100.23', '-', 'GET', $path, $status)]);
+            $entries = TrafficGateV1::captureLogSet($this->workspace);
+            $report = TrafficGateV1::evaluate(
+                $entries,
+                $entries,
+                $catalog,
+                'customers-ui-smoke',
+                'normal',
+                self::EPOCH,
+                self::EPOCH + 1,
+                self::PRODUCER_SHA,
+            );
+            self::assertSame(1, $report['counts'][$class], $path);
+            self::assertSame(0, $report['exit_code'], $path);
+            self::assertStringNotContainsString('198.51.100.23', json_encode($report, JSON_THROW_ON_ERROR), $path);
+        }
+
+        $this->write('app-access.log', [$this->line('198.51.100.24', '-', 'GET', '/health', 200)]);
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+        $untrusted = TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $catalog,
+            'customers-ui-smoke',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+        self::assertSame(1, $untrusted['counts']['public_read']);
+        self::assertSame(['hard_stop', 20], [$untrusted['decision'], $untrusted['exit_code']]);
+    }
+
+    #[DataProvider('invalidMonitorSourceProvider')]
+    public function testRuntimeMonitorSourcesRejectMissingUnsafeOrBroadCidrs(?array $payload): void
+    {
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::parseMonitorSourcesPayload($payload === null ? '' : json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    /** @return iterable<string, array{array<string,mixed>|null}> */
+    public static function invalidMonitorSourceProvider(): iterable
+    {
+        yield 'missing' => [null];
+        yield 'empty' => [
+            [
+                'schema' => 'traffic_gate_monitor_sources.v1',
+                'version' => '2026-08-09.1',
+                'exact_cidrs' => [],
+            ],
+        ];
+        yield 'broad IPv4' => [
+            [
+                'schema' => 'traffic_gate_monitor_sources.v1',
+                'version' => '2026-08-09.1',
+                'exact_cidrs' => ['172.16.0.0/12'],
+            ],
+        ];
+        yield 'broad IPv6' => [
+            [
+                'schema' => 'traffic_gate_monitor_sources.v1',
+                'version' => '2026-08-09.1',
+                'exact_cidrs' => ['2001:db8::/64'],
+            ],
+        ];
+        yield 'not an address' => [
+            [
+                'schema' => 'traffic_gate_monitor_sources.v1',
+                'version' => '2026-08-09.1',
+                'exact_cidrs' => ['monitor.internal/32'],
+            ],
+        ];
+    }
+
+    public function testRuntimeMonitorSourcePermissionsMustBeProtected(): void
+    {
+        self::assertTrue(chmod($this->monitorSourcesPath, 0644));
+
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::loadCatalog(
+            dirname(__DIR__, 3) . '/scripts/ops/config/traffic_gate_catalog.v1.json',
+            $this->monitorSourcesPath,
+        );
+    }
+
+    public function testMissingRuntimeMonitorSourceFailsThroughTheProductionCatalogLoader(): void
+    {
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::loadCatalog(
+            dirname(__DIR__, 3) . '/scripts/ops/config/traffic_gate_catalog.v1.json',
+            $this->workspace . '/missing-monitor-sources.json',
+        );
+    }
+
     public function testUnexpectedLoopbackScannerPathIsNotTrustedAsPeriodicOps(): void
     {
         $report = $this->evaluate([$this->line('127.0.0.1', '-', 'GET', '/server-status', 404)], 'no-business-traffic');
@@ -185,6 +315,92 @@ final class TrafficGateV1Test extends TestCase
         yield 'five hundred' => [$line('127.0.0.1', '-', 'GET', '/health', 503), 'status_5xx'];
         yield 'unknown source' => [$line('SOURCE_UNKNOWN', '-', 'GET', '/public', 200), 'source_unknown'];
         yield 'unknown method' => [$line('203.0.113.10', '-', 'BREW', '/public', 200), 'method_unknown'];
+    }
+
+    #[DataProvider('backofficeRouteProvider')]
+    public function testEveryBackofficeGetPrefixRemainsHardWithoutApacheRemoteUser(string $prefix): void
+    {
+        foreach (['/' . $prefix, '/index.php/' . $prefix] as $path) {
+            $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', $path, 200)], 'no-business-traffic');
+            self::assertSame(['hard_stop', 20], [$report['decision'], $report['exit_code']], $path);
+            self::assertSame(1, $report['counts']['customers_or_sensitive'], $path);
+        }
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function backofficeRouteProvider(): iterable
+    {
+        foreach (
+            [
+                'about',
+                'account',
+                'admins',
+                'api_settings',
+                'appointments',
+                'backend',
+                'backend_api',
+                'blocked_periods',
+                'booking_settings',
+                'business_settings',
+                'caldav',
+                'calendar',
+                'consents',
+                'customers',
+                'dashboard',
+                'dashboard/export',
+                'dashboard_export',
+                'general_settings',
+                'google',
+                'google_analytics_settings',
+                'integrations',
+                'ldap_settings',
+                'legal_settings',
+                'localization',
+                'matomo_analytics_settings',
+                'providers',
+                'secretaries',
+                'service_categories',
+                'services',
+                'unavailabilities',
+                'update',
+                'user',
+                'webhooks',
+            ]
+            as $prefix
+        ) {
+            yield $prefix => [$prefix];
+        }
+    }
+
+    #[DataProvider('encodedHardStopTargetProvider')]
+    public function testEncodedScannerAndBackofficeTargetsCannotBecomePublicAdvisory(
+        string $target,
+        string $overlay,
+    ): void {
+        $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', $target, 200)], 'no-business-traffic');
+
+        self::assertSame(['hard_stop', 20], [$report['decision'], $report['exit_code']]);
+        self::assertSame(1, $report['counts'][$overlay]);
+    }
+
+    /** @return iterable<string, array{string,string}> */
+    public static function encodedHardStopTargetProvider(): iterable
+    {
+        yield 'lowercase dot' => ['/%2eenv', 'scanner_success'];
+        yield 'uppercase dot' => ['/%2Eenv', 'scanner_success'];
+        yield 'double encoded dot' => ['/%252eenv', 'scanner_success'];
+        yield 'encoded scanner query' => ['/?probe=%77p-admin', 'scanner_success'];
+        yield 'encoded backoffice route' => ['/index.php/%64ashboard', 'customers_or_sensitive'];
+        yield 'malformed encoding' => ['/public%2', 'target_unknown'];
+        yield 'decoded control' => ['/public%00', 'target_unknown'];
+    }
+
+    public function testEncodedUtf8PublicReadRemainsAdvisoryInNoBusinessMode(): void
+    {
+        $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', '/caf%C3%A9', 200)], 'no-business-traffic');
+
+        self::assertSame(1, $report['counts']['public_read']);
+        self::assertSame(['advisory', 0], [$report['decision'], $report['exit_code']]);
     }
 
     public function testScannerRedirectAndNonDeniedFourHundredRemainHard(): void
@@ -255,6 +471,148 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame(1, $report['counts']['lines_in_window']);
         self::assertSame(0, $report['counts']['parse_errors']);
         self::assertSame(['allow', 0], [$report['decision'], $report['exit_code']]);
+    }
+
+    public function testPreWindowRequestCompletedAfterInitialSnapshotFailsClosed(): void
+    {
+        $old = str_replace(
+            '[09/Aug/2026:20:00:00 +0200]',
+            '[09/Aug/2026:19:59:50 +0200]',
+            $this->line('127.0.0.1', '-', 'GET', '/health', 200),
+        );
+        $preWindowCompletion = str_replace(
+            '[09/Aug/2026:20:00:00 +0200]',
+            '[09/Aug/2026:19:59:59 +0200]',
+            $this->line('203.0.113.10', '-', 'GET', '/index.php/dashboard', 200),
+        );
+        $this->write('app-access.log', [$old]);
+        $before = TrafficGateV1::captureLogSet($this->workspace);
+        self::assertNotFalse(
+            file_put_contents($this->workspace . '/app-access.log', $preWindowCompletion . "\n", FILE_APPEND),
+        );
+        $after = TrafficGateV1::captureLogSet($this->workspace);
+
+        $report = TrafficGateV1::evaluate(
+            $before,
+            $after,
+            $this->catalog,
+            'deploy',
+            'no-business-traffic',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+
+        self::assertSame(1, $report['counts']['pre_window_completion']);
+        self::assertSame(1, $report['counts']['customers_or_sensitive']);
+        self::assertSame(['hard_stop', 20], [$report['decision'], $report['exit_code']]);
+    }
+
+    public function testActiveHttpConnectionSnapshotCountsOnlyEstablishedHttpPorts(): void
+    {
+        self::assertNotFalse(
+            file_put_contents(
+                $this->tcpStatePaths[0],
+                "  sl  local_address rem_address   st\n" .
+                    "0: 0100007F:0050 0200007F:C350 01\n" .
+                    "1: 0100007F:01BB 0200007F:C351 01\n" .
+                    "2: 0100007F:0016 0200007F:C352 01\n" .
+                    "3: 0100007F:01BB 0200007F:C353 06\n",
+            ),
+        );
+
+        self::assertSame(2, TrafficGateV1::captureActiveHttpConnections($this->tcpStatePaths));
+    }
+
+    public function testMalformedActiveRequestSignalFailsClosed(): void
+    {
+        self::assertNotFalse(file_put_contents($this->tcpStatePaths[0], "not a tcp table\n"));
+
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::captureActiveHttpConnections($this->tcpStatePaths);
+    }
+
+    public function testMissingActiveRequestSignalFailsClosed(): void
+    {
+        $this->expectException(RuntimeException::class);
+        TrafficGateV1::captureActiveHttpConnections([$this->workspace . '/missing-tcp']);
+    }
+
+    public function testCollectionFixesCutoffBeforeFinalActiveSignalAndSnapshotWithoutRetry(): void
+    {
+        $this->write('app-access.log', [$this->line('127.0.0.1', '-', 'GET', '/health', 200)]);
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+        $events = [];
+        $clockValues = [self::EPOCH, self::EPOCH + 90];
+        $report = trafficGateCollectReport(
+            [
+                'purpose' => 'deploy',
+                'mode' => 'normal',
+                'window-seconds' => '90',
+                'log-dir' => $this->workspace,
+            ],
+            $this->catalog,
+            self::PRODUCER_SHA,
+            function () use (&$events, &$clockValues): int {
+                $events[] = 'clock';
+                return array_shift($clockValues);
+            },
+            function (int $seconds) use (&$events): void {
+                $events[] = 'sleep:' . $seconds;
+            },
+            function () use (&$events): int {
+                $events[] = 'active';
+                return 0;
+            },
+            function () use (&$events, $entries): array {
+                $events[] = 'capture';
+                return $entries;
+            },
+        );
+
+        self::assertSame(['clock', 'active', 'capture', 'sleep:90', 'clock', 'active', 'capture'], $events);
+        self::assertSame(self::EPOCH + 90, $report['window_end_epoch']);
+        self::assertSame(0, $report['exit_code']);
+    }
+
+    public function testActiveConnectionAtEitherBoundaryFailsBeforeAllowWithoutRetry(): void
+    {
+        foreach (
+            [
+                'start boundary' => [[1], []],
+                'end boundary' => [[0, 1], ['capture', 'sleep:90']],
+            ]
+            as $case => [$activeValues, $expectedEvents]
+        ) {
+            $events = [];
+            $clockValues = [self::EPOCH, self::EPOCH + 90];
+            try {
+                trafficGateCollectReport(
+                    [
+                        'purpose' => 'deploy',
+                        'mode' => 'normal',
+                        'window-seconds' => '90',
+                        'log-dir' => $this->workspace,
+                    ],
+                    $this->catalog,
+                    self::PRODUCER_SHA,
+                    static fn(): int => array_shift($clockValues),
+                    function (int $seconds) use (&$events): void {
+                        $events[] = 'sleep:' . $seconds;
+                    },
+                    static function () use (&$activeValues): int {
+                        return array_shift($activeValues);
+                    },
+                    function () use (&$events): array {
+                        $events[] = 'capture';
+                        return [];
+                    },
+                );
+                self::fail('active traffic boundary must fail closed');
+            } catch (RuntimeException) {
+                self::assertSame($expectedEvents, $events, $case);
+            }
+        }
     }
 
     public function testCurrentDotOneAndGzipAreReadCompletelyPastTwoThousandLines(): void
@@ -491,6 +849,9 @@ final class TrafficGateV1Test extends TestCase
         self::assertNotFalse(file_put_contents($secondPath, json_encode($second, JSON_THROW_ON_ERROR)));
 
         self::assertNotSame(trafficGateProducerSha256($firstPath), trafficGateProducerSha256($secondPath));
+        $withSources = trafficGateProducerSha256($firstPath, null, $this->monitorSourcesPath);
+        self::assertNotFalse(file_put_contents($this->monitorSourcesPath, "\n", FILE_APPEND));
+        self::assertNotSame($withSources, trafficGateProducerSha256($firstPath, null, $this->monitorSourcesPath));
     }
 
     public function testProducerFingerprintBindsEveryRuntimeProducerFile(): void
@@ -512,19 +873,143 @@ final class TrafficGateV1Test extends TestCase
         }
     }
 
-    public function testCliProducerFingerprintBindsTheRealDefaultRuntimeSet(): void
+    public function testProducerFingerprintBindsTheRealDefaultRuntimeSet(): void
     {
         $repository = dirname(__DIR__, 3);
         $catalogPath = $repository . '/scripts/ops/config/traffic_gate_catalog.v1.json';
+        $producerPaths = [
+            $repository . '/scripts/ops/lib/TrafficGateV1.php',
+            $repository . '/scripts/ops/traffic_gate_v1.php',
+            $repository . '/scripts/ops/prod_traffic_gate.sh',
+            $catalogPath,
+            $this->monitorSourcesPath,
+        ];
+        $hashes = [];
+        foreach ($producerPaths as $path) {
+            $hash = hash_file('sha256', $path);
+            self::assertIsString($hash);
+            $hashes[] = $hash;
+        }
+        $expected = hash('sha256', implode("\n", $hashes));
+
+        self::assertSame($expected, trafficGateProducerSha256($catalogPath, null, $this->monitorSourcesPath));
+    }
+
+    public function testRootWrapperCanProduceASuccessReportWithTheFixedProductionSignal(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('The production wrapper is intentionally root-only.');
+        }
+        if (!is_readable('/proc/net/tcp') || !is_readable('/proc/net/tcp6')) {
+            self::markTestSkipped('The fixed production connection signal is unavailable.');
+        }
+
+        $repository = dirname(__DIR__, 3);
+        $catalogPath = $repository . '/scripts/ops/config/traffic_gate_catalog.v1.json';
         $outputPath = $this->workspace . '/traffic-gate-report.json';
-        $timestamp = (new \DateTimeImmutable('now'))->format('d/M/Y:H:i:s O');
+        $timestamp = (new \DateTimeImmutable('-5 minutes'))->format('d/M/Y:H:i:s O');
         $this->write('app-access.log', [
             sprintf('127.0.0.1 - - [%s] "GET /health HTTP/1.1" 200 123 "-" "fixture-agent"', $timestamp),
         ]);
 
-        $result = $this->runCommand([
-            'php',
-            'scripts/ops/traffic_gate_v1.php',
+        $result = $this->runCommand(
+            [
+                'bash',
+                'scripts/ops/prod_traffic_gate.sh',
+                '--purpose',
+                'deploy',
+                '--mode',
+                'normal',
+                '--window-seconds',
+                '1',
+                '--output-json',
+                $outputPath,
+            ],
+            [
+                'TRAFFIC_GATE_LOG_DIR' => $this->workspace,
+                'TRAFFIC_GATE_CATALOG_PATH' => $catalogPath,
+                'TRAFFIC_GATE_MONITOR_SOURCES_PATH' => $this->monitorSourcesPath,
+            ],
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['output']);
+        $report = json_decode((string) file_get_contents($outputPath), true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($report);
+        self::assertSame('allow', $report['decision']);
+        self::assertSame(
+            trafficGateProducerSha256($catalogPath, null, $this->monitorSourcesPath),
+            $report['producer_sha256'],
+        );
+    }
+
+    public function testInvalidInvocationAtomicallyInvalidatesAStaleSuccessReport(): void
+    {
+        $outputPath = $this->workspace . '/stale-invalid-invocation.json';
+        $this->writeStaleSuccess($outputPath);
+
+        $exitCode = trafficGateMain(['traffic_gate_v1.php', '--output-json', $outputPath]);
+
+        self::assertSame(64, $exitCode);
+        self::assertSame('', file_get_contents($outputPath));
+        self::assertSame(0600, fileperms($outputPath) & 0777);
+    }
+
+    #[DataProvider('arbitraryStaleOutputProvider')]
+    public function testInvalidInvocationInvalidatesOlderOrNonJsonOutput(string $staleContents): void
+    {
+        $outputPath = $this->workspace . '/stale-arbitrary-output';
+        self::assertNotFalse(file_put_contents($outputPath, $staleContents));
+
+        $exitCode = trafficGateMain(['traffic_gate_v1.php', '--output-json', $outputPath]);
+
+        self::assertSame(64, $exitCode);
+        self::assertSame('', file_get_contents($outputPath));
+        self::assertSame(0600, fileperms($outputPath) & 0777);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function arbitraryStaleOutputProvider(): iterable
+    {
+        yield 'older schema' => ['{"schema":"traffic_gate.v0","decision":"allow"}'];
+        yield 'non JSON' => ['ALLOW FROM PREVIOUS RUN'];
+    }
+
+    public function testCollectionFailureCannotLeaveAStaleSuccessReport(): void
+    {
+        $outputPath = $this->workspace . '/stale-collection.json';
+        $this->writeStaleSuccess($outputPath);
+
+        $exitCode = trafficGateMain([
+            'traffic_gate_v1.php',
+            '--purpose',
+            'deploy',
+            '--mode',
+            'normal',
+            '--window-seconds',
+            '1',
+            '--output-json',
+            $outputPath,
+            '--log-dir',
+            $this->workspace . '/missing',
+            '--catalog',
+            dirname(__DIR__, 3) . '/scripts/ops/config/traffic_gate_catalog.v1.json',
+            '--monitor-sources',
+            $this->monitorSourcesPath,
+        ]);
+
+        self::assertSame(21, $exitCode);
+        self::assertSame('', file_get_contents($outputPath));
+    }
+
+    public function testGzipEvidenceFailureCannotLeaveAStaleSuccessReport(): void
+    {
+        $outputPath = $this->workspace . '/stale-evidence.json';
+        $this->writeStaleSuccess($outputPath);
+        $this->write('app-access.log', [$this->line('127.0.0.1', '-', 'GET', '/health', 200)]);
+        self::assertNotFalse(file_put_contents($this->workspace . '/app-access.log.2.gz', 'not-a-gzip'));
+
+        $exitCode = trafficGateMain([
+            'traffic_gate_v1.php',
             '--purpose',
             'deploy',
             '--mode',
@@ -536,27 +1021,13 @@ final class TrafficGateV1Test extends TestCase
             '--log-dir',
             $this->workspace,
             '--catalog',
-            $catalogPath,
+            dirname(__DIR__, 3) . '/scripts/ops/config/traffic_gate_catalog.v1.json',
+            '--monitor-sources',
+            $this->monitorSourcesPath,
         ]);
 
-        self::assertSame(0, $result['exit_code'], $result['output']);
-        $report = json_decode((string) file_get_contents($outputPath), true, 32, JSON_THROW_ON_ERROR);
-        self::assertIsArray($report);
-        $producerPaths = [
-            $repository . '/scripts/ops/lib/TrafficGateV1.php',
-            $repository . '/scripts/ops/traffic_gate_v1.php',
-            $repository . '/scripts/ops/prod_traffic_gate.sh',
-            $catalogPath,
-        ];
-        $hashes = [];
-        foreach ($producerPaths as $path) {
-            $hash = hash_file('sha256', $path);
-            self::assertIsString($hash);
-            $hashes[] = $hash;
-        }
-        $expected = hash('sha256', implode("\n", $hashes));
-
-        self::assertSame($expected, $report['producer_sha256']);
+        self::assertSame(21, $exitCode);
+        self::assertSame('', file_get_contents($outputPath));
     }
 
     public function testDirectEvaluatorAcceptsDocumentedSpaceSeparatedArguments(): void
@@ -581,13 +1052,27 @@ final class TrafficGateV1Test extends TestCase
 
     public function testCliAndProducerExposeFrozenExitContractWithoutReadingProduction(): void
     {
+        $stalePath = $this->workspace . '/stale-wrapper-invocation.json';
+        $this->writeStaleSuccess($stalePath);
         $php = $this->runCommand(['php', 'scripts/ops/traffic_gate_v1.php']);
         $shell = $this->runCommand(['bash', 'scripts/ops/prod_traffic_gate.sh', '--purpose', 'deploy']);
+        $staleShell = $this->runCommand([
+            'bash',
+            'scripts/ops/prod_traffic_gate.sh',
+            '--purpose',
+            'deploy',
+            '--output-json',
+            $stalePath,
+            '--unsupported',
+            'value',
+        ]);
         $help = $this->runCommand(['bash', 'scripts/ops/prod_traffic_gate.sh', '--help']);
 
         self::assertSame(64, $php['exit_code']);
         self::assertSame("traffic_gate status=invalid reason=invocation\n", $php['output']);
         self::assertSame(64, $shell['exit_code']);
+        self::assertSame(64, $staleShell['exit_code']);
+        self::assertSame('', file_get_contents($stalePath));
         self::assertSame(0, $help['exit_code']);
         self::assertStringContainsString(
             '0 allow/advisory, 20 traffic hard stop, 21 invalid/incomplete',
@@ -649,14 +1134,38 @@ final class TrafficGateV1Test extends TestCase
         self::assertNotFalse(file_put_contents($this->workspace . '/' . $name, $encoded));
     }
 
+    private function writeStaleSuccess(string $path): void
+    {
+        self::assertNotFalse(
+            file_put_contents(
+                $path,
+                json_encode(
+                    [
+                        'schema' => TrafficGateV1::SCHEMA,
+                        'decision' => 'allow',
+                        'exit_code' => 0,
+                        'window_end_epoch' => self::EPOCH,
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        );
+    }
+
     /**
      * @param list<string> $command
+     * @param array<string, string>|null $environment
      * @return array{exit_code:int,output:string}
      */
-    private function runCommand(array $command): array
+    private function runCommand(array $command, ?array $environment = null): array
     {
         $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $process = proc_open($command, $descriptors, $pipes, dirname(__DIR__, 3));
+        if ($environment !== null) {
+            $currentEnvironment = getenv();
+            self::assertIsArray($currentEnvironment);
+            $environment = array_merge($currentEnvironment, $environment);
+        }
+        $process = proc_open($command, $descriptors, $pipes, dirname(__DIR__, 3), $environment);
         self::assertIsResource($process);
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);

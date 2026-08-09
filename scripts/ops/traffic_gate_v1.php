@@ -16,7 +16,7 @@ function trafficGateUsage(): void
         Usage:
           php scripts/ops/traffic_gate_v1.php --purpose customers-ui-smoke|deploy \
             --mode normal|no-business-traffic --window-seconds N --output-json PATH \
-            [--log-dir PATH] [--catalog PATH]
+            [--log-dir PATH] [--catalog PATH] [--monitor-sources PATH]
 
         Exit codes: 0 allow/advisory, 20 traffic hard stop, 21 invalid/incomplete
         evidence, 64 invalid invocation.
@@ -50,7 +50,13 @@ function trafficGateParseArguments(array $argv): array
                 throw new InvalidArgumentException('invalid invocation');
             }
         }
-        if (!in_array($name, ['purpose', 'mode', 'window-seconds', 'output-json', 'log-dir', 'catalog'], true)) {
+        if (
+            !in_array(
+                $name,
+                ['purpose', 'mode', 'window-seconds', 'output-json', 'log-dir', 'catalog', 'monitor-sources'],
+                true,
+            )
+        ) {
             throw new InvalidArgumentException('invalid invocation');
         }
         if ($value === '' || isset($options[$name])) {
@@ -66,6 +72,7 @@ function trafficGateParseArguments(array $argv): array
     }
     $options['log-dir'] ??= '/var/log/apache2';
     $options['catalog'] ??= __DIR__ . '/config/traffic_gate_catalog.v1.json';
+    $options['monitor-sources'] ??= '/etc/fh/traffic-gate-monitor-sources.v1.json';
 
     return $options;
 }
@@ -74,6 +81,17 @@ function trafficGateParseArguments(array $argv): array
  * @param array<string, mixed> $report
  */
 function trafficGateWriteReport(string $path, array $report): void
+{
+    $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL;
+    trafficGateWriteOutputBytes($path, $json);
+}
+
+function trafficGatePrepareOutput(string $path): void
+{
+    trafficGateWriteOutputBytes($path, '');
+}
+
+function trafficGateWriteOutputBytes(string $path, string $contents): void
 {
     if ($path === '' || $path[0] !== '/' || str_contains($path, "\0") || is_link($path) || is_dir($path)) {
         throw new RuntimeException('traffic gate output is invalid');
@@ -90,8 +108,7 @@ function trafficGateWriteReport(string $path, array $report): void
         throw new RuntimeException('traffic gate output could not be staged');
     }
     try {
-        $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL;
-        if (file_put_contents($temporary, $json, LOCK_EX) !== strlen($json) || !chmod($temporary, 0600)) {
+        if (file_put_contents($temporary, $contents, LOCK_EX) !== strlen($contents) || !chmod($temporary, 0600)) {
             throw new RuntimeException('traffic gate output could not be written');
         }
         if (!rename($temporary, $path)) {
@@ -104,11 +121,52 @@ function trafficGateWriteReport(string $path, array $report): void
     }
 }
 
-/** @param list<string>|null $runtimePaths */
-function trafficGateProducerSha256(string $catalogPath, ?array $runtimePaths = null): string
+/** @param list<string> $argv */
+function trafficGateInvalidateStaleOutputs(array $argv): void
 {
+    $candidates = [];
+    for ($index = 1, $count = count($argv); $index < $count; $index++) {
+        if ($argv[$index] === '--output-json') {
+            if (isset($argv[$index + 1])) {
+                $candidates[] = $argv[$index + 1];
+            }
+            $index++;
+            continue;
+        }
+        if (str_starts_with($argv[$index], '--output-json=')) {
+            $candidates[] = substr($argv[$index], strlen('--output-json='));
+        }
+    }
+    foreach (array_unique($candidates) as $path) {
+        if (
+            !is_string($path) ||
+            $path === '' ||
+            $path[0] !== '/' ||
+            str_contains($path, "\0") ||
+            is_link($path) ||
+            !is_file($path)
+        ) {
+            continue;
+        }
+        try {
+            trafficGatePrepareOutput($path);
+        } catch (Throwable) {
+            // Invocation remains invalid; never expose path or exception details.
+        }
+    }
+}
+
+/** @param list<string>|null $runtimePaths */
+function trafficGateProducerSha256(
+    string $catalogPath,
+    ?array $runtimePaths = null,
+    ?string $monitorSourcesPath = null,
+): string {
     $paths = $runtimePaths ?? [__DIR__ . '/lib/TrafficGateV1.php', __FILE__, __DIR__ . '/prod_traffic_gate.sh'];
     $paths[] = $catalogPath;
+    if ($monitorSourcesPath !== null) {
+        $paths[] = $monitorSourcesPath;
+    }
     $hashes = [];
     foreach ($paths as $path) {
         if (is_link($path) || !is_file($path)) {
@@ -124,8 +182,58 @@ function trafficGateProducerSha256(string $catalogPath, ?array $runtimePaths = n
     return hash('sha256', implode("\n", $hashes));
 }
 
+/**
+ * @param array<string, string> $options
+ * @param array<string, mixed> $catalog
+ * @param callable():int|null $clock
+ * @param callable(int):void|null $sleeper
+ * @param callable():int|null $activeProbe
+ * @param callable():list<array{path:string,slot:string,device:int,inode:int,size:int,mtime:int}>|null $capture
+ * @return array<string, mixed>
+ */
+function trafficGateCollectReport(
+    array $options,
+    array $catalog,
+    string $producerSha256,
+    ?callable $clock = null,
+    ?callable $sleeper = null,
+    ?callable $activeProbe = null,
+    ?callable $capture = null,
+): array {
+    $clock ??= static fn(): int => time();
+    $sleeper ??= static function (int $seconds): void {
+        sleep($seconds);
+    };
+    $activeProbe ??= static fn(): int => TrafficGateV1::captureProductionActiveHttpConnections();
+    $capture ??= static fn(): array => TrafficGateV1::captureLogSet($options['log-dir']);
+
+    $windowStartEpoch = $clock();
+    if ($activeProbe() !== 0) {
+        throw new RuntimeException('traffic active-request boundary is not idle');
+    }
+    $before = $capture();
+    $sleeper((int) $options['window-seconds']);
+    $windowEndEpoch = $clock();
+    if ($activeProbe() !== 0) {
+        throw new RuntimeException('traffic active-request boundary is not idle');
+    }
+    $after = $capture();
+
+    return TrafficGateV1::evaluate(
+        $before,
+        $after,
+        $catalog,
+        $options['purpose'],
+        $options['mode'],
+        $windowStartEpoch,
+        $windowEndEpoch,
+        $producerSha256,
+    );
+}
+
 function trafficGateMain(array $argv): int
 {
+    trafficGateInvalidateStaleOutputs($argv);
     try {
         $options = trafficGateParseArguments($argv);
         if (
@@ -141,23 +249,19 @@ function trafficGateMain(array $argv): int
         if ($windowSeconds > 3600) {
             throw new InvalidArgumentException('invalid invocation');
         }
+        trafficGatePrepareOutput($options['output-json']);
 
-        $catalog = TrafficGateV1::loadCatalog($options['catalog']);
-        $before = TrafficGateV1::captureLogSet($options['log-dir']);
-        $windowStartEpoch = time();
-        sleep($windowSeconds);
-        $after = TrafficGateV1::captureLogSet($options['log-dir']);
-        $windowEndEpoch = time();
-        $report = TrafficGateV1::evaluate(
-            $before,
-            $after,
-            $catalog,
-            $options['purpose'],
-            $options['mode'],
-            $windowStartEpoch,
-            $windowEndEpoch,
-            trafficGateProducerSha256($options['catalog']),
-        );
+        $catalog = TrafficGateV1::loadCatalog($options['catalog'], $options['monitor-sources']);
+        $producerSha256 = trafficGateProducerSha256($options['catalog'], null, $options['monitor-sources']);
+        $report = trafficGateCollectReport($options, $catalog, $producerSha256);
+        $finalCatalog = TrafficGateV1::loadCatalog($options['catalog'], $options['monitor-sources']);
+        if ($catalog !== $finalCatalog) {
+            throw new RuntimeException('traffic catalog changed during collection');
+        }
+        $finalProducerSha256 = trafficGateProducerSha256($options['catalog'], null, $options['monitor-sources']);
+        if (!hash_equals($producerSha256, $finalProducerSha256)) {
+            throw new RuntimeException('traffic producer changed during collection');
+        }
         trafficGateWriteReport($options['output-json'], $report);
         fwrite(STDOUT, json_encode($report, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL);
 

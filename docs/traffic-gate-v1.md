@@ -34,7 +34,8 @@ Exit codes are fixed:
 counters and SHA-256 fingerprints. Its canonical cutoff is
 `window_end_epoch`; `window_start_epoch` and `window_seconds` bind the same
 inclusive observation window. `producer_sha256` binds the evaluator, producer,
-policy and catalog bytes. `log_set_sha256` binds the normalized log-member
+policy, repository catalog, and root-protected runtime monitor-source catalog
+bytes. `log_set_sha256` binds the normalized log-member
 metadata without hashing or exporting raw request data.
 The v1 top-level key set is closed but serialization order is not significant;
 new evidence fields require a schema version change instead of an additive v1
@@ -64,9 +65,27 @@ counters. It must not embed the complete traffic report inside a deploy record.
 
 ## Classification policy
 
-Documented health and periodic operations require a loopback source together
-with an exact catalog method, query-free path, and status tuple. User-Agent or
-path text alone never establishes trust.
+Documented health and periodic operations require either a cataloged loopback
+source or an address from `/etc/fh/traffic-gate-monitor-sources.v1.json`,
+together with an exact catalog method, query-free path, and status tuple. The
+runtime file is mandatory for the production producer, must be owned by the
+effective root operator, must not be group-writable or accessible by others,
+and has this closed shape:
+
+```json
+{
+  "schema": "traffic_gate_monitor_sources.v1",
+  "version": "2026-08-09.1",
+  "exact_cidrs": ["<observed IPv4>/32", "<observed IPv6>/128"]
+}
+```
+
+Only single-address `/32` and `/128` entries are accepted. Missing, empty,
+broad, duplicated, mutable, or unsafe source evidence exits `21`. Do not infer
+a Docker or RFC1918 range: the Apache-visible Kuma source must be established
+by a separately authorized read-only production observation before activation.
+User-Agent or path text alone never establishes trust, and source addresses are
+never copied into the report.
 
 External scanner signatures are advisory only when a safe method receives
 exactly `403` or `404`. Scanner success, redirects, other denials, unsafe
@@ -79,6 +98,13 @@ Authenticated traffic, writes, business/Customers/sensitive routes, queryful
 non-scanner requests, unknown source/method/target, unclassified records, and
 all 5xx remain hard stops in both modes.
 
+Request paths and queries are percent-decoded through a bounded canonicalization
+step before scanner and sensitive-route matching. Malformed, control-bearing,
+or excessively nested encodings are unknown targets and therefore hard stops.
+The sensitive-route catalog explicitly covers every current backoffice
+controller prefix; Apache's normally empty remote-user field is never used as
+proof that a backoffice GET is public.
+
 ## Rotation and completeness
 
 The producer reads the complete canonical Apache access-log set: every current
@@ -88,11 +114,25 @@ unique identity; gzip integrity is checked before parsing.
 Both plain and gzip members are bounded to the byte size captured at the
 canonical cutoff, so appends after the snapshot cannot change the decision.
 
+The producer fixes `window_end_epoch` before the final active-connection and log
+snapshots. At both boundaries it reads the kernel TCP tables for established
+connections on ports 80 and 443 without serializing addresses or socket lines.
+An active connection or unavailable/malformed kernel signal exits `21`; there
+is no retry, extra wait, or timeout increase. A record appended after the first
+snapshot whose Apache start timestamp predates the window is retained as a
+`pre_window_completion` hard stop instead of being discarded.
+
 The producer captures the log set before and after the window. Every pre-window
 identity must survive with a non-decreasing size, including when current is
 renamed to `.1`. Missing identities, truncation, duplicate identities, corrupt
 gzip, unsupported format, malformed timestamps, or a wholly unparseable set
 make the evidence incomplete and exit `21`.
+
+Immediately after a valid output path is known, the producer atomically replaces
+any earlier report with an empty `0600` invalidation artifact. Only a successful
+evaluation atomically replaces that placeholder with a current JSON report.
+Invocation, collection, rotation, gzip, active-signal, or publishing failure can
+therefore never leave an older allow decision at the fixed `*-latest.json` path.
 
 Production activation of this contract is a separate serial operation. A
 reviewed implementation or green CI does not itself activate the gate on the

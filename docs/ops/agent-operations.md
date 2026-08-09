@@ -50,7 +50,8 @@ Current accepted baseline:
 - Monitor: `https://monitor.dasforscherhaus-leg.de/`
 - Active app path: `/var/www/html/easyappointments`
 - Release archive path: `/root/releases`
-- Host-local secrets: `/etc/fh`, `/etc/fh/healthz.token`, and
+- Host-local protected inputs: `/etc/fh`, `/etc/fh/healthz.token`,
+  `/etc/fh/traffic-gate-monitor-sources.v1.json`, and
   `/root/backups/uptime-kuma-push.env`
 - Core services: `apache2`, `php8.5-fpm`, `mariadb`, `docker`, `fail2ban`,
   `cron`, `unattended-upgrades`, `fh-pdf-renderer`
@@ -67,6 +68,8 @@ Log and signal sources:
 - PDF renderer journal: `fh-pdf-renderer`
 - Cron journal: `cron`
 - Kuma data: `/var/lib/uptime-kuma-data`
+- Traffic-gate source evidence: exact Apache-visible monitor addresses in the
+  root-protected runtime catalog; never print its contents or infer a subnet
 
 ## Commands
 

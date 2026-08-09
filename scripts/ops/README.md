@@ -60,7 +60,9 @@ Script inventory:
 - `prod_customers_ui_smoke.sh` runs their operator-side Customers view/search
   smoke with no customer fixture and independent ten-minute cleanup
 - `prod_traffic_gate.sh` produces the shared passive `traffic_gate.v1` decision
-  before caller-owned probes or mutations
+  before caller-owned probes or mutations; it requires a root-protected exact
+  monitor-source catalog and fails closed on missing source or active-request
+  boundary evidence
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything
