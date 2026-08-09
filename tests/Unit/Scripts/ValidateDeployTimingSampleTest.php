@@ -120,6 +120,70 @@ final class ValidateDeployTimingSampleTest extends TestCase
         DeployTimingSampleValidator::validateLines($lines);
     }
 
+    public function testNonRootOwnedAuthoritativeFileIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+
+        try {
+            self::assertTrue(chown($file, 65534));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('root-owned mode 0600');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testGroupAndWorldWritableAuthoritativeFileIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+
+        try {
+            self::assertTrue(chmod($file, 0622));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('root-owned mode 0600');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testSymlinkedAuthoritativeFileIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+        $symlink = $directory . '/alias.jsonl';
+
+        try {
+            self::assertTrue(symlink($file, $symlink));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('absolute regular non-symlink file');
+            DeployTimingSampleValidator::validateFile($symlink);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testNonCanonicalAuthoritativeFilePathIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+        $nonCanonical = $directory . '/../' . basename($directory) . '/' . basename($file);
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('canonical and symlink-free');
+            DeployTimingSampleValidator::validateFile($nonCanonical);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
     public function testDeployScriptWritesOneRootProtectedAuthoritativeRecordPerEvent(): void
     {
         if (PHP_OS_FAMILY !== 'Linux' || trim((string) shell_exec('id -u')) !== '0') {
@@ -238,6 +302,41 @@ final class ValidateDeployTimingSampleTest extends TestCase
         $lines[5] = json_encode($summary, JSON_THROW_ON_ERROR);
 
         return $lines;
+    }
+
+    private function requireRootLinuxForSourceProtection(): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux' || trim((string) shell_exec('id -u')) !== '0') {
+            self::markTestSkipped('Root on Linux is required to verify the authoritative source protection contract.');
+        }
+    }
+
+    /**
+     * @return array{string,string}
+     */
+    private function createProtectedTimingFixture(): array
+    {
+        $directory = '/rob445-timing-source-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($directory, 0700));
+        self::assertTrue(chmod($directory, 0700));
+        $file = $directory . '/sample.jsonl';
+        self::assertNotFalse(file_put_contents($file, implode(PHP_EOL, $this->validLines()) . PHP_EOL));
+        self::assertTrue(chmod($file, 0600));
+
+        return [$directory, $file];
+    }
+
+    private function removeTimingFixture(string $directory): void
+    {
+        $files = glob($directory . '/*');
+        if (is_array($files)) {
+            foreach ($files as $file) {
+                unlink($file);
+            }
+        }
+        if (is_dir($directory)) {
+            rmdir($directory);
+        }
     }
 
     /**
