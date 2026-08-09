@@ -414,6 +414,9 @@ final class TrafficGateV1Test extends TestCase
         yield 'index booking reschedule' => ['/index.php/booking/reschedule/opaque-token'];
         yield 'booking confirmation' => ['/booking_confirmation/of/opaque-token'];
         yield 'index booking confirmation' => ['/index.php/booking_confirmation/of/opaque-token'];
+        yield 'booking captcha' => ['/captcha'];
+        yield 'index booking captcha' => ['/index.php/captcha'];
+        yield 'booking captcha refresh' => ['/captcha?1723233600'];
     }
 
     #[DataProvider('nonCanonicalSensitiveTargetProvider')]
@@ -1215,9 +1218,11 @@ final class TrafficGateV1Test extends TestCase
     public function testCliAndProducerExposeFrozenExitContractWithoutReadingProduction(): void
     {
         $stalePath = $this->workspace . '/stale-wrapper-invocation.json';
+        $lateStalePath = $this->workspace . '/late-stale-wrapper-invocation.json';
         $protectedPath = $this->workspace . '/protected-wrapper-target';
         $protectedContents = 'DO NOT REPLACE';
         $this->writeStaleSuccess($stalePath);
+        $this->writeStaleSuccess($lateStalePath);
         self::assertNotFalse(file_put_contents($protectedPath, $protectedContents));
         self::assertTrue(chmod($protectedPath, 0600));
         $php = $this->runCommand(['php', 'scripts/ops/traffic_gate_v1.php']);
@@ -1231,6 +1236,14 @@ final class TrafficGateV1Test extends TestCase
             $stalePath,
             '--unsupported',
             'value',
+        ]);
+        $lateStaleShell = $this->runCommand([
+            'bash',
+            'scripts/ops/prod_traffic_gate.sh',
+            '--unsupported',
+            'value',
+            '--output-json',
+            $lateStalePath,
         ]);
         $protectedShell = $this->runCommand([
             'bash',
@@ -1248,8 +1261,10 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame("traffic_gate status=invalid reason=invocation\n", $php['output']);
         self::assertSame(64, $shell['exit_code']);
         self::assertSame(64, $staleShell['exit_code']);
+        self::assertSame(64, $lateStaleShell['exit_code']);
         self::assertSame(64, $protectedShell['exit_code']);
         self::assertSame('', file_get_contents($stalePath));
+        self::assertSame('', file_get_contents($lateStalePath));
         self::assertSame($protectedContents, file_get_contents($protectedPath));
         self::assertSame(0, $help['exit_code']);
         self::assertStringContainsString(

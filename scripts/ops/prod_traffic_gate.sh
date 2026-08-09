@@ -21,12 +21,11 @@ USAGE
 }
 
 invalidate_stale_output() {
-    [[ -n "${OUTPUT_JSON:-}" ]] || return 0
     command -v "${PHP_BIN}" >/dev/null 2>&1 || return 0
     "${PHP_BIN}" -r '
         require $argv[1];
-        trafficGateInvalidateStaleOutputs(["traffic_gate_v1.php", "--output-json", $argv[2]]);
-    ' "${SCRIPT_DIR}/traffic_gate_v1.php" "${OUTPUT_JSON}" >/dev/null 2>&1 || true
+        trafficGateInvalidateStaleOutputs(array_merge(["traffic_gate_v1.php"], array_slice($argv, 2)));
+    ' "${SCRIPT_DIR}/traffic_gate_v1.php" "${ORIGINAL_ARGS[@]}" >/dev/null 2>&1 || true
 }
 
 die_invocation() {
@@ -39,6 +38,7 @@ PURPOSE=''
 MODE=''
 WINDOW_SECONDS=''
 OUTPUT_JSON=''
+ORIGINAL_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

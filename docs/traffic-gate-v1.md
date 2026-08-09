@@ -101,8 +101,9 @@ all 5xx remain hard stops in both modes.
 Request paths and queries are percent-decoded through a bounded canonicalization
 step before scanner and sensitive-route matching. Malformed, control-bearing,
 excessively nested, dot-segment, or repeated-slash paths are unknown targets and
-therefore hard stops. Tokenized booking-reschedule and confirmation reads remain
-business traffic even when Apache has no authenticated remote-user field.
+therefore hard stops. Tokenized booking-reschedule and confirmation reads, plus
+session-generating CAPTCHA reads, remain business traffic even when Apache has
+no authenticated remote-user field.
 The sensitive-route catalog explicitly covers every current backoffice
 controller prefix; Apache's normally empty remote-user field is never used as
 proof that a backoffice GET is public.

@@ -61,7 +61,7 @@ final class TrafficGateV1
         'user',
         'webhooks',
     ];
-    private const CUSTOMER_LIFECYCLE_PREFIXES = ['booking/reschedule', 'booking_confirmation/of'];
+    private const CUSTOMER_LIFECYCLE_PREFIXES = ['booking/reschedule', 'booking_confirmation/of', 'captcha'];
 
     /**
      * @return array<string, mixed>
