@@ -96,6 +96,7 @@ function trafficGateWriteOutputBytes(string $path, string $contents): void
     if ($path === '' || $path[0] !== '/' || str_contains($path, "\0") || is_link($path) || is_dir($path)) {
         throw new RuntimeException('traffic gate output is invalid');
     }
+    trafficGateAssertReplaceableOutput($path);
     $directory = dirname($path);
     if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
         throw new RuntimeException('traffic gate output directory is unavailable');
@@ -111,6 +112,7 @@ function trafficGateWriteOutputBytes(string $path, string $contents): void
         if (file_put_contents($temporary, $contents, LOCK_EX) !== strlen($contents) || !chmod($temporary, 0600)) {
             throw new RuntimeException('traffic gate output could not be written');
         }
+        trafficGateAssertReplaceableOutput($path);
         if (!rename($temporary, $path)) {
             throw new RuntimeException('traffic gate output could not be published');
         }
@@ -118,6 +120,52 @@ function trafficGateWriteOutputBytes(string $path, string $contents): void
         if (file_exists($temporary)) {
             @unlink($temporary);
         }
+    }
+}
+
+function trafficGateAssertReplaceableOutput(string $path): void
+{
+    if (!file_exists($path)) {
+        return;
+    }
+    $stat = lstat($path);
+    if (
+        !is_array($stat) ||
+        is_link($path) ||
+        !is_file($path) ||
+        !is_readable($path) ||
+        !function_exists('posix_geteuid') ||
+        (int) ($stat['uid'] ?? -1) !== posix_geteuid() ||
+        (int) ($stat['nlink'] ?? 0) !== 1 ||
+        (int) ($stat['size'] ?? -1) > 1_000_000
+    ) {
+        throw new RuntimeException('traffic gate output ownership is unsafe');
+    }
+    $contents = file_get_contents($path);
+    if (!is_string($contents)) {
+        throw new RuntimeException('traffic gate output is unreadable');
+    }
+    if ($contents === '') {
+        if ((((int) ($stat['mode'] ?? 0)) & 0777) !== 0600) {
+            throw new RuntimeException('traffic gate output placeholder permissions are unsafe');
+        }
+        return;
+    }
+    try {
+        $decoded = json_decode($contents, true, 16, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        throw new RuntimeException('traffic gate output is not replaceable');
+    }
+    if (
+        !is_array($decoded) ||
+        array_is_list($decoded) ||
+        !is_string($decoded['schema'] ?? null) ||
+        preg_match('/^traffic_gate\.v[0-9]+$/', $decoded['schema']) !== 1 ||
+        !is_string($decoded['decision'] ?? null) ||
+        !is_int($decoded['exit_code'] ?? null) ||
+        !is_int($decoded['window_end_epoch'] ?? null)
+    ) {
+        throw new RuntimeException('traffic gate output is not replaceable');
     }
 }
 

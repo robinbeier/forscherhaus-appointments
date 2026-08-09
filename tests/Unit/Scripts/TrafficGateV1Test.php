@@ -936,6 +936,7 @@ final class TrafficGateV1Test extends TestCase
         $report = json_decode((string) file_get_contents($outputPath), true, 32, JSON_THROW_ON_ERROR);
         self::assertIsArray($report);
         self::assertSame('allow', $report['decision']);
+        self::assertSame(0600, fileperms($outputPath) & 0777);
         self::assertSame(
             trafficGateProducerSha256($catalogPath, null, $this->monitorSourcesPath),
             $report['producer_sha256'],
@@ -954,11 +955,24 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame(0600, fileperms($outputPath) & 0777);
     }
 
-    #[DataProvider('arbitraryStaleOutputProvider')]
-    public function testInvalidInvocationInvalidatesOlderOrNonJsonOutput(string $staleContents): void
+    public function testInvalidInvocationInvalidatesAnOlderTrafficGateOutput(): void
     {
         $outputPath = $this->workspace . '/stale-arbitrary-output';
-        self::assertNotFalse(file_put_contents($outputPath, $staleContents));
+        self::assertNotFalse(
+            file_put_contents(
+                $outputPath,
+                json_encode(
+                    [
+                        'schema' => 'traffic_gate.v0',
+                        'decision' => 'allow',
+                        'exit_code' => 0,
+                        'window_end_epoch' => self::EPOCH,
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        );
+        self::assertTrue(chmod($outputPath, 0644));
 
         $exitCode = trafficGateMain(['traffic_gate_v1.php', '--output-json', $outputPath]);
 
@@ -967,11 +981,59 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame(0600, fileperms($outputPath) & 0777);
     }
 
-    /** @return iterable<string, array{string}> */
-    public static function arbitraryStaleOutputProvider(): iterable
+    public function testInvalidInvocationCannotReplaceAnUnrecognizedRegularFile(): void
     {
-        yield 'older schema' => ['{"schema":"traffic_gate.v0","decision":"allow"}'];
-        yield 'non JSON' => ['ALLOW FROM PREVIOUS RUN'];
+        $outputPath = $this->workspace . '/unrecognized-output';
+        $contents = 'NOT A TRAFFIC GATE ARTIFACT';
+        self::assertNotFalse(file_put_contents($outputPath, $contents));
+        self::assertTrue(chmod($outputPath, 0600));
+
+        $exitCode = trafficGateMain(['traffic_gate_v1.php', '--output-json', $outputPath]);
+
+        self::assertSame(64, $exitCode);
+        self::assertSame($contents, file_get_contents($outputPath));
+    }
+
+    public function testValidInvocationCannotReplaceAnUnrecognizedRegularFile(): void
+    {
+        $outputPath = $this->workspace . '/unrecognized-valid-output';
+        $contents = 'ROOT OWNED CONTENT MUST SURVIVE';
+        self::assertNotFalse(file_put_contents($outputPath, $contents));
+        self::assertTrue(chmod($outputPath, 0600));
+
+        $exitCode = trafficGateMain([
+            'traffic_gate_v1.php',
+            '--purpose',
+            'deploy',
+            '--mode',
+            'normal',
+            '--window-seconds',
+            '1',
+            '--output-json',
+            $outputPath,
+        ]);
+
+        self::assertSame(21, $exitCode);
+        self::assertSame($contents, file_get_contents($outputPath));
+    }
+
+    public function testInvalidInvocationCannotReplaceSymlinkOrMultiplyLinkedOutput(): void
+    {
+        $targetPath = $this->workspace . '/protected-target';
+        $symlinkPath = $this->workspace . '/symlink-output';
+        $hardlinkPath = $this->workspace . '/hardlink-output';
+        $this->writeStaleSuccess($targetPath);
+        $contents = file_get_contents($targetPath);
+        self::assertIsString($contents);
+        self::assertTrue(symlink($targetPath, $symlinkPath));
+        self::assertTrue(link($targetPath, $hardlinkPath));
+
+        self::assertSame(64, trafficGateMain(['traffic_gate_v1.php', '--output-json', $symlinkPath]));
+        self::assertSame(64, trafficGateMain(['traffic_gate_v1.php', '--output-json', $hardlinkPath]));
+
+        self::assertTrue(is_link($symlinkPath));
+        self::assertSame($contents, file_get_contents($targetPath));
+        self::assertSame($contents, file_get_contents($hardlinkPath));
     }
 
     public function testCollectionFailureCannotLeaveAStaleSuccessReport(): void
@@ -1053,7 +1115,11 @@ final class TrafficGateV1Test extends TestCase
     public function testCliAndProducerExposeFrozenExitContractWithoutReadingProduction(): void
     {
         $stalePath = $this->workspace . '/stale-wrapper-invocation.json';
+        $protectedPath = $this->workspace . '/protected-wrapper-target';
+        $protectedContents = 'DO NOT REPLACE';
         $this->writeStaleSuccess($stalePath);
+        self::assertNotFalse(file_put_contents($protectedPath, $protectedContents));
+        self::assertTrue(chmod($protectedPath, 0600));
         $php = $this->runCommand(['php', 'scripts/ops/traffic_gate_v1.php']);
         $shell = $this->runCommand(['bash', 'scripts/ops/prod_traffic_gate.sh', '--purpose', 'deploy']);
         $staleShell = $this->runCommand([
@@ -1066,13 +1132,25 @@ final class TrafficGateV1Test extends TestCase
             '--unsupported',
             'value',
         ]);
+        $protectedShell = $this->runCommand([
+            'bash',
+            'scripts/ops/prod_traffic_gate.sh',
+            '--purpose',
+            'deploy',
+            '--output-json',
+            $protectedPath,
+            '--unsupported',
+            'value',
+        ]);
         $help = $this->runCommand(['bash', 'scripts/ops/prod_traffic_gate.sh', '--help']);
 
         self::assertSame(64, $php['exit_code']);
         self::assertSame("traffic_gate status=invalid reason=invocation\n", $php['output']);
         self::assertSame(64, $shell['exit_code']);
         self::assertSame(64, $staleShell['exit_code']);
+        self::assertSame(64, $protectedShell['exit_code']);
         self::assertSame('', file_get_contents($stalePath));
+        self::assertSame($protectedContents, file_get_contents($protectedPath));
         self::assertSame(0, $help['exit_code']);
         self::assertStringContainsString(
             '0 allow/advisory, 20 traffic hard stop, 21 invalid/incomplete',
@@ -1150,6 +1228,7 @@ final class TrafficGateV1Test extends TestCase
                 ),
             ),
         );
+        self::assertTrue(chmod($path, 0600));
     }
 
     /**

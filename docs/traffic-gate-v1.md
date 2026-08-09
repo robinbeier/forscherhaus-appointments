@@ -133,6 +133,10 @@ any earlier report with an empty `0600` invalidation artifact. Only a successful
 evaluation atomically replaces that placeholder with a current JSON report.
 Invocation, collection, rotation, gzip, active-signal, or publishing failure can
 therefore never leave an older allow decision at the fixed `*-latest.json` path.
+An existing target is replaceable only when it belongs to the effective producer
+user, has one link, and is either a mode-`0600` empty placeholder or a
+structurally recognizable `traffic_gate.v*` report. Unrelated files remain
+untouched even when they are supplied as `--output-json`.
 
 Production activation of this contract is a separate serial operation. A
 reviewed implementation or green CI does not itself activate the gate on the
