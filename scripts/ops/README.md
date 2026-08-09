@@ -17,6 +17,10 @@ For the on-demand, no-customer-data Customers UI role smoke, use
 `docs/release-gate-customers-ui-smoke.md`. It is likewise operator-side and
 never belongs in Kuma or cron.
 
+For the shared passive Deploy/Customers traffic decision, use
+`docs/traffic-gate-v1.md` and `prod_traffic_gate.sh`. The gate reads the full
+current/rotated Apache log set and emits only versioned aggregate evidence.
+
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
 and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
 
@@ -55,6 +59,8 @@ Script inventory:
   Customers role principals
 - `prod_customers_ui_smoke.sh` runs their operator-side Customers view/search
   smoke with no customer fixture and independent ten-minute cleanup
+- `prod_traffic_gate.sh` produces the shared passive `traffic_gate.v1` decision
+  before caller-owned probes or mutations
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything

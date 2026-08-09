@@ -105,7 +105,11 @@ final class ReleaseArtifactValidatorTest extends TestCase
             'assets/js/http/customers_http_client.min.js',
             'assets/js/pages/customers.min.js',
             'scripts/ops/customers_ui_smoke_principals.sh',
+            'scripts/ops/config/traffic_gate_catalog.v1.json',
+            'scripts/ops/lib/TrafficGateV1.php',
             'scripts/ops/prod_customers_ui_smoke.sh',
+            'scripts/ops/prod_traffic_gate.sh',
+            'scripts/ops/traffic_gate_v1.php',
             'scripts/release-gate/customers_ui_smoke.php',
             'scripts/release-gate/lib/CustomersUiSmokeContract.php',
             'scripts/release-gate/lib/CustomersUiSmokeGateRuntime.php',
@@ -117,7 +121,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
             self::assertContains($path, $requiredPaths);
         }
 
-        $missingPath = 'scripts/ops/prod_customers_ui_smoke.sh';
+        $missingPath = 'scripts/ops/prod_traffic_gate.sh';
         $entries = array_values(array_filter($requiredPaths, static fn(string $path): bool => $path !== $missingPath));
 
         self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));

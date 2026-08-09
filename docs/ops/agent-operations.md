@@ -24,6 +24,11 @@ a short pointer file for emergency orientation.
    Never print DB rows, Push URLs, tokens, passwords, `config.php`, Kuma DB
    contents, health-token values, or `/etc/fh` file contents.
 
+Before a deploy or Customers UI smoke, use the shared passive contract in
+`docs/traffic-gate-v1.md`. It must complete before caller-owned HTTP probes or
+production mutations. A green local/CI implementation does not activate the
+gate on the production host.
+
 Default target:
 
 ```bash

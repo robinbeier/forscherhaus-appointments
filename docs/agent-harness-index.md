@@ -26,6 +26,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | CI performance measurement and baseline | `docs/ci-performance-baseline.md` | Versioned workload epoch, timing definitions, exclusions, and post-epoch cohort status. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
 | Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
+| Production traffic gate | `docs/traffic-gate-v1.md` | Shared versioned passive traffic contract for deploy and Customers smoke. |
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |
 | Ownership scope | `docs/ownership-map.md` | Generated view of ownership and key paths. |
 | Canonical architecture/ownership map source | `docs/maps/component_ownership_map.json` | Machine-readable source of truth. |

@@ -111,13 +111,25 @@ bash scripts/ops/prod_customers_ui_smoke.sh \
 
 Before activation, the orchestrator:
 
-1. verifies local PHP, curl, SSH, Playwright, and the app endpoint;
-2. verifies the remote root-only credential/state/wrapper contract and host
+1. verifies local PHP, curl, SSH and Playwright tooling without contacting the
+   production app;
+2. runs the passive `traffic_gate.v1` snapshot before any HTTP probe, cleanup
+   timer, or principal activation;
+3. verifies the app endpoint and the remote root-only credential/state/wrapper
+   contract and host
    Node/npm absence;
-3. verifies all principals are dormant and clean;
-4. byte-binds the deployed Customers controller, policy, fixture, view, and JS
+4. verifies all principals are dormant and clean;
+5. byte-binds the deployed Customers controller, traffic producer/evaluator,
+   policy, fixture, view, and JS
    contract to the clean operator checkout;
-5. arms `fh-customers-ui-smoke-cleanup.timer` for ten minutes.
+6. arms `fh-customers-ui-smoke-cleanup.timer` for ten minutes.
+
+The smoke defaults to `--traffic-mode normal`. A traffic-free maintenance run
+must select `--traffic-mode no-business-traffic` explicitly; only query-free,
+unauthenticated public `GET`/`HEAD` reads become advisory. See
+[`traffic-gate-v1.md`](traffic-gate-v1.md) for the fixed hard-stop and evidence
+contract. Traffic-gate failure maps to smoke preflight exit `20`, before any
+lease or cleanup timer exists.
 
 Credentials stream directly from remote `cat` into the local gate's standard
 input. They never enter a local file, variable, command argument, report, or

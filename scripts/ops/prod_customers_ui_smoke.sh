@@ -30,6 +30,10 @@ readonly CONTRACT_PATHS=(
     'assets/js/pages/customers.js'
     'assets/js/pages/customers.min.js'
     'scripts/ops/customers_ui_smoke_principals.sh'
+    'scripts/ops/config/traffic_gate_catalog.v1.json'
+    'scripts/ops/lib/TrafficGateV1.php'
+    'scripts/ops/prod_traffic_gate.sh'
+    'scripts/ops/traffic_gate_v1.php'
 )
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
@@ -45,6 +49,9 @@ BROWSER="${CUSTOMERS_UI_SMOKE_BROWSER:-${DEFAULT_BROWSER}}"
 OUTPUT_JSON=''
 BOOTSTRAP_TIMEOUT='90'
 OPEN_TIMEOUT='30'
+TRAFFIC_GATE_MODE='normal'
+TRAFFIC_GATE_WINDOW_SECONDS='90'
+TRAFFIC_GATE_REMOTE_OUTPUT='/var/lib/fh-traffic-gate/customers-ui-smoke-latest.json'
 PHP_BIN="${CUSTOMERS_UI_SMOKE_PHP_BIN:-php}"
 CURL_BIN="${CUSTOMERS_UI_SMOKE_CURL_BIN:-curl}"
 NPX_BIN="${CUSTOMERS_UI_SMOKE_NPX_BIN:-npx}"
@@ -73,6 +80,8 @@ Options:
   --output-json PATH
   --bootstrap-timeout SEC
   --open-timeout SEC
+  --traffic-mode normal|no-business-traffic
+  --traffic-window-seconds SEC
   -h, --help
 
 Exit codes: 0 pass, 1 assertion, 2 runtime, 20 preflight, 21 activation,
@@ -111,6 +120,8 @@ parse_args() {
             --output-json) [[ $# -ge 2 ]] || die "missing report path" 64; OUTPUT_JSON="$2"; shift 2 ;;
             --bootstrap-timeout) [[ $# -ge 2 ]] || die "missing bootstrap timeout" 64; BOOTSTRAP_TIMEOUT="$2"; shift 2 ;;
             --open-timeout) [[ $# -ge 2 ]] || die "missing open timeout" 64; OPEN_TIMEOUT="$2"; shift 2 ;;
+            --traffic-mode) [[ $# -ge 2 ]] || die "missing traffic mode" 64; TRAFFIC_GATE_MODE="$2"; shift 2 ;;
+            --traffic-window-seconds) [[ $# -ge 2 ]] || die "missing traffic window" 64; TRAFFIC_GATE_WINDOW_SECONDS="$2"; shift 2 ;;
             -h|--help) usage; exit 0 ;;
             *) die "unknown option" 64 ;;
         esac
@@ -126,6 +137,9 @@ validate_config() {
     validate_remote_path "${STATE_DIR}"
     validate_uint "${BOOTSTRAP_TIMEOUT}" 'bootstrap timeout'
     validate_uint "${OPEN_TIMEOUT}" 'open timeout'
+    validate_uint "${TRAFFIC_GATE_WINDOW_SECONDS}" 'traffic window'
+    case "${TRAFFIC_GATE_MODE}" in normal|no-business-traffic) ;; *) die "unsupported traffic mode" 64 ;; esac
+    validate_remote_path "${TRAFFIC_GATE_REMOTE_OUTPUT}"
     BROWSER="$(printf '%s' "${BROWSER}" | tr '[:upper:]' '[:lower:]')"
     case "${BROWSER}" in chrome|firefox|webkit|msedge) ;; *) die "unsupported browser" 64 ;; esac
     export PLAYWRIGHT_MCP_BROWSER="${BROWSER}"
@@ -207,13 +221,49 @@ printf 'remote_preflight=passed host_node_npm=absent cleanup_lease=inactive\n'
 "
 }
 
-local_preflight() {
+local_runtime_preflight() {
     local required
     for required in ssh "${PHP_BIN}" "${NPX_BIN}" "${CURL_BIN}"; do command -v "${required}" >/dev/null 2>&1 || return 1; done
     "${PHP_BIN}" -l "${GATE_PATH}" >/dev/null
+    "${PHP_BIN}" -l "${SCRIPT_DIR}/lib/TrafficGateV1.php" >/dev/null
+    "${PHP_BIN}" -l "${SCRIPT_DIR}/traffic_gate_v1.php" >/dev/null
     bash -n "${PWCLI_PATH}"
     bash "${PWCLI_PATH}" install-browser
+}
+
+local_endpoint_preflight() {
     "${CURL_BIN}" --fail --silent --show-error --output /dev/null --max-time 20 "${BASE_URL}/"
+}
+
+remote_traffic_gate() {
+    local report
+    local wrapper="${APP_ROOT}/scripts/ops/prod_traffic_gate.sh"
+
+    report="$(ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
+        "exec bash '${wrapper}' --purpose customers-ui-smoke --mode '${TRAFFIC_GATE_MODE}' --window-seconds '${TRAFFIC_GATE_WINDOW_SECONDS}' --output-json '${TRAFFIC_GATE_REMOTE_OUTPUT}'")" \
+        || return 1
+
+    printf '%s' "${report}" | "${PHP_BIN}" -r '
+        $raw = stream_get_contents(STDIN);
+        try {
+            $report = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
+        } catch (Throwable) {
+            exit(1);
+        }
+        $required = [
+            "schema", "producer_sha256", "policy_version", "catalog_version", "purpose", "mode",
+            "window_start_epoch", "window_end_epoch", "window_seconds", "log_set_sha256",
+            "rotation_complete", "parse_complete", "evidence_complete", "decision", "exit_code", "counts",
+        ];
+        if (!is_array($report) || array_is_list($report) || array_keys($report) !== $required) exit(1);
+        if (($report["schema"] ?? null) !== "traffic_gate.v1") exit(1);
+        if (($report["purpose"] ?? null) !== "customers-ui-smoke") exit(1);
+        if (($report["mode"] ?? null) !== $argv[1]) exit(1);
+        if (!in_array(($report["decision"] ?? null), ["allow", "advisory"], true)) exit(1);
+        if (($report["exit_code"] ?? null) !== 0 || ($report["evidence_complete"] ?? null) !== true) exit(1);
+        if (preg_match("/^[a-f0-9]{64}$/", (string) ($report["producer_sha256"] ?? "")) !== 1) exit(1);
+        if (preg_match("/^[a-f0-9]{64}$/", (string) ($report["log_set_sha256"] ?? "")) !== 1) exit(1);
+    ' "${TRAFFIC_GATE_MODE}"
 }
 
 arm_remote_cleanup() {
@@ -317,7 +367,9 @@ main() {
     printf '  execution  : operator-side browser; no real account or customer fixture\n'
     printf '  cleanup    : shell finally + independent 10m systemd lease\n'
 
-    local_preflight || die "local read-only/runtime preflight failed" 20
+    local_runtime_preflight || die "local read-only/runtime preflight failed" 20
+    remote_traffic_gate || die "passive traffic gate did not allow the smoke preflight" 20
+    local_endpoint_preflight || die "public endpoint preflight failed" 20
     remote_static_preflight || die "remote read-only preflight failed" 20
     remote_principal verify || die "remote principals are not dormant and clean" 20
     local_contract="$(local_contract_sha256)" || die "local contract bundle could not be hashed" 20

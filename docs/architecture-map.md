@@ -19,7 +19,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 16 | 8 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 20 | 10 |
 
 ## Component Details
 
@@ -368,9 +368,13 @@ Path prefixes:
 - `application/libraries/Provider_ui_smoke_fixture.php`
 - `scripts/ci/`
 - `scripts/ops/customers_ui_smoke_principals.sh`
+- `scripts/ops/config/traffic_gate_catalog.v1.json`
+- `scripts/ops/lib/TrafficGateV1.php`
 - `scripts/ops/prod_customers_ui_smoke.sh`
+- `scripts/ops/prod_traffic_gate.sh`
 - `scripts/ops/prod_provider_ui_smoke.sh`
 - `scripts/ops/provider_ui_smoke_principal.sh`
+- `scripts/ops/traffic_gate_v1.php`
 - `scripts/release-gate/`
 - `.github/workflows/ci.yml`
 - `docs/release-gate-dashboard.md`
@@ -384,6 +388,8 @@ Key files:
 - `application/libraries/Provider_ui_smoke_fixture.php`
 - `.github/workflows/ci.yml`
 - `scripts/ci/dashboard_integration_smoke.php`
+- `scripts/ops/lib/TrafficGateV1.php`
+- `scripts/ops/prod_traffic_gate.sh`
 - `scripts/release-gate/dashboard_release_gate.php`
 - `scripts/release-gate/customers_ui_smoke.php`
 - `scripts/release-gate/provider_ui_smoke.php`
