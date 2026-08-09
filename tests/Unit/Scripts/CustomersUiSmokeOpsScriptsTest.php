@@ -122,6 +122,16 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         self::assertStringNotContainsString('principal_activate' . PHP_EOL, $result['ssh_log']);
     }
 
+    public function testTrafficGateRejectsUnknownV1FieldsBeforeEndpointProbe(): void
+    {
+        $result = $this->runOperatorContractHashHarness(dirname(__DIR__, 3), 0, true);
+
+        self::assertSame(20, $result['exit_code'], $result['output']);
+        self::assertStringContainsString('traffic_gate_executed' . PHP_EOL, $result['ssh_log']);
+        self::assertStringNotContainsString('endpoint_curl_executed' . PHP_EOL, $result['ssh_log']);
+        self::assertStringNotContainsString('cleanup_arm_stopped' . PHP_EOL, $result['ssh_log']);
+    }
+
     public function testOperatorContractBindsCustomersRuntimeAssetsRequiredByReleaseArtifact(): void
     {
         $source = $this->read('scripts/ops/prod_customers_ui_smoke.sh');
@@ -180,8 +190,11 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
     /**
      * @return array{exit_code:int,output:string,ssh_log:string}
      */
-    private function runOperatorContractHashHarness(string $remoteRoot, int $trafficGateExit = 0): array
-    {
+    private function runOperatorContractHashHarness(
+        string $remoteRoot,
+        int $trafficGateExit = 0,
+        bool $extraTrafficField = false,
+    ): array {
         $harnessDir = sys_get_temp_dir() . '/rob441-contract-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($harnessDir, 0700));
         $sshLog = $harnessDir . '/ssh.log';
@@ -199,7 +212,11 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             if [[ "${remote_command}" == *'prod_traffic_gate.sh'* && "${remote_command}" == *'--purpose customers-ui-smoke'* ]]; then
                 printf 'traffic_gate_executed\n' >> "${ROB441_SSH_LOG}"
                 if [[ "${ROB454_TRAFFIC_GATE_EXIT}" != '0' ]]; then exit "${ROB454_TRAFFIC_GATE_EXIT}"; fi
-                printf '%s\n' '{"future_additive_field":true,"schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","mode":"normal","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{}}'
+                if [[ "${ROB454_TRAFFIC_GATE_EXTRA_FIELD}" == '1' ]]; then
+                    printf '%s\n' '{"mode":"normal","schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{},"future_raw_path":"/secret"}'
+                else
+                    printf '%s\n' '{"mode":"normal","schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{}}'
+                fi
                 exit 0
             fi
             if [[ "${remote_command}" == *'exec php -r'* ]]; then
@@ -242,6 +259,7 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
                     'PATH' => $path,
                     'ROB441_SSH_LOG' => $sshLog,
                     'ROB454_TRAFFIC_GATE_EXIT' => (string) $trafficGateExit,
+                    'ROB454_TRAFFIC_GATE_EXTRA_FIELD' => $extraTrafficField ? '1' : '0',
                     'CUSTOMERS_UI_SMOKE_PHP_BIN' => PHP_BINARY,
                     'CUSTOMERS_UI_SMOKE_CURL_BIN' => $curlPath,
                     'CUSTOMERS_UI_SMOKE_NPX_BIN' => $npxPath,

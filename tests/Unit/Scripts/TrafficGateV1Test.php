@@ -512,6 +512,53 @@ final class TrafficGateV1Test extends TestCase
         }
     }
 
+    public function testCliProducerFingerprintBindsTheRealDefaultRuntimeSet(): void
+    {
+        $repository = dirname(__DIR__, 3);
+        $catalogPath = $repository . '/scripts/ops/config/traffic_gate_catalog.v1.json';
+        $outputPath = $this->workspace . '/traffic-gate-report.json';
+        $timestamp = (new \DateTimeImmutable('now'))->format('d/M/Y:H:i:s O');
+        $this->write('app-access.log', [
+            sprintf('127.0.0.1 - - [%s] "GET /health HTTP/1.1" 200 123 "-" "fixture-agent"', $timestamp),
+        ]);
+
+        $result = $this->runCommand([
+            'php',
+            'scripts/ops/traffic_gate_v1.php',
+            '--purpose',
+            'deploy',
+            '--mode',
+            'normal',
+            '--window-seconds',
+            '1',
+            '--output-json',
+            $outputPath,
+            '--log-dir',
+            $this->workspace,
+            '--catalog',
+            $catalogPath,
+        ]);
+
+        self::assertSame(0, $result['exit_code'], $result['output']);
+        $report = json_decode((string) file_get_contents($outputPath), true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($report);
+        $producerPaths = [
+            $repository . '/scripts/ops/lib/TrafficGateV1.php',
+            $repository . '/scripts/ops/traffic_gate_v1.php',
+            $repository . '/scripts/ops/prod_traffic_gate.sh',
+            $catalogPath,
+        ];
+        $hashes = [];
+        foreach ($producerPaths as $path) {
+            $hash = hash_file('sha256', $path);
+            self::assertIsString($hash);
+            $hashes[] = $hash;
+        }
+        $expected = hash('sha256', implode("\n", $hashes));
+
+        self::assertSame($expected, $report['producer_sha256']);
+    }
+
     public function testDirectEvaluatorAcceptsDocumentedSpaceSeparatedArguments(): void
     {
         $options = trafficGateParseArguments([

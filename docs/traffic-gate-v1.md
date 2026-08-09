@@ -36,6 +36,9 @@ counters and SHA-256 fingerprints. Its canonical cutoff is
 inclusive observation window. `producer_sha256` binds the evaluator, producer,
 policy and catalog bytes. `log_set_sha256` binds the normalized log-member
 metadata without hashing or exporting raw request data.
+The v1 top-level key set is closed but serialization order is not significant;
+new evidence fields require a schema version change instead of an additive v1
+extension.
 
 The six mutually exclusive classes are:
 

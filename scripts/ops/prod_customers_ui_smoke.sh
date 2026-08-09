@@ -255,7 +255,8 @@ remote_traffic_gate() {
             "window_start_epoch", "window_end_epoch", "window_seconds", "log_set_sha256",
             "rotation_complete", "parse_complete", "evidence_complete", "decision", "exit_code", "counts",
         ];
-        if (!is_array($report) || array_is_list($report) || array_diff($required, array_keys($report)) !== []) exit(1);
+        $actual = is_array($report) && !array_is_list($report) ? array_keys($report) : [];
+        if (array_diff($required, $actual) !== [] || array_diff($actual, $required) !== []) exit(1);
         if (($report["schema"] ?? null) !== "traffic_gate.v1") exit(1);
         if (($report["purpose"] ?? null) !== "customers-ui-smoke") exit(1);
         if (($report["mode"] ?? null) !== $argv[1]) exit(1);
