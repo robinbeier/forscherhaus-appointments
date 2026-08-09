@@ -113,15 +113,14 @@ Before activation, the orchestrator:
 
 1. verifies local PHP, curl, SSH and Playwright tooling without contacting the
    production app;
-2. runs the passive `traffic_gate.v1` snapshot before any HTTP probe, cleanup
+2. byte-binds the deployed Customers controller, traffic producer/evaluator,
+   policy, fixture, view, and JS contract to the clean operator checkout;
+3. runs the now-verified passive `traffic_gate.v1` snapshot before any HTTP probe, cleanup
    timer, or principal activation;
-3. verifies the app endpoint and the remote root-only credential/state/wrapper
+4. verifies the app endpoint and the remote root-only credential/state/wrapper
    contract and host
    Node/npm absence;
-4. verifies all principals are dormant and clean;
-5. byte-binds the deployed Customers controller, traffic producer/evaluator,
-   policy, fixture, view, and JS
-   contract to the clean operator checkout;
+5. verifies all principals are dormant and clean;
 6. arms `fh-customers-ui-smoke-cleanup.timer` for ten minutes.
 
 The smoke defaults to `--traffic-mode normal`. A traffic-free maintenance run

@@ -52,6 +52,10 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         self::assertStringContainsString('cleanup_arm_stopped' . PHP_EOL, $result['ssh_log']);
         self::assertStringNotContainsString('contract bundle could not be hashed', $result['output']);
         self::assertStringNotContainsString('deployed Customers contract does not match', $result['output']);
+        self::assertLessThan(
+            strpos($result['ssh_log'], 'traffic_gate_executed'),
+            strpos($result['ssh_log'], 'remote_hash_executed'),
+        );
     }
 
     public function testOperatorRemoteContractHashFailsClosedForMissingRoot(): void
@@ -62,6 +66,7 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         self::assertSame(20, $result['exit_code'], $result['output']);
         self::assertStringContainsString('deployed contract bundle could not be hashed', $result['output']);
         self::assertStringContainsString('remote_hash_executed' . PHP_EOL, $result['ssh_log']);
+        self::assertStringNotContainsString('traffic_gate_executed' . PHP_EOL, $result['ssh_log']);
         self::assertStringNotContainsString('cleanup_arm_stopped' . PHP_EOL, $result['ssh_log']);
     }
 
@@ -81,15 +86,18 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         $source = $this->read('scripts/ops/prod_customers_ui_smoke.sh');
         self::assertSame(1, preg_match('/main\(\) \{(?<body>.*?)\n\}\n\nmain "\$@"/s', $source, $match));
         $main = $match['body'];
+        $contract = strpos($main, 'remote_contract_sha256');
         $traffic = strpos($main, 'remote_traffic_gate');
         $endpoint = strpos($main, 'local_endpoint_preflight');
         $arm = strpos($main, 'arm_remote_cleanup');
         $activate = strpos($main, 'remote_principal activate');
 
+        self::assertIsInt($contract);
         self::assertIsInt($traffic);
         self::assertIsInt($endpoint);
         self::assertIsInt($arm);
         self::assertIsInt($activate);
+        self::assertLessThan($traffic, $contract);
         self::assertLessThan($endpoint, $traffic);
         self::assertLessThan($arm, $endpoint);
         self::assertLessThan($activate, $arm);
@@ -191,7 +199,7 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             if [[ "${remote_command}" == *'prod_traffic_gate.sh'* && "${remote_command}" == *'--purpose customers-ui-smoke'* ]]; then
                 printf 'traffic_gate_executed\n' >> "${ROB441_SSH_LOG}"
                 if [[ "${ROB454_TRAFFIC_GATE_EXIT}" != '0' ]]; then exit "${ROB454_TRAFFIC_GATE_EXIT}"; fi
-                printf '%s\n' '{"schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","mode":"normal","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{}}'
+                printf '%s\n' '{"future_additive_field":true,"schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","mode":"normal","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{}}'
                 exit 0
             fi
             if [[ "${remote_command}" == *'exec php -r'* ]]; then

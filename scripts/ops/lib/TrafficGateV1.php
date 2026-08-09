@@ -69,8 +69,12 @@ final class TrafficGateV1
             }
         }
 
-        if (($catalog['documented_sources']['loopback_cidrs'] ?? null) !== ['127.0.0.0/8', '::1/128']) {
+        $sourceCidrs = $catalog['documented_sources']['loopback_cidrs'] ?? null;
+        if (!is_array($sourceCidrs) || $sourceCidrs === [] || !array_is_list($sourceCidrs)) {
             throw new RuntimeException('traffic catalog source contract is invalid');
+        }
+        foreach ($sourceCidrs as $cidr) {
+            self::assertLoopbackCidr($cidr);
         }
 
         return $catalog;
@@ -199,7 +203,6 @@ final class TrafficGateV1
                 }
                 $parseableEvidence = true;
                 if ($parsed['epoch'] > $windowEndEpoch) {
-                    $counts['parse_errors']++;
                     return;
                 }
                 if ($parsed['epoch'] < $windowStartEpoch) {
@@ -290,7 +293,7 @@ final class TrafficGateV1
         $path = $parsed['path'];
         $status = $parsed['status'];
         $queryPresent = $parsed['query_present'];
-        $loopback = self::isLoopback($parsed['source']);
+        $loopback = self::matchesSourceCidrs($parsed['source'], $catalog['documented_sources']['loopback_cidrs']);
 
         if ($status >= 500) {
             $overlays[] = 'status_5xx';
@@ -375,8 +378,13 @@ final class TrafficGateV1
      */
     private static function parseLine(string $line): ?array
     {
+        $escapedQuotedField = '"(?:\\\\.|[^"\\\\])*"';
         $pattern =
-            '/^(?<prefix>[^\r\n]+?)\s+\[(?<time>[^\]\r\n]+)\]\s+"(?<method>[^\s"\r\n]+)\s+(?<target>[^\s"\r\n]+)\s+HTTP\/(?<http>[0-9.]+)"\s+(?<status>[0-9]{3})\s+(?<bytes>\S+)(?:\s+"[^"\r\n]*"\s+"[^"\r\n]*")?\s*$/';
+            '/^(?<prefix>[^\r\n]+?)\s+\[(?<time>[^\]\r\n]+)\]\s+"(?<method>[^\s"\r\n]+)\s+(?<target>[^\s"\r\n]+)\s+HTTP\/(?<http>[0-9.]+)"\s+(?<status>[0-9]{3})\s+(?<bytes>\S+)(?:\s+' .
+            $escapedQuotedField .
+            '\s+' .
+            $escapedQuotedField .
+            ')?\s*$/';
         if (preg_match($pattern, $line, $match) !== 1) {
             return null;
         }
@@ -450,13 +458,35 @@ final class TrafficGateV1
         return [$path, $query, $queryPresent, false];
     }
 
-    private static function isLoopback(string $source): bool
+    /** @param list<string> $cidrs */
+    private static function matchesSourceCidrs(string $source, array $cidrs): bool
     {
-        if (filter_var($source, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return str_starts_with($source, '127.');
+        $packedSource = @inet_pton($source);
+        if (!is_string($packedSource)) {
+            return false;
+        }
+        foreach ($cidrs as $cidr) {
+            [$network, $prefixText] = explode('/', $cidr, 2);
+            $packedNetwork = @inet_pton($network);
+            if (!is_string($packedNetwork) || strlen($packedNetwork) !== strlen($packedSource)) {
+                continue;
+            }
+            $prefix = (int) $prefixText;
+            $wholeBytes = intdiv($prefix, 8);
+            $remainingBits = $prefix % 8;
+            if (substr($packedSource, 0, $wholeBytes) !== substr($packedNetwork, 0, $wholeBytes)) {
+                continue;
+            }
+            if ($remainingBits === 0) {
+                return true;
+            }
+            $mask = (0xff << 8 - $remainingBits) & 0xff;
+            if ((ord($packedSource[$wholeBytes]) & $mask) === (ord($packedNetwork[$wholeBytes]) & $mask)) {
+                return true;
+            }
         }
 
-        return $source === '::1';
+        return false;
     }
 
     private static function isCustomersOrSensitive(string $path): bool
@@ -533,6 +563,28 @@ final class TrafficGateV1
         }
     }
 
+    private static function assertLoopbackCidr(mixed $cidr): void
+    {
+        if (!is_string($cidr) || preg_match('~^(?<network>[^/]+)/(?<prefix>[0-9]{1,3})$~', $cidr, $match) !== 1) {
+            throw new RuntimeException('traffic catalog source contract is invalid');
+        }
+        $packed = @inet_pton($match['network']);
+        if (!is_string($packed)) {
+            throw new RuntimeException('traffic catalog source contract is invalid');
+        }
+        $prefix = (int) $match['prefix'];
+        if (strlen($packed) === 4) {
+            if ($prefix < 8 || $prefix > 32 || !str_starts_with($match['network'], '127.')) {
+                throw new RuntimeException('traffic catalog source contract is invalid');
+            }
+
+            return;
+        }
+        if ($match['network'] !== '::1' || $prefix !== 128) {
+            throw new RuntimeException('traffic catalog source contract is invalid');
+        }
+    }
+
     /**
      * @param list<array{path:string,slot:string,device:int,inode:int,size:int,mtime:int}> $before
      * @param list<array{path:string,slot:string,device:int,inode:int,size:int,mtime:int}> $after
@@ -577,29 +629,32 @@ final class TrafficGateV1
 
         $gzip = str_ends_with($path, '.gz');
         if ($gzip) {
-            $compressed = file_get_contents($path);
+            $compressed = file_get_contents($path, false, null, 0, $entry['size']);
             if (
                 !is_string($compressed) ||
-                !str_starts_with($compressed, "\x1f\x8b") ||
-                @gzdecode($compressed) === false
+                strlen($compressed) !== $entry['size'] ||
+                !str_starts_with($compressed, "\x1f\x8b")
             ) {
                 throw new RuntimeException('traffic gzip member is incomplete');
             }
-            unset($compressed);
-        }
-        $handle = $gzip ? gzopen($path, 'rb') : fopen($path, 'rb');
-        if ($handle === false) {
-            throw new RuntimeException('traffic log member could not be opened');
-        }
-        try {
-            if ($gzip) {
-                while (($line = gzgets($handle)) !== false) {
-                    $consumeLine(rtrim($line, "\r\n"));
+            $decoded = self::decodeGzipMembers($compressed);
+            if ($decoded !== '' && !str_ends_with($decoded, "\n")) {
+                throw new RuntimeException('traffic gzip member is incomplete');
+            }
+            if ($decoded !== '') {
+                $lines = explode("\n", $decoded);
+                array_pop($lines);
+                foreach ($lines as $line) {
+                    $consumeLine(rtrim($line, "\r"));
                 }
-                if (!gzeof($handle)) {
-                    throw new RuntimeException('traffic gzip member is incomplete');
-                }
-            } else {
+            }
+            unset($compressed, $decoded);
+        } else {
+            $handle = fopen($path, 'rb');
+            if ($handle === false) {
+                throw new RuntimeException('traffic log member could not be opened');
+            }
+            try {
                 $remaining = $entry['size'];
                 while ($remaining > 0) {
                     $line = fgets($handle, $remaining + 1);
@@ -612,9 +667,9 @@ final class TrafficGateV1
                     }
                     $consumeLine(rtrim($line, "\r\n"));
                 }
+            } finally {
+                fclose($handle);
             }
-        } finally {
-            $gzip ? gzclose($handle) : fclose($handle);
         }
 
         clearstatcache(true, $path);
@@ -627,6 +682,26 @@ final class TrafficGateV1
         ) {
             throw new RuntimeException('traffic log rotation changed during evaluation');
         }
+    }
+
+    private static function decodeGzipMembers(string $compressed): string
+    {
+        $decoded = '';
+        while ($compressed !== '') {
+            $context = @inflate_init(ZLIB_ENCODING_GZIP);
+            if ($context === false) {
+                throw new RuntimeException('traffic gzip member is incomplete');
+            }
+            $member = @inflate_add($context, $compressed, ZLIB_FINISH);
+            $consumed = inflate_get_read_len($context);
+            if (!is_string($member) || $consumed <= 0 || $consumed > strlen($compressed)) {
+                throw new RuntimeException('traffic gzip member is incomplete');
+            }
+            $decoded .= $member;
+            $compressed = substr($compressed, $consumed);
+        }
+
+        return $decoded;
     }
 
     /**

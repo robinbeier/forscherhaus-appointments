@@ -255,7 +255,7 @@ remote_traffic_gate() {
             "window_start_epoch", "window_end_epoch", "window_seconds", "log_set_sha256",
             "rotation_complete", "parse_complete", "evidence_complete", "decision", "exit_code", "counts",
         ];
-        if (!is_array($report) || array_is_list($report) || array_keys($report) !== $required) exit(1);
+        if (!is_array($report) || array_is_list($report) || array_diff($required, array_keys($report)) !== []) exit(1);
         if (($report["schema"] ?? null) !== "traffic_gate.v1") exit(1);
         if (($report["purpose"] ?? null) !== "customers-ui-smoke") exit(1);
         if (($report["mode"] ?? null) !== $argv[1]) exit(1);
@@ -368,14 +368,14 @@ main() {
     printf '  cleanup    : shell finally + independent 10m systemd lease\n'
 
     local_runtime_preflight || die "local read-only/runtime preflight failed" 20
-    remote_traffic_gate || die "passive traffic gate did not allow the smoke preflight" 20
-    local_endpoint_preflight || die "public endpoint preflight failed" 20
-    remote_static_preflight || die "remote read-only preflight failed" 20
-    remote_principal verify || die "remote principals are not dormant and clean" 20
     local_contract="$(local_contract_sha256)" || die "local contract bundle could not be hashed" 20
     DEPLOYED_CONTRACT_SHA256="$(remote_contract_sha256)" || die "deployed contract bundle could not be hashed" 20
     [[ "${local_contract}" =~ ^[a-f0-9]{64}$ && "${local_contract}" == "${DEPLOYED_CONTRACT_SHA256}" ]] \
         || die "deployed Customers contract does not match the operator checkout" 20
+    remote_traffic_gate || die "passive traffic gate did not allow the smoke preflight" 20
+    local_endpoint_preflight || die "public endpoint preflight failed" 20
+    remote_static_preflight || die "remote read-only preflight failed" 20
+    remote_principal verify || die "remote principals are not dormant and clean" 20
 
     trap cleanup_remote_lease EXIT
     trap 'exit 129' HUP

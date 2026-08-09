@@ -99,6 +99,39 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame(1, $report['counts']['denied_external']);
     }
 
+    public function testExternalScannerNotFoundIsDeniedAdvisory(): void
+    {
+        $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', '/.env', 404)], 'normal');
+
+        self::assertSame(1, $report['counts']['denied_external']);
+        self::assertSame(['advisory', 0], [$report['decision'], $report['exit_code']]);
+    }
+
+    public function testCatalogLoopbackCidrsControlDocumentedSourceTrust(): void
+    {
+        $catalog = $this->catalog;
+        $catalog['documented_sources']['loopback_cidrs'] = ['127.0.0.1/32', '::1/128'];
+        $path = $this->workspace . '/narrow-source-catalog.json';
+        self::assertNotFalse(file_put_contents($path, json_encode($catalog, JSON_THROW_ON_ERROR)));
+        $catalog = TrafficGateV1::loadCatalog($path);
+        $this->write('app-access.log', [$this->line('127.0.0.2', '-', 'GET', '/', 200)]);
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $report = TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $catalog,
+            'customers-ui-smoke',
+            'no-business-traffic',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+
+        self::assertSame(0, $report['counts']['documented_periodic_ops']);
+        self::assertSame(1, $report['counts']['public_read']);
+    }
+
     public function testUnexpectedLoopbackScannerPathIsNotTrustedAsPeriodicOps(): void
     {
         $report = $this->evaluate([$this->line('127.0.0.1', '-', 'GET', '/server-status', 404)], 'no-business-traffic');
@@ -181,6 +214,47 @@ final class TrafficGateV1Test extends TestCase
         self::assertStringNotContainsString($sentinel, $json);
         self::assertStringNotContainsString('203.0.113.10', $json);
         self::assertStringNotContainsString('/public', $json);
+    }
+
+    public function testEscapedApacheHeaderFieldsRemainParseable(): void
+    {
+        $line =
+            '127.0.0.1 - - [09/Aug/2026:20:00:00 +0200] "GET /health HTTP/1.1" 200 123 ' .
+            '"https://referrer.invalid/escaped\\"quote" "agent\\\\with\\"quote"';
+        $report = $this->evaluate([$line], 'normal');
+
+        self::assertSame(0, $report['counts']['parse_errors']);
+        self::assertSame(1, $report['counts']['documented_health']);
+        self::assertSame(['allow', 0], [$report['decision'], $report['exit_code']]);
+    }
+
+    public function testValidPostWindowRecordIsExcludedWithoutInvalidatingEvidence(): void
+    {
+        $this->write('app-access.log', [
+            $this->line('127.0.0.1', '-', 'GET', '/health', 200),
+            str_replace(
+                '[09/Aug/2026:20:00:00 +0200]',
+                '[09/Aug/2026:20:00:02 +0200]',
+                $this->line('203.0.113.10', '-', 'POST', '/index.php/customers', 200),
+            ),
+        ]);
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $report = TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+
+        self::assertSame(2, $report['counts']['lines_seen']);
+        self::assertSame(1, $report['counts']['lines_in_window']);
+        self::assertSame(0, $report['counts']['parse_errors']);
+        self::assertSame(['allow', 0], [$report['decision'], $report['exit_code']]);
     }
 
     public function testCurrentDotOneAndGzipAreReadCompletelyPastTwoThousandLines(): void
@@ -286,6 +360,57 @@ final class TrafficGateV1Test extends TestCase
         self::assertStringNotContainsString('POST_CUTOFF', json_encode($report, JSON_THROW_ON_ERROR));
     }
 
+    public function testGzipAppendAfterCapturedCutoffIsNotReadIntoEvidence(): void
+    {
+        $this->writeGzip('app-access.log.2.gz', [$this->line('127.0.0.1', '-', 'GET', '/health', 200)]);
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+        $appended = gzencode($this->line('203.0.113.10', '-', 'POST', '/index.php/customers', 200) . "\n");
+        self::assertIsString($appended);
+        self::assertNotFalse(file_put_contents($this->workspace . '/app-access.log.2.gz', $appended, FILE_APPEND));
+
+        $report = TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+
+        self::assertSame(1, $report['counts']['lines_seen']);
+        self::assertSame(1, $report['counts']['documented_health']);
+        self::assertSame(0, $report['counts']['write']);
+        self::assertSame(['allow', 0], [$report['decision'], $report['exit_code']]);
+    }
+
+    public function testCapturedConcatenatedGzipMembersAreReadCompletely(): void
+    {
+        $first = gzencode($this->line('127.0.0.1', '-', 'GET', '/health', 200) . "\n");
+        $second = gzencode($this->line('203.0.113.10', '-', 'GET', '/.env', 404) . "\n");
+        self::assertIsString($first);
+        self::assertIsString($second);
+        self::assertNotFalse(file_put_contents($this->workspace . '/app-access.log.2.gz', $first . $second));
+        $entries = TrafficGateV1::captureLogSet($this->workspace);
+
+        $report = TrafficGateV1::evaluate(
+            $entries,
+            $entries,
+            $this->catalog,
+            'deploy',
+            'normal',
+            self::EPOCH,
+            self::EPOCH + 1,
+            self::PRODUCER_SHA,
+        );
+
+        self::assertSame(2, $report['counts']['lines_seen']);
+        self::assertSame(1, $report['counts']['documented_health']);
+        self::assertSame(1, $report['counts']['denied_external']);
+        self::assertSame(['advisory', 0], [$report['decision'], $report['exit_code']]);
+    }
+
     public function testCorruptGzipFailsClosed(): void
     {
         $this->write('app-access.log', [$this->line('127.0.0.1', '-', 'GET', '/health', 200)]);
@@ -366,6 +491,25 @@ final class TrafficGateV1Test extends TestCase
         self::assertNotFalse(file_put_contents($secondPath, json_encode($second, JSON_THROW_ON_ERROR)));
 
         self::assertNotSame(trafficGateProducerSha256($firstPath), trafficGateProducerSha256($secondPath));
+    }
+
+    public function testProducerFingerprintBindsEveryRuntimeProducerFile(): void
+    {
+        $runtimePaths = [];
+        foreach (['TrafficGateV1.php', 'traffic_gate_v1.php', 'prod_traffic_gate.sh'] as $name) {
+            $path = $this->workspace . '/' . $name;
+            self::assertNotFalse(file_put_contents($path, 'producer:' . $name));
+            $runtimePaths[] = $path;
+        }
+        $catalogPath = $this->workspace . '/producer-catalog.json';
+        self::assertNotFalse(file_put_contents($catalogPath, json_encode($this->catalog, JSON_THROW_ON_ERROR)));
+        $baseline = trafficGateProducerSha256($catalogPath, $runtimePaths);
+        foreach ($runtimePaths as $index => $path) {
+            self::assertNotFalse(file_put_contents($path, "\npolicy-change", FILE_APPEND));
+            self::assertNotSame($baseline, trafficGateProducerSha256($catalogPath, $runtimePaths));
+            self::assertNotFalse(file_put_contents($path, 'producer:' . basename($path)));
+            self::assertSame($baseline, trafficGateProducerSha256($catalogPath, $runtimePaths), (string) $index);
+        }
     }
 
     public function testDirectEvaluatorAcceptsDocumentedSpaceSeparatedArguments(): void

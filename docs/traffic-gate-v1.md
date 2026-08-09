@@ -82,6 +82,8 @@ The producer reads the complete canonical Apache access-log set: every current
 `*access.log`, `.1`, and numbered `.gz` member. It never uses a line tail or a
 fixed record limit. Every file must be a readable regular non-symlink with a
 unique identity; gzip integrity is checked before parsing.
+Both plain and gzip members are bounded to the byte size captured at the
+canonical cutoff, so appends after the snapshot cannot change the decision.
 
 The producer captures the log set before and after the window. Every pre-window
 identity must survive with a non-decreasing size, including when current is

@@ -104,9 +104,11 @@ function trafficGateWriteReport(string $path, array $report): void
     }
 }
 
-function trafficGateProducerSha256(string $catalogPath): string
+/** @param list<string>|null $runtimePaths */
+function trafficGateProducerSha256(string $catalogPath, ?array $runtimePaths = null): string
 {
-    $paths = [__DIR__ . '/lib/TrafficGateV1.php', __FILE__, $catalogPath, __DIR__ . '/prod_traffic_gate.sh'];
+    $paths = $runtimePaths ?? [__DIR__ . '/lib/TrafficGateV1.php', __FILE__, __DIR__ . '/prod_traffic_gate.sh'];
+    $paths[] = $catalogPath;
     $hashes = [];
     foreach ($paths as $path) {
         if (is_link($path) || !is_file($path)) {
@@ -144,8 +146,8 @@ function trafficGateMain(array $argv): int
         $before = TrafficGateV1::captureLogSet($options['log-dir']);
         $windowStartEpoch = time();
         sleep($windowSeconds);
-        $windowEndEpoch = time();
         $after = TrafficGateV1::captureLogSet($options['log-dir']);
+        $windowEndEpoch = time();
         $report = TrafficGateV1::evaluate(
             $before,
             $after,
