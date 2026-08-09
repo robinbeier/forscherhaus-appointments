@@ -134,7 +134,9 @@ renamed to `.1`. Missing identities, truncation, duplicate identities, corrupt
 gzip, unsupported format, malformed timestamps, or a wholly unparseable set
 make the evidence incomplete and exit `21`.
 Gzip members are inflated incrementally from the captured compressed-byte
-prefix, including concatenated members, with bounded record buffering. CRC,
+prefix in fixed 256-byte input steps, including concatenated members, with
+bounded record buffering. Acceptance has no separate compression-ratio or
+decoded-chunk ceiling; only an individual log record is capped at 1 MB. CRC,
 trailer, member-completion, or record-boundary failures remain incomplete
 evidence instead of producing a partial decision.
 

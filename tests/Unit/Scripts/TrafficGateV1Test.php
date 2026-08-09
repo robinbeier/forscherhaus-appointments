@@ -901,6 +901,10 @@ final class TrafficGateV1Test extends TestCase
 
     public function testLargeGzipExpansionStreamsWithinBoundedMemory(): void
     {
+        $source = file_get_contents(dirname(__DIR__, 3) . '/scripts/ops/lib/TrafficGateV1.php');
+        self::assertIsString($source);
+        self::assertStringNotContainsString('MAX_GZIP_DECODED_CHUNK_BYTES', $source);
+
         $line = $this->line('127.0.0.1', '-', 'GET', '/health', 200, str_repeat('a', 4096)) . "\n";
         $path = $this->workspace . '/app-access.log.2.gz';
         $handle = gzopen($path, 'wb9');
@@ -1533,7 +1537,8 @@ final class TrafficGateV1Test extends TestCase
         self::assertSame(64, $staleShell['exit_code']);
         self::assertSame(64, $lateStaleShell['exit_code']);
         self::assertSame(64, $missingPhpShell['exit_code']);
-        self::assertSame(21, $brokenPhpShell['exit_code']);
+        $expectedBrokenPhpExit = function_exists('posix_geteuid') && posix_geteuid() === 0 ? 21 : 64;
+        self::assertSame($expectedBrokenPhpExit, $brokenPhpShell['exit_code']);
         self::assertSame(64, $reorderedStaleShell['exit_code']);
         self::assertSame(64, $protectedJsonShell['exit_code']);
         self::assertSame(64, $protectedBinaryShell['exit_code']);

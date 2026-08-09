@@ -26,7 +26,6 @@ final class TrafficGateV1
 
     private const SAFE_METHODS = ['GET', 'HEAD'];
     private const GZIP_COMPRESSED_CHUNK_BYTES = 256;
-    private const MAX_GZIP_DECODED_CHUNK_BYTES = 300_000;
     private const MAX_LOG_RECORD_BYTES = 1_000_000;
     private const ACTIVE_HTTP_STATE_PATHS = ['/proc/net/tcp', '/proc/net/tcp6'];
     private const BACKOFFICE_PREFIXES = [
@@ -950,7 +949,6 @@ final class TrafficGateV1
                 $status = inflate_get_status($context);
                 if (
                     !is_string($decoded) ||
-                    strlen($decoded) > self::MAX_GZIP_DECODED_CHUNK_BYTES ||
                     $consumed < 0 ||
                     $consumed > strlen($compressed) ||
                     ($compressed !== '' && $consumed === 0)
