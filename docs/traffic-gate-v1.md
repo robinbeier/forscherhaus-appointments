@@ -134,9 +134,15 @@ renamed to `.1`. Missing identities, truncation, duplicate identities, corrupt
 gzip, unsupported format, malformed timestamps, or a wholly unparseable set
 make the evidence incomplete and exit `21`.
 
-Immediately after a valid output path is known, the producer atomically replaces
-any earlier report with an empty `0600` invalidation artifact. Only a successful
-evaluation atomically replaces that placeholder with a current JSON report.
+The wrapper preserves the complete original argument vector and, for every
+non-help invocation, scans it for output candidates before semantic validation
+or runtime collection. It atomically replaces any earlier recognizable report
+with an empty `0600` invalidation artifact. Side-effect-free `--help` leaves an
+existing report untouched. Invalidation uses only the host's standard
+shell/coreutils and remains available when PHP or the evaluator cannot start.
+Only a successful evaluation atomically replaces that placeholder with a current
+JSON report. Evaluator failures outside the frozen exit contract are normalized
+to incomplete-evidence exit `21`.
 Invocation, collection, rotation, gzip, active-signal, or publishing failure can
 therefore never leave an older allow decision at the fixed `*-latest.json` path.
 An existing target is replaceable only when it belongs to the effective producer

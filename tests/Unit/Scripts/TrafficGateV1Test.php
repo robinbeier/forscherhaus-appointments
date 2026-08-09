@@ -1219,12 +1219,49 @@ final class TrafficGateV1Test extends TestCase
     {
         $stalePath = $this->workspace . '/stale-wrapper-invocation.json';
         $lateStalePath = $this->workspace . '/late-stale-wrapper-invocation.json';
+        $missingPhpStalePath = $this->workspace . '/missing-php-stale-wrapper-invocation.json';
+        $brokenPhpStalePath = $this->workspace . '/broken-php-stale-wrapper-invocation.json';
+        $reorderedStalePath = $this->workspace . '/reordered-stale-wrapper-invocation.json';
+        $helpStalePath = $this->workspace . '/help-stale-wrapper-invocation.json';
+        $phpHelpStalePath = $this->workspace . '/help-stale-php-invocation.json';
+        $brokenPhpPath = $this->workspace . '/broken-php';
         $protectedPath = $this->workspace . '/protected-wrapper-target';
+        $protectedJsonPath = $this->workspace . '/protected-wrapper-json-target';
+        $protectedBinaryPath = $this->workspace . '/protected-wrapper-binary-target';
         $protectedContents = 'DO NOT REPLACE';
+        $protectedJsonContents =
+            '{"schema":"traffic_gate.v1","decision":"allow","exit_code":0,"window_end_epoch":1786298400,"owner":"other"}';
+        $protectedBinaryContents =
+            '{"schema":"traffic_gate.v1","decision":"allow","exit_code":0,"window_end_epoch":1786298400}' . "\0other";
         $this->writeStaleSuccess($stalePath);
         $this->writeStaleSuccess($lateStalePath);
+        $this->writeCompleteStaleSuccess($missingPhpStalePath, true);
+        $this->writeCompleteStaleSuccess($brokenPhpStalePath);
+        self::assertNotFalse(
+            file_put_contents(
+                $reorderedStalePath,
+                '{"decision":"allow","window_end_epoch":1786298400,"schema":"traffic_gate.v1","exit_code":0}',
+            ),
+        );
+        self::assertTrue(chmod($reorderedStalePath, 0600));
+        $this->writeStaleSuccess($helpStalePath);
+        $this->writeStaleSuccess($phpHelpStalePath);
+        $helpStaleContents = file_get_contents($helpStalePath);
+        $phpHelpStaleContents = file_get_contents($phpHelpStalePath);
+        self::assertIsString($helpStaleContents);
+        self::assertIsString($phpHelpStaleContents);
+        $missingPhpStaleInode = fileinode($missingPhpStalePath);
+        $brokenPhpStaleInode = fileinode($brokenPhpStalePath);
+        self::assertIsInt($missingPhpStaleInode);
+        self::assertIsInt($brokenPhpStaleInode);
+        self::assertNotFalse(file_put_contents($brokenPhpPath, "#!/usr/bin/env bash\nexit 127\n"));
+        self::assertTrue(chmod($brokenPhpPath, 0700));
         self::assertNotFalse(file_put_contents($protectedPath, $protectedContents));
         self::assertTrue(chmod($protectedPath, 0600));
+        self::assertNotFalse(file_put_contents($protectedJsonPath, $protectedJsonContents));
+        self::assertTrue(chmod($protectedJsonPath, 0600));
+        self::assertNotFalse(file_put_contents($protectedBinaryPath, $protectedBinaryContents));
+        self::assertTrue(chmod($protectedBinaryPath, 0600));
         $php = $this->runCommand(['php', 'scripts/ops/traffic_gate_v1.php']);
         $shell = $this->runCommand(['bash', 'scripts/ops/prod_traffic_gate.sh', '--purpose', 'deploy']);
         $staleShell = $this->runCommand([
@@ -1245,6 +1282,62 @@ final class TrafficGateV1Test extends TestCase
             '--output-json',
             $lateStalePath,
         ]);
+        $missingPhpShell = $this->runCommand(
+            [
+                'bash',
+                'scripts/ops/prod_traffic_gate.sh',
+                '--purpose',
+                'deploy',
+                '--mode',
+                'normal',
+                '--window-seconds',
+                '1',
+                '--output-json',
+                $missingPhpStalePath,
+            ],
+            ['TRAFFIC_GATE_PHP_BIN' => $this->workspace . '/missing-php'],
+        );
+        $brokenPhpShell = $this->runCommand(
+            [
+                'bash',
+                'scripts/ops/prod_traffic_gate.sh',
+                '--purpose',
+                'deploy',
+                '--mode',
+                'normal',
+                '--window-seconds',
+                '1',
+                '--output-json',
+                $brokenPhpStalePath,
+            ],
+            ['TRAFFIC_GATE_PHP_BIN' => $brokenPhpPath],
+        );
+        $reorderedStaleShell = $this->runCommand(
+            [
+                'bash',
+                'scripts/ops/prod_traffic_gate.sh',
+                '--unsupported',
+                'value',
+                '--output-json',
+                $reorderedStalePath,
+            ],
+            ['TRAFFIC_GATE_PHP_BIN' => $this->workspace . '/missing-php'],
+        );
+        $protectedJsonShell = $this->runCommand(
+            ['bash', 'scripts/ops/prod_traffic_gate.sh', '--unsupported', 'value', '--output-json', $protectedJsonPath],
+            ['TRAFFIC_GATE_PHP_BIN' => $this->workspace . '/missing-php'],
+        );
+        $protectedBinaryShell = $this->runCommand(
+            [
+                'bash',
+                'scripts/ops/prod_traffic_gate.sh',
+                '--unsupported',
+                'value',
+                '--output-json',
+                $protectedBinaryPath,
+            ],
+            ['TRAFFIC_GATE_PHP_BIN' => $this->workspace . '/missing-php'],
+        );
         $protectedShell = $this->runCommand([
             'bash',
             'scripts/ops/prod_traffic_gate.sh',
@@ -1256,17 +1349,51 @@ final class TrafficGateV1Test extends TestCase
             'value',
         ]);
         $help = $this->runCommand(['bash', 'scripts/ops/prod_traffic_gate.sh', '--help']);
+        $helpWithOutput = $this->runCommand([
+            'bash',
+            'scripts/ops/prod_traffic_gate.sh',
+            '--help',
+            '--output-json',
+            $helpStalePath,
+        ]);
+        $phpHelpWithOutput = $this->runCommand([
+            'php',
+            'scripts/ops/traffic_gate_v1.php',
+            '--help',
+            '--output-json',
+            $phpHelpStalePath,
+        ]);
 
         self::assertSame(64, $php['exit_code']);
         self::assertSame("traffic_gate status=invalid reason=invocation\n", $php['output']);
         self::assertSame(64, $shell['exit_code']);
         self::assertSame(64, $staleShell['exit_code']);
         self::assertSame(64, $lateStaleShell['exit_code']);
+        self::assertSame(64, $missingPhpShell['exit_code']);
+        self::assertSame(21, $brokenPhpShell['exit_code']);
+        self::assertSame(64, $reorderedStaleShell['exit_code']);
+        self::assertSame(64, $protectedJsonShell['exit_code']);
+        self::assertSame(64, $protectedBinaryShell['exit_code']);
         self::assertSame(64, $protectedShell['exit_code']);
         self::assertSame('', file_get_contents($stalePath));
         self::assertSame('', file_get_contents($lateStalePath));
+        self::assertSame('', file_get_contents($missingPhpStalePath));
+        self::assertSame('', file_get_contents($brokenPhpStalePath));
+        self::assertSame('', file_get_contents($reorderedStalePath));
+        clearstatcache(true, $missingPhpStalePath);
+        clearstatcache(true, $brokenPhpStalePath);
+        self::assertNotSame($missingPhpStaleInode, fileinode($missingPhpStalePath));
+        self::assertNotSame($brokenPhpStaleInode, fileinode($brokenPhpStalePath));
+        self::assertSame(0600, fileperms($missingPhpStalePath) & 0777);
+        self::assertSame(0600, fileperms($brokenPhpStalePath) & 0777);
         self::assertSame($protectedContents, file_get_contents($protectedPath));
+        self::assertSame($protectedJsonContents, file_get_contents($protectedJsonPath));
+        self::assertSame($protectedBinaryContents, file_get_contents($protectedBinaryPath));
         self::assertSame(0, $help['exit_code']);
+        self::assertSame(0, $helpWithOutput['exit_code']);
+        self::assertSame(0, $phpHelpWithOutput['exit_code']);
+        self::assertSame($helpStaleContents, file_get_contents($helpStalePath));
+        self::assertSame($phpHelpStaleContents, file_get_contents($phpHelpStalePath));
         self::assertStringContainsString(
             '0 allow/advisory, 20 traffic hard stop, 21 invalid/incomplete',
             $help['output'],
@@ -1341,6 +1468,60 @@ final class TrafficGateV1Test extends TestCase
                     ],
                     JSON_THROW_ON_ERROR,
                 ),
+            ),
+        );
+        self::assertTrue(chmod($path, 0600));
+    }
+
+    private function writeCompleteStaleSuccess(string $path, bool $reverse = false): void
+    {
+        $report = [
+            'schema' => TrafficGateV1::SCHEMA,
+            'producer_sha256' => str_repeat('a', 64),
+            'policy_version' => 'traffic-gate-policy.v1',
+            'catalog_version' => 'traffic-gate-catalog.v1',
+            'purpose' => 'customers-ui-smoke',
+            'mode' => 'no-business-traffic',
+            'window_start_epoch' => self::EPOCH - 90,
+            'window_end_epoch' => self::EPOCH,
+            'window_seconds' => 90,
+            'log_set_sha256' => str_repeat('b', 64),
+            'rotation_complete' => true,
+            'parse_complete' => true,
+            'evidence_complete' => true,
+            'decision' => 'allow',
+            'exit_code' => 0,
+            'counts' => [
+                'documented_health' => 0,
+                'documented_periodic_ops' => 0,
+                'denied_external' => 0,
+                'public_read' => 0,
+                'business_or_authenticated' => 0,
+                'unclassified' => 0,
+                'total' => 0,
+                'lines_seen' => 0,
+                'lines_in_window' => 0,
+                'parse_errors' => 0,
+                'source_unknown' => 0,
+                'method_unknown' => 0,
+                'target_unknown' => 0,
+                'status_5xx' => 0,
+                'write' => 0,
+                'authenticated' => 0,
+                'customers_or_sensitive' => 0,
+                'scanner_success' => 0,
+                'pre_window_completion' => 0,
+                'rotation_errors' => 0,
+            ],
+        ];
+        if ($reverse) {
+            $report['counts'] = array_reverse($report['counts'], true);
+            $report = array_reverse($report, true);
+        }
+        self::assertNotFalse(
+            file_put_contents(
+                $path,
+                json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n",
             ),
         );
         self::assertTrue(chmod($path, 0600));

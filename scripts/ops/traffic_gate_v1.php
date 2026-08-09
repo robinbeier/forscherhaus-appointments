@@ -281,9 +281,9 @@ function trafficGateCollectReport(
 
 function trafficGateMain(array $argv): int
 {
-    trafficGateInvalidateStaleOutputs($argv);
     try {
         $options = trafficGateParseArguments($argv);
+        trafficGateInvalidateStaleOutputs($argv);
         if (
             !in_array($options['purpose'], TrafficGateV1::PURPOSES, true) ||
             !in_array($options['mode'], TrafficGateV1::MODES, true)
@@ -315,6 +315,7 @@ function trafficGateMain(array $argv): int
 
         return $report['exit_code'];
     } catch (InvalidArgumentException) {
+        trafficGateInvalidateStaleOutputs($argv);
         fwrite(STDERR, "traffic_gate status=invalid reason=invocation\n");
         return TRAFFIC_GATE_INVOCATION_EXIT;
     } catch (Throwable) {
