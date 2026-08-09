@@ -729,7 +729,7 @@ final class TrafficGateV1
     {
         if (
             preg_match(
-                '#^/(?:wp-admin(?:/|$)|wp-login(?:\.php)?(?:$|[./])|xmlrpc\.php(?:$|[./])|\.env(?:$|[./_~?-])|vendor/phpunit(?:/|$)|phpinfo(?:\.php)?(?:$|[./])|config\.php(?:$|[./])|server-status(?:$|[./])|boaform(?:/|$)|HNAP1(?:/|$)|cgi-bin(?:/|$))#i',
+                '#^/(?:wp-admin(?:/|$)|wp-config\.php$|wp-login(?:\.php)?(?:$|[./])|xmlrpc\.php(?:$|[./])|\.env(?:$|[./_~?-])|\.environment$|\.git/config$|vendor/phpunit(?:/|$)|phpinfo(?:\.php)?(?:$|[./])|administrator/phpinfo\.php$|config\.php(?:$|[./])|server-status(?:$|[./])|boaform(?:/|$)|HNAP1(?:/|$)|cgi-bin(?:/|$))#i',
                 $path,
             ) === 1
         ) {

@@ -467,6 +467,54 @@ final class TrafficGateV1Test extends TestCase
         }
     }
 
+    public function testEveryRepoFixedScannerProbeSuccessRemainsHard(): void
+    {
+        $specs = $this->runCommand([
+            'bash',
+            '-c',
+            'source scripts/ops/lib/prod_scanner_paths.sh; prod_scanner_path_specs',
+        ]);
+        self::assertSame(0, $specs['exit_code'], $specs['output']);
+
+        foreach (array_filter(explode("\n", $specs['output'])) as $spec) {
+            [$kind, $label, $target] = explode('|', $spec, 3);
+            self::assertContains($kind, ['scanner_path', 'scanner_query'], $label);
+            $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', $target, 200)], 'no-business-traffic');
+
+            self::assertSame(['hard_stop', 20], [$report['decision'], $report['exit_code']], $label);
+            self::assertSame(1, $report['counts']['scanner_success'], $label);
+        }
+    }
+
+    public function testDocumentedEnvironmentScannerSuccessRemainsHard(): void
+    {
+        $report = $this->evaluate(
+            [$this->line('203.0.113.10', '-', 'GET', '/.environment', 200)],
+            'no-business-traffic',
+        );
+
+        self::assertSame(['hard_stop', 20], [$report['decision'], $report['exit_code']]);
+        self::assertSame(1, $report['counts']['scanner_success']);
+    }
+
+    #[DataProvider('scannerInventoryLookalikeProvider')]
+    public function testScannerInventoryAdditionsDoNotWidenToPrefixLookalikes(string $target): void
+    {
+        $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', $target, 200)], 'no-business-traffic');
+
+        self::assertSame(1, $report['counts']['public_read']);
+        self::assertSame(0, $report['counts']['scanner_success']);
+        self::assertSame(['advisory', 0], [$report['decision'], $report['exit_code']]);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function scannerInventoryLookalikeProvider(): iterable
+    {
+        yield 'environment suffix' => ['/.environment.production'];
+        yield 'nested phpinfo suffix' => ['/administrator/phpinfo.php/extra'];
+        yield 'wp config suffix' => ['/wp-config.php.bak'];
+    }
+
     public function testMalformedRecordInvalidatesEvidenceWithoutLeakingRawTraffic(): void
     {
         $sentinel = 'CUSTOMER_SECRET_EMAIL@example.invalid';

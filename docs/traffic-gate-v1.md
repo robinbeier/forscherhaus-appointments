@@ -106,6 +106,9 @@ business traffic even when Apache has no authenticated remote-user field.
 The sensitive-route catalog explicitly covers every current backoffice
 controller prefix; Apache's normally empty remote-user field is never used as
 proof that a backoffice GET is public.
+Scanner-success classification covers the complete fixed probe inventory from
+`scripts/ops/lib/prod_scanner_paths.sh` plus the documented `/.environment`
+signature; a successful match is never relaxed to a public-read advisory.
 
 ## Rotation and completeness
 
