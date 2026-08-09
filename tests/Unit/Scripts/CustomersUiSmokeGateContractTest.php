@@ -117,6 +117,159 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         }
     }
 
+    public function testActualPlaywrightSnippetCompletesNavigationAndBothSearchesWithClientSerializedBodies(): void
+    {
+        $initialBody = $this->executeActualCustomersSearch('');
+        $syntheticBody = $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER);
+        $execution = $this->executeFullBrowserFlow($initialBody, $syntheticBody);
+
+        self::assertSame(
+            [
+                'navigation' => 'continue',
+                'static_asset' => 'continue',
+                'initial_search_post' => 'continue',
+                'synthetic_search_post' => 'continue',
+            ],
+            $execution['route_actions'],
+        );
+        self::assertSame(
+            [
+                'ok' => true,
+                'network_policy_installed' => true,
+                'page_loaded' => true,
+                'initial_search_empty' => true,
+                'synthetic_search_empty' => true,
+                'empty_state_visible' => true,
+                'script_vars_safe' => true,
+                'dom_safe' => true,
+                'response_bodies_safe' => true,
+                'initial_search_request_seen' => true,
+                'initial_search_request_allowed' => true,
+                'initial_search_response_seen' => true,
+                'initial_search_body_read' => true,
+                'synthetic_search_request_seen' => true,
+                'synthetic_search_request_allowed' => true,
+                'synthetic_search_response_seen' => true,
+                'synthetic_search_body_read' => true,
+                'search_response_count' => 2,
+                'blocked_request_count' => 0,
+                'blocked_initial_search_post_count' => 0,
+                'blocked_synthetic_search_post_count' => 0,
+                'blocked_navigation_count' => 0,
+                'blocked_static_asset_count' => 0,
+                'blocked_other_same_origin_count' => 0,
+                'blocked_cross_origin_count' => 0,
+                'page_error_count' => 0,
+                'console_error_count' => 0,
+                'flow_error_count' => 0,
+            ],
+            $execution['result'],
+        );
+    }
+
+    public function testActualPlaywrightSnippetRejectsForbiddenMarkersInEitherSearchResponse(): void
+    {
+        $initialBody = $this->executeActualCustomersSearch('');
+        $syntheticBody = $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER);
+
+        foreach (['initial', 'synthetic'] as $contaminatedStage) {
+            $execution = $this->executeFullBrowserFlow(
+                $initialBody,
+                $syntheticBody,
+                'success',
+                $contaminatedStage === 'initial' ? '["customer_filter_providers"]' : '[]',
+                $contaminatedStage === 'synthetic' ? '["customer_filter_providers"]' : '[]',
+            );
+
+            self::assertFalse($execution['result']['response_bodies_safe'], $contaminatedStage);
+            self::assertFalse($execution['result']['ok'], $contaminatedStage);
+            self::assertSame(2, $execution['result']['search_response_count'], $contaminatedStage);
+            self::assertTrue($execution['result']['initial_search_body_read'], $contaminatedStage);
+            self::assertTrue($execution['result']['synthetic_search_body_read'], $contaminatedStage);
+        }
+    }
+
+    public function testActualPlaywrightSnippetClassifiesMalformedSearchPostsByActiveStage(): void
+    {
+        $initialBody = $this->executeActualCustomersSearch('');
+        $syntheticBody = $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER);
+        $cases = [
+            'initial duplicate keyword' => ['initial', $initialBody . '&keyword=duplicate'],
+            'initial invalid encoding' => ['initial', str_replace('csrf_token=token', 'csrf_token=%ZZ', $initialBody)],
+            'synthetic duplicate keyword' => ['synthetic', $syntheticBody . '&keyword=duplicate'],
+            'synthetic invalid encoding' => [
+                'synthetic',
+                str_replace('csrf_token=token', 'csrf_token=%ZZ', $syntheticBody),
+            ],
+        ];
+
+        foreach ($cases as $label => [$stage, $malformedBody]) {
+            $execution = $this->executeFullBrowserFlow(
+                $stage === 'initial' ? $malformedBody : $initialBody,
+                $stage === 'synthetic' ? $malformedBody : $syntheticBody,
+                'malformed-' . $stage,
+            );
+            $counter = 'blocked_' . $stage . '_search_post_count';
+            $seen = $stage . '_search_request_seen';
+            $allowed = $stage . '_search_request_allowed';
+            $classifiedCount = array_sum(
+                array_intersect_key(
+                    $execution['result'],
+                    array_flip([
+                        'blocked_initial_search_post_count',
+                        'blocked_synthetic_search_post_count',
+                        'blocked_navigation_count',
+                        'blocked_static_asset_count',
+                        'blocked_other_same_origin_count',
+                        'blocked_cross_origin_count',
+                    ]),
+                ),
+            );
+
+            self::assertSame('abort', $execution['route_actions'][$stage . '_search_post'], $label);
+            self::assertSame(1, $execution['result']['blocked_request_count'], $label);
+            self::assertSame(1, $execution['result'][$counter], $label);
+            self::assertSame(0, $execution['result']['blocked_other_same_origin_count'], $label);
+            self::assertSame($execution['result']['blocked_request_count'], $classifiedCount, $label);
+            self::assertTrue($execution['result'][$seen], $label);
+            self::assertFalse($execution['result'][$allowed], $label);
+            self::assertSame(1, $execution['result']['flow_error_count'], $label);
+            self::assertFalse($execution['result']['ok'], $label);
+        }
+    }
+
+    public function testActualPlaywrightSnippetClassifiesBlockedRequestsWithoutRawDetails(): void
+    {
+        $execution = $this->executeFullBrowserFlow(
+            $this->executeActualCustomersSearch(''),
+            $this->executeActualCustomersSearch(CustomersUiSmokeContract::SEARCH_MARKER),
+            'blocked',
+        );
+
+        self::assertSame(5, $execution['result']['blocked_request_count']);
+        self::assertSame(1, $execution['result']['blocked_initial_search_post_count']);
+        self::assertSame(0, $execution['result']['blocked_synthetic_search_post_count']);
+        self::assertSame(1, $execution['result']['blocked_navigation_count']);
+        self::assertSame(1, $execution['result']['blocked_static_asset_count']);
+        self::assertSame(1, $execution['result']['blocked_other_same_origin_count']);
+        self::assertSame(1, $execution['result']['blocked_cross_origin_count']);
+        self::assertTrue($execution['result']['initial_search_request_seen']);
+        self::assertFalse($execution['result']['initial_search_request_allowed']);
+        self::assertFalse($execution['result']['initial_search_response_seen']);
+        self::assertFalse($execution['result']['initial_search_body_read']);
+        self::assertFalse($execution['result']['synthetic_search_request_seen']);
+        self::assertFalse($execution['result']['synthetic_search_request_allowed']);
+        self::assertFalse($execution['result']['synthetic_search_response_seen']);
+        self::assertFalse($execution['result']['synthetic_search_body_read']);
+        self::assertSame(1, $execution['result']['flow_error_count']);
+
+        $encodedResult = json_encode($execution['result'], JSON_THROW_ON_ERROR);
+        self::assertStringNotContainsString('example.test', $encodedResult);
+        self::assertStringNotContainsString('csrf_token', $encodedResult);
+        self::assertStringNotContainsString('unexpected', $encodedResult);
+        self::assertStringNotContainsString('dashboard', $encodedResult);
+    }
+
     public function testPrivateTempDirectoryCleanupRejectsSymlinksAndRemovesFiles(): void
     {
         $directory = CustomersUiSmokeContract::createPrivateTempDirectory();
@@ -216,6 +369,207 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         self::assertIsString($stdout);
 
         return trim($stdout);
+    }
+
+    /**
+     * @return array{route_actions: array<string, string>, result: array<string, bool|int>}
+     */
+    private function executeFullBrowserFlow(
+        string $initialBody,
+        string $syntheticBody,
+        string $mode = 'success',
+        string $initialResponseBody = '[]',
+        string $syntheticResponseBody = '[]',
+    ): array {
+        $snippetPath = __DIR__ . '/../../../scripts/release-gate/playwright/customers_ui_smoke.js';
+        $nodeScript = <<<'JS'
+        const fs = require('fs');
+
+        (async () => {
+            const config = {
+                customers_url: 'https://example.test/index.php/customers',
+                allowed_origin: 'https://example.test',
+                customers_route_path: '/index.php/customers',
+                search_route_path: '/index.php/customers/search',
+                asset_path_prefix: '/assets/',
+                favicon_path: '/assets/img/favicon.ico',
+                search_marker: '__EA_CUSTOMERS_UI_SMOKE_V1_EMPTY_SEARCH__',
+                forbidden_keys: ['customer_filter_providers'],
+                forbidden_response_markers: ['customer_filter_providers'],
+                open_timeout_ms: 100,
+            };
+            const source = fs
+                .readFileSync(process.argv[1], 'utf8')
+                .replace('__CUSTOMERS_UI_SMOKE_CONFIG__', JSON.stringify(config))
+                .replace(/;\s*$/, '');
+            const smoke = eval('(' + source + ')');
+            const bodies = {
+                initial: process.argv[2],
+                synthetic: process.argv[3],
+            };
+            const mode = process.argv[4];
+            const responseBodies = {
+                initial: process.argv[5],
+                synthetic: process.argv[6],
+            };
+            const routeActions = {};
+            const responseWaiters = [];
+            let routeHandler = null;
+            let currentKeyword = '';
+
+            const request = (method, url, postData = '') => ({
+                method: () => method,
+                url: () => url,
+                postData: () => postData,
+            });
+            const dispatch = async (label, interceptedRequest, responseBody = null) => {
+                let action = 'missing';
+                await routeHandler({
+                    request: () => interceptedRequest,
+                    continue: async () => {
+                        action = 'continue';
+                    },
+                    abort: async () => {
+                        action = 'abort';
+                    },
+                });
+                routeActions[label] = action;
+
+                if (action !== 'continue' || responseBody === null) {
+                    return;
+                }
+
+                const response = {
+                    url: () => interceptedRequest.url(),
+                    request: () => interceptedRequest,
+                    text: async () => responseBody,
+                    status: () => 200,
+                };
+                const waiterIndex = responseWaiters.findIndex(({predicate}) => predicate(response));
+                if (waiterIndex === -1) {
+                    throw new Error('response emitted before matching waitForResponse');
+                }
+                const [{resolve}] = responseWaiters.splice(waiterIndex, 1);
+                resolve(response);
+            };
+            const context = {
+                route: async (_pattern, handler) => {
+                    routeHandler = handler;
+                },
+            };
+            const page = {
+                context: () => context,
+                on: () => {},
+                waitForResponse: (predicate) => new Promise((resolve) => responseWaiters.push({predicate, resolve})),
+                goto: async () => {
+                    if (mode === 'blocked') {
+                        await dispatch(
+                            'initial_search_post',
+                            request(
+                                'POST',
+                                config.allowed_origin + config.search_route_path,
+                                bodies.initial + '&unexpected=value',
+                            ),
+                        );
+                        await dispatch('navigation', request('POST', config.customers_url));
+                        await dispatch('static_asset', request('POST', config.allowed_origin + '/assets/js/app.js'));
+                        await dispatch('other_same_origin', request('GET', config.allowed_origin + '/index.php/dashboard'));
+                        await dispatch('cross_origin', request('GET', 'https://blocked.example.test/pixel'));
+                        throw new Error('blocked classification complete');
+                    }
+
+                    if (mode === 'malformed-initial') {
+                        await dispatch(
+                            'initial_search_post',
+                            request('POST', config.allowed_origin + config.search_route_path, bodies.initial),
+                        );
+                        throw new Error('initial classification complete');
+                    }
+
+                    await dispatch('navigation', request('GET', config.customers_url));
+                    await dispatch('static_asset', request('GET', config.allowed_origin + '/assets/js/app.js'));
+                    await dispatch(
+                        'initial_search_post',
+                        request('POST', config.allowed_origin + config.search_route_path, bodies.initial),
+                        responseBodies.initial,
+                    );
+                    return {status: () => 200};
+                },
+                locator: (selector) => ({
+                    count: async () => (selector === '#customers-page' ? 1 : 0),
+                    fill: async (value) => {
+                        currentKeyword = value;
+                    },
+                    press: async () => {
+                        if (currentKeyword !== config.search_marker) {
+                            throw new Error('synthetic marker was not filled before submit');
+                        }
+                        await dispatch(
+                            'synthetic_search_post',
+                            request('POST', config.allowed_origin + config.search_route_path, bodies.synthetic),
+                            mode === 'malformed-synthetic' ? null : responseBodies.synthetic,
+                        );
+                        if (mode === 'malformed-synthetic') {
+                            throw new Error('synthetic classification complete');
+                        }
+                    },
+                    isVisible: async () => selector === '#filter-customers .results em',
+                }),
+                evaluate: async (callback, argument) => callback(argument),
+                waitForFunction: async (callback) => {
+                    if (!callback()) {
+                        throw new Error('empty state was not reached');
+                    }
+                },
+                waitForTimeout: async () => {},
+            };
+
+            global.window = {vars: () => undefined};
+            global.document = {
+                documentElement: {innerHTML: ''},
+                querySelectorAll: () => [],
+                querySelector: (selector) => (selector === '#filter-customers .results em' ? {} : null),
+            };
+
+            const emitted = await smoke(page);
+            const prefix = '__CUSTOMERS_UI_SMOKE_GATE__';
+            if (typeof emitted !== 'string' || !emitted.startsWith(prefix)) {
+                throw new Error('smoke result prefix missing');
+            }
+            process.stdout.write(
+                JSON.stringify({route_actions: routeActions, result: JSON.parse(emitted.slice(prefix.length))}),
+            );
+        })().catch((error) => {
+            process.stderr.write(error instanceof Error ? error.message : 'unknown test harness error');
+            process.exit(1);
+        });
+        JS;
+        $process = proc_open(
+            [
+                'node',
+                '-e',
+                $nodeScript,
+                $snippetPath,
+                $initialBody,
+                $syntheticBody,
+                $mode,
+                $initialResponseBody,
+                $syntheticResponseBody,
+            ],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), is_string($stderr) ? $stderr : '');
+        self::assertIsString($stdout);
+        $decoded = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded);
+
+        return $decoded;
     }
 
     private function executeActualCustomersSearch(string $keyword, bool $addInheritedKey = false): string

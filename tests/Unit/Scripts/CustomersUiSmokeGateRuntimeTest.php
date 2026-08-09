@@ -105,6 +105,14 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
             },
             'non-boolean field',
         ];
+        yield 'diagnostic boolean encoded as string' => [
+            static function (array $result): array {
+                $result['initial_search_request_seen'] = 'yes';
+
+                return $result;
+            },
+            'non-boolean field',
+        ];
         yield 'negative counter' => [
             static function (array $result): array {
                 $result['flow_error_count'] = -1;
@@ -121,6 +129,14 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
             },
             'invalid count',
         ];
+        yield 'negative diagnostic counter' => [
+            static function (array $result): array {
+                $result['blocked_cross_origin_count'] = -1;
+
+                return $result;
+            },
+            'invalid count',
+        ];
         yield 'missing required counter' => [
             static function (array $result): array {
                 unset($result['flow_error_count']);
@@ -128,6 +144,22 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
                 return $result;
             },
             'unexpected field set',
+        ];
+        yield 'missing required diagnostic counter' => [
+            static function (array $result): array {
+                unset($result['blocked_other_same_origin_count']);
+
+                return $result;
+            },
+            'unexpected field set',
+        ];
+        yield 'inconsistent diagnostic counter sum' => [
+            static function (array $result): array {
+                $result['blocked_request_count'] = 1;
+
+                return $result;
+            },
+            'inconsistent blocked counts',
         ];
     }
 
@@ -318,8 +350,22 @@ final class CustomersUiSmokeGateRuntimeTest extends TestCase
             'script_vars_safe' => true,
             'dom_safe' => true,
             'response_bodies_safe' => true,
+            'initial_search_request_seen' => true,
+            'initial_search_request_allowed' => true,
+            'initial_search_response_seen' => true,
+            'initial_search_body_read' => true,
+            'synthetic_search_request_seen' => true,
+            'synthetic_search_request_allowed' => true,
+            'synthetic_search_response_seen' => true,
+            'synthetic_search_body_read' => true,
             'search_response_count' => 2,
             'blocked_request_count' => 0,
+            'blocked_initial_search_post_count' => 0,
+            'blocked_synthetic_search_post_count' => 0,
+            'blocked_navigation_count' => 0,
+            'blocked_static_asset_count' => 0,
+            'blocked_other_same_origin_count' => 0,
+            'blocked_cross_origin_count' => 0,
             'page_error_count' => 0,
             'console_error_count' => 0,
             'flow_error_count' => 0,
