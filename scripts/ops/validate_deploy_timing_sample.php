@@ -8,6 +8,8 @@ use RuntimeException;
 
 final class DeployTimingSampleValidator
 {
+    private const MAX_UNATTRIBUTED_MS = 30;
+
     private const PHASES = [
         'preparation_artifact',
         'predeploy',
@@ -67,7 +69,8 @@ final class DeployTimingSampleValidator
             throw new RuntimeException('timing sample has an invalid run_id');
         }
 
-        $previousElapsed = -1;
+        $previousElapsed = 0;
+        $phaseDurationTotal = 0;
         foreach ($events as $index => $event) {
             $expectedSequence = $index + 1;
             if (($event['schema'] ?? null) !== 'deploy_timing.v1') {
@@ -107,6 +110,10 @@ final class DeployTimingSampleValidator
                 if ($event['elapsed_ms'] < $previousElapsed) {
                     throw new RuntimeException('elapsed_ms is not monotonic');
                 }
+                if ($event['duration_ms'] > $event['elapsed_ms'] - $previousElapsed) {
+                    throw new RuntimeException('phase duration exceeds its elapsed_ms window');
+                }
+                $phaseDurationTotal += $event['duration_ms'];
                 $previousElapsed = $event['elapsed_ms'];
                 continue;
             }
@@ -131,6 +138,9 @@ final class DeployTimingSampleValidator
             self::assertNonNegativeInteger($event['total_ms'] ?? null, 'total_ms');
             if ($event['total_ms'] < $previousElapsed) {
                 throw new RuntimeException('total_ms precedes the final phase');
+            }
+            if ($event['total_ms'] - $phaseDurationTotal > self::MAX_UNATTRIBUTED_MS) {
+                throw new RuntimeException(sprintf('unattributed timing exceeds %d ms', self::MAX_UNATTRIBUTED_MS));
             }
         }
 

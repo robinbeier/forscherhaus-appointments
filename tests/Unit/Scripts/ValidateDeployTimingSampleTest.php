@@ -21,6 +21,42 @@ final class ValidateDeployTimingSampleTest extends TestCase
         self::assertSame(6, $result['records']);
     }
 
+    public function testHistoricallyObservedSummaryOverheadsAreAcceptedThroughThirtyMilliseconds(): void
+    {
+        foreach ([0, 10, 20, 30] as $overheadMs) {
+            $result = DeployTimingSampleValidator::validateLines($this->linesWithSummaryTotal(50 + $overheadMs));
+
+            self::assertSame(50 + $overheadMs, $result['total_ms']);
+        }
+    }
+
+    public function testSummaryOverheadBoundaryRejectsThirtyOneMilliseconds(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('unattributed timing exceeds 30 ms');
+        DeployTimingSampleValidator::validateLines($this->linesWithSummaryTotal(81));
+    }
+
+    public function testArbitrarilyLargeSummaryMismatchIsRejected(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('unattributed timing exceeds 30 ms');
+        DeployTimingSampleValidator::validateLines($this->linesWithSummaryTotal(999));
+    }
+
+    public function testPhaseDurationCannotExceedItsElapsedWindow(): void
+    {
+        $lines = $this->validLines();
+        $event = json_decode($lines[2], true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($event);
+        $event['duration_ms'] = 11;
+        $lines[2] = json_encode($event, JSON_THROW_ON_ERROR);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('phase duration exceeds its elapsed_ms window');
+        DeployTimingSampleValidator::validateLines($lines);
+    }
+
     public function testRealDuplicatePostdeployAndSummaryCaptureIsRejected(): void
     {
         $lines = $this->validLines();
@@ -186,6 +222,20 @@ final class ValidateDeployTimingSampleTest extends TestCase
             ],
             JSON_THROW_ON_ERROR,
         );
+
+        return $lines;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function linesWithSummaryTotal(int $totalMs): array
+    {
+        $lines = $this->validLines();
+        $summary = json_decode($lines[5], true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($summary);
+        $summary['total_ms'] = $totalMs;
+        $lines[5] = json_encode($summary, JSON_THROW_ON_ERROR);
 
         return $lines;
     }

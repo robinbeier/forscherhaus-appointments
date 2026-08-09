@@ -167,8 +167,13 @@ php scripts/ops/validate_deploy_timing_sample.php \
 The validator fails closed unless the protected source contains one run with
 sequences `1` through `6`, all five successful core phases in order, and exactly
 one successful summary. Missing, duplicate, mixed-run, out-of-order, dry-run, or
-unexpected-field records invalidate the complete sample. Do not reconstruct or
-deduplicate a sample from stdout or the surrounding sensitive operator log.
+unexpected-field records invalidate the complete sample. Each phase duration
+must fit inside its monotonic `elapsed_ms` window. The validator derives the
+unattributed interval as `total_ms - sum(duration_ms)` and permits at most
+`30 ms`, the highest clock-read seam observed across accepted baseline samples
+1 through 4 (`0`, `10`, `20`, and `30 ms`). A larger difference is not repaired
+or inferred; it invalidates the sample. Do not reconstruct or deduplicate a
+sample from stdout or the surrounding sensitive operator log.
 
 Timing is strictly observational: clock or output-write failures disable or drop
 telemetry records but never change deploy, validation, rollback, or exit status.
