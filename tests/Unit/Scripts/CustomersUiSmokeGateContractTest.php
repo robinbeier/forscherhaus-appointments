@@ -73,7 +73,7 @@ final class CustomersUiSmokeGateContractTest extends TestCase
         self::assertStringContainsString("context.route('**/*', routeHandler)", $snippet);
         self::assertStringContainsString("route.abort('blockedbyclient')", $snippet);
         self::assertStringContainsString("['', config.search_marker].includes(values.keyword)", $snippet);
-        self::assertStringContainsString('order_by: orderBy || undefined', $client);
+        self::assertStringContainsString("order_by: orderBy || ''", $client);
         self::assertStringContainsString('Object.create(null)', $snippet);
         self::assertStringContainsString('script_vars_safe', $snippet);
         self::assertStringContainsString('dom_safe', $snippet);
@@ -582,6 +582,9 @@ final class CustomersUiSmokeGateContractTest extends TestCase
             const pairs = [];
             for (const key in data) {
                 const value = data[key];
+                if (value === undefined) {
+                    continue;
+                }
                 if (value !== null && !['string', 'number', 'undefined'].includes(typeof value)) {
                     throw new Error('Customers search emitted a non-scalar form value');
                 }
@@ -607,7 +610,7 @@ final class CustomersUiSmokeGateContractTest extends TestCase
                     data.keyword !== process.argv[2] ||
                     data.limit !== 20 ||
                     data.offset !== null ||
-                    data.order_by !== undefined
+                    data.order_by !== ''
                 ) {
                     throw new Error('Customers search emitted unexpected form values');
                 }
