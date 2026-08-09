@@ -12,6 +12,21 @@ require_once __DIR__ . '/../../../scripts/ops/validate_deploy_timing_sample.php'
 
 final class ValidateDeployTimingSampleTest extends TestCase
 {
+    public function testDeployTimingDefaultUsesProtectedVarLibStateDirectory(): void
+    {
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        unset FH_DEPLOY_TIMING_DIR
+        source "$1"
+        builtin printf '%s\n' "$DEPLOY_TIMING_DIR"
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', dirname(__DIR__, 3) . '/deploy_ea.sh']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame("/var/lib/fh-deploy-timing\n", $result['stdout']);
+    }
+
     public function testValidSuccessfulSampleIsAccepted(): void
     {
         $result = DeployTimingSampleValidator::validateLines($this->validLines());
@@ -579,6 +594,36 @@ final class ValidateDeployTimingSampleTest extends TestCase
         }
     }
 
+    public function testDeployTimingPreparationAcceptsMissingLeafBelowProtectedVarLibAncestor(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $ancestor = '/var/lib';
+        $directory = $ancestor . '/rob445-deploy-timing-' . bin2hex(random_bytes(6));
+        $ancestorMetadata = $this->directoryAuthorityMetadata($ancestor);
+        self::assertSame(0, $ancestorMetadata['uid']);
+        self::assertSame(0, $ancestorMetadata['mode'] & 0022);
+
+        try {
+            $result = $this->runTimingPreparation($directory);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('accepted', $result['stdout']);
+            self::assertSame(['uid' => 0, 'mode' => 0700], $this->directoryAuthorityMetadata($directory));
+            $files = glob($directory . '/*.jsonl');
+            self::assertIsArray($files);
+            self::assertCount(1, $files);
+            $fileStat = lstat($files[0]);
+            self::assertIsArray($fileStat);
+            self::assertSame(0, $fileStat['uid']);
+            self::assertSame(0600, $fileStat['mode'] & 0777);
+            self::assertSame(1, $fileStat['nlink']);
+        } finally {
+            if (is_dir($directory)) {
+                $this->removeTimingFixture($directory);
+            }
+        }
+    }
+
     public function testDeployTimingPreparationRejectsAMissingNonCanonicalDirectory(): void
     {
         $this->requireRootLinuxForSourceProtection();
@@ -617,6 +662,38 @@ final class ValidateDeployTimingSampleTest extends TestCase
             self::assertSame($before, $this->directoryAuthorityMetadata($parent));
         } finally {
             $this->removeTimingFixture($parent);
+        }
+    }
+
+    public function testDeployTimingInitializationDisablesCaptureBelowGroupWritableLogAncestor(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        $root = '/rob445-deploy-timing-log-parent-' . bin2hex(random_bytes(6));
+        $logAncestor = $root . '/var/log';
+        $directory = $logAncestor . '/fh-deploy-timing';
+        self::assertTrue(mkdir($logAncestor, 0775, true));
+        self::assertTrue(chmod($root, 0700));
+        self::assertTrue(chmod($root . '/var', 0755));
+        self::assertTrue(chmod($logAncestor, 0775));
+        $before = $this->directoryAuthorityMetadata($logAncestor);
+
+        try {
+            $result = $this->runTimingInitialization($directory);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertSame("authoritative_active=0\nauthoritative_file=\n", $result['stdout']);
+            self::assertSame(
+                1,
+                substr_count(
+                    $result['stderr'],
+                    'Authoritative deploy timing source unavailable; this run is invalid for baseline use.',
+                ),
+            );
+            self::assertDirectoryDoesNotExist($directory);
+            self::assertSame(['uid' => 0, 'mode' => 0775], $before);
+            self::assertSame($before, $this->directoryAuthorityMetadata($logAncestor));
+        } finally {
+            $this->removeTimingFixture($root);
         }
     }
 
@@ -749,6 +826,26 @@ final class ValidateDeployTimingSampleTest extends TestCase
         else
           builtin printf 'rejected\n'
         fi
+        BASH;
+
+        return $this->runCommand(['bash', '-c', $script, 'bash', dirname(__DIR__, 3) . '/deploy_ea.sh', $directory]);
+    }
+
+    /**
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runTimingInitialization(string $directory): array
+    {
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_DIR="$2"
+        DEPLOY_TIMING_AUTHORITATIVE_ENABLED=1
+        deploy_timing_init deploy 0 preparation_artifact
+        builtin printf 'authoritative_active=%s\n' "$DEPLOY_TIMING_AUTHORITATIVE_ACTIVE"
+        builtin printf 'authoritative_file=%s\n' "$DEPLOY_TIMING_FILE"
+        deploy_timing_disable
+        trap - EXIT
         BASH;
 
         return $this->runCommand(['bash', '-c', $script, 'bash', dirname(__DIR__, 3) . '/deploy_ea.sh', $directory]);

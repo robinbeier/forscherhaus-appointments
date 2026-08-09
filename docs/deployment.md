@@ -132,7 +132,7 @@ one terminal summary. Each line starts with `DEPLOY_TIMING ` followed by a JSON
 object using schema `deploy_timing.v1`. These stdout lines are observational,
 not authoritative: wrappers, SSH capture, or log forwarding may duplicate them.
 For a real root-run deploy, the authoritative secret-free source is the unique
-`/var/log/fh-deploy-timing/<run_id>.jsonl` file. The directory is root-owned mode
+`/var/lib/fh-deploy-timing/<run_id>.jsonl` file. The directory is root-owned mode
 `0700`; each run file is root-owned mode `0600` with one hardlink. An existing
 directory must already satisfy this contract and is never normalized by the
 deploy. Only a missing canonical target beneath a root-controlled ancestor
@@ -163,7 +163,7 @@ free-form error text. Validate the authoritative file before baseline use:
 
 ```bash
 php scripts/ops/validate_deploy_timing_sample.php \
-  --file=/var/log/fh-deploy-timing/<run_id>.jsonl
+  --file=/var/lib/fh-deploy-timing/<run_id>.jsonl
 ```
 
 The validator fails closed unless the protected source contains one run with
