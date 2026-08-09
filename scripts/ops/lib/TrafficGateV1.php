@@ -61,6 +61,7 @@ final class TrafficGateV1
         'user',
         'webhooks',
     ];
+    private const CUSTOMER_LIFECYCLE_PREFIXES = ['booking/reschedule', 'booking_confirmation/of'];
 
     /**
      * @return array<string, mixed>
@@ -637,7 +638,9 @@ final class TrafficGateV1
             $queryUnknown ||
             $path === '' ||
             $path[0] !== '/' ||
-            preg_match('/[?#\\\\]/', $path) === 1
+            preg_match('/[?#\\\\]/', $path) === 1 ||
+            str_contains($path, '//') ||
+            preg_match('#(?:^|/)\.{1,2}(?:/|$)#', $path) === 1
         ) {
             return ['', '', $queryPresent, true];
         }
@@ -706,6 +709,11 @@ final class TrafficGateV1
             return true;
         }
         foreach (self::BACKOFFICE_PREFIXES as $prefix) {
+            if (preg_match('#^/' . preg_quote($prefix, '#') . '(?:/|$)#i', $normalized) === 1) {
+                return true;
+            }
+        }
+        foreach (self::CUSTOMER_LIFECYCLE_PREFIXES as $prefix) {
             if (preg_match('#^/' . preg_quote($prefix, '#') . '(?:/|$)#i', $normalized) === 1) {
                 return true;
             }

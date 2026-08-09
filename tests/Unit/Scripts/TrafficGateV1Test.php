@@ -395,6 +395,58 @@ final class TrafficGateV1Test extends TestCase
         yield 'decoded control' => ['/public%00', 'target_unknown'];
     }
 
+    #[DataProvider('customerLifecycleReadProvider')]
+    public function testTokenizedCustomerLifecycleReadsRemainHardInBothModes(string $target): void
+    {
+        foreach (['normal', 'no-business-traffic'] as $mode) {
+            $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', $target, 200)], $mode);
+
+            self::assertSame(['hard_stop', 20], [$report['decision'], $report['exit_code']], $mode);
+            self::assertSame(1, $report['counts']['business_or_authenticated'], $mode);
+            self::assertSame(1, $report['counts']['customers_or_sensitive'], $mode);
+        }
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function customerLifecycleReadProvider(): iterable
+    {
+        yield 'booking reschedule' => ['/booking/reschedule/opaque-token'];
+        yield 'index booking reschedule' => ['/index.php/booking/reschedule/opaque-token'];
+        yield 'booking confirmation' => ['/booking_confirmation/of/opaque-token'];
+        yield 'index booking confirmation' => ['/index.php/booking_confirmation/of/opaque-token'];
+    }
+
+    #[DataProvider('nonCanonicalSensitiveTargetProvider')]
+    public function testNonCanonicalSensitiveTargetsFailClosed(string $target): void
+    {
+        foreach (['normal', 'no-business-traffic'] as $mode) {
+            $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', $target, 200)], $mode);
+
+            self::assertSame(['hard_stop', 20], [$report['decision'], $report['exit_code']], $mode);
+            self::assertSame(1, $report['counts']['unclassified'], $mode);
+            self::assertSame(1, $report['counts']['target_unknown'], $mode);
+        }
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function nonCanonicalSensitiveTargetProvider(): iterable
+    {
+        yield 'parent segment' => ['/x/../index.php/dashboard'];
+        yield 'encoded parent segment' => ['/x/%2e%2e/index.php/dashboard'];
+        yield 'double encoded parent segment' => ['/x/%252e%252e/index.php/dashboard'];
+        yield 'current segment' => ['/./index.php/dashboard'];
+        yield 'repeated slash' => ['/index.php//dashboard'];
+        yield 'encoded slash' => ['/index.php/%2fdashboard'];
+    }
+
+    public function testPublicBookingPageRemainsAdvisoryInNoBusinessMode(): void
+    {
+        $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', '/booking', 200)], 'no-business-traffic');
+
+        self::assertSame(1, $report['counts']['public_read']);
+        self::assertSame(['advisory', 0], [$report['decision'], $report['exit_code']]);
+    }
+
     public function testEncodedUtf8PublicReadRemainsAdvisoryInNoBusinessMode(): void
     {
         $report = $this->evaluate([$this->line('203.0.113.10', '-', 'GET', '/caf%C3%A9', 200)], 'no-business-traffic');
