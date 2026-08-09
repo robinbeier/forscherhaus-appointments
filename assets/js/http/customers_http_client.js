@@ -98,7 +98,7 @@ App.Http.Customers = (function () {
             keyword,
             limit,
             offset,
-            order_by: orderBy || undefined,
+            order_by: orderBy || '',
         };
 
         return $.post(url, data);
