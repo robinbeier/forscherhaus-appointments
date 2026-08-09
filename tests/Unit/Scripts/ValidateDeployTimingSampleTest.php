@@ -136,6 +136,44 @@ final class ValidateDeployTimingSampleTest extends TestCase
         }
     }
 
+    public function testEmptyAuthoritativeFilePathIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('absolute regular non-symlink file');
+        DeployTimingSampleValidator::validateFile('');
+    }
+
+    public function testRelativeAuthoritativeFilePathIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [, $file] = $this->createProtectedTimingFixture();
+        $relative = ltrim($file, '/');
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('absolute regular non-symlink file');
+            DeployTimingSampleValidator::validateFile($relative);
+        } finally {
+            $this->removeTimingFixture(dirname($file));
+        }
+    }
+
+    public function testNonRegularAuthoritativeFilePathIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory] = $this->createProtectedTimingFixture();
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('absolute regular non-symlink file');
+            DeployTimingSampleValidator::validateFile($directory);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
     public function testGroupAndWorldWritableAuthoritativeFileIsRejected(): void
     {
         $this->requireRootLinuxForSourceProtection();
@@ -181,6 +219,121 @@ final class ValidateDeployTimingSampleTest extends TestCase
             DeployTimingSampleValidator::validateFile($nonCanonical);
         } finally {
             $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testHardlinkedAuthoritativeFileIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+        $hardlink = $directory . '/hardlink.jsonl';
+
+        try {
+            self::assertTrue(link($file, $hardlink));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('with one hardlink');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testNonRootOwnedTimingSourceDirectoryIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+
+        try {
+            self::assertTrue(chown($directory, 65534));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('ancestors must be root-controlled');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testWritableTimingSourceDirectoryIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+
+        try {
+            self::assertTrue(chmod($directory, 0722));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('ancestors must be root-controlled');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testTimingSourceDirectoryWithoutExactMode0700IsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$directory, $file] = $this->createProtectedTimingFixture();
+
+        try {
+            self::assertTrue(chmod($directory, 0750));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('directory must use mode 0700');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($directory);
+        }
+    }
+
+    public function testNonRootOwnedTimingSourceAncestorIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$root, $ancestor, , $file] = $this->createNestedProtectedTimingFixture();
+
+        try {
+            self::assertTrue(chown($ancestor, 65534));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('ancestors must be root-controlled');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($root);
+        }
+    }
+
+    public function testWritableTimingSourceAncestorIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$root, $ancestor, , $file] = $this->createNestedProtectedTimingFixture();
+
+        try {
+            self::assertTrue(chmod($ancestor, 0722));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('ancestors must be root-controlled');
+            DeployTimingSampleValidator::validateFile($file);
+        } finally {
+            $this->removeTimingFixture($root);
+        }
+    }
+
+    public function testSymlinkedTimingSourceAncestorIsRejected(): void
+    {
+        $this->requireRootLinuxForSourceProtection();
+        [$root, $ancestor, $directory, $file] = $this->createNestedProtectedTimingFixture();
+        $alias = $root . '/alias';
+        $aliasedFile = $alias . '/' . basename($directory) . '/' . basename($file);
+
+        try {
+            self::assertTrue(symlink($ancestor, $alias));
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('canonical and symlink-free');
+            DeployTimingSampleValidator::validateFile($aliasedFile);
+        } finally {
+            $this->removeTimingFixture($root);
         }
     }
 
@@ -326,12 +479,39 @@ final class ValidateDeployTimingSampleTest extends TestCase
         return [$directory, $file];
     }
 
+    /**
+     * @return array{string,string,string,string}
+     */
+    private function createNestedProtectedTimingFixture(): array
+    {
+        $root = '/rob445-timing-source-' . bin2hex(random_bytes(6));
+        $ancestor = $root . '/ancestor';
+        $directory = $ancestor . '/source';
+        self::assertTrue(mkdir($directory, 0700, true));
+        self::assertTrue(chmod($root, 0700));
+        self::assertTrue(chmod($ancestor, 0700));
+        self::assertTrue(chmod($directory, 0700));
+        $file = $directory . '/sample.jsonl';
+        self::assertNotFalse(file_put_contents($file, implode(PHP_EOL, $this->validLines()) . PHP_EOL));
+        self::assertTrue(chmod($file, 0600));
+
+        return [$root, $ancestor, $directory, $file];
+    }
+
     private function removeTimingFixture(string $directory): void
     {
-        $files = glob($directory . '/*');
-        if (is_array($files)) {
-            foreach ($files as $file) {
-                unlink($file);
+        $entries = scandir($directory);
+        if (is_array($entries)) {
+            foreach ($entries as $entry) {
+                if ($entry === '.' || $entry === '..') {
+                    continue;
+                }
+                $path = $directory . '/' . $entry;
+                if (is_link($path) || is_file($path)) {
+                    unlink($path);
+                } elseif (is_dir($path)) {
+                    $this->removeTimingFixture($path);
+                }
             }
         }
         if (is_dir($directory)) {
