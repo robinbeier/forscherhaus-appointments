@@ -21,6 +21,10 @@ For the shared passive Deploy/Customers traffic decision, use
 `docs/traffic-gate-v1.md` and `prod_traffic_gate.sh`. The gate reads the full
 current/rotated Apache log set and emits only versioned aggregate evidence.
 
+For the pure ROB-455 deploy intent, lifecycle, and evidence contract, use
+`docs/deployment-run-v1.md` and `validate_deployment_contract_v1.php`. This
+contract slice does not install a host runner or activate production behavior.
+
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
 and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
 
@@ -63,6 +67,10 @@ Script inventory:
   before caller-owned probes or mutations; it requires a root-protected exact
   monitor-source catalog and fails closed on missing source or active-request
   boundary evidence
+- `validate_deployment_contract_v1.php` validates canonical local
+  `deployment_run.v1` JSONL plus closed `deployment_evidence.v1` JSON without
+  invoking a deploy or trusting a production path; the evidence keeps the
+  normal deploy reservation separate from any at-most-once post-gate recovery
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything
