@@ -44,6 +44,26 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(30, $result['exit_code'], $result['stderr']);
     }
 
+    public function testReservedRawPreSwitchExitsAreNormalizedWithoutResultProvenance(): void
+    {
+        foreach ([30, 31, 32] as $rawExitCode) {
+            $result = $this->runShell(
+                str_replace(
+                    'RAW_EXIT_CODE',
+                    (string) $rawExitCode,
+                    <<<'BASH'
+                    source ./deploy_ea.sh
+                    deploy_result_trap_install
+                    exit RAW_EXIT_CODE
+                    BASH
+                    ,
+                ),
+            );
+
+            self::assertSame(30, $result['exit_code'], $rawExitCode . ': ' . $result['stderr']);
+        }
+    }
+
     public function testFirstAtomicMoveFailureReportsDeployFailedWithoutAttemptingSecondMove(): void
     {
         $result = $this->runShell(
@@ -145,7 +165,7 @@ final class DeployStableResultTest extends TestCase
                 }
                 rollback_after_failure() {
                   printf 'rollback\n'
-                  exit 30
+                  deploy_result_exit 30
                 }
                 perform_atomic_switch
                 BASH
@@ -168,7 +188,7 @@ final class DeployStableResultTest extends TestCase
                 }
                 rollback_after_failure() {
                   printf 'rollback\n'
-                  exit 30
+                  deploy_result_exit 30
                 }
                 perform_atomic_switch
                 false
@@ -193,7 +213,7 @@ final class DeployStableResultTest extends TestCase
                 }
                 rollback_after_failure() {
                   printf 'rollback\n'
-                  exit 31
+                  deploy_result_exit 31
                 }
                 perform_atomic_switch
                 false
@@ -207,6 +227,33 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(1, substr_count($result['stdout'], "rollback\n"));
     }
 
+    public function testReservedRawPostSwitchExitsStillRunExistingRollback(): void
+    {
+        foreach ([30, 31, 32] as $rawExitCode) {
+            $result = $this->runShell(
+                $this->switchHarness(
+                    str_replace(
+                        'RAW_EXIT_CODE',
+                        (string) $rawExitCode,
+                        <<<'BASH'
+                        mv() { return 0; }
+                        rollback_after_failure() {
+                          printf 'rollback\n'
+                          deploy_result_exit 30
+                        }
+                        perform_atomic_switch
+                        exit RAW_EXIT_CODE
+                        BASH
+                        ,
+                    ),
+                ),
+            );
+
+            self::assertSame(30, $result['exit_code'], $rawExitCode . ': ' . $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "rollback\n"), (string) $rawExitCode);
+        }
+    }
+
     public function testTimingActivePostSwitchFailureReportsVerifiedRollbackSummary(): void
     {
         $result = $this->runShell(
@@ -216,7 +263,7 @@ final class DeployStableResultTest extends TestCase
                 mv() { return 0; }
                 rollback_after_failure() {
                   deploy_timing_finish failed rollback_succeeded 30
-                  exit 30
+                  deploy_result_exit 30
                 }
                 perform_atomic_switch
                 false
@@ -239,7 +286,7 @@ final class DeployStableResultTest extends TestCase
                 mv() { return 0; }
                 rollback_after_failure() {
                   deploy_timing_finish failed rollback_failed 31
-                  exit 31
+                  deploy_result_exit 31
                 }
                 perform_atomic_switch
                 false
@@ -306,6 +353,43 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(31, $failure['exit_code'], $failure['stderr']);
     }
 
+    public function testSignalDuringDirectAutomaticRollbackDoesNotStartSecondRollback(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            APP=/fixed/active
+            PREV=/fixed/previous
+            REL=ea_contract
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
+            ZERO_SURPRISE_CANARY_REPORT=''
+            DEPLOY_RESULT_PHASE=switch_complete
+            deploy_timing_begin_rollback() { printf 'rollback-start\n'; }
+            deploy_timing_finish() { :; }
+            emit_zero_surprise_incident() { :; }
+            reload_services() { :; }
+            restart_renderer_service() { return 0; }
+            probe_renderer_health() { return 0; }
+            probe_deep_health_contract() { return 0; }
+            bash() {
+              if [[ "${signal_sent:-0}" == "0" ]]; then
+                signal_sent=1
+                kill -TERM $$
+              fi
+              return 0
+            }
+            rollback_after_failure 'redacted failure'
+            BASH
+            ,
+        );
+
+        self::assertSame(31, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "rollback-start\n"));
+    }
+
     public function testSigtermRemainsTheContractInterruptionExit(): void
     {
         $result = $this->runShell(
@@ -359,7 +443,7 @@ final class DeployStableResultTest extends TestCase
                 mv() { return 0; }
                 rollback_after_failure() {
                   printf 'rollback\n'
-                  exit 30
+                  deploy_result_exit 30
                 }
                 perform_atomic_switch
                 kill -HUP $$
@@ -384,7 +468,7 @@ final class DeployStableResultTest extends TestCase
                         mv() { return 0; }
                         rollback_after_failure() {
                           printf 'rollback\n'
-                          exit 30
+                          deploy_result_exit 30
                         }
                         perform_atomic_switch
                         kill -SIGNAL_NAME $$
@@ -437,7 +521,7 @@ final class DeployStableResultTest extends TestCase
                 mv() { return 0; }
                 rollback_after_failure() {
                   printf 'rollback\n'
-                  exit 30
+                  deploy_result_exit 30
                 }
                 perform_atomic_switch
                 kill -TERM $$
@@ -458,7 +542,7 @@ final class DeployStableResultTest extends TestCase
                 mv() { return 0; }
                 rollback_after_failure() {
                   printf 'rollback\n'
-                  exit 31
+                  deploy_result_exit 31
                 }
                 perform_atomic_switch
                 kill -TERM $$
@@ -479,7 +563,7 @@ final class DeployStableResultTest extends TestCase
                 mv() { return 0; }
                 rollback_after_failure() {
                   printf 'rollback\n'
-                  exit 30
+                  deploy_result_exit 30
                 }
                 perform_atomic_switch
                 exit 143

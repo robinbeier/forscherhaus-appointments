@@ -56,6 +56,7 @@ EXIT_SWITCH_RECOVERY_REQUIRED=32
 DEPLOY_RESULT_NORMALIZATION_ACTIVE=0
 DEPLOY_RESULT_PHASE="before_switch"
 DEPLOY_RESULT_ROLLBACK_ACTIVE=0
+DEPLOY_RESULT_FINAL_EXIT_CODE=""
 
 DEPLOY_TIMING_SCHEMA="deploy_timing.v1"
 DEPLOY_TIMING_ACTIVE=0
@@ -290,17 +291,34 @@ deploy_result_reconcile_switch_phase() {
   esac
 }
 
-deploy_result_normalize_exit_code() {
+deploy_result_exit() {
   local exit_code="$1"
 
   case "$exit_code" in
-    0|30|31|32)
-      printf '%s\n' "$exit_code"
-      return 0
+    30|31|32)
+      DEPLOY_RESULT_FINAL_EXIT_CODE="$exit_code"
+      exit "$exit_code"
+      ;;
+    *)
+      return 1
       ;;
   esac
+}
+
+deploy_result_normalize_exit_code() {
+  local exit_code="$1"
+
+  if [[ "$exit_code" == "0" ]]; then
+    printf '%s\n' "$exit_code"
+    return 0
+  fi
 
   if [[ "${DEPLOY_RESULT_NORMALIZATION_ACTIVE:-0}" != "1" ]]; then
+    printf '%s\n' "$exit_code"
+    return 0
+  fi
+
+  if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" && "$exit_code" == "$DEPLOY_RESULT_FINAL_EXIT_CODE" ]]; then
     printf '%s\n' "$exit_code"
     return 0
   fi
@@ -333,13 +351,13 @@ deploy_result_on_signal() {
 
   case "${DEPLOY_RESULT_PHASE:-before_switch}" in
     switch_partial)
-      exit "$EXIT_SWITCH_RECOVERY_REQUIRED"
+      deploy_result_exit "$EXIT_SWITCH_RECOVERY_REQUIRED"
       ;;
     switch_complete)
       if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" && "${DRYRUN:-0}" != "1" ]]; then
         DEPLOY_RESULT_ROLLBACK_ACTIVE=1
         rollback_after_failure "post-switch interruption"
-        exit "$EXIT_ROLLBACK_FAILED"
+        deploy_result_exit "$EXIT_ROLLBACK_FAILED"
       fi
       ;;
   esac
@@ -349,6 +367,7 @@ deploy_result_on_signal() {
 
 deploy_result_trap_install() {
   DEPLOY_RESULT_NORMALIZATION_ACTIVE=1
+  DEPLOY_RESULT_FINAL_EXIT_CODE=""
   trap deploy_timing_on_exit EXIT
   trap 'deploy_result_on_signal 129' HUP
   trap 'deploy_result_on_signal 130' INT
@@ -493,9 +512,7 @@ deploy_timing_on_exit() {
   deploy_result_reconcile_switch_phase
   if [[
     "$raw_exit_code" != "0" &&
-    "$raw_exit_code" != "$EXIT_DEPLOY_FAILED" &&
-    "$raw_exit_code" != "$EXIT_ROLLBACK_FAILED" &&
-    "$raw_exit_code" != "$EXIT_SWITCH_RECOVERY_REQUIRED" &&
+    ( -z "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" || "$raw_exit_code" != "$DEPLOY_RESULT_FINAL_EXIT_CODE" ) &&
     "${DEPLOY_RESULT_PHASE:-before_switch}" == "switch_complete" &&
     "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" &&
     "${DRYRUN:-0}" != "1"
@@ -503,7 +520,7 @@ deploy_timing_on_exit() {
     DEPLOY_RESULT_ROLLBACK_ACTIVE=1
     trap deploy_timing_on_exit EXIT
     rollback_after_failure "unhandled post-switch failure"
-    exit "$EXIT_ROLLBACK_FAILED"
+    deploy_result_exit "$EXIT_ROLLBACK_FAILED"
   fi
 
   exit_code="$(deploy_result_normalize_exit_code "$raw_exit_code")"
@@ -2261,6 +2278,7 @@ runtime_config_rollback_cli() {
 }
 
 rollback_after_failure() {
+  DEPLOY_RESULT_ROLLBACK_ACTIVE=1
   local reason="$1"
   local failed_base="${APP}_failed_${REL}"
   local failed_path="$failed_base"
@@ -2288,7 +2306,7 @@ rollback_after_failure() {
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
     deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
-    exit "$EXIT_ROLLBACK_SUCCESS"
+    deploy_result_exit "$EXIT_ROLLBACK_SUCCESS"
   fi
 
   config_result="ok"
@@ -2347,7 +2365,7 @@ rollback_after_failure() {
       "$incident_report_root"
     echo "[!] Rollback succeeded, deployment remains failed."
     deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
-    exit "$EXIT_ROLLBACK_SUCCESS"
+    deploy_result_exit "$EXIT_ROLLBACK_SUCCESS"
   fi
 
   if [[ "$reason" == "zero-surprise canary failed" ]]; then
@@ -2363,7 +2381,7 @@ rollback_after_failure() {
     "$incident_report_root"
   echo "[!] Rollback failed or unverifiable. Manual intervention required."
   deploy_timing_finish failed rollback_failed "$EXIT_ROLLBACK_FAILED"
-  exit "$EXIT_ROLLBACK_FAILED"
+  deploy_result_exit "$EXIT_ROLLBACK_FAILED"
 }
 
 verify_post_switch_runtime_config_contracts() {
