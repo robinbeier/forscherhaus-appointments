@@ -507,9 +507,9 @@ deploy_timing_finish() {
 
   total_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
   (( total_ms >= 0 )) || total_ms=0
+  DEPLOY_TIMING_SUMMARY_EMITTED=1
   emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms" || true
 
-  DEPLOY_TIMING_SUMMARY_EMITTED=1
   DEPLOY_TIMING_ACTIVE=0
   trap - EXIT
   return 0
@@ -561,7 +561,10 @@ deploy_timing_on_exit() {
         outcome="failed_post_switch"
         ;;
     esac
-    if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+    if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "0" ]]; then
+      outcome="succeeded"
+      phase_status="ok"
+    elif [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
       if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_ROLLBACK_SUCCESS" ]]; then
         outcome="rollback_succeeded"
         phase_status="ok"

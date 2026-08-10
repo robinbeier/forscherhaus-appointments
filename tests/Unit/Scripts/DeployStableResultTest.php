@@ -368,6 +368,29 @@ final class DeployStableResultTest extends TestCase
         self::assertStringNotContainsString('unexpected-rollback', $result['stdout']);
     }
 
+    public function testSignalDuringSuccessfulTimingPhaseKeepsSucceededSummary(): void
+    {
+        $result = $this->runShell($this->successfulRealTimingSignalHarness(false));
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "timing-phase-boundary\n"));
+        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
+        self::assertStringContainsString('"outcome":"succeeded"', $result['stdout']);
+        self::assertStringContainsString('"exit_code":0', $result['stdout']);
+        self::assertStringNotContainsString('"outcome":"failed_post_switch"', $result['stdout']);
+    }
+
+    public function testSignalAfterSuccessfulTimingSummaryWriteDoesNotDuplicateSummary(): void
+    {
+        $result = $this->runShell($this->successfulRealTimingSignalHarness(true));
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "timing-summary-boundary\n"));
+        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
+        self::assertStringContainsString('"outcome":"succeeded"', $result['stdout']);
+        self::assertStringContainsString('"exit_code":0', $result['stdout']);
+    }
+
     public function testExistingRollbackSuccessAndFailureExitsRemainStable(): void
     {
         $success = $this->runShell($this->rollbackHarness(true));
@@ -759,6 +782,54 @@ final class DeployStableResultTest extends TestCase
             deploy_result_after_timing_finish() { printf 'signal-boundary\n'; kill -TERM $$; }
             deploy_timing_init deploy 0 postdeploy_validation
             rollback_after_failure 'redacted failure'
+            BASH
+            ,
+        );
+    }
+
+    private function successfulRealTimingSignalHarness(bool $signalAfterSummaryWrite): string
+    {
+        $injection = $signalAfterSummaryWrite
+            ? <<<'BASH'
+            deploy_timing_emit_record() {
+              builtin printf '%s\n' "$1"
+              if [[ "$1" == *'"event":"summary"'* && "$injected" == "0" ]]; then
+                injected=1
+                printf 'timing-summary-boundary\n'
+                kill -TERM $$
+              fi
+            }
+            BASH
+            : <<<'BASH'
+            deploy_timing_complete_phase() {
+              if [[ "$injected" == "0" ]]; then
+                injected=1
+                printf 'timing-phase-boundary\n'
+                kill -TERM $$
+              fi
+              DEPLOY_TIMING_PHASE=""
+              return 0
+            }
+            BASH;
+
+        return str_replace(
+            '__INJECTION__',
+            $injection,
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            DEPLOY_RESULT_PHASE=switch_complete
+            injected=0
+            deploy_monotonic_ms() { printf '1000\n'; }
+            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
+            rollback_after_failure() {
+              printf 'unexpected-rollback\n'
+              deploy_result_exit 31
+            }
+            __INJECTION__
+            deploy_timing_init deploy 0 postdeploy_validation
+            deploy_result_finish_with_timing 0 ok succeeded
             BASH
             ,
         );
