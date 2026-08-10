@@ -1407,6 +1407,64 @@ final class DeploymentContractV1Test extends TestCase
         yield 'day apart zero wall clock' => ['2026-08-10T04:00:00Z', '2026-08-11T04:00:00Z', 0];
     }
 
+    #[DataProvider('validOrchestratorLifecycleProvider')]
+    public function testOrchestratorTimingCanEncloseJournalLifecycle(
+        string $startedAtUtc,
+        string $finishedAtUtc,
+        int $wallClockMs,
+    ): void {
+        $lines = $this->successfulRunLines();
+        $evidence = $this->validEvidence($lines);
+        $evidence['orchestrator_timing'] = [
+            'started_at_utc' => $startedAtUtc,
+            'finished_at_utc' => $finishedAtUtc,
+            'wall_clock_ms' => $wallClockMs,
+        ];
+
+        self::assertSame('succeeded', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{string,string,int}> */
+    public static function validOrchestratorLifecycleProvider(): iterable
+    {
+        yield 'start equals first journal record' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:30Z', 30_000];
+        yield 'start encloses first journal record' => ['2026-08-10T03:59:59Z', '2026-08-10T04:00:30Z', 31_000];
+        yield 'finish equals terminal journal record' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:12Z', 12_000];
+        yield 'finish equals evidence capture' => ['2026-08-10T04:00:00Z', '2026-08-10T04:01:00Z', 60_000];
+    }
+
+    #[DataProvider('invalidOrchestratorLifecycleProvider')]
+    public function testOrchestratorTimingRejectsJournalLifecycleContradictions(
+        string $startedAtUtc,
+        string $finishedAtUtc,
+        int $wallClockMs,
+    ): void {
+        $lines = $this->successfulRunLines();
+        $evidence = $this->validEvidence($lines);
+        $evidence['orchestrator_timing'] = [
+            'started_at_utc' => $startedAtUtc,
+            'finished_at_utc' => $finishedAtUtc,
+            'wall_clock_ms' => $wallClockMs,
+        ];
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,string,int}> */
+    public static function invalidOrchestratorLifecycleProvider(): iterable
+    {
+        yield 'start follows first journal record' => ['2026-08-10T04:00:01Z', '2026-08-10T04:00:30Z', 29_000];
+        yield 'finish precedes terminal journal record' => ['2026-08-10T03:59:59Z', '2026-08-10T04:00:11Z', 12_000];
+        yield 'finish follows evidence capture' => ['2026-08-10T03:59:59Z', '2026-08-10T04:01:01Z', 62_000];
+        yield 'both timestamps follow evidence capture by years' => [
+            '2027-08-10T04:00:00Z',
+            '2027-08-10T04:00:01Z',
+            1_000,
+        ];
+        yield 'both timestamps precede first journal record' => ['2026-08-10T03:59:58Z', '2026-08-10T03:59:59Z', 1_000];
+    }
+
     public function testTimingObservabilityGapDoesNotRewriteSuccessfulDeployOutcome(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());

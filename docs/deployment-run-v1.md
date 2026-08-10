@@ -154,6 +154,9 @@ outer wall clock never replaces, extends, or mixes with the five-phase
 stored second-precision UTC interval: for `delta_ms` derived from the two UTC
 timestamps, the accepted range is
 `max(0, delta_ms - 999) <= wall_clock_ms <= delta_ms + 999`.
+The outer interval must enclose the journal lifecycle: its start is no later
+than the immutable intent record, its finish is no earlier than the terminal
+record, and that finish is no later than evidence capture.
 
 ## Traffic-gate consumption
 

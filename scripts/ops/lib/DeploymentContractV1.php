@@ -360,6 +360,12 @@ final class DeploymentContractV1
         if (self::utcEpoch($evidence['captured_at_utc']) < self::utcEpoch($last['recorded_at_utc'])) {
             throw new RuntimeException('evidence capture precedes the terminal journal record');
         }
+        self::assertOrchestratorTimingMatchesLifecycle(
+            $evidence['orchestrator_timing'],
+            $intent['recorded_at_utc'],
+            $last['recorded_at_utc'],
+            $evidence['captured_at_utc'],
+        );
         self::assertFailureTransitionMatchesEvidence($last, $evidence);
         self::assertSame($evidence['result']['exit_code'], $last['exit_code'], 'evidence exit_code');
         self::assertSame($evidence['result']['reason'], $last['reason'], 'evidence reason');
@@ -1239,6 +1245,24 @@ final class DeploymentContractV1
         $maximumWallClockMs = $timestampDeltaMs + 999;
         if ($section['wall_clock_ms'] < $minimumWallClockMs || $section['wall_clock_ms'] > $maximumWallClockMs) {
             throw new RuntimeException('orchestrator wall clock contradicts its UTC timestamps');
+        }
+    }
+
+    /** @param array<string,mixed> $section */
+    private static function assertOrchestratorTimingMatchesLifecycle(
+        array $section,
+        string $firstRecordedAtUtc,
+        string $terminalRecordedAtUtc,
+        string $capturedAtUtc,
+    ): void {
+        if (self::utcEpoch($section['started_at_utc']) > self::utcEpoch($firstRecordedAtUtc)) {
+            throw new RuntimeException('orchestrator timing starts after the deployment journal');
+        }
+        if (self::utcEpoch($section['finished_at_utc']) < self::utcEpoch($terminalRecordedAtUtc)) {
+            throw new RuntimeException('orchestrator timing finishes before the terminal journal record');
+        }
+        if (self::utcEpoch($section['finished_at_utc']) > self::utcEpoch($capturedAtUtc)) {
+            throw new RuntimeException('orchestrator timing finishes after evidence capture');
         }
     }
 
