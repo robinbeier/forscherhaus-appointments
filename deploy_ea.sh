@@ -73,6 +73,7 @@ DEPLOY_TIMING_AUTHORITATIVE_ENABLED=0
 DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
 DEPLOY_TIMING_DIR="${FH_DEPLOY_TIMING_DIR:-/var/lib/fh-deploy-timing}"
 DEPLOY_TIMING_FILE=""
+DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
 
 DEPLOY_DETAIL_SCHEMA="deploy_detail.v1"
 DEPLOY_DETAIL_ACTIVE=0
@@ -387,6 +388,29 @@ deploy_result_trap_install() {
   trap 'deploy_result_on_signal 143' TERM
 }
 
+deploy_timing_defer_signals() {
+  DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=129' HUP
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=130' INT
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=131' QUIT
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=143' TERM
+}
+
+deploy_timing_restore_signals() {
+  trap 'deploy_result_on_signal 129' HUP
+  trap 'deploy_result_on_signal 130' INT
+  trap 'deploy_result_on_signal 131' QUIT
+  trap 'deploy_result_on_signal 143' TERM
+}
+
+deploy_timing_handle_deferred_signal() {
+  local signal_exit_code="${DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE:-}"
+
+  DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
+  [[ -n "$signal_exit_code" ]] || return 0
+  deploy_result_on_signal "$signal_exit_code"
+}
+
 emit_deploy_timing_phase() {
   local phase="$1"
   local status="$2"
@@ -450,8 +474,11 @@ deploy_timing_complete_phase() {
   (( duration_ms >= 0 )) || duration_ms=0
   (( elapsed_ms >= 0 )) || elapsed_ms=0
 
+  deploy_timing_defer_signals
   emit_deploy_timing_phase "$DEPLOY_TIMING_PHASE" "$status" "$duration_ms" "$elapsed_ms" || true
   DEPLOY_TIMING_PHASE=""
+  deploy_timing_restore_signals
+  deploy_timing_handle_deferred_signal
   return 0
 }
 
@@ -507,11 +534,14 @@ deploy_timing_finish() {
 
   total_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
   (( total_ms >= 0 )) || total_ms=0
-  DEPLOY_TIMING_SUMMARY_EMITTED=1
+  deploy_timing_defer_signals
   emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms" || true
 
+  DEPLOY_TIMING_SUMMARY_EMITTED=1
   DEPLOY_TIMING_ACTIVE=0
   trap - EXIT
+  deploy_timing_restore_signals
+  deploy_timing_handle_deferred_signal
   return 0
 }
 

@@ -368,21 +368,33 @@ final class DeployStableResultTest extends TestCase
         self::assertStringNotContainsString('unexpected-rollback', $result['stdout']);
     }
 
-    public function testSignalDuringSuccessfulTimingPhaseKeepsSucceededSummary(): void
+    public function testSignalAfterSuccessfulTimingPhaseWriteDoesNotDuplicatePhase(): void
     {
-        $result = $this->runShell($this->successfulRealTimingSignalHarness(false));
+        $result = $this->runShell($this->successfulRealTimingSignalHarness('phase_after_write'));
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
         self::assertSame(1, substr_count($result['stdout'], "timing-phase-boundary\n"));
+        self::assertSame(1, substr_count($result['stdout'], '"event":"phase"'));
         self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
         self::assertStringContainsString('"outcome":"succeeded"', $result['stdout']);
         self::assertStringContainsString('"exit_code":0', $result['stdout']);
         self::assertStringNotContainsString('"outcome":"failed_post_switch"', $result['stdout']);
     }
 
+    public function testSignalBeforeSuccessfulTimingSummaryWriteDoesNotLoseSummary(): void
+    {
+        $result = $this->runShell($this->successfulRealTimingSignalHarness('summary_before_write'));
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "timing-summary-boundary\n"));
+        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
+        self::assertStringContainsString('"outcome":"succeeded"', $result['stdout']);
+        self::assertStringContainsString('"exit_code":0', $result['stdout']);
+    }
+
     public function testSignalAfterSuccessfulTimingSummaryWriteDoesNotDuplicateSummary(): void
     {
-        $result = $this->runShell($this->successfulRealTimingSignalHarness(true));
+        $result = $this->runShell($this->successfulRealTimingSignalHarness('summary_after_write'));
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
         self::assertSame(1, substr_count($result['stdout'], "timing-summary-boundary\n"));
@@ -787,10 +799,30 @@ final class DeployStableResultTest extends TestCase
         );
     }
 
-    private function successfulRealTimingSignalHarness(bool $signalAfterSummaryWrite): string
+    private function successfulRealTimingSignalHarness(string $boundary): string
     {
-        $injection = $signalAfterSummaryWrite
-            ? <<<'BASH'
+        $injection = match ($boundary) {
+            'phase_after_write' => <<<'BASH'
+            deploy_timing_emit_record() {
+              builtin printf '%s\n' "$1"
+              if [[ "$1" == *'"event":"phase"'* && "$injected" == "0" ]]; then
+                injected=1
+                printf 'timing-phase-boundary\n'
+                kill -TERM $$
+              fi
+            }
+            BASH,
+            'summary_before_write' => <<<'BASH'
+            deploy_timing_emit_record() {
+              if [[ "$1" == *'"event":"summary"'* && "$injected" == "0" ]]; then
+                injected=1
+                printf 'timing-summary-boundary\n'
+                kill -TERM $$
+              fi
+              builtin printf '%s\n' "$1"
+            }
+            BASH,
+            'summary_after_write' => <<<'BASH'
             deploy_timing_emit_record() {
               builtin printf '%s\n' "$1"
               if [[ "$1" == *'"event":"summary"'* && "$injected" == "0" ]]; then
@@ -799,18 +831,9 @@ final class DeployStableResultTest extends TestCase
                 kill -TERM $$
               fi
             }
-            BASH
-            : <<<'BASH'
-            deploy_timing_complete_phase() {
-              if [[ "$injected" == "0" ]]; then
-                injected=1
-                printf 'timing-phase-boundary\n'
-                kill -TERM $$
-              fi
-              DEPLOY_TIMING_PHASE=""
-              return 0
-            }
-            BASH;
+            BASH,
+            default => throw new \InvalidArgumentException('Unknown timing signal boundary.'),
+        };
 
         return str_replace(
             '__INJECTION__',
