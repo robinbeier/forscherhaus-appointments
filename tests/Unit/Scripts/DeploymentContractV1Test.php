@@ -56,6 +56,58 @@ final class DeploymentContractV1Test extends TestCase
         self::assertSame(1, $result['deploy_invocation_count']);
     }
 
+    public function testRollbackReservationIsDurableAndObserveOnly(): void
+    {
+        $result = DeploymentContractV1::validateRunLines($this->rollbackRunningLines());
+
+        self::assertSame('rollback_running', $result['state']);
+        self::assertSame('attach_observe_only', $result['recovery']);
+        self::assertSame(1, $result['deploy_invocation_count']);
+    }
+
+    public function testSuccessfulProgressionDoesNotEnterRollbackReservation(): void
+    {
+        self::assertNotContains('rollback_running', DeploymentContractV1::PROGRESS_STATES);
+        $states = array_map(
+            static fn(string $line): string => json_decode($line, true, 64, JSON_THROW_ON_ERROR)['state'],
+            array_slice($this->successfulRunLines(), 1),
+        );
+        $postGateIndex = array_search('post_gates_running', $states, true);
+        self::assertIsInt($postGateIndex);
+        self::assertSame('succeeded', $states[$postGateIndex + 1]);
+    }
+
+    public function testRollbackReservationCanOnlyFollowPostGates(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'rollback_running', 1));
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
+    #[DataProvider('transitionForbiddenAfterRollbackReservationProvider')]
+    public function testRollbackReservationRejectsIllegalContinuation(
+        string $state,
+        int $exitCode,
+        string $reason,
+    ): void {
+        $lines = $this->rollbackRunningLines();
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $exitCode, $reason));
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
+    /** @return iterable<string,array{string,int,string}> */
+    public static function transitionForbiddenAfterRollbackReservationProvider(): iterable
+    {
+        yield 'second reservation' => ['rollback_running', 0, 'ok'];
+        yield 'backward to post-gates' => ['post_gates_running', 0, 'ok'];
+        yield 'success skips rollback verdict' => ['succeeded', 0, 'ok'];
+        yield 'failed before write after invocation' => ['failed_before_write', 70, 'contract_invalid'];
+    }
+
     #[DataProvider('invalidTransitionProvider')]
     public function testInvalidTransitionIsRejected(string $previous, string $next, int $count): void
     {
@@ -251,7 +303,7 @@ final class DeploymentContractV1Test extends TestCase
         int $exit,
         string $reason,
     ): void {
-        $lines = $this->runThrough($from);
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
         $lines[] = $this->encode($this->transition($lines, $state, $count, $exit, $reason));
 
         self::assertSame('terminal', DeploymentContractV1::validateRunLines($lines)['recovery']);
@@ -268,19 +320,13 @@ final class DeploymentContractV1Test extends TestCase
         yield 'commit' => ['lock_acquired', 'failed_before_write', 0, 25, 'expected_commit_mismatch'];
         yield 'pre-switch' => ['deploy_running', 'failed_pre_switch', 1, 30, 'deploy_failed'];
         yield 'rollback succeeded' => [
-            'post_gates_running',
+            'rollback_running',
             'failed_post_switch_rollback_succeeded',
             1,
             30,
             'deploy_failed',
         ];
-        yield 'rollback failed' => [
-            'post_gates_running',
-            'failed_post_switch_rollback_failed',
-            1,
-            31,
-            'rollback_failed',
-        ];
+        yield 'rollback failed' => ['rollback_running', 'failed_post_switch_rollback_failed', 1, 31, 'rollback_failed'];
         yield 'switch recovery' => [
             'deploy_running',
             'failed_switch_recovery_required',
@@ -292,6 +338,33 @@ final class DeploymentContractV1Test extends TestCase
         yield 'conflict' => ['accepted', 'failed_before_write', 0, 75, 'state_conflict'];
         yield 'interrupted before write' => ['artifact_verified', 'failed_before_write', 0, 143, 'interrupted'];
         yield 'interrupted after invocation' => ['deploy_running', 'manual_recovery_required', 1, 143, 'interrupted'];
+    }
+
+    public function testInterruptedInvocationCannotUseFailedPreSwitchJournalTerminal(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'failed_pre_switch', 1, 143, 'interrupted'));
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
+    public function testInterruptedInvocationCannotUseFailedPreSwitchBundleTerminal(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'failed_pre_switch', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'failed_pre_switch',
+            143,
+            'interrupted',
+            30,
+            'not_run',
+            'not_observed',
+        );
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
     public function testWrongExitReasonPairIsRejected(): void
@@ -342,6 +415,15 @@ final class DeploymentContractV1Test extends TestCase
         $lines[] = $this->encode(
             $this->transition($lines, 'manual_recovery_required', 1, 32, 'switch_recovery_required'),
         );
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
+    public function testPostGateRollbackFailureCannotSkipWriteAheadReservation(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 31, 'rollback_failed'));
 
         $this->expectException(RuntimeException::class);
         DeploymentContractV1::validateRunLines($lines);
@@ -986,7 +1068,7 @@ final class DeploymentContractV1Test extends TestCase
         string $rollbackOutcome,
         string $postGateStatus,
     ): void {
-        $lines = $this->runThrough($from);
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
         $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
         $evidence = $this->invokedFailureEvidence(
             $lines,
@@ -1031,8 +1113,17 @@ final class DeploymentContractV1Test extends TestCase
             'succeeded',
             'not_observed',
         ];
+        yield 'rollback failed before post-gates' => [
+            'deploy_running',
+            'failed_post_switch_rollback_failed',
+            31,
+            'rollback_failed',
+            31,
+            'failed',
+            'not_observed',
+        ];
         yield 'rollback succeeded after post-gates' => [
-            'post_gates_running',
+            'rollback_running',
             'failed_post_switch_rollback_succeeded',
             30,
             'deploy_failed',
@@ -1041,7 +1132,7 @@ final class DeploymentContractV1Test extends TestCase
             'failed',
         ];
         yield 'rollback failed after post-gates' => [
-            'post_gates_running',
+            'rollback_running',
             'failed_post_switch_rollback_failed',
             31,
             'rollback_failed',
@@ -1051,11 +1142,119 @@ final class DeploymentContractV1Test extends TestCase
         ];
     }
 
+    #[DataProvider('completedPostGateRollbackProvider')]
+    public function testCompletedPostGateRollbackRequiresDedicatedReservation(
+        string $state,
+        int $publicExit,
+        string $reason,
+        string $rollbackStatus,
+    ): void {
+        $lines = $this->rollbackRunningLines();
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            $publicExit,
+            $reason,
+            $publicExit,
+            $rollbackStatus,
+            'failed',
+        );
+        $evidence['rollback'] = $this->rollbackEvidence('not_invoked');
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,int,string,string}> */
+    public static function completedPostGateRollbackProvider(): iterable
+    {
+        yield 'rollback succeeded' => ['failed_post_switch_rollback_succeeded', 30, 'deploy_failed', 'succeeded'];
+        yield 'rollback failed' => ['failed_post_switch_rollback_failed', 31, 'rollback_failed', 'failed'];
+    }
+
+    #[DataProvider('completedPostGateRollbackProvider')]
+    public function testCompletedRollbackCannotSkipWriteAheadReservation(
+        string $state,
+        int $publicExit,
+        string $reason,
+        string $_rollbackStatus,
+    ): void {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
+    #[DataProvider('completedPostGateRollbackProvider')]
+    public function testPostGateRollbackTerminalRejectsFailedDeployAlias(
+        string $state,
+        int $publicExit,
+        string $reason,
+        string $rollbackStatus,
+    ): void {
+        $lines = $this->rollbackRunningLines();
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            $publicExit,
+            $reason,
+            $publicExit,
+            $rollbackStatus,
+            'failed',
+        );
+        $evidence['deploy'] = [
+            'status' => 'failed',
+            'invocation_count' => 1,
+            'exit_code' => $publicExit,
+            'rollback_outcome' => $rollbackStatus,
+        ];
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    #[DataProvider('completedPostGateRollbackProvider')]
+    public function testDirectInternalRollbackCannotClaimDedicatedRollback(
+        string $state,
+        int $publicExit,
+        string $reason,
+        string $rollbackStatus,
+    ): void {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            $publicExit,
+            $reason,
+            $publicExit,
+            $rollbackStatus,
+            'not_observed',
+        );
+        $evidence['rollback'] = $this->rollbackEvidence($rollbackStatus);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testDedicatedRollbackCannotBeClaimedBySuccessfulDeployment(): void
+    {
+        $lines = $this->successfulRunLines();
+        $evidence = $this->validEvidence($lines);
+        $evidence['rollback'] = $this->rollbackEvidence('unknown');
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
     #[DataProvider('postGatePhaseMismatchProvider')]
     public function testPostGateEvidenceMustMatchTheFailureTransitionPhase(string $from, string $postGateStatus): void
     {
         $state = 'failed_post_switch_rollback_failed';
-        $lines = $this->runThrough($from);
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
         $lines[] = $this->encode($this->transition($lines, $state, 1, 31, 'rollback_failed'));
         $evidence = $this->invokedFailureEvidence($lines, $state, 31, 'rollback_failed', 31, 'failed', $postGateStatus);
 
@@ -1068,7 +1267,7 @@ final class DeploymentContractV1Test extends TestCase
     public static function postGatePhaseMismatchProvider(): iterable
     {
         yield 'claims failure before post-gates' => ['deploy_running', 'failed'];
-        yield 'omits failure after post-gates' => ['post_gates_running', 'not_observed'];
+        yield 'omits failure after reservation' => ['rollback_running', 'not_observed'];
     }
 
     #[DataProvider('rollbackSucceededPostGatePhaseMismatchProvider')]
@@ -1077,7 +1276,7 @@ final class DeploymentContractV1Test extends TestCase
         string $postGateStatus,
     ): void {
         $state = 'failed_post_switch_rollback_succeeded';
-        $lines = $this->runThrough($from);
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
         $lines[] = $this->encode($this->transition($lines, $state, 1, 30, 'deploy_failed'));
         $evidence = $this->invokedFailureEvidence(
             $lines,
@@ -1098,7 +1297,7 @@ final class DeploymentContractV1Test extends TestCase
     public static function rollbackSucceededPostGatePhaseMismatchProvider(): iterable
     {
         yield 'claims failure before post-gates' => ['deploy_running', 'failed'];
-        yield 'omits failure after post-gates' => ['post_gates_running', 'not_observed'];
+        yield 'omits failure after reservation' => ['rollback_running', 'not_observed'];
     }
 
     public function testInterruptedManualRecoveryBeforePostGatesRetainsUnknownDeployOutcome(): void
@@ -1282,6 +1481,104 @@ final class DeploymentContractV1Test extends TestCase
         ];
     }
 
+    public function testInterruptedManualRecoveryAfterRollbackReservationRetainsUnknownOutcome(): void
+    {
+        $lines = $this->rollbackRunningLines();
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'failed',
+        );
+        $evidence['rollback'] = $this->rollbackEvidence('unknown');
+
+        self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    public function testRollbackFailureManualRecoveryRetainsFailedVerifiedOutcome(): void
+    {
+        $lines = $this->rollbackRunningLines();
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 31, 'rollback_failed'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            31,
+            'rollback_failed',
+            31,
+            'failed',
+            'failed',
+        );
+
+        self::assertFalse($evidence['rollback']['verified']);
+        self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    #[DataProvider('nonInterruptedRollbackFailureProvider')]
+    public function testNonInterruptedRollbackFailureCannotRetainUnknownOutcome(string $state): void
+    {
+        $lines = $this->rollbackRunningLines();
+        $lines[] = $this->encode($this->transition($lines, $state, 1, 31, 'rollback_failed'));
+        $evidence = $this->invokedFailureEvidence($lines, $state, 31, 'rollback_failed', 31, 'failed', 'failed');
+        $evidence['rollback'] = $this->rollbackEvidence('unknown');
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function nonInterruptedRollbackFailureProvider(): iterable
+    {
+        yield 'failed rollback terminal' => ['failed_post_switch_rollback_failed'];
+        yield 'manual recovery terminal' => ['manual_recovery_required'];
+    }
+
+    #[DataProvider('contradictoryRollbackEvidenceProvider')]
+    public function testRollbackEvidenceRejectsMalformedOrContradictoryShape(
+        array $overrides,
+        ?string $missingField = null,
+    ): void {
+        $lines = $this->rollbackRunningLines();
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'failed',
+        );
+        $evidence['rollback'] = array_replace($this->rollbackEvidence('unknown'), $overrides);
+        if ($missingField !== null) {
+            unset($evidence['rollback'][$missingField]);
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>,?string}> */
+    public static function contradictoryRollbackEvidenceProvider(): iterable
+    {
+        yield 'missing field' => [[], 'verified'];
+        yield 'extra field' => [['exit_code' => null], null];
+        yield 'wrong status type' => [['status' => 1], null];
+        yield 'wrong invocation count type' => [['invocation_count' => '1'], null];
+        yield 'wrong verified type' => [['verified' => 'false'], null];
+        yield 'unknown status enum' => [['status' => 'reserved'], null];
+        yield 'second invocation' => [['invocation_count' => 2], null];
+        yield 'unknown without reservation' => [['invocation_count' => 0], null];
+        yield 'unknown with wrong mode' => [['mode' => 'not_applicable'], null];
+        yield 'unknown with verdict' => [['verified' => false], null];
+        yield 'succeeded without verdict' => [['status' => 'succeeded'], null];
+        yield 'failed with successful verdict' => [['status' => 'failed', 'verified' => true], null];
+        yield 'not invoked with dedicated mode' => [['status' => 'not_invoked', 'invocation_count' => 0], null];
+    }
+
     #[DataProvider('invalidIncompletePostGateShapeProvider')]
     public function testIncompletePostGateEvidenceRejectsContradictoryShape(array $observed): void
     {
@@ -1336,7 +1633,7 @@ final class DeploymentContractV1Test extends TestCase
         int $deployExit,
         string $rollbackOutcome,
     ): void {
-        $lines = $this->runThrough($from);
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
         $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
         $evidence = $this->invokedFailureEvidence(
             $lines,
@@ -1357,7 +1654,7 @@ final class DeploymentContractV1Test extends TestCase
     public static function forbiddenIncompletePostGateTerminalProvider(): iterable
     {
         yield 'rollback terminal' => [
-            'post_gates_running',
+            'rollback_running',
             'failed_post_switch_rollback_succeeded',
             30,
             'deploy_failed',
@@ -1365,7 +1662,7 @@ final class DeploymentContractV1Test extends TestCase
             'succeeded',
         ];
         yield 'manual recovery rollback reason' => [
-            'post_gates_running',
+            'rollback_running',
             'manual_recovery_required',
             31,
             'rollback_failed',
@@ -1450,6 +1747,12 @@ final class DeploymentContractV1Test extends TestCase
             'recovery_required',
             'failed',
         );
+        $evidence['deploy'] = [
+            'status' => 'failed',
+            'invocation_count' => 1,
+            'exit_code' => 31,
+            'rollback_outcome' => 'recovery_required',
+        ];
 
         $this->expectException(RuntimeException::class);
         DeploymentContractV1::validateBundle($lines, $evidence);
@@ -1482,7 +1785,7 @@ final class DeploymentContractV1Test extends TestCase
         int $deployExit,
         string $rollbackOutcome,
     ): void {
-        $lines = $this->runThrough('post_gates_running');
+        $lines = $this->rollbackRunningLines();
         $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
         $evidence = $this->invokedFailureEvidence(
             $lines,
@@ -1911,7 +2214,7 @@ final class DeploymentContractV1Test extends TestCase
 
     public function testFailedPostGateEvidenceRejectsMoreHealthyThanTotalKumaChecks(): void
     {
-        $lines = $this->runThrough('post_gates_running');
+        $lines = $this->rollbackRunningLines();
         $lines[] = $this->encode(
             $this->transition($lines, 'failed_post_switch_rollback_failed', 1, 31, 'rollback_failed'),
         );
@@ -1932,7 +2235,7 @@ final class DeploymentContractV1Test extends TestCase
 
     public function testPostGateSummaryIsDerivedFromEveryIndividualCheck(): void
     {
-        $lines = $this->runThrough('post_gates_running');
+        $lines = $this->rollbackRunningLines();
         $lines[] = $this->encode(
             $this->transition($lines, 'failed_post_switch_rollback_failed', 1, 31, 'rollback_failed'),
         );
@@ -2248,6 +2551,7 @@ final class DeploymentContractV1Test extends TestCase
             [
                 'deploy_running',
                 'post_gates_running',
+                'rollback_running',
                 'succeeded',
                 'failed_pre_switch',
                 'failed_switch_recovery_required',
@@ -2273,6 +2577,15 @@ final class DeploymentContractV1Test extends TestCase
             'exit_code' => $exit,
             'reason' => $reason,
         ];
+    }
+
+    /** @return list<string> */
+    private function rollbackRunningLines(): array
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, 'rollback_running', 1));
+
+        return $lines;
     }
 
     /** @param list<string> $lines @return array<string,mixed> */
@@ -2346,6 +2659,7 @@ final class DeploymentContractV1Test extends TestCase
                 'exit_code' => 0,
                 'rollback_outcome' => 'not_run',
             ],
+            'rollback' => $this->rollbackEvidence('not_invoked'),
             'post_gates' => [
                 'status' => 'passed',
                 'kuma_healthy_count' => 13,
@@ -2465,6 +2779,19 @@ final class DeploymentContractV1Test extends TestCase
             'exit_code' => $deployExit,
             'rollback_outcome' => $rollbackOutcome,
         ];
+        $terminal = json_decode($lines[array_key_last($lines)], true, 64, JSON_THROW_ON_ERROR);
+        if (in_array($terminal['previous_state'], ['post_gates_running', 'rollback_running'], true)) {
+            $evidence['deploy'] = $this->succeededDeployEvidence();
+        }
+        if ($terminal['previous_state'] === 'rollback_running') {
+            if ($state === 'failed_post_switch_rollback_succeeded') {
+                $evidence['rollback'] = $this->rollbackEvidence('succeeded');
+            } elseif ($state === 'failed_post_switch_rollback_failed' || $reason === 'rollback_failed') {
+                $evidence['rollback'] = $this->rollbackEvidence('failed');
+            } elseif ($state === 'manual_recovery_required' && $reason === 'interrupted') {
+                $evidence['rollback'] = $this->rollbackEvidence('unknown');
+            }
+        }
         if ($postGateStatus === 'not_observed') {
             $evidence['post_gates'] = $this->notObservedSection($evidence['post_gates']);
         } else {
@@ -2498,6 +2825,38 @@ final class DeploymentContractV1Test extends TestCase
             'exit_code' => 0,
             'rollback_outcome' => 'not_run',
         ];
+    }
+
+    /** @return array{status:string,invocation_count:int,mode:string,verified:?bool} */
+    private function rollbackEvidence(string $status): array
+    {
+        return match ($status) {
+            'not_invoked' => [
+                'status' => 'not_invoked',
+                'invocation_count' => 0,
+                'mode' => 'not_applicable',
+                'verified' => null,
+            ],
+            'unknown' => [
+                'status' => 'unknown',
+                'invocation_count' => 1,
+                'mode' => 'dedicated_post_gate_recovery',
+                'verified' => null,
+            ],
+            'succeeded' => [
+                'status' => 'succeeded',
+                'invocation_count' => 1,
+                'mode' => 'dedicated_post_gate_recovery',
+                'verified' => true,
+            ],
+            'failed' => [
+                'status' => 'failed',
+                'invocation_count' => 1,
+                'mode' => 'dedicated_post_gate_recovery',
+                'verified' => false,
+            ],
+            default => throw new RuntimeException('unknown rollback test status'),
+        };
     }
 
     /** @param array<string,mixed> $section @return array<string,mixed> */

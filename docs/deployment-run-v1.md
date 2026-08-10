@@ -14,8 +14,11 @@ ROB-455 is delivered serially:
 3. an operator-side coordinator that builds, uploads, starts, attaches, waits,
    and fetches evidence.
 
-`deploy_ea.sh` remains the single deploy primitive. The later runner may invoke
-it once; this contract never invokes it.
+`deploy_ea.sh` remains the single normal deploy primitive. The later runner may
+invoke that normal deploy mode once; this contract never invokes it. A failure
+in an independent post-gate may require the script's dedicated recovery mode,
+which has its own separately reserved at-most-once action and never increments
+or resets the normal deploy invocation count.
 
 ## Logical intent and attachment
 
@@ -79,6 +82,26 @@ must never create a second deploy process. Before reservation, a valid prefix
 may be attached for status/revalidation. After terminal persistence, attachment
 only returns the existing result.
 
+The independent post-gates run only after the normal deploy child has returned
+successfully. If one of those gates fails, a future runner must durably reserve
+the dedicated rollback action by appending and fsyncing the monotonic branch
+state `rollback_running` before starting it:
+
+```text
+post_gates_running -> rollback_running
+  -> failed_post_switch_rollback_succeeded
+  |  failed_post_switch_rollback_failed
+  |  manual_recovery_required
+```
+
+`rollback_running` is not part of the success path and cannot transition back
+to a prior state or to `succeeded`. It represents separate reservation count
+`1`, is attach-observe-only, and is not a second normal deploy invocation. A
+crash before reservation leaves rollback `not_invoked`; a crash after
+reservation but before a verified verdict records rollback `unknown` and
+requires manual recovery rather than an automatic retry. The Host-runner PR
+owns the reservation write, fsync, spawn, and reconciliation implementation.
+
 ## Public exit and reason pairs
 
 The public contract uses only stable pairs:
@@ -118,7 +141,8 @@ Its sections are:
 - capacity available/projected bytes, observed/projected used percentages, the
   fixed `85` percent ceiling, and a derived decision;
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
-- exactly-once deploy exit and rollback outcome;
+- exactly-once deploy exit and any rollback performed inside that child;
+- a separate at-most-once dedicated post-gate rollback reservation and verdict;
 - independent post-gates including Kuma raw `13/13`, runtime config, services,
   endpoints, logs, scanner, and dormant/clean;
 - a reference to the authoritative `deploy_timing.v1` file by SHA and its own
@@ -141,14 +165,23 @@ earlier verified gate;
 the journal's last verified state must agree. Evidence `captured_at_utc` cannot
 precede the terminal journal timestamp. A successful result requires all
 safety and post-gate sections to pass. Post-switch terminal evidence reached
-directly from `deploy_running` keeps post-gates `not_observed`; a rollback or
-manual-recovery terminal reached from `post_gates_running` requires failed
-post-gate evidence. The sole partial exception is
+directly from `deploy_running` keeps post-gates `not_observed` and the separate
+rollback section `not_invoked`; rollback performed inside `deploy_ea.sh` remains
+part of the deploy-child evidence. A completed dedicated rollback terminal is
+reachable only from `rollback_running`; it preserves the already successful
+deploy child and requires the separately reserved rollback verdict. A
+manual-recovery terminal reached from `post_gates_running` or
+`rollback_running` requires failed post-gate evidence. The sole partial
+exception is
 `post_gates_running -> manual_recovery_required` with reason `interrupted`:
 it may use status `incomplete` when the interruption prevented all checks from
 finishing. Because the deploy child completed before post-gates began, its
 deploy evidence remains `succeeded` with exit `0` and rollback `not_run`; the
-terminal run still fails closed on the interrupted post-gates. In that shape
+terminal run still fails closed on the interrupted post-gates. Its separate
+rollback evidence is `not_invoked` with reservation count `0` when the terminal
+follows `post_gates_running`, or `unknown` with reservation count `1`, fixed
+mode `dedicated_post_gate_recovery`, and no invented verdict when it follows
+`rollback_running`. In that shape
 `passed` is `null`, unobserved checks stay `null`,
 observed booleans retain their exact values, and the two Kuma counts are either
 both absent or both valid with healthy not exceeding total. At least one check
@@ -251,8 +284,8 @@ runner slice must establish and test these invariants before activation:
 - canonical, non-symlink, root-controlled ancestor chain;
 - root-owned state root and per-run directory, mode `0700`;
 - root-owned regular non-symlink files, mode `0600`, one hardlink;
-- one global root-controlled lock and the invocation reservation in the same
-  state root;
+- one global root-controlled lock plus the normal deploy and dedicated rollback
+  invocation reservations in the same state root;
 - atomic complete-record append/replacement and durability before process
   spawn;
 - identity checks before and after every read/write;

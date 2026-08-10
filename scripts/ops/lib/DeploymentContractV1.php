@@ -33,6 +33,8 @@ final class DeploymentContractV1
         'succeeded',
     ];
 
+    public const ROLLBACK_RESERVATION_STATE = 'rollback_running';
+
     public const TERMINAL_FAILURE_STATES = [
         'failed_before_write',
         'failed_pre_switch',
@@ -124,6 +126,7 @@ final class DeploymentContractV1
         'capacity',
         'artifact',
         'deploy',
+        'rollback',
         'post_gates',
         'deploy_timing',
         'orchestrator_timing',
@@ -302,6 +305,7 @@ final class DeploymentContractV1
         self::validateCapacityEvidence($evidence['capacity']);
         self::validateArtifactEvidence($evidence['artifact']);
         self::validateDeployEvidence($evidence['deploy']);
+        self::validateRollbackEvidence($evidence['rollback']);
         self::validatePostGateEvidence($evidence['post_gates']);
         self::validateDeployTimingEvidence($evidence['deploy_timing']);
         self::validateOrchestratorTiming($evidence['orchestrator_timing']);
@@ -318,6 +322,11 @@ final class DeploymentContractV1
             $evidence['result']['state'],
             $evidence['result']['reason'],
             $evidence['deploy'],
+        );
+        self::assertRollbackResultConsistency(
+            $evidence['result']['state'],
+            $evidence['result']['reason'],
+            $evidence['rollback'],
         );
         self::assertTerminalEvidenceConsistency($evidence);
         if (
@@ -406,8 +415,31 @@ final class DeploymentContractV1
 
     private static function assertStateTransition(string $previous, mixed $next): void
     {
-        if (!is_string($next) || !in_array($next, [...self::PROGRESS_STATES, ...self::TERMINAL_FAILURE_STATES], true)) {
+        if (
+            !is_string($next) ||
+            !in_array(
+                $next,
+                [...self::PROGRESS_STATES, self::ROLLBACK_RESERVATION_STATE, ...self::TERMINAL_FAILURE_STATES],
+                true,
+            )
+        ) {
             throw new RuntimeException('state is unknown');
+        }
+        if ($previous === self::ROLLBACK_RESERVATION_STATE) {
+            if (
+                in_array(
+                    $next,
+                    [
+                        'failed_post_switch_rollback_succeeded',
+                        'failed_post_switch_rollback_failed',
+                        'manual_recovery_required',
+                    ],
+                    true,
+                )
+            ) {
+                return;
+            }
+            throw new RuntimeException('failure state is incompatible with the rollback reservation phase');
         }
         $index = array_search($previous, self::PROGRESS_STATES, true);
         if (!is_int($index)) {
@@ -415,6 +447,9 @@ final class DeploymentContractV1
         }
         $expectedNext = self::PROGRESS_STATES[$index + 1] ?? null;
         if ($next === $expectedNext) {
+            return;
+        }
+        if ($previous === 'post_gates_running' && $next === self::ROLLBACK_RESERVATION_STATE) {
             return;
         }
         if (!in_array($next, self::TERMINAL_FAILURE_STATES, true)) {
@@ -431,15 +466,13 @@ final class DeploymentContractV1
             return;
         }
         if (
-            in_array(
-                $next,
-                [
-                    'failed_post_switch_rollback_succeeded',
-                    'failed_post_switch_rollback_failed',
-                    'manual_recovery_required',
-                ],
-                true,
-            ) &&
+            in_array($next, ['failed_post_switch_rollback_succeeded', 'failed_post_switch_rollback_failed'], true) &&
+            $previous === 'deploy_running'
+        ) {
+            return;
+        }
+        if (
+            $next === 'manual_recovery_required' &&
             in_array($previous, ['deploy_running', 'post_gates_running'], true)
         ) {
             return;
@@ -457,6 +490,7 @@ final class DeploymentContractV1
             [
                 'deploy_running',
                 'post_gates_running',
+                self::ROLLBACK_RESERVATION_STATE,
                 'succeeded',
                 'failed_pre_switch',
                 'failed_switch_recovery_required',
@@ -479,12 +513,15 @@ final class DeploymentContractV1
         if (!array_key_exists($reason, self::EXIT_REASONS) || self::EXIT_REASONS[$reason] !== $exitCode) {
             throw new RuntimeException('exit_code and reason are not a stable pair');
         }
-        if (in_array($state, self::PROGRESS_STATES, true) && ($exitCode !== 0 || $reason !== 'ok')) {
+        if (
+            (in_array($state, self::PROGRESS_STATES, true) || $state === self::ROLLBACK_RESERVATION_STATE) &&
+            ($exitCode !== 0 || $reason !== 'ok')
+        ) {
             throw new RuntimeException('non-terminal states cannot carry a failure result');
         }
         $allowed = match ($state) {
             'failed_before_write' => [20, 21, 22, 23, 24, 25, 70, 75, 143],
-            'failed_pre_switch' => [30, 143],
+            'failed_pre_switch' => [30],
             'failed_switch_recovery_required' => [32],
             'failed_post_switch_rollback_succeeded' => [30],
             'failed_post_switch_rollback_failed' => [31],
@@ -501,6 +538,13 @@ final class DeploymentContractV1
         string $state,
         string $reason,
     ): void {
+        if (
+            $previous === 'post_gates_running' &&
+            $state === 'manual_recovery_required' &&
+            $reason === 'rollback_failed'
+        ) {
+            throw new RuntimeException('rollback failure requires a durable rollback reservation');
+        }
         if ($state !== 'failed_before_write') {
             return;
         }
@@ -700,21 +744,6 @@ final class DeploymentContractV1
     /** @param array<string,mixed> $last @param array<string,mixed> $evidence */
     private static function assertFailureTransitionMatchesEvidence(array $last, array $evidence): void
     {
-        if ($last['state'] === 'manual_recovery_required' && $last['reason'] === 'interrupted') {
-            $actualDeploy = [
-                $evidence['deploy']['status'],
-                $evidence['deploy']['invocation_count'],
-                $evidence['deploy']['exit_code'],
-                $evidence['deploy']['rollback_outcome'],
-            ];
-            $expectedDeploy =
-                $last['previous_state'] === 'deploy_running'
-                    ? ['unknown', 1, null, 'not_observed']
-                    : ['succeeded', 1, 0, 'not_run'];
-            if ($actualDeploy !== $expectedDeploy) {
-                throw new RuntimeException('deploy evidence does not match the interrupted transition phase');
-            }
-        }
         if (
             in_array(
                 $last['state'],
@@ -726,7 +755,66 @@ final class DeploymentContractV1
                 true,
             )
         ) {
-            $allowedPostGateStatuses = $last['previous_state'] === 'post_gates_running' ? ['failed'] : ['not_observed'];
+            $actualDeploy = [
+                $evidence['deploy']['status'],
+                $evidence['deploy']['invocation_count'],
+                $evidence['deploy']['exit_code'],
+                $evidence['deploy']['rollback_outcome'],
+            ];
+            $actualRollback = [
+                $evidence['rollback']['status'],
+                $evidence['rollback']['invocation_count'],
+                $evidence['rollback']['mode'],
+                $evidence['rollback']['verified'],
+            ];
+            $notInvokedRollback = ['not_invoked', 0, 'not_applicable', null];
+            if ($last['previous_state'] === 'deploy_running') {
+                $expectedDeploy = match ($last['state']) {
+                    'failed_post_switch_rollback_succeeded' => ['failed', 1, 30, 'succeeded'],
+                    'failed_post_switch_rollback_failed' => ['failed', 1, 31, 'failed'],
+                    'manual_recovery_required' => $last['reason'] === 'interrupted'
+                        ? ['unknown', 1, null, 'not_observed']
+                        : ['failed', 1, 31, 'recovery_required'],
+                };
+                if ($actualDeploy !== $expectedDeploy || $actualRollback !== $notInvokedRollback) {
+                    throw new RuntimeException(
+                        'deploy or rollback evidence does not match the failure transition phase',
+                    );
+                }
+            } elseif ($last['previous_state'] === 'post_gates_running') {
+                if ($actualDeploy !== ['succeeded', 1, 0, 'not_run']) {
+                    throw new RuntimeException('deploy evidence does not match the post-gate transition phase');
+                }
+                if (
+                    $last['state'] !== 'manual_recovery_required' ||
+                    $last['reason'] !== 'interrupted' ||
+                    $actualRollback !== $notInvokedRollback
+                ) {
+                    throw new RuntimeException('rollback evidence does not match the pre-reservation transition phase');
+                }
+            } else {
+                if ($actualDeploy !== ['succeeded', 1, 0, 'not_run']) {
+                    throw new RuntimeException('deploy evidence does not match the rollback reservation phase');
+                }
+                $allowedRollback = match ($last['state']) {
+                    'failed_post_switch_rollback_succeeded' => [['succeeded', 1, 'dedicated_post_gate_recovery', true]],
+                    'failed_post_switch_rollback_failed' => [['failed', 1, 'dedicated_post_gate_recovery', false]],
+                    'manual_recovery_required' => $last['reason'] === 'interrupted'
+                        ? [['unknown', 1, 'dedicated_post_gate_recovery', null]]
+                        : [['failed', 1, 'dedicated_post_gate_recovery', false]],
+                };
+                if (!in_array($actualRollback, $allowedRollback, true)) {
+                    throw new RuntimeException('rollback evidence does not match the rollback reservation phase');
+                }
+            }
+
+            $allowedPostGateStatuses = in_array(
+                $last['previous_state'],
+                ['post_gates_running', self::ROLLBACK_RESERVATION_STATE],
+                true,
+            )
+                ? ['failed']
+                : ['not_observed'];
             if (
                 $last['state'] === 'manual_recovery_required' &&
                 $last['reason'] === 'interrupted' &&
@@ -1251,6 +1339,31 @@ final class DeploymentContractV1
         }
     }
 
+    private static function validateRollbackEvidence(mixed $section): void
+    {
+        self::assertObject($section, 'rollback');
+        self::assertExactKeys($section, ['status', 'invocation_count', 'mode', 'verified'], 'rollback');
+        self::assertEnum($section['status'], ['not_invoked', 'unknown', 'succeeded', 'failed'], 'rollback.status');
+        if (!is_int($section['invocation_count']) || !in_array($section['invocation_count'], [0, 1], true)) {
+            throw new RuntimeException('rollback.invocation_count must be zero or one');
+        }
+        self::assertEnum($section['mode'], ['not_applicable', 'dedicated_post_gate_recovery'], 'rollback.mode');
+        if ($section['verified'] !== null && !is_bool($section['verified'])) {
+            throw new RuntimeException('rollback.verified must be boolean or null');
+        }
+
+        $actual = [$section['status'], $section['invocation_count'], $section['mode'], $section['verified']];
+        $expected = match ($section['status']) {
+            'not_invoked' => ['not_invoked', 0, 'not_applicable', null],
+            'unknown' => ['unknown', 1, 'dedicated_post_gate_recovery', null],
+            'succeeded' => ['succeeded', 1, 'dedicated_post_gate_recovery', true],
+            'failed' => ['failed', 1, 'dedicated_post_gate_recovery', false],
+        };
+        if ($actual !== $expected) {
+            throw new RuntimeException('rollback evidence is inconsistent');
+        }
+    }
+
     /** @param array<string,mixed> $deploy */
     private static function assertDeployResultConsistency(string $state, string $reason, array $deploy): void
     {
@@ -1266,13 +1379,34 @@ final class DeploymentContractV1
             'failed_before_write' => ['not_invoked', 0, null, 'not_applicable'],
             'failed_pre_switch' => ['failed', 1, 30, 'not_run'],
             'failed_switch_recovery_required' => ['failed', 1, 32, 'recovery_required'],
-            'failed_post_switch_rollback_succeeded' => ['failed', 1, 30, 'succeeded'],
-            'failed_post_switch_rollback_failed' => ['failed', 1, 31, 'failed'],
-            'manual_recovery_required' => ['failed', 1, 31, 'recovery_required'],
+            'failed_post_switch_rollback_succeeded' => [['failed', 1, 30, 'succeeded'], ['succeeded', 1, 0, 'not_run']],
+            'failed_post_switch_rollback_failed' => [['failed', 1, 31, 'failed'], ['succeeded', 1, 0, 'not_run']],
+            'manual_recovery_required' => [['failed', 1, 31, 'recovery_required'], ['succeeded', 1, 0, 'not_run']],
             default => throw new RuntimeException('result state is unknown'),
         };
-        if ($actual !== $expected) {
+        $allowed = isset($expected[0]) && is_array($expected[0]) ? $expected : [$expected];
+        if (!in_array($actual, $allowed, true)) {
             throw new RuntimeException('deploy and rollback evidence is inconsistent with the terminal state');
+        }
+    }
+
+    /** @param array<string,mixed> $rollback */
+    private static function assertRollbackResultConsistency(string $state, string $reason, array $rollback): void
+    {
+        $actual = [$rollback['status'], $rollback['invocation_count'], $rollback['mode'], $rollback['verified']];
+        $notInvoked = ['not_invoked', 0, 'not_applicable', null];
+        $unknown = ['unknown', 1, 'dedicated_post_gate_recovery', null];
+        $succeeded = ['succeeded', 1, 'dedicated_post_gate_recovery', true];
+        $failed = ['failed', 1, 'dedicated_post_gate_recovery', false];
+
+        $allowed = match ($state) {
+            'failed_post_switch_rollback_succeeded' => [$notInvoked, $succeeded],
+            'failed_post_switch_rollback_failed' => [$notInvoked, $failed],
+            'manual_recovery_required' => $reason === 'interrupted' ? [$notInvoked, $unknown] : [$notInvoked, $failed],
+            default => [$notInvoked],
+        };
+        if (!in_array($actual, $allowed, true)) {
+            throw new RuntimeException('rollback evidence is inconsistent with the terminal state');
         }
     }
 

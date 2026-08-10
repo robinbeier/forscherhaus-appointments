@@ -69,7 +69,8 @@ Script inventory:
   boundary evidence
 - `validate_deployment_contract_v1.php` validates canonical local
   `deployment_run.v1` JSONL plus closed `deployment_evidence.v1` JSON without
-  invoking a deploy or trusting a production path
+  invoking a deploy or trusting a production path; the evidence keeps the
+  normal deploy reservation separate from any at-most-once post-gate recovery
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything
