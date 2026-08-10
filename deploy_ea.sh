@@ -429,6 +429,10 @@ deploy_timing_handle_deferred_signal() {
 
   DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
   [[ -n "$signal_exit_code" ]] || return 0
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+    deploy_result_on_recovery_signal "$signal_exit_code"
+    return 0
+  fi
   deploy_result_on_signal "$signal_exit_code"
 }
 

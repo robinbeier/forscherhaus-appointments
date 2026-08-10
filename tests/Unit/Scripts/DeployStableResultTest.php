@@ -528,43 +528,27 @@ final class DeployStableResultTest extends TestCase
 
     public function testRealTimingDoesNotReplaceRecoverySignalHandlers(): void
     {
-        $result = $this->runShell(
-            <<<'BASH'
-            source ./deploy_ea.sh
-            deploy_result_trap_install
-            DRYRUN=0
-            APP=/fixed/active
-            PREV=/fixed/previous
-            REL=ea_contract
-            WEBUSER=www-data
-            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
-            ZERO_SURPRISE_CANARY_REPORT=''
-            DEPLOY_RESULT_PHASE=switch_complete
-            deploy_monotonic_ms() { printf '1000\n'; }
-            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
-            emit_zero_surprise_incident() { :; }
-            reload_services() { :; }
-            restart_renderer_service() { return 0; }
-            probe_renderer_health() { return 0; }
-            probe_deep_health_contract() { return 0; }
-            bash() {
-              if [[ "${signal_sent:-0}" == "0" ]]; then
-                signal_sent=1
-                kill -TERM $$
-              fi
-              printf 'real-timing-recovery-finished\n'
-              return 0
-            }
-            deploy_timing_init deploy 0 postdeploy_validation
-            rollback_after_failure 'redacted failure'
-            BASH
-            ,
-        );
+        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
+            $result = $this->runShell($this->realTimingRecoverySignalHarness($signal, false));
 
-        self::assertSame(31, $result['exit_code'], $result['stderr']);
-        self::assertSame(1, substr_count($result['stdout'], "real-timing-recovery-finished\n"));
-        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
-        self::assertStringContainsString('"outcome":"rollback_failed"', $result['stdout']);
+            self::assertSame(31, $result['exit_code'], $signal . ': ' . $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "real-timing-recovery-finished\n"), $signal);
+            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
+            self::assertStringContainsString('"outcome":"rollback_failed"', $result['stdout'], $signal);
+        }
+    }
+
+    public function testDeferredRealTimingSignalsDoNotPreemptRecovery(): void
+    {
+        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
+            $result = $this->runShell($this->realTimingRecoverySignalHarness($signal, true));
+
+            self::assertSame(31, $result['exit_code'], $signal . ': ' . $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "rollback-timing-write-boundary\n"), $signal);
+            self::assertSame(1, substr_count($result['stdout'], "real-timing-recovery-finished\n"), $signal);
+            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
+            self::assertStringContainsString('"outcome":"rollback_failed"', $result['stdout'], $signal);
+        }
     }
 
     public function testSigtermRemainsTheContractInterruptionExit(): void
@@ -868,6 +852,63 @@ final class DeployStableResultTest extends TestCase
             probe_deep_health_contract() { return 0; }
             bash() { ROLLBACK_RESULT; }
             deploy_result_after_timing_finish() { printf 'signal-boundary\n'; kill -TERM $$; }
+            deploy_timing_init deploy 0 postdeploy_validation
+            rollback_after_failure 'redacted failure'
+            BASH
+            ,
+        );
+    }
+
+    private function realTimingRecoverySignalHarness(string $signal, bool $duringTimingWrite): string
+    {
+        $timingInjection = $duringTimingWrite
+            ? <<<'BASH'
+            deploy_timing_emit_record() {
+              builtin printf '%s\n' "$1"
+              if [[ "$1" == *'"event":"phase"'* && "${signal_sent:-0}" == "0" ]]; then
+                signal_sent=1
+                printf 'rollback-timing-write-boundary\n'
+                kill -SIGNAL $$
+              fi
+            }
+            BASH
+            : '';
+        $rollbackSignal = $duringTimingWrite
+            ? ''
+            : <<<'BASH'
+              if [[ "${signal_sent:-0}" == "0" ]]; then
+                signal_sent=1
+                kill -SIGNAL $$
+              fi
+            BASH;
+
+        return str_replace(
+            ['__TIMING_INJECTION__', '__ROLLBACK_SIGNAL__', 'SIGNAL'],
+            [$timingInjection, $rollbackSignal, $signal],
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            APP=/fixed/active
+            PREV=/fixed/previous
+            REL=ea_contract
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
+            ZERO_SURPRISE_CANARY_REPORT=''
+            DEPLOY_RESULT_PHASE=switch_complete
+            deploy_monotonic_ms() { printf '1000\n'; }
+            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
+            emit_zero_surprise_incident() { :; }
+            reload_services() { :; }
+            restart_renderer_service() { return 0; }
+            probe_renderer_health() { return 0; }
+            probe_deep_health_contract() { return 0; }
+            bash() {
+            __ROLLBACK_SIGNAL__
+              printf 'real-timing-recovery-finished\n'
+              return 0
+            }
+            __TIMING_INJECTION__
             deploy_timing_init deploy 0 postdeploy_validation
             rollback_after_failure 'redacted failure'
             BASH
