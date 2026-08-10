@@ -67,6 +67,11 @@ DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
 DEPLOY_TIMING_DIR="${FH_DEPLOY_TIMING_DIR:-/var/lib/fh-deploy-timing}"
 DEPLOY_TIMING_FILE=""
 
+DEPLOY_DETAIL_SCHEMA="deploy_detail.v1"
+DEPLOY_DETAIL_ACTIVE=0
+DEPLOY_DETAIL_SEQUENCE=0
+DEPLOY_DETAIL_DRY_RUN="false"
+
 SYSTEMCTL_BASE=(/bin/systemctl)
 
 deploy_monotonic_ms() {
@@ -411,6 +416,322 @@ deploy_timing_init() {
   return 0
 }
 
+deploy_detail_init() {
+  local dry_run="$1"
+
+  DEPLOY_DETAIL_ACTIVE=0
+  DEPLOY_DETAIL_SEQUENCE=0
+  [[ "${DEPLOY_TIMING_RUN_ID:-}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] \
+    || return 0
+  [[ "${DEPLOY_TIMING_START_MS:-}" =~ ^[0-9]+$ ]] || return 0
+  if [[ "$dry_run" == "1" ]]; then
+    DEPLOY_DETAIL_DRY_RUN="true"
+  else
+    DEPLOY_DETAIL_DRY_RUN="false"
+  fi
+  DEPLOY_DETAIL_ACTIVE=1
+  return 0
+}
+
+deploy_detail_pair_is_allowed() {
+  local phase="$1"
+  local subphase="$2"
+
+  case "$phase:$subphase" in
+    predeploy:stage_permissions|predeploy:zero_surprise_replay|permissions_stage:storage_transfer|permissions_stage:renderer_dependencies|permissions_stage:final_permissions|permissions_stage:runtime_config_contracts)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+deploy_detail_reason_is_allowed() {
+  case "$1" in
+    none|dry_run|stage_permissions_failed|zero_surprise_failed|storage_fingerprint_failed|rsync_failed|renderer_dependencies_failed|final_permissions_failed|runtime_config_contract_failed)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+deploy_detail_elapsed_ms() {
+  local now
+  local elapsed_ms
+
+  now="$(deploy_timing_now_ms)" || return 1
+  [[ "$now" =~ ^[0-9]+$ && "${DEPLOY_TIMING_START_MS:-}" =~ ^[0-9]+$ ]] || return 1
+  elapsed_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
+  (( elapsed_ms >= 0 )) || elapsed_ms=0
+  printf '%d\n' "$elapsed_ms"
+}
+
+deploy_detail_emit_subphase() {
+  local phase="$1"
+  local subphase="$2"
+  local status="$3"
+  local reason_code="$4"
+  local duration_ms="$5"
+  local elapsed_ms="$6"
+  local record
+
+  [[ "${DEPLOY_DETAIL_ACTIVE:-0}" == "1" ]] || return 0
+  deploy_detail_pair_is_allowed "$phase" "$subphase" || return 0
+  [[ "$status" == "ok" || "$status" == "failed" || "$status" == "skipped" ]] || return 0
+  deploy_detail_reason_is_allowed "$reason_code" || return 0
+  [[ "$duration_ms" =~ ^[0-9]+$ && "$elapsed_ms" =~ ^[0-9]+$ ]] || return 0
+
+  DEPLOY_DETAIL_SEQUENCE="$((DEPLOY_DETAIL_SEQUENCE + 1))"
+  builtin printf -v record '{"schema":"%s","run_id":"%s","sequence":%d,"event":"subphase","phase":"%s","subphase":"%s","status":"%s","reason_code":"%s","duration_ms":%d,"elapsed_ms":%d,"dry_run":%s}' \
+    "$DEPLOY_DETAIL_SCHEMA" \
+    "$DEPLOY_TIMING_RUN_ID" \
+    "$DEPLOY_DETAIL_SEQUENCE" \
+    "$phase" \
+    "$subphase" \
+    "$status" \
+    "$reason_code" \
+    "$duration_ms" \
+    "$elapsed_ms" \
+    "$DEPLOY_DETAIL_DRY_RUN"
+  builtin printf 'DEPLOY_DETAIL %s\n' "$record" || true
+  return 0
+}
+
+deploy_detail_run_subphase() {
+  local phase="$1"
+  local subphase="$2"
+  local failure_reason="$3"
+  local started_ms
+  local finished_ms
+  local duration_ms=0
+  local elapsed_ms=0
+  local exit_code
+  shift 3
+
+  started_ms="$(deploy_timing_now_ms 2>/dev/null || true)"
+
+  if "$@"; then
+    exit_code=0
+  else
+    exit_code="$?"
+  fi
+
+  finished_ms="$(deploy_timing_now_ms 2>/dev/null || true)"
+  if [[ "$started_ms" =~ ^[0-9]+$ && "$finished_ms" =~ ^[0-9]+$ ]]; then
+    duration_ms="$((10#$finished_ms - 10#$started_ms))"
+    (( duration_ms >= 0 )) || duration_ms=0
+  fi
+  elapsed_ms="$(deploy_detail_elapsed_ms 2>/dev/null || printf '0\n')"
+
+  if [[ "$exit_code" -eq 0 ]]; then
+    deploy_detail_emit_subphase "$phase" "$subphase" ok none "$duration_ms" "$elapsed_ms"
+  else
+    deploy_detail_emit_subphase "$phase" "$subphase" failed "$failure_reason" "$duration_ms" "$elapsed_ms"
+  fi
+  return "$exit_code"
+}
+
+deploy_detail_storage_totals() {
+  local root="$1"
+  local totals
+
+  [[ -d "$root" && ! -L "$root" ]] || return 1
+  totals="$(php -r '
+    $root = (string) ($argv[1] ?? "");
+    try {
+        if ($root === "" || !is_dir($root) || is_link($root)) {
+            exit(1);
+        }
+        $files = 0;
+        $logical = 0;
+        $allocated = 0;
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY,
+        );
+        foreach ($iterator as $entry) {
+            if ($entry->isLink() || !$entry->isFile()) {
+                continue;
+            }
+            $stat = @lstat($entry->getPathname());
+            if (!is_array($stat) || !isset($stat["size"], $stat["blocks"])) {
+                exit(2);
+            }
+            $files++;
+            $logical += (int) $stat["size"];
+            $allocated += (int) $stat["blocks"] * 512;
+        }
+        printf("%d %d %d\n", $files, $logical, $allocated);
+    } catch (Throwable) {
+        exit(3);
+    }
+  ' "$root" 2>/dev/null)" || return 1
+  [[ "$totals" =~ ^([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)$ ]] || return 1
+  printf '%s %s %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+}
+
+deploy_detail_emit_storage_fingerprint() {
+  local boundary="$1"
+  local root="$2"
+  local status="${3:-ok}"
+  local reason_code="${4:-none}"
+  local totals="${5:-}"
+  local file_count=0
+  local logical_bytes=0
+  local allocated_bytes=0
+  local elapsed_ms=0
+  local record
+
+  [[ "${DEPLOY_DETAIL_ACTIVE:-0}" == "1" ]] || return 0
+  [[ "$boundary" == "source_before" || "$boundary" == "target_before" || "$boundary" == "target_after" ]] || return 0
+  [[ "$status" == "ok" || "$status" == "failed" || "$status" == "skipped" ]] || return 0
+  deploy_detail_reason_is_allowed "$reason_code" || return 0
+
+  if [[ "$status" == "ok" ]]; then
+    if [[ -z "$totals" ]]; then
+      if ! totals="$(deploy_detail_storage_totals "$root")"; then
+        status="failed"
+        reason_code="storage_fingerprint_failed"
+        totals="0 0 0"
+      fi
+    fi
+    if [[ ! "$totals" =~ ^([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)$ ]]; then
+      status="failed"
+      reason_code="storage_fingerprint_failed"
+      totals="0 0 0"
+      [[ "$totals" =~ ^([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)$ ]]
+    fi
+    file_count="${BASH_REMATCH[1]}"
+    logical_bytes="${BASH_REMATCH[2]}"
+    allocated_bytes="${BASH_REMATCH[3]}"
+  fi
+  elapsed_ms="$(deploy_detail_elapsed_ms 2>/dev/null || printf '0\n')"
+
+  DEPLOY_DETAIL_SEQUENCE="$((DEPLOY_DETAIL_SEQUENCE + 1))"
+  builtin printf -v record '{"schema":"%s","run_id":"%s","sequence":%d,"event":"storage_fingerprint","phase":"permissions_stage","subphase":"storage_transfer","boundary":"%s","status":"%s","reason_code":"%s","file_count":%d,"logical_bytes":%d,"allocated_bytes":%d,"elapsed_ms":%d,"dry_run":%s}' \
+    "$DEPLOY_DETAIL_SCHEMA" \
+    "$DEPLOY_TIMING_RUN_ID" \
+    "$DEPLOY_DETAIL_SEQUENCE" \
+    "$boundary" \
+    "$status" \
+    "$reason_code" \
+    "$file_count" \
+    "$logical_bytes" \
+    "$allocated_bytes" \
+    "$elapsed_ms" \
+    "$DEPLOY_DETAIL_DRY_RUN"
+  builtin printf 'DEPLOY_DETAIL %s\n' "$record" || true
+  return 0
+}
+
+sync_storage_payload_with_detail() {
+  local source_root="${1%/}"
+  local target_root="${2%/}"
+  local started_ms
+  local finished_ms
+  local elapsed_ms=0
+  local duration_ms=0
+  local exit_code
+
+  started_ms="$(deploy_timing_now_ms 2>/dev/null || true)"
+  if [[ "${DRYRUN:-0}" -eq 1 ]]; then
+    deploy_detail_emit_storage_fingerprint source_before "$source_root" skipped dry_run
+    deploy_detail_emit_storage_fingerprint target_before "$target_root" skipped dry_run
+    echo "[DRY-RUN] rsync -a -- '$source_root/' '$target_root/'"
+    deploy_detail_emit_storage_fingerprint target_after "$target_root" skipped dry_run
+    finished_ms="$(deploy_timing_now_ms 2>/dev/null || true)"
+    if [[ "$started_ms" =~ ^[0-9]+$ && "$finished_ms" =~ ^[0-9]+$ ]]; then
+      duration_ms="$((10#$finished_ms - 10#$started_ms))"
+      (( duration_ms >= 0 )) || duration_ms=0
+    fi
+    elapsed_ms="$(deploy_detail_elapsed_ms 2>/dev/null || printf '0\n')"
+    deploy_detail_emit_subphase permissions_stage storage_transfer skipped dry_run "$duration_ms" "$elapsed_ms"
+    return 0
+  fi
+
+  deploy_detail_emit_storage_fingerprint source_before "$source_root" || true
+  deploy_detail_emit_storage_fingerprint target_before "$target_root" || true
+
+  if rsync -a -- "$source_root/" "$target_root/" >/dev/null 2>&1; then
+    exit_code=0
+  else
+    exit_code="$?"
+  fi
+  if [[ "$exit_code" -ne 0 ]]; then
+    finished_ms="$(deploy_timing_now_ms 2>/dev/null || true)"
+    if [[ "$started_ms" =~ ^[0-9]+$ && "$finished_ms" =~ ^[0-9]+$ ]]; then
+      duration_ms="$((10#$finished_ms - 10#$started_ms))"
+      (( duration_ms >= 0 )) || duration_ms=0
+    fi
+    elapsed_ms="$(deploy_detail_elapsed_ms 2>/dev/null || printf '0\n')"
+    deploy_detail_emit_subphase permissions_stage storage_transfer failed rsync_failed "$duration_ms" "$elapsed_ms"
+    return "$exit_code"
+  fi
+
+  deploy_detail_emit_storage_fingerprint target_after "$target_root" || true
+  finished_ms="$(deploy_timing_now_ms 2>/dev/null || true)"
+  if [[ "$started_ms" =~ ^[0-9]+$ && "$finished_ms" =~ ^[0-9]+$ ]]; then
+    duration_ms="$((10#$finished_ms - 10#$started_ms))"
+    (( duration_ms >= 0 )) || duration_ms=0
+  fi
+  elapsed_ms="$(deploy_detail_elapsed_ms 2>/dev/null || printf '0\n')"
+  deploy_detail_emit_subphase permissions_stage storage_transfer ok none "$duration_ms" "$elapsed_ms"
+  return 0
+}
+
+sync_live_storage_to_stage() {
+  sync_storage_payload_with_detail "$APP/storage" "$STAGE_ROOT/storage"
+}
+
+prepare_predeploy_stage_permissions() {
+  prepare_zero_surprise_stage_runtime || return $?
+  run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
+  run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
+  run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +" || return $?
+  restore_runtime_script_permissions || return $?
+  if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
+    harden_and_verify_runtime_config "$STAGE_ROOT" || return $?
+  fi
+  return 0
+}
+
+run_zero_surprise_predeploy_gate() {
+  run_zero_surprise_predeploy_replay || return $?
+  validate_zero_surprise_report || return $?
+  return 0
+}
+
+prepare_stage_renderer_dependencies() {
+  if [[ "$DRYRUN" -eq 0 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
+    [[ -f "$STAGE_ROOT/pdf-renderer/package-lock.json" ]] || return 1
+  elif [[ "$DRYRUN" -eq 1 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
+    echo "[DRY-RUN] would verify $STAGE_ROOT/pdf-renderer/package-lock.json exists"
+  else
+    echo "[i] Renderer dependency install handled externally; skipping host npm gate."
+  fi
+
+  if [[ "$RENDERER_DEPLOY_MODE" == "host" ]]; then
+    prepare_renderer_state_dir || return $?
+    install_renderer_dependencies || return $?
+  else
+    echo "[i] Renderer deploy mode external: leaving dependency/image preparation to '$RENDERER_SERVICE'."
+  fi
+  return 0
+}
+
+normalize_stage_permissions() {
+  run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
+  run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
+  run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +" || return $?
+  restore_runtime_script_permissions || return $?
+  return 0
+}
+
+verify_pre_switch_runtime_config_contracts() {
+  harden_and_verify_runtime_config "$STAGE_ROOT" || return $?
+  harden_and_verify_runtime_config "$APP" || return $?
+  return 0
+}
+
 usage() {
   cat <<'USAGE'
 Usage: deploy_ea.sh --rel REL [options]
@@ -652,9 +973,11 @@ prepare_renderer_state_dir() {
     return 0
   fi
 
-  mkdir -p "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache"
-  chown -R "$WEBUSER":"$WEBUSER" "$RENDERER_STATE_DIR"
-  chmod 0750 "$RENDERER_STATE_DIR" "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache"
+  mkdir -p "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache" \
+    || return $?
+  chown -R "$WEBUSER":"$WEBUSER" "$RENDERER_STATE_DIR" || return $?
+  chmod 0750 "$RENDERER_STATE_DIR" "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache" \
+    || return $?
 }
 
 restore_runtime_script_permissions() {
@@ -1456,8 +1779,8 @@ prepare_zero_surprise_stage_runtime() {
   base_url="$(read_zero_surprise_predeploy_base_url)" \
     || die "[!] Could not resolve zero-surprise predeploy base_url from $ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE"
 
-  cp "$stage_sample" "$stage_config"
-  mkdir -p "$STAGE_ROOT/storage/logs/release-gate"
+  cp "$stage_sample" "$stage_config" || return $?
+  mkdir -p "$STAGE_ROOT/storage/logs/release-gate" || return $?
 
   php "$STAGE_ROOT/scripts/release-gate/prepare_zero_surprise_stage_config.php" \
     --config="$stage_config" \
@@ -2035,6 +2358,7 @@ fi
 DEPLOY_TIMING_AUTHORITATIVE_ENABLED=1
 deploy_timing_init deploy "$DRYRUN" preparation_artifact \
   || die "[!] Could not initialize monotonic deploy timing."
+deploy_detail_init "$DRYRUN"
 
 echo "[i] Deploy Easy!Appointments"
 echo "    Release              : $REL"
@@ -2091,6 +2415,7 @@ fi
 require_command curl
 require_command php
 require_command runuser
+require_command rsync
 if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
   require_command docker
   require_docker_compose
@@ -2117,49 +2442,31 @@ validate_stage_release_artifact
 validate_deploy_script_drift
 deploy_timing_transition predeploy
 validate_breakglass_policy || die "[!] Zero-surprise breakglass policy validation failed."
-prepare_zero_surprise_stage_runtime
-run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
-run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
-run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
-restore_runtime_script_permissions
-if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
-  harden_and_verify_runtime_config "$STAGE_ROOT" \
-    || die "[!] Zero-surprise stage runtime config permission contract failed."
-fi
-run_zero_surprise_predeploy_replay || die "[!] Zero-surprise pre-deploy replay failed. Aborting before atomic switch."
-validate_zero_surprise_report || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
+deploy_detail_run_subphase predeploy stage_permissions stage_permissions_failed \
+  prepare_predeploy_stage_permissions \
+  || die "[!] Predeploy stage permissions failed. Aborting before atomic switch."
+deploy_detail_run_subphase predeploy zero_surprise_replay zero_surprise_failed \
+  run_zero_surprise_predeploy_gate \
+  || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
 
 deploy_timing_transition permissions_stage
 
 run_shell "cp '$APP/config.php' '$STAGE_ROOT/config.php'"
 run_shell "mkdir -p '$STAGE_ROOT/storage'"
-run_shell "rsync -a '$APP/storage/' '$STAGE_ROOT/storage/' 2>/dev/null || true"
+sync_live_storage_to_stage \
+  || die "[!] Live storage transfer failed. Aborting before atomic switch."
 
-if [[ "$DRYRUN" -eq 0 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
-  [[ -f "$STAGE_ROOT/pdf-renderer/package-lock.json" ]] \
-    || die "[!] Missing pre-switch gate file: $STAGE_ROOT/pdf-renderer/package-lock.json"
-elif [[ "$DRYRUN" -eq 1 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
-  echo "[DRY-RUN] would verify $STAGE_ROOT/pdf-renderer/package-lock.json exists"
-else
-  echo "[i] Renderer dependency install handled externally; skipping host npm gate."
-fi
+deploy_detail_run_subphase permissions_stage renderer_dependencies renderer_dependencies_failed \
+  prepare_stage_renderer_dependencies \
+  || die "[!] Renderer dependency preparation failed. Aborting before atomic switch."
 
-if [[ "$RENDERER_DEPLOY_MODE" == "host" ]]; then
-  prepare_renderer_state_dir
-  install_renderer_dependencies
-else
-  echo "[i] Renderer deploy mode external: leaving dependency/image preparation to '$RENDERER_SERVICE'."
-fi
+deploy_detail_run_subphase permissions_stage final_permissions final_permissions_failed \
+  normalize_stage_permissions \
+  || die "[!] Final staged permission normalization failed. Aborting before atomic switch."
 
-run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'"
-run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +"
-run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +"
-restore_runtime_script_permissions
-
-harden_and_verify_runtime_config "$STAGE_ROOT" \
-  || die "[!] Staged runtime config permission contract failed."
-harden_and_verify_runtime_config "$APP" \
-  || die "[!] Current live runtime config permission contract failed before atomic switch."
+deploy_detail_run_subphase permissions_stage runtime_config_contracts runtime_config_contract_failed \
+  verify_pre_switch_runtime_config_contracts \
+  || die "[!] Runtime config permission contract failed. Aborting before atomic switch."
 
 deploy_timing_transition switch
 perform_atomic_switch

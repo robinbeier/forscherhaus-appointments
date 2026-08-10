@@ -506,6 +506,65 @@ class GateCliSupportTest extends TestCase
         );
     }
 
+    public function testElevatedRealRsyncFailureStopsBeforeAtomicSwitchAndEmitsSafeReason(): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux' || trim((string) shell_exec('id -u')) !== '0') {
+            self::markTestSkipped('Root on Linux is required for the production storage-transfer regression.');
+        }
+        if (trim((string) shell_exec('command -v rsync')) === '') {
+            self::markTestSkipped('rsync is required for the root storage-transfer regression.');
+        }
+        if (!is_dir('/sys')) {
+            self::markTestSkipped(
+                'A read-only Linux system filesystem is required to force a real rsync receiver failure.',
+            );
+        }
+
+        $workspace = '/rob456-rsync-customer-secret-' . bin2hex(random_bytes(6));
+        $source = $workspace . '/storage';
+        $switchSentinel = $workspace . '/switch-reached';
+        self::assertTrue(mkdir($source, 0700, true));
+        self::assertNotFalse(file_put_contents($source . '/SENSITIVE_MARKER.txt', 'secret payload'));
+
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        deploy_detail_init 0
+        perform_atomic_switch() { : > "$4"; }
+        sync_storage_payload_with_detail "$2" "$3"
+        perform_atomic_switch
+        BASH;
+
+        try {
+            $result = $this->runCommand([
+                'bash',
+                '-c',
+                $script,
+                'bash',
+                dirname(__DIR__, 3) . '/deploy_ea.sh',
+                $source,
+                '/sys',
+                $switchSentinel,
+            ]);
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertFileDoesNotExist($switchSentinel);
+            $events = $this->deployDetailEvents($result['stdout']);
+            self::assertNotSame([], $events);
+            $failure = $events[array_key_last($events)];
+            self::assertSame('subphase', $failure['event']);
+            self::assertSame('storage_transfer', $failure['subphase']);
+            self::assertSame('failed', $failure['status']);
+            self::assertSame('rsync_failed', $failure['reason_code']);
+            self::assertStringNotContainsString($workspace, $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testResolveCsrfNamesFromConfigAppliesCookiePrefix(): void
     {
         $configPath = tempnam(sys_get_temp_dir(), 'gate-config-');
@@ -632,6 +691,24 @@ class GateCliSupportTest extends TestCase
         }
 
         $this->assertNotSame([], $events);
+
+        return $events;
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function deployDetailEvents(string $output): array
+    {
+        $events = [];
+        foreach (preg_split('/\R/', $output) ?: [] as $line) {
+            if (!str_starts_with($line, 'DEPLOY_DETAIL ')) {
+                continue;
+            }
+            $event = json_decode(substr($line, strlen('DEPLOY_DETAIL ')), true, 64, JSON_THROW_ON_ERROR);
+            self::assertIsArray($event);
+            $events[] = $event;
+        }
 
         return $events;
     }
