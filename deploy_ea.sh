@@ -588,7 +588,7 @@ deploy_detail_emit_storage_fingerprint() {
 
   if [[ "$status" == "ok" ]]; then
     if [[ -z "$totals" ]]; then
-      if ! totals="$(deploy_detail_storage_totals "$root")"; then
+      if ! totals="$(deploy_detail_storage_totals "$root" 2>/dev/null)"; then
         status="failed"
         reason_code="storage_fingerprint_failed"
         totals="0 0 0"

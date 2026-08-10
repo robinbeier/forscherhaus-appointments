@@ -209,6 +209,125 @@ final class DeployDetailTelemetryTest extends TestCase
         }
     }
 
+    public function testDryRunStorageTransferSkipsCopyAndEmitsSkippedTelemetry(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-storage-dry-run-' . bin2hex(random_bytes(6));
+        $source = $workspace . '/source storage';
+        $target = $workspace . '/target storage';
+        self::assertTrue(mkdir($source, 0700, true));
+        self::assertTrue(mkdir($target, 0700, true));
+        self::assertNotFalse(file_put_contents($source . '/dry-run-source.txt', 'payload'));
+
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        DRYRUN=1
+        deploy_detail_init 1
+        sync_storage_payload_with_detail "$2" "$3"
+        BASH;
+
+        try {
+            $result = $this->runCommand([
+                'bash',
+                '-c',
+                $script,
+                'bash',
+                dirname(__DIR__, 3) . '/deploy_ea.sh',
+                $source,
+                $target,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertFileDoesNotExist($target . '/dry-run-source.txt');
+            $events = $this->detailEvents($result['stdout']);
+            self::assertSame([1, 2, 3, 4], array_column($events, 'sequence'));
+            self::assertSame(
+                ['source_before', 'target_before', 'target_after'],
+                array_column(array_slice($events, 0, 3), 'boundary'),
+            );
+            foreach (array_slice($events, 0, 3) as $event) {
+                self::assertSame('storage_fingerprint', $event['event']);
+                self::assertSame('skipped', $event['status']);
+                self::assertSame('dry_run', $event['reason_code']);
+                self::assertTrue($event['dry_run']);
+                self::assertSame(0, $event['file_count']);
+                self::assertSame(0, $event['logical_bytes']);
+                self::assertSame(0, $event['allocated_bytes']);
+            }
+            self::assertSame('subphase', $events[3]['event']);
+            self::assertSame('skipped', $events[3]['status']);
+            self::assertSame('dry_run', $events[3]['reason_code']);
+            self::assertTrue($events[3]['dry_run']);
+            self::assertStringNotContainsString(
+                $workspace,
+                implode(
+                    "\n",
+                    array_map(static fn(array $event): string => json_encode($event, JSON_THROW_ON_ERROR), $events),
+                ),
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testMalformedStorageFingerprintFallsBackWithoutLeakingOrFailingTransfer(): void
+    {
+        if (trim((string) shell_exec('command -v rsync')) === '') {
+            self::markTestSkipped('rsync is required for the storage-fingerprint fallback regression.');
+        }
+
+        $workspace = sys_get_temp_dir() . '/rob456-storage-fingerprint-fallback-' . bin2hex(random_bytes(6));
+        $source = $workspace . '/source storage';
+        $target = $workspace . '/target storage';
+        self::assertTrue(mkdir($source, 0700, true));
+        self::assertTrue(mkdir($target, 0700, true));
+        self::assertNotFalse(file_put_contents($source . '/safe.txt', 'payload'));
+
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        deploy_detail_init 0
+        deploy_detail_storage_totals() { printf 'MALFORMED SENSITIVE_MARKER\n'; }
+        sync_storage_payload_with_detail "$2" "$3"
+        BASH;
+
+        try {
+            $result = $this->runCommand([
+                'bash',
+                '-c',
+                $script,
+                'bash',
+                dirname(__DIR__, 3) . '/deploy_ea.sh',
+                $source,
+                $target,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertSame('payload', file_get_contents($target . '/safe.txt'));
+            $events = $this->detailEvents($result['stdout']);
+            self::assertCount(4, $events);
+            foreach (array_slice($events, 0, 3) as $event) {
+                self::assertSame('storage_fingerprint', $event['event']);
+                self::assertSame('failed', $event['status']);
+                self::assertSame('storage_fingerprint_failed', $event['reason_code']);
+                self::assertSame(0, $event['file_count']);
+                self::assertSame(0, $event['logical_bytes']);
+                self::assertSame(0, $event['allocated_bytes']);
+            }
+            self::assertSame('subphase', $events[3]['event']);
+            self::assertSame('ok', $events[3]['status']);
+            self::assertSame('none', $events[3]['reason_code']);
+            self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString($workspace, $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testSubphaseFailurePreservesExitAndEmitsOnlyAllowlistedReason(): void
     {
         $script = <<<'BASH'
@@ -299,6 +418,92 @@ final class DeployDetailTelemetryTest extends TestCase
         self::assertSame([], $this->detailEvents($result['stdout']));
         self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
         self::assertStringNotContainsString('/secret/path', $result['stdout'] . $result['stderr']);
+    }
+
+    public function testStorageTransferDryRunSkipsCopyAndEmitsOnlySkippedDryRunDetail(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-storage-dry-run-' . bin2hex(random_bytes(6));
+        $source = $workspace . '/source';
+        $target = $workspace . '/target';
+        self::assertTrue(mkdir($source, 0700, true));
+        self::assertTrue(mkdir($target, 0700, true));
+        self::assertNotFalse(file_put_contents($source . '/SENSITIVE_MARKER.txt', 'payload'));
+
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        deploy_detail_init 1
+        DRYRUN=1
+        sync_storage_payload_with_detail "$2" "$3"
+        BASH;
+
+        try {
+            $result = $this->runCommand([
+                'bash',
+                '-c',
+                $script,
+                'bash',
+                dirname(__DIR__, 3) . '/deploy_ea.sh',
+                $source,
+                $target,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertFileDoesNotExist($target . '/SENSITIVE_MARKER.txt');
+            $events = $this->detailEvents($result['stdout']);
+            self::assertCount(4, $events);
+            self::assertSame([1, 2, 3, 4], array_column($events, 'sequence'));
+            self::assertSame(
+                ['source_before', 'target_before', 'target_after'],
+                array_column(array_slice($events, 0, 3), 'boundary'),
+            );
+            foreach ($events as $event) {
+                self::assertSame('skipped', $event['status']);
+                self::assertSame('dry_run', $event['reason_code']);
+                self::assertTrue($event['dry_run']);
+                $encoded = json_encode($event, JSON_THROW_ON_ERROR);
+                self::assertStringNotContainsString($workspace, $encoded);
+                self::assertStringNotContainsString('SENSITIVE_MARKER', $encoded);
+            }
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testFingerprintFailureAndMalformedTotalsRemainSanitizedAndFailOpen(): void
+    {
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        deploy_detail_init 0
+        deploy_detail_storage_totals() { printf 'SENSITIVE_MARKER /secret/path\n' >&2; return 23; }
+        deploy_detail_emit_storage_fingerprint source_before /unreadable-secret-root
+        deploy_detail_storage_totals() { printf 'malformed SENSITIVE_MARKER /secret/path\n'; return 0; }
+        deploy_detail_emit_storage_fingerprint target_before /malformed-secret-root
+        printf 'CONTINUED\n'
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', dirname(__DIR__, 3) . '/deploy_ea.sh']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('CONTINUED', $result['stdout']);
+        $events = $this->detailEvents($result['stdout']);
+        self::assertCount(2, $events);
+        foreach ($events as $event) {
+            self::assertSame('failed', $event['status']);
+            self::assertSame('storage_fingerprint_failed', $event['reason_code']);
+            self::assertSame(0, $event['file_count']);
+            self::assertSame(0, $event['logical_bytes']);
+            self::assertSame(0, $event['allocated_bytes']);
+        }
+        self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('/secret/path', $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('unreadable-secret-root', $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('malformed-secret-root', $result['stdout'] . $result['stderr']);
     }
 
     /**
