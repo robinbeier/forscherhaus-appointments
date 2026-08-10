@@ -414,8 +414,12 @@ final class ValidateDeployTimingSampleTest extends TestCase
         DEPLOY_TIMING_DIR="$2"
         DEPLOY_TIMING_AUTHORITATIVE_ENABLED=1
         deploy_timing_init deploy 0 preparation_artifact
+        deploy_detail_init 0
+        deploy_detail_emit_subphase predeploy stage_permissions ok none 1 1
         deploy_timing_transition predeploy
+        deploy_detail_emit_subphase predeploy zero_surprise_replay ok none 1 2
         deploy_timing_transition permissions_stage
+        deploy_detail_emit_subphase permissions_stage final_permissions ok none 1 3
         deploy_timing_transition switch
         deploy_timing_transition postdeploy_validation
         deploy_timing_finish ok succeeded 0
@@ -445,6 +449,13 @@ final class ValidateDeployTimingSampleTest extends TestCase
                 ),
             );
             self::assertCount(6, $stdoutLines);
+            $detailLines = array_values(
+                array_filter(
+                    preg_split('/\R/', $result['stdout']) ?: [],
+                    static fn(string $line): bool => str_starts_with($line, 'DEPLOY_DETAIL '),
+                ),
+            );
+            self::assertCount(3, $detailLines);
             foreach ($stdoutLines as $index => $line) {
                 $event = json_decode(substr($line, strlen('DEPLOY_TIMING ')), true, 512, JSON_THROW_ON_ERROR);
                 self::assertSame($index + 1, $event['sequence'] ?? null);

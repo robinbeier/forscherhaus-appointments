@@ -121,6 +121,11 @@ canonical source contract, phase definitions, and five-comparable-deploy
 measurement plan are in `docs/deployment.md`.
 Timing collection is fail-open: a missing timing record is an observability gap,
 never authority to skip or change deploy, validation, or rollback behavior.
+Secret-free `DEPLOY_DETAIL ` / `deploy_detail.v1` stdout records add correlated
+subphase durations and aggregate storage file/logical/allocated-byte
+fingerprints. They are non-authoritative and must never be mixed into the
+protected timing JSONL. A fingerprint gap remains observational; a non-zero
+storage `rsync` is independently fail-closed before the atomic switch.
 
 Optional Certbot renewal simulation:
 
