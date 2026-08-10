@@ -536,6 +536,15 @@ final class DeploymentContractV1Test extends TestCase
             'succeeded',
             'not_observed',
         ];
+        yield 'rollback succeeded after post-gates' => [
+            'post_gates_running',
+            'failed_post_switch_rollback_succeeded',
+            30,
+            'deploy_failed',
+            30,
+            'succeeded',
+            'failed',
+        ];
         yield 'rollback failed after post-gates' => [
             'post_gates_running',
             'failed_post_switch_rollback_failed',
