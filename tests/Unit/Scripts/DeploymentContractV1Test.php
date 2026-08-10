@@ -422,6 +422,28 @@ final class DeploymentContractV1Test extends TestCase
         yield 'rotation error contradicts rotation complete' => ['rotation_errors', 1];
     }
 
+    #[DataProvider('unknownTrafficOverlayProvider')]
+    public function testUnknownTrafficOverlayCannotExceedUnclassified(string $overlay): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['documented_health'] = 1;
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
+        $evidence['traffic_gate']['counts'][$overlay] = 1;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function unknownTrafficOverlayProvider(): iterable
+    {
+        yield 'unknown source' => ['source_unknown'];
+        yield 'unknown method' => ['method_unknown'];
+        yield 'unknown target' => ['target_unknown'];
+    }
+
     public function testTrafficParsedAndFailedLinesCannotOverlapSourceLines(): void
     {
         $lines = $this->runThrough('expected_commit_verified');

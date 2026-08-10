@@ -833,6 +833,11 @@ final class DeploymentContractV1
                 throw new RuntimeException('traffic gate overlay count exceeds the observation window');
             }
         }
+        foreach (['source_unknown', 'method_unknown', 'target_unknown'] as $unknownOverlay) {
+            if ($section['counts'][$unknownOverlay] > $section['counts']['unclassified']) {
+                throw new RuntimeException('traffic gate unknown overlay exceeds the unclassified count');
+            }
+        }
         $rotationComplete = $section['counts']['rotation_errors'] === 0;
         $parseComplete = $section['counts']['parse_errors'] === 0 && $section['counts']['lines_seen'] > 0;
         $evidenceComplete = $rotationComplete && $parseComplete;

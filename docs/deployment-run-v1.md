@@ -173,7 +173,8 @@ Completeness is also derived, never trusted: rotation completeness follows
 `rotation_errors`, parse completeness requires zero parse errors plus at least
 one parsed line, and evidence completeness is the conjunction of both. Parsed
 window lines and parse errors are disjoint producer outcomes, so their sum
-cannot exceed `lines_seen`.
+cannot exceed `lines_seen`. Unknown source, method, and target overlays are
+each bounded by the `unclassified` traffic class that the producer assigns.
 
 Capacity passes only when available bytes cover projected required bytes,
 observed and projected usage are both below the fixed `85` percent ceiling, and
