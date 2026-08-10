@@ -114,7 +114,7 @@ Its sections are:
 
 - expected and observed commit plus exact verification result;
 - traffic-gate reference and normalized core;
-- dump age/SHA/gzip/restore evidence;
+- dump age/SHA plus explicit checksum-, gzip-, and restore-verification evidence;
 - capacity available/projected bytes, observed/projected used percentages, the
   fixed `85` percent ceiling, and a derived decision;
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
@@ -141,7 +141,10 @@ observational as defined in `docs/deployment.md`: missing or invalid
 Invalid timing bytes retain their authoritative SHA while an unavailable parsed
 timing Run-ID or total remains `null`; `valid` timing requires both values. The
 outer wall clock never replaces, extends, or mixes with the five-phase
-`deploy_timing.v1` baseline.
+`deploy_timing.v1` baseline. Its milliseconds must agree with the independently
+stored second-precision UTC interval: for `delta_ms` derived from the two UTC
+timestamps, the accepted range is
+`max(0, delta_ms - 999) <= wall_clock_ms <= delta_ms + 999`.
 
 ## Traffic-gate consumption
 
@@ -183,12 +186,17 @@ one parsed line, and evidence completeness is the conjunction of both. Parsed
 window lines and parse errors are disjoint producer outcomes, so their sum
 cannot exceed `lines_seen`. Unknown source, method, and target overlays are
 each bounded by the `unclassified` traffic class that the producer assigns.
+Conversely, every unclassified line must be backed by at least one of those
+unknown overlays in the aggregate evidence.
 The `status_5xx`, `write`, `authenticated`,
-`customers_or_sensitive`, and `scanner_success` overlays are each bounded
-by the combined `business_or_authenticated` and `unclassified` classes that
-can carry them.
+`customers_or_sensitive` overlays are each bounded by the combined
+`business_or_authenticated` and `unclassified` classes that can carry them.
+`scanner_success` is bounded by `business_or_authenticated` alone because
+unknown-field rows return as unclassified before scanner classification.
 
-Capacity passes only when available bytes cover projected required bytes,
+Dump evidence passes only when it is strictly under 240 minutes old and its
+checksum, gzip, and restore verification flags are all true. Capacity passes
+only when available bytes cover projected required bytes,
 observed and projected usage are both below the fixed `85` percent ceiling, and
 the projection does not move backwards. The stored `passed` value and status
 must equal that derived result. Post-gate `passed` is likewise the exact

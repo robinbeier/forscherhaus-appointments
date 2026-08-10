@@ -457,6 +457,18 @@ final class DeploymentContractV1Test extends TestCase
         self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
     }
 
+    public function testUnclassifiedTrafficCannotExceedCombinedUnknownOverlays(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
     #[DataProvider('invalidTrafficReportProvider')]
     public function testTrafficEvidenceInvalidCanRepresentUnavailableOrMalformedReport(?string $reportSha256): void
     {
@@ -569,6 +581,20 @@ final class DeploymentContractV1Test extends TestCase
         $evidence['traffic_gate']['counts'][$overlay] = 1;
 
         self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    public function testScannerSuccessCannotExceedBusinessTraffic(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts']['source_unknown'] = 1;
+        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
     public function testTrafficParsedAndFailedLinesCannotOverlapSourceLines(): void
@@ -945,6 +971,50 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateEvidence($evidence);
     }
 
+    public function testFailedDumpCanRepresentUnverifiedSha(): void
+    {
+        $lines = $this->runThrough('traffic_gate_passed');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 22, 'dump_verification_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 22, 'dump_verification_failed');
+        $evidence['dump']['age_seconds'] = 60;
+        $evidence['dump']['sha256_verified'] = false;
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    public function testPassedDumpRejectsUnverifiedSha(): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['dump']['sha256_verified'] = false;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    #[DataProvider('invalidDumpShaVerificationSchemaProvider')]
+    public function testDumpShaVerificationFieldIsClosedAndBoolean(string $mutation): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        if ($mutation === 'missing') {
+            unset($evidence['dump']['sha256_verified']);
+        } elseif ($mutation === 'wrong_type') {
+            $evidence['dump']['sha256_verified'] = 'true';
+        } else {
+            $evidence['dump']['sha256_verification_source'] = 'invented';
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function invalidDumpShaVerificationSchemaProvider(): iterable
+    {
+        yield 'missing' => ['missing'];
+        yield 'wrong type' => ['wrong_type'];
+        yield 'extra field' => ['extra'];
+    }
+
     public function testArtifactHashOrHostScriptMismatchIsRejected(): void
     {
         foreach (['remote_sha256', 'artifact_script_sha256'] as $field) {
@@ -1053,6 +1123,58 @@ final class DeploymentContractV1Test extends TestCase
         );
         self::assertNotSame($evidence['deploy_timing']['total_ms'], $evidence['orchestrator_timing']['wall_clock_ms']);
         self::assertNotSame($evidence['run_id'], $evidence['deploy_timing']['run_id']);
+    }
+
+    #[DataProvider('validOrchestratorTimingProvider')]
+    public function testOrchestratorWallClockAcceptsSecondPrecisionBounds(
+        string $startedAtUtc,
+        string $finishedAtUtc,
+        int $wallClockMs,
+    ): void {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['orchestrator_timing'] = [
+            'started_at_utc' => $startedAtUtc,
+            'finished_at_utc' => $finishedAtUtc,
+            'wall_clock_ms' => $wallClockMs,
+        ];
+
+        DeploymentContractV1::validateEvidence($evidence);
+        self::addToAssertionCount(1);
+    }
+
+    /** @return iterable<string,array{string,string,int}> */
+    public static function validOrchestratorTimingProvider(): iterable
+    {
+        yield 'lower 60-second bound' => ['2026-08-10T04:00:00Z', '2026-08-10T04:01:00Z', 59_001];
+        yield 'upper 60-second bound' => ['2026-08-10T04:00:00Z', '2026-08-10T04:01:00Z', 60_999];
+        yield 'zero delta lower bound' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:00Z', 0];
+        yield 'zero delta upper bound' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:00Z', 999];
+    }
+
+    #[DataProvider('invalidOrchestratorTimingProvider')]
+    public function testOrchestratorWallClockRejectsValuesOutsideSecondPrecisionBounds(
+        string $startedAtUtc,
+        string $finishedAtUtc,
+        int $wallClockMs,
+    ): void {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['orchestrator_timing'] = [
+            'started_at_utc' => $startedAtUtc,
+            'finished_at_utc' => $finishedAtUtc,
+            'wall_clock_ms' => $wallClockMs,
+        ];
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    /** @return iterable<string,array{string,string,int}> */
+    public static function invalidOrchestratorTimingProvider(): iterable
+    {
+        yield 'below 60-second bound' => ['2026-08-10T04:00:00Z', '2026-08-10T04:01:00Z', 59_000];
+        yield 'above 60-second bound' => ['2026-08-10T04:00:00Z', '2026-08-10T04:01:00Z', 61_000];
+        yield 'same timestamp multi-hour wall clock' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:00Z', 7_200_000];
+        yield 'day apart zero wall clock' => ['2026-08-10T04:00:00Z', '2026-08-11T04:00:00Z', 0];
     }
 
     public function testTimingObservabilityGapDoesNotRewriteSuccessfulDeployOutcome(): void
@@ -1224,6 +1346,7 @@ final class DeploymentContractV1Test extends TestCase
                 'age_seconds' => 60,
                 'max_age_seconds' => 14400,
                 'sha256' => self::SHA,
+                'sha256_verified' => true,
                 'gzip_verified' => true,
                 'restore_verified' => true,
             ],
@@ -1273,7 +1396,7 @@ final class DeploymentContractV1Test extends TestCase
             'orchestrator_timing' => [
                 'started_at_utc' => '2026-08-10T04:00:00Z',
                 'finished_at_utc' => '2026-08-10T04:01:00Z',
-                'wall_clock_ms' => 180000,
+                'wall_clock_ms' => 60_000,
             ],
             'result' => ['state' => 'succeeded', 'exit_code' => 0, 'reason' => 'ok'],
         ];

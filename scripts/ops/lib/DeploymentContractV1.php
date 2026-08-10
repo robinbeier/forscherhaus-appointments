@@ -854,11 +854,21 @@ final class DeploymentContractV1
                 throw new RuntimeException('traffic gate unknown overlay exceeds the unclassified count');
             }
         }
+        $unknownOverlayCount =
+            $section['counts']['source_unknown'] +
+            $section['counts']['method_unknown'] +
+            $section['counts']['target_unknown'];
+        if ($section['counts']['unclassified'] > $unknownOverlayCount) {
+            throw new RuntimeException('traffic gate unclassified count lacks an unknown overlay');
+        }
         $unsafeClassCount = $section['counts']['business_or_authenticated'] + $section['counts']['unclassified'];
-        foreach (['status_5xx', 'write', 'authenticated', 'customers_or_sensitive', 'scanner_success'] as $overlay) {
+        foreach (['status_5xx', 'write', 'authenticated', 'customers_or_sensitive'] as $overlay) {
             if ($section['counts'][$overlay] > $unsafeClassCount) {
                 throw new RuntimeException('traffic gate hazardous overlay exceeds the unsafe traffic classes');
             }
+        }
+        if ($section['counts']['scanner_success'] > $section['counts']['business_or_authenticated']) {
+            throw new RuntimeException('traffic gate scanner success exceeds the business traffic class');
         }
         $rotationComplete = $section['counts']['rotation_errors'] === 0;
         $parseComplete = $section['counts']['parse_errors'] === 0 && $section['counts']['lines_seen'] > 0;
@@ -912,7 +922,16 @@ final class DeploymentContractV1
         self::assertObject($section, 'dump');
         self::assertExactKeys(
             $section,
-            ['status', 'policy', 'age_seconds', 'max_age_seconds', 'sha256', 'gzip_verified', 'restore_verified'],
+            [
+                'status',
+                'policy',
+                'age_seconds',
+                'max_age_seconds',
+                'sha256',
+                'sha256_verified',
+                'gzip_verified',
+                'restore_verified',
+            ],
             'dump',
         );
         self::assertEnum($section['status'], ['not_observed', 'passed', 'failed'], 'dump.status');
@@ -924,10 +943,12 @@ final class DeploymentContractV1
         self::assertNonNegativeInteger($section['age_seconds'], 'dump.age_seconds');
         self::assertSame($section['max_age_seconds'], 14400, 'dump.max_age_seconds');
         self::assertSha256($section['sha256'], 'dump.sha256');
+        self::assertBoolean($section['sha256_verified'], 'dump.sha256_verified');
         self::assertBoolean($section['gzip_verified'], 'dump.gzip_verified');
         self::assertBoolean($section['restore_verified'], 'dump.restore_verified');
         $passed =
             $section['age_seconds'] < $section['max_age_seconds'] &&
+            $section['sha256_verified'] &&
             $section['gzip_verified'] &&
             $section['restore_verified'];
         if (($section['status'] === 'passed') !== $passed) {
@@ -1160,8 +1181,16 @@ final class DeploymentContractV1
         self::assertUtc($section['started_at_utc'], 'orchestrator_timing.started_at_utc');
         self::assertUtc($section['finished_at_utc'], 'orchestrator_timing.finished_at_utc');
         self::assertNonNegativeInteger($section['wall_clock_ms'], 'orchestrator_timing.wall_clock_ms');
-        if (self::utcEpoch($section['finished_at_utc']) < self::utcEpoch($section['started_at_utc'])) {
+        $startedAtEpoch = self::utcEpoch($section['started_at_utc']);
+        $finishedAtEpoch = self::utcEpoch($section['finished_at_utc']);
+        if ($finishedAtEpoch < $startedAtEpoch) {
             throw new RuntimeException('orchestrator timing is not monotonic');
+        }
+        $timestampDeltaMs = ($finishedAtEpoch - $startedAtEpoch) * 1000;
+        $minimumWallClockMs = max(0, $timestampDeltaMs - 999);
+        $maximumWallClockMs = $timestampDeltaMs + 999;
+        if ($section['wall_clock_ms'] < $minimumWallClockMs || $section['wall_clock_ms'] > $maximumWallClockMs) {
+            throw new RuntimeException('orchestrator wall clock contradicts its UTC timestamps');
         }
     }
 
