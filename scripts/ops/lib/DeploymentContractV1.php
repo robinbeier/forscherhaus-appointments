@@ -478,7 +478,7 @@ final class DeploymentContractV1
             'failed_switch_recovery_required' => [32],
             'failed_post_switch_rollback_succeeded' => [30],
             'failed_post_switch_rollback_failed' => [31],
-            'manual_recovery_required' => [31, 32, 70, 75, 143],
+            'manual_recovery_required' => [31, 70, 75, 143],
             default => [0],
         };
         if (!in_array($exitCode, $allowed, true)) {
@@ -1012,7 +1012,7 @@ final class DeploymentContractV1
         if (
             $section['invocation_count'] !== 1 ||
             !is_int($section['exit_code']) ||
-            !in_array($section['exit_code'], [0, 30, 31], true)
+            !in_array($section['exit_code'], [0, 30, 31, 32], true)
         ) {
             throw new RuntimeException('invoked deploy evidence is invalid');
         }
@@ -1034,7 +1034,7 @@ final class DeploymentContractV1
             'succeeded' => ['succeeded', 1, 0, 'not_run'],
             'failed_before_write' => ['not_invoked', 0, null, 'not_applicable'],
             'failed_pre_switch' => ['failed', 1, 30, 'not_run'],
-            'failed_switch_recovery_required' => ['failed', 1, 31, 'recovery_required'],
+            'failed_switch_recovery_required' => ['failed', 1, 32, 'recovery_required'],
             'failed_post_switch_rollback_succeeded' => ['failed', 1, 30, 'succeeded'],
             'failed_post_switch_rollback_failed' => ['failed', 1, 31, 'failed'],
             'manual_recovery_required' => ['failed', 1, 31, 'recovery_required'],
@@ -1072,6 +1072,9 @@ final class DeploymentContractV1
         }
         self::assertNonNegativeInteger($section['kuma_healthy_count'], 'post_gates.kuma_healthy_count');
         self::assertNonNegativeInteger($section['kuma_total_count'], 'post_gates.kuma_total_count');
+        if ($section['kuma_healthy_count'] > $section['kuma_total_count']) {
+            throw new RuntimeException('post-gate Kuma counts are inconsistent');
+        }
         foreach (
             [
                 'runtime_config_passed',
@@ -1278,7 +1281,7 @@ final class DeploymentContractV1
 
     private static function assertVersion(mixed $value, string $field): void
     {
-        if (!is_string($value) || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $value) !== 1) {
+        if (!is_string($value) || preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/', $value) !== 1) {
             throw new RuntimeException($field . ' is invalid');
         }
     }

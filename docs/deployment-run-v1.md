@@ -67,7 +67,9 @@ Terminal failure states are:
 
 `failed_switch_recovery_required` is reachable only directly from
 `deploy_running`; once `post_gates_running` begins, a switch-phase recovery
-claim is an impossible ordering and fails closed. Terminal state is immutable.
+claim is an impossible ordering and fails closed. Exit `32` is represented by
+that dedicated state and by deploy evidence alike; it cannot alias
+`manual_recovery_required`. Terminal state is immutable.
 The `deploy_running` record is the durable
 write-ahead invocation reservation: the future host runner must append and
 fsync it before spawning `deploy_ea.sh`. It changes
@@ -160,11 +162,12 @@ Deploy evidence stores only:
 
 It must not embed the report, raw traffic, a path, or a second snapshot.
 `purpose` is `deploy`; mode must equal the immutable intent; the canonical
-cutoff is `window_end_epoch`. Counts and the decision are recomputed by the
-contract validator. Only complete `allow` or `advisory` evidence with exit `0`
-can precede invocation reservation. Freshness and requested-window checks are
-the responsibility of the later runner because they depend on its invocation
-time; they may not be weakened by attaching to an old Run-ID.
+cutoff is `window_end_epoch`; the catalog version matches the producer grammar
+`YYYY-MM-DD.N`. Counts and the decision are recomputed by the contract
+validator. Only complete `allow` or `advisory` evidence with exit `0` can
+precede invocation reservation. Freshness and requested-window checks are the
+responsibility of the later runner because they depend on its invocation time;
+they may not be weakened by attaching to an old Run-ID.
 
 Completeness is also derived, never trusted: rotation completeness follows
 `rotation_errors`, parse completeness requires zero parse errors plus at least
@@ -176,7 +179,8 @@ Capacity passes only when available bytes cover projected required bytes,
 observed and projected usage are both below the fixed `85` percent ceiling, and
 the projection does not move backwards. The stored `passed` value and status
 must equal that derived result. Post-gate `passed` is likewise the exact
-conjunction of Kuma `13/13` and every named boolean gate.
+conjunction of Kuma `13/13` and every named boolean gate; the healthy monitor
+count can never exceed the total.
 
 ## Future root state trust boundary
 

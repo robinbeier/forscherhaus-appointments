@@ -316,6 +316,37 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateRunLines($lines);
     }
 
+    public function testSwitchRecoveryBundleRejectsLegacyDeployExitCode(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_switch_recovery_required', 1, 32, 'switch_recovery_required'),
+        );
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'failed_switch_recovery_required',
+            32,
+            'switch_recovery_required',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testManualRecoveryCannotAliasSwitchRecoveryFailureAfterPostGates(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'manual_recovery_required', 1, 32, 'switch_recovery_required'),
+        );
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
     public function testFailedBeforeWriteReasonMustMatchTheJournalPredecessor(): void
     {
         $lines = $this->runThrough('planned');
@@ -411,6 +442,15 @@ final class DeploymentContractV1Test extends TestCase
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('unexpected fields');
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testTrafficCatalogVersionMustMatchProducerGrammar(): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['traffic_gate']['catalog_version'] = 'x';
+
+        $this->expectException(RuntimeException::class);
         DeploymentContractV1::validateEvidence($evidence);
     }
 
@@ -608,7 +648,7 @@ final class DeploymentContractV1Test extends TestCase
             'failed_switch_recovery_required',
             32,
             'switch_recovery_required',
-            31,
+            32,
             'recovery_required',
             'not_observed',
         ];
@@ -734,6 +774,27 @@ final class DeploymentContractV1Test extends TestCase
 
         $this->expectException(RuntimeException::class);
         DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testFailedPostGateEvidenceRejectsMoreHealthyThanTotalKumaChecks(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_post_switch_rollback_failed', 1, 31, 'rollback_failed'),
+        );
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'failed_post_switch_rollback_failed',
+            31,
+            'rollback_failed',
+            31,
+            'failed',
+            'failed',
+        );
+        $evidence['post_gates']['kuma_healthy_count'] = 14;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
     public function testPostGateSummaryIsDerivedFromEveryIndividualCheck(): void
