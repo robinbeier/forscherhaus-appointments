@@ -552,8 +552,18 @@ class GateCliSupportTest extends TestCase
             self::assertNotSame(0, $result['exit_code']);
             self::assertFileDoesNotExist($switchSentinel);
             $events = $this->deployDetailEvents($result['stdout']);
-            self::assertNotSame([], $events);
-            $failure = $events[array_key_last($events)];
+            self::assertCount(3, $events);
+            self::assertSame([1, 2, 3], array_column($events, 'sequence'));
+            self::assertSame(
+                ['source_before', 'target_before'],
+                array_column(array_slice($events, 0, 2), 'boundary'),
+            );
+            self::assertSame(
+                ['storage_fingerprint', 'storage_fingerprint', 'subphase'],
+                array_column($events, 'event'),
+            );
+            self::assertNotContains('target_after', array_column($events, 'boundary'));
+            $failure = $events[2];
             self::assertSame('subphase', $failure['event']);
             self::assertSame('storage_transfer', $failure['subphase']);
             self::assertSame('failed', $failure['status']);

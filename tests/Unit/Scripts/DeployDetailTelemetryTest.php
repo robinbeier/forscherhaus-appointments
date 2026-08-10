@@ -362,6 +362,48 @@ final class DeployDetailTelemetryTest extends TestCase
         );
     }
 
+    public function testPredeploySubphaseFailuresAbortBeforeSwitchWithAllowlistedReasons(): void
+    {
+        $cases = [
+            ['stage_permissions', 'stage_permissions_failed'],
+            ['zero_surprise_replay', 'zero_surprise_failed'],
+        ];
+
+        foreach ($cases as [$subphase, $reasonCode]) {
+            $script = <<<'BASH'
+            set -Eeuo pipefail
+            source "$1"
+            DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+            DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+            deploy_detail_init 0
+            failing_predeploy_gate() { printf 'SENSITIVE_MARKER /secret/path\n' >&2; return 23; }
+            deploy_detail_run_subphase predeploy "$2" "$3" failing_predeploy_gate
+            printf 'SWITCH_REACHED\n'
+            BASH;
+
+            $result = $this->runCommand([
+                'bash',
+                '-c',
+                $script,
+                'bash',
+                dirname(__DIR__, 3) . '/deploy_ea.sh',
+                $subphase,
+                $reasonCode,
+            ]);
+
+            self::assertSame(23, $result['exit_code']);
+            self::assertStringNotContainsString('SWITCH_REACHED', $result['stdout']);
+            $events = $this->detailEvents($result['stdout']);
+            self::assertCount(1, $events);
+            self::assertSame('predeploy', $events[0]['phase']);
+            self::assertSame($subphase, $events[0]['subphase']);
+            self::assertSame('failed', $events[0]['status']);
+            self::assertSame($reasonCode, $events[0]['reason_code']);
+            self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout']);
+            self::assertStringNotContainsString('/secret/path', $result['stdout']);
+        }
+    }
+
     public function testInstrumentedRendererPreparationCannotMaskAnEarlyCommandFailure(): void
     {
         $script = <<<'BASH'
