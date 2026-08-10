@@ -75,6 +75,7 @@ DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
 DEPLOY_TIMING_DIR="${FH_DEPLOY_TIMING_DIR:-/var/lib/fh-deploy-timing}"
 DEPLOY_TIMING_FILE=""
 DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
+DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE=0
 
 DEPLOY_DETAIL_SCHEMA="deploy_detail.v1"
 DEPLOY_DETAIL_ACTIVE=0
@@ -355,6 +356,9 @@ deploy_result_normalize_exit_code() {
 deploy_result_on_signal() {
   local signal_exit_code="${1:-143}"
 
+  if [[ "${DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE:-0}" == "1" ]]; then
+    return 0
+  fi
   if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" ]]; then
     DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
   fi
@@ -591,7 +595,7 @@ deploy_timing_on_exit() {
   local outcome="failed_pre_switch"
   local phase_status="failed"
 
-  trap - EXIT
+  DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE=1
   deploy_result_reconcile_switch_phase
   if [[
     "$raw_exit_code" != "0" &&
@@ -607,6 +611,7 @@ deploy_timing_on_exit() {
   fi
 
   exit_code="$(deploy_result_normalize_exit_code "$raw_exit_code")"
+  deploy_result_finalize "$exit_code" || true
   if [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "0" ]]; then
     case "${DEPLOY_RESULT_PHASE:-before_switch}" in
       switch_partial)
@@ -630,6 +635,7 @@ deploy_timing_on_exit() {
     deploy_timing_finish "$phase_status" "$outcome" "$exit_code" || true
   fi
 
+  trap - EXIT
   exit "$exit_code"
 }
 

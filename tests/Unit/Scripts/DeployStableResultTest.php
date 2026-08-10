@@ -618,6 +618,34 @@ final class DeployStableResultTest extends TestCase
         }
     }
 
+    public function testPreSwitchSignalsDuringFailedTimingPhaseStillCommitSummary(): void
+    {
+        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
+            $result = $this->runShell($this->failedRealTimingSignalHarness($signal, 'phase'));
+
+            self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "failed-timing-phase-boundary\n"), $signal);
+            self::assertSame(1, substr_count($result['stdout'], '"event":"phase"'), $signal);
+            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
+            self::assertStringContainsString('"outcome":"failed_pre_switch"', $result['stdout'], $signal);
+            self::assertStringContainsString('"exit_code":30', $result['stdout'], $signal);
+        }
+    }
+
+    public function testPreSwitchSignalsDuringFailedTimingSummaryPreserveStableExit(): void
+    {
+        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
+            $result = $this->runShell($this->failedRealTimingSignalHarness($signal, 'summary'));
+
+            self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "failed-timing-summary-boundary\n"), $signal);
+            self::assertSame(1, substr_count($result['stdout'], '"event":"phase"'), $signal);
+            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
+            self::assertStringContainsString('"outcome":"failed_pre_switch"', $result['stdout'], $signal);
+            self::assertStringContainsString('"exit_code":30', $result['stdout'], $signal);
+        }
+    }
+
     public function testCallerHangupDuringPartialSwitchReportsRecoveryRequired(): void
     {
         $result = $this->runShell(
@@ -911,6 +939,33 @@ final class DeployStableResultTest extends TestCase
             __TIMING_INJECTION__
             deploy_timing_init deploy 0 postdeploy_validation
             rollback_after_failure 'redacted failure'
+            BASH
+            ,
+        );
+    }
+
+    private function failedRealTimingSignalHarness(string $signal, string $event): string
+    {
+        return str_replace(
+            ['__SIGNAL__', '__EVENT__'],
+            [$signal, $event],
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            injected=0
+            deploy_monotonic_ms() { printf '1000\n'; }
+            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
+            deploy_timing_emit_record() {
+              builtin printf '%s\n' "$1"
+              if [[ "$1" == *'"event":"__EVENT__"'* && "$injected" == "0" ]]; then
+                injected=1
+                printf 'failed-timing-__EVENT__-boundary\n'
+                kill -__SIGNAL__ $$
+              fi
+            }
+            deploy_timing_init deploy 0 preparation_artifact
+            false
             BASH
             ,
         );
