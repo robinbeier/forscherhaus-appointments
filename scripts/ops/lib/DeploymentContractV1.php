@@ -645,12 +645,20 @@ final class DeploymentContractV1
         if ($reason === 'dump_verification_failed' && $dumpStatus === 'invalid') {
             $dumpStatus = 'failed';
         }
+        $capacityStatus = $evidence['capacity']['status'];
+        if ($reason === 'capacity_gate_failed' && $capacityStatus === 'invalid') {
+            $capacityStatus = 'failed';
+        }
+        $artifactStatus = $evidence['artifact']['status'];
+        if ($reason === 'artifact_verification_failed' && $artifactStatus === 'invalid') {
+            $artifactStatus = 'failed';
+        }
         $actualStatuses = [
             $evidence['expected_commit']['verified'],
             $trafficStatus,
             $dumpStatus,
-            $evidence['capacity']['status'],
-            $evidence['artifact']['status'],
+            $capacityStatus,
+            $artifactStatus,
         ];
         if ($actualStatuses !== $expectedStatuses) {
             throw new RuntimeException('failed-before-write result lacks matching failure evidence');
@@ -883,6 +891,9 @@ final class DeploymentContractV1
         if ($section['counts']['unclassified'] > $unknownOverlayCount) {
             throw new RuntimeException('traffic gate unclassified count lacks an unknown overlay');
         }
+        if ($section['counts']['method_unknown'] > $section['counts']['write']) {
+            throw new RuntimeException('traffic gate unknown method lacks the required write overlay');
+        }
         $unsafeClassCount = $section['counts']['business_or_authenticated'] + $section['counts']['unclassified'];
         foreach (['status_5xx', 'write', 'authenticated', 'customers_or_sensitive'] as $overlay) {
             if ($section['counts'][$overlay] > $unsafeClassCount) {
@@ -898,11 +909,18 @@ final class DeploymentContractV1
             $section['counts']['authenticated'],
             $section['counts']['customers_or_sensitive'],
         );
+        $minimumBusinessHazardRows = max(0, $largestHazardOverlay - $section['counts']['unclassified']);
         if (
-            $section['counts']['scanner_success'] + $largestHazardOverlay >
+            $section['counts']['scanner_success'] + $minimumBusinessHazardRows >
             $section['counts']['business_or_authenticated']
         ) {
             throw new RuntimeException('traffic gate scanner success overlaps hazardous business traffic');
+        }
+        if (
+            $section['counts']['target_unknown'] + $section['counts']['customers_or_sensitive'] >
+            $section['counts']['unclassified'] + $section['counts']['business_or_authenticated']
+        ) {
+            throw new RuntimeException('traffic gate unknown target overlaps sensitive traffic');
         }
         $rotationComplete = $section['counts']['rotation_errors'] === 0;
         $parseComplete = $section['counts']['parse_errors'] === 0 && $section['counts']['lines_seen'] > 0;
@@ -1028,10 +1046,48 @@ final class DeploymentContractV1
             ],
             'capacity',
         );
-        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed'], 'capacity.status');
+        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed', 'invalid'], 'capacity.status');
         if ($section['status'] === 'not_observed') {
             self::assertAllNullExcept($section, ['status'], 'capacity');
             return;
+        }
+        self::assertSame($section['max_used_percent'], self::MAX_CAPACITY_USED_PERCENT, 'capacity.max_used_percent');
+        if ($section['status'] === 'invalid') {
+            foreach (
+                ['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent']
+                as $field
+            ) {
+                if ($section[$field] !== null) {
+                    self::assertNonNegativeInteger($section[$field], 'capacity.' . $field);
+                }
+            }
+            foreach (['observed_percent', 'projected_percent'] as $field) {
+                if ($section[$field] !== null && $section[$field] > 100) {
+                    throw new RuntimeException('capacity percentages must not exceed 100');
+                }
+            }
+            if (
+                $section['observed_percent'] !== null &&
+                $section['projected_percent'] !== null &&
+                $section['projected_percent'] < $section['observed_percent']
+            ) {
+                throw new RuntimeException('projected capacity cannot precede observed capacity');
+            }
+            if ($section['passed'] !== null) {
+                self::assertBoolean($section['passed'], 'capacity.passed');
+            }
+            if ($section['passed'] === true) {
+                throw new RuntimeException('invalid capacity evidence cannot claim success');
+            }
+            foreach (
+                ['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent', 'passed']
+                as $field
+            ) {
+                if ($section[$field] === null) {
+                    return;
+                }
+            }
+            throw new RuntimeException('invalid capacity evidence must retain an unavailable measurement');
         }
         foreach (['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent'] as $field) {
             self::assertNonNegativeInteger($section[$field], 'capacity.' . $field);
@@ -1039,7 +1095,6 @@ final class DeploymentContractV1
         if ($section['observed_percent'] > 100 || $section['projected_percent'] > 100) {
             throw new RuntimeException('capacity percentages must not exceed 100');
         }
-        self::assertSame($section['max_used_percent'], self::MAX_CAPACITY_USED_PERCENT, 'capacity.max_used_percent');
         self::assertBoolean($section['passed'], 'capacity.passed');
         $passed =
             $section['available_bytes'] >= $section['projected_required_bytes'] &&
@@ -1068,12 +1123,37 @@ final class DeploymentContractV1
             ],
             'artifact',
         );
-        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed'], 'artifact.status');
+        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed', 'invalid'], 'artifact.status');
         if ($section['status'] === 'not_observed') {
             self::assertAllNullExcept($section, ['status'], 'artifact');
             return;
         }
         self::assertSame($section['expectation'], self::ARTIFACT_EXPECTATION, 'artifact.expectation');
+        if ($section['status'] === 'invalid') {
+            foreach (
+                ['local_sha256', 'remote_sha256', 'manifest_sha256', 'host_script_sha256', 'artifact_script_sha256']
+                as $field
+            ) {
+                if ($section[$field] !== null) {
+                    self::assertSha256($section[$field], 'artifact.' . $field);
+                }
+            }
+            if ($section['verified'] !== null) {
+                self::assertBoolean($section['verified'], 'artifact.verified');
+            }
+            if ($section['verified'] === true) {
+                throw new RuntimeException('invalid artifact evidence cannot claim verification');
+            }
+            foreach (
+                ['local_sha256', 'remote_sha256', 'manifest_sha256', 'host_script_sha256', 'artifact_script_sha256']
+                as $field
+            ) {
+                if ($section[$field] === null) {
+                    return;
+                }
+            }
+            throw new RuntimeException('invalid artifact evidence must retain an unavailable hash');
+        }
         foreach (
             ['local_sha256', 'remote_sha256', 'manifest_sha256', 'host_script_sha256', 'artifact_script_sha256']
             as $field

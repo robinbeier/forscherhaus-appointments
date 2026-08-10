@@ -453,6 +453,68 @@ final class DeploymentContractV1Test extends TestCase
         $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
         $evidence['traffic_gate']['counts']['unclassified'] = 1;
         $evidence['traffic_gate']['counts'][$overlay] = 1;
+        if ($overlay === 'method_unknown') {
+            $evidence['traffic_gate']['counts']['business_or_authenticated'] = 1;
+            $evidence['traffic_gate']['counts']['total'] = 2;
+            $evidence['traffic_gate']['counts']['lines_seen'] = 2;
+            $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
+            $evidence['traffic_gate']['counts']['write'] = 1;
+        }
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    public function testUnknownMethodCannotExceedWriteTraffic(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts']['method_unknown'] = 1;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testUnknownMethodWriteCanBeContainedByOneUnclassifiedLine(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts']['method_unknown'] = 1;
+        $evidence['traffic_gate']['counts']['write'] = 1;
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    public function testUnknownTargetAndSensitiveCustomerTrafficCannotShareOneLine(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
+        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testUnknownTargetAndSensitiveCustomerTrafficCanFitTwoLines(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
+        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
+        $evidence['traffic_gate']['counts']['total'] = 2;
+        $evidence['traffic_gate']['counts']['lines_seen'] = 2;
+        $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
 
         self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
     }
@@ -1381,6 +1443,199 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
+    #[DataProvider('validInvalidCapacityEvidenceProvider')]
+    public function testCapacityFailureCanRepresentUnavailableMeasurements(array $observed): void
+    {
+        $lines = $this->runThrough('dump_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 23, 'capacity_gate_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 23, 'capacity_gate_failed');
+        $evidence['capacity'] = array_replace($this->invalidCapacityEvidence($evidence['capacity']), $observed);
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function validInvalidCapacityEvidenceProvider(): iterable
+    {
+        yield 'all measurements unavailable' => [[]];
+        yield 'partial observed percentage' => [['observed_percent' => 81, 'passed' => false]];
+    }
+
+    #[DataProvider('invalidCapacityEvidenceShapeProvider')]
+    public function testInvalidCapacityEvidenceRejectsMalformedOrCompleteShape(array $observed): void
+    {
+        $lines = $this->runThrough('dump_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 23, 'capacity_gate_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 23, 'capacity_gate_failed');
+        $evidence['capacity'] = array_replace($this->invalidCapacityEvidence($evidence['capacity']), $observed);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function invalidCapacityEvidenceShapeProvider(): iterable
+    {
+        yield 'wrong maximum percentage' => [['max_used_percent' => 84]];
+        foreach (['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent'] as $field) {
+            yield 'wrong ' . $field . ' type' => [[$field => '1']];
+            yield 'negative ' . $field => [[$field => -1]];
+        }
+        yield 'observed percentage over one hundred' => [['observed_percent' => 101]];
+        yield 'projected percentage over one hundred' => [['projected_percent' => 101]];
+        yield 'wrong passed type' => [['passed' => 'false']];
+        yield 'passed true' => [['passed' => true]];
+        yield 'fully observed invalid status' => [
+            [
+                'available_bytes' => 8_000_000_000,
+                'projected_required_bytes' => 1_000_000_000,
+                'observed_percent' => 81,
+                'projected_percent' => 84,
+                'passed' => false,
+            ],
+        ];
+    }
+
+    public function testPassedCapacityRejectsUnavailableMeasurement(): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['capacity']['available_bytes'] = null;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testGenericFailureCannotAliasInvalidCapacityEvidence(): void
+    {
+        $lines = $this->runThrough('planned');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 70, 'contract_invalid'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 70, 'contract_invalid');
+        $evidence['expected_commit']['observed'] = null;
+        $evidence['expected_commit']['verified'] = false;
+        $evidence['capacity'] = $this->invalidCapacityEvidence($evidence['capacity']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testArtifactFailureCannotAliasInvalidCapacityEvidence(): void
+    {
+        $lines = $this->runThrough('capacity_passed');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_before_write', 0, 24, 'artifact_verification_failed'),
+        );
+        $evidence = $this->failedBeforeWriteEvidence($lines, 24, 'artifact_verification_failed');
+        $evidence['capacity'] = $this->invalidCapacityEvidence($evidence['capacity']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    #[DataProvider('validInvalidArtifactEvidenceProvider')]
+    public function testArtifactVerificationFailureCanRepresentUnavailableHashes(array $observed): void
+    {
+        $lines = $this->runThrough('capacity_passed');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_before_write', 0, 24, 'artifact_verification_failed'),
+        );
+        $evidence = $this->failedBeforeWriteEvidence($lines, 24, 'artifact_verification_failed');
+        $evidence['artifact'] = array_replace($this->invalidArtifactEvidence($evidence['artifact']), $observed);
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function validInvalidArtifactEvidenceProvider(): iterable
+    {
+        yield 'all hashes unavailable' => [[]];
+        yield 'partial local and manifest hashes observed' => [
+            [
+                'local_sha256' => self::SHA,
+                'manifest_sha256' => self::SHA,
+                'verified' => false,
+            ],
+        ];
+    }
+
+    #[DataProvider('invalidArtifactEvidenceShapeProvider')]
+    public function testInvalidArtifactEvidenceRejectsMalformedOrCompleteShape(
+        array $observed,
+        ?string $missingField = null,
+    ): void {
+        $lines = $this->runThrough('capacity_passed');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_before_write', 0, 24, 'artifact_verification_failed'),
+        );
+        $evidence = $this->failedBeforeWriteEvidence($lines, 24, 'artifact_verification_failed');
+        $evidence['artifact'] = array_replace($this->invalidArtifactEvidence($evidence['artifact']), $observed);
+        if ($missingField !== null) {
+            unset($evidence['artifact'][$missingField]);
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>,?string}> */
+    public static function invalidArtifactEvidenceShapeProvider(): iterable
+    {
+        yield 'wrong expectation' => [['expectation' => 'different_artifact_expectation'], null];
+        foreach (
+            ['local_sha256', 'remote_sha256', 'manifest_sha256', 'host_script_sha256', 'artifact_script_sha256']
+            as $hashField
+        ) {
+            yield 'malformed ' . $hashField => [[$hashField => 'not-a-sha'], null];
+        }
+        yield 'wrong verified type' => [['verified' => 'false'], null];
+        yield 'verified true' => [['local_sha256' => self::SHA, 'verified' => true], null];
+        yield 'fully observed invalid status' => [
+            [
+                'local_sha256' => self::SHA,
+                'remote_sha256' => self::SHA,
+                'manifest_sha256' => self::SHA,
+                'host_script_sha256' => self::SHA,
+                'artifact_script_sha256' => self::SHA,
+                'verified' => false,
+            ],
+            null,
+        ];
+        yield 'extra field' => [['extra' => null], null];
+        yield 'missing field' => [[], 'remote_sha256'];
+    }
+
+    public function testPassedArtifactRejectsUnavailableHash(): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['artifact']['remote_sha256'] = null;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testGenericFailureCannotAliasInvalidArtifactEvidence(): void
+    {
+        $lines = $this->runThrough('planned');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 70, 'contract_invalid'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 70, 'contract_invalid');
+        $evidence['expected_commit']['observed'] = null;
+        $evidence['expected_commit']['verified'] = false;
+        $evidence['artifact'] = $this->invalidArtifactEvidence($evidence['artifact']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testCapacityFailureCannotAliasInvalidArtifactEvidence(): void
+    {
+        $lines = $this->runThrough('dump_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 23, 'capacity_gate_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 23, 'capacity_gate_failed');
+        $evidence['artifact'] = $this->invalidArtifactEvidence($evidence['artifact']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
     public function testArtifactHashOrHostScriptMismatchIsRejected(): void
     {
         foreach (['remote_sha256', 'artifact_script_sha256'] as $field) {
@@ -1999,6 +2254,26 @@ final class DeploymentContractV1Test extends TestCase
         $section['status'] = 'invalid';
         $section['policy'] = DeploymentContractV1::DUMP_POLICY;
         $section['max_age_seconds'] = 14400;
+
+        return $section;
+    }
+
+    /** @param array<string,mixed> $section @return array<string,mixed> */
+    private function invalidArtifactEvidence(array $section): array
+    {
+        $section = $this->notObservedSection($section);
+        $section['status'] = 'invalid';
+        $section['expectation'] = DeploymentContractV1::ARTIFACT_EXPECTATION;
+
+        return $section;
+    }
+
+    /** @param array<string,mixed> $section @return array<string,mixed> */
+    private function invalidCapacityEvidence(array $section): array
+    {
+        $section = $this->notObservedSection($section);
+        $section['status'] = 'invalid';
+        $section['max_used_percent'] = DeploymentContractV1::MAX_CAPACITY_USED_PERCENT;
 
         return $section;
     }

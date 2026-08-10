@@ -164,6 +164,12 @@ record, and that finish is no later than evidence capture.
 Runs that fail before reserving the deploy invocation must retain
 `deploy_timing` as `not_observed`.
 
+Capacity and artifact collection failures use the same fail-closed distinction:
+`invalid` retains the fixed ceiling or artifact expectation and every available
+strictly typed measurement, while unavailable measurements or hashes remain
+`null`. A complete observation uses `passed` or `failed`; `invalid` cannot claim
+success or verification and cannot substantiate a different terminal reason.
+
 ## Traffic-gate consumption
 
 The later runner must read one unique `traffic_gate.v1` report file once into a
