@@ -237,6 +237,60 @@ deploy_timing_disable() {
   return 0
 }
 
+deploy_result_set_switch_phase() {
+  local phase="$1"
+
+  DEPLOY_RESULT_PHASE="$phase"
+  case "$phase" in
+    before_switch|switch_first_move_pending)
+      DEPLOY_TIMING_SWITCH_STATE="not_started"
+      ;;
+    switch_partial|switch_second_move_pending)
+      DEPLOY_TIMING_SWITCH_STATE="partial"
+      ;;
+    switch_complete)
+      DEPLOY_TIMING_SWITCH_STATE="complete"
+      ;;
+  esac
+}
+
+deploy_result_path_exists() {
+  [[ -e "$1" || -L "$1" ]]
+}
+
+deploy_result_reconcile_switch_phase() {
+  case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+    switch_first_move_pending)
+      if
+        ! deploy_result_path_exists "$APP" &&
+          deploy_result_path_exists "$PREV" &&
+          deploy_result_path_exists "$STAGE_ROOT"
+      then
+        deploy_result_set_switch_phase switch_partial
+      elif
+        deploy_result_path_exists "$APP" &&
+          ! deploy_result_path_exists "$PREV" &&
+          deploy_result_path_exists "$STAGE_ROOT"
+      then
+        deploy_result_set_switch_phase before_switch
+      else
+        deploy_result_set_switch_phase switch_partial
+      fi
+      ;;
+    switch_second_move_pending)
+      if
+        deploy_result_path_exists "$APP" &&
+          deploy_result_path_exists "$PREV" &&
+          ! deploy_result_path_exists "$STAGE_ROOT"
+      then
+        deploy_result_set_switch_phase switch_complete
+      else
+        deploy_result_set_switch_phase switch_partial
+      fi
+      ;;
+  esac
+}
+
 deploy_result_normalize_exit_code() {
   local exit_code="$1"
 
@@ -273,7 +327,10 @@ deploy_result_normalize_exit_code() {
 }
 
 deploy_result_on_signal() {
-  trap - TERM
+  local signal_exit_code="${1:-143}"
+
+  trap - HUP INT QUIT TERM
+  deploy_result_reconcile_switch_phase
 
   case "${DEPLOY_RESULT_PHASE:-before_switch}" in
     switch_partial)
@@ -288,13 +345,16 @@ deploy_result_on_signal() {
       ;;
   esac
 
-  exit 143
+  exit "$signal_exit_code"
 }
 
 deploy_result_trap_install() {
   DEPLOY_RESULT_NORMALIZATION_ACTIVE=1
   trap deploy_timing_on_exit EXIT
-  trap deploy_result_on_signal TERM
+  trap 'deploy_result_on_signal 129' HUP
+  trap 'deploy_result_on_signal 130' INT
+  trap 'deploy_result_on_signal 131' QUIT
+  trap 'deploy_result_on_signal 143' TERM
 }
 
 emit_deploy_timing_phase() {
@@ -431,6 +491,7 @@ deploy_timing_on_exit() {
   local outcome="failed_pre_switch"
 
   trap - EXIT
+  deploy_result_reconcile_switch_phase
   if [[
     "$raw_exit_code" != "0" &&
     "$raw_exit_code" != "$EXIT_DEPLOY_FAILED" &&
@@ -1624,12 +1685,12 @@ perform_atomic_switch() {
     return 0
   fi
 
+  deploy_result_set_switch_phase switch_first_move_pending
   mv "$APP" "$PREV"
-  DEPLOY_RESULT_PHASE="switch_partial"
-  DEPLOY_TIMING_SWITCH_STATE="partial"
+  deploy_result_set_switch_phase switch_partial
+  deploy_result_set_switch_phase switch_second_move_pending
   mv "$STAGE_ROOT" "$APP"
-  DEPLOY_RESULT_PHASE="switch_complete"
-  DEPLOY_TIMING_SWITCH_STATE="complete"
+  deploy_result_set_switch_phase switch_complete
 }
 
 is_positive_integer() {
