@@ -580,7 +580,11 @@ final class DeploymentContractV1
                 true,
             )
         ) {
-            if (!in_array($evidence['post_gates']['status'], ['not_observed', 'failed'], true)) {
+            $allowedPostGateStatuses = ['not_observed', 'failed'];
+            if ($state === 'manual_recovery_required' && $reason === 'interrupted') {
+                $allowedPostGateStatuses = array_merge($allowedPostGateStatuses, ['incomplete', 'passed']);
+            }
+            if (!in_array($evidence['post_gates']['status'], $allowedPostGateStatuses, true)) {
                 throw new RuntimeException('failure evidence cannot claim passed post-gates');
             }
         } else {
@@ -684,8 +688,15 @@ final class DeploymentContractV1
                 true,
             )
         ) {
-            $expectedPostGateStatus = $last['previous_state'] === 'post_gates_running' ? 'failed' : 'not_observed';
-            if ($evidence['post_gates']['status'] !== $expectedPostGateStatus) {
+            $allowedPostGateStatuses = $last['previous_state'] === 'post_gates_running' ? ['failed'] : ['not_observed'];
+            if (
+                $last['state'] === 'manual_recovery_required' &&
+                $last['reason'] === 'interrupted' &&
+                $last['previous_state'] === 'post_gates_running'
+            ) {
+                $allowedPostGateStatuses = array_merge($allowedPostGateStatuses, ['incomplete', 'passed']);
+            }
+            if (!in_array($evidence['post_gates']['status'], $allowedPostGateStatuses, true)) {
                 throw new RuntimeException('post-gate evidence does not match the failure transition phase');
             }
             return;
@@ -1113,9 +1124,46 @@ final class DeploymentContractV1
             ],
             'post_gates',
         );
-        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed'], 'post_gates.status');
+        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed', 'incomplete'], 'post_gates.status');
         if ($section['status'] === 'not_observed') {
             self::assertAllNullExcept($section, ['status'], 'post_gates');
+            return;
+        }
+        if ($section['status'] === 'incomplete') {
+            self::assertSame($section['passed'], null, 'post_gates.passed');
+            $healthyObserved = $section['kuma_healthy_count'] !== null;
+            $totalObserved = $section['kuma_total_count'] !== null;
+            if ($healthyObserved !== $totalObserved) {
+                throw new RuntimeException('incomplete post-gate Kuma counts must be observed together');
+            }
+            $hasUnobservedCheck = !$healthyObserved;
+            if ($healthyObserved) {
+                self::assertNonNegativeInteger($section['kuma_healthy_count'], 'post_gates.kuma_healthy_count');
+                self::assertNonNegativeInteger($section['kuma_total_count'], 'post_gates.kuma_total_count');
+                if ($section['kuma_healthy_count'] > $section['kuma_total_count']) {
+                    throw new RuntimeException('post-gate Kuma counts are inconsistent');
+                }
+            }
+            foreach (
+                [
+                    'runtime_config_passed',
+                    'services_passed',
+                    'endpoints_passed',
+                    'logs_passed',
+                    'scanner_passed',
+                    'dormant_clean_passed',
+                ]
+                as $field
+            ) {
+                if ($section[$field] === null) {
+                    $hasUnobservedCheck = true;
+                    continue;
+                }
+                self::assertBoolean($section[$field], 'post_gates.' . $field);
+            }
+            if (!$hasUnobservedCheck) {
+                throw new RuntimeException('incomplete post-gate evidence must retain an unobserved check');
+            }
             return;
         }
         self::assertNonNegativeInteger($section['kuma_healthy_count'], 'post_gates.kuma_healthy_count');

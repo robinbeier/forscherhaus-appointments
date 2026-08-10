@@ -135,7 +135,16 @@ precede the terminal journal timestamp. A successful result requires all
 safety and post-gate sections to pass. Post-switch terminal evidence reached
 directly from `deploy_running` keeps post-gates `not_observed`; a rollback or
 manual-recovery terminal reached from `post_gates_running` requires failed
-post-gate evidence. Timing remains
+post-gate evidence. The sole partial exception is
+`post_gates_running -> manual_recovery_required` with reason `interrupted`:
+it may use status `incomplete` when the interruption prevented all checks from
+finishing. In that shape `passed` is `null`, unobserved checks stay `null`,
+observed booleans retain their exact values, and the two Kuma counts are either
+both absent or both valid with healthy not exceeding total. At least one check
+must remain unobserved. The same transition uses `passed` or `failed` when all
+checks completed before terminal persistence; no other failure transition may
+claim passed post-gates, and no other terminal state or reason accepts
+incomplete post-gates. Timing remains
 observational as defined in `docs/deployment.md`: missing or invalid
 `deploy_timing.v1` evidence is visible but cannot rewrite a safe deploy outcome.
 Invalid timing bytes retain their authoritative SHA while an unavailable parsed

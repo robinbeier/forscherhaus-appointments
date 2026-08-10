@@ -961,6 +961,236 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateBundle($lines, $observedFailure);
     }
 
+    #[DataProvider('validIncompletePostGateProvider')]
+    public function testInterruptedManualRecoveryAfterPostGatesAcceptsIncompleteEvidence(array $observed): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+        $evidence['post_gates'] = array_replace($this->incompletePostGateEvidence($evidence['post_gates']), $observed);
+
+        self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function validIncompletePostGateProvider(): iterable
+    {
+        yield 'all checks unavailable' => [[]];
+        yield 'mixed partial checks' => [
+            [
+                'kuma_healthy_count' => 13,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+            ],
+        ];
+    }
+
+    #[DataProvider('invalidIncompletePostGateShapeProvider')]
+    public function testIncompletePostGateEvidenceRejectsContradictoryShape(array $observed): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+        $evidence['post_gates'] = array_replace($this->incompletePostGateEvidence($evidence['post_gates']), $observed);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function invalidIncompletePostGateShapeProvider(): iterable
+    {
+        yield 'healthy count without total' => [['kuma_healthy_count' => 13]];
+        yield 'total count without healthy' => [['kuma_total_count' => 13]];
+        yield 'negative Kuma count' => [['kuma_healthy_count' => -1, 'kuma_total_count' => 13]];
+        yield 'wrong Kuma type' => [['kuma_healthy_count' => '13', 'kuma_total_count' => 13]];
+        yield 'healthy exceeds total' => [['kuma_healthy_count' => 14, 'kuma_total_count' => 13]];
+        yield 'wrong gate type' => [['runtime_config_passed' => 'true']];
+        yield 'passed is non-null' => [['passed' => false]];
+        yield 'all checks complete' => [
+            [
+                'kuma_healthy_count' => 13,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+                'services_passed' => true,
+                'endpoints_passed' => true,
+                'logs_passed' => false,
+                'scanner_passed' => true,
+                'dormant_clean_passed' => true,
+            ],
+        ];
+    }
+
+    #[DataProvider('forbiddenIncompletePostGateTerminalProvider')]
+    public function testIncompletePostGateEvidenceIsRestrictedToInterruptedManualRecovery(
+        string $from,
+        string $state,
+        int $publicExit,
+        string $reason,
+        int $deployExit,
+        string $rollbackOutcome,
+    ): void {
+        $lines = $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            $publicExit,
+            $reason,
+            $deployExit,
+            $rollbackOutcome,
+            'not_observed',
+        );
+        $evidence['post_gates'] = $this->incompletePostGateEvidence($evidence['post_gates']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,string,int,string,int,string}> */
+    public static function forbiddenIncompletePostGateTerminalProvider(): iterable
+    {
+        yield 'rollback terminal' => [
+            'post_gates_running',
+            'failed_post_switch_rollback_succeeded',
+            30,
+            'deploy_failed',
+            30,
+            'succeeded',
+        ];
+        yield 'manual recovery rollback reason' => [
+            'post_gates_running',
+            'manual_recovery_required',
+            31,
+            'rollback_failed',
+            31,
+            'recovery_required',
+        ];
+        yield 'manual recovery switch reason' => [
+            'post_gates_running',
+            'manual_recovery_required',
+            32,
+            'switch_recovery_required',
+            31,
+            'recovery_required',
+        ];
+        yield 'interrupted before post-gates' => [
+            'deploy_running',
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+        ];
+    }
+
+    public function testSuccessfulDeploymentRejectsIncompletePostGateEvidence(): void
+    {
+        $lines = $this->successfulRunLines();
+        $evidence = $this->validEvidence($lines);
+        $evidence['post_gates'] = $this->incompletePostGateEvidence($evidence['post_gates']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testInterruptedManualRecoveryAfterPostGatesStillAcceptsCompleteFailureEvidence(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'failed',
+        );
+
+        self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    public function testInterruptedManualRecoveryAfterPostGatesAcceptsCompletePassedEvidence(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+        $evidence['post_gates'] = $this->validEvidence($lines)['post_gates'];
+
+        self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    #[DataProvider('terminalThatCannotRetainPassedPostGatesProvider')]
+    public function testPassedPostGatesAreRejectedForOtherFailureOutcomes(
+        string $state,
+        int $publicExit,
+        string $reason,
+        int $deployExit,
+        string $rollbackOutcome,
+    ): void {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            $publicExit,
+            $reason,
+            $deployExit,
+            $rollbackOutcome,
+            'not_observed',
+        );
+        $evidence['post_gates'] = $this->validEvidence($lines)['post_gates'];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('claim passed post-gates');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,int,string,int,string}> */
+    public static function terminalThatCannotRetainPassedPostGatesProvider(): iterable
+    {
+        yield 'manual recovery for rollback failure' => [
+            'manual_recovery_required',
+            31,
+            'rollback_failed',
+            31,
+            'recovery_required',
+        ];
+        yield 'rollback succeeded terminal' => [
+            'failed_post_switch_rollback_succeeded',
+            30,
+            'deploy_failed',
+            30,
+            'succeeded',
+        ];
+        yield 'rollback failed terminal' => ['failed_post_switch_rollback_failed', 31, 'rollback_failed', 31, 'failed'];
+    }
+
     public function testDumpAgeAtExactly240MinutesIsRejected(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
@@ -1513,6 +1743,15 @@ final class DeploymentContractV1Test extends TestCase
         foreach ($section as $field => $_value) {
             $section[$field] = $field === 'status' ? 'not_observed' : null;
         }
+
+        return $section;
+    }
+
+    /** @param array<string,mixed> $section @return array<string,mixed> */
+    private function incompletePostGateEvidence(array $section): array
+    {
+        $section = $this->notObservedSection($section);
+        $section['status'] = 'incomplete';
 
         return $section;
     }
