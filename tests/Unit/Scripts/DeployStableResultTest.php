@@ -526,6 +526,47 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(1, substr_count($result['stdout'], "runtime-config-rollback-finished\n"));
     }
 
+    public function testRealTimingDoesNotReplaceRecoverySignalHandlers(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            APP=/fixed/active
+            PREV=/fixed/previous
+            REL=ea_contract
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
+            ZERO_SURPRISE_CANARY_REPORT=''
+            DEPLOY_RESULT_PHASE=switch_complete
+            deploy_monotonic_ms() { printf '1000\n'; }
+            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
+            emit_zero_surprise_incident() { :; }
+            reload_services() { :; }
+            restart_renderer_service() { return 0; }
+            probe_renderer_health() { return 0; }
+            probe_deep_health_contract() { return 0; }
+            bash() {
+              if [[ "${signal_sent:-0}" == "0" ]]; then
+                signal_sent=1
+                kill -TERM $$
+              fi
+              printf 'real-timing-recovery-finished\n'
+              return 0
+            }
+            deploy_timing_init deploy 0 postdeploy_validation
+            rollback_after_failure 'redacted failure'
+            BASH
+            ,
+        );
+
+        self::assertSame(31, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "real-timing-recovery-finished\n"));
+        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
+        self::assertStringContainsString('"outcome":"rollback_failed"', $result['stdout']);
+    }
+
     public function testSigtermRemainsTheContractInterruptionExit(): void
     {
         $result = $this->runShell(

@@ -413,6 +413,11 @@ deploy_timing_defer_signals() {
 }
 
 deploy_timing_restore_signals() {
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+    deploy_result_recovery_signal_traps_install
+    return 0
+  fi
+
   trap 'deploy_result_on_signal 129' HUP
   trap 'deploy_result_on_signal 130' INT
   trap 'deploy_result_on_signal 131' QUIT
