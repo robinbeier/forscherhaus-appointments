@@ -65,7 +65,10 @@ Terminal failure states are:
 - `failed_post_switch_rollback_failed`
 - `manual_recovery_required`
 
-Terminal state is immutable. The `deploy_running` record is the durable
+`failed_switch_recovery_required` is reachable only directly from
+`deploy_running`; once `post_gates_running` begins, a switch-phase recovery
+claim is an impossible ordering and fails closed. Terminal state is immutable.
+The `deploy_running` record is the durable
 write-ahead invocation reservation: the future host runner must append and
 fsync it before spawning `deploy_ea.sh`. It changes
 `deploy_invocation_count` from `0` to `1`; the count can never exceed one or
@@ -125,7 +128,8 @@ Not-yet-observed sections retain their exact keys with `null` values and a
 fixed `not_observed`/`not_invoked` status. They never invent zero hashes or
 success. A terminal failure with exit `20` through `25` requires the claimed
 gate's failed evidence plus passed evidence for every earlier verified gate;
-the journal's last verified state must agree. A successful result requires all
+the journal's last verified state must agree. Evidence `captured_at_utc` cannot
+precede the terminal journal timestamp. A successful result requires all
 safety and post-gate sections to pass. Rollback evidence reached directly from
 `deploy_running` keeps post-gates `not_observed`; a rollback reached from
 `post_gates_running` requires failed post-gate evidence. Timing remains

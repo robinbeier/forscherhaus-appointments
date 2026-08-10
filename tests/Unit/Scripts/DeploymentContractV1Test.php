@@ -304,6 +304,18 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateRunLines($lines);
     }
 
+    public function testSwitchRecoveryRequiredCannotFollowPostGates(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_switch_recovery_required', 1, 32, 'switch_recovery_required'),
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('deployment phase');
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
     public function testFailedBeforeWriteReasonMustMatchTheJournalPredecessor(): void
     {
         $lines = $this->runThrough('planned');
@@ -493,6 +505,17 @@ final class DeploymentContractV1Test extends TestCase
         }
 
         $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testEvidenceCaptureCannotPrecedeTheTerminalJournalRecord(): void
+    {
+        $lines = $this->successfulRunLines();
+        $evidence = $this->validEvidence($lines);
+        $evidence['captured_at_utc'] = '2026-08-10T03:59:59Z';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('terminal journal record');
         DeploymentContractV1::validateBundle($lines, $evidence);
     }
 

@@ -357,6 +357,9 @@ final class DeploymentContractV1
         }
 
         $last = json_decode($runLines[array_key_last($runLines)], true, 64, JSON_THROW_ON_ERROR);
+        if (self::utcEpoch($evidence['captured_at_utc']) < self::utcEpoch($last['recorded_at_utc'])) {
+            throw new RuntimeException('evidence capture precedes the terminal journal record');
+        }
         self::assertFailureTransitionMatchesEvidence($last, $evidence);
         self::assertSame($evidence['result']['exit_code'], $last['exit_code'], 'evidence exit_code');
         self::assertSame($evidence['result']['reason'], $last['reason'], 'evidence reason');
@@ -414,11 +417,13 @@ final class DeploymentContractV1
         if ($next === 'failed_pre_switch' && $previous === 'deploy_running') {
             return;
         }
+        if ($next === 'failed_switch_recovery_required' && $previous === 'deploy_running') {
+            return;
+        }
         if (
             in_array(
                 $next,
                 [
-                    'failed_switch_recovery_required',
                     'failed_post_switch_rollback_succeeded',
                     'failed_post_switch_rollback_failed',
                     'manual_recovery_required',
