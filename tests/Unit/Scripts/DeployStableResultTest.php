@@ -430,6 +430,14 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(143, $result['exit_code'], $result['stderr']);
     }
 
+    public function testDocumentedResultSeamIncludesPreSwitchSigterm(): void
+    {
+        $documentation = file_get_contents(dirname(__DIR__, 3) . '/docs/deployment.md');
+
+        self::assertIsString($documentation);
+        self::assertMatchesRegularExpression('/`143`[^\n]*SIGTERM[^\n]*before[^\n]*live switch/i', $documentation);
+    }
+
     public function testOtherCommonPreSwitchSignalsUseStableDeployFailedExit(): void
     {
         foreach (['HUP', 'INT', 'QUIT'] as $signal) {
@@ -669,9 +677,8 @@ final class DeployStableResultTest extends TestCase
             probe_renderer_health() { return 0; }
             probe_deep_health_contract() { return 0; }
             bash() { ROLLBACK_RESULT; }
+            deploy_result_after_timing_finish() { printf 'signal-boundary\n'; kill -TERM $$; }
             deploy_timing_init deploy 0 postdeploy_validation
-            set -T
-            trap 'if [[ "$BASH_COMMAND" == deploy_result_exit* && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "1" ]]; then trap - DEBUG; printf "signal-boundary\\n"; kill -TERM $$; fi' DEBUG
             rollback_after_failure 'redacted failure'
             BASH
             ,

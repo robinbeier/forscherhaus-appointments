@@ -133,6 +133,7 @@ Normal deploy execution exposes a stable result seam for the host-side caller:
 - `31` means an attempted rollback failed or is unverifiable.
 - `32` means the first atomic move completed but the second did not, so the
   partial switch requires recovery.
+- `143` means SIGTERM interrupted the deploy before any live switch.
 
 An otherwise unhandled failure after a completed switch enters the same
 automatic rollback path before returning `30` or `31`. The independent safety

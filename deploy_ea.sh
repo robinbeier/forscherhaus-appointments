@@ -514,6 +514,21 @@ deploy_timing_finish() {
   return 0
 }
 
+deploy_result_after_timing_finish() {
+  return 0
+}
+
+deploy_result_finish_with_timing() {
+  local exit_code="$1"
+  local phase_status="$2"
+  local outcome="$3"
+
+  deploy_result_finalize "$exit_code" || return 1
+  deploy_timing_finish "$phase_status" "$outcome" "$exit_code"
+  deploy_result_after_timing_finish || true
+  deploy_result_exit "$exit_code"
+}
+
 deploy_timing_on_exit() {
   local raw_exit_code="$?"
   local exit_code
@@ -2322,9 +2337,7 @@ rollback_after_failure() {
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
-    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
-    deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
-    deploy_result_exit "$EXIT_ROLLBACK_SUCCESS"
+    deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
   fi
 
   config_result="ok"
@@ -2382,9 +2395,7 @@ rollback_after_failure() {
       "$incident_report" \
       "$incident_report_root"
     echo "[!] Rollback succeeded, deployment remains failed."
-    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
-    deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
-    deploy_result_exit "$EXIT_ROLLBACK_SUCCESS"
+    deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
   fi
 
   if [[ "$reason" == "zero-surprise canary failed" ]]; then
@@ -2399,9 +2410,7 @@ rollback_after_failure() {
     "$incident_report" \
     "$incident_report_root"
   echo "[!] Rollback failed or unverifiable. Manual intervention required."
-  deploy_result_finalize "$EXIT_ROLLBACK_FAILED"
-  deploy_timing_finish failed rollback_failed "$EXIT_ROLLBACK_FAILED"
-  deploy_result_exit "$EXIT_ROLLBACK_FAILED"
+  deploy_result_finish_with_timing "$EXIT_ROLLBACK_FAILED" failed rollback_failed
 }
 
 verify_post_switch_runtime_config_contracts() {
