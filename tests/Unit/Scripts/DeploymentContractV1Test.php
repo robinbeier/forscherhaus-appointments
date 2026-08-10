@@ -756,6 +756,42 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
+    #[DataProvider('impossibleTrafficCountBoundProvider')]
+    public function testTrafficProducerCountBoundsAreEnforced(
+        int $exitCode,
+        string $reason,
+        array $countOverrides,
+        array $coreOverrides,
+    ): void {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, $exitCode, $reason));
+        $evidence = $this->failedBeforeWriteEvidence($lines, $exitCode, $reason);
+        $evidence['traffic_gate']['counts'] = array_replace($evidence['traffic_gate']['counts'], $countOverrides);
+        $evidence['traffic_gate'] = array_replace($evidence['traffic_gate'], $coreOverrides);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('count bounds');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{int,string,array<string,int>,array<string,mixed>}> */
+    public static function impossibleTrafficCountBoundProvider(): iterable
+    {
+        yield 'window exceeds seen lines' => [
+            20,
+            'traffic_hard_stop',
+            ['documented_health' => 1, 'total' => 2, 'lines_in_window' => 2],
+            [],
+        ];
+        yield 'pre-window completion exceeds window' => [20, 'traffic_hard_stop', ['pre_window_completion' => 2], []];
+        yield 'more than one rotation error' => [
+            21,
+            'traffic_evidence_invalid',
+            ['rotation_errors' => 2],
+            ['rotation_complete' => false],
+        ];
+    }
+
     public function testTrafficUnknownFieldAndFullReportInjectionAreRejected(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
