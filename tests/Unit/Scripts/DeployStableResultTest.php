@@ -344,6 +344,30 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(2, substr_count($result['stdout'], "move\n"));
     }
 
+    public function testSignalAfterSuccessfulTimingFinishDoesNotRollbackCompletedDeploy(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            DEPLOY_RESULT_PHASE=switch_complete
+            deploy_timing_finish() { trap - EXIT; }
+            deploy_result_after_timing_finish() { printf 'success-boundary\n'; kill -TERM $$; }
+            rollback_after_failure() {
+              printf 'unexpected-rollback\n'
+              deploy_result_exit 31
+            }
+            deploy_result_finish_with_timing 0 ok succeeded
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "success-boundary\n"));
+        self::assertStringNotContainsString('unexpected-rollback', $result['stdout']);
+    }
+
     public function testExistingRollbackSuccessAndFailureExitsRemainStable(): void
     {
         $success = $this->runShell($this->rollbackHarness(true));
@@ -467,6 +491,35 @@ final class DeployStableResultTest extends TestCase
             );
 
             self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
+        }
+    }
+
+    public function testPreSwitchSignalsDuringTimingExitRemainStableDeployFailed(): void
+    {
+        foreach (['HUP', 'INT', 'QUIT'] as $signal) {
+            $result = $this->runShell(
+                str_replace(
+                    'SIGNAL_NAME',
+                    $signal,
+                    <<<'BASH'
+                    source ./deploy_ea.sh
+                    deploy_result_trap_install
+                    injected=0
+                    deploy_result_reconcile_switch_phase() {
+                      if [[ "$injected" == "0" ]]; then
+                        injected=1
+                        printf 'timing-exit-boundary\n'
+                        kill -SIGNAL_NAME $$
+                      fi
+                    }
+                    exit 1
+                    BASH
+                    ,
+                ),
+            );
+
+            self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "timing-exit-boundary\n"), $signal);
         }
     }
 

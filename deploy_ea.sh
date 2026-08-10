@@ -295,7 +295,7 @@ deploy_result_finalize() {
   local exit_code="$1"
 
   case "$exit_code" in
-    30|31|32)
+    0|30|31|32)
       DEPLOY_RESULT_FINAL_EXIT_CODE="$exit_code"
       return 0
       ;;
@@ -373,6 +373,7 @@ deploy_result_on_signal() {
       ;;
   esac
 
+  signal_exit_code="$(deploy_result_normalize_exit_code "$signal_exit_code")"
   exit "$signal_exit_code"
 }
 
@@ -2722,4 +2723,4 @@ echo "Rollback (manual fallback):"
 MANUAL_FAILED_PATH="${APP}_failed_${REL}"
 echo "  bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$MANUAL_FAILED_PATH' --runtime-user '$WEBUSER'"
 
-deploy_timing_finish ok succeeded 0
+deploy_result_finish_with_timing 0 ok succeeded
