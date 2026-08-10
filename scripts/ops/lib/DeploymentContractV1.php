@@ -710,7 +710,7 @@ final class DeploymentContractV1
             $expectedDeploy =
                 $last['previous_state'] === 'deploy_running'
                     ? ['unknown', 1, null, 'not_observed']
-                    : ['failed', 1, 31, 'recovery_required'];
+                    : ['succeeded', 1, 0, 'not_run'];
             if ($actualDeploy !== $expectedDeploy) {
                 throw new RuntimeException('deploy evidence does not match the interrupted transition phase');
             }
@@ -1256,10 +1256,7 @@ final class DeploymentContractV1
     {
         $actual = [$deploy['status'], $deploy['invocation_count'], $deploy['exit_code'], $deploy['rollback_outcome']];
         if ($state === 'manual_recovery_required' && $reason === 'interrupted') {
-            if (
-                $actual !== ['unknown', 1, null, 'not_observed'] &&
-                $actual !== ['failed', 1, 31, 'recovery_required']
-            ) {
+            if ($actual !== ['unknown', 1, null, 'not_observed'] && $actual !== ['succeeded', 1, 0, 'not_run']) {
                 throw new RuntimeException('deploy and rollback evidence is inconsistent with interrupted recovery');
             }
             return;

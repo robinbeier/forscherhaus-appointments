@@ -1263,6 +1263,7 @@ final class DeploymentContractV1Test extends TestCase
             'recovery_required',
             'not_observed',
         );
+        $evidence['deploy'] = $this->succeededDeployEvidence();
         $evidence['post_gates'] = array_replace($this->incompletePostGateEvidence($evidence['post_gates']), $observed);
 
         self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
@@ -1295,6 +1296,7 @@ final class DeploymentContractV1Test extends TestCase
             'recovery_required',
             'not_observed',
         );
+        $evidence['deploy'] = $this->succeededDeployEvidence();
         $evidence['post_gates'] = array_replace($this->incompletePostGateEvidence($evidence['post_gates']), $observed);
 
         $this->expectException(RuntimeException::class);
@@ -1411,6 +1413,7 @@ final class DeploymentContractV1Test extends TestCase
             'recovery_required',
             'failed',
         );
+        $evidence['deploy'] = $this->succeededDeployEvidence();
 
         self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
     }
@@ -1428,9 +1431,47 @@ final class DeploymentContractV1Test extends TestCase
             'recovery_required',
             'not_observed',
         );
+        $evidence['deploy'] = $this->succeededDeployEvidence();
         $evidence['post_gates'] = $this->validEvidence($lines)['post_gates'];
 
         self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    public function testInterruptedManualRecoveryAfterPostGatesRejectsFabricatedRecoveryOutcome(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'failed',
+        );
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testInterruptedManualRecoveryBeforePostGatesRejectsSucceededDeployOutcome(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+        $evidence['deploy'] = $this->succeededDeployEvidence();
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
     #[DataProvider('terminalThatCannotRetainPassedPostGatesProvider')]
@@ -2445,6 +2486,17 @@ final class DeploymentContractV1Test extends TestCase
             'invocation_count' => 1,
             'exit_code' => null,
             'rollback_outcome' => 'not_observed',
+        ];
+    }
+
+    /** @return array{status:string,invocation_count:int,exit_code:int,rollback_outcome:string} */
+    private function succeededDeployEvidence(): array
+    {
+        return [
+            'status' => 'succeeded',
+            'invocation_count' => 1,
+            'exit_code' => 0,
+            'rollback_outcome' => 'not_run',
         ];
     }
 

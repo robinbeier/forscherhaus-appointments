@@ -146,7 +146,10 @@ manual-recovery terminal reached from `post_gates_running` requires failed
 post-gate evidence. The sole partial exception is
 `post_gates_running -> manual_recovery_required` with reason `interrupted`:
 it may use status `incomplete` when the interruption prevented all checks from
-finishing. In that shape `passed` is `null`, unobserved checks stay `null`,
+finishing. Because the deploy child completed before post-gates began, its
+deploy evidence remains `succeeded` with exit `0` and rollback `not_run`; the
+terminal run still fails closed on the interrupted post-gates. In that shape
+`passed` is `null`, unobserved checks stay `null`,
 observed booleans retain their exact values, and the two Kuma counts are either
 both absent or both valid with healthy not exceeding total. At least one check
 must remain unobserved. The same transition uses `passed` or `failed` when all
