@@ -1044,7 +1044,17 @@ final class DeploymentContractV1Test extends TestCase
         ]);
         self::assertSame(0, $validExit, $validStderr);
         self::assertSame('', $validStderr);
-        self::assertTrue(json_decode($validStdout, true, 64, JSON_THROW_ON_ERROR)['valid']);
+        $validOutput = json_decode($validStdout, true, 64, JSON_THROW_ON_ERROR);
+        self::assertSame(
+            ['schema', 'valid', 'run_id', 'state', 'records', 'recovery', 'evidence_sha256'],
+            array_keys($validOutput),
+        );
+        self::assertSame('deployment_contract_validation.v1', $validOutput['schema']);
+        self::assertTrue($validOutput['valid']);
+        self::assertSame(self::RUN_ID, $validOutput['run_id']);
+        self::assertSame('failed_before_write', $validOutput['state']);
+        self::assertSame('terminal', $validOutput['recovery']);
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $validOutput['evidence_sha256']);
 
         [$usageExit, , $usageStderr] = $this->runCli([]);
         self::assertSame(64, $usageExit);
@@ -1056,6 +1066,56 @@ final class DeploymentContractV1Test extends TestCase
         ]);
         self::assertSame(70, $invalidExit);
         self::assertStringContainsString('INVALID:', $invalidStderr);
+    }
+
+    public function testStateConflictBeforeWriteBundleRemainsRepresentable(): void
+    {
+        $lines = $this->runThrough('accepted');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 75, 'state_conflict'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 75, 'state_conflict');
+        $evidence['expected_commit']['observed'] = null;
+        $evidence['expected_commit']['verified'] = false;
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    #[DataProvider('postWriteStateConflictProvider')]
+    public function testStateConflictAfterWriteIsRejectedByJournal(string $from, string $_postGateStatus): void
+    {
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 75, 'state_conflict'));
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
+    #[DataProvider('postWriteStateConflictProvider')]
+    public function testStateConflictAfterWriteIsRejectedByBundle(string $from, string $postGateStatus): void
+    {
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 75, 'state_conflict'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            75,
+            'state_conflict',
+            31,
+            'recovery_required',
+            $postGateStatus,
+        );
+        if ($from === 'rollback_running') {
+            $evidence['rollback'] = $this->rollbackEvidence('failed');
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function postWriteStateConflictProvider(): iterable
+    {
+        yield 'deploy running' => ['deploy_running', 'not_observed'];
+        yield 'rollback running' => ['rollback_running', 'failed'];
     }
 
     #[DataProvider('nonSuccessTerminalBundleProvider')]

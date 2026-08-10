@@ -525,7 +525,7 @@ final class DeploymentContractV1
             'failed_switch_recovery_required' => [32],
             'failed_post_switch_rollback_succeeded' => [30],
             'failed_post_switch_rollback_failed' => [31],
-            'manual_recovery_required' => [31, 70, 75, 143],
+            'manual_recovery_required' => [31, 70, 143],
             default => [0],
         };
         if (!in_array($exitCode, $allowed, true)) {

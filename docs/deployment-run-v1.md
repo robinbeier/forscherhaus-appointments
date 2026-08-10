@@ -122,6 +122,10 @@ The public contract uses only stable pairs:
 | `75` | `state_conflict` | lock, attachment, or intent conflict |
 | `143` | `interrupted` | interruption leaves a fixed fail-closed state |
 
+`state_conflict` is a before-write terminal only. Once deploy or rollback
+execution has been reserved, the terminal reason must preserve that execution
+phase instead of relabeling it as an attachment or lock conflict.
+
 Arbitrary child exit codes or free-form reasons are never copied into evidence.
 The future runner must normalize them into this table.
 
