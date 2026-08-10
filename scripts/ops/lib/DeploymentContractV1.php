@@ -314,7 +314,11 @@ final class DeploymentContractV1
             $evidence['result']['exit_code'],
             $evidence['result']['reason'],
         );
-        self::assertDeployResultConsistency($evidence['result']['state'], $evidence['deploy']);
+        self::assertDeployResultConsistency(
+            $evidence['result']['state'],
+            $evidence['result']['reason'],
+            $evidence['deploy'],
+        );
         self::assertTerminalEvidenceConsistency($evidence);
         if (
             $evidence['deploy_timing']['status'] !== 'not_observed' &&
@@ -696,6 +700,21 @@ final class DeploymentContractV1
     /** @param array<string,mixed> $last @param array<string,mixed> $evidence */
     private static function assertFailureTransitionMatchesEvidence(array $last, array $evidence): void
     {
+        if ($last['state'] === 'manual_recovery_required' && $last['reason'] === 'interrupted') {
+            $actualDeploy = [
+                $evidence['deploy']['status'],
+                $evidence['deploy']['invocation_count'],
+                $evidence['deploy']['exit_code'],
+                $evidence['deploy']['rollback_outcome'],
+            ];
+            $expectedDeploy =
+                $last['previous_state'] === 'deploy_running'
+                    ? ['unknown', 1, null, 'not_observed']
+                    : ['failed', 1, 31, 'recovery_required'];
+            if ($actualDeploy !== $expectedDeploy) {
+                throw new RuntimeException('deploy evidence does not match the interrupted transition phase');
+            }
+        }
         if (
             in_array(
                 $last['state'],
@@ -922,6 +941,14 @@ final class DeploymentContractV1
         ) {
             throw new RuntimeException('traffic gate unknown target overlaps sensitive traffic');
         }
+        if (
+            $section['counts']['scanner_success'] +
+                $section['counts']['target_unknown'] +
+                $section['counts']['customers_or_sensitive'] >
+            $section['counts']['unclassified'] + $section['counts']['business_or_authenticated']
+        ) {
+            throw new RuntimeException('traffic gate scanner, unknown target, and sensitive traffic overlap');
+        }
         $rotationComplete = $section['counts']['rotation_errors'] === 0;
         $parseComplete = $section['counts']['parse_errors'] === 0 && $section['counts']['lines_seen'] > 0;
         $evidenceComplete = $rotationComplete && $parseComplete;
@@ -1144,6 +1171,9 @@ final class DeploymentContractV1
             if ($section['verified'] === true) {
                 throw new RuntimeException('invalid artifact evidence cannot claim verification');
             }
+            if ($section['verified'] === null) {
+                return;
+            }
             foreach (
                 ['local_sha256', 'remote_sha256', 'manifest_sha256', 'host_script_sha256', 'artifact_script_sha256']
                 as $field
@@ -1174,13 +1204,13 @@ final class DeploymentContractV1
     {
         self::assertObject($section, 'deploy');
         self::assertExactKeys($section, ['status', 'invocation_count', 'exit_code', 'rollback_outcome'], 'deploy');
-        self::assertEnum($section['status'], ['not_invoked', 'succeeded', 'failed'], 'deploy.status');
+        self::assertEnum($section['status'], ['not_invoked', 'succeeded', 'failed', 'unknown'], 'deploy.status');
         if (!is_int($section['invocation_count']) || !in_array($section['invocation_count'], [0, 1], true)) {
             throw new RuntimeException('deploy.invocation_count must be zero or one');
         }
         self::assertEnum(
             $section['rollback_outcome'],
-            ['not_applicable', 'not_run', 'succeeded', 'failed', 'recovery_required'],
+            ['not_applicable', 'not_observed', 'not_run', 'succeeded', 'failed', 'recovery_required'],
             'deploy.rollback_outcome',
         );
         if ($section['status'] === 'not_invoked') {
@@ -1190,6 +1220,16 @@ final class DeploymentContractV1
                 $section['rollback_outcome'] !== 'not_applicable'
             ) {
                 throw new RuntimeException('not-invoked deploy evidence is inconsistent');
+            }
+            return;
+        }
+        if ($section['status'] === 'unknown') {
+            if (
+                $section['invocation_count'] !== 1 ||
+                $section['exit_code'] !== null ||
+                $section['rollback_outcome'] !== 'not_observed'
+            ) {
+                throw new RuntimeException('unknown deploy evidence is inconsistent');
             }
             return;
         }
@@ -1212,8 +1252,18 @@ final class DeploymentContractV1
     }
 
     /** @param array<string,mixed> $deploy */
-    private static function assertDeployResultConsistency(string $state, array $deploy): void
+    private static function assertDeployResultConsistency(string $state, string $reason, array $deploy): void
     {
+        $actual = [$deploy['status'], $deploy['invocation_count'], $deploy['exit_code'], $deploy['rollback_outcome']];
+        if ($state === 'manual_recovery_required' && $reason === 'interrupted') {
+            if (
+                $actual !== ['unknown', 1, null, 'not_observed'] &&
+                $actual !== ['failed', 1, 31, 'recovery_required']
+            ) {
+                throw new RuntimeException('deploy and rollback evidence is inconsistent with interrupted recovery');
+            }
+            return;
+        }
         $expected = match ($state) {
             'succeeded' => ['succeeded', 1, 0, 'not_run'],
             'failed_before_write' => ['not_invoked', 0, null, 'not_applicable'],
@@ -1224,7 +1274,6 @@ final class DeploymentContractV1
             'manual_recovery_required' => ['failed', 1, 31, 'recovery_required'],
             default => throw new RuntimeException('result state is unknown'),
         };
-        $actual = [$deploy['status'], $deploy['invocation_count'], $deploy['exit_code'], $deploy['rollback_outcome']];
         if ($actual !== $expected) {
             throw new RuntimeException('deploy and rollback evidence is inconsistent with the terminal state');
         }

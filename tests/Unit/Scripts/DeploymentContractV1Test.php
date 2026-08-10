@@ -519,6 +519,40 @@ final class DeploymentContractV1Test extends TestCase
         self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
     }
 
+    public function testScannerUnknownTargetAndSensitiveTrafficCannotOccupyTwoClassLines(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
+        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
+        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
+        $evidence['traffic_gate']['counts']['total'] = 2;
+        $evidence['traffic_gate']['counts']['lines_seen'] = 2;
+        $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testScannerUnknownTargetAndSensitiveTrafficCanFitThreeClassLines(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 2;
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
+        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
+        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
+        $evidence['traffic_gate']['counts']['total'] = 3;
+        $evidence['traffic_gate']['counts']['lines_seen'] = 3;
+        $evidence['traffic_gate']['counts']['lines_in_window'] = 3;
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
     public function testUnclassifiedTrafficCannotExceedCombinedUnknownOverlays(): void
     {
         $lines = $this->runThrough('expected_commit_verified');
@@ -979,15 +1013,6 @@ final class DeploymentContractV1Test extends TestCase
             'failed',
             'failed',
         ];
-        yield 'manual recovery after interruption' => [
-            'deploy_running',
-            'manual_recovery_required',
-            143,
-            'interrupted',
-            31,
-            'recovery_required',
-            'not_observed',
-        ];
     }
 
     #[DataProvider('postGatePhaseMismatchProvider')]
@@ -1040,7 +1065,7 @@ final class DeploymentContractV1Test extends TestCase
         yield 'omits failure after post-gates' => ['post_gates_running', 'not_observed'];
     }
 
-    public function testManualRecoveryBeforePostGatesRejectsObservedPostGateFailure(): void
+    public function testInterruptedManualRecoveryBeforePostGatesRetainsUnknownDeployOutcome(): void
     {
         $lines = $this->runThrough('deploy_running');
         $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
@@ -1053,6 +1078,7 @@ final class DeploymentContractV1Test extends TestCase
             'recovery_required',
             'not_observed',
         );
+        $notObserved['deploy'] = $this->unknownInvokedDeployEvidence();
         self::assertSame(
             'manual_recovery_required',
             DeploymentContractV1::validateBundle($lines, $notObserved)['state'],
@@ -1067,10 +1093,124 @@ final class DeploymentContractV1Test extends TestCase
             'recovery_required',
             'failed',
         );
+        $observedFailure['deploy'] = $this->unknownInvokedDeployEvidence();
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('transition phase');
         DeploymentContractV1::validateBundle($lines, $observedFailure);
+    }
+
+    #[DataProvider('contradictoryUnknownDeployEvidenceProvider')]
+    public function testUnknownDeployOutcomeRejectsPartialOrContradictoryClaims(
+        array $overrides,
+        ?string $missingField = null,
+    ): void {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+        $evidence['deploy'] = array_replace($this->unknownInvokedDeployEvidence(), $overrides);
+        if ($missingField !== null) {
+            unset($evidence['deploy'][$missingField]);
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>,?string}> */
+    public static function contradictoryUnknownDeployEvidenceProvider(): iterable
+    {
+        yield 'observed exit code' => [['exit_code' => 31], null];
+        yield 'claimed rollback outcome' => [['rollback_outcome' => 'recovery_required'], null];
+        yield 'invocation not retained' => [['invocation_count' => 0], null];
+        yield 'failed status alias' => [['status' => 'failed'], null];
+        yield 'extra field' => [['child_pid' => null], null];
+        yield 'missing field' => [[], 'exit_code'];
+    }
+
+    public function testInterruptedManualRecoveryRejectsFabricatedRecoveryOutcome(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    #[DataProvider('terminalThatCannotUseUnknownDeployEvidenceProvider')]
+    public function testUnknownDeployOutcomeIsRestrictedToDirectInterruptedManualRecovery(
+        string $from,
+        string $state,
+        int $publicExit,
+        string $reason,
+        int $deployExit,
+        string $rollbackOutcome,
+        string $postGateStatus,
+    ): void {
+        $lines = $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            $publicExit,
+            $reason,
+            $deployExit,
+            $rollbackOutcome,
+            $postGateStatus,
+        );
+        $evidence['deploy'] = $this->unknownInvokedDeployEvidence();
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,string,int,string,int,string,string}> */
+    public static function terminalThatCannotUseUnknownDeployEvidenceProvider(): iterable
+    {
+        yield 'pre-switch deploy failure' => [
+            'deploy_running',
+            'failed_pre_switch',
+            30,
+            'deploy_failed',
+            30,
+            'not_run',
+            'not_observed',
+        ];
+        yield 'manual recovery for rollback failure' => [
+            'deploy_running',
+            'manual_recovery_required',
+            31,
+            'rollback_failed',
+            31,
+            'recovery_required',
+            'not_observed',
+        ];
+        yield 'interrupted after post-gates began' => [
+            'post_gates_running',
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'failed',
+        ];
     }
 
     #[DataProvider('validIncompletePostGateProvider')]
@@ -1555,6 +1695,16 @@ final class DeploymentContractV1Test extends TestCase
                 'verified' => false,
             ],
         ];
+        yield 'all hashes observed before verification' => [
+            [
+                'local_sha256' => self::SHA,
+                'remote_sha256' => self::SHA,
+                'manifest_sha256' => self::SHA,
+                'host_script_sha256' => self::SHA,
+                'artifact_script_sha256' => self::SHA,
+                'verified' => null,
+            ],
+        ];
     }
 
     #[DataProvider('invalidArtifactEvidenceShapeProvider')]
@@ -1601,6 +1751,29 @@ final class DeploymentContractV1Test extends TestCase
         ];
         yield 'extra field' => [['extra' => null], null];
         yield 'missing field' => [[], 'remote_sha256'];
+    }
+
+    #[DataProvider('completeArtifactStatusRequiringVerificationProvider')]
+    public function testCompleteArtifactWithUnknownVerificationCannotAliasObservedStatus(string $status): void
+    {
+        $lines = $this->runThrough('capacity_passed');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_before_write', 0, 24, 'artifact_verification_failed'),
+        );
+        $evidence = $this->failedBeforeWriteEvidence($lines, 24, 'artifact_verification_failed');
+        $evidence['artifact'] = $this->validEvidence($lines)['artifact'];
+        $evidence['artifact']['status'] = $status;
+        $evidence['artifact']['verified'] = null;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function completeArtifactStatusRequiringVerificationProvider(): iterable
+    {
+        yield 'passed' => ['passed'];
+        yield 'failed' => ['failed'];
     }
 
     public function testPassedArtifactRejectsUnavailableHash(): void
@@ -2226,6 +2399,17 @@ final class DeploymentContractV1Test extends TestCase
         $evidence['result'] = ['state' => $state, 'exit_code' => $publicExit, 'reason' => $reason];
 
         return $evidence;
+    }
+
+    /** @return array{status:string,invocation_count:int,exit_code:null,rollback_outcome:string} */
+    private function unknownInvokedDeployEvidence(): array
+    {
+        return [
+            'status' => 'unknown',
+            'invocation_count' => 1,
+            'exit_code' => null,
+            'rollback_outcome' => 'not_observed',
+        ];
     }
 
     /** @param array<string,mixed> $section @return array<string,mixed> */

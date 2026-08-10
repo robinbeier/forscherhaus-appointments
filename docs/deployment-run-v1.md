@@ -128,7 +128,11 @@ Its sections are:
 
 Not-yet-observed sections retain their exact keys with `null` values and a
 fixed `not_observed`/`not_invoked` status. They never invent zero hashes or
-success. A missing, unreadable, or pre-digest dump failure uses `invalid`:
+success. An interruption directly after the `deploy_running` write-ahead
+reservation uses deploy status `unknown`, invocation count `1`, a `null` child
+exit, and rollback outcome `not_observed`; that shape is valid only for the
+direct `manual_recovery_required`/`interrupted` crash window and never permits a
+second invocation. A missing, unreadable, or pre-digest dump failure uses `invalid`:
 the known policy and 14,400-second ceiling remain fixed, observed values keep
 their strict types, unavailable measurements stay `null`, and at least one
 measurement must remain unavailable. A terminal failure with exit `20` through
@@ -166,9 +170,10 @@ Runs that fail before reserving the deploy invocation must retain
 
 Capacity and artifact collection failures use the same fail-closed distinction:
 `invalid` retains the fixed ceiling or artifact expectation and every available
-strictly typed measurement, while unavailable measurements or hashes remain
-`null`. A complete observation uses `passed` or `failed`; `invalid` cannot claim
-success or verification and cannot substantiate a different terminal reason.
+strictly typed measurement, while unavailable measurements, hashes, or the
+artifact verification result remain `null`. A complete observation uses
+`passed` or `failed`; `invalid` cannot claim success or verification and cannot
+substantiate a different terminal reason.
 
 ## Traffic-gate consumption
 
@@ -217,6 +222,8 @@ The `status_5xx`, `write`, `authenticated`,
 `business_or_authenticated` and `unclassified` classes that can carry them.
 `scanner_success` is bounded by `business_or_authenticated` alone because
 unknown-field rows return as unclassified before scanner classification.
+Scanner-success, target-unknown, and customer/sensitive overlays must also fit
+into distinct eligible business or unclassified rows in aggregate.
 
 Dump evidence passes only when it is strictly under 240 minutes old and its
 checksum, gzip, and restore verification flags are all true. Capacity passes
