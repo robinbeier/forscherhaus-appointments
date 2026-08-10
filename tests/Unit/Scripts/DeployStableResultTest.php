@@ -362,6 +362,23 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(31, $failure['exit_code'], $failure['stderr']);
     }
 
+    public function testRealTimingSummaryRemainsBoundToRollbackResultWhenSignalArrivesBeforeExit(): void
+    {
+        foreach (
+            [[true, 30, 'rollback_succeeded'], [false, 31, 'rollback_failed']]
+            as [$rollbackSucceeds, $expectedExitCode, $expectedOutcome]
+        ) {
+            $result = $this->runShell($this->rollbackWithRealTimingAndSignalHarness($rollbackSucceeds));
+
+            self::assertSame($expectedExitCode, $result['exit_code'], $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "signal-boundary\n"));
+            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
+            self::assertStringContainsString('"outcome":"' . $expectedOutcome . '"', $result['stdout']);
+            self::assertStringContainsString('"exit_code":' . $expectedExitCode, $result['stdout']);
+            self::assertStringNotContainsString('"outcome":"failed_pre_switch"', $result['stdout']);
+        }
+    }
+
     public function testSignalDuringDirectAutomaticRollbackDoesNotStartSecondRollback(): void
     {
         $result = $this->runShell(
@@ -625,6 +642,40 @@ final class DeployStableResultTest extends TestCase
         bash() { {$rollbackResult}; }
         rollback_after_failure 'redacted failure'
         BASH;
+    }
+
+    private function rollbackWithRealTimingAndSignalHarness(bool $succeeds): string
+    {
+        $rollbackResult = $succeeds ? 'return 0' : 'return 1';
+
+        return str_replace(
+            'ROLLBACK_RESULT',
+            $rollbackResult,
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            APP=/fixed/active
+            PREV=/fixed/previous
+            REL=ea_contract
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
+            ZERO_SURPRISE_CANARY_REPORT=''
+            deploy_monotonic_ms() { printf '1000\n'; }
+            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
+            emit_zero_surprise_incident() { :; }
+            reload_services() { :; }
+            restart_renderer_service() { return 0; }
+            probe_renderer_health() { return 0; }
+            probe_deep_health_contract() { return 0; }
+            bash() { ROLLBACK_RESULT; }
+            deploy_timing_init deploy 0 postdeploy_validation
+            set -T
+            trap 'if [[ "$BASH_COMMAND" == deploy_result_exit* && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "1" ]]; then trap - DEBUG; printf "signal-boundary\\n"; kill -TERM $$; fi' DEBUG
+            rollback_after_failure 'redacted failure'
+            BASH
+            ,
+        );
     }
 
     /** @return array{stdout:string,stderr:string,exit_code:int} */
