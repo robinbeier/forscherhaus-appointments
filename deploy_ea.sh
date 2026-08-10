@@ -48,8 +48,16 @@ RENDERER_HEALTH_SLEEP_SECONDS=2
 DEEP_HEALTH_RETRIES=10
 DEEP_HEALTH_SLEEP_SECONDS=2
 
+EXIT_DEPLOY_FAILED=30
 EXIT_ROLLBACK_SUCCESS=30
 EXIT_ROLLBACK_FAILED=31
+EXIT_SWITCH_RECOVERY_REQUIRED=32
+
+DEPLOY_RESULT_NORMALIZATION_ACTIVE=0
+DEPLOY_RESULT_PHASE="before_switch"
+DEPLOY_RESULT_ROLLBACK_ACTIVE=0
+DEPLOY_RESULT_FINAL_EXIT_CODE=""
+DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
 
 DEPLOY_TIMING_SCHEMA="deploy_timing.v1"
 DEPLOY_TIMING_ACTIVE=0
@@ -66,6 +74,8 @@ DEPLOY_TIMING_AUTHORITATIVE_ENABLED=0
 DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
 DEPLOY_TIMING_DIR="${FH_DEPLOY_TIMING_DIR:-/var/lib/fh-deploy-timing}"
 DEPLOY_TIMING_FILE=""
+DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
+DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE=0
 
 DEPLOY_DETAIL_SCHEMA="deploy_detail.v1"
 DEPLOY_DETAIL_ACTIVE=0
@@ -231,6 +241,205 @@ deploy_timing_disable() {
   return 0
 }
 
+deploy_result_set_switch_phase() {
+  local phase="$1"
+
+  DEPLOY_RESULT_PHASE="$phase"
+  case "$phase" in
+    before_switch|switch_first_move_pending)
+      DEPLOY_TIMING_SWITCH_STATE="not_started"
+      ;;
+    switch_partial|switch_second_move_pending)
+      DEPLOY_TIMING_SWITCH_STATE="partial"
+      ;;
+    switch_complete)
+      DEPLOY_TIMING_SWITCH_STATE="complete"
+      ;;
+  esac
+}
+
+deploy_result_path_exists() {
+  [[ -e "$1" || -L "$1" ]]
+}
+
+deploy_result_reconcile_switch_phase() {
+  case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+    switch_first_move_pending)
+      if
+        ! deploy_result_path_exists "$APP" &&
+          deploy_result_path_exists "$PREV" &&
+          deploy_result_path_exists "$STAGE_ROOT"
+      then
+        deploy_result_set_switch_phase switch_partial
+      elif
+        deploy_result_path_exists "$APP" &&
+          ! deploy_result_path_exists "$PREV" &&
+          deploy_result_path_exists "$STAGE_ROOT"
+      then
+        deploy_result_set_switch_phase before_switch
+      else
+        deploy_result_set_switch_phase switch_partial
+      fi
+      ;;
+    switch_second_move_pending)
+      if
+        deploy_result_path_exists "$APP" &&
+          deploy_result_path_exists "$PREV"
+      then
+        deploy_result_set_switch_phase switch_complete
+      else
+        deploy_result_set_switch_phase switch_partial
+      fi
+      ;;
+  esac
+}
+
+deploy_result_finalize() {
+  local exit_code="$1"
+
+  case "$exit_code" in
+    0|30|31|32)
+      DEPLOY_RESULT_FINAL_EXIT_CODE="$exit_code"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+deploy_result_exit() {
+  local exit_code="$1"
+
+  deploy_result_finalize "$exit_code" || return 1
+  exit "$exit_code"
+}
+
+deploy_result_normalize_exit_code() {
+  local exit_code="$1"
+
+  if [[ "$exit_code" == "0" ]]; then
+    printf '%s\n' "$exit_code"
+    return 0
+  fi
+
+  if [[ "${DEPLOY_RESULT_NORMALIZATION_ACTIVE:-0}" != "1" ]]; then
+    printf '%s\n' "$exit_code"
+    return 0
+  fi
+
+  if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" ]]; then
+    printf '%s\n' "$DEPLOY_RESULT_FINAL_EXIT_CODE"
+    return 0
+  fi
+
+  case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+    before_switch)
+      if [[ "$exit_code" == "143" ]]; then
+        printf '%s\n' "$exit_code"
+      else
+        printf '%s\n' "$EXIT_DEPLOY_FAILED"
+      fi
+      ;;
+    switch_partial)
+      printf '%s\n' "$EXIT_SWITCH_RECOVERY_REQUIRED"
+      ;;
+    switch_complete)
+      printf '%s\n' "$EXIT_ROLLBACK_FAILED"
+      ;;
+    *)
+      printf '%s\n' "$EXIT_ROLLBACK_FAILED"
+      ;;
+  esac
+}
+
+deploy_result_on_signal() {
+  local signal_exit_code="${1:-143}"
+
+  if [[ "${DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" ]]; then
+    DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
+  fi
+  deploy_result_recovery_signal_traps_install
+  deploy_result_reconcile_switch_phase
+
+  if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" ]]; then
+    exit "$DEPLOY_RESULT_FINAL_EXIT_CODE"
+  fi
+
+  case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+    switch_partial)
+      deploy_result_exit "$EXIT_SWITCH_RECOVERY_REQUIRED"
+      ;;
+    switch_complete)
+      if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" && "${DRYRUN:-0}" != "1" ]]; then
+        DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+        rollback_after_failure "post-switch interruption"
+        deploy_result_exit "$EXIT_ROLLBACK_FAILED"
+      fi
+      ;;
+  esac
+
+  signal_exit_code="$(deploy_result_normalize_exit_code "$signal_exit_code")"
+  exit "$signal_exit_code"
+}
+
+deploy_result_on_recovery_signal() {
+  DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE="${1:-143}"
+  return 0
+}
+
+deploy_result_recovery_signal_traps_install() {
+  trap 'deploy_result_on_recovery_signal 129' HUP
+  trap 'deploy_result_on_recovery_signal 130' INT
+  trap 'deploy_result_on_recovery_signal 131' QUIT
+  trap 'deploy_result_on_recovery_signal 143' TERM
+}
+
+deploy_result_trap_install() {
+  DEPLOY_RESULT_NORMALIZATION_ACTIVE=1
+  DEPLOY_RESULT_FINAL_EXIT_CODE=""
+  trap deploy_timing_on_exit EXIT
+  trap 'deploy_result_on_signal 129' HUP
+  trap 'deploy_result_on_signal 130' INT
+  trap 'deploy_result_on_signal 131' QUIT
+  trap 'deploy_result_on_signal 143' TERM
+}
+
+deploy_timing_defer_signals() {
+  DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=129' HUP
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=130' INT
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=131' QUIT
+  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=143' TERM
+}
+
+deploy_timing_restore_signals() {
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+    deploy_result_recovery_signal_traps_install
+    return 0
+  fi
+
+  trap 'deploy_result_on_signal 129' HUP
+  trap 'deploy_result_on_signal 130' INT
+  trap 'deploy_result_on_signal 131' QUIT
+  trap 'deploy_result_on_signal 143' TERM
+}
+
+deploy_timing_handle_deferred_signal() {
+  local signal_exit_code="${DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE:-}"
+
+  DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
+  [[ -n "$signal_exit_code" ]] || return 0
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+    deploy_result_on_recovery_signal "$signal_exit_code"
+    return 0
+  fi
+  deploy_result_on_signal "$signal_exit_code"
+}
+
 emit_deploy_timing_phase() {
   local phase="$1"
   local status="$2"
@@ -294,8 +503,11 @@ deploy_timing_complete_phase() {
   (( duration_ms >= 0 )) || duration_ms=0
   (( elapsed_ms >= 0 )) || elapsed_ms=0
 
+  deploy_timing_defer_signals
   emit_deploy_timing_phase "$DEPLOY_TIMING_PHASE" "$status" "$duration_ms" "$elapsed_ms" || true
   DEPLOY_TIMING_PHASE=""
+  deploy_timing_restore_signals
+  deploy_timing_handle_deferred_signal
   return 0
 }
 
@@ -351,31 +563,79 @@ deploy_timing_finish() {
 
   total_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
   (( total_ms >= 0 )) || total_ms=0
+  deploy_timing_defer_signals
   emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms" || true
 
   DEPLOY_TIMING_SUMMARY_EMITTED=1
   DEPLOY_TIMING_ACTIVE=0
   trap - EXIT
+  deploy_timing_restore_signals
+  deploy_timing_handle_deferred_signal
   return 0
 }
 
-deploy_timing_on_exit() {
-  local exit_code="$?"
-  local outcome="failed_pre_switch"
+deploy_result_after_timing_finish() {
+  return 0
+}
 
-  trap - EXIT
+deploy_result_finish_with_timing() {
+  local exit_code="$1"
+  local phase_status="$2"
+  local outcome="$3"
+
+  deploy_result_finalize "$exit_code" || return 1
+  deploy_timing_finish "$phase_status" "$outcome" "$exit_code"
+  deploy_result_after_timing_finish || true
+  deploy_result_exit "$exit_code"
+}
+
+deploy_timing_on_exit() {
+  local raw_exit_code="$?"
+  local exit_code
+  local outcome="failed_pre_switch"
+  local phase_status="failed"
+
+  DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE=1
+  deploy_result_reconcile_switch_phase
+  if [[
+    "$raw_exit_code" != "0" &&
+    -z "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" &&
+    "${DEPLOY_RESULT_PHASE:-before_switch}" == "switch_complete" &&
+    "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" &&
+    "${DRYRUN:-0}" != "1"
+  ]]; then
+    DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+    trap deploy_timing_on_exit EXIT
+    rollback_after_failure "unhandled post-switch failure"
+    deploy_result_exit "$EXIT_ROLLBACK_FAILED"
+  fi
+
+  exit_code="$(deploy_result_normalize_exit_code "$raw_exit_code")"
+  deploy_result_finalize "$exit_code" || true
   if [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "0" ]]; then
-    case "${DEPLOY_TIMING_SWITCH_STATE:-not_started}" in
-      partial)
+    case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+      switch_partial)
         outcome="failed_switch_recovery_required"
         ;;
-      complete)
+      switch_complete)
         outcome="failed_post_switch"
         ;;
     esac
-    deploy_timing_finish failed "$outcome" "$exit_code" || true
+    if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "0" ]]; then
+      outcome="succeeded"
+      phase_status="ok"
+    elif [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+      if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_ROLLBACK_SUCCESS" ]]; then
+        outcome="rollback_succeeded"
+        phase_status="ok"
+      else
+        outcome="rollback_failed"
+      fi
+    fi
+    deploy_timing_finish "$phase_status" "$outcome" "$exit_code" || true
   fi
 
+  trap - EXIT
   exit "$exit_code"
 }
 
@@ -785,8 +1045,9 @@ Renderer / health gate options:
 
 Exit codes:
   0   Success
-  30  Deploy failed, automatic rollback succeeded
+  30  Deploy failed before switch, or automatic rollback succeeded
   31  Deploy failed, rollback failed or unverifiable
+  32  Switch is partial and requires recovery
 
 Example:
   /root/deploy_ea.sh --rel ea_20251005_2000 --healthz-token-file /etc/fh/healthz.token
@@ -1537,10 +1798,12 @@ perform_atomic_switch() {
     return 0
   fi
 
+  deploy_result_set_switch_phase switch_first_move_pending
   mv "$APP" "$PREV"
-  DEPLOY_TIMING_SWITCH_STATE="partial"
+  deploy_result_set_switch_phase switch_partial
+  deploy_result_set_switch_phase switch_second_move_pending
   mv "$STAGE_ROOT" "$APP"
-  DEPLOY_TIMING_SWITCH_STATE="complete"
+  deploy_result_set_switch_phase switch_complete
 }
 
 is_positive_integer() {
@@ -2112,6 +2375,11 @@ runtime_config_rollback_cli() {
 }
 
 rollback_after_failure() {
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" ]]; then
+    DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
+  fi
+  DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+  deploy_result_recovery_signal_traps_install
   local reason="$1"
   local failed_base="${APP}_failed_${REL}"
   local failed_path="$failed_base"
@@ -2138,8 +2406,7 @@ rollback_after_failure() {
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
-    deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
-    exit "$EXIT_ROLLBACK_SUCCESS"
+    deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
   fi
 
   config_result="ok"
@@ -2174,6 +2441,14 @@ rollback_after_failure() {
     fi
   fi
 
+  if [[ -n "${DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE:-}" ]]; then
+    rollback_ok=0
+  fi
+
+  if [[ "$rollback_ok" -eq 1 ]]; then
+    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
+  fi
+
   echo "[!] Deployment failed; rollback result summary"
   echo "    Failure reason      : $reason"
   echo "    Failed release path : $failed_path"
@@ -2197,8 +2472,7 @@ rollback_after_failure() {
       "$incident_report" \
       "$incident_report_root"
     echo "[!] Rollback succeeded, deployment remains failed."
-    deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
-    exit "$EXIT_ROLLBACK_SUCCESS"
+    deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
   fi
 
   if [[ "$reason" == "zero-surprise canary failed" ]]; then
@@ -2213,8 +2487,7 @@ rollback_after_failure() {
     "$incident_report" \
     "$incident_report_root"
   echo "[!] Rollback failed or unverifiable. Manual intervention required."
-  deploy_timing_finish failed rollback_failed "$EXIT_ROLLBACK_FAILED"
-  exit "$EXIT_ROLLBACK_FAILED"
+  deploy_result_finish_with_timing "$EXIT_ROLLBACK_FAILED" failed rollback_failed
 }
 
 verify_post_switch_runtime_config_contracts() {
@@ -2249,6 +2522,8 @@ case "${1:-}" in
     exit 0
     ;;
 esac
+
+deploy_result_trap_install
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -2510,6 +2785,7 @@ if command -v curl >/dev/null 2>&1; then
   fi
 fi
 
+deploy_result_finalize 0
 echo "[✓] Deployment completed: $APP"
 echo "    Archive        : $ARCHIVE"
 echo "    Previous       : $PREV"
@@ -2520,4 +2796,4 @@ echo "Rollback (manual fallback):"
 MANUAL_FAILED_PATH="${APP}_failed_${REL}"
 echo "  bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$MANUAL_FAILED_PATH' --runtime-user '$WEBUSER'"
 
-deploy_timing_finish ok succeeded 0
+deploy_result_finish_with_timing 0 ok succeeded

@@ -47,6 +47,7 @@ class GateCliSupportTest extends TestCase
         $this->assertStringContainsString('--zero-surprise-incident-webhook-file PATH', $result['stdout']);
         $this->assertStringContainsString('--runtime-config-permissions harden|verify', $result['stdout']);
         $this->assertStringContainsString('--runtime-config-rollback --active PATH', $result['stdout']);
+        $this->assertStringContainsString('32  Switch is partial and requires recovery', $result['stdout']);
     }
 
     public function testElevatedRegressionStepExecutesTheProductionTrafficGateWrapper(): void
@@ -276,6 +277,7 @@ class GateCliSupportTest extends TestCase
         $script = <<<'BASH'
         source "$1"
         SENSITIVE_FIXTURE_PATH="/fixtures/customer-alpha/config.php"
+        deploy_result_trap_install
         deploy_timing_init deploy 0 preparation_artifact
         deploy_timing_transition predeploy
         exit 23
@@ -283,14 +285,14 @@ class GateCliSupportTest extends TestCase
 
         $result = $this->runCommand(['bash', '-c', $script, 'bash', $repoRoot . '/deploy_ea.sh']);
 
-        $this->assertSame(23, $result['exit_code']);
+        $this->assertSame(30, $result['exit_code']);
         $events = $this->deployTimingEvents($result['stdout']);
         $this->assertSame('preparation_artifact', $events[0]['phase']);
         $this->assertSame('ok', $events[0]['status']);
         $this->assertSame('predeploy', $events[1]['phase']);
         $this->assertSame('failed', $events[1]['status']);
         $this->assertSame('failed_pre_switch', $events[2]['outcome']);
-        $this->assertSame(23, $events[2]['exit_code']);
+        $this->assertSame(30, $events[2]['exit_code']);
 
         foreach ($this->deployTimingLines($result['stdout']) as $timingLine) {
             $this->assertStringNotContainsString('customer-alpha', $timingLine);
@@ -378,6 +380,7 @@ class GateCliSupportTest extends TestCase
         PREV="$3"
         STAGE_ROOT="$4"
         DRYRUN=0
+        deploy_result_trap_install
         deploy_timing_init deploy 0 preparation_artifact
         deploy_timing_transition predeploy
         deploy_timing_transition permissions_stage
@@ -398,7 +401,7 @@ class GateCliSupportTest extends TestCase
                 $missingStagePath,
             ]);
 
-            $this->assertNotSame(0, $result['exit_code']);
+            $this->assertSame(32, $result['exit_code']);
             $this->assertDirectoryDoesNotExist($appPath);
             $this->assertDirectoryExists($previousPath);
             $this->assertFileExists($previousPath . '/SENSITIVE_CUSTOMER_MARKER');
