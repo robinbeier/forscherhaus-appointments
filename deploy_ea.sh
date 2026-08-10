@@ -280,8 +280,7 @@ deploy_result_reconcile_switch_phase() {
     switch_second_move_pending)
       if
         deploy_result_path_exists "$APP" &&
-          deploy_result_path_exists "$PREV" &&
-          ! deploy_result_path_exists "$STAGE_ROOT"
+          deploy_result_path_exists "$PREV"
       then
         deploy_result_set_switch_phase switch_complete
       else

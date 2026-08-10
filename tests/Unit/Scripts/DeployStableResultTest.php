@@ -119,7 +119,7 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(32, $result['exit_code'], $result['stderr']);
     }
 
-    public function testSigtermAfterSecondSuccessfulMoveUsesTheReconciledCompletedState(): void
+    public function testSigtermAfterSecondSuccessfulMoveUsesCompletedStateWhenStageReappears(): void
     {
         $result = $this->runShell(
             $this->switchHarness(
@@ -128,7 +128,7 @@ final class DeployStableResultTest extends TestCase
                 move_count=0
                 deploy_result_path_exists() {
                   case "$MOCK_SWITCH_STATE:$1" in
-                    before:/fixed/active|before:/fixed/stage|partial:/fixed/previous|partial:/fixed/stage|complete:/fixed/active|complete:/fixed/previous)
+                    before:/fixed/active|before:/fixed/stage|partial:/fixed/previous|partial:/fixed/stage|complete_with_stage:/fixed/active|complete_with_stage:/fixed/previous|complete_with_stage:/fixed/stage)
                       return 0
                       ;;
                   esac
@@ -140,7 +140,7 @@ final class DeployStableResultTest extends TestCase
                     MOCK_SWITCH_STATE=partial
                     return 0
                   fi
-                  MOCK_SWITCH_STATE=complete
+                  MOCK_SWITCH_STATE=complete_with_stage
                   kill -TERM $$
                 }
                 rollback_after_failure() {
@@ -370,6 +370,33 @@ final class DeployStableResultTest extends TestCase
 
         self::assertSame(30, $result['exit_code'], $result['stderr']);
         self::assertSame(1, substr_count($result['stdout'], "rollback\n"));
+    }
+
+    public function testInterruptAndQuitAfterCompletedSwitchRunExistingRollback(): void
+    {
+        foreach (['INT', 'QUIT'] as $signal) {
+            $result = $this->runShell(
+                $this->switchHarness(
+                    str_replace(
+                        'SIGNAL_NAME',
+                        $signal,
+                        <<<'BASH'
+                        mv() { return 0; }
+                        rollback_after_failure() {
+                          printf 'rollback\n'
+                          exit 30
+                        }
+                        perform_atomic_switch
+                        kill -SIGNAL_NAME $$
+                        BASH
+                        ,
+                    ),
+                ),
+            );
+
+            self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
+            self::assertSame(1, substr_count($result['stdout'], "rollback\n"), $signal);
+        }
     }
 
     public function testSigtermDuringPartialSwitchReportsRecoveryRequired(): void
