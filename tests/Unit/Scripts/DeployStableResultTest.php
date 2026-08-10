@@ -370,6 +370,14 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(1, substr_count($result['stdout'], "incident-boundary\n"));
     }
 
+    public function testSignalDuringSummaryAfterVerifiedRollbackPreservesSuccessResult(): void
+    {
+        $result = $this->runShell($this->rollbackHarness(true, false, false, true));
+
+        self::assertSame(30, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "summary-boundary\n"));
+    }
+
     public function testRealTimingSummaryRemainsBoundToRollbackResultWhenSignalArrivesBeforeExit(): void
     {
         foreach (
@@ -637,10 +645,14 @@ final class DeployStableResultTest extends TestCase
         bool $succeeds,
         bool $signalAfterTimingFinish = false,
         bool $signalDuringIncident = false,
+        bool $signalDuringSummary = false,
     ): string {
         $rollbackResult = $succeeds ? 'return 0' : 'return 1';
         $timingFinish = $signalAfterTimingFinish ? 'trap - EXIT; kill -TERM $$' : 'trap - EXIT';
         $incident = $signalDuringIncident ? "printf 'incident-boundary\\n'; kill -TERM \$\$" : ':';
+        $summary = $signalDuringSummary
+            ? "echo() { if [[ \"\$*\" == '[!] Deployment failed; rollback result summary' ]]; then builtin printf 'summary-boundary\\n'; kill -TERM \$\$; fi; builtin echo \"\$@\"; }"
+            : '';
 
         return <<<BASH
         source ./deploy_ea.sh
@@ -661,6 +673,7 @@ final class DeployStableResultTest extends TestCase
         probe_renderer_health() { return 0; }
         probe_deep_health_contract() { return 0; }
         bash() { {$rollbackResult}; }
+        {$summary}
         rollback_after_failure 'redacted failure'
         BASH;
     }
