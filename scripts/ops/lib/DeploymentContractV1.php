@@ -342,7 +342,7 @@ final class DeploymentContractV1
 
         $intent = json_decode($runLines[0], true, 64, JSON_THROW_ON_ERROR);
         self::assertSame($evidence['expected_commit']['expected'], $intent['expected_commit'], 'bound expected_commit');
-        if ($evidence['traffic_gate']['status'] !== 'not_observed') {
+        if (in_array($evidence['traffic_gate']['status'], ['passed', 'failed'], true)) {
             self::assertSame($evidence['traffic_gate']['mode'], $intent['traffic_mode'], 'bound traffic mode');
         }
         if ($evidence['dump']['status'] !== 'not_observed') {
@@ -617,7 +617,7 @@ final class DeploymentContractV1
         }
         if ($expectedStatuses === null) {
             foreach (['traffic_gate', 'dump', 'capacity', 'artifact'] as $section) {
-                if ($evidence[$section]['status'] === 'failed') {
+                if (in_array($evidence[$section]['status'], ['failed', 'invalid'], true)) {
                     throw new RuntimeException(
                         'generic pre-write failure evidence cannot claim a different gate failure',
                     );
@@ -626,9 +626,13 @@ final class DeploymentContractV1
             return;
         }
 
+        $trafficStatus = $evidence['traffic_gate']['status'];
+        if ($reason === 'traffic_evidence_invalid' && $trafficStatus === 'invalid') {
+            $trafficStatus = 'failed';
+        }
         $actualStatuses = [
             $evidence['expected_commit']['verified'],
-            $evidence['traffic_gate']['status'],
+            $trafficStatus,
             $evidence['dump']['status'],
             $evidence['capacity']['status'],
             $evidence['artifact']['status'],
@@ -641,7 +645,11 @@ final class DeploymentContractV1
                 ($evidence['traffic_gate']['decision'] !== 'hard_stop' ||
                     $evidence['traffic_gate']['exit_code'] !== 20)) ||
             ($reason === 'traffic_evidence_invalid' &&
-                ($evidence['traffic_gate']['decision'] !== 'invalid' || $evidence['traffic_gate']['exit_code'] !== 21))
+                (($evidence['traffic_gate']['status'] === 'failed' &&
+                    ($evidence['traffic_gate']['decision'] !== 'invalid' ||
+                        $evidence['traffic_gate']['exit_code'] !== 21)) ||
+                    ($evidence['traffic_gate']['status'] === 'invalid' &&
+                        $evidence['traffic_gate']['exit_code'] !== 21)))
         ) {
             throw new RuntimeException('traffic failure evidence does not match its public result');
         }
@@ -760,9 +768,17 @@ final class DeploymentContractV1
             'counts',
         ];
         self::assertExactKeys($section, $keys, 'traffic_gate');
-        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed'], 'traffic_gate.status');
+        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed', 'invalid'], 'traffic_gate.status');
         if ($section['status'] === 'not_observed') {
             self::assertAllNullExcept($section, ['status'], 'traffic_gate');
+            return;
+        }
+        if ($section['status'] === 'invalid') {
+            if ($section['report_sha256'] !== null) {
+                self::assertSha256($section['report_sha256'], 'traffic_gate.report_sha256');
+            }
+            self::assertSame($section['exit_code'], 21, 'traffic_gate.exit_code');
+            self::assertAllNullExcept($section, ['status', 'report_sha256', 'exit_code'], 'traffic_gate');
             return;
         }
         self::assertSha256($section['report_sha256'], 'traffic_gate.report_sha256');
@@ -836,6 +852,12 @@ final class DeploymentContractV1
         foreach (['source_unknown', 'method_unknown', 'target_unknown'] as $unknownOverlay) {
             if ($section['counts'][$unknownOverlay] > $section['counts']['unclassified']) {
                 throw new RuntimeException('traffic gate unknown overlay exceeds the unclassified count');
+            }
+        }
+        $unsafeClassCount = $section['counts']['business_or_authenticated'] + $section['counts']['unclassified'];
+        foreach (['status_5xx', 'write', 'authenticated', 'customers_or_sensitive', 'scanner_success'] as $overlay) {
+            if ($section['counts'][$overlay] > $unsafeClassCount) {
+                throw new RuntimeException('traffic gate hazardous overlay exceeds the unsafe traffic classes');
             }
         }
         $rotationComplete = $section['counts']['rotation_errors'] === 0;

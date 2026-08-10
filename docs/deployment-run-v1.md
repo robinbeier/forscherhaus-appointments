@@ -169,12 +169,24 @@ precede invocation reservation. Freshness and requested-window checks are the
 responsibility of the later runner because they depend on its invocation time;
 they may not be weakened by attaching to an old Run-ID.
 
+If the producer returns exit `21` without a parseable published report, traffic
+status is `invalid`. Every report-derived core field remains `null`; an exact
+raw-byte SHA-256 may be retained only when malformed bytes were actually read.
+No-report evidence keeps that hash `null`. This is distinct from
+`not_observed`, while a parseable report with an incomplete derived core retains
+the full normalized fields and status `failed`. Partial or mixed cores are never
+accepted.
+
 Completeness is also derived, never trusted: rotation completeness follows
 `rotation_errors`, parse completeness requires zero parse errors plus at least
 one parsed line, and evidence completeness is the conjunction of both. Parsed
 window lines and parse errors are disjoint producer outcomes, so their sum
 cannot exceed `lines_seen`. Unknown source, method, and target overlays are
 each bounded by the `unclassified` traffic class that the producer assigns.
+The `status_5xx`, `write`, `authenticated`,
+`customers_or_sensitive`, and `scanner_success` overlays are each bounded
+by the combined `business_or_authenticated` and `unclassified` classes that
+can carry them.
 
 Capacity passes only when available bytes cover projected required bytes,
 observed and projected usage are both below the fixed `85` percent ceiling, and
