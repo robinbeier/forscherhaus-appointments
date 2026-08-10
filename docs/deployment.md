@@ -194,16 +194,19 @@ values; records contain only booleans and non-negative counts, byte totals, and
 monotonic durations. They omit paths, filenames, release IDs, users, URLs,
 credentials, contents, and free-form errors.
 
-The storage-transfer detail contains `source_before`, `target_before`, and
-`target_after` fingerprints. Each fingerprint aggregates regular-file count,
-logical bytes, and allocated bytes (filesystem blocks multiplied by 512). It is
-comparison metadata rather than content evidence: it deliberately contains no
-names or content hashes. A failed fingerprint is recorded as a sanitized
-observability gap and does not alter deployment behavior. The storage copy
-itself is different: every non-zero `rsync` exit is a fail-closed pre-switch
-error. There is no retry, partial-transfer acceptance, or switch after that
-failure; the existing staged directory remains recoverable and is replaced by
-the next normal deploy attempt.
+Successful storage-transfer detail contains `source_before`, `target_before`,
+and `target_after` fingerprints. Each fingerprint aggregates regular-file
+count, logical bytes, and allocated bytes (filesystem blocks multiplied by
+512). It is comparison metadata rather than content evidence: it deliberately
+contains no names or content hashes. A failed fingerprint is recorded as a
+sanitized observability gap and does not alter deployment behavior. A failed
+transfer emits only the two pre-transfer fingerprints followed by the fixed
+`rsync_failed` record; the potentially partial staged target is not treated as
+authoritative post-transfer evidence. The storage copy itself is different:
+every non-zero `rsync` exit is a fail-closed pre-switch error. There is no
+retry, partial-transfer acceptance, or switch after that failure; the existing
+staged directory remains recoverable and is replaced by the next normal deploy
+attempt.
 
 If the live app has already moved to the previous-release path but the staged
 release cannot move into place, the `switch` phase fails and the summary outcome

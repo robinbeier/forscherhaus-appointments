@@ -532,7 +532,8 @@ class GateCliSupportTest extends TestCase
         DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
         DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
         deploy_detail_init 0
-        perform_atomic_switch() { : > "$4"; }
+        switch_sentinel="$4"
+        perform_atomic_switch() { : > "$switch_sentinel"; }
         sync_storage_payload_with_detail "$2" "$3"
         perform_atomic_switch
         BASH;
@@ -554,10 +555,7 @@ class GateCliSupportTest extends TestCase
             $events = $this->deployDetailEvents($result['stdout']);
             self::assertCount(3, $events);
             self::assertSame([1, 2, 3], array_column($events, 'sequence'));
-            self::assertSame(
-                ['source_before', 'target_before'],
-                array_column(array_slice($events, 0, 2), 'boundary'),
-            );
+            self::assertSame(['source_before', 'target_before'], array_column(array_slice($events, 0, 2), 'boundary'));
             self::assertSame(
                 ['storage_fingerprint', 'storage_fingerprint', 'subphase'],
                 array_column($events, 'event'),
