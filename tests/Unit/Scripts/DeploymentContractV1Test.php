@@ -444,6 +444,19 @@ final class DeploymentContractV1Test extends TestCase
         yield 'unknown target' => ['target_unknown'];
     }
 
+    #[DataProvider('unknownTrafficOverlayProvider')]
+    public function testUnknownTrafficOverlayCanEqualUnclassified(string $overlay): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
+        $evidence['traffic_gate']['counts']['unclassified'] = 1;
+        $evidence['traffic_gate']['counts'][$overlay] = 1;
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
     #[DataProvider('invalidTrafficReportProvider')]
     public function testTrafficEvidenceInvalidCanRepresentUnavailableOrMalformedReport(?string $reportSha256): void
     {
@@ -854,6 +867,36 @@ final class DeploymentContractV1Test extends TestCase
 
     /** @return iterable<string,array{string,string}> */
     public static function postGatePhaseMismatchProvider(): iterable
+    {
+        yield 'claims failure before post-gates' => ['deploy_running', 'failed'];
+        yield 'omits failure after post-gates' => ['post_gates_running', 'not_observed'];
+    }
+
+    #[DataProvider('rollbackSucceededPostGatePhaseMismatchProvider')]
+    public function testRollbackSucceededPostGateEvidenceMustMatchTransitionPhase(
+        string $from,
+        string $postGateStatus,
+    ): void {
+        $state = 'failed_post_switch_rollback_succeeded';
+        $lines = $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, $state, 1, 30, 'deploy_failed'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            30,
+            'deploy_failed',
+            30,
+            'succeeded',
+            $postGateStatus,
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('transition phase');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function rollbackSucceededPostGatePhaseMismatchProvider(): iterable
     {
         yield 'claims failure before post-gates' => ['deploy_running', 'failed'];
         yield 'omits failure after post-gates' => ['post_gates_running', 'not_observed'];
