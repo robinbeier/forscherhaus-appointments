@@ -362,6 +362,14 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(31, $failure['exit_code'], $failure['stderr']);
     }
 
+    public function testSignalDuringIncidentAfterVerifiedRollbackPreservesSuccessResult(): void
+    {
+        $result = $this->runShell($this->rollbackHarness(true, false, true));
+
+        self::assertSame(30, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "incident-boundary\n"));
+    }
+
     public function testRealTimingSummaryRemainsBoundToRollbackResultWhenSignalArrivesBeforeExit(): void
     {
         foreach (
@@ -625,10 +633,14 @@ final class DeployStableResultTest extends TestCase
             $body;
     }
 
-    private function rollbackHarness(bool $succeeds, bool $signalAfterTimingFinish = false): string
-    {
+    private function rollbackHarness(
+        bool $succeeds,
+        bool $signalAfterTimingFinish = false,
+        bool $signalDuringIncident = false,
+    ): string {
         $rollbackResult = $succeeds ? 'return 0' : 'return 1';
         $timingFinish = $signalAfterTimingFinish ? 'trap - EXIT; kill -TERM $$' : 'trap - EXIT';
+        $incident = $signalDuringIncident ? "printf 'incident-boundary\\n'; kill -TERM \$\$" : ':';
 
         return <<<BASH
         source ./deploy_ea.sh
@@ -640,9 +652,10 @@ final class DeployStableResultTest extends TestCase
         WEBUSER=www-data
         CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
         ZERO_SURPRISE_CANARY_REPORT=''
+        DEPLOY_RESULT_PHASE=switch_complete
         deploy_timing_begin_rollback() { :; }
         deploy_timing_finish() { {$timingFinish}; }
-        emit_zero_surprise_incident() { :; }
+        emit_zero_surprise_incident() { {$incident}; }
         reload_services() { :; }
         restart_renderer_service() { return 0; }
         probe_renderer_health() { return 0; }

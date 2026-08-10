@@ -2381,6 +2381,7 @@ rollback_after_failure() {
   echo "    Deep health check   : $deep_result"
 
   if [[ "$rollback_ok" -eq 1 ]]; then
+    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
     rollback_result="rollback_succeeded"
     if [[ "$reason" == "zero-surprise canary failed" ]]; then
       incident_event="zero_surprise_canary_failed"
