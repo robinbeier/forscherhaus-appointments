@@ -57,6 +57,7 @@ DEPLOY_RESULT_NORMALIZATION_ACTIVE=0
 DEPLOY_RESULT_PHASE="before_switch"
 DEPLOY_RESULT_ROLLBACK_ACTIVE=0
 DEPLOY_RESULT_FINAL_EXIT_CODE=""
+DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
 
 DEPLOY_TIMING_SCHEMA="deploy_timing.v1"
 DEPLOY_TIMING_ACTIVE=0
@@ -354,7 +355,10 @@ deploy_result_normalize_exit_code() {
 deploy_result_on_signal() {
   local signal_exit_code="${1:-143}"
 
-  trap - HUP INT QUIT TERM
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" ]]; then
+    DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
+  fi
+  deploy_result_recovery_signal_traps_install
   deploy_result_reconcile_switch_phase
 
   if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" ]]; then
@@ -376,6 +380,18 @@ deploy_result_on_signal() {
 
   signal_exit_code="$(deploy_result_normalize_exit_code "$signal_exit_code")"
   exit "$signal_exit_code"
+}
+
+deploy_result_on_recovery_signal() {
+  DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE="${1:-143}"
+  return 0
+}
+
+deploy_result_recovery_signal_traps_install() {
+  trap 'deploy_result_on_recovery_signal 129' HUP
+  trap 'deploy_result_on_recovery_signal 130' INT
+  trap 'deploy_result_on_recovery_signal 131' QUIT
+  trap 'deploy_result_on_recovery_signal 143' TERM
 }
 
 deploy_result_trap_install() {
@@ -2344,7 +2360,11 @@ runtime_config_rollback_cli() {
 }
 
 rollback_after_failure() {
+  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" ]]; then
+    DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
+  fi
   DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+  deploy_result_recovery_signal_traps_install
   local reason="$1"
   local failed_base="${APP}_failed_${REL}"
   local failed_path="$failed_base"
@@ -2404,6 +2424,10 @@ rollback_after_failure() {
       deep_result="failed"
       rollback_ok=0
     fi
+  fi
+
+  if [[ -n "${DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE:-}" ]]; then
+    rollback_ok=0
   fi
 
   if [[ "$rollback_ok" -eq 1 ]]; then
@@ -2746,6 +2770,7 @@ if command -v curl >/dev/null 2>&1; then
   fi
 fi
 
+deploy_result_finalize 0
 echo "[✓] Deployment completed: $APP"
 echo "    Archive        : $ARCHIVE"
 echo "    Previous       : $PREV"

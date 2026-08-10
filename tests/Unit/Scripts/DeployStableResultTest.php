@@ -368,6 +368,39 @@ final class DeployStableResultTest extends TestCase
         self::assertStringNotContainsString('unexpected-rollback', $result['stdout']);
     }
 
+    public function testSuccessIsFinalizedBeforeTheSuccessEpilogueCanBeInterrupted(): void
+    {
+        $script = file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        self::assertIsString($script);
+        $finalizationPosition = strpos($script, "\ndeploy_result_finalize 0\n");
+        $successBannerPosition = strpos($script, "\necho \"[✓] Deployment completed: \$APP\"\n");
+
+        self::assertIsInt($finalizationPosition);
+        self::assertIsInt($successBannerPosition);
+        self::assertLessThan($successBannerPosition, $finalizationPosition);
+
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            DEPLOY_RESULT_PHASE=switch_complete
+            rollback_after_failure() {
+              printf 'unexpected-rollback\n'
+              deploy_result_exit 31
+            }
+            deploy_result_finalize 0
+            printf 'success-epilogue-boundary\n'
+            kill -TERM $$
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "success-epilogue-boundary\n"));
+        self::assertStringNotContainsString('unexpected-rollback', $result['stdout']);
+    }
+
     public function testSignalAfterSuccessfulTimingPhaseWriteDoesNotDuplicatePhase(): void
     {
         $result = $this->runShell($this->successfulRealTimingSignalHarness('phase_after_write'));
@@ -480,6 +513,7 @@ final class DeployStableResultTest extends TestCase
                 signal_sent=1
                 kill -TERM $$
               fi
+              printf 'runtime-config-rollback-finished\n'
               return 0
             }
             rollback_after_failure 'redacted failure'
@@ -489,6 +523,7 @@ final class DeployStableResultTest extends TestCase
 
         self::assertSame(31, $result['exit_code'], $result['stderr']);
         self::assertSame(1, substr_count($result['stdout'], "rollback-start\n"));
+        self::assertSame(1, substr_count($result['stdout'], "runtime-config-rollback-finished\n"));
     }
 
     public function testSigtermRemainsTheContractInterruptionExit(): void
