@@ -313,25 +313,12 @@ final class DeploymentContractV1
             $evidence['result']['reason'],
         );
         self::assertDeployResultConsistency($evidence['result']['state'], $evidence['deploy']);
+        self::assertTerminalEvidenceConsistency($evidence);
         if (
             $evidence['deploy_timing']['status'] !== 'not_observed' &&
             $evidence['deploy_timing']['run_id'] === $evidence['run_id']
         ) {
             throw new RuntimeException('deploy timing Run-ID must remain separate from the orchestrator Run-ID');
-        }
-
-        if ($evidence['result']['state'] === 'succeeded') {
-            foreach (['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact', 'post_gates'] as $section) {
-                $expectedStatus = $section === 'expected_commit' ? true : 'passed';
-                $actualStatus =
-                    $section === 'expected_commit' ? $evidence[$section]['verified'] : $evidence[$section]['status'];
-                if ($actualStatus !== $expectedStatus) {
-                    throw new RuntimeException('successful evidence requires every pre/post gate to pass');
-                }
-            }
-            if ($evidence['deploy']['status'] !== 'succeeded') {
-                throw new RuntimeException('successful evidence requires a succeeded deploy');
-            }
         }
     }
 
@@ -368,6 +355,7 @@ final class DeploymentContractV1
         }
 
         $last = json_decode($runLines[array_key_last($runLines)], true, 64, JSON_THROW_ON_ERROR);
+        self::assertFailureTransitionMatchesEvidence($last, $evidence);
         self::assertSame($evidence['result']['exit_code'], $last['exit_code'], 'evidence exit_code');
         self::assertSame($evidence['result']['reason'], $last['reason'], 'evidence reason');
         self::assertSame(
@@ -524,8 +512,149 @@ final class DeploymentContractV1
             self::assertCommit($section['observed'], 'expected_commit.observed');
         }
         self::assertBoolean($section['verified'], 'expected_commit.verified');
-        if ($section['verified'] && $section['observed'] !== $section['expected']) {
+        $matches = $section['observed'] !== null && hash_equals($section['expected'], $section['observed']);
+        if ($section['verified'] !== $matches) {
             throw new RuntimeException('expected commit evidence is inconsistent');
+        }
+    }
+
+    /** @param array<string,mixed> $evidence */
+    private static function assertTerminalEvidenceConsistency(array $evidence): void
+    {
+        $state = $evidence['result']['state'];
+        $reason = $evidence['result']['reason'];
+        if ($state === 'succeeded') {
+            self::assertEveryPreGatePassed($evidence);
+            self::assertSame($evidence['post_gates']['status'], 'passed', 'successful post-gate evidence');
+            self::assertSame($evidence['deploy']['status'], 'succeeded', 'successful deploy evidence');
+            return;
+        }
+        if ($state === 'failed_before_write') {
+            self::assertFailedBeforeWriteEvidence($reason, $evidence);
+            self::assertSame($evidence['post_gates']['status'], 'not_observed', 'pre-write post-gate evidence');
+            return;
+        }
+
+        self::assertEveryPreGatePassed($evidence);
+        if (in_array($state, ['failed_post_switch_rollback_succeeded', 'failed_post_switch_rollback_failed'], true)) {
+            self::assertSame($evidence['post_gates']['status'], 'failed', 'post-switch failure evidence');
+        } elseif ($state === 'manual_recovery_required') {
+            if (!in_array($evidence['post_gates']['status'], ['not_observed', 'failed'], true)) {
+                throw new RuntimeException('manual recovery evidence cannot claim passed post-gates');
+            }
+        } else {
+            self::assertSame($evidence['post_gates']['status'], 'not_observed', 'pre-post-gate failure evidence');
+        }
+    }
+
+    /** @param array<string,mixed> $evidence */
+    private static function assertFailedBeforeWriteEvidence(string $reason, array $evidence): void
+    {
+        $expectedStatuses = match ($reason) {
+            'traffic_hard_stop', 'traffic_evidence_invalid' => [
+                true,
+                'failed',
+                'not_observed',
+                'not_observed',
+                'not_observed',
+            ],
+            'dump_verification_failed' => [true, 'passed', 'failed', 'not_observed', 'not_observed'],
+            'capacity_gate_failed' => [true, 'passed', 'passed', 'failed', 'not_observed'],
+            'artifact_verification_failed' => [true, 'passed', 'passed', 'passed', 'failed'],
+            'expected_commit_mismatch' => [false, 'not_observed', 'not_observed', 'not_observed', 'not_observed'],
+            'contract_invalid', 'state_conflict', 'interrupted' => null,
+            default => throw new RuntimeException('failed-before-write reason is unknown'),
+        };
+
+        if ($reason === 'expected_commit_mismatch') {
+            if (
+                $evidence['expected_commit']['observed'] === null ||
+                hash_equals($evidence['expected_commit']['expected'], $evidence['expected_commit']['observed'])
+            ) {
+                throw new RuntimeException('expected commit evidence is inconsistent with mismatch failure');
+            }
+        }
+        if ($expectedStatuses === null) {
+            foreach (['traffic_gate', 'dump', 'capacity', 'artifact'] as $section) {
+                if ($evidence[$section]['status'] === 'failed') {
+                    throw new RuntimeException(
+                        'generic pre-write failure evidence cannot claim a different gate failure',
+                    );
+                }
+            }
+            return;
+        }
+
+        $actualStatuses = [
+            $evidence['expected_commit']['verified'],
+            $evidence['traffic_gate']['status'],
+            $evidence['dump']['status'],
+            $evidence['capacity']['status'],
+            $evidence['artifact']['status'],
+        ];
+        if ($actualStatuses !== $expectedStatuses) {
+            throw new RuntimeException('failed-before-write result lacks matching failure evidence');
+        }
+        if (
+            ($reason === 'traffic_hard_stop' &&
+                ($evidence['traffic_gate']['decision'] !== 'hard_stop' ||
+                    $evidence['traffic_gate']['exit_code'] !== 20)) ||
+            ($reason === 'traffic_evidence_invalid' &&
+                ($evidence['traffic_gate']['decision'] !== 'invalid' || $evidence['traffic_gate']['exit_code'] !== 21))
+        ) {
+            throw new RuntimeException('traffic failure evidence does not match its public result');
+        }
+    }
+
+    /** @param array<string,mixed> $evidence */
+    private static function assertEveryPreGatePassed(array $evidence): void
+    {
+        $statuses = [
+            $evidence['expected_commit']['verified'],
+            $evidence['traffic_gate']['status'],
+            $evidence['dump']['status'],
+            $evidence['capacity']['status'],
+            $evidence['artifact']['status'],
+        ];
+        if ($statuses !== [true, 'passed', 'passed', 'passed', 'passed']) {
+            throw new RuntimeException('terminal evidence requires every pre-deploy gate to pass');
+        }
+    }
+
+    /** @param array<string,mixed> $last @param array<string,mixed> $evidence */
+    private static function assertFailureTransitionMatchesEvidence(array $last, array $evidence): void
+    {
+        if ($last['state'] !== 'failed_before_write') {
+            return;
+        }
+        $requiredPrevious = match ($last['reason']) {
+            'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
+            'dump_verification_failed' => 'traffic_gate_passed',
+            'capacity_gate_failed' => 'dump_verified',
+            'artifact_verification_failed' => 'capacity_passed',
+            'expected_commit_mismatch' => 'lock_acquired',
+            default => null,
+        };
+        if ($requiredPrevious !== null && $last['previous_state'] !== $requiredPrevious) {
+            throw new RuntimeException('failure transition does not match its claimed gate evidence');
+        }
+
+        $previousIndex = array_search($last['previous_state'], self::PROGRESS_STATES, true);
+        if (!is_int($previousIndex)) {
+            throw new RuntimeException('failure transition previous state is unknown');
+        }
+        $requiredPassed = [
+            'expected_commit_verified' => $evidence['expected_commit']['verified'] === true,
+            'traffic_gate_passed' => $evidence['traffic_gate']['status'] === 'passed',
+            'dump_verified' => $evidence['dump']['status'] === 'passed',
+            'capacity_passed' => $evidence['capacity']['status'] === 'passed',
+            'artifact_verified' => $evidence['artifact']['status'] === 'passed',
+        ];
+        foreach ($requiredPassed as $state => $passed) {
+            $stateIndex = array_search($state, self::PROGRESS_STATES, true);
+            if (is_int($stateIndex) && $previousIndex >= $stateIndex && !$passed) {
+                throw new RuntimeException('failure evidence does not cover the last verified deployment state');
+            }
         }
     }
 

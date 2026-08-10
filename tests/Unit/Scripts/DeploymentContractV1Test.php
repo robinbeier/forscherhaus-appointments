@@ -365,6 +365,122 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
+    #[DataProvider('missingClaimedFailureEvidenceProvider')]
+    public function testFailedBeforeWriteRequiresEvidenceForTheClaimedGate(
+        string $from,
+        int $exitCode,
+        string $reason,
+        string $missingSection,
+    ): void {
+        $lines = $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, $exitCode, $reason));
+        $evidence = $this->failedBeforeWriteEvidence($lines, $exitCode, $reason);
+        $evidence[$missingSection] = $this->notObservedSection($evidence[$missingSection]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('failure evidence');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,int,string,string}> */
+    public static function missingClaimedFailureEvidenceProvider(): iterable
+    {
+        yield 'traffic hard stop' => ['expected_commit_verified', 20, 'traffic_hard_stop', 'traffic_gate'];
+        yield 'traffic invalid' => ['expected_commit_verified', 21, 'traffic_evidence_invalid', 'traffic_gate'];
+        yield 'dump' => ['traffic_gate_passed', 22, 'dump_verification_failed', 'dump'];
+        yield 'capacity' => ['dump_verified', 23, 'capacity_gate_failed', 'capacity'];
+        yield 'artifact' => ['capacity_passed', 24, 'artifact_verification_failed', 'artifact'];
+    }
+
+    #[DataProvider('claimedFailureEvidenceProvider')]
+    public function testFailedBeforeWriteAcceptsMatchingGateEvidence(string $from, int $exitCode, string $reason): void
+    {
+        $lines = $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, $exitCode, $reason));
+        $evidence = $this->failedBeforeWriteEvidence($lines, $exitCode, $reason);
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{string,int,string}> */
+    public static function claimedFailureEvidenceProvider(): iterable
+    {
+        yield 'traffic hard stop' => ['expected_commit_verified', 20, 'traffic_hard_stop'];
+        yield 'traffic invalid' => ['expected_commit_verified', 21, 'traffic_evidence_invalid'];
+        yield 'dump' => ['traffic_gate_passed', 22, 'dump_verification_failed'];
+        yield 'capacity' => ['dump_verified', 23, 'capacity_gate_failed'];
+        yield 'artifact' => ['capacity_passed', 24, 'artifact_verification_failed'];
+        yield 'commit' => ['lock_acquired', 25, 'expected_commit_mismatch'];
+    }
+
+    public function testGenericInterruptedFailureMustEvidenceEveryPreviouslyVerifiedGate(): void
+    {
+        $lines = $this->runThrough('artifact_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 143, 'interrupted'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 143, 'interrupted');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('last verified deployment state');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testExpectedCommitMismatchRequiresAnObservedDifferentCommit(): void
+    {
+        $lines = $this->runThrough('lock_acquired');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 25, 'expected_commit_mismatch'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 25, 'expected_commit_mismatch');
+        $evidence['expected_commit']['observed'] = $evidence['expected_commit']['expected'];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('expected commit evidence is inconsistent');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    #[DataProvider('intentEvidenceMismatchProvider')]
+    public function testEveryIntentEvidenceBindingRejectsMismatch(string $section, string $field, mixed $value): void
+    {
+        $lines = $this->successfulRunLines();
+        $evidence = $this->validEvidence($lines);
+        $evidence[$section][$field] = $value;
+        if ($section === 'expected_commit') {
+            $evidence[$section]['observed'] = $value;
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,string,mixed}> */
+    public static function intentEvidenceMismatchProvider(): iterable
+    {
+        yield 'expected commit' => ['expected_commit', 'expected', str_repeat('c', 40)];
+        yield 'dump policy' => ['dump', 'policy', 'future_policy'];
+        yield 'artifact expectation' => ['artifact', 'expectation', 'future_expectation'];
+    }
+
+    public function testCliValidatesFixturesAndUsesStableUsageAndInvalidExitCodes(): void
+    {
+        $fixtureRoot = dirname(__DIR__, 2) . '/Fixtures/deployment-contract-v1';
+        [$validExit, $validStdout, $validStderr] = $this->runCli([
+            '--run-jsonl=' . $fixtureRoot . '/failed-before-write.jsonl',
+            '--evidence-json=' . $fixtureRoot . '/failed-before-write-evidence.json',
+        ]);
+        self::assertSame(0, $validExit, $validStderr);
+        self::assertSame('', $validStderr);
+        self::assertTrue(json_decode($validStdout, true, 64, JSON_THROW_ON_ERROR)['valid']);
+
+        [$usageExit, , $usageStderr] = $this->runCli([]);
+        self::assertSame(64, $usageExit);
+        self::assertStringContainsString('Usage:', $usageStderr);
+
+        [$invalidExit, , $invalidStderr] = $this->runCli([
+            '--run-jsonl=' . $fixtureRoot . '/failed-before-write.jsonl',
+            '--evidence-json=' . $fixtureRoot . '/missing.json',
+        ]);
+        self::assertSame(70, $invalidExit);
+        self::assertStringContainsString('INVALID:', $invalidStderr);
+    }
+
     public function testDumpAgeAtExactly240MinutesIsRejected(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
@@ -621,6 +737,115 @@ final class DeploymentContractV1Test extends TestCase
             ],
             'result' => ['state' => 'succeeded', 'exit_code' => 0, 'reason' => 'ok'],
         ];
+    }
+
+    /** @param list<string> $lines @return array<string,mixed> */
+    private function failedBeforeWriteEvidence(array $lines, int $exitCode, string $reason): array
+    {
+        $evidence = $this->validEvidence($lines);
+        $evidence['deploy'] = [
+            'status' => 'not_invoked',
+            'invocation_count' => 0,
+            'exit_code' => null,
+            'rollback_outcome' => 'not_applicable',
+        ];
+        $evidence['post_gates'] = $this->notObservedSection($evidence['post_gates']);
+        $evidence['deploy_timing'] = $this->notObservedSection($evidence['deploy_timing']);
+        $evidence['result'] = ['state' => 'failed_before_write', 'exit_code' => $exitCode, 'reason' => $reason];
+
+        foreach (['traffic_gate', 'dump', 'capacity', 'artifact'] as $section) {
+            $evidence[$section] = $this->notObservedSection($evidence[$section]);
+        }
+
+        if (in_array($reason, ['traffic_hard_stop', 'traffic_evidence_invalid'], true)) {
+            $evidence['traffic_gate'] = $this->validEvidence($lines)['traffic_gate'];
+            if ($reason === 'traffic_hard_stop') {
+                $evidence['traffic_gate']['counts']['documented_health'] = 0;
+                $evidence['traffic_gate']['counts']['business_or_authenticated'] = 1;
+                $evidence['traffic_gate']['decision'] = 'hard_stop';
+                $evidence['traffic_gate']['exit_code'] = 20;
+            } else {
+                $evidence['traffic_gate']['parse_complete'] = false;
+                $evidence['traffic_gate']['evidence_complete'] = false;
+                $evidence['traffic_gate']['decision'] = 'invalid';
+                $evidence['traffic_gate']['exit_code'] = 21;
+            }
+            $evidence['traffic_gate']['status'] = 'failed';
+        }
+        if (
+            in_array(
+                $reason,
+                ['dump_verification_failed', 'capacity_gate_failed', 'artifact_verification_failed'],
+                true,
+            )
+        ) {
+            $evidence['traffic_gate'] = $this->validEvidence($lines)['traffic_gate'];
+        }
+        if (in_array($reason, ['capacity_gate_failed', 'artifact_verification_failed'], true)) {
+            $evidence['dump'] = $this->validEvidence($lines)['dump'];
+        }
+        if ($reason === 'dump_verification_failed') {
+            $evidence['dump'] = $this->validEvidence($lines)['dump'];
+            $evidence['dump']['age_seconds'] = 14400;
+            $evidence['dump']['status'] = 'failed';
+        }
+        if ($reason === 'capacity_gate_failed') {
+            $evidence['capacity'] = $this->validEvidence($lines)['capacity'];
+            $evidence['capacity']['passed'] = false;
+            $evidence['capacity']['status'] = 'failed';
+        }
+        if ($reason === 'artifact_verification_failed') {
+            $evidence['capacity'] = $this->validEvidence($lines)['capacity'];
+            $evidence['artifact'] = $this->validEvidence($lines)['artifact'];
+            $evidence['artifact']['verified'] = false;
+            $evidence['artifact']['status'] = 'failed';
+        }
+        if ($reason === 'expected_commit_mismatch') {
+            $evidence['expected_commit']['observed'] = str_repeat('c', 40);
+            $evidence['expected_commit']['verified'] = false;
+        }
+
+        return $evidence;
+    }
+
+    /** @param array<string,mixed> $section @return array<string,mixed> */
+    private function notObservedSection(array $section): array
+    {
+        foreach ($section as $field => $_value) {
+            $section[$field] = $field === 'status' ? 'not_observed' : null;
+        }
+
+        return $section;
+    }
+
+    /** @param list<string> $arguments @return array{int,string,string} */
+    private function runCli(array $arguments): array
+    {
+        $command = [
+            PHP_BINARY,
+            dirname(__DIR__, 3) . '/scripts/ops/validate_deployment_contract_v1.php',
+            ...$arguments,
+        ];
+        $process = proc_open(
+            $command,
+            [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ],
+            $pipes,
+            dirname(__DIR__, 3),
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertIsString($stdout);
+        self::assertIsString($stderr);
+
+        return [proc_close($process), $stdout, $stderr];
     }
 
     /** @param array<string,mixed> $value */
