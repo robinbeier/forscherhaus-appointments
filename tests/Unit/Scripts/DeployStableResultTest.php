@@ -353,6 +353,15 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(31, $failure['exit_code'], $failure['stderr']);
     }
 
+    public function testSignalAfterRollbackVerificationPreservesTheFinalResult(): void
+    {
+        $success = $this->runShell($this->rollbackHarness(true, true));
+        $failure = $this->runShell($this->rollbackHarness(false, true));
+
+        self::assertSame(30, $success['exit_code'], $success['stderr']);
+        self::assertSame(31, $failure['exit_code'], $failure['stderr']);
+    }
+
     public function testSignalDuringDirectAutomaticRollbackDoesNotStartSecondRollback(): void
     {
         $result = $this->runShell(
@@ -591,9 +600,10 @@ final class DeployStableResultTest extends TestCase
             $body;
     }
 
-    private function rollbackHarness(bool $succeeds): string
+    private function rollbackHarness(bool $succeeds, bool $signalAfterTimingFinish = false): string
     {
         $rollbackResult = $succeeds ? 'return 0' : 'return 1';
+        $timingFinish = $signalAfterTimingFinish ? 'trap - EXIT; kill -TERM $$' : 'trap - EXIT';
 
         return <<<BASH
         source ./deploy_ea.sh
@@ -606,7 +616,7 @@ final class DeployStableResultTest extends TestCase
         CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
         ZERO_SURPRISE_CANARY_REPORT=''
         deploy_timing_begin_rollback() { :; }
-        deploy_timing_finish() { trap - EXIT; }
+        deploy_timing_finish() { {$timingFinish}; }
         emit_zero_surprise_incident() { :; }
         reload_services() { :; }
         restart_renderer_service() { return 0; }

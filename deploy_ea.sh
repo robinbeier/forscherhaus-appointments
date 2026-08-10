@@ -291,18 +291,25 @@ deploy_result_reconcile_switch_phase() {
   esac
 }
 
-deploy_result_exit() {
+deploy_result_finalize() {
   local exit_code="$1"
 
   case "$exit_code" in
     30|31|32)
       DEPLOY_RESULT_FINAL_EXIT_CODE="$exit_code"
-      exit "$exit_code"
+      return 0
       ;;
     *)
       return 1
       ;;
   esac
+}
+
+deploy_result_exit() {
+  local exit_code="$1"
+
+  deploy_result_finalize "$exit_code" || return 1
+  exit "$exit_code"
 }
 
 deploy_result_normalize_exit_code() {
@@ -318,8 +325,8 @@ deploy_result_normalize_exit_code() {
     return 0
   fi
 
-  if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" && "$exit_code" == "$DEPLOY_RESULT_FINAL_EXIT_CODE" ]]; then
-    printf '%s\n' "$exit_code"
+  if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" ]]; then
+    printf '%s\n' "$DEPLOY_RESULT_FINAL_EXIT_CODE"
     return 0
   fi
 
@@ -348,6 +355,10 @@ deploy_result_on_signal() {
 
   trap - HUP INT QUIT TERM
   deploy_result_reconcile_switch_phase
+
+  if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" ]]; then
+    exit "$DEPLOY_RESULT_FINAL_EXIT_CODE"
+  fi
 
   case "${DEPLOY_RESULT_PHASE:-before_switch}" in
     switch_partial)
@@ -507,12 +518,13 @@ deploy_timing_on_exit() {
   local raw_exit_code="$?"
   local exit_code
   local outcome="failed_pre_switch"
+  local phase_status="failed"
 
   trap - EXIT
   deploy_result_reconcile_switch_phase
   if [[
     "$raw_exit_code" != "0" &&
-    ( -z "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" || "$raw_exit_code" != "$DEPLOY_RESULT_FINAL_EXIT_CODE" ) &&
+    -z "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" &&
     "${DEPLOY_RESULT_PHASE:-before_switch}" == "switch_complete" &&
     "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" &&
     "${DRYRUN:-0}" != "1"
@@ -534,9 +546,14 @@ deploy_timing_on_exit() {
         ;;
     esac
     if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
-      outcome="rollback_failed"
+      if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_ROLLBACK_SUCCESS" ]]; then
+        outcome="rollback_succeeded"
+        phase_status="ok"
+      else
+        outcome="rollback_failed"
+      fi
     fi
-    deploy_timing_finish failed "$outcome" "$exit_code" || true
+    deploy_timing_finish "$phase_status" "$outcome" "$exit_code" || true
   fi
 
   exit "$exit_code"
@@ -2305,6 +2322,7 @@ rollback_after_failure() {
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
+    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
     deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
     deploy_result_exit "$EXIT_ROLLBACK_SUCCESS"
   fi
@@ -2364,6 +2382,7 @@ rollback_after_failure() {
       "$incident_report" \
       "$incident_report_root"
     echo "[!] Rollback succeeded, deployment remains failed."
+    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
     deploy_timing_finish ok rollback_succeeded "$EXIT_ROLLBACK_SUCCESS"
     deploy_result_exit "$EXIT_ROLLBACK_SUCCESS"
   fi
@@ -2380,6 +2399,7 @@ rollback_after_failure() {
     "$incident_report" \
     "$incident_report_root"
   echo "[!] Rollback failed or unverifiable. Manual intervention required."
+  deploy_result_finalize "$EXIT_ROLLBACK_FAILED"
   deploy_timing_finish failed rollback_failed "$EXIT_ROLLBACK_FAILED"
   deploy_result_exit "$EXIT_ROLLBACK_FAILED"
 }
