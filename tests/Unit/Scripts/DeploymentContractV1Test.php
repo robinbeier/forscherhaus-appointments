@@ -481,6 +481,101 @@ final class DeploymentContractV1Test extends TestCase
         self::assertStringContainsString('INVALID:', $invalidStderr);
     }
 
+    #[DataProvider('nonSuccessTerminalBundleProvider')]
+    public function testEveryNonSuccessTerminalBundleIsRepresentable(
+        string $from,
+        string $state,
+        int $publicExit,
+        string $reason,
+        int $deployExit,
+        string $rollbackOutcome,
+        string $postGateStatus,
+    ): void {
+        $lines = $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, $state, 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            $state,
+            $publicExit,
+            $reason,
+            $deployExit,
+            $rollbackOutcome,
+            $postGateStatus,
+        );
+
+        self::assertSame($state, DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{string,string,int,string,int,string,string}> */
+    public static function nonSuccessTerminalBundleProvider(): iterable
+    {
+        yield 'failed pre-switch' => [
+            'deploy_running',
+            'failed_pre_switch',
+            30,
+            'deploy_failed',
+            30,
+            'not_run',
+            'not_observed',
+        ];
+        yield 'switch recovery required' => [
+            'deploy_running',
+            'failed_switch_recovery_required',
+            32,
+            'switch_recovery_required',
+            31,
+            'recovery_required',
+            'not_observed',
+        ];
+        yield 'rollback succeeded before post-gates' => [
+            'deploy_running',
+            'failed_post_switch_rollback_succeeded',
+            30,
+            'deploy_failed',
+            30,
+            'succeeded',
+            'not_observed',
+        ];
+        yield 'rollback failed after post-gates' => [
+            'post_gates_running',
+            'failed_post_switch_rollback_failed',
+            31,
+            'rollback_failed',
+            31,
+            'failed',
+            'failed',
+        ];
+        yield 'manual recovery after interruption' => [
+            'deploy_running',
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        ];
+    }
+
+    #[DataProvider('postGatePhaseMismatchProvider')]
+    public function testPostGateEvidenceMustMatchTheFailureTransitionPhase(string $from, string $postGateStatus): void
+    {
+        $state = 'failed_post_switch_rollback_failed';
+        $lines = $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, $state, 1, 31, 'rollback_failed'));
+        $evidence = $this->invokedFailureEvidence($lines, $state, 31, 'rollback_failed', 31, 'failed', $postGateStatus);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('transition phase');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function postGatePhaseMismatchProvider(): iterable
+    {
+        yield 'claims failure before post-gates' => ['deploy_running', 'failed'];
+        yield 'omits failure after post-gates' => ['post_gates_running', 'not_observed'];
+    }
+
     public function testDumpAgeAtExactly240MinutesIsRejected(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
@@ -804,6 +899,39 @@ final class DeploymentContractV1Test extends TestCase
             $evidence['expected_commit']['observed'] = str_repeat('c', 40);
             $evidence['expected_commit']['verified'] = false;
         }
+
+        return $evidence;
+    }
+
+    /**
+     * @param list<string> $lines
+     * @return array<string,mixed>
+     */
+    private function invokedFailureEvidence(
+        array $lines,
+        string $state,
+        int $publicExit,
+        string $reason,
+        int $deployExit,
+        string $rollbackOutcome,
+        string $postGateStatus,
+    ): array {
+        $evidence = $this->validEvidence($lines);
+        $evidence['deploy'] = [
+            'status' => 'failed',
+            'invocation_count' => 1,
+            'exit_code' => $deployExit,
+            'rollback_outcome' => $rollbackOutcome,
+        ];
+        if ($postGateStatus === 'not_observed') {
+            $evidence['post_gates'] = $this->notObservedSection($evidence['post_gates']);
+        } else {
+            $evidence['post_gates']['logs_passed'] = false;
+            $evidence['post_gates']['passed'] = false;
+            $evidence['post_gates']['status'] = 'failed';
+        }
+        $evidence['deploy_timing'] = $this->notObservedSection($evidence['deploy_timing']);
+        $evidence['result'] = ['state' => $state, 'exit_code' => $publicExit, 'reason' => $reason];
 
         return $evidence;
     }

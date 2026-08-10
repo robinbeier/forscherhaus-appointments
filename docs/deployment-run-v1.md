@@ -125,10 +125,12 @@ fixed `not_observed`/`not_invoked` status. They never invent zero hashes or
 success. A terminal failure with exit `20` through `25` requires the claimed
 gate's failed evidence plus passed evidence for every earlier verified gate;
 the journal's last verified state must agree. A successful result requires all
-safety and post-gate sections to pass. Timing remains observational as defined
-in `docs/deployment.md`: missing
-or invalid `deploy_timing.v1` evidence is visible but cannot rewrite a safe
-deploy outcome. The outer wall clock never replaces, extends, or mixes with
+safety and post-gate sections to pass. Rollback evidence reached directly from
+`deploy_running` keeps post-gates `not_observed`; a rollback reached from
+`post_gates_running` requires failed post-gate evidence. Timing remains
+observational as defined in `docs/deployment.md`: missing or invalid
+`deploy_timing.v1` evidence is visible but cannot rewrite a safe deploy outcome.
+The outer wall clock never replaces, extends, or mixes with
 the five-phase `deploy_timing.v1` baseline.
 
 ## Traffic-gate consumption

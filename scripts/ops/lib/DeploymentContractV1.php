@@ -536,11 +536,19 @@ final class DeploymentContractV1
         }
 
         self::assertEveryPreGatePassed($evidence);
-        if (in_array($state, ['failed_post_switch_rollback_succeeded', 'failed_post_switch_rollback_failed'], true)) {
-            self::assertSame($evidence['post_gates']['status'], 'failed', 'post-switch failure evidence');
-        } elseif ($state === 'manual_recovery_required') {
+        if (
+            in_array(
+                $state,
+                [
+                    'failed_post_switch_rollback_succeeded',
+                    'failed_post_switch_rollback_failed',
+                    'manual_recovery_required',
+                ],
+                true,
+            )
+        ) {
             if (!in_array($evidence['post_gates']['status'], ['not_observed', 'failed'], true)) {
-                throw new RuntimeException('manual recovery evidence cannot claim passed post-gates');
+                throw new RuntimeException('failure evidence cannot claim passed post-gates');
             }
         } else {
             self::assertSame($evidence['post_gates']['status'], 'not_observed', 'pre-post-gate failure evidence');
@@ -624,6 +632,19 @@ final class DeploymentContractV1
     /** @param array<string,mixed> $last @param array<string,mixed> $evidence */
     private static function assertFailureTransitionMatchesEvidence(array $last, array $evidence): void
     {
+        if (
+            in_array(
+                $last['state'],
+                ['failed_post_switch_rollback_succeeded', 'failed_post_switch_rollback_failed'],
+                true,
+            )
+        ) {
+            $expectedPostGateStatus = $last['previous_state'] === 'post_gates_running' ? 'failed' : 'not_observed';
+            if ($evidence['post_gates']['status'] !== $expectedPostGateStatus) {
+                throw new RuntimeException('post-gate evidence does not match the failure transition phase');
+            }
+            return;
+        }
         if ($last['state'] !== 'failed_before_write') {
             return;
         }
