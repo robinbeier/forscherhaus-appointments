@@ -130,9 +130,10 @@ success. A terminal failure with exit `20` through `25` requires the claimed
 gate's failed evidence plus passed evidence for every earlier verified gate;
 the journal's last verified state must agree. Evidence `captured_at_utc` cannot
 precede the terminal journal timestamp. A successful result requires all
-safety and post-gate sections to pass. Rollback evidence reached directly from
-`deploy_running` keeps post-gates `not_observed`; a rollback reached from
-`post_gates_running` requires failed post-gate evidence. Timing remains
+safety and post-gate sections to pass. Post-switch terminal evidence reached
+directly from `deploy_running` keeps post-gates `not_observed`; a rollback or
+manual-recovery terminal reached from `post_gates_running` requires failed
+post-gate evidence. Timing remains
 observational as defined in `docs/deployment.md`: missing or invalid
 `deploy_timing.v1` evidence is visible but cannot rewrite a safe deploy outcome.
 Invalid timing bytes retain their authoritative SHA while an unavailable parsed
@@ -167,7 +168,9 @@ time; they may not be weakened by attaching to an old Run-ID.
 
 Completeness is also derived, never trusted: rotation completeness follows
 `rotation_errors`, parse completeness requires zero parse errors plus at least
-one parsed line, and evidence completeness is the conjunction of both.
+one parsed line, and evidence completeness is the conjunction of both. Parsed
+window lines and parse errors are disjoint producer outcomes, so their sum
+cannot exceed `lines_seen`.
 
 Capacity passes only when available bytes cover projected required bytes,
 observed and projected usage are both below the fixed `85` percent ceiling, and

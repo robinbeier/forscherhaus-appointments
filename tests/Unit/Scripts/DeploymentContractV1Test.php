@@ -375,6 +375,9 @@ final class DeploymentContractV1Test extends TestCase
         $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
         $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
         $evidence['traffic_gate']['counts'][$count] = $value;
+        if ($count === 'parse_errors') {
+            $evidence['traffic_gate']['counts']['lines_seen'] = 2;
+        }
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('completeness');
@@ -386,6 +389,19 @@ final class DeploymentContractV1Test extends TestCase
     {
         yield 'parse errors contradict parse complete' => ['parse_errors', 1];
         yield 'rotation error contradicts rotation complete' => ['rotation_errors', 1];
+    }
+
+    public function testTrafficParsedAndFailedLinesCannotOverlapSourceLines(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 21, 'traffic_evidence_invalid'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 21, 'traffic_evidence_invalid');
+        $evidence['traffic_gate']['counts']['lines_seen'] = 1;
+        $evidence['traffic_gate']['counts']['parse_errors'] = 1;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('count bounds');
+        DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
     public function testTrafficUnknownFieldAndFullReportInjectionAreRejected(): void
@@ -652,6 +668,39 @@ final class DeploymentContractV1Test extends TestCase
     {
         yield 'claims failure before post-gates' => ['deploy_running', 'failed'];
         yield 'omits failure after post-gates' => ['post_gates_running', 'not_observed'];
+    }
+
+    public function testManualRecoveryBeforePostGatesRejectsObservedPostGateFailure(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 143, 'interrupted'));
+        $notObserved = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+        self::assertSame(
+            'manual_recovery_required',
+            DeploymentContractV1::validateBundle($lines, $notObserved)['state'],
+        );
+
+        $observedFailure = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            143,
+            'interrupted',
+            31,
+            'recovery_required',
+            'failed',
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('transition phase');
+        DeploymentContractV1::validateBundle($lines, $observedFailure);
     }
 
     public function testDumpAgeAtExactly240MinutesIsRejected(): void
@@ -1003,6 +1052,7 @@ final class DeploymentContractV1Test extends TestCase
                 $evidence['traffic_gate']['decision'] = 'hard_stop';
                 $evidence['traffic_gate']['exit_code'] = 20;
             } else {
+                $evidence['traffic_gate']['counts']['lines_seen'] = 2;
                 $evidence['traffic_gate']['counts']['parse_errors'] = 1;
                 $evidence['traffic_gate']['parse_complete'] = false;
                 $evidence['traffic_gate']['evidence_complete'] = false;

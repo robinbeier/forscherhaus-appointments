@@ -668,7 +668,11 @@ final class DeploymentContractV1
         if (
             in_array(
                 $last['state'],
-                ['failed_post_switch_rollback_succeeded', 'failed_post_switch_rollback_failed'],
+                [
+                    'failed_post_switch_rollback_succeeded',
+                    'failed_post_switch_rollback_failed',
+                    'manual_recovery_required',
+                ],
                 true,
             )
         ) {
@@ -804,6 +808,8 @@ final class DeploymentContractV1
         if (
             $section['counts']['lines_in_window'] > $section['counts']['lines_seen'] ||
             $section['counts']['parse_errors'] > $section['counts']['lines_seen'] ||
+            $section['counts']['parse_errors'] + $section['counts']['lines_in_window'] >
+                $section['counts']['lines_seen'] ||
             $section['counts']['pre_window_completion'] > $section['counts']['lines_in_window'] ||
             !in_array($section['counts']['rotation_errors'], [0, 1], true)
         ) {
