@@ -48,8 +48,14 @@ RENDERER_HEALTH_SLEEP_SECONDS=2
 DEEP_HEALTH_RETRIES=10
 DEEP_HEALTH_SLEEP_SECONDS=2
 
+EXIT_DEPLOY_FAILED=30
 EXIT_ROLLBACK_SUCCESS=30
 EXIT_ROLLBACK_FAILED=31
+EXIT_SWITCH_RECOVERY_REQUIRED=32
+
+DEPLOY_RESULT_NORMALIZATION_ACTIVE=0
+DEPLOY_RESULT_PHASE="before_switch"
+DEPLOY_RESULT_ROLLBACK_ACTIVE=0
 
 DEPLOY_TIMING_SCHEMA="deploy_timing.v1"
 DEPLOY_TIMING_ACTIVE=0
@@ -231,6 +237,66 @@ deploy_timing_disable() {
   return 0
 }
 
+deploy_result_normalize_exit_code() {
+  local exit_code="$1"
+
+  case "$exit_code" in
+    0|30|31|32)
+      printf '%s\n' "$exit_code"
+      return 0
+      ;;
+  esac
+
+  if [[ "${DEPLOY_RESULT_NORMALIZATION_ACTIVE:-0}" != "1" ]]; then
+    printf '%s\n' "$exit_code"
+    return 0
+  fi
+
+  case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+    before_switch)
+      if [[ "$exit_code" == "143" ]]; then
+        printf '%s\n' "$exit_code"
+      else
+        printf '%s\n' "$EXIT_DEPLOY_FAILED"
+      fi
+      ;;
+    switch_partial)
+      printf '%s\n' "$EXIT_SWITCH_RECOVERY_REQUIRED"
+      ;;
+    switch_complete)
+      printf '%s\n' "$EXIT_ROLLBACK_FAILED"
+      ;;
+    *)
+      printf '%s\n' "$EXIT_ROLLBACK_FAILED"
+      ;;
+  esac
+}
+
+deploy_result_on_signal() {
+  trap - TERM
+
+  case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+    switch_partial)
+      exit "$EXIT_SWITCH_RECOVERY_REQUIRED"
+      ;;
+    switch_complete)
+      if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" && "${DRYRUN:-0}" != "1" ]]; then
+        DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+        rollback_after_failure "post-switch interruption"
+        exit "$EXIT_ROLLBACK_FAILED"
+      fi
+      ;;
+  esac
+
+  exit 143
+}
+
+deploy_result_trap_install() {
+  DEPLOY_RESULT_NORMALIZATION_ACTIVE=1
+  trap deploy_timing_on_exit EXIT
+  trap deploy_result_on_signal TERM
+}
+
 emit_deploy_timing_phase() {
   local phase="$1"
   local status="$2"
@@ -360,19 +426,39 @@ deploy_timing_finish() {
 }
 
 deploy_timing_on_exit() {
-  local exit_code="$?"
+  local raw_exit_code="$?"
+  local exit_code
   local outcome="failed_pre_switch"
 
   trap - EXIT
+  if [[
+    "$raw_exit_code" != "0" &&
+    "$raw_exit_code" != "$EXIT_DEPLOY_FAILED" &&
+    "$raw_exit_code" != "$EXIT_ROLLBACK_FAILED" &&
+    "$raw_exit_code" != "$EXIT_SWITCH_RECOVERY_REQUIRED" &&
+    "${DEPLOY_RESULT_PHASE:-before_switch}" == "switch_complete" &&
+    "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" &&
+    "${DRYRUN:-0}" != "1"
+  ]]; then
+    DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+    trap deploy_timing_on_exit EXIT
+    rollback_after_failure "unhandled post-switch failure"
+    exit "$EXIT_ROLLBACK_FAILED"
+  fi
+
+  exit_code="$(deploy_result_normalize_exit_code "$raw_exit_code")"
   if [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "0" ]]; then
-    case "${DEPLOY_TIMING_SWITCH_STATE:-not_started}" in
-      partial)
+    case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+      switch_partial)
         outcome="failed_switch_recovery_required"
         ;;
-      complete)
+      switch_complete)
         outcome="failed_post_switch"
         ;;
     esac
+    if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+      outcome="rollback_failed"
+    fi
     deploy_timing_finish failed "$outcome" "$exit_code" || true
   fi
 
@@ -785,8 +871,9 @@ Renderer / health gate options:
 
 Exit codes:
   0   Success
-  30  Deploy failed, automatic rollback succeeded
+  30  Deploy failed before switch, or automatic rollback succeeded
   31  Deploy failed, rollback failed or unverifiable
+  32  Switch is partial and requires recovery
 
 Example:
   /root/deploy_ea.sh --rel ea_20251005_2000 --healthz-token-file /etc/fh/healthz.token
@@ -1538,8 +1625,10 @@ perform_atomic_switch() {
   fi
 
   mv "$APP" "$PREV"
+  DEPLOY_RESULT_PHASE="switch_partial"
   DEPLOY_TIMING_SWITCH_STATE="partial"
   mv "$STAGE_ROOT" "$APP"
+  DEPLOY_RESULT_PHASE="switch_complete"
   DEPLOY_TIMING_SWITCH_STATE="complete"
 }
 
@@ -2249,6 +2338,8 @@ case "${1:-}" in
     exit 0
     ;;
 esac
+
+deploy_result_trap_install
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
