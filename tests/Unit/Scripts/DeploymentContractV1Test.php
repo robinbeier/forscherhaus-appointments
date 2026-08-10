@@ -597,6 +597,56 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
+    #[DataProvider('nonScannerHazardOverlayProvider')]
+    public function testScannerSuccessIsDisjointFromOtherHazardOverlays(string $overlay): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
+        $evidence['traffic_gate']['counts'][$overlay] = 1;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    #[DataProvider('nonScannerHazardOverlayProvider')]
+    public function testScannerAndHazardOverlayCanFitTwoBusinessLines(string $overlay): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 2;
+        $evidence['traffic_gate']['counts']['total'] = 2;
+        $evidence['traffic_gate']['counts']['lines_seen'] = 2;
+        $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
+        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
+        $evidence['traffic_gate']['counts'][$overlay] = 1;
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function nonScannerHazardOverlayProvider(): iterable
+    {
+        yield 'server error' => ['status_5xx'];
+        yield 'write' => ['write'];
+        yield 'authenticated' => ['authenticated'];
+        yield 'customers or sensitive' => ['customers_or_sensitive'];
+    }
+
+    public function testOverlappingHazardOverlaysDoNotRequireExtraBusinessLines(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        foreach (['status_5xx', 'write', 'authenticated', 'customers_or_sensitive'] as $overlay) {
+            $evidence['traffic_gate']['counts'][$overlay] = 1;
+        }
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
     public function testTrafficParsedAndFailedLinesCannotOverlapSourceLines(): void
     {
         $lines = $this->runThrough('expected_commit_verified');
@@ -1245,6 +1295,92 @@ final class DeploymentContractV1Test extends TestCase
         yield 'extra field' => ['extra'];
     }
 
+    #[DataProvider('validInvalidDumpEvidenceProvider')]
+    public function testDumpVerificationFailureCanRepresentUnavailableMeasurements(array $observed): void
+    {
+        $lines = $this->runThrough('traffic_gate_passed');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 22, 'dump_verification_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 22, 'dump_verification_failed');
+        $evidence['dump'] = array_replace($this->invalidDumpEvidence($evidence['dump']), $observed);
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function validInvalidDumpEvidenceProvider(): iterable
+    {
+        yield 'all measurements unavailable' => [[]];
+        yield 'gzip observed before age and digest failure' => [['gzip_verified' => true]];
+    }
+
+    #[DataProvider('invalidDumpEvidenceShapeProvider')]
+    public function testInvalidDumpEvidenceRejectsMalformedOrCompleteMeasurements(array $observed): void
+    {
+        $lines = $this->runThrough('traffic_gate_passed');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 22, 'dump_verification_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 22, 'dump_verification_failed');
+        $evidence['dump'] = array_replace($this->invalidDumpEvidence($evidence['dump']), $observed);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function invalidDumpEvidenceShapeProvider(): iterable
+    {
+        yield 'wrong policy' => [['policy' => 'different_dump_policy']];
+        yield 'wrong maximum age' => [['max_age_seconds' => 1]];
+        yield 'negative age' => [['age_seconds' => -1]];
+        yield 'wrong age type' => [['age_seconds' => '60']];
+        yield 'malformed digest' => [['sha256' => 'not-a-sha']];
+        yield 'wrong digest verification type' => [['sha256_verified' => 'true']];
+        yield 'wrong gzip type' => [['gzip_verified' => 'true']];
+        yield 'wrong restore type' => [['restore_verified' => 'true']];
+        yield 'verified without digest' => [['sha256_verified' => true]];
+        yield 'fully observed invalid status' => [
+            [
+                'age_seconds' => 60,
+                'sha256' => self::SHA,
+                'sha256_verified' => false,
+                'gzip_verified' => true,
+                'restore_verified' => true,
+            ],
+        ];
+    }
+
+    public function testPassedDumpRejectsUnavailableMeasurement(): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['dump']['age_seconds'] = null;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testGenericFailureCannotAliasInvalidDumpEvidence(): void
+    {
+        $lines = $this->runThrough('planned');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 70, 'contract_invalid'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 70, 'contract_invalid');
+        $evidence['expected_commit']['observed'] = null;
+        $evidence['expected_commit']['verified'] = false;
+        $evidence['dump'] = $this->invalidDumpEvidence($evidence['dump']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testCapacityFailureCannotAliasInvalidDumpEvidence(): void
+    {
+        $lines = $this->runThrough('dump_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 23, 'capacity_gate_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 23, 'capacity_gate_failed');
+        $evidence['dump'] = $this->invalidDumpEvidence($evidence['dump']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
     public function testArtifactHashOrHostScriptMismatchIsRejected(): void
     {
         foreach (['remote_sha256', 'artifact_script_sha256'] as $field) {
@@ -1491,6 +1627,48 @@ final class DeploymentContractV1Test extends TestCase
 
         DeploymentContractV1::validateEvidence($evidence);
         self::assertSame('succeeded', $evidence['result']['state']);
+    }
+
+    #[DataProvider('observedDeployTimingWithoutInvocationProvider')]
+    public function testFailedBeforeWriteRejectsObservedDeployTiming(array $deployTiming): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['deploy_timing'] = $deployTiming;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function observedDeployTimingWithoutInvocationProvider(): iterable
+    {
+        yield 'valid timing' => [
+            [
+                'status' => 'valid',
+                'authoritative_sha256' => self::SHA,
+                'run_id' => self::TIMING_RUN_ID,
+                'total_ms' => 124_020,
+            ],
+        ];
+        yield 'invalid timing' => [
+            [
+                'status' => 'invalid',
+                'authoritative_sha256' => self::SHA,
+                'run_id' => null,
+                'total_ms' => null,
+            ],
+        ];
+    }
+
+    public function testFailedBeforeWriteAcceptsUnobservedDeployTiming(): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+
+        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
     }
 
     public function testSecretPiiPathAndFreeFormFieldsCannotEnterClosedEvidence(): void
@@ -1810,6 +1988,17 @@ final class DeploymentContractV1Test extends TestCase
     {
         $section = $this->notObservedSection($section);
         $section['status'] = 'incomplete';
+
+        return $section;
+    }
+
+    /** @param array<string,mixed> $section @return array<string,mixed> */
+    private function invalidDumpEvidence(array $section): array
+    {
+        $section = $this->notObservedSection($section);
+        $section['status'] = 'invalid';
+        $section['policy'] = DeploymentContractV1::DUMP_POLICY;
+        $section['max_age_seconds'] = 14400;
 
         return $section;
     }

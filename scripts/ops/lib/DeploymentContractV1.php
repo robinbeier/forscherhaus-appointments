@@ -571,6 +571,7 @@ final class DeploymentContractV1
         if ($state === 'failed_before_write') {
             self::assertFailedBeforeWriteEvidence($reason, $evidence);
             self::assertSame($evidence['post_gates']['status'], 'not_observed', 'pre-write post-gate evidence');
+            self::assertSame($evidence['deploy_timing']['status'], 'not_observed', 'pre-write deploy timing evidence');
             return;
         }
 
@@ -640,10 +641,14 @@ final class DeploymentContractV1
         if ($reason === 'traffic_evidence_invalid' && $trafficStatus === 'invalid') {
             $trafficStatus = 'failed';
         }
+        $dumpStatus = $evidence['dump']['status'];
+        if ($reason === 'dump_verification_failed' && $dumpStatus === 'invalid') {
+            $dumpStatus = 'failed';
+        }
         $actualStatuses = [
             $evidence['expected_commit']['verified'],
             $trafficStatus,
-            $evidence['dump']['status'],
+            $dumpStatus,
             $evidence['capacity']['status'],
             $evidence['artifact']['status'],
         ];
@@ -887,6 +892,18 @@ final class DeploymentContractV1
         if ($section['counts']['scanner_success'] > $section['counts']['business_or_authenticated']) {
             throw new RuntimeException('traffic gate scanner success exceeds the business traffic class');
         }
+        $largestHazardOverlay = max(
+            $section['counts']['status_5xx'],
+            $section['counts']['write'],
+            $section['counts']['authenticated'],
+            $section['counts']['customers_or_sensitive'],
+        );
+        if (
+            $section['counts']['scanner_success'] + $largestHazardOverlay >
+            $section['counts']['business_or_authenticated']
+        ) {
+            throw new RuntimeException('traffic gate scanner success overlaps hazardous business traffic');
+        }
         $rotationComplete = $section['counts']['rotation_errors'] === 0;
         $parseComplete = $section['counts']['parse_errors'] === 0 && $section['counts']['lines_seen'] > 0;
         $evidenceComplete = $rotationComplete && $parseComplete;
@@ -951,14 +968,36 @@ final class DeploymentContractV1
             ],
             'dump',
         );
-        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed'], 'dump.status');
+        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed', 'invalid'], 'dump.status');
         if ($section['status'] === 'not_observed') {
             self::assertAllNullExcept($section, ['status'], 'dump');
             return;
         }
         self::assertSame($section['policy'], self::DUMP_POLICY, 'dump.policy');
-        self::assertNonNegativeInteger($section['age_seconds'], 'dump.age_seconds');
         self::assertSame($section['max_age_seconds'], 14400, 'dump.max_age_seconds');
+        if ($section['status'] === 'invalid') {
+            if ($section['age_seconds'] !== null) {
+                self::assertNonNegativeInteger($section['age_seconds'], 'dump.age_seconds');
+            }
+            if ($section['sha256'] !== null) {
+                self::assertSha256($section['sha256'], 'dump.sha256');
+            }
+            foreach (['sha256_verified', 'gzip_verified', 'restore_verified'] as $field) {
+                if ($section[$field] !== null) {
+                    self::assertBoolean($section[$field], 'dump.' . $field);
+                }
+            }
+            if ($section['sha256_verified'] === true && $section['sha256'] === null) {
+                throw new RuntimeException('dump checksum verification lacks a digest');
+            }
+            foreach (['age_seconds', 'sha256', 'sha256_verified', 'gzip_verified', 'restore_verified'] as $field) {
+                if ($section[$field] === null) {
+                    return;
+                }
+            }
+            throw new RuntimeException('invalid dump evidence must retain an unavailable measurement');
+        }
+        self::assertNonNegativeInteger($section['age_seconds'], 'dump.age_seconds');
         self::assertSha256($section['sha256'], 'dump.sha256');
         self::assertBoolean($section['sha256_verified'], 'dump.sha256_verified');
         self::assertBoolean($section['gzip_verified'], 'dump.gzip_verified');

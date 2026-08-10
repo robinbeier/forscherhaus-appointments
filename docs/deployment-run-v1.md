@@ -128,8 +128,12 @@ Its sections are:
 
 Not-yet-observed sections retain their exact keys with `null` values and a
 fixed `not_observed`/`not_invoked` status. They never invent zero hashes or
-success. A terminal failure with exit `20` through `25` requires the claimed
-gate's failed evidence plus passed evidence for every earlier verified gate;
+success. A missing, unreadable, or pre-digest dump failure uses `invalid`:
+the known policy and 14,400-second ceiling remain fixed, observed values keep
+their strict types, unavailable measurements stay `null`, and at least one
+measurement must remain unavailable. A terminal failure with exit `20` through
+`25` requires the claimed gate's failed evidence plus passed evidence for every
+earlier verified gate;
 the journal's last verified state must agree. Evidence `captured_at_utc` cannot
 precede the terminal journal timestamp. A successful result requires all
 safety and post-gate sections to pass. Post-switch terminal evidence reached
@@ -157,6 +161,8 @@ timestamps, the accepted range is
 The outer interval must enclose the journal lifecycle: its start is no later
 than the immutable intent record, its finish is no earlier than the terminal
 record, and that finish is no later than evidence capture.
+Runs that fail before reserving the deploy invocation must retain
+`deploy_timing` as `not_observed`.
 
 ## Traffic-gate consumption
 
