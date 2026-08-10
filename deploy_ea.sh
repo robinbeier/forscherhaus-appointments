@@ -1774,10 +1774,10 @@ prepare_zero_surprise_stage_runtime() {
     return 0
   fi
 
-  [[ -f "$stage_sample" ]] || die "[!] Missing zero-surprise stage sample config: $stage_sample"
+  [[ -f "$stage_sample" ]] || return 1
 
   base_url="$(read_zero_surprise_predeploy_base_url)" \
-    || die "[!] Could not resolve zero-surprise predeploy base_url from $ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE"
+    || return $?
 
   cp "$stage_sample" "$stage_config" || return $?
   mkdir -p "$STAGE_ROOT/storage/logs/release-gate" || return $?
@@ -1785,7 +1785,9 @@ prepare_zero_surprise_stage_runtime() {
   php "$STAGE_ROOT/scripts/release-gate/prepare_zero_surprise_stage_config.php" \
     --config="$stage_config" \
     --base-url="$base_url" \
-    || die "[!] Could not prepare zero-surprise stage config."
+    >/dev/null 2>&1 \
+    || return $?
+  return 0
 }
 
 run_zero_surprise_predeploy_replay() {

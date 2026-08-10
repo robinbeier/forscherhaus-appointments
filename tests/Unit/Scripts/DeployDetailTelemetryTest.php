@@ -404,6 +404,92 @@ final class DeployDetailTelemetryTest extends TestCase
         }
     }
 
+    public function testRealMissingStageRuntimeFailureIsReportedBeforePreSwitchAbort(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-missing-stage-SENSITIVE_MARKER-' . bin2hex(random_bytes(6));
+        $missingStage = $workspace . '/missing stage';
+        $secretCredentials = $workspace . '/secret credentials.ini';
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        deploy_detail_init 0
+        REQUIRE_ZERO_SURPRISE=1
+        DRYRUN=0
+        STAGE_ROOT="$2"
+        ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE="$3"
+        WEBUSER=www-data
+        deploy_detail_run_subphase predeploy stage_permissions stage_permissions_failed \
+          prepare_predeploy_stage_permissions
+        printf 'SWITCH_REACHED\n'
+        BASH;
+
+        $result = $this->runCommand([
+            'bash',
+            '-c',
+            $script,
+            'bash',
+            dirname(__DIR__, 3) . '/deploy_ea.sh',
+            $missingStage,
+            $secretCredentials,
+        ]);
+
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringNotContainsString('SWITCH_REACHED', $result['stdout']);
+        $events = $this->detailEvents($result['stdout']);
+        self::assertCount(1, $events);
+        self::assertSame(1, $events[0]['sequence']);
+        self::assertSame('predeploy', $events[0]['phase']);
+        self::assertSame('stage_permissions', $events[0]['subphase']);
+        self::assertSame('failed', $events[0]['status']);
+        self::assertSame('stage_permissions_failed', $events[0]['reason_code']);
+        self::assertStringNotContainsString($workspace, $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('secret credentials.ini', $result['stdout'] . $result['stderr']);
+    }
+
+    public function testRealInvalidStageCredentialsFailureIsReportedBeforePreSwitchAbort(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-invalid-credentials-SENSITIVE_MARKER-' . bin2hex(random_bytes(6));
+        $stage = $workspace . '/stage';
+        $secretCredentials = $workspace . '/secret credentials.ini';
+        self::assertTrue(mkdir($stage, 0700, true));
+        self::assertNotFalse(file_put_contents($stage . '/config-sample.php', '<?php return [];'));
+        self::assertNotFalse(file_put_contents($secretCredentials, "username=secret\n"));
+
+        try {
+            $result = $this->runRealStagePermissionsFailure($stage, $secretCredentials);
+
+            $this->assertSanitizedStagePermissionsFailure($result, $workspace);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testRealStageConfigHelperFailureIsReportedBeforePreSwitchAbort(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-stage-helper-SENSITIVE_MARKER-' . bin2hex(random_bytes(6));
+        $stage = $workspace . '/stage';
+        $scripts = $stage . '/scripts/release-gate';
+        $secretCredentials = $workspace . '/secret credentials.ini';
+        self::assertTrue(mkdir($scripts, 0700, true));
+        self::assertNotFalse(file_put_contents($stage . '/config-sample.php', '<?php return [];'));
+        self::assertNotFalse(file_put_contents($secretCredentials, "base_url=https://secret.example.invalid\n"));
+        self::assertNotFalse(file_put_contents(
+            $scripts . '/prepare_zero_surprise_stage_config.php',
+            "<?php fwrite(STDERR, 'SENSITIVE_MARKER /secret/path'); exit(23);\n",
+        ));
+
+        try {
+            $result = $this->runRealStagePermissionsFailure($stage, $secretCredentials);
+
+            $this->assertSanitizedStagePermissionsFailure($result, $workspace);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testInstrumentedRendererPreparationCannotMaskAnEarlyCommandFailure(): void
     {
         $script = <<<'BASH'
@@ -564,6 +650,58 @@ final class DeployDetailTelemetryTest extends TestCase
         }
 
         return $events;
+    }
+
+    /**
+     * @return array{exit_code:int,stdout:string,stderr:string}
+     */
+    private function runRealStagePermissionsFailure(string $stage, string $credentials): array
+    {
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        deploy_detail_init 0
+        REQUIRE_ZERO_SURPRISE=1
+        DRYRUN=0
+        STAGE_ROOT="$2"
+        ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE="$3"
+        WEBUSER=www-data
+        deploy_detail_run_subphase predeploy stage_permissions stage_permissions_failed \
+          prepare_predeploy_stage_permissions
+        printf 'SWITCH_REACHED\n'
+        BASH;
+
+        return $this->runCommand([
+            'bash',
+            '-c',
+            $script,
+            'bash',
+            dirname(__DIR__, 3) . '/deploy_ea.sh',
+            $stage,
+            $credentials,
+        ]);
+    }
+
+    /**
+     * @param array{exit_code:int,stdout:string,stderr:string} $result
+     */
+    private function assertSanitizedStagePermissionsFailure(array $result, string $workspace): void
+    {
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringNotContainsString('SWITCH_REACHED', $result['stdout']);
+        $events = $this->detailEvents($result['stdout']);
+        self::assertCount(1, $events);
+        self::assertSame(1, $events[0]['sequence']);
+        self::assertSame('predeploy', $events[0]['phase']);
+        self::assertSame('stage_permissions', $events[0]['subphase']);
+        self::assertSame('failed', $events[0]['status']);
+        self::assertSame('stage_permissions_failed', $events[0]['reason_code']);
+        self::assertStringNotContainsString($workspace, $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('secret credentials.ini', $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('/secret/path', $result['stdout'] . $result['stderr']);
     }
 
     /**
