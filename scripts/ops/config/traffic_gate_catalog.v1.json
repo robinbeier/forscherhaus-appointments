@@ -1,0 +1,26 @@
+{
+    "schema": "traffic_gate_catalog.v1",
+    "version": "2026-08-09.2",
+    "documented_sources": {
+        "loopback_cidrs": ["127.0.0.0/8", "::1/128"]
+    },
+    "documented_health": [
+        {
+            "methods": ["GET", "HEAD"],
+            "paths": ["/health"],
+            "statuses": [200, 204]
+        },
+        {
+            "methods": ["GET", "HEAD"],
+            "paths": ["/index.php/healthz"],
+            "statuses": [200, 204]
+        }
+    ],
+    "documented_periodic_ops": [
+        {
+            "methods": ["GET", "HEAD"],
+            "paths": ["/"],
+            "statuses": [200, 204, 301, 302, 303, 307, 308]
+        }
+    ]
+}

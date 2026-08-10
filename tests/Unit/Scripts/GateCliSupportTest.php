@@ -49,6 +49,71 @@ class GateCliSupportTest extends TestCase
         $this->assertStringContainsString('--runtime-config-rollback --active PATH', $result['stdout']);
     }
 
+    public function testElevatedRegressionStepExecutesTheProductionTrafficGateWrapper(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('This contract runs in the existing root-elevated CI regression step.');
+        }
+        if (!is_readable('/proc/net/tcp') || !is_readable('/proc/net/tcp6')) {
+            self::fail('The fixed production active-request signal must be available in the root CI step.');
+        }
+
+        $repository = dirname(__DIR__, 3);
+        $workspace = sys_get_temp_dir() . '/traffic-gate-root-cli-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($workspace, 0700));
+        $monitorSourcesPath = $workspace . '/monitor-sources.json';
+        $outputPath = $workspace . '/report.json';
+        $timestamp = (new \DateTimeImmutable('-5 minutes'))->format('d/M/Y:H:i:s O');
+        self::assertNotFalse(
+            file_put_contents(
+                $monitorSourcesPath,
+                json_encode(
+                    [
+                        'schema' => 'traffic_gate_monitor_sources.v1',
+                        'version' => '2026-08-09.1',
+                        'exact_cidrs' => ['198.51.100.23/32'],
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        );
+        self::assertTrue(chmod($monitorSourcesPath, 0600));
+        self::assertNotFalse(
+            file_put_contents(
+                $workspace . '/app-access.log',
+                sprintf('127.0.0.1 - - [%s] "GET /health HTTP/1.1" 200 123 "-" "fixture-agent"', $timestamp) . "\n",
+            ),
+        );
+
+        try {
+            $result = $this->runCommand([
+                'env',
+                'TRAFFIC_GATE_LOG_DIR=' . $workspace,
+                'TRAFFIC_GATE_CATALOG_PATH=' . $repository . '/scripts/ops/config/traffic_gate_catalog.v1.json',
+                'TRAFFIC_GATE_MONITOR_SOURCES_PATH=' . $monitorSourcesPath,
+                'bash',
+                'scripts/ops/prod_traffic_gate.sh',
+                '--purpose',
+                'deploy',
+                '--mode',
+                'normal',
+                '--window-seconds',
+                '1',
+                '--output-json',
+                $outputPath,
+            ]);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $report = json_decode((string) file_get_contents($outputPath), true, 32, JSON_THROW_ON_ERROR);
+            self::assertIsArray($report);
+            self::assertSame('allow', $report['decision']);
+            self::assertSame(0, $report['exit_code']);
+            self::assertSame(0600, fileperms($outputPath) & 0777);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testDeployDryRunNormalizesRelativeZeroSurprisePathsBeforeStageReplay(): void
     {
         $repoRoot = dirname(__DIR__, 3);
