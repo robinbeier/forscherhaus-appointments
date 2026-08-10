@@ -1779,8 +1779,8 @@ prepare_zero_surprise_stage_runtime() {
   base_url="$(read_zero_surprise_predeploy_base_url)" \
     || return $?
 
-  cp "$stage_sample" "$stage_config" || return $?
-  mkdir -p "$STAGE_ROOT/storage/logs/release-gate" || return $?
+  cp "$stage_sample" "$stage_config" >/dev/null 2>&1 || return $?
+  mkdir -p "$STAGE_ROOT/storage/logs/release-gate" >/dev/null 2>&1 || return $?
 
   php "$STAGE_ROOT/scripts/release-gate/prepare_zero_surprise_stage_config.php" \
     --config="$stage_config" \

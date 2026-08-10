@@ -209,6 +209,69 @@ final class DeployDetailTelemetryTest extends TestCase
         }
     }
 
+    public function testDeterministicRsyncFailureStopsBeforeSwitchInNormalTestMatrix(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-fake-rsync-SENSITIVE_MARKER-' . bin2hex(random_bytes(6));
+        $source = $workspace . '/source';
+        $target = $workspace . '/target';
+        $fakeBin = $workspace . '/bin';
+        self::assertTrue(mkdir($source, 0700, true));
+        self::assertTrue(mkdir($target, 0700, true));
+        self::assertTrue(mkdir($fakeBin, 0700, true));
+        self::assertNotFalse(file_put_contents($source . '/payload.txt', 'payload'));
+        $fakeRsync = $fakeBin . '/rsync';
+        self::assertNotFalse(file_put_contents(
+            $fakeRsync,
+            "#!/usr/bin/env bash\nprintf 'SENSITIVE_MARKER /secret/path\\n' >&2\nexit 23\n",
+        ));
+        self::assertTrue(chmod($fakeRsync, 0700));
+
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+        DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
+        DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
+        deploy_detail_init 0
+        PATH="$4:$PATH"
+        sync_storage_payload_with_detail "$2" "$3"
+        printf 'SWITCH_REACHED\n'
+        BASH;
+
+        try {
+            $result = $this->runCommand([
+                'bash',
+                '-c',
+                $script,
+                'bash',
+                dirname(__DIR__, 3) . '/deploy_ea.sh',
+                $source,
+                $target,
+                $fakeBin,
+            ]);
+
+            self::assertSame(23, $result['exit_code']);
+            self::assertStringNotContainsString('SWITCH_REACHED', $result['stdout']);
+            self::assertFileDoesNotExist($target . '/payload.txt');
+            self::assertSame('payload', file_get_contents($source . '/payload.txt'));
+            $events = $this->detailEvents($result['stdout']);
+            self::assertCount(3, $events);
+            self::assertSame([1, 2, 3], array_column($events, 'sequence'));
+            self::assertSame(
+                ['storage_fingerprint', 'storage_fingerprint', 'subphase'],
+                array_column($events, 'event'),
+            );
+            self::assertSame(['source_before', 'target_before'], array_column(array_slice($events, 0, 2), 'boundary'));
+            self::assertNotContains('target_after', array_column($events, 'boundary'));
+            self::assertSame('failed', $events[2]['status']);
+            self::assertSame('rsync_failed', $events[2]['reason_code']);
+            self::assertStringNotContainsString($workspace, $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('/secret/path', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testDryRunStorageTransferSkipsCopyAndEmitsSkippedTelemetry(): void
     {
         $workspace = sys_get_temp_dir() . '/rob456-storage-dry-run-' . bin2hex(random_bytes(6));
@@ -480,6 +543,44 @@ final class DeployDetailTelemetryTest extends TestCase
             $scripts . '/prepare_zero_surprise_stage_config.php',
             "<?php fwrite(STDERR, 'SENSITIVE_MARKER /secret/path'); exit(23);\n",
         ));
+
+        try {
+            $result = $this->runRealStagePermissionsFailure($stage, $secretCredentials);
+
+            $this->assertSanitizedStagePermissionsFailure($result, $workspace);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testRealStageConfigCopyFailureIsReportedWithoutRawPathBeforePreSwitchAbort(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-stage-copy-SENSITIVE_MARKER-' . bin2hex(random_bytes(6));
+        $stage = $workspace . '/stage';
+        $secretCredentials = $workspace . '/secret credentials.ini';
+        self::assertTrue(mkdir($stage, 0700, true));
+        self::assertNotFalse(file_put_contents($stage . '/config-sample.php', '<?php return [];'));
+        self::assertTrue(symlink($workspace . '/missing-parent/config.php', $stage . '/config.php'));
+        self::assertNotFalse(file_put_contents($secretCredentials, "base_url=https://secret.example.invalid\n"));
+
+        try {
+            $result = $this->runRealStagePermissionsFailure($stage, $secretCredentials);
+
+            $this->assertSanitizedStagePermissionsFailure($result, $workspace);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testRealStageLogDirectoryFailureIsReportedWithoutRawPathBeforePreSwitchAbort(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob456-stage-mkdir-SENSITIVE_MARKER-' . bin2hex(random_bytes(6));
+        $stage = $workspace . '/stage';
+        $secretCredentials = $workspace . '/secret credentials.ini';
+        self::assertTrue(mkdir($stage, 0700, true));
+        self::assertNotFalse(file_put_contents($stage . '/config-sample.php', '<?php return [];'));
+        self::assertNotFalse(file_put_contents($stage . '/storage', 'not-a-directory'));
+        self::assertNotFalse(file_put_contents($secretCredentials, "base_url=https://secret.example.invalid\n"));
 
         try {
             $result = $this->runRealStagePermissionsFailure($stage, $secretCredentials);
