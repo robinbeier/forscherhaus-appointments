@@ -304,6 +304,18 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateRunLines($lines);
     }
 
+    public function testFailedBeforeWriteReasonMustMatchTheJournalPredecessor(): void
+    {
+        $lines = $this->runThrough('planned');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_before_write', 0, 24, 'artifact_verification_failed'),
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('claimed gate');
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
     public function testTrafficEvidenceContainsOnlyShaAndNormalizedCore(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
@@ -342,6 +354,26 @@ final class DeploymentContractV1Test extends TestCase
         yield 'false completeness' => ['parse_complete', false];
         yield 'decision mismatch' => ['decision', 'hard_stop'];
         yield 'raw sha malformed' => ['report_sha256', 'ABC'];
+    }
+
+    #[DataProvider('impossibleTrafficCompletenessProvider')]
+    public function testTrafficCompletenessIsDerivedFromProducerCounts(string $count, int $value): void
+    {
+        $lines = $this->runThrough('expected_commit_verified');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $evidence['traffic_gate']['counts'][$count] = $value;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('completeness');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{string,int}> */
+    public static function impossibleTrafficCompletenessProvider(): iterable
+    {
+        yield 'parse errors contradict parse complete' => ['parse_errors', 1];
+        yield 'rotation error contradicts rotation complete' => ['rotation_errors', 1];
     }
 
     public function testTrafficUnknownFieldAndFullReportInjectionAreRejected(): void
@@ -421,6 +453,20 @@ final class DeploymentContractV1Test extends TestCase
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('last verified deployment state');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    public function testGenericFailureCannotClaimSuccessBeyondJournalProgress(): void
+    {
+        $lines = $this->runThrough('planned');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 70, 'contract_invalid'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 70, 'contract_invalid');
+        $evidence['expected_commit']['observed'] = null;
+        $evidence['expected_commit']['verified'] = false;
+        $evidence['capacity'] = $this->validEvidence($lines)['capacity'];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('beyond the last verified deployment state');
         DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
@@ -618,6 +664,56 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateEvidence($evidence);
     }
 
+    public function testPostGateSummaryIsDerivedFromEveryIndividualCheck(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->encode(
+            $this->transition($lines, 'failed_post_switch_rollback_failed', 1, 31, 'rollback_failed'),
+        );
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'failed_post_switch_rollback_failed',
+            31,
+            'rollback_failed',
+            31,
+            'failed',
+            'failed',
+        );
+        $evidence['post_gates']['logs_passed'] = true;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('summary');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    #[DataProvider('unsafeCapacityProvider')]
+    public function testCapacityDecisionIsDerivedFromMeasurements(
+        int $availableBytes,
+        int $requiredBytes,
+        int $observedPercent,
+        int $projectedPercent,
+    ): void {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['capacity']['max_used_percent'] = 85;
+        $evidence['capacity']['available_bytes'] = $availableBytes;
+        $evidence['capacity']['projected_required_bytes'] = $requiredBytes;
+        $evidence['capacity']['observed_percent'] = $observedPercent;
+        $evidence['capacity']['projected_percent'] = $projectedPercent;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('capacity');
+        DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    /** @return iterable<string,array{int,int,int,int}> */
+    public static function unsafeCapacityProvider(): iterable
+    {
+        yield 'insufficient bytes' => [0, 1, 81, 84];
+        yield 'observed threshold reached' => [8_000_000_000, 1_000_000_000, 85, 85];
+        yield 'projected threshold reached' => [8_000_000_000, 1_000_000_000, 81, 85];
+        yield 'projection moves backwards' => [8_000_000_000, 1_000_000_000, 84, 81];
+    }
+
     public function testOuterWallClockNeverReplacesOrMixesDeployTiming(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
@@ -640,6 +736,20 @@ final class DeploymentContractV1Test extends TestCase
         $evidence['deploy_timing'] = [
             'status' => 'not_observed',
             'authoritative_sha256' => null,
+            'run_id' => null,
+            'total_ms' => null,
+        ];
+
+        DeploymentContractV1::validateEvidence($evidence);
+        self::assertSame('succeeded', $evidence['result']['state']);
+    }
+
+    public function testInvalidTimingEvidenceKeepsHashWithoutInventingParsedFields(): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['deploy_timing'] = [
+            'status' => 'invalid',
+            'authoritative_sha256' => self::SHA,
             'run_id' => null,
             'total_ms' => null,
         ];
@@ -798,6 +908,7 @@ final class DeploymentContractV1Test extends TestCase
                 'projected_required_bytes' => 1_000_000_000,
                 'observed_percent' => 81,
                 'projected_percent' => 84,
+                'max_used_percent' => DeploymentContractV1::MAX_CAPACITY_USED_PERCENT,
                 'passed' => true,
             ],
             'artifact' => [
@@ -869,6 +980,7 @@ final class DeploymentContractV1Test extends TestCase
                 $evidence['traffic_gate']['decision'] = 'hard_stop';
                 $evidence['traffic_gate']['exit_code'] = 20;
             } else {
+                $evidence['traffic_gate']['counts']['parse_errors'] = 1;
                 $evidence['traffic_gate']['parse_complete'] = false;
                 $evidence['traffic_gate']['evidence_complete'] = false;
                 $evidence['traffic_gate']['decision'] = 'invalid';
@@ -895,6 +1007,7 @@ final class DeploymentContractV1Test extends TestCase
         }
         if ($reason === 'capacity_gate_failed') {
             $evidence['capacity'] = $this->validEvidence($lines)['capacity'];
+            $evidence['capacity']['projected_percent'] = DeploymentContractV1::MAX_CAPACITY_USED_PERCENT;
             $evidence['capacity']['passed'] = false;
             $evidence['capacity']['status'] = 'failed';
         }

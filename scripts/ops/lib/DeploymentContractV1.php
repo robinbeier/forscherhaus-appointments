@@ -15,6 +15,7 @@ final class DeploymentContractV1
     public const EVIDENCE_SCHEMA = 'deployment_evidence.v1';
     public const DUMP_POLICY = 'fresh_verified_under_240m';
     public const ARTIFACT_EXPECTATION = 'build_from_expected_commit';
+    public const MAX_CAPACITY_USED_PERCENT = 85;
 
     public const PROGRESS_STATES = [
         'planned',
@@ -253,6 +254,7 @@ final class DeploymentContractV1
             self::assertStateTransition($previousState, $record['state']);
             self::assertInvocationCount($record['state'], $record['deploy_invocation_count'], $invocationCount);
             self::assertResultCode($record['state'], $record['exit_code'], $record['reason']);
+            self::assertFailureReasonMatchesPreviousState($previousState, $record['state'], $record['reason']);
             $previousState = $record['state'];
             $invocationCount = $record['deploy_invocation_count'];
             $previousEpoch = $epoch;
@@ -479,6 +481,32 @@ final class DeploymentContractV1
         }
     }
 
+    private static function assertFailureReasonMatchesPreviousState(
+        string $previous,
+        string $state,
+        string $reason,
+    ): void {
+        if ($state !== 'failed_before_write') {
+            return;
+        }
+        $requiredPrevious = self::requiredPreviousStateForFailureReason($reason);
+        if ($requiredPrevious !== null && $previous !== $requiredPrevious) {
+            throw new RuntimeException('failure transition does not match its claimed gate');
+        }
+    }
+
+    private static function requiredPreviousStateForFailureReason(string $reason): ?string
+    {
+        return match ($reason) {
+            'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
+            'dump_verification_failed' => 'traffic_gate_passed',
+            'capacity_gate_failed' => 'dump_verified',
+            'artifact_verification_failed' => 'capacity_passed',
+            'expected_commit_mismatch' => 'lock_acquired',
+            default => null,
+        };
+    }
+
     private static function recoveryClassification(string $state, int $invocationCount): string
     {
         if (self::isTerminal($state)) {
@@ -648,14 +676,7 @@ final class DeploymentContractV1
         if ($last['state'] !== 'failed_before_write') {
             return;
         }
-        $requiredPrevious = match ($last['reason']) {
-            'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
-            'dump_verification_failed' => 'traffic_gate_passed',
-            'capacity_gate_failed' => 'dump_verified',
-            'artifact_verification_failed' => 'capacity_passed',
-            'expected_commit_mismatch' => 'lock_acquired',
-            default => null,
-        };
+        $requiredPrevious = self::requiredPreviousStateForFailureReason($last['reason']);
         if ($requiredPrevious !== null && $last['previous_state'] !== $requiredPrevious) {
             throw new RuntimeException('failure transition does not match its claimed gate evidence');
         }
@@ -675,6 +696,33 @@ final class DeploymentContractV1
             $stateIndex = array_search($state, self::PROGRESS_STATES, true);
             if (is_int($stateIndex) && $previousIndex >= $stateIndex && !$passed) {
                 throw new RuntimeException('failure evidence does not cover the last verified deployment state');
+            }
+        }
+        if (!in_array($last['reason'], ['contract_invalid', 'state_conflict', 'interrupted'], true)) {
+            return;
+        }
+        foreach ($requiredPassed as $state => $_passed) {
+            $stateIndex = array_search($state, self::PROGRESS_STATES, true);
+            if (!is_int($stateIndex) || $previousIndex >= $stateIndex) {
+                continue;
+            }
+            if ($state === 'expected_commit_verified') {
+                if ($evidence['expected_commit']['verified'] || $evidence['expected_commit']['observed'] !== null) {
+                    throw new RuntimeException(
+                        'failure evidence claims success beyond the last verified deployment state',
+                    );
+                }
+                continue;
+            }
+            $section = match ($state) {
+                'traffic_gate_passed' => 'traffic_gate',
+                'dump_verified' => 'dump',
+                'capacity_passed' => 'capacity',
+                'artifact_verified' => 'artifact',
+                default => throw new RuntimeException('failure evidence state is unknown'),
+            };
+            if ($evidence[$section]['status'] !== 'not_observed') {
+                throw new RuntimeException('failure evidence claims success beyond the last verified deployment state');
             }
         }
     }
@@ -774,8 +822,15 @@ final class DeploymentContractV1
                 throw new RuntimeException('traffic gate overlay count exceeds the observation window');
             }
         }
-        if ($section['evidence_complete'] !== ($section['rotation_complete'] && $section['parse_complete'])) {
-            throw new RuntimeException('traffic gate completeness booleans are inconsistent');
+        $rotationComplete = $section['counts']['rotation_errors'] === 0;
+        $parseComplete = $section['counts']['parse_errors'] === 0 && $section['counts']['lines_seen'] > 0;
+        $evidenceComplete = $rotationComplete && $parseComplete;
+        if (
+            $section['rotation_complete'] !== $rotationComplete ||
+            $section['parse_complete'] !== $parseComplete ||
+            $section['evidence_complete'] !== $evidenceComplete
+        ) {
+            throw new RuntimeException('traffic gate completeness contradicts normalized counts');
         }
         $hardStop =
             $section['counts']['business_or_authenticated'] > 0 ||
@@ -790,7 +845,7 @@ final class DeploymentContractV1
             $section['counts']['target_unknown'] > 0 ||
             $section['counts']['pre_window_completion'] > 0 ||
             ($section['mode'] === 'normal' && $section['counts']['public_read'] > 0);
-        [$expectedDecision, $expectedExit] = !$section['evidence_complete']
+        [$expectedDecision, $expectedExit] = !$evidenceComplete
             ? ['invalid', 21]
             : ($hardStop
                 ? ['hard_stop', 20]
@@ -801,9 +856,9 @@ final class DeploymentContractV1
             throw new RuntimeException('traffic gate decision is inconsistent with normalized counts');
         }
         $passed =
-            $section['evidence_complete'] &&
-            $section['rotation_complete'] &&
-            $section['parse_complete'] &&
+            $evidenceComplete &&
+            $rotationComplete &&
+            $parseComplete &&
             $section['counts']['rotation_errors'] === 0 &&
             $section['counts']['parse_errors'] === 0 &&
             $section['counts']['lines_seen'] > 0 &&
@@ -853,6 +908,7 @@ final class DeploymentContractV1
                 'projected_required_bytes',
                 'observed_percent',
                 'projected_percent',
+                'max_used_percent',
                 'passed',
             ],
             'capacity',
@@ -868,8 +924,14 @@ final class DeploymentContractV1
         if ($section['observed_percent'] > 100 || $section['projected_percent'] > 100) {
             throw new RuntimeException('capacity percentages must not exceed 100');
         }
+        self::assertSame($section['max_used_percent'], self::MAX_CAPACITY_USED_PERCENT, 'capacity.max_used_percent');
         self::assertBoolean($section['passed'], 'capacity.passed');
-        if (($section['status'] === 'passed') !== $section['passed']) {
+        $passed =
+            $section['available_bytes'] >= $section['projected_required_bytes'] &&
+            $section['observed_percent'] < $section['max_used_percent'] &&
+            $section['projected_percent'] < $section['max_used_percent'] &&
+            $section['projected_percent'] >= $section['observed_percent'];
+        if ($section['passed'] !== $passed || ($section['status'] === 'passed') !== $passed) {
             throw new RuntimeException('capacity status is inconsistent');
         }
     }
@@ -1021,10 +1083,9 @@ final class DeploymentContractV1
             $section['endpoints_passed'] &&
             $section['logs_passed'] &&
             $section['scanner_passed'] &&
-            $section['dormant_clean_passed'] &&
-            $section['passed'];
-        if (($section['status'] === 'passed') !== $passed) {
-            throw new RuntimeException('post-gate status is inconsistent');
+            $section['dormant_clean_passed'];
+        if ($section['passed'] !== $passed || ($section['status'] === 'passed') !== $passed) {
+            throw new RuntimeException('post-gate summary or status is inconsistent');
         }
     }
 
@@ -1038,6 +1099,15 @@ final class DeploymentContractV1
             return;
         }
         self::assertSha256($section['authoritative_sha256'], 'deploy_timing.authoritative_sha256');
+        if ($section['status'] === 'invalid') {
+            if ($section['run_id'] !== null) {
+                self::assertUuidV4($section['run_id'], 'deploy_timing.run_id');
+            }
+            if ($section['total_ms'] !== null) {
+                self::assertNonNegativeInteger($section['total_ms'], 'deploy_timing.total_ms');
+            }
+            return;
+        }
         self::assertUuidV4($section['run_id'], 'deploy_timing.run_id');
         self::assertNonNegativeInteger($section['total_ms'], 'deploy_timing.total_ms');
     }

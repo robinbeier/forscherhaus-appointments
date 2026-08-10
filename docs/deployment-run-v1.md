@@ -110,7 +110,8 @@ Its sections are:
 - expected and observed commit plus exact verification result;
 - traffic-gate reference and normalized core;
 - dump age/SHA/gzip/restore evidence;
-- capacity observed/projected integers and decision;
+- capacity available/projected bytes, observed/projected used percentages, the
+  fixed `85` percent ceiling, and a derived decision;
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
 - exactly-once deploy exit and rollback outcome;
 - independent post-gates including Kuma raw `13/13`, runtime config, services,
@@ -130,8 +131,10 @@ safety and post-gate sections to pass. Rollback evidence reached directly from
 `post_gates_running` requires failed post-gate evidence. Timing remains
 observational as defined in `docs/deployment.md`: missing or invalid
 `deploy_timing.v1` evidence is visible but cannot rewrite a safe deploy outcome.
-The outer wall clock never replaces, extends, or mixes with
-the five-phase `deploy_timing.v1` baseline.
+Invalid timing bytes retain their authoritative SHA while an unavailable parsed
+timing Run-ID or total remains `null`; `valid` timing requires both values. The
+outer wall clock never replaces, extends, or mixes with the five-phase
+`deploy_timing.v1` baseline.
 
 ## Traffic-gate consumption
 
@@ -157,6 +160,16 @@ contract validator. Only complete `allow` or `advisory` evidence with exit `0`
 can precede invocation reservation. Freshness and requested-window checks are
 the responsibility of the later runner because they depend on its invocation
 time; they may not be weakened by attaching to an old Run-ID.
+
+Completeness is also derived, never trusted: rotation completeness follows
+`rotation_errors`, parse completeness requires zero parse errors plus at least
+one parsed line, and evidence completeness is the conjunction of both.
+
+Capacity passes only when available bytes cover projected required bytes,
+observed and projected usage are both below the fixed `85` percent ceiling, and
+the projection does not move backwards. The stored `passed` value and status
+must equal that derived result. Post-gate `passed` is likewise the exact
+conjunction of Kuma `13/13` and every named boolean gate.
 
 ## Future root state trust boundary
 
