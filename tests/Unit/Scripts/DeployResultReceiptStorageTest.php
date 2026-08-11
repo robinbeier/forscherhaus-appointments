@@ -684,6 +684,35 @@ final class DeployResultReceiptStorageTest extends TestCase
         yield 'publication failure preserves abnormal result' => ['parent_fsync', 74];
     }
 
+    public function testSignalBeforePublicationCannotReturnAStableExitWithoutAReceipt(): void
+    {
+        $target = $this->protectedDirectory . '/signal-before-publication.json';
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DEPLOY_RESULT_RECEIPT_PATH="$1"
+            DEPLOY_RESULT_PHASE=before_switch
+            deploy_result_receipt_prepare
+            deploy_result_trap_install
+            set -T
+            signal_before_publish() {
+              if [[ "$BASH_COMMAND" == 'deploy_result_receipt_publish_once "$outcome" "$exit_code"' ]]; then
+                trap - DEBUG
+                kill -TERM $$
+              fi
+            }
+            trap signal_before_publish DEBUG
+            deploy_result_exit 30
+            BASH
+            ,
+            [$target],
+        );
+
+        self::assertSame(30, $result['exit_code'], $result['stderr']);
+        self::assertFileExists($target);
+        self::assertSame('failed_pre_switch', DeployResultV1::decode((string) file_get_contents($target))['outcome']);
+    }
+
     /** @return iterable<string,array{string,bool}> */
     public static function caughtPublicationFailureProvider(): iterable
     {

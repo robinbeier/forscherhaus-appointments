@@ -730,7 +730,6 @@ deploy_result_receipt_publish_once() {
   [[ "${DEPLOY_RESULT_RECEIPT_ACTIVE:-0}" == "1" ]] || return 0
   [[ "${DEPLOY_RESULT_RECEIPT_ATTEMPTED:-0}" == "0" ]] || return 0
   DEPLOY_RESULT_RECEIPT_ATTEMPTED=1
-  DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=1
   builtin printf -v receipt '{"schema":"deploy_result.v1","outcome":"%s","exit_code":%d}\n' "$outcome" "$exit_code"
   if ! deploy_result_receipt_storage \
     publish \
@@ -742,10 +741,8 @@ deploy_result_receipt_publish_once() {
     "${DEPLOY_RESULT_RECEIPT_TEST_BARRIER_PATH:-}"
   then
     echo "[!] Deploy result candidate could not be durably published." >&2
-    DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=0
     return "$EXIT_RESULT_PUBLICATION_FAILED"
   fi
-  DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=0
   return 0
 }
 
@@ -761,6 +758,7 @@ deploy_result_finalize() {
   case "$exit_code" in
     0|30|31|32|143)
       outcome="$(deploy_result_receipt_outcome "$exit_code")" || return 1
+      DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=1
       DEPLOY_RESULT_ACTION_EXIT_CODE="$exit_code"
       DEPLOY_RESULT_ACTION_OUTCOME="$outcome"
       DEPLOY_RESULT_FINAL_EXIT_CODE="$exit_code"
@@ -768,8 +766,10 @@ deploy_result_finalize() {
       if ! deploy_result_receipt_publish_once "$outcome" "$exit_code"; then
         DEPLOY_RESULT_FINAL_EXIT_CODE="$EXIT_RESULT_PUBLICATION_FAILED"
         DEPLOY_RESULT_FINAL_OUTCOME=""
+        DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=0
         return "$EXIT_RESULT_PUBLICATION_FAILED"
       fi
+      DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=0
       return 0
       ;;
     *)
