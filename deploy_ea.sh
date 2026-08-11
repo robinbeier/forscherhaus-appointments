@@ -2964,13 +2964,15 @@ rollback_after_failure() {
     rollback_ok=0
   fi
 
-  echo "[!] Deployment failed; rollback result summary"
-  echo "    Failure reason      : $reason"
-  echo "    Failed release path : $failed_path"
-  echo "    Restored app path   : $APP"
-  echo "    Config permission   : $config_result"
-  echo "    Renderer check      : $renderer_result"
-  echo "    Deep health check   : $deep_result"
+  {
+    echo "[!] Deployment failed; rollback result summary"
+    echo "    Failure reason      : $reason"
+    echo "    Failed release path : $failed_path"
+    echo "    Restored app path   : $APP"
+    echo "    Config permission   : $config_result"
+    echo "    Renderer check      : $renderer_result"
+    echo "    Deep health check   : $deep_result"
+  } || true
 
   if [[ "$rollback_ok" -eq 1 ]]; then
     rollback_result="rollback_succeeded"
@@ -2985,8 +2987,9 @@ rollback_after_failure() {
       "$reason" \
       "$rollback_result" \
       "$incident_report" \
-      "$incident_report_root"
-    echo "[!] Rollback succeeded, deployment remains failed."
+      "$incident_report_root" \
+      || true
+    echo "[!] Rollback succeeded, deployment remains failed." || true
     deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
   fi
 
@@ -3000,8 +3003,9 @@ rollback_after_failure() {
     "$reason" \
     "$rollback_result" \
     "$incident_report" \
-    "$incident_report_root"
-  echo "[!] Rollback failed or unverifiable. Manual intervention required."
+    "$incident_report_root" \
+    || true
+  echo "[!] Rollback failed or unverifiable. Manual intervention required." || true
   deploy_result_finish_with_timing "$EXIT_ROLLBACK_FAILED" failed rollback_failed
 }
 

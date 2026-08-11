@@ -529,6 +529,43 @@ final class DeployResultReceiptStorageTest extends TestCase
         self::assertSame(1, substr_count($result['stdout'], "incident-emitted\n"));
     }
 
+    public function testRollbackReportingFailureCannotReplaceVerifiedRollbackSuccess(): void
+    {
+        $target = $this->protectedDirectory . '/rollback-reporting-failure.json';
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DEPLOY_RESULT_RECEIPT_PATH="$1"
+            DEPLOY_RESULT_PHASE=switch_complete
+            DRYRUN=0
+            APP=/root/fh-active
+            PREV=/root/fh-previous
+            REL=receipt-test
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/root/deploy_ea.sh
+            deploy_result_receipt_prepare
+            deploy_result_trap_install
+            deploy_timing_begin_rollback() { :; }
+            bash() { return 0; }
+            restart_renderer_service() { return 0; }
+            probe_renderer_health() { return 0; }
+            reload_services() { return 0; }
+            probe_deep_health_contract() { return 0; }
+            emit_zero_surprise_incident() { return 1; }
+            rollback_after_failure 'redacted failure'
+            BASH
+            ,
+            [$target],
+        );
+
+        self::assertSame(30, $result['exit_code'], $result['stderr']);
+        self::assertFileExists($target);
+        self::assertSame(
+            'internal_rollback_succeeded',
+            DeployResultV1::decode((string) file_get_contents($target))['outcome'],
+        );
+    }
+
     #[DataProvider('exitTrapPublicationFailureProvider')]
     public function testExitTrapPreservesObservedTimingWhenPublicationFails(
         string $body,
@@ -687,6 +724,7 @@ final class DeployResultReceiptStorageTest extends TestCase
     public function testSignalBeforePublicationCannotReturnAStableExitWithoutAReceipt(): void
     {
         $target = $this->protectedDirectory . '/signal-before-publication.json';
+        $sentinel = $this->protectedDirectory . '/signal-before-publication.sentinel';
         $result = $this->runShell(
             <<<'BASH'
             source ./deploy_ea.sh
@@ -694,21 +732,22 @@ final class DeployResultReceiptStorageTest extends TestCase
             DEPLOY_RESULT_PHASE=before_switch
             deploy_result_receipt_prepare
             deploy_result_trap_install
-            set -T
-            signal_before_publish() {
-              if [[ "$BASH_COMMAND" == 'deploy_result_receipt_publish_once "$outcome" "$exit_code"' ]]; then
-                trap - DEBUG
-                kill -TERM $$
-              fi
+            signal_sentinel="$2"
+            original_publish="$(declare -f deploy_result_receipt_publish_once)"
+            eval "${original_publish/deploy_result_receipt_publish_once ()/deploy_result_receipt_publish_once_original ()}"
+            deploy_result_receipt_publish_once() {
+              builtin printf '1\n' >> "$signal_sentinel"
+              kill -TERM $$
+              deploy_result_receipt_publish_once_original "$@"
             }
-            trap signal_before_publish DEBUG
             deploy_result_exit 30
             BASH
             ,
-            [$target],
+            [$target, $sentinel],
         );
 
         self::assertSame(30, $result['exit_code'], $result['stderr']);
+        self::assertSame("1\n", file_get_contents($sentinel));
         self::assertFileExists($target);
         self::assertSame('failed_pre_switch', DeployResultV1::decode((string) file_get_contents($target))['outcome']);
     }
