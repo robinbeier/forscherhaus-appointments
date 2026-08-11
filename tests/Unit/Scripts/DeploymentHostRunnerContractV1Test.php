@@ -298,7 +298,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => self::RUN_ID,
             'intent_sha256' => self::INTENT_SHA,
             'state' => 'deploy_running',
-            'state_sha256' => self::SHA,
+            'sequence' => 11,
+            'events_sha256' => self::SHA,
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
 
@@ -371,6 +372,24 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::validateResponse($response);
 
         self::assertSame(75, DeploymentHostRunnerContractV1::cliExitCode($response));
+    }
+
+    public function testCliContractInvalidRejectionUsesStableInvalidPair(): void
+    {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'action' => 'deploy',
+            'disposition' => 'rejected',
+            'state' => null,
+            'result_exit_code' => 70,
+            'result_reason' => 'contract_invalid',
+        ];
+
+        DeploymentHostRunnerContractV1::validateResponse($response);
+
+        self::assertSame(70, DeploymentHostRunnerContractV1::cliExitCode($response));
     }
 
     public function testCliResponseRejectsStateExitMismatchAndUnknownProgressState(): void
@@ -495,7 +514,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         }
         self::assertSame($decodedState['run_id'], $decodedActive['run_id']);
         self::assertSame($decodedState['intent_sha256'], $decodedActive['intent_sha256']);
-        self::assertSame(hash('sha256', $state), $decodedActive['state_sha256']);
+        self::assertSame($decodedState['sequence'], $decodedActive['sequence']);
+        self::assertSame($decodedState['events_sha256'], $decodedActive['events_sha256']);
         self::assertSame(6, count(glob($root . '/*.json') ?: []));
     }
 
@@ -583,9 +603,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => self::RUN_ID,
             'intent_sha256' => $this->deployRequest()['intent_sha256'],
             'state' => 'deploy_running',
-            'state_sha256' => DeploymentHostRunnerContractV1::fileSha256(
-                DeploymentHostRunnerContractV1::encodeFile($state),
-            ),
+            'sequence' => count($lines),
+            'events_sha256' => hash('sha256', $events),
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
 
@@ -725,9 +744,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => self::RUN_ID,
             'intent_sha256' => $state['intent_sha256'],
             'state' => 'deploy_running',
-            'state_sha256' => DeploymentHostRunnerContractV1::fileSha256(
-                DeploymentHostRunnerContractV1::encodeFile($state),
-            ),
+            'sequence' => $state['sequence'],
+            'events_sha256' => $state['events_sha256'],
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
 
@@ -749,9 +767,70 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state = $this->terminalState('failed_pre_switch', 143, 'interrupted');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->failedPreSwitchEvidence($lines)) . "\n";
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
 
         $this->expectException(RuntimeException::class);
-        DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, "{}\n");
+        $this->expectExceptionMessage('journal result');
+        DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
+    }
+
+    public function testTerminalStateCacheRejectsDeployOutcomeThatContradictsEvidence(): void
+    {
+        $lines = $this->runThrough('succeeded');
+        $events = implode("\n", $lines) . "\n";
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
+        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $state['deploy']['observed_exit_code'] = 30;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('deploy outcome');
+        DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
+    }
+
+    public function testTerminalStateCacheRejectsRollbackVerdictThatContradictsEvidence(): void
+    {
+        $lines = $this->rollbackSucceededLines();
+        $events = implode("\n", $lines) . "\n";
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->rollbackSucceededEvidence($lines)) . "\n";
+        $state = $this->terminalState('failed_post_switch_rollback_succeeded', 30, 'deploy_failed');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['rollback'] = [
+            'request_sha256' => self::SHA,
+            'execution_input_sha256' => self::SHA,
+            'invocation_count' => 1,
+            'unit_name' => DeploymentHostRunnerContractV1::unitName('rollback', self::RUN_ID, $state['intent_sha256']),
+            'unit_state' => 'exited',
+            'observed_exit_code' => 1,
+            'verdict' => 'failed',
+        ];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('rollback outcome');
+        DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
+    }
+
+    public function testActiveRunClaimBindsAProvenJournalPrefix(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $events = implode("\n", $lines) . "\n";
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'state' => 'deploy_running',
+            'sequence' => count($lines),
+            'events_sha256' => hash('sha256', $events),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        DeploymentHostRunnerContractV1::validateActiveRun($claim);
     }
 
     public function testTerminalActiveClaimClearsOnlyWithMatchingStateEvidenceAndCandidate(): void
@@ -763,12 +842,15 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $claimLines = array_slice($lines, 0, -1);
+        $claimEvents = implode("\n", $claimLines) . "\n";
         $claim = [
             'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
             'run_id' => self::RUN_ID,
             'intent_sha256' => $state['intent_sha256'],
             'state' => 'post_gates_running',
-            'state_sha256' => self::SHA,
+            'sequence' => count($claimLines),
+            'events_sha256' => hash('sha256', $claimEvents),
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
 
@@ -785,9 +867,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         );
 
         $claim['state'] = 'succeeded';
-        $claim['state_sha256'] = DeploymentHostRunnerContractV1::fileSha256(
-            DeploymentHostRunnerContractV1::encodeFile($state),
-        );
+        $claim['sequence'] = count($lines);
+        $claim['events_sha256'] = hash('sha256', $events);
         self::assertSame(
             'clear_terminal',
             DeploymentHostRunnerContractV1::activeRunDisposition(
@@ -830,7 +911,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         }
 
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
-        $claim['state_sha256'] = self::SHA;
+        $claim['events_sha256'] = self::SHA;
         $this->expectException(RuntimeException::class);
         DeploymentHostRunnerContractV1::activeRunDisposition(
             $claim,
@@ -894,7 +975,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertSame('current', DeploymentHostRunnerContractV1::stateCacheDisposition($state, $events));
     }
 
-    public function testActiveRunClaimMustBindExactStateBytes(): void
+    public function testActiveRunClaimMustBindExactJournalPrefix(): void
     {
         $lines = $this->runThrough('deploy_running');
         $events = implode("\n", $lines) . "\n";
@@ -911,7 +992,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => self::RUN_ID,
             'intent_sha256' => $state['intent_sha256'],
             'state' => 'deploy_running',
-            'state_sha256' => self::SHA,
+            'sequence' => count($lines),
+            'events_sha256' => self::SHA,
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
 
@@ -1022,6 +1104,30 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'recorded_at_utc' => '2026-08-11T13:00:11Z',
             'previous_state' => $previous['state'],
             'state' => 'failed_pre_switch',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'exit_code' => 30,
+            'reason' => 'deploy_failed',
+        ]);
+
+        return $lines;
+    }
+
+    /** @return list<string> */
+    private function rollbackSucceededLines(): array
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->transition($lines, DeploymentContractV1::ROLLBACK_RESERVATION_STATE);
+        $previous = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($previous);
+        $lines[] = DeploymentContractV1::canonicalJson([
+            'schema' => DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::RUN_ID,
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-11T13:00:13Z',
+            'previous_state' => $previous['state'],
+            'state' => 'failed_post_switch_rollback_succeeded',
             'deploy_invocation_count' => 1,
             'intent_sha256' => $this->deployRequest()['intent_sha256'],
             'exit_code' => 30,
@@ -1157,6 +1263,52 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             ],
             'result' => ['state' => 'succeeded', 'exit_code' => 0, 'reason' => 'ok'],
         ];
+    }
+
+    /** @param list<string> $lines @return array<string,mixed> */
+    private function failedPreSwitchEvidence(array $lines): array
+    {
+        $evidence = $this->succeededEvidence($lines);
+        $evidence['deploy'] = [
+            'status' => 'failed',
+            'invocation_count' => 1,
+            'exit_code' => 30,
+            'rollback_outcome' => 'not_run',
+        ];
+        $evidence['post_gates'] = array_map(static fn(mixed $_value): mixed => null, $evidence['post_gates']);
+        $evidence['post_gates']['status'] = 'not_observed';
+        $evidence['result'] = [
+            'state' => 'failed_pre_switch',
+            'exit_code' => 30,
+            'reason' => 'deploy_failed',
+        ];
+
+        return $evidence;
+    }
+
+    /** @param list<string> $lines @return array<string,mixed> */
+    private function rollbackSucceededEvidence(array $lines): array
+    {
+        $evidence = $this->succeededEvidence($lines);
+        $evidence['captured_at_utc'] = '2026-08-11T13:00:15Z';
+        $evidence['orchestrator_timing']['finished_at_utc'] = '2026-08-11T13:00:14Z';
+        $evidence['orchestrator_timing']['wall_clock_ms'] = 14_000;
+        $evidence['rollback'] = [
+            'status' => 'succeeded',
+            'invocation_count' => 1,
+            'mode' => 'dedicated_post_gate_recovery',
+            'verified' => true,
+        ];
+        $evidence['post_gates']['logs_passed'] = false;
+        $evidence['post_gates']['passed'] = false;
+        $evidence['post_gates']['status'] = 'failed';
+        $evidence['result'] = [
+            'state' => 'failed_post_switch_rollback_succeeded',
+            'exit_code' => 30,
+            'reason' => 'deploy_failed',
+        ];
+
+        return $evidence;
     }
 
     /** @return array<string,mixed> */

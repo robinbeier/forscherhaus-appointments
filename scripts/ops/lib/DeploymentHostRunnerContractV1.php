@@ -88,7 +88,15 @@ final class DeploymentHostRunnerContractV1
         'reason',
     ];
 
-    private const ACTIVE_RUN_KEYS = ['schema', 'run_id', 'intent_sha256', 'state', 'state_sha256', 'claimed_at_utc'];
+    private const ACTIVE_RUN_KEYS = [
+        'schema',
+        'run_id',
+        'intent_sha256',
+        'state',
+        'sequence',
+        'events_sha256',
+        'claimed_at_utc',
+    ];
 
     private const RESPONSE_KEYS = [
         'schema',
@@ -276,25 +284,43 @@ final class DeploymentHostRunnerContractV1
         }
         $lines = explode("\n", substr($referencedEventsBytes, 0, -1));
         $run = DeploymentContractV1::validateRunLines($lines);
+        if ($claim['sequence'] > count($lines)) {
+            throw new RuntimeException('active run claim is ahead of the authoritative journal');
+        }
+        $claimLines = array_slice($lines, 0, $claim['sequence']);
+        $claimEventsBytes = implode("\n", $claimLines) . "\n";
+        $claimRun = DeploymentContractV1::validateRunLines($claimLines);
+        if (
+            $claimRun['run_id'] !== $claim['run_id'] ||
+            !hash_equals($claimRun['intent_sha256'], $claim['intent_sha256']) ||
+            $claimRun['state'] !== $claim['state'] ||
+            $claimRun['records'] !== $claim['sequence'] ||
+            !hash_equals(hash('sha256', $claimEventsBytes), $claim['events_sha256'])
+        ) {
+            throw new RuntimeException('active run claim does not bind a trusted journal prefix');
+        }
         if ($run['recovery'] === 'terminal') {
             if ($cacheDisposition !== 'current') {
                 throw new RuntimeException('terminal journal requires matching durable state and evidence');
             }
-            $terminalStateSha256 = self::fileSha256(self::encodeFile($referencedState));
             if ($claim['state'] !== $referencedState['state']) {
                 if (!in_array($claim['state'], self::OBSERVE_ONLY_STATES, true)) {
                     throw new RuntimeException('terminal active run claim contradicts the durable terminal state');
                 }
                 return 'refresh_terminal_claim';
             }
-            if (!hash_equals($claim['state_sha256'], $terminalStateSha256)) {
-                throw new RuntimeException('terminal active run claim does not bind the durable state');
+            if (
+                $claim['sequence'] !== $referencedState['sequence'] ||
+                !hash_equals($claim['events_sha256'], $referencedState['events_sha256'])
+            ) {
+                throw new RuntimeException('terminal active run claim does not bind the authoritative journal');
             }
             return 'clear_terminal';
         }
         if (
             $referencedState['state'] !== $claim['state'] ||
-            !hash_equals(self::fileSha256(self::encodeFile($referencedState)), $claim['state_sha256'])
+            $referencedState['sequence'] !== $claim['sequence'] ||
+            !hash_equals($referencedState['events_sha256'], $claim['events_sha256'])
         ) {
             throw new RuntimeException('active run claim is stale or contradictory');
         }
@@ -411,6 +437,7 @@ final class DeploymentHostRunnerContractV1
             }
             $evidence = self::decodeEvidenceFile($evidenceBytes);
             $bundle = DeploymentContractV1::validateBundle($lines, $evidence);
+            self::assertTerminalActionEvidence($state, $evidence);
             if (
                 !hash_equals(hash('sha256', $evidenceBytes), $state['evidence_sha256']) ||
                 $bundle['state'] !== $state['state'] ||
@@ -423,6 +450,31 @@ final class DeploymentHostRunnerContractV1
         }
 
         return $state['sequence'] === $run['records'] ? 'current' : 'stale_recoverable';
+    }
+
+    /** @param array<string,mixed> $state @param array<string,mixed> $evidence */
+    private static function assertTerminalActionEvidence(array $state, array $evidence): void
+    {
+        if ($state['deploy']['invocation_count'] !== $evidence['deploy']['invocation_count']) {
+            throw new RuntimeException('terminal state deploy outcome contradicts the durable evidence');
+        }
+        if (
+            $evidence['deploy']['exit_code'] !== null &&
+            $state['deploy']['observed_exit_code'] !== $evidence['deploy']['exit_code']
+        ) {
+            throw new RuntimeException('terminal state deploy outcome contradicts the durable evidence');
+        }
+        $hasAcceptedReceipt = $state['deploy']['receipt_sha256'] !== null;
+        $evidenceHasKnownDeployOutcome = in_array($evidence['deploy']['status'], ['succeeded', 'failed'], true);
+        if ($hasAcceptedReceipt !== $evidenceHasKnownDeployOutcome) {
+            throw new RuntimeException('terminal state deploy outcome contradicts the durable evidence');
+        }
+        if (
+            $state['rollback']['invocation_count'] !== $evidence['rollback']['invocation_count'] ||
+            $state['rollback']['verdict'] !== $evidence['rollback']['status']
+        ) {
+            throw new RuntimeException('terminal state rollback outcome contradicts the durable evidence');
+        }
     }
 
     /** @param array<string,mixed> $event */
@@ -461,7 +513,8 @@ final class DeploymentHostRunnerContractV1
             [...self::OBSERVE_ONLY_STATES, 'succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES],
             'active run state',
         );
-        self::assertSha256($claim['state_sha256'], 'state_sha256');
+        self::assertPositiveInteger($claim['sequence'], 'sequence');
+        self::assertSha256($claim['events_sha256'], 'events_sha256');
         self::assertUtc($claim['claimed_at_utc'], 'claimed_at_utc');
     }
 
