@@ -521,7 +521,7 @@ final class DeploymentContractV1
         }
         $allowed = match ($state) {
             'failed_before_write' => [20, 21, 22, 23, 24, 25, 70, 75, 143],
-            'failed_pre_switch' => [30],
+            'failed_pre_switch' => [30, 143],
             'failed_switch_recovery_required' => [32],
             'failed_post_switch_rollback_succeeded' => [30],
             'failed_post_switch_rollback_failed' => [31],
@@ -538,6 +538,9 @@ final class DeploymentContractV1
         string $state,
         string $reason,
     ): void {
+        if ($state === 'manual_recovery_required' && $reason === 'contract_invalid' && $previous !== 'deploy_running') {
+            throw new RuntimeException('rejected child result requires the deploy-running phase');
+        }
         if (
             $previous === 'post_gates_running' &&
             $state === 'manual_recovery_required' &&
@@ -772,9 +775,10 @@ final class DeploymentContractV1
                 $expectedDeploy = match ($last['state']) {
                     'failed_post_switch_rollback_succeeded' => ['failed', 1, 30, 'succeeded'],
                     'failed_post_switch_rollback_failed' => ['failed', 1, 31, 'failed'],
-                    'manual_recovery_required' => $last['reason'] === 'interrupted'
-                        ? ['unknown', 1, null, 'not_observed']
-                        : ['failed', 1, 31, 'recovery_required'],
+                    'manual_recovery_required' => match ($last['reason']) {
+                        'interrupted', 'contract_invalid' => ['unknown', 1, null, 'not_observed'],
+                        default => ['failed', 1, 31, 'recovery_required'],
+                    },
                 };
                 if ($actualDeploy !== $expectedDeploy || $actualRollback !== $notInvokedRollback) {
                     throw new RuntimeException(
@@ -1324,7 +1328,7 @@ final class DeploymentContractV1
         if (
             $section['invocation_count'] !== 1 ||
             !is_int($section['exit_code']) ||
-            !in_array($section['exit_code'], [0, 30, 31, 32], true)
+            !in_array($section['exit_code'], [0, 30, 31, 32, 143], true)
         ) {
             throw new RuntimeException('invoked deploy evidence is invalid');
         }
@@ -1368,6 +1372,12 @@ final class DeploymentContractV1
     private static function assertDeployResultConsistency(string $state, string $reason, array $deploy): void
     {
         $actual = [$deploy['status'], $deploy['invocation_count'], $deploy['exit_code'], $deploy['rollback_outcome']];
+        if ($state === 'manual_recovery_required' && $reason === 'contract_invalid') {
+            if ($actual !== ['unknown', 1, null, 'not_observed']) {
+                throw new RuntimeException('deploy evidence is inconsistent with a rejected child result');
+            }
+            return;
+        }
         if ($state === 'manual_recovery_required' && $reason === 'interrupted') {
             if ($actual !== ['unknown', 1, null, 'not_observed'] && $actual !== ['succeeded', 1, 0, 'not_run']) {
                 throw new RuntimeException('deploy and rollback evidence is inconsistent with interrupted recovery');
@@ -1377,7 +1387,9 @@ final class DeploymentContractV1
         $expected = match ($state) {
             'succeeded' => ['succeeded', 1, 0, 'not_run'],
             'failed_before_write' => ['not_invoked', 0, null, 'not_applicable'],
-            'failed_pre_switch' => ['failed', 1, 30, 'not_run'],
+            'failed_pre_switch' => $reason === 'interrupted'
+                ? ['failed', 1, 143, 'not_run']
+                : ['failed', 1, 30, 'not_run'],
             'failed_switch_recovery_required' => ['failed', 1, 32, 'recovery_required'],
             'failed_post_switch_rollback_succeeded' => [['failed', 1, 30, 'succeeded'], ['succeeded', 1, 0, 'not_run']],
             'failed_post_switch_rollback_failed' => [['failed', 1, 31, 'failed'], ['succeeded', 1, 0, 'not_run']],

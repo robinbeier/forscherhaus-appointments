@@ -473,6 +473,7 @@ jobs:
       - name: ROB-442 root deployment regression tests
         run: |
           sudo php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
+            tests/Unit/Scripts/DeployResultReceiptStorageTest.php \
             tests/Unit/Scripts/DeployRuntimeConfigPermissionsTest.php \
             tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
             tests/Unit/Scripts/GateCliSupportTest.php \

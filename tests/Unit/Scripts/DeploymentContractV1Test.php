@@ -340,16 +340,18 @@ final class DeploymentContractV1Test extends TestCase
         yield 'interrupted after invocation' => ['deploy_running', 'manual_recovery_required', 1, 143, 'interrupted'];
     }
 
-    public function testInterruptedInvocationCannotUseFailedPreSwitchJournalTerminal(): void
+    public function testObservedInterruptedInvocationUsesFailedPreSwitchJournalTerminal(): void
     {
         $lines = $this->runThrough('deploy_running');
         $lines[] = $this->encode($this->transition($lines, 'failed_pre_switch', 1, 143, 'interrupted'));
 
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateRunLines($lines);
+        $result = DeploymentContractV1::validateRunLines($lines);
+
+        self::assertSame('failed_pre_switch', $result['state']);
+        self::assertSame('terminal', $result['recovery']);
     }
 
-    public function testInterruptedInvocationCannotUseFailedPreSwitchBundleTerminal(): void
+    public function testObservedInterruptedInvocationUsesFailedPreSwitchBundleTerminal(): void
     {
         $lines = $this->runThrough('deploy_running');
         $lines[] = $this->encode($this->transition($lines, 'failed_pre_switch', 1, 143, 'interrupted'));
@@ -358,13 +360,45 @@ final class DeploymentContractV1Test extends TestCase
             'failed_pre_switch',
             143,
             'interrupted',
-            30,
+            143,
+            'not_run',
+            'not_observed',
+        );
+
+        $result = DeploymentContractV1::validateBundle($lines, $evidence);
+
+        self::assertSame('failed_pre_switch', $result['state']);
+        self::assertSame('terminal', $result['recovery']);
+    }
+
+    #[DataProvider('failedPreSwitchEvidenceExitMismatchProvider')]
+    public function testFailedPreSwitchEvidenceExitMustMatchTerminalReason(
+        int $publicExit,
+        string $reason,
+        int $deployExit,
+    ): void {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'failed_pre_switch', 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'failed_pre_switch',
+            $publicExit,
+            $reason,
+            $deployExit,
             'not_run',
             'not_observed',
         );
 
         $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('deploy and rollback evidence');
         DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{int,string,int}> */
+    public static function failedPreSwitchEvidenceExitMismatchProvider(): iterable
+    {
+        yield 'deploy failure cannot claim interrupted child' => [30, 'deploy_failed', 143];
+        yield 'interrupted terminal cannot claim ordinary deploy failure' => [143, 'interrupted', 30];
     }
 
     public function testWrongExitReasonPairIsRejected(): void
@@ -1393,6 +1427,47 @@ final class DeploymentContractV1Test extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('transition phase');
         DeploymentContractV1::validateBundle($lines, $observedFailure);
+    }
+
+    public function testRejectedReceiptNormalizesToContractInvalidManualRecovery(): void
+    {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 70, 'contract_invalid'));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'manual_recovery_required',
+            70,
+            'contract_invalid',
+            31,
+            'recovery_required',
+            'not_observed',
+        );
+        $evidence['deploy'] = $this->unknownInvokedDeployEvidence();
+
+        self::assertSame('manual_recovery_required', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
+
+        $evidence['deploy'] = $this->succeededDeployEvidence();
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('rejected child result');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    #[DataProvider('lateContractInvalidProvider')]
+    public function testRejectedReceiptNormalizationIsLimitedToDeployRunning(string $from): void
+    {
+        $lines = $from === 'rollback_running' ? $this->rollbackRunningLines() : $this->runThrough($from);
+        $lines[] = $this->encode($this->transition($lines, 'manual_recovery_required', 1, 70, 'contract_invalid'));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('rejected child result');
+        DeploymentContractV1::validateRunLines($lines);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function lateContractInvalidProvider(): iterable
+    {
+        yield 'post gates already observed an accepted deploy' => ['post_gates_running'];
+        yield 'dedicated rollback already reserved' => ['rollback_running'];
     }
 
     #[DataProvider('contradictoryUnknownDeployEvidenceProvider')]

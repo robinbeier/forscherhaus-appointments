@@ -19,7 +19,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 22 | 12 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 24 | 14 |
 
 ## Component Details
 
@@ -366,9 +366,11 @@ Path prefixes:
 - `application/core/Provider_ui_smoke_access_policy.php`
 - `application/libraries/Customers_ui_smoke_fixture.php`
 - `application/libraries/Provider_ui_smoke_fixture.php`
+- `deploy_ea.sh`
 - `scripts/ci/`
 - `scripts/ops/customers_ui_smoke_principals.sh`
 - `scripts/ops/config/traffic_gate_catalog.v1.json`
+- `scripts/ops/lib/DeployResultV1.php`
 - `scripts/ops/lib/DeploymentContractV1.php`
 - `scripts/ops/lib/TrafficGateV1.php`
 - `scripts/ops/prod_customers_ui_smoke.sh`
@@ -389,7 +391,9 @@ Key files:
 - `application/libraries/Customers_ui_smoke_fixture.php`
 - `application/libraries/Provider_ui_smoke_fixture.php`
 - `.github/workflows/ci.yml`
+- `deploy_ea.sh`
 - `scripts/ci/dashboard_integration_smoke.php`
+- `scripts/ops/lib/DeployResultV1.php`
 - `scripts/ops/lib/TrafficGateV1.php`
 - `scripts/ops/lib/DeploymentContractV1.php`
 - `scripts/ops/prod_traffic_gate.sh`

@@ -52,12 +52,27 @@ EXIT_DEPLOY_FAILED=30
 EXIT_ROLLBACK_SUCCESS=30
 EXIT_ROLLBACK_FAILED=31
 EXIT_SWITCH_RECOVERY_REQUIRED=32
+EXIT_RESULT_PUBLICATION_FAILED=74
 
 DEPLOY_RESULT_NORMALIZATION_ACTIVE=0
 DEPLOY_RESULT_PHASE="before_switch"
 DEPLOY_RESULT_ROLLBACK_ACTIVE=0
 DEPLOY_RESULT_FINAL_EXIT_CODE=""
 DEPLOY_RESULT_RECOVERY_SIGNAL_EXIT_CODE=""
+DEPLOY_RESULT_FINAL_OUTCOME=""
+DEPLOY_RESULT_ACTION_EXIT_CODE=""
+DEPLOY_RESULT_ACTION_OUTCOME=""
+DEPLOY_RESULT_RECEIPT_PATH=""
+DEPLOY_RESULT_RECEIPT_CHAIN_SHA256=""
+DEPLOY_RESULT_RECEIPT_ACTIVE=0
+DEPLOY_RESULT_RECEIPT_ATTEMPTED=0
+DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=0
+# Intentionally reset: only sourced regression tests may set a crash checkpoint.
+DEPLOY_RESULT_RECEIPT_TEST_CRASH_POINT=""
+# Intentionally reset: only sourced regression tests may inject storage failures.
+DEPLOY_RESULT_RECEIPT_TEST_FAILURE_POINT=""
+# Intentionally reset: only sourced regression tests may coordinate publishers.
+DEPLOY_RESULT_RECEIPT_TEST_BARRIER_PATH=""
 
 DEPLOY_TIMING_SCHEMA="deploy_timing.v1"
 DEPLOY_TIMING_ACTIVE=0
@@ -294,12 +309,467 @@ deploy_result_reconcile_switch_phase() {
   esac
 }
 
-deploy_result_finalize() {
+deploy_result_receipt_storage() {
+  php /dev/fd/3 "$@" 3<<'PHP'
+<?php
+declare(strict_types=1);
+
+const RESULT_SCHEMA = 'deploy_result.v1';
+const RESULT_OUTCOME_EXITS = [
+    'succeeded' => 0,
+    'failed_pre_switch' => 30,
+    'internal_rollback_succeeded' => 30,
+    'rollback_failed_or_unverifiable' => 31,
+    'switch_recovery_required' => 32,
+    'interrupted_pre_switch' => 143,
+];
+
+/** @return array<string,int|string> */
+function trustedDirectory(string $path): array
+{
+    clearstatcache(true, $path);
+    $before = @lstat($path);
+    $canonical = @realpath($path);
+    clearstatcache(true, $path);
+    $after = @lstat($path);
+    if (!is_array($before) || !is_array($after) || $canonical !== $path) {
+        throw new RuntimeException('untrusted directory');
+    }
+    foreach (['dev', 'ino', 'mode', 'uid', 'gid', 'nlink'] as $key) {
+        if ($before[$key] !== $after[$key]) {
+            throw new RuntimeException('directory identity changed');
+        }
+    }
+    if (($after['mode'] & 0170000) !== 0040000 || $after['uid'] !== 0 || $after['gid'] !== 0) {
+        throw new RuntimeException('directory identity is untrusted');
+    }
+    if (($after['mode'] & 0022) !== 0) {
+        throw new RuntimeException('directory is writable by non-root');
+    }
+
+    return [
+        'path' => $path,
+        'dev' => $after['dev'],
+        'ino' => $after['ino'],
+        'mode' => $after['mode'] & 07777,
+        'uid' => $after['uid'],
+        'gid' => $after['gid'],
+    ];
+}
+
+/** @return list<array<string,int|string>> */
+function trustedChain(string $target): array
+{
+    if (
+        $target === '' || $target === '/' || $target[0] !== '/' || str_ends_with($target, '/') ||
+        str_contains($target, '//') || preg_match('/[\x00-\x1f\x7f]/', $target) === 1
+    ) {
+        throw new RuntimeException('invalid result path');
+    }
+    $parts = explode('/', substr($target, 1));
+    if ($parts === [] || in_array('', $parts, true) || in_array('.', $parts, true) || in_array('..', $parts, true)) {
+        throw new RuntimeException('non-canonical result path');
+    }
+
+    array_pop($parts);
+    $paths = ['/'];
+    $current = '';
+    foreach ($parts as $part) {
+        $current .= '/' . $part;
+        $paths[] = $current;
+    }
+    $chain = [];
+    foreach ($paths as $path) {
+        $chain[] = trustedDirectory($path);
+    }
+    $parent = dirname($target);
+    $parentEntry = $chain[array_key_last($chain)];
+    if ($parentEntry['path'] !== $parent || $parentEntry['mode'] !== 0700) {
+        throw new RuntimeException('result parent is not protected');
+    }
+
+    return $chain;
+}
+
+function chainFingerprint(string $target): string
+{
+    return hash('sha256', json_encode(trustedChain($target), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+}
+
+function targetIsAbsent(string $target): bool
+{
+    clearstatcache(true, $target);
+    return @lstat($target) === false;
+}
+
+/** @return array<string,int> */
+function protectedFile(string $path, int $expectedLinks = 1): array
+{
+    clearstatcache(true, $path);
+    $stat = @lstat($path);
+    if (
+        !is_array($stat) || ($stat['mode'] & 0170000) !== 0100000 || $stat['uid'] !== 0 ||
+        $stat['gid'] !== 0 || ($stat['mode'] & 07777) !== 0600 || $stat['nlink'] !== $expectedLinks
+    ) {
+        throw new RuntimeException('result file is untrusted');
+    }
+
+    return ['dev' => $stat['dev'], 'ino' => $stat['ino']];
+}
+
+/** @param resource $stream @param array<string,int> $identity */
+function assertStreamIdentity($stream, array $identity, int $expectedLinks = 1): void
+{
+    $stat = fstat($stream);
+    if (
+        !is_array($stat) || $stat['dev'] !== $identity['dev'] || $stat['ino'] !== $identity['ino'] ||
+        ($stat['mode'] & 0170000) !== 0100000 || $stat['uid'] !== 0 || $stat['gid'] !== 0 ||
+        ($stat['mode'] & 07777) !== 0600 || $stat['nlink'] !== $expectedLinks
+    ) {
+        throw new RuntimeException('result stream identity is untrusted');
+    }
+}
+
+function crashAt(string $selected, string $checkpoint): void
+{
+    if ($selected !== $checkpoint) {
+        return;
+    }
+    if (!function_exists('posix_kill') || !posix_kill(posix_getpid(), 9)) {
+        exit(97);
+    }
+    usleep(1000000);
+    exit(97);
+}
+
+function failAt(string $selected, string $checkpoint): void
+{
+    if ($selected === $checkpoint) {
+        throw new RuntimeException('injected result storage failure');
+    }
+}
+
+function waitAtTestBarrier(string $barrier): void
+{
+    if ($barrier === '') {
+        return;
+    }
+    $ready = $barrier . '.ready.' . getmypid();
+    if (file_put_contents($ready, '') === false || !chmod($ready, 0600)) {
+        throw new RuntimeException('result test barrier setup failed');
+    }
+    try {
+        for ($attempt = 0; $attempt < 1000; $attempt++) {
+            clearstatcache(true, $barrier);
+            if (is_file($barrier)) {
+                return;
+            }
+            usleep(10000);
+        }
+        throw new RuntimeException('result test barrier timed out');
+    } finally {
+        @unlink($ready);
+    }
+}
+
+/** @param array<string,int|string> $expectedParent */
+function fsyncDirectory(string $parent, array $expectedParent): void
+{
+    $directoryStream = @fopen($parent, 'rb');
+    if (!is_resource($directoryStream)) {
+        throw new RuntimeException('result parent open failed');
+    }
+    try {
+        $directoryStat = fstat($directoryStream);
+        $parentEntry = trustedDirectory($parent);
+        if (
+            !is_array($directoryStat) || $directoryStat['dev'] !== $expectedParent['dev'] ||
+            $directoryStat['ino'] !== $expectedParent['ino'] || $parentEntry['dev'] !== $expectedParent['dev'] ||
+            $parentEntry['ino'] !== $expectedParent['ino'] || !function_exists('fsync') || !fsync($directoryStream)
+        ) {
+            throw new RuntimeException('result parent fsync failed');
+        }
+    } finally {
+        fclose($directoryStream);
+    }
+}
+
+function validateReceipt(string $encoded): void
+{
+    $receipt = json_decode($encoded, true, 8, JSON_THROW_ON_ERROR);
+    if (!is_array($receipt) || array_is_list($receipt)) {
+        throw new RuntimeException('result receipt is not an object');
+    }
+    $keys = array_keys($receipt);
+    sort($keys);
+    if ($keys !== ['exit_code', 'outcome', 'schema'] || $receipt['schema'] !== RESULT_SCHEMA) {
+        throw new RuntimeException('result receipt schema is invalid');
+    }
+    if (
+        !is_string($receipt['outcome']) || !array_key_exists($receipt['outcome'], RESULT_OUTCOME_EXITS) ||
+        !is_int($receipt['exit_code']) || RESULT_OUTCOME_EXITS[$receipt['outcome']] !== $receipt['exit_code']
+    ) {
+        throw new RuntimeException('result receipt pair is invalid');
+    }
+}
+
+/** @param array<string,int> $identity */
+function unlinkOwnedProtectedFile(string $path, array $identity): bool
+{
+    clearstatcache(true, $path);
+    $stat = @lstat($path);
+    if (!is_array($stat)) {
+        return true;
+    }
+    if (
+        $stat['dev'] !== $identity['dev'] || $stat['ino'] !== $identity['ino'] ||
+        ($stat['mode'] & 0170000) !== 0100000 || $stat['uid'] !== 0 || $stat['gid'] !== 0 ||
+        ($stat['mode'] & 07777) !== 0600 || !in_array($stat['nlink'], [1, 2], true)
+    ) {
+        return false;
+    }
+
+    return @unlink($path);
+}
+
+function publish(
+    string $target,
+    string $expectedChain,
+    string $encoded,
+    string $crashPoint,
+    string $failurePoint,
+    string $testBarrier,
+): void {
+    validateReceipt($encoded);
+    $chain = trustedChain($target);
+    $chainHash = hash('sha256', json_encode($chain, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+    if (!hash_equals($expectedChain, $chainHash) || !targetIsAbsent($target)) {
+        throw new RuntimeException('result target changed');
+    }
+
+    $parent = dirname($target);
+    $parentIdentity = $chain[array_key_last($chain)];
+    $temporary = $parent . '/.deploy-result.' . bin2hex(random_bytes(16)) . '.tmp';
+    umask(0077);
+    $stream = @fopen($temporary, 'x+b');
+    if (!is_resource($stream)) {
+        throw new RuntimeException('result temporary create failed');
+    }
+    $temporaryIdentity = null;
+    $published = false;
+    try {
+        if (!chmod($temporary, 0600)) {
+            throw new RuntimeException('result chmod failed');
+        }
+        $temporaryIdentity = protectedFile($temporary);
+        assertStreamIdentity($stream, $temporaryIdentity);
+        crashAt($crashPoint, 'after_temp_create');
+
+        $offset = 0;
+        $length = strlen($encoded);
+        while ($offset < $length) {
+            $written = fwrite($stream, substr($encoded, $offset));
+            if (!is_int($written) || $written < 1) {
+                throw new RuntimeException('result write failed');
+            }
+            $offset += $written;
+        }
+        if (!fflush($stream)) {
+            throw new RuntimeException('result flush failed');
+        }
+        failAt($failurePoint, 'file_fsync');
+        if (!function_exists('fsync') || !fsync($stream)) {
+            throw new RuntimeException('result file fsync failed');
+        }
+        assertStreamIdentity($stream, $temporaryIdentity);
+        crashAt($crashPoint, 'after_file_fsync');
+        if (
+            !hash_equals($expectedChain, chainFingerprint($target)) || !targetIsAbsent($target) ||
+            protectedFile($temporary) !== $temporaryIdentity
+        ) {
+            throw new RuntimeException('result target changed before publish');
+        }
+        waitAtTestBarrier($testBarrier);
+        if (!@link($temporary, $target)) {
+            throw new RuntimeException('result no-clobber publish failed');
+        }
+        $published = true;
+        if (
+            protectedFile($temporary, 2) !== $temporaryIdentity ||
+            protectedFile($target, 2) !== $temporaryIdentity
+        ) {
+            throw new RuntimeException('published result identity changed');
+        }
+        assertStreamIdentity($stream, $temporaryIdentity, 2);
+        if (!@unlink($temporary)) {
+            throw new RuntimeException('result temporary unlink failed');
+        }
+        if (protectedFile($target) !== $temporaryIdentity) {
+            throw new RuntimeException('published result identity changed');
+        }
+        assertStreamIdentity($stream, $temporaryIdentity);
+        crashAt($crashPoint, 'after_publish');
+
+        if ($failurePoint === 'replace_target_identity') {
+            if (
+                !@unlink($target) || file_put_contents($target, "replacement\n") === false ||
+                !chmod($target, 0600)
+            ) {
+                throw new RuntimeException('injected result target replacement failed');
+            }
+            throw new RuntimeException('injected result target identity replacement');
+        }
+
+        if (in_array($failurePoint, ['parent_fsync', 'parent_fsync_cleanup'], true)) {
+            throw new RuntimeException('injected result parent fsync failure');
+        }
+        fsyncDirectory($parent, $parentIdentity);
+        crashAt($crashPoint, 'after_parent_fsync');
+        failAt($failurePoint, 'post_publish_identity');
+        if (
+            !hash_equals($expectedChain, chainFingerprint($target)) ||
+            protectedFile($target) !== $temporaryIdentity
+        ) {
+            throw new RuntimeException('published result changed');
+        }
+    } catch (Throwable $failure) {
+        if (
+            is_array($temporaryIdentity) && $published && $failurePoint !== 'parent_fsync_cleanup' &&
+            unlinkOwnedProtectedFile($target, $temporaryIdentity)
+        ) {
+            try {
+                fsyncDirectory($parent, $parentIdentity);
+            } catch (Throwable) {
+                // The caller still receives a hard publication failure.
+            }
+        }
+        throw $failure;
+    } finally {
+        if (is_resource($stream)) {
+            fclose($stream);
+        }
+        if (is_array($temporaryIdentity)) {
+            unlinkOwnedProtectedFile($temporary, $temporaryIdentity);
+        }
+    }
+}
+
+try {
+    if (!function_exists('posix_geteuid') || posix_geteuid() !== 0 || count($argv) < 3) {
+        throw new RuntimeException('result storage requires root');
+    }
+    $operation = $argv[1];
+    $target = $argv[2];
+    if ($operation === 'prepare' && count($argv) === 3) {
+        if (!targetIsAbsent($target)) {
+            throw new RuntimeException('result target already exists');
+        }
+        echo chainFingerprint($target), "\n";
+        exit(0);
+    }
+    if ($operation === 'publish' && count($argv) === 8) {
+        publish($target, $argv[3], $argv[4], $argv[5], $argv[6], $argv[7]);
+        exit(0);
+    }
+    throw new RuntimeException('result storage invocation is invalid');
+} catch (Throwable) {
+    exit(1);
+}
+PHP
+}
+
+deploy_result_receipt_prepare() {
+  local fingerprint
+
+  [[ -n "${DEPLOY_RESULT_RECEIPT_PATH:-}" ]] || return 0
+  if ! fingerprint="$(deploy_result_receipt_storage prepare "$DEPLOY_RESULT_RECEIPT_PATH")" \
+    || [[ ! "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "[!] Deploy result target trust contract failed." >&2
+    return 1
+  fi
+  DEPLOY_RESULT_RECEIPT_CHAIN_SHA256="$fingerprint"
+  DEPLOY_RESULT_RECEIPT_ACTIVE=1
+  return 0
+}
+
+deploy_result_receipt_outcome() {
   local exit_code="$1"
 
   case "$exit_code" in
-    0|30|31|32)
+    0)
+      printf 'succeeded\n'
+      ;;
+    30)
+      if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+        printf 'internal_rollback_succeeded\n'
+      else
+        printf 'failed_pre_switch\n'
+      fi
+      ;;
+    31)
+      printf 'rollback_failed_or_unverifiable\n'
+      ;;
+    32)
+      printf 'switch_recovery_required\n'
+      ;;
+    143)
+      [[ "${DEPLOY_RESULT_PHASE:-before_switch}" == "before_switch" ]] || return 1
+      printf 'interrupted_pre_switch\n'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+deploy_result_receipt_publish_once() {
+  local outcome="$1"
+  local exit_code="$2"
+  local receipt
+
+  [[ "${DEPLOY_RESULT_RECEIPT_ACTIVE:-0}" == "1" ]] || return 0
+  [[ "${DEPLOY_RESULT_RECEIPT_ATTEMPTED:-0}" == "0" ]] || return 0
+  DEPLOY_RESULT_RECEIPT_ATTEMPTED=1
+  builtin printf -v receipt '{"schema":"deploy_result.v1","outcome":"%s","exit_code":%d}\n' "$outcome" "$exit_code"
+  if ! deploy_result_receipt_storage \
+    publish \
+    "$DEPLOY_RESULT_RECEIPT_PATH" \
+    "$DEPLOY_RESULT_RECEIPT_CHAIN_SHA256" \
+    "$receipt" \
+    "${DEPLOY_RESULT_RECEIPT_TEST_CRASH_POINT:-}" \
+    "${DEPLOY_RESULT_RECEIPT_TEST_FAILURE_POINT:-}" \
+    "${DEPLOY_RESULT_RECEIPT_TEST_BARRIER_PATH:-}"
+  then
+    echo "[!] Deploy result candidate could not be durably published." >&2
+    return "$EXIT_RESULT_PUBLICATION_FAILED"
+  fi
+  return 0
+}
+
+deploy_result_finalize() {
+  local exit_code="$1"
+  local outcome
+
+  if [[ -n "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" ]]; then
+    [[ "$DEPLOY_RESULT_FINAL_EXIT_CODE" == "$exit_code" ]]
+    return $?
+  fi
+
+  case "$exit_code" in
+    0|30|31|32|143)
+      outcome="$(deploy_result_receipt_outcome "$exit_code")" || return 1
+      DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=1
+      DEPLOY_RESULT_ACTION_EXIT_CODE="$exit_code"
+      DEPLOY_RESULT_ACTION_OUTCOME="$outcome"
       DEPLOY_RESULT_FINAL_EXIT_CODE="$exit_code"
+      DEPLOY_RESULT_FINAL_OUTCOME="$outcome"
+      if ! deploy_result_receipt_publish_once "$outcome" "$exit_code"; then
+        DEPLOY_RESULT_FINAL_EXIT_CODE="$EXIT_RESULT_PUBLICATION_FAILED"
+        DEPLOY_RESULT_FINAL_OUTCOME=""
+        DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=0
+        return "$EXIT_RESULT_PUBLICATION_FAILED"
+      fi
+      DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE=0
       return 0
       ;;
     *)
@@ -310,9 +780,17 @@ deploy_result_finalize() {
 
 deploy_result_exit() {
   local exit_code="$1"
+  local finalize_status
 
-  deploy_result_finalize "$exit_code" || return 1
-  exit "$exit_code"
+  if deploy_result_finalize "$exit_code"; then
+    exit "${DEPLOY_RESULT_FINAL_EXIT_CODE:-$exit_code}"
+  else
+    finalize_status="$?"
+  fi
+  if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_RESULT_PUBLICATION_FAILED" ]]; then
+    exit "$EXIT_RESULT_PUBLICATION_FAILED"
+  fi
+  return "$finalize_status"
 }
 
 deploy_result_normalize_exit_code() {
@@ -356,7 +834,8 @@ deploy_result_normalize_exit_code() {
 deploy_result_on_signal() {
   local signal_exit_code="${1:-143}"
 
-  if [[ "${DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE:-0}" == "1" ]]; then
+  if [[ "${DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE:-0}" == "1" \
+    || "${DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE:-0}" == "1" ]]; then
     return 0
   fi
   if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" != "1" ]]; then
@@ -401,6 +880,9 @@ deploy_result_recovery_signal_traps_install() {
 deploy_result_trap_install() {
   DEPLOY_RESULT_NORMALIZATION_ACTIVE=1
   DEPLOY_RESULT_FINAL_EXIT_CODE=""
+  DEPLOY_RESULT_FINAL_OUTCOME=""
+  DEPLOY_RESULT_ACTION_EXIT_CODE=""
+  DEPLOY_RESULT_ACTION_OUTCOME=""
   trap deploy_timing_on_exit EXIT
   trap 'deploy_result_on_signal 129' HUP
   trap 'deploy_result_on_signal 130' INT
@@ -583,7 +1065,13 @@ deploy_result_finish_with_timing() {
   local phase_status="$2"
   local outcome="$3"
 
-  deploy_result_finalize "$exit_code" || return 1
+  if ! deploy_result_finalize "$exit_code"; then
+    if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_RESULT_PUBLICATION_FAILED" ]]; then
+      deploy_timing_finish "$phase_status" "$outcome" "$exit_code"
+      deploy_result_exit "$EXIT_RESULT_PUBLICATION_FAILED"
+    fi
+    return 1
+  fi
   deploy_timing_finish "$phase_status" "$outcome" "$exit_code"
   deploy_result_after_timing_finish || true
   deploy_result_exit "$exit_code"
@@ -592,6 +1080,7 @@ deploy_result_finish_with_timing() {
 deploy_timing_on_exit() {
   local raw_exit_code="$?"
   local exit_code
+  local timing_exit_code
   local outcome="failed_pre_switch"
   local phase_status="failed"
 
@@ -611,28 +1100,57 @@ deploy_timing_on_exit() {
   fi
 
   exit_code="$(deploy_result_normalize_exit_code "$raw_exit_code")"
-  deploy_result_finalize "$exit_code" || true
+  if ! deploy_result_finalize "$exit_code"; then
+    exit_code="$(deploy_result_normalize_exit_code "$exit_code")"
+  fi
   if [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "0" ]]; then
-    case "${DEPLOY_RESULT_PHASE:-before_switch}" in
-      switch_partial)
-        outcome="failed_switch_recovery_required"
-        ;;
-      switch_complete)
-        outcome="failed_post_switch"
-        ;;
-    esac
-    if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "0" ]]; then
-      outcome="succeeded"
-      phase_status="ok"
-    elif [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
-      if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_ROLLBACK_SUCCESS" ]]; then
-        outcome="rollback_succeeded"
+    timing_exit_code="$exit_code"
+    if [[
+      "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_RESULT_PUBLICATION_FAILED" &&
+      -n "${DEPLOY_RESULT_ACTION_EXIT_CODE:-}"
+    ]]; then
+      timing_exit_code="$DEPLOY_RESULT_ACTION_EXIT_CODE"
+      case "${DEPLOY_RESULT_ACTION_OUTCOME:-}" in
+        succeeded)
+          outcome="succeeded"
+          phase_status="ok"
+          ;;
+        failed_pre_switch|interrupted_pre_switch)
+          outcome="failed_pre_switch"
+          ;;
+        switch_recovery_required)
+          outcome="failed_switch_recovery_required"
+          ;;
+        internal_rollback_succeeded)
+          outcome="rollback_succeeded"
+          phase_status="ok"
+          ;;
+        rollback_failed_or_unverifiable)
+          outcome="rollback_failed"
+          ;;
+      esac
+    else
+      case "${DEPLOY_RESULT_PHASE:-before_switch}" in
+        switch_partial)
+          outcome="failed_switch_recovery_required"
+          ;;
+        switch_complete)
+          outcome="failed_post_switch"
+          ;;
+      esac
+      if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "0" ]]; then
+        outcome="succeeded"
         phase_status="ok"
-      else
-        outcome="rollback_failed"
+      elif [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
+        if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_ROLLBACK_SUCCESS" ]]; then
+          outcome="rollback_succeeded"
+          phase_status="ok"
+        else
+          outcome="rollback_failed"
+        fi
       fi
     fi
-    deploy_timing_finish "$phase_status" "$outcome" "$exit_code" || true
+    deploy_timing_finish "$phase_status" "$outcome" "$timing_exit_code" || true
   fi
 
   trap - EXIT
@@ -1008,6 +1526,7 @@ Core options:
   --src DIR                    Directory with release archive     [default: /root/releases]
   --user WEBUSER               Web user for ownership/actions     [default: www-data]
   --reload LIST                Services to reload (CSV)           [default: apache2,<detected php-fpm>]
+  --result-file PATH           Publish durable deploy_result.v1 candidate
   --dry-run                    Print actions only
   --no-mark                    Skip writing _RELEASE marker
 
@@ -2398,10 +2917,12 @@ rollback_after_failure() {
     failed_path="${failed_base}_$(date -u +%Y%m%d_%H%M%S)"
   fi
 
-  echo "[!] Post-switch validation failed: $reason"
-  echo "[!] Starting automatic rollback"
-  echo "    Failed path target : $failed_path"
-  echo "    Restore source     : $PREV"
+  {
+    echo "[!] Post-switch validation failed: $reason"
+    echo "[!] Starting automatic rollback"
+    echo "    Failed path target : $failed_path"
+    echo "    Restore source     : $PREV"
+  } || true
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
@@ -2445,17 +2966,15 @@ rollback_after_failure() {
     rollback_ok=0
   fi
 
-  if [[ "$rollback_ok" -eq 1 ]]; then
-    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
-  fi
-
-  echo "[!] Deployment failed; rollback result summary"
-  echo "    Failure reason      : $reason"
-  echo "    Failed release path : $failed_path"
-  echo "    Restored app path   : $APP"
-  echo "    Config permission   : $config_result"
-  echo "    Renderer check      : $renderer_result"
-  echo "    Deep health check   : $deep_result"
+  {
+    echo "[!] Deployment failed; rollback result summary"
+    echo "    Failure reason      : $reason"
+    echo "    Failed release path : $failed_path"
+    echo "    Restored app path   : $APP"
+    echo "    Config permission   : $config_result"
+    echo "    Renderer check      : $renderer_result"
+    echo "    Deep health check   : $deep_result"
+  } || true
 
   if [[ "$rollback_ok" -eq 1 ]]; then
     rollback_result="rollback_succeeded"
@@ -2470,8 +2989,9 @@ rollback_after_failure() {
       "$reason" \
       "$rollback_result" \
       "$incident_report" \
-      "$incident_report_root"
-    echo "[!] Rollback succeeded, deployment remains failed."
+      "$incident_report_root" \
+      || true
+    echo "[!] Rollback succeeded, deployment remains failed." || true
     deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
   fi
 
@@ -2485,8 +3005,9 @@ rollback_after_failure() {
     "$reason" \
     "$rollback_result" \
     "$incident_report" \
-    "$incident_report_root"
-  echo "[!] Rollback failed or unverifiable. Manual intervention required."
+    "$incident_report_root" \
+    || true
+  echo "[!] Rollback failed or unverifiable. Manual intervention required." || true
   deploy_result_finish_with_timing "$EXIT_ROLLBACK_FAILED" failed rollback_failed
 }
 
@@ -2532,6 +3053,7 @@ while [[ $# -gt 0 ]]; do
     --src) SRC="$2"; shift 2;;
     --user) WEBUSER="$2"; shift 2;;
     --reload) RELOAD_SERVICES="$2"; shift 2;;
+    --result-file) DEPLOY_RESULT_RECEIPT_PATH="$2"; shift 2;;
     --dry-run) DRYRUN=1; shift 1;;
     --no-mark) MARK_RELEASE=0; shift 1;;
     --renderer-service) RENDERER_SERVICE="$2"; shift 2;;
@@ -2556,6 +3078,11 @@ while [[ $# -gt 0 ]]; do
     *) die "[!] Unknown option: $1";;
   esac
 done
+
+if [[ -n "$DEPLOY_RESULT_RECEIPT_PATH" && "$DRYRUN" -eq 1 ]]; then
+  die "[!] --result-file cannot be used with --dry-run."
+fi
+deploy_result_receipt_prepare || die "[!] Refusing unsafe deploy result target."
 
 [[ -n "$REL" ]] || die "[!] --rel is required."
 [[ "$REQUIRE_ZERO_SURPRISE" == "0" || "$REQUIRE_ZERO_SURPRISE" == "1" ]] \

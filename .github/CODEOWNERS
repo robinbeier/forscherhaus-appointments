@@ -141,6 +141,7 @@
 /assets/js/pages/service_categories.js @robinbeier
 /assets/js/pages/services.js @robinbeier
 /assets/js/pages/webhooks.js @robinbeier
+/deploy_ea.sh @robinbeier
 /docs/release-gate-booking-confirmation-pdf.md @robinbeier
 /docs/release-gate-customers-ui-smoke.md @robinbeier
 /docs/release-gate-dashboard.md @robinbeier
@@ -150,6 +151,7 @@
 /scripts/ci/** @robinbeier
 /scripts/ops/config/traffic_gate_catalog.v1.json @robinbeier
 /scripts/ops/customers_ui_smoke_principals.sh @robinbeier
+/scripts/ops/lib/DeployResultV1.php @robinbeier
 /scripts/ops/lib/DeploymentContractV1.php @robinbeier
 /scripts/ops/lib/TrafficGateV1.php @robinbeier
 /scripts/ops/prod_customers_ui_smoke.sh @robinbeier

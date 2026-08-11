@@ -47,8 +47,8 @@ class CiPerformanceBaselineTest extends TestCase
         self::assertSame(7, $policy['cohort_size']);
         self::assertSame(5, $policy['minimum_samples']);
         self::assertSame('nearest_rank', $policy['percentile_method']);
-        self::assertSame(1, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-08T01:16:14Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(2, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-11T02:14:03Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertMatchesRegularExpression(
             '/^sha256:[a-f0-9]{64}$/',
             $policy['workload_contract']['workflow_jobs_sha256'],
@@ -104,7 +104,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 123,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
             'conclusion' => 'success',
             'html_url' => 'https://example.test/actions/runs/123',
             'head_branch' => 'codex/example',
@@ -174,7 +174,7 @@ class CiPerformanceBaselineTest extends TestCase
 
         self::assertFalse($candidate['eligible']);
         self::assertContains(
-            'workload_contract_mismatch: run predates cohort epoch 2026-08-08T01:16:14Z',
+            'workload_contract_mismatch: run predates cohort epoch 2026-08-11T02:14:03Z',
             $candidate['reasons'],
         );
     }
@@ -184,7 +184,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 456,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
         ];
         $jobs = [
             $this->job('changes', 2, 10),
@@ -207,7 +207,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 321,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -241,7 +241,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $validRun = [
             'id' => 654,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -274,7 +274,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 789,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -306,7 +306,7 @@ class CiPerformanceBaselineTest extends TestCase
         $policy = $this->policy();
         $run = [
             'id' => 987,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -565,7 +565,7 @@ class CiPerformanceBaselineTest extends TestCase
         }
         $runs[] = [
             'id' => 101,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
             'conclusion' => 'success',
             'run_attempt' => 1,
             'event' => 'pull_request',
@@ -624,7 +624,7 @@ class CiPerformanceBaselineTest extends TestCase
 
         $run = [
             'id' => 123,
-            'created_at' => '2026-08-08T01:20:00Z',
+            'created_at' => '2026-08-11T02:20:00Z',
             'conclusion' => 'success',
             'html_url' => 'https://example.test/actions/runs/123',
             'head_branch' => 'codex/example',
@@ -843,7 +843,7 @@ class CiPerformanceBaselineTest extends TestCase
 
     private function timestamp(int $afterSeconds): string
     {
-        return gmdate('Y-m-d\TH:i:s\Z', strtotime('2026-08-08T01:20:00Z') + $afterSeconds);
+        return gmdate('Y-m-d\TH:i:s\Z', strtotime('2026-08-11T02:20:00Z') + $afterSeconds);
     }
 
     private function repoPolicyPath(): string

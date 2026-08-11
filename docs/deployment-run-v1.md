@@ -125,9 +125,53 @@ The public contract uses only stable pairs:
 `state_conflict` is a before-write terminal only. Once deploy or rollback
 execution has been reserved, the terminal reason must preserve that execution
 phase instead of relabeling it as an attachment or lock conflict.
+`contract_invalid` may also terminate a reserved deploy as
+`manual_recovery_required` only when the child verdict cannot be accepted; in
+that case deploy evidence is strictly `unknown`, invocation count is `1`, and
+exit/rollback outcome remain `null`/`not_observed`.
 
 Arbitrary child exit codes or free-form reasons are never copied into evidence.
 The future runner must normalize them into this table.
+
+## Deploy child result candidate
+
+When normal deploy is invoked with `--result-file ABSOLUTE_PATH`,
+`deploy_ea.sh` publishes one closed, secret-free `deploy_result.v1` receipt
+candidate.
+The object has exactly `schema`, `outcome`, and `exit_code`; it contains no
+timing, paths, commands, hosts, output, or free text. Its fixed bindings are:
+
+| Outcome | Exit | Deploy evidence |
+| --- | ---: | --- |
+| `succeeded` | `0` | `succeeded`, `1`, `0`, `not_run` |
+| `failed_pre_switch` | `30` | `failed`, `1`, `30`, `not_run` |
+| `internal_rollback_succeeded` | `30` | `failed`, `1`, `30`, `succeeded` |
+| `rollback_failed_or_unverifiable` | `31` | `failed`, `1`, `31`, `failed` |
+| `switch_recovery_required` | `32` | `failed`, `1`, `32`, `recovery_required` |
+| `interrupted_pre_switch` | `143` | `failed`, `1`, `143`, `not_run` |
+
+The caller supplies a run-specific target beneath an existing canonical
+root-owned mode-`0700` directory. The target must be absent at invocation start
+and is never overwritten or repaired. Publication uses a root-owned mode-`0600`
+single-link same-directory temporary file, mandatory file fsync, atomic
+no-replace publication, and mandatory parent-directory fsync. The writer
+returns a normal deploy exit only after all durability and final identity
+checks succeed. A receipt write, file-fsync, parent-fsync, or final identity
+failure instead returns `74`; `74` is deliberately not a valid
+`deploy_result.v1` outcome/exit pair. Best-effort cleanup removes only the
+writer's revalidated inode and fsyncs the parent again. A crash or unprovable
+cleanup may leave a complete candidate, but it remains unaccepted.
+
+The future Host Runner may accept a candidate only while holding both the
+host-global production-change lock and the run lock, after it has independently
+observed the terminal child/systemd result and proved an exact exit/outcome
+match against a canonical trusted receipt. It then binds the exact receipt-byte
+SHA-256 into its own atomically persisted and fsynced state. Missing, malformed,
+untrusted, mismatched, killed, exit-`74`, or otherwise unknown child results
+remain `unknown`/`null`, require manual recovery, and never authorize a respawn.
+The receipt alone is not authoritative. `deploy_timing.v1`, stdout, stderr, and
+process timing are never result oracles. Dry-run does not publish a receipt and
+rejects `--result-file`.
 
 ## Evidence contract
 
@@ -157,10 +201,14 @@ Its sections are:
 Not-yet-observed sections retain their exact keys with `null` values and a
 fixed `not_observed`/`not_invoked` status. They never invent zero hashes or
 success. An interruption directly after the `deploy_running` write-ahead
-reservation uses deploy status `unknown`, invocation count `1`, a `null` child
-exit, and rollback outcome `not_observed`; that shape is valid only for the
-direct `manual_recovery_required`/`interrupted` crash window and never permits a
-second invocation. A missing, unreadable, or pre-digest dump failure uses `invalid`:
+reservation for which no valid, bound child receipt can be recovered uses
+deploy status `unknown`, invocation count `1`, a `null` child exit, and rollback
+outcome `not_observed`. That shape is valid for either the direct
+`manual_recovery_required`/`interrupted` crash window or a rejected child result
+normalized to `manual_recovery_required`/`contract_invalid` exit `70`; neither
+case permits a second invocation. An observed `interrupted_pre_switch` receipt instead binds the
+known `failed_pre_switch` terminal, exit `143`, and rollback `not_run`. A
+missing, unreadable, or pre-digest dump failure uses `invalid`:
 the known policy and 14,400-second ceiling remain fixed, observed values keep
 their strict types, unavailable measurements stay `null`, and at least one
 measurement must remain unavailable. A terminal failure with exit `20` through
