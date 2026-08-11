@@ -215,9 +215,13 @@ final class DeploymentHostRunnerContractV1
         return $request;
     }
 
-    /** @param list<string> $existingLines @param array<string,mixed> $request */
-    public static function deployAttachmentDisposition(array $existingLines, array $request): string
-    {
+    /** @param list<string> $existingLines @param array<string,mixed> $request @param ?array<string,mixed> $terminalState */
+    public static function deployAttachmentDisposition(
+        array $existingLines,
+        array $request,
+        ?array $terminalState = null,
+        ?string $terminalEvidenceBytes = null,
+    ): string {
         self::validateDeployRequest($request);
         $candidateIntent = DeploymentContractV1::createIntentRecord(
             $request['run_id'],
@@ -229,28 +233,79 @@ final class DeploymentHostRunnerContractV1
             $request['artifact_expectation'],
         );
 
-        return DeploymentContractV1::attachmentDecision($existingLines, $candidateIntent);
+        return self::attachmentDispositionWithTerminalBundle(
+            DeploymentContractV1::attachmentDecision($existingLines, $candidateIntent),
+            $existingLines,
+            $terminalState,
+            $terminalEvidenceBytes,
+        );
     }
 
-    /** @param list<string> $existingLines @param array<string,mixed> $request */
-    public static function recoveryAttachmentDisposition(array $existingLines, array $request): string
-    {
+    /** @param list<string> $existingLines @param array<string,mixed> $request @param ?array<string,mixed> $terminalState */
+    public static function recoveryAttachmentDisposition(
+        array $existingLines,
+        array $request,
+        ?array $terminalState = null,
+        ?string $terminalEvidenceBytes = null,
+    ): string {
         self::validateRecoveryRequest($request);
         $run = DeploymentContractV1::validateRunLines($existingLines);
         if ($run['run_id'] !== $request['run_id'] || !hash_equals($run['intent_sha256'], $request['intent_sha256'])) {
             throw new RuntimeException('recovery request does not bind the existing run intent');
         }
         if ($run['state'] === 'post_gates_running') {
+            self::assertNoTerminalAttachmentBundle($terminalState, $terminalEvidenceBytes);
             return 'accepted';
         }
         if ($run['state'] === DeploymentContractV1::ROLLBACK_RESERVATION_STATE) {
+            self::assertNoTerminalAttachmentBundle($terminalState, $terminalEvidenceBytes);
             return 'attach_observe_only';
         }
         if ($run['recovery'] === 'terminal') {
-            return 'terminal';
+            return self::attachmentDispositionWithTerminalBundle(
+                'terminal',
+                $existingLines,
+                $terminalState,
+                $terminalEvidenceBytes,
+            );
         }
 
         throw new RuntimeException('recovery request is incompatible with the current state');
+    }
+
+    /**
+     * @param list<string> $existingLines
+     * @param ?array<string,mixed> $terminalState
+     */
+    private static function attachmentDispositionWithTerminalBundle(
+        string $disposition,
+        array $existingLines,
+        ?array $terminalState,
+        ?string $terminalEvidenceBytes,
+    ): string {
+        if ($disposition !== 'terminal') {
+            self::assertNoTerminalAttachmentBundle($terminalState, $terminalEvidenceBytes);
+            return $disposition;
+        }
+        if ($terminalState === null || $terminalEvidenceBytes === null) {
+            throw new RuntimeException('terminal attachment requires durable state and evidence');
+        }
+        $eventsBytes = implode("\n", $existingLines) . "\n";
+        if (self::terminalStateCacheDisposition($terminalState, $eventsBytes, $terminalEvidenceBytes) !== 'current') {
+            throw new RuntimeException('terminal attachment bundle is not current');
+        }
+
+        return 'terminal';
+    }
+
+    /** @param ?array<string,mixed> $terminalState */
+    private static function assertNoTerminalAttachmentBundle(
+        ?array $terminalState,
+        ?string $terminalEvidenceBytes,
+    ): void {
+        if ($terminalState !== null || $terminalEvidenceBytes !== null) {
+            throw new RuntimeException('nonterminal attachment cannot consume a terminal bundle');
+        }
     }
 
     /**

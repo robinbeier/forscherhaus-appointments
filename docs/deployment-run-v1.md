@@ -525,7 +525,12 @@ Unknown or incomplete flags exit `64`; contract-invalid input exits `70`; an
 intent, active-run, lock, phase, or unit conflict exits `75`. Accepted start and
 nonterminal attachment exit `0`. Terminal attachment also exits `0` as a status
 operation while returning the immutable stored lifecycle exit/reason inside the
-response; it does not replay that failure as the CLI process exit.
+response; it does not replay that failure as the CLI process exit. Neither a
+deploy nor recovery attachment may return `terminal` from `events.jsonl` alone:
+the caller must also supply the matching current terminal `state.json` and
+canonical `evidence.json`, and the complete bundle must pass the same strict
+terminal-cache validation. A terminal journal with either derived file absent
+or mismatched remains reconciliation-required.
 
 Normal stdout is one canonical `deployment_host_runner_response.v1` object with
 exactly `schema`, `run_id`, `intent_sha256`, `action`, `disposition`, `state`,

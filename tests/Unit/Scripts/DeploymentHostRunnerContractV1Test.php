@@ -356,6 +356,38 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertSame(0, DeploymentHostRunnerContractV1::cliExitCode($response));
     }
 
+    #[DataProvider('validTerminalResponseProvider')]
+    public function testCliResponseAcceptsEveryDefinedTerminalResult(string $state, int $exitCode, string $reason): void
+    {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'action' => 'reconcile',
+            'disposition' => 'terminal',
+            'state' => $state,
+            'result_exit_code' => $exitCode,
+            'result_reason' => $reason,
+        ];
+
+        DeploymentHostRunnerContractV1::validateResponse($response);
+
+        self::assertSame(0, DeploymentHostRunnerContractV1::cliExitCode($response));
+    }
+
+    public static function validTerminalResponseProvider(): iterable
+    {
+        yield 'succeeded' => ['succeeded', 0, 'ok'];
+        yield 'failed pre-switch' => ['failed_pre_switch', 30, 'deploy_failed'];
+        yield 'interrupted pre-switch' => ['failed_pre_switch', 143, 'interrupted'];
+        yield 'switch recovery required' => ['failed_switch_recovery_required', 32, 'switch_recovery_required'];
+        yield 'post-switch rollback succeeded' => ['failed_post_switch_rollback_succeeded', 30, 'deploy_failed'];
+        yield 'post-switch rollback failed' => ['failed_post_switch_rollback_failed', 31, 'rollback_failed'];
+        yield 'manual rollback failed' => ['manual_recovery_required', 31, 'rollback_failed'];
+        yield 'manual contract invalid' => ['manual_recovery_required', 70, 'contract_invalid'];
+        yield 'manual interrupted' => ['manual_recovery_required', 143, 'interrupted'];
+    }
+
     public function testCliConflictUsesOnlyStableStateConflictPair(): void
     {
         $response = [
@@ -584,6 +616,123 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
 
         $this->expectException(RuntimeException::class);
         DeploymentHostRunnerContractV1::recoveryAttachmentDisposition($this->runThrough('deploy_running'), $request);
+    }
+
+    public function testTerminalAttachmentRequiresMatchingDurableStateAndEvidence(): void
+    {
+        $lines = $this->runThrough('succeeded');
+        $events = implode("\n", $lines) . "\n";
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
+        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+
+        self::assertSame(
+            'terminal',
+            DeploymentHostRunnerContractV1::deployAttachmentDisposition(
+                $lines,
+                $this->deployRequest(),
+                $state,
+                $evidenceBytes,
+            ),
+        );
+        self::assertSame(
+            'terminal',
+            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition(
+                $lines,
+                $this->recoveryRequest(),
+                $state,
+                $evidenceBytes,
+            ),
+        );
+    }
+
+    #[DataProvider('terminalAttachmentWithoutCompleteBundleProvider')]
+    public function testTerminalAttachmentRejectsAnIncompleteBundle(
+        string $action,
+        bool $includeState,
+        bool $includeEvidence,
+    ): void {
+        $lines = $this->runThrough('succeeded');
+        $state = $includeState ? $this->terminalState('succeeded', 0, 'ok') : null;
+        $evidenceBytes = $includeEvidence ? "{}\n" : null;
+        $request = $action === 'deploy' ? $this->deployRequest() : $this->recoveryRequest();
+
+        $this->expectException(RuntimeException::class);
+        if ($action === 'deploy') {
+            DeploymentHostRunnerContractV1::deployAttachmentDisposition($lines, $request, $state, $evidenceBytes);
+        } else {
+            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition($lines, $request, $state, $evidenceBytes);
+        }
+    }
+
+    public static function terminalAttachmentWithoutCompleteBundleProvider(): iterable
+    {
+        yield 'deploy missing state and evidence' => ['deploy', false, false];
+        yield 'deploy missing evidence' => ['deploy', true, false];
+        yield 'deploy missing state' => ['deploy', false, true];
+        yield 'recovery missing state and evidence' => ['recovery', false, false];
+        yield 'recovery missing evidence' => ['recovery', true, false];
+        yield 'recovery missing state' => ['recovery', false, true];
+    }
+
+    #[DataProvider('nonterminalAttachmentProvider')]
+    public function testNonterminalAttachmentRejectsATerminalBundle(string $action, string $stateName): void
+    {
+        $lines = $this->runThrough($stateName);
+        $request = $action === 'deploy' ? $this->deployRequest() : $this->recoveryRequest();
+
+        $this->expectException(RuntimeException::class);
+        if ($action === 'deploy') {
+            DeploymentHostRunnerContractV1::deployAttachmentDisposition($lines, $request, $this->state(), "{}\n");
+        } else {
+            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition($lines, $request, $this->state(), "{}\n");
+        }
+    }
+
+    public static function nonterminalAttachmentProvider(): iterable
+    {
+        yield 'deploy pre-reservation' => ['deploy', 'artifact_verified'];
+        yield 'recovery before rollback reservation' => ['recovery', 'post_gates_running'];
+    }
+
+    #[DataProvider('invalidActiveRunProvider')]
+    public function testActiveRunClaimRejectsMissingExtraOrMistypedFields(array $claim): void
+    {
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validateActiveRun($claim);
+    }
+
+    public static function invalidActiveRunProvider(): iterable
+    {
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'state' => 'deploy_running',
+            'sequence' => 11,
+            'events_sha256' => self::SHA,
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        $missing = $claim;
+        unset($missing['sequence']);
+        yield 'missing sequence' => [$missing];
+
+        yield 'extra key' => [$claim + ['detail' => '/secret/path']];
+
+        $mistypedSequence = $claim;
+        $mistypedSequence['sequence'] = '11';
+        yield 'mistyped sequence' => [$mistypedSequence];
+
+        $mistypedHash = $claim;
+        $mistypedHash['events_sha256'] = 123;
+        yield 'mistyped events hash' => [$mistypedHash];
+
+        $invalidTimestamp = $claim;
+        $invalidTimestamp['claimed_at_utc'] = '2026-08-11T15:00:00+02:00';
+        yield 'non-UTC timestamp' => [$invalidTimestamp];
     }
 
     public function testDurableActiveRunBlocksAnotherRunAndAllowsExactReconcile(): void
