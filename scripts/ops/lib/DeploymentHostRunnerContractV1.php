@@ -815,6 +815,13 @@ final class DeploymentHostRunnerContractV1
         ) {
             throw new RuntimeException('rollback_running requires the dedicated rollback reservation');
         }
+        if (
+            !self::isTerminalState($state['state']) &&
+            $state['state'] !== DeploymentContractV1::ROLLBACK_RESERVATION_STATE &&
+            $state['rollback']['invocation_count'] !== 0
+        ) {
+            throw new RuntimeException('runner state invents a rollback reservation');
+        }
     }
 
     /** @param array<string,mixed> $state */

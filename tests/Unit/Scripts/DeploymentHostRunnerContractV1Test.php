@@ -210,6 +210,23 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::validateState($state);
     }
 
+    public function testStateRejectsRollbackReservationBeforeRollbackRunning(): void
+    {
+        $state = $this->state();
+        $state['rollback'] = [
+            'request_sha256' => self::SHA,
+            'execution_input_sha256' => self::SHA,
+            'invocation_count' => 1,
+            'unit_name' => DeploymentHostRunnerContractV1::unitName('rollback', self::RUN_ID, self::INTENT_SHA),
+            'unit_state' => 'running',
+            'observed_exit_code' => null,
+            'verdict' => 'unknown',
+        ];
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validateState($state);
+    }
+
     public function testTerminalStateRequiresStableResultAndEvidenceBinding(): void
     {
         $state = $this->state();
@@ -877,6 +894,54 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'state' => 'deploy_running',
             'sequence' => count($claimLines),
             'events_sha256' => hash('sha256', $claimEvents),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        self::assertSame(
+            'attach_observe_only',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                null,
+                self::RUN_ID,
+                $state['intent_sha256'],
+            ),
+        );
+    }
+
+    public function testRollbackRunningActiveClaimRemainsObserveOnly(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->transition($lines, DeploymentContractV1::ROLLBACK_RESERVATION_STATE);
+        $events = implode("\n", $lines) . "\n";
+        $state = $this->state();
+        $state['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $state['state'] = DeploymentContractV1::ROLLBACK_RESERVATION_STATE;
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['active_action'] = 'rollback';
+        $state['deploy']['unit_name'] = DeploymentHostRunnerContractV1::unitName(
+            'deploy',
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+        $state['rollback'] = [
+            'request_sha256' => self::SHA,
+            'execution_input_sha256' => self::SHA,
+            'invocation_count' => 1,
+            'unit_name' => DeploymentHostRunnerContractV1::unitName('rollback', self::RUN_ID, $state['intent_sha256']),
+            'unit_state' => 'running',
+            'observed_exit_code' => null,
+            'verdict' => 'unknown',
+        ];
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => DeploymentContractV1::ROLLBACK_RESERVATION_STATE,
+            'sequence' => count($lines),
+            'events_sha256' => hash('sha256', $events),
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
 
