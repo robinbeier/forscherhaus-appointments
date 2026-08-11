@@ -11,6 +11,50 @@ require_once __DIR__ . '/../../../scripts/release-gate/lib/ReleaseArtifactValida
 
 final class CustomersUiSmokeOpsScriptsTest extends TestCase
 {
+    private const CONTRACT_ASSET_FIXTURES = [
+        'assets/js/http/customers_http_client.min.js' => "rob441-customers-http-client-fixture\n",
+        'assets/js/pages/customers.min.js' => "rob441-customers-page-fixture\n",
+    ];
+
+    /** @var resource|null */
+    private $contractAssetFixtureLock = null;
+
+    /** @var array<string, string> */
+    private array $createdContractAssetFixtures = [];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $repoRoot = dirname(__DIR__, 3);
+        $this->contractAssetFixtureLock = $this->acquireContractAssetFixtureLock($repoRoot);
+
+        try {
+            $this->createMissingContractAssetFixtures($repoRoot);
+        } catch (\Throwable $error) {
+            try {
+                $this->removeCreatedContractAssetFixtures();
+            } finally {
+                $this->releaseContractAssetFixtureLock();
+            }
+
+            throw $error;
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        try {
+            $this->removeCreatedContractAssetFixtures();
+        } finally {
+            try {
+                $this->releaseContractAssetFixtureLock();
+            } finally {
+                parent::tearDown();
+            }
+        }
+    }
+
     public function testBothWrappersExposeOnlySafeHelpWithoutRemoteAccess(): void
     {
         foreach (
@@ -276,6 +320,161 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
                 }
             }
             self::assertTrue(rmdir($harnessDir));
+        }
+    }
+
+    /** @return resource */
+    private function acquireContractAssetFixtureLock(string $repoRoot)
+    {
+        $lockPath = sys_get_temp_dir() . '/rob441-contract-assets-' . hash('sha256', $repoRoot) . '.lock';
+
+        if (is_link($lockPath)) {
+            throw new \RuntimeException('Contract asset fixture lock path is an unsafe symlink.');
+        }
+
+        $lock = fopen($lockPath, 'c');
+        if ($lock === false) {
+            throw new \RuntimeException('Contract asset fixture lock could not be opened.');
+        }
+
+        if (!flock($lock, LOCK_EX)) {
+            fclose($lock);
+            throw new \RuntimeException('Contract asset fixture lock could not be acquired.');
+        }
+
+        $pathMetadata = lstat($lockPath);
+        $handleMetadata = fstat($lock);
+        if (
+            $pathMetadata === false ||
+            $handleMetadata === false ||
+            is_link($lockPath) ||
+            $pathMetadata['dev'] !== $handleMetadata['dev'] ||
+            $pathMetadata['ino'] !== $handleMetadata['ino']
+        ) {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+            throw new \RuntimeException('Contract asset fixture lock path changed while acquiring.');
+        }
+
+        return $lock;
+    }
+
+    private function releaseContractAssetFixtureLock(): void
+    {
+        if (!is_resource($this->contractAssetFixtureLock)) {
+            throw new \RuntimeException('Contract asset fixture lock is not held.');
+        }
+
+        $unlocked = flock($this->contractAssetFixtureLock, LOCK_UN);
+        $closed = fclose($this->contractAssetFixtureLock);
+        $this->contractAssetFixtureLock = null;
+
+        if (!$unlocked || !$closed) {
+            throw new \RuntimeException('Contract asset fixture lock could not be released safely.');
+        }
+    }
+
+    private function createMissingContractAssetFixtures(string $repoRoot): void
+    {
+        foreach (self::CONTRACT_ASSET_FIXTURES as $relativePath => $contents) {
+            $absolutePath = $repoRoot . '/' . $relativePath;
+            clearstatcache(true, $absolutePath);
+
+            if (is_link($absolutePath)) {
+                throw new \RuntimeException('Contract asset fixture path is an unsafe symlink: ' . $relativePath);
+            }
+
+            if (file_exists($absolutePath)) {
+                if (!is_file($absolutePath)) {
+                    throw new \RuntimeException('Contract asset fixture path is not a regular file: ' . $relativePath);
+                }
+
+                continue;
+            }
+
+            $handle = @fopen($absolutePath, 'x+b');
+            if ($handle === false) {
+                throw new \RuntimeException('Contract asset fixture path changed before create: ' . $relativePath);
+            }
+
+            $createdMetadata = fstat($handle);
+            $written = fwrite($handle, $contents);
+            $closed = fclose($handle);
+
+            if ($createdMetadata === false || $written !== strlen($contents) || !$closed) {
+                $this->removeIncompleteContractAssetFixture($absolutePath, $createdMetadata);
+                throw new \RuntimeException('Contract asset fixture could not be written: ' . $relativePath);
+            }
+
+            clearstatcache(true, $absolutePath);
+            $metadata = lstat($absolutePath);
+            $actualSha256 =
+                is_file($absolutePath) && !is_link($absolutePath) ? hash_file('sha256', $absolutePath) : false;
+            $expectedSha256 = hash('sha256', $contents);
+            $this->createdContractAssetFixtures[$absolutePath] = $expectedSha256;
+
+            if (
+                $metadata === false ||
+                is_link($absolutePath) ||
+                !is_file($absolutePath) ||
+                !is_string($actualSha256) ||
+                !hash_equals($expectedSha256, $actualSha256)
+            ) {
+                throw new \RuntimeException('Contract asset fixture is unsafe after create: ' . $relativePath);
+            }
+        }
+    }
+
+    /** @param array{dev:int,ino:int}|false $createdMetadata */
+    private function removeIncompleteContractAssetFixture(string $absolutePath, array|false $createdMetadata): void
+    {
+        clearstatcache(true, $absolutePath);
+        $metadata = lstat($absolutePath);
+
+        if (
+            $createdMetadata === false ||
+            $metadata === false ||
+            is_link($absolutePath) ||
+            !is_file($absolutePath) ||
+            $metadata['dev'] !== $createdMetadata['dev'] ||
+            $metadata['ino'] !== $createdMetadata['ino'] ||
+            !unlink($absolutePath)
+        ) {
+            throw new \RuntimeException('Incomplete contract asset fixture could not be cleaned safely.');
+        }
+    }
+
+    private function removeCreatedContractAssetFixtures(): void
+    {
+        $cleanupFailed = false;
+
+        foreach (array_reverse($this->createdContractAssetFixtures, true) as $absolutePath => $expectedSha256) {
+            clearstatcache(true, $absolutePath);
+            $metadata = lstat($absolutePath);
+            $actualSha256 =
+                is_file($absolutePath) && !is_link($absolutePath) ? hash_file('sha256', $absolutePath) : false;
+
+            if (
+                $metadata === false ||
+                is_link($absolutePath) ||
+                !is_file($absolutePath) ||
+                !is_string($actualSha256) ||
+                !hash_equals($expectedSha256, $actualSha256)
+            ) {
+                $cleanupFailed = true;
+                continue;
+            }
+
+            if (!unlink($absolutePath)) {
+                $cleanupFailed = true;
+                continue;
+            }
+
+            unset($this->createdContractAssetFixtures[$absolutePath]);
+        }
+
+        if ($cleanupFailed) {
+            throw new \RuntimeException('Created contract asset fixtures could not be cleaned safely.');
         }
     }
 
