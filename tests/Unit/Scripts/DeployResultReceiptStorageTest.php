@@ -495,6 +495,40 @@ final class DeployResultReceiptStorageTest extends TestCase
         yield 'rollback failure' => [31, 'switch_complete', 1, 'failed', 'rollback_failed'];
     }
 
+    public function testRollbackIncidentIsEmittedBeforeReceiptPublicationFailure(): void
+    {
+        $target = $this->protectedDirectory . '/rollback-reporting.json';
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DEPLOY_RESULT_RECEIPT_PATH="$1"
+            DEPLOY_RESULT_RECEIPT_TEST_FAILURE_POINT=parent_fsync
+            DEPLOY_RESULT_PHASE=switch_complete
+            DRYRUN=0
+            APP=/root/fh-active
+            PREV=/root/fh-previous
+            REL=receipt-test
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/root/deploy_ea.sh
+            deploy_result_receipt_prepare
+            deploy_result_trap_install
+            deploy_timing_begin_rollback() { :; }
+            bash() { return 0; }
+            restart_renderer_service() { return 0; }
+            probe_renderer_health() { return 0; }
+            reload_services() { return 0; }
+            probe_deep_health_contract() { return 0; }
+            emit_zero_surprise_incident() { builtin printf 'incident-emitted\n'; }
+            rollback_after_failure 'redacted failure'
+            BASH
+            ,
+            [$target],
+        );
+
+        self::assertSame(74, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], "incident-emitted\n"));
+    }
+
     #[DataProvider('exitTrapPublicationFailureProvider')]
     public function testExitTrapPreservesObservedTimingWhenPublicationFails(
         string $body,

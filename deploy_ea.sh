@@ -2964,10 +2964,6 @@ rollback_after_failure() {
     rollback_ok=0
   fi
 
-  if [[ "$rollback_ok" -eq 1 ]]; then
-    deploy_result_finalize "$EXIT_ROLLBACK_SUCCESS"
-  fi
-
   echo "[!] Deployment failed; rollback result summary"
   echo "    Failure reason      : $reason"
   echo "    Failed release path : $failed_path"
