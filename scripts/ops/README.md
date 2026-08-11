@@ -21,9 +21,10 @@ For the shared passive Deploy/Customers traffic decision, use
 `docs/traffic-gate-v1.md` and `prod_traffic_gate.sh`. The gate reads the full
 current/rotated Apache log set and emits only versioned aggregate evidence.
 
-For the pure ROB-455 deploy intent, lifecycle, and evidence contract, use
-`docs/deployment-run-v1.md` and `validate_deployment_contract_v1.php`. This
-contract slice does not install a host runner or activate production behavior.
+For the pure ROB-455 deploy intent, lifecycle, child-result receipt, and evidence
+contract, use `docs/deployment-run-v1.md`, `lib/DeployResultV1.php`, and
+`validate_deployment_contract_v1.php`. This contract slice does not install a
+host runner or activate production behavior.
 
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
 and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
@@ -71,6 +72,10 @@ Script inventory:
   `deployment_run.v1` JSONL plus closed `deployment_evidence.v1` JSON without
   invoking a deploy or trusting a production path; the evidence keeps the
   normal deploy reservation separate from any at-most-once post-gate recovery
+- `lib/DeployResultV1.php` validates a closed canonical `deploy_result.v1`
+  child-receipt candidate and derives its fixed deploy-evidence tuple without
+  reading timing or process output; authority additionally requires an
+  independently observed matching child exit and durable runner-state binding
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything

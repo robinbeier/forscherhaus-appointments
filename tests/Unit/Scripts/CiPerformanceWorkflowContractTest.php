@@ -21,8 +21,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
         );
 
-        self::assertSame(1, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-08T01:16:14Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(2, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-11T02:14:03Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),

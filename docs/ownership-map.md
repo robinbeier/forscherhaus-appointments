@@ -354,6 +354,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/libraries/Provider_ui_smoke_fixture.php`
   - `.github/workflows/ci.yml`
   - `scripts/ci/dashboard_integration_smoke.php`
+  - `scripts/ops/lib/DeployResultV1.php`
   - `scripts/ops/lib/TrafficGateV1.php`
   - `scripts/ops/lib/DeploymentContractV1.php`
   - `scripts/ops/prod_traffic_gate.sh`
@@ -370,6 +371,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `scripts/ci/`
   - `scripts/ops/customers_ui_smoke_principals.sh`
   - `scripts/ops/config/traffic_gate_catalog.v1.json`
+  - `scripts/ops/lib/DeployResultV1.php`
   - `scripts/ops/lib/DeploymentContractV1.php`
   - `scripts/ops/lib/TrafficGateV1.php`
   - `scripts/ops/prod_customers_ui_smoke.sh`

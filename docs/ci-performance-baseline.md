@@ -16,10 +16,10 @@ enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
-- Workload contract v1 starts at cohort epoch `2026-08-08T01:16:14Z`, the first
-  run created from the expanded `build-test` workload. Runs before this instant
-  are excluded as `workload_contract_mismatch` even when their deep-runtime
-  flags happen to match.
+- Workload contract v2 starts at cohort epoch `2026-08-11T02:14:03Z`, when the
+  root deployment regression list added the authoritative deploy-result storage
+  suite. Runs before this instant are excluded as `workload_contract_mismatch`
+  even when their deep-runtime flags happen to match.
 - Selection is fail-closed: a run is comparable only when its complete profile
   fingerprint equals the policy fingerprint and it is on or after the workload
   epoch. Missing jobs, job-log fields, or later API pages therefore cannot
@@ -37,9 +37,9 @@ and fully observed phase rankings in
 
 ## Versioned Workload Contract
 
-Workload contract v1 pins the canonicalized definitions of every job in
+Workload contract v2 pins the canonicalized definitions of every job in
 `.github/workflows/ci.yml` to
-`sha256:cb33cc29d160ae3c7ef2b67fc4a56ad085b16a02f7d0fb41a66dcd2b080d80f3`.
+`sha256:62355c5c11f6726326acb93e7ae5269dd5aaa52a3238781205ae553808217c80`.
 The workflow contract test also requires every job to have an explicit expected
 `success` or `skipped` conclusion in the comparison profile. This covers the
 always-active `build-test`, JavaScript lint, PHPStan, typed request DTO, and both
@@ -94,7 +94,7 @@ a capped 100-result page cannot be mistaken for the final page.
 There are currently **0 valid post-epoch baseline samples out of the required
 5**. Run
 [31232249260](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/31232249260)
-was created at the epoch from the expanded workflow, but it was a draft-PR run
+predates the current workload contract and was also a draft-PR run
 whose full-profile jobs were intentionally skipped. It is not a baseline
 sample. No baseline median or p75 is established.
 

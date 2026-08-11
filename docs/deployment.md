@@ -135,6 +135,27 @@ Normal deploy execution exposes a stable result seam for the host-side caller:
   partial switch requires recovery.
 - `143` means SIGTERM interrupted the deploy before any live switch.
 
+For a machine-readable result candidate, the root caller passes
+`--result-file` with an exact absolute path beneath an existing canonical
+root-owned mode-`0700` directory. The leaf must not exist; stale regular files,
+symlinks, hardlinks, unsafe ancestors, and noncanonical paths are hard stops and
+are never normalized or overwritten. The terminal `deploy_result.v1` receipt
+contains only the closed keys `schema`, `outcome`, and `exit_code`, uses the six
+fixed outcome/exit bindings documented in `docs/deployment-run-v1.md`, and is
+published once through file fsync, atomic no-replace publication, and
+parent-directory fsync. Receipt write, fsync, publication, or final identity
+failure returns abnormal exit `74`, which is not a valid receipt outcome pair.
+The observational `deploy_timing.v1` summary continues to describe the actual
+deploy action and its original exit/outcome; it does not relabel that action as
+exit `74`.
+The later Host Runner accepts bytes only after independently observing the
+terminal child result and proving its exact exit/outcome match under the global
+and per-run locks; it then persists the exact receipt-byte SHA-256 in durable
+runner state. Missing, invalid, mismatched, exit-`74`, killed, or unknown results
+remain unknown and require manual recovery without respawn. Receipt bytes,
+timing, and output are not standalone verdict oracles. `--result-file` is not
+available in dry-run mode. Without it, existing deploy exits are unchanged.
+
 An otherwise unhandled failure after a completed switch enters the same
 automatic rollback path before returning `30` or `31`. The independent safety
 phase that selects these exits is not derived from `deploy_timing.v1`; timing
