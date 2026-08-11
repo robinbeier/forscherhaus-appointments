@@ -15,12 +15,16 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         'assets/js/http/customers_http_client.min.js' => "rob441-customers-http-client-fixture\n",
         'assets/js/pages/customers.min.js' => "rob441-customers-page-fixture\n",
     ];
+    private const CONTRACT_ASSET_LOCK_DIRECTORY = 'storage/logs/.rob441-contract-assets.lock';
+    private const CONTRACT_ASSET_LOCK_WAIT_MICROSECONDS = 30_000_000;
 
     /** @var resource|null */
     private $contractAssetFixtureLock = null;
 
     /** @var array<string, string> */
     private array $createdContractAssetFixtures = [];
+
+    private ?string $contractAssetFixtureLockDirectory = null;
 
     protected function setUp(): void
     {
@@ -69,6 +73,14 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             self::assertStringContainsString('Customers UI smoke', $result['output']);
             self::assertStringNotContainsString('CUSTOMERS_UI_SMOKE_PASSWORD=', $result['output']);
         }
+    }
+
+    public function testContractAssetFixtureUsesSharedRepoLockDirectory(): void
+    {
+        self::assertNotNull($this->contractAssetFixtureLockDirectory);
+        self::assertDirectoryExists($this->contractAssetFixtureLockDirectory);
+        self::assertFalse(is_link($this->contractAssetFixtureLockDirectory));
+        self::assertFalse(@mkdir($this->contractAssetFixtureLockDirectory, 0700));
     }
 
     public function testOperatorWrapperRejectsTraversalBeforeSsh(): void
@@ -326,13 +338,13 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
     /** @return resource */
     private function acquireContractAssetFixtureLock(string $repoRoot)
     {
-        $lockPath = sys_get_temp_dir() . '/rob441-contract-assets-' . hash('sha256', $repoRoot) . '.lock';
+        $lockPath = $repoRoot . '/tests/Unit/Scripts/CustomersUiSmokeOpsScriptsTest.php';
 
-        if (is_link($lockPath)) {
-            throw new \RuntimeException('Contract asset fixture lock path is an unsafe symlink.');
+        if (is_link($lockPath) || !is_file($lockPath)) {
+            throw new \RuntimeException('Contract asset fixture lock target is unsafe.');
         }
 
-        $lock = fopen($lockPath, 'c');
+        $lock = fopen($lockPath, 'r');
         if ($lock === false) {
             throw new \RuntimeException('Contract asset fixture lock could not be opened.');
         }
@@ -348,6 +360,7 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             $pathMetadata === false ||
             $handleMetadata === false ||
             is_link($lockPath) ||
+            !is_file($lockPath) ||
             $pathMetadata['dev'] !== $handleMetadata['dev'] ||
             $pathMetadata['ino'] !== $handleMetadata['ino']
         ) {
@@ -356,7 +369,38 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             throw new \RuntimeException('Contract asset fixture lock path changed while acquiring.');
         }
 
+        try {
+            $this->acquireSharedContractAssetFixtureLock($repoRoot);
+        } catch (\Throwable $error) {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+            throw $error;
+        }
+
         return $lock;
+    }
+
+    private function acquireSharedContractAssetFixtureLock(string $repoRoot): void
+    {
+        $lockDirectory = $repoRoot . '/' . self::CONTRACT_ASSET_LOCK_DIRECTORY;
+        $deadline = hrtime(true) + self::CONTRACT_ASSET_LOCK_WAIT_MICROSECONDS * 1_000;
+
+        do {
+            clearstatcache(true, $lockDirectory);
+
+            if (is_link($lockDirectory) || (file_exists($lockDirectory) && !is_dir($lockDirectory))) {
+                throw new \RuntimeException('Shared contract asset fixture lock path is unsafe.');
+            }
+
+            if (@mkdir($lockDirectory, 0700)) {
+                $this->contractAssetFixtureLockDirectory = $lockDirectory;
+                return;
+            }
+
+            usleep(10_000);
+        } while (hrtime(true) < $deadline);
+
+        throw new \RuntimeException('Shared contract asset fixture lock could not be acquired.');
     }
 
     private function releaseContractAssetFixtureLock(): void
@@ -365,11 +409,25 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             throw new \RuntimeException('Contract asset fixture lock is not held.');
         }
 
+        $directoryReleased = false;
+
+        if ($this->contractAssetFixtureLockDirectory !== null) {
+            clearstatcache(true, $this->contractAssetFixtureLockDirectory);
+            $directoryReleased =
+                !is_link($this->contractAssetFixtureLockDirectory) &&
+                is_dir($this->contractAssetFixtureLockDirectory) &&
+                rmdir($this->contractAssetFixtureLockDirectory);
+
+            if ($directoryReleased) {
+                $this->contractAssetFixtureLockDirectory = null;
+            }
+        }
+
         $unlocked = flock($this->contractAssetFixtureLock, LOCK_UN);
         $closed = fclose($this->contractAssetFixtureLock);
         $this->contractAssetFixtureLock = null;
 
-        if (!$unlocked || !$closed) {
+        if (!$directoryReleased || !$unlocked || !$closed) {
             throw new \RuntimeException('Contract asset fixture lock could not be released safely.');
         }
     }
