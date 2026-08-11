@@ -358,6 +358,7 @@ final class DeploymentHostRunnerContractV1
             if ($cacheDisposition !== 'current') {
                 throw new RuntimeException('terminal journal requires matching durable state and evidence');
             }
+            self::assertReservedUnitsStopped($referencedState);
             if ($claim['state'] !== $referencedState['state']) {
                 if (!in_array($claim['state'], self::OBSERVE_ONLY_STATES, true)) {
                     throw new RuntimeException('terminal active run claim contradicts the durable terminal state');
@@ -822,6 +823,14 @@ final class DeploymentHostRunnerContractV1
         ) {
             throw new RuntimeException('runner state invents a rollback reservation');
         }
+        if (
+            in_array($state['state'], ['post_gates_running', DeploymentContractV1::ROLLBACK_RESERVATION_STATE], true) &&
+            ($state['deploy']['unit_state'] !== 'exited' ||
+                $state['deploy']['observed_exit_code'] !== 0 ||
+                $state['deploy']['receipt_sha256'] === null)
+        ) {
+            throw new RuntimeException('post-deploy state requires a completed successful deploy result');
+        }
     }
 
     /** @param array<string,mixed> $state */
@@ -904,6 +913,25 @@ final class DeploymentHostRunnerContractV1
         }
         if (in_array($rollback['verdict'], ['succeeded', 'failed'], true) && $rollback['observed_exit_code'] === null) {
             throw new RuntimeException('known rollback verdict requires an independently observed exit');
+        }
+        if ($rollback['verdict'] === 'succeeded' && $rollback['observed_exit_code'] !== 0) {
+            throw new RuntimeException('successful rollback verdict requires exit zero');
+        }
+        if ($rollback['verdict'] === 'failed' && $rollback['observed_exit_code'] === 0) {
+            throw new RuntimeException('failed rollback verdict requires a nonzero exit');
+        }
+    }
+
+    /** @param array<string,mixed> $state */
+    private static function assertReservedUnitsStopped(array $state): void
+    {
+        foreach (['deploy', 'rollback'] as $action) {
+            if (
+                $state[$action]['invocation_count'] === 1 &&
+                !in_array($state[$action]['unit_state'], ['exited', 'failed', 'killed'], true)
+            ) {
+                throw new RuntimeException('terminal active run claim requires every reserved unit to be stopped');
+            }
         }
     }
 

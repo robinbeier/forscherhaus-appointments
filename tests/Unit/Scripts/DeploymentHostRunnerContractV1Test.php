@@ -227,6 +227,176 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::validateState($state);
     }
 
+    #[DataProvider('unprovenTerminalUnitStateProvider')]
+    public function testTerminalClaimCannotClearWhileAReservedUnitMayStillBeLive(string $unitState): void
+    {
+        $claimLines = $this->runThrough('deploy_running');
+        $lines = $claimLines;
+        $previous = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($previous);
+        $lines[] = DeploymentContractV1::canonicalJson([
+            'schema' => DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::RUN_ID,
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-11T13:00:11Z',
+            'previous_state' => $previous['state'],
+            'state' => 'manual_recovery_required',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ]);
+        $events = implode("\n", $lines) . "\n";
+        $evidence = $this->succeededEvidence($lines);
+        $evidence['deploy'] = [
+            'status' => 'unknown',
+            'invocation_count' => 1,
+            'exit_code' => null,
+            'rollback_outcome' => 'not_observed',
+        ];
+        $evidence['post_gates'] = array_map(static fn(mixed $_value): mixed => null, $evidence['post_gates']);
+        $evidence['post_gates']['status'] = 'not_observed';
+        $evidence['result'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ];
+        $evidenceBytes = DeploymentContractV1::canonicalJson($evidence) . "\n";
+        $state = $this->terminalState('manual_recovery_required', 143, 'interrupted');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['deploy']['unit_state'] = $unitState;
+        $state['deploy']['observed_exit_code'] = null;
+        $state['deploy']['receipt_sha256'] = null;
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $claimEvents = implode("\n", $claimLines) . "\n";
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => 'deploy_running',
+            'sequence' => count($claimLines),
+            'events_sha256' => hash('sha256', $claimEvents),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('every reserved unit');
+        DeploymentHostRunnerContractV1::activeRunDisposition(
+            $claim,
+            $state,
+            $events,
+            $evidenceBytes,
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+    }
+
+    public static function unprovenTerminalUnitStateProvider(): iterable
+    {
+        yield 'starting' => ['starting'];
+        yield 'running' => ['running'];
+        yield 'unknown' => ['unknown'];
+    }
+
+    public function testTerminalClaimCannotClearWhileRollbackUnitStateIsUnknown(): void
+    {
+        $claimLines = $this->runThrough('post_gates_running');
+        $claimLines[] = $this->transition($claimLines, DeploymentContractV1::ROLLBACK_RESERVATION_STATE);
+        $lines = $claimLines;
+        $previous = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($previous);
+        $lines[] = DeploymentContractV1::canonicalJson([
+            'schema' => DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::RUN_ID,
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-11T13:00:13Z',
+            'previous_state' => $previous['state'],
+            'state' => 'manual_recovery_required',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ]);
+        $events = implode("\n", $lines) . "\n";
+        $evidence = $this->rollbackSucceededEvidence($lines);
+        $evidence['rollback'] = [
+            'status' => 'unknown',
+            'invocation_count' => 1,
+            'mode' => 'dedicated_post_gate_recovery',
+            'verified' => null,
+        ];
+        $evidence['result'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ];
+        $evidenceBytes = DeploymentContractV1::canonicalJson($evidence) . "\n";
+        $state = $this->terminalState('manual_recovery_required', 143, 'interrupted');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['rollback'] = [
+            'request_sha256' => self::SHA,
+            'execution_input_sha256' => self::SHA,
+            'invocation_count' => 1,
+            'unit_name' => DeploymentHostRunnerContractV1::unitName('rollback', self::RUN_ID, $state['intent_sha256']),
+            'unit_state' => 'unknown',
+            'observed_exit_code' => null,
+            'verdict' => 'unknown',
+        ];
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $claimEvents = implode("\n", $claimLines) . "\n";
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => DeploymentContractV1::ROLLBACK_RESERVATION_STATE,
+            'sequence' => count($claimLines),
+            'events_sha256' => hash('sha256', $claimEvents),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('every reserved unit');
+        DeploymentHostRunnerContractV1::activeRunDisposition(
+            $claim,
+            $state,
+            $events,
+            $evidenceBytes,
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+    }
+
+    #[DataProvider('rollbackVerdictExitProvider')]
+    public function testRollbackVerdictMustMatchObservedExit(string $verdict, int $observedExitCode): void
+    {
+        $state = $this->state();
+        $state['state'] = DeploymentContractV1::ROLLBACK_RESERVATION_STATE;
+        $state['active_action'] = 'rollback';
+        $state['rollback'] = [
+            'request_sha256' => self::SHA,
+            'execution_input_sha256' => self::SHA,
+            'invocation_count' => 1,
+            'unit_name' => DeploymentHostRunnerContractV1::unitName('rollback', self::RUN_ID, self::INTENT_SHA),
+            'unit_state' => 'exited',
+            'observed_exit_code' => $observedExitCode,
+            'verdict' => $verdict,
+        ];
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validateState($state);
+    }
+
+    public static function rollbackVerdictExitProvider(): iterable
+    {
+        yield 'success with nonzero exit' => ['succeeded', 1];
+        yield 'failure with zero exit' => ['failed', 0];
+    }
+
     public function testTerminalStateRequiresStableResultAndEvidenceBinding(): void
     {
         $state = $this->state();
@@ -926,6 +1096,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             self::RUN_ID,
             $state['intent_sha256'],
         );
+        $state['deploy']['observed_exit_code'] = 0;
         $state['rollback'] = [
             'request_sha256' => self::SHA,
             'execution_input_sha256' => self::SHA,
@@ -976,6 +1147,79 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state['sequence']--;
         $this->expectException(RuntimeException::class);
         DeploymentHostRunnerContractV1::stateCacheDisposition($state, $events);
+    }
+
+    #[DataProvider('laterNonterminalDeployOutcomeProvider')]
+    public function testLaterNonterminalStateRequiresCompletedSuccessfulDeploy(
+        string $stateName,
+        string $unitState,
+        ?int $observedExitCode,
+        ?string $receiptSha256,
+    ): void {
+        $lines = $this->runThrough('post_gates_running');
+        if ($stateName === DeploymentContractV1::ROLLBACK_RESERVATION_STATE) {
+            $lines[] = $this->transition($lines, DeploymentContractV1::ROLLBACK_RESERVATION_STATE);
+        }
+        $events = implode("\n", $lines) . "\n";
+        $state = $this->state();
+        $state['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $state['state'] = $stateName;
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['active_action'] = $stateName === DeploymentContractV1::ROLLBACK_RESERVATION_STATE ? 'rollback' : 'none';
+        $state['deploy']['unit_name'] = DeploymentHostRunnerContractV1::unitName(
+            'deploy',
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+        $state['deploy']['unit_state'] = $unitState;
+        $state['deploy']['observed_exit_code'] = $observedExitCode;
+        $state['deploy']['receipt_sha256'] = $receiptSha256;
+        if ($stateName === DeploymentContractV1::ROLLBACK_RESERVATION_STATE) {
+            $state['rollback'] = [
+                'request_sha256' => self::SHA,
+                'execution_input_sha256' => self::SHA,
+                'invocation_count' => 1,
+                'unit_name' => DeploymentHostRunnerContractV1::unitName(
+                    'rollback',
+                    self::RUN_ID,
+                    $state['intent_sha256'],
+                ),
+                'unit_state' => 'running',
+                'observed_exit_code' => null,
+                'verdict' => 'unknown',
+            ];
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::stateCacheDisposition($state, $events);
+    }
+
+    public static function laterNonterminalDeployOutcomeProvider(): iterable
+    {
+        foreach (['post_gates_running', DeploymentContractV1::ROLLBACK_RESERVATION_STATE] as $state) {
+            yield $state . ' with failed deploy exit' => [$state, 'exited', 30, self::SHA];
+            yield $state . ' with live deploy unit' => [$state, 'running', null, null];
+        }
+    }
+
+    public function testActiveRunDocumentationFreezesSatisfiableReservationOrdering(): void
+    {
+        $documentation = (string) file_get_contents(dirname(__DIR__, 3) . '/docs/deployment-run-v1.md');
+
+        self::assertStringContainsString(
+            '1. append and fsync the `deploy_running` or `rollback_running` journal reservation;',
+            $documentation,
+        );
+        self::assertStringContainsString(
+            '2. atomically persist and fsync `active-run.json` bound to that exact reserved journal prefix;',
+            $documentation,
+        );
+        self::assertStringContainsString(
+            '3. atomically persist and fsync the matching `state.json` cache;',
+            $documentation,
+        );
+        self::assertStringContainsString('4. start the reserved unit exactly once.', $documentation);
     }
 
     public function testCompleteJournalCanProveARecoverablyStaleStateCache(): void
@@ -1289,6 +1533,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             self::RUN_ID,
             $state['intent_sha256'],
         );
+        $state['deploy']['observed_exit_code'] = 0;
         $state['rollback'] = [
             'request_sha256' => self::SHA,
             'execution_input_sha256' => self::SHA,

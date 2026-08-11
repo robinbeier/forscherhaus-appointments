@@ -411,7 +411,11 @@ matching durable state and evidence remains reconciliation-required.
 The cached deploy invocation count, accepted-receipt presence, and known
 observed deploy exit must match the validated deploy evidence; the cached
 rollback count and verdict must likewise match the validated dedicated rollback
-evidence. A nested action contradiction is not a current terminal cache.
+evidence. `post_gates_running` and `rollback_running` additionally require the
+deploy unit to be `exited`, its independently observed exit to be `0`, and its
+accepted receipt SHA to be present. A known successful rollback verdict requires
+exit `0`; a known failed verdict requires a nonzero exit. A nested action
+contradiction is not a current terminal cache.
 Counts are `0` or `1`. `active_action` is `deploy` only in `deploy_running`,
 `rollback` only in `rollback_running`, and otherwise `none`. Unit state is one
 of `not_created`, `starting`, `running`, `exited`, `failed`, `killed`, or
@@ -422,7 +426,10 @@ evidence still uses only the frozen stable pairs. A receipt SHA requires an
 independently observed normal exit from `0`, `30`, `31`, `32`, or `143`.
 Terminal fields and evidence SHA are all absent before terminal state and all
 present afterwards. Every `manual_recovery_required` state preserves the
-fsynced deploy reservation and count `1`.
+fsynced deploy reservation and count `1`. A terminal bundle may preserve an
+unknown unit verdict, but an active-run claim is refreshed or cleared only when
+every reserved unit is independently known `exited`, `failed`, or `killed`;
+`starting`, `running`, or `unknown` keeps the global exclusion in place.
 
 The fixed-enum operator journal uses schema
 `deployment_host_operator_event.v1` and exactly:
@@ -464,9 +471,15 @@ canonical ancestors. They are opened, identity-checked, locked, rechecked, and
 never unlinked or recreated. The invocation keeps both locks until its response
 has been derived from durable state.
 
-Process locks are not crash-durable. Before any deploy or recovery reservation,
-the runner therefore atomically persists and fsyncs
-`/var/lib/fh-deploy-orchestrator/active-run.json` with schema
+Process locks are not crash-durable. While both locks are held, every action
+uses this write-ahead order before any spawn:
+
+1. append and fsync the `deploy_running` or `rollback_running` journal reservation;
+2. atomically persist and fsync `active-run.json` bound to that exact reserved journal prefix;
+3. atomically persist and fsync the matching `state.json` cache;
+4. start the reserved unit exactly once.
+
+`/var/lib/fh-deploy-orchestrator/active-run.json` uses schema
 `deployment_host_active_run.v1`. It contains exactly `schema`, `run_id`,
 `intent_sha256`, the reserved nonterminal `state`, `sequence`, `events_sha256`,
 and `claimed_at_utc`. Allowed states are `deploy_running`,
@@ -474,7 +487,11 @@ and `claimed_at_utc`. Allowed states are `deploy_running`,
 clearance handoff. `sequence` and `events_sha256` always bind the exact
 canonical authoritative journal prefix through that sequence, including its
 final newline. That prefix remains independently provable after `state.json`
-advances.
+advances. A crash after the reservation fsync but before the claim fsync leaves
+the journal as the authoritative reservation. The next holder of the global
+lock must scan the trusted run journals and reconstruct the one provable
+missing claim before handling any candidate; it never spawns from that recovery
+path.
 
 Under the global lock, a different Run-ID is exit `75` while that claim binds a
 nonterminal trusted journal, even if no runner process remains or the unit has
