@@ -380,6 +380,48 @@ those exact bytes including that newline. Missing, extra, wrongly typed,
 noncanonical, oversized, or invalid data is `70`/`contract_invalid`; it is never
 repaired or normalized.
 
+The separately pinned `deployment_host_execution_input.v1` is canonical JSON
+with one final newline, no NUL, and at most 16,384 bytes. It contains exactly
+`schema`, `run_id`, `intent_sha256`, `action`, and `parameters`; it contains no
+caller-selected executable, argv, environment, inline secret, app root, runtime
+user, or result path. Deploy parameters bind the immutable `release_id`, the
+closed renderer mode, and root-protected path-plus-SHA references for the
+health token, dump, predeploy credentials, canary credentials, and incident
+webhook. The execution-input producer is a fully trusted root authority for
+selecting those protected files; web/user-authored input is rejected, and a
+path plus digest is integrity evidence rather than authorization by itself.
+Recovery parameters contain only the original immutable `release_id`. The
+recovery bundle must bind both the closed recovery request and the original
+deploy request, so a recovery request alone cannot authorize a different
+release. The runner constructs one fixed argv vector through `/usr/bin/env -i`,
+the fixed `LANG=C`, `LC_ALL=C`, and `PATH`, `/bin/bash`, and
+`/root/deploy_ea.sh`. Deploy result, app, previous, failed, and runtime-user
+paths are derived from the trusted state root, Run-ID, and immutable release;
+they are never caller authority. The request and execution input are each read
+once, validated, copied without replacement into the protected run directory,
+file-fsynced, parent-directory-fsynced, and SHA-bound before reservation. This
+PR freezes that storage contract but does not implement the storage engine. A
+crash after the no-replace input pin but before reservation resumes only when
+the caller bytes are exactly identical to the pinned canonical bytes; changed
+bytes are a conflict and the pinned file is never replaced.
+
+`deployment_host_post_gate_report.v1` is the same bounded canonical form and
+contains exactly `schema`, `run_id`, `intent_sha256`, `captured_at_utc`,
+`subject`, the deploy receipt SHA when the subject is `deploy`, and the closed
+existing `post_gates` tuple. `--action=post-gates` receives the identity request
+plus an explicit report file. Its producer is trusted root authority for the
+reported observations; canonical bytes alone do not establish gate truth, and
+web/user-authored reports are rejected. The runner validates the report against the
+completed action, pins those exact bytes without replacement and with file and
+parent-directory fsync, and records their SHA, count `1`, and `passed`/`failed`
+verdict. An exact-byte retry attaches idempotently without incrementing the
+count; changed bytes are `75`/`state_conflict` and never overwrite the first
+submission. A crash after report pinning but before the state slot update uses
+the same rule: an identical pinned file resumes the first submission, while
+different pinned bytes fail closed. Recovery admission re-reads the exact
+pinned failed deploy report, validates its SHA and receipt binding against
+current durable state, and never trusts the state verdict alone.
+
 ## Host-runner state contracts
 
 `state.json` uses schema `deployment_host_runner_state.v1` and exactly these
@@ -387,14 +429,17 @@ keys:
 
 ```text
 schema run_id intent_sha256 state sequence events_sha256 active_action deploy
-rollback evidence_sha256 terminal updated_at_utc
+post_gates rollback evidence_sha256 terminal updated_at_utc
 ```
 
 `deploy` contains exactly `request_sha256`, `execution_input_sha256`,
 `invocation_count`, `unit_name`, `unit_state`, `observed_exit_code`, and
 `receipt_sha256`. `rollback` keeps the independent corresponding request,
 execution-input, count, unit, and observed-exit fields plus its fixed
-`not_invoked`/`succeeded`/`failed`/`unknown` verdict. `terminal` contains only
+`not_invoked`/`verification_pending`/`succeeded`/`failed`/`unknown` verdict.
+`post_gates` keeps separate deploy and rollback report SHA, count, and verdict
+triples; every count is `0`/`not_submitted`/null or `1` with an immutable SHA
+and `passed`/`failed` verdict. `terminal` contains only
 `state`, `exit_code`, and `reason`. Keeping deploy and rollback in separate
 closed objects prevents a recovery request or unit from overwriting the
 exactly-once deploy binding.
@@ -413,10 +458,22 @@ observed deploy exit must match the validated deploy evidence; the cached
 rollback count and verdict must likewise match the validated dedicated rollback
 evidence. `post_gates_running` and `rollback_running` additionally require the
 deploy unit to be `exited`, its independently observed exit to be `0`, and its
-accepted receipt SHA to be present. A known successful rollback verdict requires
-exit `0`; a known failed verdict requires a nonzero exit; an unknown verdict
-requires a null observed exit. A nested action
-contradiction is not a current terminal cache.
+accepted receipt SHA to be present. A dedicated rollback normal exit `0` first
+records `verification_pending`; it is not success until a bound
+rollback-subject post-gate report passes. A normal nonzero rollback exit,
+including a normal exit `143`, maps uniquely to rollback failed and needs no
+verification report. Signal, core, timeout, or otherwise unproved termination
+is not passed to that normal-exit mapping and remains unknown. A bound failed
+rollback report after normal exit `0` also maps to rollback failed. An unknown
+verdict requires a null observed exit. A nested action contradiction is not a
+current terminal cache. The closed rollback tuple is therefore: null observed
+exit with `unknown` and no report; exit `0` with no report and
+`verification_pending`; exit `0` with a passed/failed report and matching
+`succeeded`/`failed` verdict; or a nonzero normal exit with `failed` and no
+report. The two direct deploy receipt outcomes `internal_rollback_succeeded`
+and `rollback_failed_or_unverifiable` remain valid terminal deploy results with
+no dedicated rollback reservation or post-gate submission; the report
+requirements apply only when the independent rollback invocation count is `1`.
 For every known deploy outcome, the stored receipt SHA must equal the SHA-256 of
 the unique canonical `deploy_result.v1` bytes derived from the validated deploy
 evidence tuple; mere hash presence is not a binding.
@@ -467,13 +524,20 @@ The exact reason enum is `none`, `same_intent`, `state_conflict`,
 
 Every mutation or reconciliation acquires locks in one order:
 
-1. `/run/lock/fh-production-change.lock`;
+1. `/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock`;
 2. `/var/lib/fh-deploy-orchestrator/runs/<run_id>/run.lock`.
 
 Both are stable root-owned mode-`0600` regular single-link files beneath trusted
 canonical ancestors. They are opened, identity-checked, locked, rechecked, and
 never unlinked or recreated. The invocation keeps both locks until its response
 has been derived from durable state.
+
+The production-change lock is global across conforming Host Runner invocations,
+not across manual root actions or non-participating tools. Those privileged
+actors remain outside this exclusion boundary until they explicitly adopt the
+same lock contract. This prerequisite freezes the protected path; its
+ancestor/leaf implementation and root/Linux proof belong to the executable
+storage slice.
 
 Process locks are not crash-durable. While both locks are held, every action
 uses this write-ahead order before any spawn:
@@ -528,24 +592,28 @@ fh-rollback-<run_id>-<intent12>.service
 ```
 
 The system-manager transient service uses `Type=exec`, `RemainAfterExit=yes`,
-`UMask=0077`, `KillMode=control-group`, `Restart=no`, journal output, null
-standard input, `RuntimeMaxSec=7200s` for deploy or `1800s` for rollback, and
+`UMask=0077`, `KillMode=control-group`, `Restart=no`, null standard input,
+output, and error, `RuntimeMaxSec=7200s` for deploy or `1800s` for rollback, and
 `TimeoutStopSec=300s`. It is argv-based without a shell. The runner never uses
 scope units, `--wait`, `--pipe`, `--pty`, `--collect`, or unit-name reuse as an
 attachment mechanism. A pre-existing unit-name collision is `75`; attachment
 comes only from the bound durable run state.
 
-The future root-only executable has three internal actions:
+The future root-only executable has four internal actions:
 
 ```text
 --action=deploy --request-file=ABSOLUTE_PATH --execution-input-file=ABSOLUTE_PATH
+--action=post-gates --request-file=ABSOLUTE_PATH --report-file=ABSOLUTE_PATH
 --action=recovery --request-file=ABSOLUTE_PATH --execution-input-file=ABSOLUTE_PATH
 --action=reconcile --run-id=UUIDV4 --intent-sha256=SHA256
 ```
 
 The execution-input file is separate root-protected host-local input. Only its
-exact byte SHA may enter state; its commands, arguments, paths, environment, and
-secrets never enter a request, evidence, operator journal, or normal response.
+exact byte SHA may enter protected state; protected file references and
+constructed argv never enter a request, evidence, operator journal, or normal
+response. The input SHA and its component file SHAs and paths remain
+root-protected too: none is copied into unit names/descriptions, responses, or
+operator logs as a deterministic offline oracle.
 Unknown or incomplete flags exit `64`; contract-invalid input exits `70`; an
 intent, active-run, lock, phase, or unit conflict exits `75`. Accepted start and
 nonterminal attachment exit `0`. Terminal attachment also exits `0` as a status
@@ -572,18 +640,30 @@ stored lifecycle pair; rejected responses carry only `70`/`contract_invalid` or
 SSH, build, upload, start/status/wait UX, post-gate collection, and host
 activation remain outside this contract PR.
 
-The action/disposition/state combinations are closed. The first deploy request
-is `accepted` in `accepted`; a later same-intent call can be
-`attach_pre_deploy` at that same durable state because disposition distinguishes
-request history, not just the state name. Pre-deploy attachment covers the
+The action/disposition/state combinations are closed. The first deploy start is
+`accepted` only after the `deploy_running` reservation is durable. Pre-deploy attachment covers the
 explicit frozen states from `planned` through `artifact_verified`; the list is
 not derived from enum ordering. Observe-only attachment covers
 `deploy_running`, `post_gates_running`, or `rollback_running`. Recovery is
-`accepted` only in `post_gates_running` and observe-only only in
-`rollback_running`. Reconcile may report only a pre-deploy attachment,
+accepted only after the `rollback_running` reservation is durable and only
+after a bound failed deploy post-gate report; observe-only recovery is likewise
+`rollback_running`. A first failed post-gate submission is accepted in
+`post_gates_running`, and an exact replay attaches observe-only. A passing
+submission returns its terminal result. Reconcile may report only a pre-deploy attachment,
 observe-only attachment, terminal result, or rejection. `succeeded` and every
 terminal failure always use disposition `terminal`, never a nonterminal
 disposition.
+
+This remains an additive prerequisite, not a runnable Host Runner. The next
+serial contract slice still owns launch nonce and Description binding,
+systemd-run/systemctl observation, manager boot and InvocationID identity,
+missing-unit classification, monotonic state evolution, durable active-claim
+clearance and terminal ordering, the closed operator tuple matrix, and exact
+report-byte participation in terminal evidence clearance. Child standard
+streams are discarded at the systemd boundary, but `deploy_ea.sh` still owns
+its internal deployment logfile; activation therefore requires a separate
+root-owned mode-`0600` secure-log and redaction audit. No claim here treats that
+existing logfile as part of the secret-free runner response/evidence boundary.
 
 ## Local validation
 

@@ -76,10 +76,12 @@ Script inventory:
   child-receipt candidate and derives its fixed deploy-evidence tuple without
   reading timing or process output; authority additionally requires an
   independently observed matching child exit and durable runner-state binding
-- `lib/DeploymentHostRunnerContractV1.php` freezes the closed secret-free deploy
-  and recovery requests plus state, active-run, operator-event, response, lock,
-  and transient-unit identities for the later root Host Runner; it does not
-  spawn a unit or activate production behavior
+- `lib/DeploymentHostRunnerContractV1.php` freezes the closed deploy/recovery
+  requests, pinned semantic execution input, exact-byte post-gate submissions,
+  state/response bindings, protected lock path, and null-stream policy for the
+  later root Host Runner; systemd identity/reconciliation remains a later
+  prerequisite and this library does not spawn a unit or activate production
+  behavior
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything

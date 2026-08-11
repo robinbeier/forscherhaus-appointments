@@ -49,6 +49,354 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         );
     }
 
+    public function testProtectedLockAndExecutionPlanAreClosed(): void
+    {
+        self::assertSame(
+            '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
+            DeploymentHostRunnerContractV1::GLOBAL_LOCK_PATH,
+        );
+        $input = $this->deployExecutionInput();
+        $encoded = DeploymentHostRunnerContractV1::encodeExecutionInput($input);
+        self::assertEquals($input, DeploymentHostRunnerContractV1::decodeExecutionInput($encoded));
+        self::assertSame('pin', DeploymentHostRunnerContractV1::executionInputPinDisposition($encoded, null));
+        self::assertSame('resume', DeploymentHostRunnerContractV1::executionInputPinDisposition($encoded, $encoded));
+        DeploymentHostRunnerContractV1::validateDeployExecutionBundle($this->deployRequest(), $input);
+        self::assertSame(
+            [
+                '/usr/bin/env',
+                '-i',
+                'LANG=C',
+                'LC_ALL=C',
+                'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+                '/bin/bash',
+                '/root/deploy_ea.sh',
+                '--rel',
+                'ea_20260811',
+                '--renderer-deploy-mode',
+                'host',
+                '--healthz-token-file',
+                '/etc/fh/healthz.token',
+                '--zero-surprise-dump-file',
+                '/root/backups/predeploy.sql.gz',
+                '--zero-surprise-predeploy-credentials-file',
+                '/etc/fh/predeploy.ini',
+                '--zero-surprise-canary-credentials-file',
+                '/etc/fh/canary.ini',
+                '--zero-surprise-incident-webhook-file',
+                '/etc/fh/incident.ini',
+                '--result-file',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-result.json',
+            ],
+            DeploymentHostRunnerContractV1::executionArgv($input),
+        );
+    }
+
+    #[DataProvider('invalidExecutionInputProvider')]
+    public function testExecutionInputRejectsCallerCommandAuthority(array|string $candidate): void
+    {
+        $this->expectException(RuntimeException::class);
+        if (is_string($candidate)) {
+            DeploymentHostRunnerContractV1::decodeExecutionInput($candidate);
+            return;
+        }
+        DeploymentHostRunnerContractV1::validateExecutionInput($candidate);
+    }
+
+    public static function invalidExecutionInputProvider(): iterable
+    {
+        $valid = self::staticDeployExecutionInput();
+        yield 'executable' => [$valid + ['executable' => '/bin/sh']];
+        yield 'argv' => [$valid + ['arguments' => ['-c', 'touch /tmp/marker']]];
+        yield 'environment' => [$valid + ['environment' => ['TOKEN' => 'secret']]];
+        yield 'inline secret' => [[...$valid, 'parameters' => [...$valid['parameters'], 'token' => 'secret']]];
+        yield 'relative path' => [
+            [
+                ...$valid,
+                'parameters' => [
+                    ...$valid['parameters'],
+                    'healthz_token' => ['path' => '../token', 'sha256' => self::SHA],
+                ],
+            ],
+        ];
+        yield 'oversized' => [str_repeat('x', 16_385)];
+    }
+
+    public function testRecoveryPlanDerivesPathsFromOriginalImmutableRelease(): void
+    {
+        $input = [
+            'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'action' => 'rollback',
+            'parameters' => ['release_id' => 'ea_20260811'],
+        ];
+        DeploymentHostRunnerContractV1::validateRecoveryExecutionBundle(
+            $this->recoveryRequest(),
+            $this->deployRequest(),
+            $input,
+        );
+        self::assertSame(
+            [
+                '/usr/bin/env',
+                '-i',
+                'LANG=C',
+                'LC_ALL=C',
+                'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+                '/bin/bash',
+                '/root/deploy_ea.sh',
+                '--runtime-config-rollback',
+                '--active',
+                '/var/www/html/easyappointments',
+                '--previous',
+                '/var/www/html/easyappointments_prev_ea_20260811',
+                '--failed',
+                '/var/www/html/.fh-failed-' . self::RUN_ID,
+                '--runtime-user',
+                'www-data',
+            ],
+            DeploymentHostRunnerContractV1::executionArgv($input),
+        );
+    }
+
+    public function testChangedExecutionInputCannotReplaceAPinnedFirstInput(): void
+    {
+        $input = $this->deployExecutionInput();
+        $encoded = DeploymentHostRunnerContractV1::encodeExecutionInput($input);
+        $input['parameters']['renderer_deploy_mode'] = 'external';
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::executionInputPinDisposition(
+            DeploymentHostRunnerContractV1::encodeExecutionInput($input),
+            $encoded,
+        );
+    }
+
+    public function testPostGateReportsAreCanonicalAndBindCurrentActionState(): void
+    {
+        $state = $this->state();
+        $state['state'] = 'post_gates_running';
+        $state['active_action'] = 'none';
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['deploy']['receipt_sha256'] = self::SHA;
+        $passed = $this->postGateReport(true, 'deploy');
+        $encoded = DeploymentHostRunnerContractV1::encodePostGateReport($passed);
+        self::assertEquals($passed, DeploymentHostRunnerContractV1::decodePostGateReport($encoded));
+        DeploymentHostRunnerContractV1::validatePostGateBundle($passed, $state);
+        self::assertSame('succeeded', DeploymentHostRunnerContractV1::postGateDisposition($passed));
+
+        $failed = $this->postGateReport(false, 'deploy');
+        self::assertSame('recovery_required', DeploymentHostRunnerContractV1::postGateDisposition($failed));
+        $failed['deploy_receipt_sha256'] = str_repeat('c', 64);
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validatePostGateBundle($failed, $state);
+    }
+
+    public function testPostGateSubmissionIsWriteOnceAndExactByteRetriesAttach(): void
+    {
+        $state = $this->state();
+        $state['state'] = 'post_gates_running';
+        $state['active_action'] = 'none';
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['deploy']['receipt_sha256'] = self::SHA;
+        $encoded = DeploymentHostRunnerContractV1::encodePostGateReport($this->postGateReport(false, 'deploy'));
+
+        self::assertSame(
+            'first_submission',
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition($encoded, $state),
+        );
+        self::assertSame(
+            'resume_first_submission',
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition($encoded, $state, $encoded),
+        );
+
+        $differentPinned = $this->postGateReport(false, 'deploy');
+        $differentPinned['captured_at_utc'] = '2026-08-11T13:06:00Z';
+        try {
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition(
+                $encoded,
+                $state,
+                DeploymentHostRunnerContractV1::encodePostGateReport($differentPinned),
+            );
+            self::fail('Changed pinned report bytes resumed a first submission.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $state['post_gates']['deploy_report_sha256'] = hash('sha256', $encoded);
+        $state['post_gates']['deploy_submission_count'] = 1;
+        $state['post_gates']['deploy_verdict'] = 'failed';
+        self::assertSame(
+            'attach',
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition($encoded, $state, $encoded),
+        );
+
+        try {
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition($encoded, $state);
+            self::fail('A missing pinned report attached from state metadata alone.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $receiptMismatch = $this->postGateReport(false, 'deploy');
+        $receiptMismatch['deploy_receipt_sha256'] = str_repeat('c', 64);
+        $mismatchBytes = DeploymentHostRunnerContractV1::encodePostGateReport($receiptMismatch);
+        $mismatchState = $state;
+        $mismatchState['post_gates']['deploy_report_sha256'] = hash('sha256', $mismatchBytes);
+        try {
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition(
+                $mismatchBytes,
+                $mismatchState,
+                $mismatchBytes,
+            );
+            self::fail('A receipt-mismatched stored report attached.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $changed = $this->postGateReport(false, 'deploy');
+        $changed['captured_at_utc'] = '2026-08-11T13:06:00Z';
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::postGateSubmissionDisposition(
+            DeploymentHostRunnerContractV1::encodePostGateReport($changed),
+            $state,
+            $encoded,
+        );
+    }
+
+    public function testRecoveryBundleRequiresBothRecoveryAndOriginalDeployIdentity(): void
+    {
+        $input = [
+            'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'action' => 'rollback',
+            'parameters' => ['release_id' => 'ea_20260811'],
+        ];
+        $recovery = $this->recoveryRequest();
+        $recovery['intent_sha256'] = self::SHA;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validateRecoveryExecutionBundle($recovery, $this->deployRequest(), $input);
+    }
+
+    public function testRollbackExitZeroWaitsForReportAndNonzeroMapsUniquely(): void
+    {
+        self::assertSame(
+            ['disposition' => 'post_recovery_verification_required', 'observed_exit_code' => 0],
+            DeploymentHostRunnerContractV1::rollbackNormalExitResult(0),
+        );
+        self::assertSame(
+            ['state' => 'failed_post_switch_rollback_failed', 'exit_code' => 31, 'reason' => 'rollback_failed'],
+            DeploymentHostRunnerContractV1::rollbackNormalExitResult(9),
+        );
+        self::assertSame(
+            ['state' => 'failed_post_switch_rollback_failed', 'exit_code' => 31, 'reason' => 'rollback_failed'],
+            DeploymentHostRunnerContractV1::rollbackNormalExitResult(143),
+        );
+        self::assertSame(
+            'failed_post_switch_rollback_succeeded',
+            DeploymentHostRunnerContractV1::postGateDisposition($this->postGateReport(true, 'rollback')),
+        );
+    }
+
+    public function testDirectDeployRollbackReceiptsDoNotRequireDedicatedPostGateRecovery(): void
+    {
+        foreach (
+            [
+                ['failed_post_switch_rollback_succeeded', 30, 'deploy_failed', 'internal_rollback_succeeded'],
+                ['failed_post_switch_rollback_failed', 31, 'rollback_failed', 'rollback_failed_or_unverifiable'],
+            ]
+            as [$stateName, $exitCode, $reason, $outcome]
+        ) {
+            $state = $this->state();
+            $state['state'] = $stateName;
+            $state['active_action'] = 'none';
+            $state['deploy']['observed_exit_code'] = $exitCode;
+            $state['deploy']['receipt_sha256'] = $this->receiptSha256($outcome);
+            $state['evidence_sha256'] = self::SHA;
+            $state['terminal'] = ['state' => $stateName, 'exit_code' => $exitCode, 'reason' => $reason];
+
+            DeploymentHostRunnerContractV1::validateState($state);
+        }
+
+        self::addToAssertionCount(2);
+    }
+
+    public function testRollbackStateClosesExitReportAndVerdictMatrix(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->transition($lines, 'rollback_running');
+        $state = $this->recoveryAdmissionState($lines, 'rollback_running');
+
+        DeploymentHostRunnerContractV1::validateState($state);
+
+        $pending = $state;
+        $pending['rollback']['unit_state'] = 'exited';
+        $pending['rollback']['observed_exit_code'] = 0;
+        $pending['rollback']['verdict'] = 'verification_pending';
+        DeploymentHostRunnerContractV1::validateState($pending);
+
+        foreach ([['passed', 'succeeded'], ['failed', 'failed']] as [$reportVerdict, $rollbackVerdict]) {
+            $submitted = $pending;
+            $submitted['post_gates']['rollback_report_sha256'] = self::SHA;
+            $submitted['post_gates']['rollback_submission_count'] = 1;
+            $submitted['post_gates']['rollback_verdict'] = $reportVerdict;
+            $submitted['rollback']['verdict'] = $rollbackVerdict;
+            DeploymentHostRunnerContractV1::validateState($submitted);
+
+            $submitted['rollback']['verdict'] = $rollbackVerdict === 'succeeded' ? 'failed' : 'succeeded';
+            try {
+                DeploymentHostRunnerContractV1::validateState($submitted);
+                self::fail('A rollback report/verdict mismatch was accepted.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        foreach (['succeeded', 'failed'] as $prematureVerdict) {
+            $invalid = $pending;
+            $invalid['rollback']['verdict'] = $prematureVerdict;
+            try {
+                DeploymentHostRunnerContractV1::validateState($invalid);
+                self::fail('Exit zero produced a final rollback verdict without a report.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        $failedAction = $pending;
+        $failedAction['rollback']['observed_exit_code'] = 9;
+        $failedAction['rollback']['verdict'] = 'failed';
+        DeploymentHostRunnerContractV1::validateState($failedAction);
+    }
+
+    public function testRollbackPostGateSubmissionFirstAndReplayBindTheFinalVerdict(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->transition($lines, 'rollback_running');
+        $state = $this->recoveryAdmissionState($lines, 'rollback_running');
+        $state['rollback']['unit_state'] = 'exited';
+        $state['rollback']['observed_exit_code'] = 0;
+        $state['rollback']['verdict'] = 'verification_pending';
+        $report = $this->postGateReport(true, 'rollback');
+        $report['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $encoded = DeploymentHostRunnerContractV1::encodePostGateReport($report);
+
+        self::assertSame(
+            'first_submission',
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition($encoded, $state),
+        );
+
+        $state['post_gates']['rollback_report_sha256'] = hash('sha256', $encoded);
+        $state['post_gates']['rollback_submission_count'] = 1;
+        $state['post_gates']['rollback_verdict'] = 'passed';
+        $state['rollback']['verdict'] = 'succeeded';
+        self::assertSame(
+            'attach',
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition($encoded, $state, $encoded),
+        );
+    }
+
     #[DataProvider('malformedRecoveryRequestProvider')]
     public function testRecoveryRequestRejectsInvalidOrNoncanonicalInput(array|string $candidate): void
     {
@@ -428,6 +776,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $succeeded['active_action'] = 'none';
         $succeeded['deploy']['unit_state'] = 'exited';
         $succeeded['deploy']['observed_exit_code'] = 0;
+        $succeeded['post_gates'] = $this->submittedPostGates('passed');
         $succeeded['evidence_sha256'] = self::SHA;
         $succeeded['terminal'] = ['state' => 'succeeded', 'exit_code' => 0, 'reason' => 'ok'];
 
@@ -522,12 +871,17 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertSame('0077', $properties['UMask']);
         self::assertSame('control-group', $properties['KillMode']);
         self::assertSame('no', $properties['Restart']);
+        self::assertSame('null', $properties['StandardInput']);
+        self::assertSame('null', $properties['StandardOutput']);
+        self::assertSame('null', $properties['StandardError']);
         self::assertArrayNotHasKey('CollectMode', $properties);
 
         $rollbackProperties = DeploymentHostRunnerContractV1::unitProperties('rollback');
         self::assertSame('1800s', $rollbackProperties['RuntimeMaxSec']);
         self::assertSame('300s', $rollbackProperties['TimeoutStopSec']);
         self::assertSame('no', $rollbackProperties['Restart']);
+        self::assertSame('null', $rollbackProperties['StandardOutput']);
+        self::assertSame('null', $rollbackProperties['StandardError']);
     }
 
     public function testCliResponseSeparatesAttachExitFromStoredTerminalResult(): void
@@ -759,10 +1113,11 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
 
     public static function validNonterminalResponseProvider(): iterable
     {
-        yield 'new deploy accepted' => ['deploy', 'accepted', 'accepted'];
+        yield 'new deploy accepted after reservation' => ['deploy', 'accepted', 'deploy_running'];
         yield 'deploy attaches before reservation' => ['deploy', 'attach_pre_deploy', 'artifact_verified'];
         yield 'deploy observes reservation' => ['deploy', 'attach_observe_only', 'deploy_running'];
-        yield 'recovery accepted after post gates' => ['recovery', 'accepted', 'post_gates_running'];
+        yield 'failed post gates authorize recovery' => ['post-gates', 'accepted', 'post_gates_running'];
+        yield 'recovery accepted after reservation' => ['recovery', 'accepted', 'rollback_running'];
         yield 'recovery observes reservation' => ['recovery', 'attach_observe_only', 'rollback_running'];
         yield 'reconcile reports pre-deploy prefix' => ['reconcile', 'attach_pre_deploy', 'artifact_verified'];
         yield 'reconcile observes active work' => ['reconcile', 'attach_observe_only', 'post_gates_running'];
@@ -777,6 +1132,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $operator = (string) file_get_contents($root . '/operator-event.json');
         $active = (string) file_get_contents($root . '/active-run.json');
         $response = (string) file_get_contents($root . '/terminal-response.json');
+        $execution = (string) file_get_contents($root . '/execution-input.json');
+        $postGates = (string) file_get_contents($root . '/post-gate-report.json');
 
         $decodedDeploy = DeploymentHostRunnerContractV1::decodeDeployRequest($deploy);
         $decodedRecovery = DeploymentHostRunnerContractV1::decodeRecoveryRequest($recovery);
@@ -784,8 +1141,21 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $decodedOperator = DeploymentHostRunnerContractV1::decodeOperatorEvent($operator);
         $decodedActive = DeploymentHostRunnerContractV1::decodeActiveRun($active);
         $decodedResponse = DeploymentHostRunnerContractV1::decodeResponse($response);
+        $decodedExecution = DeploymentHostRunnerContractV1::decodeExecutionInput($execution);
+        $decodedPostGates = DeploymentHostRunnerContractV1::decodePostGateReport($postGates);
 
-        foreach ([$decodedRecovery, $decodedState, $decodedOperator, $decodedActive, $decodedResponse] as $fixture) {
+        foreach (
+            [
+                $decodedRecovery,
+                $decodedState,
+                $decodedOperator,
+                $decodedActive,
+                $decodedResponse,
+                $decodedExecution,
+                $decodedPostGates,
+            ]
+            as $fixture
+        ) {
             self::assertSame($decodedDeploy['run_id'], $fixture['run_id']);
             self::assertSame($decodedDeploy['intent_sha256'], $fixture['intent_sha256']);
         }
@@ -793,12 +1163,15 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertSame($decodedState['intent_sha256'], $decodedActive['intent_sha256']);
         self::assertSame($decodedState['sequence'], $decodedActive['sequence']);
         self::assertSame($decodedState['events_sha256'], $decodedActive['events_sha256']);
-        self::assertSame(6, count(glob($root . '/*.json') ?: []));
+        self::assertSame(8, count(glob($root . '/*.json') ?: []));
     }
 
     public function testPathsAndInternalCliContractAreDeterministic(): void
     {
-        self::assertSame('/run/lock/fh-production-change.lock', DeploymentHostRunnerContractV1::GLOBAL_LOCK_PATH);
+        self::assertSame(
+            '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
+            DeploymentHostRunnerContractV1::GLOBAL_LOCK_PATH,
+        );
         self::assertSame(
             '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/run.lock',
             DeploymentHostRunnerContractV1::runLockPath(self::RUN_ID),
@@ -816,6 +1189,10 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertSame(
             ['--action=deploy', '--request-file=ABSOLUTE_PATH', '--execution-input-file=ABSOLUTE_PATH'],
             $cli['deploy'],
+        );
+        self::assertSame(
+            ['--action=post-gates', '--request-file=ABSOLUTE_PATH', '--report-file=ABSOLUTE_PATH'],
+            $cli['post_gates'],
         );
         self::assertSame(
             ['--action=recovery', '--request-file=ABSOLUTE_PATH', '--execution-input-file=ABSOLUTE_PATH'],
@@ -843,24 +1220,92 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     public function testRecoveryRequestIsAcceptedOnlyAfterPostGatesAndNeverReservesTwice(): void
     {
         $request = $this->recoveryRequest();
+        $postGateLines = $this->runThrough('post_gates_running');
+        $postGateState = $this->recoveryAdmissionState($postGateLines, 'post_gates_running');
+        $reportBytes = $this->failedDeployPostGateReportBytes();
 
         self::assertSame(
             'accepted',
             DeploymentHostRunnerContractV1::recoveryAttachmentDisposition(
-                $this->runThrough('post_gates_running'),
+                $postGateLines,
                 $request,
+                $postGateState,
+                null,
+                $reportBytes,
             ),
         );
 
-        $rollback = $this->runThrough('post_gates_running');
+        $rollback = $postGateLines;
         $rollback[] = $this->transition($rollback, 'rollback_running');
+        $rollbackState = $this->recoveryAdmissionState($rollback, 'rollback_running');
         self::assertSame(
             'attach_observe_only',
-            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition($rollback, $request),
+            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition(
+                $rollback,
+                $request,
+                $rollbackState,
+                null,
+                $reportBytes,
+            ),
         );
 
+        foreach ([null, "{}\n"] as $invalidReportBytes) {
+            try {
+                DeploymentHostRunnerContractV1::recoveryAttachmentDisposition(
+                    $postGateLines,
+                    $request,
+                    $postGateState,
+                    null,
+                    $invalidReportBytes,
+                );
+                self::fail('Recovery accepted a missing or malformed pinned deploy report.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        $changedReport = $this->postGateReport(false, 'deploy');
+        $changedReport['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $changedReport['deploy_receipt_sha256'] = $this->receiptSha256('succeeded');
+        $changedReport['captured_at_utc'] = '2026-08-11T13:06:00Z';
+        try {
+            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition(
+                $postGateLines,
+                $request,
+                $postGateState,
+                null,
+                DeploymentHostRunnerContractV1::encodePostGateReport($changedReport),
+            );
+            self::fail('Recovery accepted changed report bytes after the first submission.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $notSubmitted = $postGateState;
+        $notSubmitted['post_gates'] = $this->state()['post_gates'];
+        try {
+            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition(
+                $postGateLines,
+                $request,
+                $notSubmitted,
+                null,
+                $reportBytes,
+            );
+            self::fail('Recovery was accepted before a failed deploy post-gate submission.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $passed = $postGateState;
+        $passed['post_gates'] = $this->submittedPostGates('passed');
         $this->expectException(RuntimeException::class);
-        DeploymentHostRunnerContractV1::recoveryAttachmentDisposition($this->runThrough('deploy_running'), $request);
+        DeploymentHostRunnerContractV1::recoveryAttachmentDisposition(
+            $postGateLines,
+            $request,
+            $passed,
+            null,
+            $reportBytes,
+        );
     }
 
     public function testTerminalAttachmentRequiresMatchingDurableStateAndEvidence(): void
@@ -1118,6 +1563,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'observed_exit_code' => null,
             'verdict' => 'unknown',
         ];
+        $state['post_gates'] = $this->submittedPostGates('failed');
         $claim = [
             'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
             'run_id' => self::RUN_ID,
@@ -1188,6 +1634,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state['deploy']['observed_exit_code'] = $observedExitCode;
         $state['deploy']['receipt_sha256'] = $receiptSha256;
         if ($stateName === DeploymentContractV1::ROLLBACK_RESERVATION_STATE) {
+            $state['post_gates'] = $this->submittedPostGates('failed');
             $state['rollback'] = [
                 'request_sha256' => self::SHA,
                 'execution_input_sha256' => self::SHA,
@@ -1370,7 +1817,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state['deploy']['observed_exit_code'] = 30;
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('deploy outcome');
+        $this->expectExceptionMessage('deploy post-gates');
         DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
     }
 
@@ -1409,9 +1856,10 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'observed_exit_code' => 1,
             'verdict' => 'failed',
         ];
+        $state['post_gates'] = $this->submittedPostGates('failed', 'passed');
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('rollback outcome');
+        $this->expectExceptionMessage('post-gates');
         DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
     }
 
@@ -1620,6 +2068,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'observed_exit_code' => null,
             'verdict' => 'unknown',
         ];
+        $state['post_gates'] = $this->submittedPostGates('failed');
 
         self::assertSame('current', DeploymentHostRunnerContractV1::stateCacheDisposition($state, $events));
     }
@@ -1677,6 +2126,62 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'dump_policy' => $intent['dump_policy'],
             'artifact_expectation' => $intent['artifact_expectation'],
             'intent_sha256' => $intent['intent_sha256'],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function deployExecutionInput(): array
+    {
+        $input = self::staticDeployExecutionInput();
+        $input['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+
+        return $input;
+    }
+
+    /** @return array<string,mixed> */
+    private static function staticDeployExecutionInput(): array
+    {
+        $file = static fn(string $path): array => ['path' => $path, 'sha256' => self::SHA];
+
+        return [
+            'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'action' => 'deploy',
+            'parameters' => [
+                'release_id' => 'ea_20260811',
+                'renderer_deploy_mode' => 'host',
+                'healthz_token' => $file('/etc/fh/healthz.token'),
+                'zero_surprise_dump' => $file('/root/backups/predeploy.sql.gz'),
+                'zero_surprise_predeploy_credentials' => $file('/etc/fh/predeploy.ini'),
+                'zero_surprise_canary_credentials' => $file('/etc/fh/canary.ini'),
+                'zero_surprise_incident_webhook' => $file('/etc/fh/incident.ini'),
+            ],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function postGateReport(bool $passed, string $subject): array
+    {
+        return [
+            'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'captured_at_utc' => '2026-08-11T13:05:00Z',
+            'subject' => $subject,
+            'deploy_receipt_sha256' => $subject === 'deploy' ? self::SHA : null,
+            'post_gates' => [
+                'status' => $passed ? 'passed' : 'failed',
+                'kuma_healthy_count' => $passed ? 13 : 12,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+                'services_passed' => true,
+                'endpoints_passed' => true,
+                'logs_passed' => $passed,
+                'scanner_passed' => true,
+                'dormant_clean_passed' => true,
+                'passed' => $passed,
+            ],
         ];
     }
 
@@ -1802,8 +2307,71 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state['deploy']['receipt_sha256'] = $receiptOutcome === null ? null : $this->receiptSha256($receiptOutcome);
         $state['evidence_sha256'] = self::SHA;
         $state['terminal'] = ['state' => $stateName, 'exit_code' => $exitCode, 'reason' => $reason];
+        if ($stateName === 'succeeded') {
+            $state['post_gates'] = $this->submittedPostGates('passed');
+        }
 
         return $state;
+    }
+
+    /** @return array<string,mixed> */
+    private function submittedPostGates(string $deployVerdict, string $rollbackVerdict = 'not_submitted'): array
+    {
+        return [
+            'deploy_report_sha256' => self::SHA,
+            'deploy_submission_count' => 1,
+            'deploy_verdict' => $deployVerdict,
+            'rollback_report_sha256' => $rollbackVerdict === 'not_submitted' ? null : self::SHA,
+            'rollback_submission_count' => $rollbackVerdict === 'not_submitted' ? 0 : 1,
+            'rollback_verdict' => $rollbackVerdict,
+        ];
+    }
+
+    /** @param list<string> $lines @return array<string,mixed> */
+    private function recoveryAdmissionState(array $lines, string $stateName): array
+    {
+        $events = implode("\n", $lines) . "\n";
+        $state = $this->state();
+        $state['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $state['state'] = $stateName;
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['active_action'] = $stateName === 'rollback_running' ? 'rollback' : 'none';
+        $state['deploy']['unit_name'] = DeploymentHostRunnerContractV1::unitName(
+            'deploy',
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['deploy']['receipt_sha256'] = $this->receiptSha256('succeeded');
+        $state['post_gates'] = $this->submittedPostGates('failed');
+        $state['post_gates']['deploy_report_sha256'] = hash('sha256', $this->failedDeployPostGateReportBytes());
+        if ($stateName === 'rollback_running') {
+            $state['rollback'] = [
+                'request_sha256' => self::SHA,
+                'execution_input_sha256' => self::SHA,
+                'invocation_count' => 1,
+                'unit_name' => DeploymentHostRunnerContractV1::unitName(
+                    'rollback',
+                    self::RUN_ID,
+                    $state['intent_sha256'],
+                ),
+                'unit_state' => 'running',
+                'observed_exit_code' => null,
+                'verdict' => 'unknown',
+            ];
+        }
+
+        return $state;
+    }
+
+    private function failedDeployPostGateReportBytes(): string
+    {
+        $report = $this->postGateReport(false, 'deploy');
+        $report['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $report['deploy_receipt_sha256'] = $this->receiptSha256('succeeded');
+
+        return DeploymentHostRunnerContractV1::encodePostGateReport($report);
     }
 
     private function receiptSha256(string $outcome): string
@@ -1988,6 +2556,14 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'unit_state' => 'exited',
                 'observed_exit_code' => 30,
                 'receipt_sha256' => self::SHA,
+            ],
+            'post_gates' => [
+                'deploy_report_sha256' => null,
+                'deploy_submission_count' => 0,
+                'deploy_verdict' => 'not_submitted',
+                'rollback_report_sha256' => null,
+                'rollback_submission_count' => 0,
+                'rollback_verdict' => 'not_submitted',
             ],
             'rollback' => [
                 'request_sha256' => null,
