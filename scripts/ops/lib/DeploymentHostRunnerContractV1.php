@@ -920,6 +920,9 @@ final class DeploymentHostRunnerContractV1
         if ($rollback['verdict'] === 'failed' && $rollback['observed_exit_code'] === 0) {
             throw new RuntimeException('failed rollback verdict requires a nonzero exit');
         }
+        if ($rollback['verdict'] === 'unknown' && $rollback['observed_exit_code'] !== null) {
+            throw new RuntimeException('unknown rollback verdict cannot retain an observed exit');
+        }
     }
 
     /** @param array<string,mixed> $state */

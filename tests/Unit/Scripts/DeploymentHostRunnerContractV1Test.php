@@ -196,6 +196,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state = $this->state();
         $state['state'] = DeploymentContractV1::ROLLBACK_RESERVATION_STATE;
         $state['active_action'] = 'rollback';
+        $state['deploy']['observed_exit_code'] = 0;
         $state['rollback'] = [
             'request_sha256' => self::SHA,
             'execution_input_sha256' => self::SHA,
@@ -377,6 +378,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $state = $this->state();
         $state['state'] = DeploymentContractV1::ROLLBACK_RESERVATION_STATE;
         $state['active_action'] = 'rollback';
+        $state['deploy']['observed_exit_code'] = 0;
         $state['rollback'] = [
             'request_sha256' => self::SHA,
             'execution_input_sha256' => self::SHA,
@@ -395,6 +397,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     {
         yield 'success with nonzero exit' => ['succeeded', 1];
         yield 'failure with zero exit' => ['failed', 0];
+        yield 'unknown verdict with observed exit' => ['unknown', 1];
     }
 
     public function testTerminalStateRequiresStableResultAndEvidenceBinding(): void
@@ -640,7 +643,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         yield 'malformed intent identity' => [['intent_sha256' => 'not-an-intent-hash']];
     }
 
-    public function testCliRejectedResponseCannotClaimAState(): void
+    #[DataProvider('rejectedResponseProvider')]
+    public function testCliRejectedResponseCannotClaimAState(int $exitCode, string $reason): void
     {
         $response = [
             'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
@@ -649,12 +653,18 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'action' => 'deploy',
             'disposition' => 'rejected',
             'state' => 'planned',
-            'result_exit_code' => 70,
-            'result_reason' => 'contract_invalid',
+            'result_exit_code' => $exitCode,
+            'result_reason' => $reason,
         ];
 
         $this->expectException(RuntimeException::class);
         DeploymentHostRunnerContractV1::validateResponse($response);
+    }
+
+    public static function rejectedResponseProvider(): iterable
+    {
+        yield 'contract invalid' => [70, 'contract_invalid'];
+        yield 'state conflict' => [75, 'state_conflict'];
     }
 
     public function testCliResponseRejectsStateExitMismatchAndUnknownProgressState(): void
@@ -1491,6 +1501,55 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             $evidenceBytes,
             self::RUN_ID,
             $state['intent_sha256'],
+        );
+    }
+
+    public function testFailedTerminalActiveClaimRefreshesThenClears(): void
+    {
+        $lines = $this->failedPreSwitchLines();
+        $events = implode("\n", $lines) . "\n";
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->failedPreSwitchEvidence($lines)) . "\n";
+        $state = $this->terminalState('failed_pre_switch', 30, 'deploy_failed');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $claimLines = array_slice($lines, 0, -1);
+        $claimEvents = implode("\n", $claimLines) . "\n";
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => 'deploy_running',
+            'sequence' => count($claimLines),
+            'events_sha256' => hash('sha256', $claimEvents),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        self::assertSame(
+            'refresh_terminal_claim',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                $evidenceBytes,
+                self::RUN_ID,
+                $state['intent_sha256'],
+            ),
+        );
+
+        $claim['state'] = 'failed_pre_switch';
+        $claim['sequence'] = count($lines);
+        $claim['events_sha256'] = hash('sha256', $events);
+        self::assertSame(
+            'clear_terminal',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                $evidenceBytes,
+                self::RUN_ID,
+                $state['intent_sha256'],
+            ),
         );
     }
 

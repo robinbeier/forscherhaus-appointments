@@ -414,7 +414,8 @@ rollback count and verdict must likewise match the validated dedicated rollback
 evidence. `post_gates_running` and `rollback_running` additionally require the
 deploy unit to be `exited`, its independently observed exit to be `0`, and its
 accepted receipt SHA to be present. A known successful rollback verdict requires
-exit `0`; a known failed verdict requires a nonzero exit. A nested action
+exit `0`; a known failed verdict requires a nonzero exit; an unknown verdict
+requires a null observed exit. A nested action
 contradiction is not a current terminal cache.
 Counts are `0` or `1`. `active_action` is `deploy` only in `deploy_running`,
 `rollback` only in `rollback_running`, and otherwise `none`. Unit state is one
