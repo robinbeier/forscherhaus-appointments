@@ -350,7 +350,185 @@ systemd unit, locking, crash injection, and process reconciliation belong to
 the Host-runner PR. SSH/build/upload/start/status/wait belong to the Coordinator
 PR.
 
+## Host-runner request contracts
+
+The internal root runner accepts two closed, secret-free request objects. This
+contract freezes their future boundary; it does not install or execute the
+runner.
+
+`deployment_host_runner_request.v1` contains exactly `schema`, `run_id`,
+`expected_commit`, `release_id`, `traffic_mode`, the fixed `dump_policy` and
+`artifact_expectation` values, and the existing `intent_sha256` over those five
+immutable intent fields. It is the request form of the immutable
+`deployment_run.v1` intent. It never contains sequence, timestamps, states,
+reservation counts, results, commands, arguments, paths, hosts, receipts,
+output, or free text. The runner writes the full intent record and all mutable
+fields itself. Same Run-ID plus a different intent hash is
+`75`/`state_conflict`.
+
+`deployment_host_recovery_request.v1` contains exactly `schema`, `run_id`, and
+`intent_sha256`. Recovery is an action on the existing durable run, not a new
+intent. Host-local active/previous/failed release paths, runtime users,
+commands, and verdicts are not caller fields. Recovery is accepted only from
+`post_gates_running`; an existing `rollback_running` reservation attaches
+observe-only, and a terminal run returns its stored result without a second
+reservation.
+
+Standalone request and state files are recursively key-sorted compact JSON with
+one final newline, no NUL, and at most 4,096 bytes. Their file SHA-256 covers
+those exact bytes including that newline. Missing, extra, wrongly typed,
+noncanonical, oversized, or invalid data is `70`/`contract_invalid`; it is never
+repaired or normalized.
+
+## Host-runner state contracts
+
+`state.json` uses schema `deployment_host_runner_state.v1` and exactly these
+keys:
+
+```text
+schema run_id intent_sha256 state sequence events_sha256 active_action deploy
+rollback evidence_sha256 terminal updated_at_utc
+```
+
+`deploy` contains exactly `request_sha256`, `execution_input_sha256`,
+`invocation_count`, `unit_name`, `unit_state`, `observed_exit_code`, and
+`receipt_sha256`. `rollback` keeps the independent corresponding request,
+execution-input, count, unit, and observed-exit fields plus its fixed
+`not_invoked`/`succeeded`/`failed`/`unknown` verdict. `terminal` contains only
+`state`, `exit_code`, and `reason`. Keeping deploy and rollback in separate
+closed objects prevents a recovery request or unit from overwriting the
+exactly-once deploy binding.
+
+`events.jsonl` is authoritative. `state.json` is a SHA-bound cache and can lag
+only when the complete canonical journal proves the next state. A contradiction
+or corrupt/partial journal fails closed; neither file is truncated or repaired.
+Counts are `0` or `1`. `active_action` is `deploy` only in `deploy_running`,
+`rollback` only in `rollback_running`, and otherwise `none`. Unit state is one
+of `not_created`, `starting`, `running`, `exited`, `failed`, `killed`, or
+`unknown`. Arbitrary child exits may be retained only as the independently
+observed byte-sized exit in runner state; `killed` records a systemd signal
+verdict with a null normal exit, never a synthesized `143`. Public terminal
+evidence still uses only the frozen stable pairs. A receipt SHA requires an
+independently observed normal exit from `0`, `30`, `31`, `32`, or `143`.
+Terminal fields and evidence SHA are all absent before terminal state and all
+present afterwards. Every `manual_recovery_required` state preserves the
+fsynced deploy reservation and count `1`.
+
+The fixed-enum operator journal uses schema
+`deployment_host_operator_event.v1` and exactly:
+
+```text
+schema run_id intent_sha256 sequence recorded_at_utc action event status reason
+```
+
+Actions are `none`, `deploy`, `rollback`, or `reconcile`. Status is `ok`,
+`running`, `failed`, `unknown`, or `terminal`. Events are limited to request
+acceptance, attachment, durable reservation, unit start/observation, receipt
+acceptance/rejection, post-gate observation, rollback reservation,
+reconciliation required, terminal persistence, and active-run clearance.
+Reasons are fixed codes for same-intent attachment, contract/state/lock/unit
+classification, receipt classification, interruption, post-gate failure,
+rollback verdict, and manual recovery. No detail, exception, path, command,
+host, stdout, stderr, or raw journal field exists.
+
+The exact event enum is `request_accepted`, `attached`,
+`reservation_persisted`, `unit_started`, `unit_observed`, `receipt_accepted`,
+`receipt_rejected`, `post_gates_observed`, `rollback_reserved`,
+`reconciliation_required`, `terminal_persisted`, or `active_run_cleared`.
+The exact reason enum is `none`, `same_intent`, `state_conflict`,
+`contract_invalid`, `lock_busy`, `unit_collision`, `unit_running`,
+`unit_exited`, `unit_failed`, `unit_killed`, `unit_missing`, `receipt_valid`,
+`receipt_missing`, `receipt_invalid`, `receipt_mismatch`, `child_exit_74`,
+`interrupted`, `post_gate_failed`, `rollback_succeeded`, `rollback_failed`, or
+`manual_recovery_required`.
+
+## Locks and durable active run
+
+Every mutation or reconciliation acquires locks in one order:
+
+1. `/run/lock/fh-production-change.lock`;
+2. `/var/lib/fh-deploy-orchestrator/runs/<run_id>/run.lock`.
+
+Both are stable root-owned mode-`0600` regular single-link files beneath trusted
+canonical ancestors. They are opened, identity-checked, locked, rechecked, and
+never unlinked or recreated. The invocation keeps both locks until its response
+has been derived from durable state.
+
+Process locks are not crash-durable. Before any deploy or recovery reservation,
+the runner therefore atomically persists and fsyncs
+`/var/lib/fh-deploy-orchestrator/active-run.json` with schema
+`deployment_host_active_run.v1`. It contains exactly `schema`, `run_id`,
+`intent_sha256`, the reserved nonterminal `state`, `state_sha256`, and
+`claimed_at_utc`. Allowed states are `deploy_running`, `post_gates_running`, and
+`rollback_running`. `state_sha256` binds the exact canonical `state.json` bytes,
+including their final newline.
+
+Under the global lock, a different Run-ID is exit `75` while that claim binds a
+nonterminal trusted journal, even if no runner process remains or the unit has
+already exited. The exact run and intent may only attach/reconcile. A terminal
+journal plus matching durable evidence permits clearing a stale claim with an
+atomic file+directory fsync. A missing claim with one discovered trusted
+nonterminal reserved run is reconstructed; multiple, corrupt, mismatched, or
+unprovable candidates fail closed and never authorize a new spawn.
+
+## Transient unit and internal CLI contract
+
+Unit identity binds action, full Run-ID, and the first 12 hex characters of the
+intent SHA:
+
+```text
+fh-deploy-<run_id>-<intent12>.service
+fh-rollback-<run_id>-<intent12>.service
+```
+
+The system-manager transient service uses `Type=exec`, `RemainAfterExit=yes`,
+`UMask=0077`, `KillMode=control-group`, `Restart=no`, journal output, null
+standard input, `RuntimeMaxSec=7200s` for deploy or `1800s` for rollback, and
+`TimeoutStopSec=300s`. It is argv-based without a shell. The runner never uses
+scope units, `--wait`, `--pipe`, `--pty`, `--collect`, or unit-name reuse as an
+attachment mechanism. A pre-existing unit-name collision is `75`; attachment
+comes only from the bound durable run state.
+
+The future root-only executable has three internal actions:
+
+```text
+--action=deploy --request-file=ABSOLUTE_PATH --execution-input-file=ABSOLUTE_PATH
+--action=recovery --request-file=ABSOLUTE_PATH --execution-input-file=ABSOLUTE_PATH
+--action=reconcile --run-id=UUIDV4 --intent-sha256=SHA256
+```
+
+The execution-input file is separate root-protected host-local input. Only its
+exact byte SHA may enter state; its commands, arguments, paths, environment, and
+secrets never enter a request, evidence, operator journal, or normal response.
+Unknown or incomplete flags exit `64`; contract-invalid input exits `70`; an
+intent, active-run, lock, phase, or unit conflict exits `75`. Accepted start and
+nonterminal attachment exit `0`. Terminal attachment also exits `0` as a status
+operation while returning the immutable stored lifecycle exit/reason inside the
+response; it does not replay that failure as the CLI process exit.
+
+Normal stdout is one canonical `deployment_host_runner_response.v1` object with
+exactly `schema`, `run_id`, `intent_sha256`, `action`, `disposition`, `state`,
+`result_exit_code`, and `result_reason`. Disposition is `accepted`,
+`attach_pre_deploy`, `attach_observe_only`, `terminal`, or `rejected`.
+Nonterminal accepted responses carry `0`/`ok`; terminal responses carry the
+stored lifecycle pair; rejected responses carry only `70`/`contract_invalid` or
+`75`/`state_conflict`. Diagnostics are fixed and secret-free. Coordinator-owned
+SSH, build, upload, start/status/wait UX, post-gate collection, and host
+activation remain outside this contract PR.
+
 ## Local validation
+
+The request/state contract is a pure PHPUnit test in the general CI suite; it
+does not require root or a live systemd manager:
+
+```bash
+php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
+  tests/Unit/Scripts/DeploymentHostRunnerContractV1Test.php
+```
+
+Root/Linux storage, lock, fsync, crash, and transient-unit execution tests stay
+with the later executable Host Runner. This contract-only PR does not add an
+inactive implementation to the privileged CI list.
 
 The pure validator can validate a completed local fixture without privileged
 execution:

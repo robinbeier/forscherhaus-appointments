@@ -76,6 +76,10 @@ Script inventory:
   child-receipt candidate and derives its fixed deploy-evidence tuple without
   reading timing or process output; authority additionally requires an
   independently observed matching child exit and durable runner-state binding
+- `lib/DeploymentHostRunnerContractV1.php` freezes the closed secret-free deploy
+  and recovery requests plus state, active-run, operator-event, response, lock,
+  and transient-unit identities for the later root Host Runner; it does not
+  spawn a unit or activate production behavior
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything
