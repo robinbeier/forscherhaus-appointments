@@ -141,6 +141,7 @@
 /assets/js/pages/service_categories.js @robinbeier
 /assets/js/pages/services.js @robinbeier
 /assets/js/pages/webhooks.js @robinbeier
+/deploy_ea.sh @robinbeier
 /docs/release-gate-booking-confirmation-pdf.md @robinbeier
 /docs/release-gate-customers-ui-smoke.md @robinbeier
 /docs/release-gate-dashboard.md @robinbeier
