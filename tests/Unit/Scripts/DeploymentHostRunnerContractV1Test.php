@@ -229,6 +229,36 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::validateState($state);
     }
 
+    public function testSucceededAndManualRecoveryTerminalStatesAreAccepted(): void
+    {
+        $succeeded = $this->state();
+        $succeeded['state'] = 'succeeded';
+        $succeeded['active_action'] = 'none';
+        $succeeded['deploy']['unit_state'] = 'exited';
+        $succeeded['deploy']['observed_exit_code'] = 0;
+        $succeeded['evidence_sha256'] = self::SHA;
+        $succeeded['terminal'] = ['state' => 'succeeded', 'exit_code' => 0, 'reason' => 'ok'];
+
+        DeploymentHostRunnerContractV1::validateState($succeeded);
+
+        $manual = $this->state();
+        $manual['state'] = 'manual_recovery_required';
+        $manual['active_action'] = 'none';
+        $manual['deploy']['unit_state'] = 'unknown';
+        $manual['deploy']['observed_exit_code'] = null;
+        $manual['deploy']['receipt_sha256'] = null;
+        $manual['evidence_sha256'] = self::SHA;
+        $manual['terminal'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 70,
+            'reason' => 'contract_invalid',
+        ];
+
+        DeploymentHostRunnerContractV1::validateState($manual);
+
+        self::addToAssertionCount(2);
+    }
+
     public function testOperatorJournalIsClosedAndFixedEnumOnly(): void
     {
         $event = [
@@ -261,7 +291,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::validateOperatorEvent($event);
     }
 
-    public function testActiveRunClaimAllowsOnlyReservedNonterminalPhases(): void
+    public function testActiveRunClaimAllowsReservedPhasesAndTerminalClearanceHandoff(): void
     {
         $claim = [
             'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
@@ -275,6 +305,9 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::validateActiveRun($claim);
 
         $claim['state'] = 'succeeded';
+        DeploymentHostRunnerContractV1::validateActiveRun($claim);
+
+        $claim['state'] = 'artifact_verified';
         $this->expectException(RuntimeException::class);
         DeploymentHostRunnerContractV1::validateActiveRun($claim);
     }
@@ -366,6 +399,77 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
 
         $this->expectException(RuntimeException::class);
         DeploymentHostRunnerContractV1::validateResponse($response);
+    }
+
+    #[DataProvider('impossibleResponseProvider')]
+    public function testCliResponseRejectsActionImpossibleDispositionOrState(array $changes): void
+    {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'action' => 'deploy',
+            'disposition' => 'attach_pre_deploy',
+            'state' => 'artifact_verified',
+            'result_exit_code' => 0,
+            'result_reason' => 'ok',
+        ];
+        foreach ($changes as $key => $value) {
+            $response[$key] = $value;
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validateResponse($response);
+    }
+
+    public static function impossibleResponseProvider(): iterable
+    {
+        yield 'recovery cannot attach before deploy' => [
+            ['action' => 'recovery', 'disposition' => 'attach_pre_deploy', 'state' => 'planned'],
+        ];
+        yield 'reconcile cannot accept new work' => [['action' => 'reconcile', 'disposition' => 'accepted']];
+        yield 'succeeded cannot be nonterminal' => [['disposition' => 'accepted', 'state' => 'succeeded']];
+        yield 'pre-deploy attach cannot claim deploy reservation' => [
+            ['disposition' => 'attach_pre_deploy', 'state' => 'deploy_running'],
+        ];
+        yield 'observe-only attach requires reserved work' => [
+            ['disposition' => 'attach_observe_only', 'state' => 'artifact_verified'],
+        ];
+        yield 'recovery acceptance requires post gates' => [
+            ['action' => 'recovery', 'disposition' => 'accepted', 'state' => 'artifact_verified'],
+        ];
+    }
+
+    #[DataProvider('validNonterminalResponseProvider')]
+    public function testCliResponseAcceptsOnlyDefinedNonterminalActionCombinations(
+        string $action,
+        string $disposition,
+        string $state,
+    ): void {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'action' => $action,
+            'disposition' => $disposition,
+            'state' => $state,
+            'result_exit_code' => 0,
+            'result_reason' => 'ok',
+        ];
+
+        DeploymentHostRunnerContractV1::validateResponse($response);
+        self::assertSame(0, DeploymentHostRunnerContractV1::cliExitCode($response));
+    }
+
+    public static function validNonterminalResponseProvider(): iterable
+    {
+        yield 'new deploy accepted' => ['deploy', 'accepted', 'accepted'];
+        yield 'deploy attaches before reservation' => ['deploy', 'attach_pre_deploy', 'artifact_verified'];
+        yield 'deploy observes reservation' => ['deploy', 'attach_observe_only', 'deploy_running'];
+        yield 'recovery accepted after post gates' => ['recovery', 'accepted', 'post_gates_running'];
+        yield 'recovery observes reservation' => ['recovery', 'attach_observe_only', 'rollback_running'];
+        yield 'reconcile reports pre-deploy prefix' => ['reconcile', 'attach_pre_deploy', 'artifact_verified'];
+        yield 'reconcile observes active work' => ['reconcile', 'attach_observe_only', 'post_gates_running'];
     }
 
     public function testCanonicalPositiveFixturesRemainExact(): void
@@ -491,6 +595,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 $claim,
                 $state,
                 $events,
+                null,
                 self::RUN_ID,
                 $this->deployRequest()['intent_sha256'],
             ),
@@ -501,6 +606,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             $claim,
             $state,
             $events,
+            null,
             '228f6f52-4c87-4d4e-8b19-6a66e6e1af25',
             $this->deployRequest()['intent_sha256'],
         );
@@ -520,11 +626,10 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         );
 
         self::assertSame('current', DeploymentHostRunnerContractV1::stateCacheDisposition($state, $events));
-        DeploymentHostRunnerContractV1::validateStateAgainstJournal($state, $events);
 
         $state['sequence']--;
         $this->expectException(RuntimeException::class);
-        DeploymentHostRunnerContractV1::validateStateAgainstJournal($state, $events);
+        DeploymentHostRunnerContractV1::stateCacheDisposition($state, $events);
     }
 
     public function testCompleteJournalCanProveARecoverablyStaleStateCache(): void
@@ -554,7 +659,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     public function testStateJournalRejectsCorruptOrPartialBytes(string $events): void
     {
         $this->expectException(RuntimeException::class);
-        DeploymentHostRunnerContractV1::validateStateAgainstJournal($this->state(), $events);
+        DeploymentHostRunnerContractV1::stateCacheDisposition($this->state(), $events);
     }
 
     public static function corruptJournalProvider(): iterable
@@ -588,7 +693,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::validateState($state);
     }
 
-    public function testTerminalJournalAllowsClearingAStaleActiveClaim(): void
+    public function testTerminalJournalCannotClearAClaimBeforeTerminalStateAndEvidenceAreDurable(): void
     {
         $lines = $this->runThrough('deploy_running');
         $previous = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
@@ -626,16 +731,167 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
 
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::activeRunDisposition(
+            $claim,
+            $state,
+            $events,
+            null,
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+    }
+
+    public function testTerminalStateCacheMustMatchJournalResult(): void
+    {
+        $lines = $this->failedPreSwitchLines();
+        $events = implode("\n", $lines) . "\n";
+        $state = $this->terminalState('failed_pre_switch', 143, 'interrupted');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, "{}\n");
+    }
+
+    public function testTerminalActiveClaimClearsOnlyWithMatchingStateEvidenceAndCandidate(): void
+    {
+        $lines = $this->runThrough('succeeded');
+        $events = implode("\n", $lines) . "\n";
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
+        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => 'post_gates_running',
+            'state_sha256' => self::SHA,
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        self::assertSame(
+            'refresh_terminal_claim',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                $evidenceBytes,
+                self::RUN_ID,
+                $state['intent_sha256'],
+            ),
+        );
+
+        $claim['state'] = 'succeeded';
+        $claim['state_sha256'] = DeploymentHostRunnerContractV1::fileSha256(
+            DeploymentHostRunnerContractV1::encodeFile($state),
+        );
         self::assertSame(
             'clear_terminal',
             DeploymentHostRunnerContractV1::activeRunDisposition(
                 $claim,
                 $state,
                 $events,
+                $evidenceBytes,
                 self::RUN_ID,
                 $state['intent_sha256'],
             ),
         );
+
+        try {
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                $evidenceBytes,
+                '228f6f52-4c87-4d4e-8b19-6a66e6e1af25',
+                $state['intent_sha256'],
+            );
+            self::fail('A mismatched candidate cleared the durable active-run claim.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $state['evidence_sha256'] = self::SHA;
+        try {
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                $evidenceBytes,
+                self::RUN_ID,
+                $state['intent_sha256'],
+            );
+            self::fail('Mismatched evidence bytes cleared the durable active-run claim.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $claim['state_sha256'] = self::SHA;
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::activeRunDisposition(
+            $claim,
+            $state,
+            $events,
+            $evidenceBytes,
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+    }
+
+    #[DataProvider('invalidTerminalEvidenceBytesProvider')]
+    public function testTerminalStateCacheRejectsMalformedOrNoncanonicalEvidenceBytes(string $evidenceBytes): void
+    {
+        $lines = $this->runThrough('succeeded');
+        $events = implode("\n", $lines) . "\n";
+        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
+    }
+
+    public static function invalidTerminalEvidenceBytesProvider(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'malformed' => ["{\n"];
+        yield 'nul byte' => ["{}\0\n"];
+        yield 'missing final newline' => ['{}'];
+        yield 'oversized' => [str_repeat('x', 65_537)];
+    }
+
+    public function testRollbackReservationStateMatchesItsAuthoritativeJournal(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->transition($lines, DeploymentContractV1::ROLLBACK_RESERVATION_STATE);
+        $events = implode("\n", $lines) . "\n";
+        $state = $this->state();
+        $state['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $state['state'] = DeploymentContractV1::ROLLBACK_RESERVATION_STATE;
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['active_action'] = 'rollback';
+        $state['deploy']['unit_name'] = DeploymentHostRunnerContractV1::unitName(
+            'deploy',
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+        $state['rollback'] = [
+            'request_sha256' => self::SHA,
+            'execution_input_sha256' => self::SHA,
+            'invocation_count' => 1,
+            'unit_name' => DeploymentHostRunnerContractV1::unitName('rollback', self::RUN_ID, $state['intent_sha256']),
+            'unit_state' => 'running',
+            'observed_exit_code' => null,
+            'verdict' => 'unknown',
+        ];
+
+        self::assertSame('current', DeploymentHostRunnerContractV1::stateCacheDisposition($state, $events));
     }
 
     public function testActiveRunClaimMustBindExactStateBytes(): void
@@ -664,6 +920,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             $claim,
             $state,
             $events,
+            null,
             self::RUN_ID,
             $state['intent_sha256'],
         );
@@ -749,6 +1006,157 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         ];
 
         return DeploymentContractV1::canonicalJson($record);
+    }
+
+    /** @return list<string> */
+    private function failedPreSwitchLines(): array
+    {
+        $lines = $this->runThrough('deploy_running');
+        $previous = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($previous);
+        $lines[] = DeploymentContractV1::canonicalJson([
+            'schema' => DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::RUN_ID,
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-11T13:00:11Z',
+            'previous_state' => $previous['state'],
+            'state' => 'failed_pre_switch',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'exit_code' => 30,
+            'reason' => 'deploy_failed',
+        ]);
+
+        return $lines;
+    }
+
+    /** @return array<string,mixed> */
+    private function terminalState(string $stateName, int $exitCode, string $reason): array
+    {
+        $state = $this->state();
+        $state['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $state['state'] = $stateName;
+        $state['active_action'] = 'none';
+        $state['deploy']['unit_name'] = DeploymentHostRunnerContractV1::unitName(
+            'deploy',
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+        $state['deploy']['observed_exit_code'] = $exitCode;
+        $state['evidence_sha256'] = self::SHA;
+        $state['terminal'] = ['state' => $stateName, 'exit_code' => $exitCode, 'reason' => $reason];
+
+        return $state;
+    }
+
+    /** @param list<string> $lines @return array<string,mixed> */
+    private function succeededEvidence(array $lines): array
+    {
+        $intent = json_decode($lines[0], true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($intent);
+        $counts = array_fill_keys(DeploymentContractV1::TRAFFIC_COUNT_KEYS, 0);
+        $counts['documented_health'] = 1;
+        $counts['total'] = 1;
+        $counts['lines_seen'] = 1;
+        $counts['lines_in_window'] = 1;
+
+        return [
+            'schema' => DeploymentContractV1::EVIDENCE_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $intent['intent_sha256'],
+            'captured_at_utc' => '2026-08-11T13:00:13Z',
+            'expected_commit' => [
+                'expected' => str_repeat('c', 40),
+                'observed' => str_repeat('c', 40),
+                'verified' => true,
+            ],
+            'traffic_gate' => [
+                'status' => 'passed',
+                'report_sha256' => self::SHA,
+                'schema' => 'traffic_gate.v1',
+                'producer_sha256' => self::SHA,
+                'policy_version' => 'traffic_gate_policy.v1',
+                'catalog_version' => '2026-08-09.1',
+                'purpose' => 'deploy',
+                'mode' => 'normal',
+                'window_start_epoch' => 1786453110,
+                'window_end_epoch' => 1786453200,
+                'window_seconds' => 90,
+                'log_set_sha256' => self::SHA,
+                'rotation_complete' => true,
+                'parse_complete' => true,
+                'evidence_complete' => true,
+                'decision' => 'allow',
+                'exit_code' => 0,
+                'counts' => $counts,
+            ],
+            'dump' => [
+                'status' => 'passed',
+                'policy' => DeploymentContractV1::DUMP_POLICY,
+                'age_seconds' => 60,
+                'max_age_seconds' => 14400,
+                'sha256' => self::SHA,
+                'sha256_verified' => true,
+                'gzip_verified' => true,
+                'restore_verified' => true,
+            ],
+            'capacity' => [
+                'status' => 'passed',
+                'available_bytes' => 8_000_000_000,
+                'projected_required_bytes' => 1_000_000_000,
+                'observed_percent' => 81,
+                'projected_percent' => 84,
+                'max_used_percent' => DeploymentContractV1::MAX_CAPACITY_USED_PERCENT,
+                'passed' => true,
+            ],
+            'artifact' => [
+                'status' => 'passed',
+                'expectation' => DeploymentContractV1::ARTIFACT_EXPECTATION,
+                'local_sha256' => self::SHA,
+                'remote_sha256' => self::SHA,
+                'manifest_sha256' => self::SHA,
+                'host_script_sha256' => self::SHA,
+                'artifact_script_sha256' => self::SHA,
+                'verified' => true,
+            ],
+            'deploy' => [
+                'status' => 'succeeded',
+                'invocation_count' => 1,
+                'exit_code' => 0,
+                'rollback_outcome' => 'not_run',
+            ],
+            'rollback' => [
+                'status' => 'not_invoked',
+                'invocation_count' => 0,
+                'mode' => 'not_applicable',
+                'verified' => null,
+            ],
+            'post_gates' => [
+                'status' => 'passed',
+                'kuma_healthy_count' => 13,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+                'services_passed' => true,
+                'endpoints_passed' => true,
+                'logs_passed' => true,
+                'scanner_passed' => true,
+                'dormant_clean_passed' => true,
+                'passed' => true,
+            ],
+            'deploy_timing' => [
+                'status' => 'not_observed',
+                'authoritative_sha256' => null,
+                'run_id' => null,
+                'total_ms' => null,
+            ],
+            'orchestrator_timing' => [
+                'started_at_utc' => '2026-08-11T13:00:00Z',
+                'finished_at_utc' => '2026-08-11T13:00:12Z',
+                'wall_clock_ms' => 12_000,
+            ],
+            'result' => ['state' => 'succeeded', 'exit_code' => 0, 'reason' => 'ok'],
+        ];
     }
 
     /** @return array<string,mixed> */

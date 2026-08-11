@@ -103,6 +103,21 @@ final class DeploymentHostRunnerContractV1
 
     private const UNIT_STATES = ['not_created', 'starting', 'running', 'exited', 'failed', 'killed', 'unknown'];
 
+    private const PRE_DEPLOY_STATES = [
+        'planned',
+        'built',
+        'uploaded',
+        'accepted',
+        'lock_acquired',
+        'expected_commit_verified',
+        'traffic_gate_passed',
+        'dump_verified',
+        'capacity_passed',
+        'artifact_verified',
+    ];
+
+    private const OBSERVE_ONLY_STATES = ['deploy_running', 'post_gates_running', 'rollback_running'];
+
     private const OPERATOR_EVENTS = [
         'request_accepted',
         'attached',
@@ -238,13 +253,21 @@ final class DeploymentHostRunnerContractV1
         array $claim,
         array $referencedState,
         string $referencedEventsBytes,
+        ?string $referencedEvidenceBytes,
         string $candidateRunId,
         string $candidateIntentSha256,
     ): string {
         self::validateActiveRun($claim);
         self::assertUuidV4($candidateRunId, 'candidate run_id');
         self::assertSha256($candidateIntentSha256, 'candidate intent_sha256');
-        self::validateStateAgainstJournal($referencedState, $referencedEventsBytes);
+        if ($candidateRunId !== $claim['run_id'] || !hash_equals($candidateIntentSha256, $claim['intent_sha256'])) {
+            throw new RuntimeException('a different run cannot bypass the durable active-run claim');
+        }
+        $cacheDisposition = self::stateCacheDispositionWithEvidence(
+            $referencedState,
+            $referencedEventsBytes,
+            $referencedEvidenceBytes,
+        );
         if (
             $referencedState['run_id'] !== $claim['run_id'] ||
             !hash_equals($referencedState['intent_sha256'], $claim['intent_sha256'])
@@ -254,6 +277,19 @@ final class DeploymentHostRunnerContractV1
         $lines = explode("\n", substr($referencedEventsBytes, 0, -1));
         $run = DeploymentContractV1::validateRunLines($lines);
         if ($run['recovery'] === 'terminal') {
+            if ($cacheDisposition !== 'current') {
+                throw new RuntimeException('terminal journal requires matching durable state and evidence');
+            }
+            $terminalStateSha256 = self::fileSha256(self::encodeFile($referencedState));
+            if ($claim['state'] !== $referencedState['state']) {
+                if (!in_array($claim['state'], self::OBSERVE_ONLY_STATES, true)) {
+                    throw new RuntimeException('terminal active run claim contradicts the durable terminal state');
+                }
+                return 'refresh_terminal_claim';
+            }
+            if (!hash_equals($claim['state_sha256'], $terminalStateSha256)) {
+                throw new RuntimeException('terminal active run claim does not bind the durable state');
+            }
             return 'clear_terminal';
         }
         if (
@@ -262,10 +298,6 @@ final class DeploymentHostRunnerContractV1
         ) {
             throw new RuntimeException('active run claim is stale or contradictory');
         }
-        if ($candidateRunId !== $claim['run_id'] || !hash_equals($candidateIntentSha256, $claim['intent_sha256'])) {
-            throw new RuntimeException('a different run cannot bypass the durable active-run claim');
-        }
-
         return 'attach_observe_only';
     }
 
@@ -310,14 +342,26 @@ final class DeploymentHostRunnerContractV1
     }
 
     /** @param array<string,mixed> $state */
-    public static function validateStateAgainstJournal(array $state, string $eventsBytes): void
+    public static function stateCacheDisposition(array $state, string $eventsBytes): string
     {
-        self::stateCacheDisposition($state, $eventsBytes);
+        return self::stateCacheDispositionWithEvidence($state, $eventsBytes, null);
     }
 
     /** @param array<string,mixed> $state */
-    public static function stateCacheDisposition(array $state, string $eventsBytes): string
-    {
+    public static function terminalStateCacheDisposition(
+        array $state,
+        string $eventsBytes,
+        string $evidenceBytes,
+    ): string {
+        return self::stateCacheDispositionWithEvidence($state, $eventsBytes, $evidenceBytes);
+    }
+
+    /** @param array<string,mixed> $state */
+    private static function stateCacheDispositionWithEvidence(
+        array $state,
+        string $eventsBytes,
+        ?string $evidenceBytes,
+    ): string {
         self::validateState($state);
         if (
             $eventsBytes === '' ||
@@ -352,6 +396,30 @@ final class DeploymentHostRunnerContractV1
             ($last['previous_state'] ?? null) === DeploymentContractV1::ROLLBACK_RESERVATION_STATE;
         if ($expectsRollback !== ($state['rollback']['invocation_count'] === 1)) {
             throw new RuntimeException('state cache contradicts the rollback reservation');
+        }
+
+        $stateIsTerminal = self::isTerminalState($state['state']);
+        if ($stateIsTerminal) {
+            if (
+                ($last['exit_code'] ?? null) !== $state['terminal']['exit_code'] ||
+                ($last['reason'] ?? null) !== $state['terminal']['reason']
+            ) {
+                throw new RuntimeException('terminal state cache contradicts the authoritative journal result');
+            }
+            if ($state['sequence'] !== $run['records'] || $evidenceBytes === null) {
+                throw new RuntimeException('terminal state cache requires matching durable evidence');
+            }
+            $evidence = self::decodeEvidenceFile($evidenceBytes);
+            $bundle = DeploymentContractV1::validateBundle($lines, $evidence);
+            if (
+                !hash_equals(hash('sha256', $evidenceBytes), $state['evidence_sha256']) ||
+                $bundle['state'] !== $state['state'] ||
+                $bundle['run_id'] !== $state['run_id']
+            ) {
+                throw new RuntimeException('terminal state cache does not bind the durable evidence bytes');
+            }
+        } elseif ($evidenceBytes !== null) {
+            throw new RuntimeException('nonterminal state cache cannot consume terminal evidence');
         }
 
         return $state['sequence'] === $run['records'] ? 'current' : 'stale_recoverable';
@@ -390,7 +458,7 @@ final class DeploymentHostRunnerContractV1
         self::assertSha256($claim['intent_sha256'], 'intent_sha256');
         self::assertEnum(
             $claim['state'],
-            ['deploy_running', 'post_gates_running', DeploymentContractV1::ROLLBACK_RESERVATION_STATE],
+            [...self::OBSERVE_ONLY_STATES, 'succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES],
             'active run state',
         );
         self::assertSha256($claim['state_sha256'], 'state_sha256');
@@ -507,14 +575,21 @@ final class DeploymentHostRunnerContractV1
             self::assertExitAllowedForState($response['state'], $response['result_exit_code']);
             return;
         }
+        $nonterminalStates = array_values(
+            array_filter(
+                DeploymentContractV1::PROGRESS_STATES,
+                static fn(string $state): bool => $state !== 'succeeded',
+            ),
+        );
         self::assertEnum(
             $response['state'],
-            [...DeploymentContractV1::PROGRESS_STATES, DeploymentContractV1::ROLLBACK_RESERVATION_STATE],
+            [...$nonterminalStates, DeploymentContractV1::ROLLBACK_RESERVATION_STATE],
             'response state',
         );
         if ($response['result_exit_code'] !== 0 || $response['result_reason'] !== 'ok') {
             throw new RuntimeException('nonterminal accepted response must use ok');
         }
+        self::assertResponseActionDisposition($response['action'], $response['disposition'], $response['state']);
     }
 
     /** @return array<string,mixed> */
@@ -564,6 +639,47 @@ final class DeploymentHostRunnerContractV1
         }
 
         return $decoded;
+    }
+
+    /** @return array<string,mixed> */
+    private static function decodeEvidenceFile(string $encoded): array
+    {
+        if ($encoded === '' || strlen($encoded) > 65_536 || str_contains($encoded, "\0")) {
+            throw new RuntimeException('deployment evidence encoding is invalid');
+        }
+        try {
+            $decoded = json_decode($encoded, true, 64, JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new RuntimeException('deployment evidence JSON is invalid', 0, $exception);
+        }
+        if (!is_array($decoded) || array_is_list($decoded)) {
+            throw new RuntimeException('deployment evidence must be an object');
+        }
+        if (!hash_equals(DeploymentContractV1::canonicalJson($decoded) . "\n", $encoded)) {
+            throw new RuntimeException('deployment evidence is not canonical');
+        }
+
+        return $decoded;
+    }
+
+    private static function assertResponseActionDisposition(string $action, string $disposition, string $state): void
+    {
+        $allowedStates = match ($action . ':' . $disposition) {
+            'deploy:accepted' => ['accepted'],
+            'deploy:attach_pre_deploy', 'reconcile:attach_pre_deploy' => self::PRE_DEPLOY_STATES,
+            'deploy:attach_observe_only', 'reconcile:attach_observe_only' => self::OBSERVE_ONLY_STATES,
+            'recovery:accepted' => ['post_gates_running'],
+            'recovery:attach_observe_only' => [DeploymentContractV1::ROLLBACK_RESERVATION_STATE],
+            default => [],
+        };
+        if (!in_array($state, $allowedStates, true)) {
+            throw new RuntimeException('runner response action, disposition, and state are incompatible');
+        }
+    }
+
+    private static function isTerminalState(string $state): bool
+    {
+        return $state === 'succeeded' || in_array($state, DeploymentContractV1::TERMINAL_FAILURE_STATES, true);
     }
 
     /** @param array<string,mixed> $state */

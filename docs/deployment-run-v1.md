@@ -402,6 +402,12 @@ exactly-once deploy binding.
 `events.jsonl` is authoritative. `state.json` is a SHA-bound cache and can lag
 only when the complete canonical journal proves the next state. A contradiction
 or corrupt/partial journal fails closed; neither file is truncated or repaired.
+For a current terminal cache, its state, exit, and reason must equal the final
+journal record, and its `evidence_sha256` must hash the exact canonical
+`evidence.json` bytes including the final newline. The evidence is bounded to
+65,536 bytes and must pass the existing `deployment_evidence.v1` bundle
+validator against that same complete journal. A terminal journal without this
+matching durable state and evidence remains reconciliation-required.
 Counts are `0` or `1`. `active_action` is `deploy` only in `deploy_running`,
 `rollback` only in `rollback_running`, and otherwise `none`. Unit state is one
 of `not_created`, `starting`, `running`, `exited`, `failed`, `killed`, or
@@ -459,17 +465,26 @@ the runner therefore atomically persists and fsyncs
 `/var/lib/fh-deploy-orchestrator/active-run.json` with schema
 `deployment_host_active_run.v1`. It contains exactly `schema`, `run_id`,
 `intent_sha256`, the reserved nonterminal `state`, `state_sha256`, and
-`claimed_at_utc`. Allowed states are `deploy_running`, `post_gates_running`, and
-`rollback_running`. `state_sha256` binds the exact canonical `state.json` bytes,
-including their final newline.
+`claimed_at_utc`. Allowed states are `deploy_running`, `post_gates_running`,
+`rollback_running`, or a terminal state used only for the clearance handoff.
+`state_sha256` always binds the exact canonical `state.json` bytes, including
+their final newline.
 
 Under the global lock, a different Run-ID is exit `75` while that claim binds a
 nonterminal trusted journal, even if no runner process remains or the unit has
 already exited. The exact run and intent may only attach/reconcile. A terminal
-journal plus matching durable evidence permits clearing a stale claim with an
-atomic file+directory fsync. A missing claim with one discovered trusted
-nonterminal reserved run is reconstructed; multiple, corrupt, mismatched, or
-unprovable candidates fail closed and never authorize a new spawn.
+journal plus matching durable state and evidence first yields
+`refresh_terminal_claim`: the runner atomically replaces and fsyncs the stale
+nonterminal claim with a terminal claim bound to those exact state bytes. Only
+that exact terminal claim yields `clear_terminal`, followed by atomic
+file+directory fsync clearance. A crash between refresh and clearance is thus
+reconcilable without ignoring `state_sha256`. A missing claim with one
+discovered trusted nonterminal reserved run is reconstructed; multiple,
+corrupt, mismatched, or unprovable candidates fail closed and never authorize a
+new spawn.
+The candidate Run-ID and intent are checked against the durable claim before
+both attach and terminal-clear decisions; terminal clearance never bypasses a
+candidate mismatch.
 
 ## Transient unit and internal CLI contract
 
@@ -515,6 +530,19 @@ stored lifecycle pair; rejected responses carry only `70`/`contract_invalid` or
 `75`/`state_conflict`. Diagnostics are fixed and secret-free. Coordinator-owned
 SSH, build, upload, start/status/wait UX, post-gate collection, and host
 activation remain outside this contract PR.
+
+The action/disposition/state combinations are closed. The first deploy request
+is `accepted` in `accepted`; a later same-intent call can be
+`attach_pre_deploy` at that same durable state because disposition distinguishes
+request history, not just the state name. Pre-deploy attachment covers the
+explicit frozen states from `planned` through `artifact_verified`; the list is
+not derived from enum ordering. Observe-only attachment covers
+`deploy_running`, `post_gates_running`, or `rollback_running`. Recovery is
+`accepted` only in `post_gates_running` and observe-only only in
+`rollback_running`. Reconcile may report only a pre-deploy attachment,
+observe-only attachment, terminal result, or rejection. `succeeded` and every
+terminal failure always use disposition `terminal`, never a nonterminal
+disposition.
 
 ## Local validation
 
