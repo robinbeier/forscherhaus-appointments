@@ -358,6 +358,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `scripts/ops/lib/DeployResultV1.php`
   - `scripts/ops/lib/TrafficGateV1.php`
   - `scripts/ops/lib/DeploymentContractV1.php`
+  - `scripts/ops/lib/DeploymentHostRunnerContractV1.php`
   - `scripts/ops/prod_traffic_gate.sh`
   - `scripts/ops/validate_deployment_contract_v1.php`
   - `scripts/release-gate/dashboard_release_gate.php`
@@ -375,6 +376,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `scripts/ops/config/traffic_gate_catalog.v1.json`
   - `scripts/ops/lib/DeployResultV1.php`
   - `scripts/ops/lib/DeploymentContractV1.php`
+  - `scripts/ops/lib/DeploymentHostRunnerContractV1.php`
   - `scripts/ops/lib/TrafficGateV1.php`
   - `scripts/ops/prod_customers_ui_smoke.sh`
   - `scripts/ops/prod_traffic_gate.sh`

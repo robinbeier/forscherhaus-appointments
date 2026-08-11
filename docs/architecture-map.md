@@ -19,7 +19,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 24 | 14 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 25 | 15 |
 
 ## Component Details
 
@@ -372,6 +372,7 @@ Path prefixes:
 - `scripts/ops/config/traffic_gate_catalog.v1.json`
 - `scripts/ops/lib/DeployResultV1.php`
 - `scripts/ops/lib/DeploymentContractV1.php`
+- `scripts/ops/lib/DeploymentHostRunnerContractV1.php`
 - `scripts/ops/lib/TrafficGateV1.php`
 - `scripts/ops/prod_customers_ui_smoke.sh`
 - `scripts/ops/prod_traffic_gate.sh`
@@ -396,6 +397,7 @@ Key files:
 - `scripts/ops/lib/DeployResultV1.php`
 - `scripts/ops/lib/TrafficGateV1.php`
 - `scripts/ops/lib/DeploymentContractV1.php`
+- `scripts/ops/lib/DeploymentHostRunnerContractV1.php`
 - `scripts/ops/prod_traffic_gate.sh`
 - `scripts/ops/validate_deployment_contract_v1.php`
 - `scripts/release-gate/dashboard_release_gate.php`
