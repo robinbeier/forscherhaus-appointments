@@ -505,6 +505,94 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         }
     }
 
+    public function testFailedDeployReportReplayRemainsObserveOnly(): void
+    {
+        $encoded = $this->failedDeployPostGateReportBytes();
+        foreach (['post_gates_running', 'rollback_running'] as $stateName) {
+            $lines = $this->runThrough('post_gates_running');
+            if ($stateName === 'rollback_running') {
+                $lines[] = $this->transition($lines, 'rollback_running');
+            }
+            $state = $this->recoveryAdmissionState($lines, $stateName);
+
+            self::assertSame(
+                'attach_observe_only',
+                DeploymentHostRunnerContractV1::postGateDisposition($encoded, $state, $encoded),
+            );
+        }
+    }
+
+    public function testPersistedPassingDeployReportConvergesToSuccess(): void
+    {
+        $state = $this->state();
+        $state['state'] = 'post_gates_running';
+        $state['active_action'] = 'none';
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['deploy']['receipt_sha256'] = self::SHA;
+        $encoded = DeploymentHostRunnerContractV1::encodePostGateReport($this->postGateReport(true, 'deploy'));
+        $state['post_gates']['deploy_report_sha256'] = hash('sha256', $encoded);
+        $state['post_gates']['deploy_submission_count'] = 1;
+        $state['post_gates']['deploy_verdict'] = 'passed';
+
+        self::assertSame('succeeded', DeploymentHostRunnerContractV1::postGateDisposition($encoded, $state, $encoded));
+    }
+
+    public function testPinnedReportBeforeStateSlotResumesTheFirstDisposition(): void
+    {
+        $state = $this->state();
+        $state['state'] = 'post_gates_running';
+        $state['active_action'] = 'none';
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['deploy']['receipt_sha256'] = self::SHA;
+        foreach ([[false, 'recovery_required'], [true, 'succeeded']] as [$passed, $expected]) {
+            $encoded = DeploymentHostRunnerContractV1::encodePostGateReport($this->postGateReport($passed, 'deploy'));
+
+            self::assertSame(
+                $expected,
+                DeploymentHostRunnerContractV1::postGateDisposition($encoded, $state, $encoded),
+            );
+        }
+    }
+
+    public function testPostGateDispositionNeverDerivesAResultOverATerminalState(): void
+    {
+        foreach ([true, false] as $rollbackPassed) {
+            $state = $this->dedicatedRollbackTerminalState($rollbackPassed);
+            $encoded = $this->failedDeployPostGateReportBytes();
+
+            try {
+                DeploymentHostRunnerContractV1::postGateDisposition($encoded, $state, $encoded);
+                self::fail('A post-gate report replay derived a transition over an immutable terminal state.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        $state = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
+        $report = $this->postGateReport(true, 'deploy');
+        $report['intent_sha256'] = $state['intent_sha256'];
+        $report['deploy_receipt_sha256'] = $state['deploy']['receipt_sha256'];
+        $encoded = DeploymentHostRunnerContractV1::encodePostGateReport($report);
+        $state['post_gates']['deploy_report_sha256'] = hash('sha256', $encoded);
+        $manualState = $state;
+        $manualState['state'] = 'manual_recovery_required';
+        $manualState['terminal'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 70,
+            'reason' => 'contract_invalid',
+        ];
+        DeploymentHostRunnerContractV1::validateState($manualState);
+
+        foreach ([$state, $manualState] as $terminalState) {
+            try {
+                DeploymentHostRunnerContractV1::postGateDisposition($encoded, $terminalState, $encoded);
+                self::fail('A deploy report replay replaced an immutable terminal state.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testPersistedDeployReportCannotAttachBeforePostGateLifecycle(): void
     {
         $state = $this->state();
@@ -2612,6 +2700,36 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'verdict' => 'unknown',
             ];
         }
+
+        return $state;
+    }
+
+    /** @return array<string,mixed> */
+    private function dedicatedRollbackTerminalState(bool $rollbackPassed): array
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $lines[] = $this->transition($lines, 'rollback_running');
+        $state = $this->recoveryAdmissionState($lines, 'rollback_running');
+        $state['state'] = $rollbackPassed
+            ? 'failed_post_switch_rollback_succeeded'
+            : 'failed_post_switch_rollback_failed';
+        $state['active_action'] = 'none';
+        $state['rollback']['unit_state'] = 'exited';
+        $state['rollback']['observed_exit_code'] = 0;
+        $state['rollback']['verdict'] = $rollbackPassed ? 'succeeded' : 'failed';
+        $report = $this->postGateReport($rollbackPassed, 'rollback');
+        $report['intent_sha256'] = $state['intent_sha256'];
+        $encoded = DeploymentHostRunnerContractV1::encodePostGateReport($report);
+        $state['post_gates']['rollback_report_sha256'] = hash('sha256', $encoded);
+        $state['post_gates']['rollback_submission_count'] = 1;
+        $state['post_gates']['rollback_verdict'] = $rollbackPassed ? 'passed' : 'failed';
+        $state['evidence_sha256'] = self::SHA;
+        $state['terminal'] = [
+            'state' => $state['state'],
+            'exit_code' => $rollbackPassed ? 30 : 31,
+            'reason' => $rollbackPassed ? 'deploy_failed' : 'rollback_failed',
+        ];
+        DeploymentHostRunnerContractV1::validateState($state);
 
         return $state;
     }

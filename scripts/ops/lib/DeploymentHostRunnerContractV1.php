@@ -628,9 +628,19 @@ final class DeploymentHostRunnerContractV1
         array $state,
         ?string $existingPinnedReportBytes = null,
     ): string {
-        self::postGateSubmissionDisposition($encodedReport, $state, $existingPinnedReportBytes);
+        $submissionDisposition = self::postGateSubmissionDisposition(
+            $encodedReport,
+            $state,
+            $existingPinnedReportBytes,
+        );
+        if (self::isTerminalState($state['state'])) {
+            throw new RuntimeException('post-gate disposition cannot replace an immutable terminal result');
+        }
         $report = self::decodePostGateReport($encodedReport);
         if ($report['subject'] === 'deploy') {
+            if ($submissionDisposition === 'attach' && !$report['post_gates']['passed']) {
+                return 'attach_observe_only';
+            }
             return $report['post_gates']['passed'] ? 'succeeded' : 'recovery_required';
         }
 
