@@ -312,9 +312,18 @@ final class DeploymentHostRunnerContractV1
         return $encoded;
     }
 
-    public static function executionInputPinDisposition(string $encodedInput, ?string $existingPinnedInputBytes): string
-    {
-        self::decodeExecutionInput($encodedInput);
+    /**
+     * @param array<string,mixed> $request
+     * @param ?array<string,mixed> $originalDeployRequest
+     */
+    public static function executionInputPinDisposition(
+        string $encodedInput,
+        ?string $existingPinnedInputBytes,
+        array $request,
+        ?array $originalDeployRequest = null,
+    ): string {
+        $input = self::decodeExecutionInput($encodedInput);
+        self::validateBoundExecutionInput($request, $input, $originalDeployRequest);
         if ($existingPinnedInputBytes === null) {
             return 'pin';
         }
@@ -339,6 +348,29 @@ final class DeploymentHostRunnerContractV1
         ) {
             throw new RuntimeException('execution input does not bind the immutable deploy request');
         }
+    }
+
+    /**
+     * @param array<string,mixed> $request
+     * @param array<string,mixed> $input
+     * @param ?array<string,mixed> $originalDeployRequest
+     */
+    private static function validateBoundExecutionInput(
+        array $request,
+        array $input,
+        ?array $originalDeployRequest,
+    ): void {
+        if ($input['action'] === 'deploy') {
+            if ($originalDeployRequest !== null) {
+                throw new RuntimeException('deploy execution input cannot bind an original recovery request');
+            }
+            self::validateDeployExecutionBundle($request, $input);
+            return;
+        }
+        if ($originalDeployRequest === null) {
+            throw new RuntimeException('recovery execution input requires the immutable deploy request');
+        }
+        self::validateRecoveryExecutionBundle($request, $originalDeployRequest, $input);
     }
 
     /**
@@ -368,10 +400,15 @@ final class DeploymentHostRunnerContractV1
         }
     }
 
-    /** @param array<string,mixed> $input @return list<string> */
-    public static function executionArgv(array $input): array
+    /**
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $request
+     * @param ?array<string,mixed> $originalDeployRequest
+     * @return list<string>
+     */
+    public static function executionArgv(array $input, array $request, ?array $originalDeployRequest = null): array
     {
-        self::validateExecutionInput($input);
+        self::validateBoundExecutionInput($request, $input, $originalDeployRequest);
         $argv = [
             '/usr/bin/env',
             '-i',
@@ -585,10 +622,14 @@ final class DeploymentHostRunnerContractV1
         }
     }
 
-    /** @param array<string,mixed> $report */
-    public static function postGateDisposition(array $report): string
-    {
-        self::validatePostGateReport($report);
+    /** @param array<string,mixed> $state */
+    public static function postGateDisposition(
+        string $encodedReport,
+        array $state,
+        ?string $existingPinnedReportBytes = null,
+    ): string {
+        self::postGateSubmissionDisposition($encodedReport, $state, $existingPinnedReportBytes);
+        $report = self::decodePostGateReport($encodedReport);
         if ($report['subject'] === 'deploy') {
             return $report['post_gates']['passed'] ? 'succeeded' : 'recovery_required';
         }
@@ -1440,6 +1481,23 @@ final class DeploymentHostRunnerContractV1
     private static function assertPostGateLifecycle(array $state): void
     {
         $postGates = $state['post_gates'];
+        if (
+            $postGates['deploy_submission_count'] === 1 &&
+            !in_array(
+                $state['state'],
+                [
+                    'post_gates_running',
+                    DeploymentContractV1::ROLLBACK_RESERVATION_STATE,
+                    'succeeded',
+                    'failed_post_switch_rollback_succeeded',
+                    'failed_post_switch_rollback_failed',
+                    'manual_recovery_required',
+                ],
+                true,
+            )
+        ) {
+            throw new RuntimeException('deploy post-gate report cannot precede the post-gate lifecycle');
+        }
         if (
             $postGates['deploy_submission_count'] === 1 &&
             ($state['deploy']['unit_state'] !== 'exited' ||
