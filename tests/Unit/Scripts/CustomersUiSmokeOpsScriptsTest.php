@@ -15,49 +15,6 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
         'assets/js/http/customers_http_client.min.js' => "rob441-customers-http-client-fixture\n",
         'assets/js/pages/customers.min.js' => "rob441-customers-page-fixture\n",
     ];
-    private const CONTRACT_ASSET_LOCK_DIRECTORY = 'storage/logs/.rob441-contract-assets.lock';
-    private const CONTRACT_ASSET_LOCK_WAIT_MICROSECONDS = 30_000_000;
-
-    /** @var resource|null */
-    private $contractAssetFixtureLock = null;
-
-    /** @var array<string, string> */
-    private array $createdContractAssetFixtures = [];
-
-    private ?string $contractAssetFixtureLockDirectory = null;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        $repoRoot = dirname(__DIR__, 3);
-        $this->contractAssetFixtureLock = $this->acquireContractAssetFixtureLock($repoRoot);
-
-        try {
-            $this->createMissingContractAssetFixtures($repoRoot);
-        } catch (\Throwable $error) {
-            try {
-                $this->removeCreatedContractAssetFixtures();
-            } finally {
-                $this->releaseContractAssetFixtureLock();
-            }
-
-            throw $error;
-        }
-    }
-
-    protected function tearDown(): void
-    {
-        try {
-            $this->removeCreatedContractAssetFixtures();
-        } finally {
-            try {
-                $this->releaseContractAssetFixtureLock();
-            } finally {
-                parent::tearDown();
-            }
-        }
-    }
 
     public function testBothWrappersExposeOnlySafeHelpWithoutRemoteAccess(): void
     {
@@ -73,14 +30,6 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
             self::assertStringContainsString('Customers UI smoke', $result['output']);
             self::assertStringNotContainsString('CUSTOMERS_UI_SMOKE_PASSWORD=', $result['output']);
         }
-    }
-
-    public function testContractAssetFixtureUsesSharedRepoLockDirectory(): void
-    {
-        self::assertNotNull($this->contractAssetFixtureLockDirectory);
-        self::assertDirectoryExists($this->contractAssetFixtureLockDirectory);
-        self::assertFalse(is_link($this->contractAssetFixtureLockDirectory));
-        self::assertFalse(@mkdir($this->contractAssetFixtureLockDirectory, 0700));
     }
 
     public function testOperatorWrapperRejectsTraversalBeforeSsh(): void
@@ -253,61 +202,66 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
     ): array {
         $harnessDir = sys_get_temp_dir() . '/rob441-contract-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($harnessDir, 0700));
+        $fixtureRepoRoot = $harnessDir . '/repo';
+        $fixtureScript = $fixtureRepoRoot . '/scripts/ops/prod_customers_ui_smoke.sh';
         $sshLog = $harnessDir . '/ssh.log';
         $sshPath = $harnessDir . '/ssh';
         $curlPath = $harnessDir . '/curl';
         $npxPath = $harnessDir . '/npx';
         $pwcliPath = $harnessDir . '/playwright_cli.sh';
 
-        $this->writeExecutable(
-            $sshPath,
-            <<<'BASH'
-            #!/usr/bin/env bash
-            set -euo pipefail
-            remote_command="${!#}"
-            if [[ "${remote_command}" == *'prod_traffic_gate.sh'* && "${remote_command}" == *'--purpose customers-ui-smoke'* ]]; then
-                printf 'traffic_gate_executed\n' >> "${ROB441_SSH_LOG}"
-                if [[ "${ROB454_TRAFFIC_GATE_EXIT}" != '0' ]]; then exit "${ROB454_TRAFFIC_GATE_EXIT}"; fi
-                if [[ "${ROB454_TRAFFIC_GATE_EXTRA_FIELD}" == '1' ]]; then
-                    printf '%s\n' '{"mode":"normal","schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{},"future_raw_path":"/secret"}'
-                else
-                    printf '%s\n' '{"mode":"normal","schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{}}'
-                fi
-                exit 0
-            fi
-            if [[ "${remote_command}" == *'exec php -r'* ]]; then
-                printf 'remote_hash_executed\n' >> "${ROB441_SSH_LOG}"
-                exec bash -c "${remote_command}"
-            fi
-            if [[ "${remote_command}" == *'--on-active=10m'* ]]; then
-                printf 'cleanup_arm_stopped\n' >> "${ROB441_SSH_LOG}"
-                exit 75
-            fi
-            if [[ "${remote_command}" == *"'activate'"* ]]; then printf 'principal_activate\n' >> "${ROB441_SSH_LOG}"; fi
-            exit 0
-            BASH
-            ,
-        );
-        $this->writeExecutable(
-            $curlPath,
-            "#!/usr/bin/env bash\nprintf 'endpoint_curl_executed\\n' >> \"\${ROB441_SSH_LOG}\"\nexit 0\n",
-        );
-        $this->writeExecutable($npxPath, "#!/usr/bin/env bash\nexit 0\n");
-        $this->writeExecutable($pwcliPath, "#!/usr/bin/env bash\nexit 0\n");
-
-        $baseEnvironment = getenv();
-        self::assertIsArray($baseEnvironment);
-        $path = $harnessDir . PATH_SEPARATOR . ($baseEnvironment['PATH'] ?? '');
-
         try {
+            $this->materializeOperatorFixtureRepo(dirname(__DIR__, 3), $fixtureRepoRoot);
+
+            $this->writeExecutable(
+                $sshPath,
+                <<<'BASH'
+                #!/usr/bin/env bash
+                set -euo pipefail
+                remote_command="${!#}"
+                if [[ "${remote_command}" == *'prod_traffic_gate.sh'* && "${remote_command}" == *'--purpose customers-ui-smoke'* ]]; then
+                    printf 'traffic_gate_executed\n' >> "${ROB441_SSH_LOG}"
+                    if [[ "${ROB454_TRAFFIC_GATE_EXIT}" != '0' ]]; then exit "${ROB454_TRAFFIC_GATE_EXIT}"; fi
+                    if [[ "${ROB454_TRAFFIC_GATE_EXTRA_FIELD}" == '1' ]]; then
+                        printf '%s\n' '{"mode":"normal","schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{},"future_raw_path":"/secret"}'
+                    else
+                        printf '%s\n' '{"mode":"normal","schema":"traffic_gate.v1","producer_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","policy_version":"traffic_gate_policy.v1","catalog_version":"2026-08-09.1","purpose":"customers-ui-smoke","window_start_epoch":1,"window_end_epoch":91,"window_seconds":90,"log_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","rotation_complete":true,"parse_complete":true,"evidence_complete":true,"decision":"allow","exit_code":0,"counts":{}}'
+                    fi
+                    exit 0
+                fi
+                if [[ "${remote_command}" == *'exec php -r'* ]]; then
+                    printf 'remote_hash_executed\n' >> "${ROB441_SSH_LOG}"
+                    exec bash -c "${remote_command}"
+                fi
+                if [[ "${remote_command}" == *'--on-active=10m'* ]]; then
+                    printf 'cleanup_arm_stopped\n' >> "${ROB441_SSH_LOG}"
+                    exit 75
+                fi
+                if [[ "${remote_command}" == *"'activate'"* ]]; then printf 'principal_activate\n' >> "${ROB441_SSH_LOG}"; fi
+                exit 0
+                BASH
+                ,
+            );
+            $this->writeExecutable(
+                $curlPath,
+                "#!/usr/bin/env bash\nprintf 'endpoint_curl_executed\\n' >> \"\${ROB441_SSH_LOG}\"\nexit 0\n",
+            );
+            $this->writeExecutable($npxPath, "#!/usr/bin/env bash\nexit 0\n");
+            $this->writeExecutable($pwcliPath, "#!/usr/bin/env bash\nexit 0\n");
+
+            $baseEnvironment = getenv();
+            self::assertIsArray($baseEnvironment);
+            $path = $harnessDir . PATH_SEPARATOR . ($baseEnvironment['PATH'] ?? '');
+            $effectiveRemoteRoot = $remoteRoot === dirname(__DIR__, 3) ? $fixtureRepoRoot : $remoteRoot;
+
             $result = $this->runCommand(
                 [
                     'bash',
-                    'scripts/ops/prod_customers_ui_smoke.sh',
+                    $fixtureScript,
                     '--prod-ssh-target',
                     'root@test.invalid',
                     '--app-root',
-                    $remoteRoot,
+                    $effectiveRemoteRoot,
                     '--pwcli-path',
                     $pwcliPath,
                 ],
@@ -326,213 +280,109 @@ final class CustomersUiSmokeOpsScriptsTest extends TestCase
 
             return $result + ['ssh_log' => $sshLogContent];
         } finally {
-            foreach ([$sshLog, $sshPath, $curlPath, $npxPath, $pwcliPath] as $pathToRemove) {
-                if (file_exists($pathToRemove)) {
-                    self::assertTrue(unlink($pathToRemove));
-                }
-            }
-            self::assertTrue(rmdir($harnessDir));
+            $this->removeTemporaryHarnessDirectory($harnessDir);
         }
     }
 
-    /** @return resource */
-    private function acquireContractAssetFixtureLock(string $repoRoot)
+    private function materializeOperatorFixtureRepo(string $sourceRepoRoot, string $fixtureRepoRoot): void
     {
-        $lockPath = $repoRoot . '/tests/Unit/Scripts/CustomersUiSmokeOpsScriptsTest.php';
+        $operatorScript = $this->read('scripts/ops/prod_customers_ui_smoke.sh');
+        self::assertSame(1, preg_match('/readonly CONTRACT_PATHS=\((?<paths>.*?)\n\)/s', $operatorScript, $match));
+        $pathCount = preg_match_all("/^\\s+'([^']+)'$/m", $match['paths'], $pathMatches);
+        self::assertIsInt($pathCount);
+        self::assertGreaterThan(0, $pathCount);
 
-        if (is_link($lockPath) || !is_file($lockPath)) {
-            throw new \RuntimeException('Contract asset fixture lock target is unsafe.');
+        $contractPaths = $pathMatches[1];
+        foreach (array_keys(self::CONTRACT_ASSET_FIXTURES) as $fixturePath) {
+            self::assertContains($fixturePath, $contractPaths);
         }
 
-        $lock = fopen($lockPath, 'r');
-        if ($lock === false) {
-            throw new \RuntimeException('Contract asset fixture lock could not be opened.');
+        $fixturePaths = array_values(
+            array_unique([
+                ...$contractPaths,
+                'scripts/ops/prod_customers_ui_smoke.sh',
+                'scripts/ops/lib/prod_common.sh',
+                'scripts/release-gate/customers_ui_smoke.php',
+            ]),
+        );
+
+        foreach ($fixturePaths as $relativePath) {
+            self::assertSame(1, preg_match('#^[A-Za-z0-9._/-]+$#', $relativePath));
+            self::assertStringNotContainsString('../', $relativePath);
+
+            $fixturePath = $fixtureRepoRoot . '/' . $relativePath;
+            $fixtureDirectory = dirname($fixturePath);
+            if (!is_dir($fixtureDirectory)) {
+                self::assertTrue(mkdir($fixtureDirectory, 0700, true));
+            }
+
+            if (isset(self::CONTRACT_ASSET_FIXTURES[$relativePath])) {
+                $this->writeCreateOnlyFixture($fixturePath, self::CONTRACT_ASSET_FIXTURES[$relativePath]);
+                continue;
+            }
+
+            $sourcePath = $sourceRepoRoot . '/' . $relativePath;
+            self::assertFileExists($sourcePath);
+            self::assertFalse(is_link($sourcePath));
+            self::assertTrue(is_file($sourcePath));
+            self::assertTrue(copy($sourcePath, $fixturePath));
         }
 
-        if (!flock($lock, LOCK_EX)) {
-            fclose($lock);
-            throw new \RuntimeException('Contract asset fixture lock could not be acquired.');
+        $fixtureContents = array_values(self::CONTRACT_ASSET_FIXTURES);
+        self::assertNotSame($fixtureContents[0], $fixtureContents[1]);
+        foreach (self::CONTRACT_ASSET_FIXTURES as $relativePath => $expectedContents) {
+            $actualContents = file_get_contents($fixtureRepoRoot . '/' . $relativePath);
+            self::assertSame($expectedContents, $actualContents);
         }
+    }
 
-        $pathMetadata = lstat($lockPath);
-        $handleMetadata = fstat($lock);
-        if (
-            $pathMetadata === false ||
-            $handleMetadata === false ||
-            is_link($lockPath) ||
-            !is_file($lockPath) ||
-            $pathMetadata['dev'] !== $handleMetadata['dev'] ||
-            $pathMetadata['ino'] !== $handleMetadata['ino']
-        ) {
-            flock($lock, LOCK_UN);
-            fclose($lock);
-            throw new \RuntimeException('Contract asset fixture lock path changed while acquiring.');
-        }
+    private function writeCreateOnlyFixture(string $path, string $contents): void
+    {
+        self::assertFalse(file_exists($path));
+        self::assertFalse(is_link($path));
+
+        $handle = fopen($path, 'x+b');
+        self::assertIsResource($handle);
 
         try {
-            $this->acquireSharedContractAssetFixtureLock($repoRoot);
-        } catch (\Throwable $error) {
-            flock($lock, LOCK_UN);
-            fclose($lock);
-            throw $error;
+            self::assertSame(strlen($contents), fwrite($handle, $contents));
+        } finally {
+            self::assertTrue(fclose($handle));
         }
 
-        return $lock;
+        self::assertFalse(is_link($path));
+        self::assertTrue(is_file($path));
+        self::assertSame(hash('sha256', $contents), hash_file('sha256', $path));
     }
 
-    private function acquireSharedContractAssetFixtureLock(string $repoRoot): void
+    private function removeTemporaryHarnessDirectory(string $harnessDir): void
     {
-        $lockDirectory = $repoRoot . '/' . self::CONTRACT_ASSET_LOCK_DIRECTORY;
-        $deadline = hrtime(true) + self::CONTRACT_ASSET_LOCK_WAIT_MICROSECONDS * 1_000;
-
-        do {
-            clearstatcache(true, $lockDirectory);
-
-            if (is_link($lockDirectory) || (file_exists($lockDirectory) && !is_dir($lockDirectory))) {
-                throw new \RuntimeException('Shared contract asset fixture lock path is unsafe.');
-            }
-
-            if (@mkdir($lockDirectory, 0700)) {
-                $this->contractAssetFixtureLockDirectory = $lockDirectory;
-                return;
-            }
-
-            usleep(10_000);
-        } while (hrtime(true) < $deadline);
-
-        throw new \RuntimeException('Shared contract asset fixture lock could not be acquired.');
-    }
-
-    private function releaseContractAssetFixtureLock(): void
-    {
-        if (!is_resource($this->contractAssetFixtureLock)) {
-            throw new \RuntimeException('Contract asset fixture lock is not held.');
+        $expectedPrefix = rtrim(sys_get_temp_dir(), '/') . '/rob441-contract-';
+        if (!str_starts_with($harnessDir, $expectedPrefix) || is_link($harnessDir) || !is_dir($harnessDir)) {
+            throw new \RuntimeException('Temporary Customers contract harness directory is unsafe.');
         }
 
-        $directoryReleased = false;
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($harnessDir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
 
-        if ($this->contractAssetFixtureLockDirectory !== null) {
-            clearstatcache(true, $this->contractAssetFixtureLockDirectory);
-            $directoryReleased =
-                !is_link($this->contractAssetFixtureLockDirectory) &&
-                is_dir($this->contractAssetFixtureLockDirectory) &&
-                rmdir($this->contractAssetFixtureLockDirectory);
-
-            if ($directoryReleased) {
-                $this->contractAssetFixtureLockDirectory = null;
-            }
-        }
-
-        $unlocked = flock($this->contractAssetFixtureLock, LOCK_UN);
-        $closed = fclose($this->contractAssetFixtureLock);
-        $this->contractAssetFixtureLock = null;
-
-        if (!$directoryReleased || !$unlocked || !$closed) {
-            throw new \RuntimeException('Contract asset fixture lock could not be released safely.');
-        }
-    }
-
-    private function createMissingContractAssetFixtures(string $repoRoot): void
-    {
-        foreach (self::CONTRACT_ASSET_FIXTURES as $relativePath => $contents) {
-            $absolutePath = $repoRoot . '/' . $relativePath;
-            clearstatcache(true, $absolutePath);
-
-            if (is_link($absolutePath)) {
-                throw new \RuntimeException('Contract asset fixture path is an unsafe symlink: ' . $relativePath);
-            }
-
-            if (file_exists($absolutePath)) {
-                if (!is_file($absolutePath)) {
-                    throw new \RuntimeException('Contract asset fixture path is not a regular file: ' . $relativePath);
+        foreach ($iterator as $item) {
+            $path = $item->getPathname();
+            if ($item->isLink() || $item->isFile()) {
+                if (!unlink($path)) {
+                    throw new \RuntimeException('Temporary Customers contract harness file could not be removed.');
                 }
-
                 continue;
             }
 
-            $handle = @fopen($absolutePath, 'x+b');
-            if ($handle === false) {
-                throw new \RuntimeException('Contract asset fixture path changed before create: ' . $relativePath);
-            }
-
-            $createdMetadata = fstat($handle);
-            $written = fwrite($handle, $contents);
-            $closed = fclose($handle);
-
-            if ($createdMetadata === false || $written !== strlen($contents) || !$closed) {
-                $this->removeIncompleteContractAssetFixture($absolutePath, $createdMetadata);
-                throw new \RuntimeException('Contract asset fixture could not be written: ' . $relativePath);
-            }
-
-            clearstatcache(true, $absolutePath);
-            $metadata = lstat($absolutePath);
-            $actualSha256 =
-                is_file($absolutePath) && !is_link($absolutePath) ? hash_file('sha256', $absolutePath) : false;
-            $expectedSha256 = hash('sha256', $contents);
-            $this->createdContractAssetFixtures[$absolutePath] = $expectedSha256;
-
-            if (
-                $metadata === false ||
-                is_link($absolutePath) ||
-                !is_file($absolutePath) ||
-                !is_string($actualSha256) ||
-                !hash_equals($expectedSha256, $actualSha256)
-            ) {
-                throw new \RuntimeException('Contract asset fixture is unsafe after create: ' . $relativePath);
+            if (!$item->isDir() || !rmdir($path)) {
+                throw new \RuntimeException('Temporary Customers contract harness directory could not be removed.');
             }
         }
-    }
 
-    /** @param array{dev:int,ino:int}|false $createdMetadata */
-    private function removeIncompleteContractAssetFixture(string $absolutePath, array|false $createdMetadata): void
-    {
-        clearstatcache(true, $absolutePath);
-        $metadata = lstat($absolutePath);
-
-        if (
-            $createdMetadata === false ||
-            $metadata === false ||
-            is_link($absolutePath) ||
-            !is_file($absolutePath) ||
-            $metadata['dev'] !== $createdMetadata['dev'] ||
-            $metadata['ino'] !== $createdMetadata['ino'] ||
-            !unlink($absolutePath)
-        ) {
-            throw new \RuntimeException('Incomplete contract asset fixture could not be cleaned safely.');
-        }
-    }
-
-    private function removeCreatedContractAssetFixtures(): void
-    {
-        $cleanupFailed = false;
-
-        foreach (array_reverse($this->createdContractAssetFixtures, true) as $absolutePath => $expectedSha256) {
-            clearstatcache(true, $absolutePath);
-            $metadata = lstat($absolutePath);
-            $actualSha256 =
-                is_file($absolutePath) && !is_link($absolutePath) ? hash_file('sha256', $absolutePath) : false;
-
-            if (
-                $metadata === false ||
-                is_link($absolutePath) ||
-                !is_file($absolutePath) ||
-                !is_string($actualSha256) ||
-                !hash_equals($expectedSha256, $actualSha256)
-            ) {
-                $cleanupFailed = true;
-                continue;
-            }
-
-            if (!unlink($absolutePath)) {
-                $cleanupFailed = true;
-                continue;
-            }
-
-            unset($this->createdContractAssetFixtures[$absolutePath]);
-        }
-
-        if ($cleanupFailed) {
-            throw new \RuntimeException('Created contract asset fixtures could not be cleaned safely.');
+        if (!rmdir($harnessDir)) {
+            throw new \RuntimeException('Temporary Customers contract harness root could not be removed.');
         }
     }
 
