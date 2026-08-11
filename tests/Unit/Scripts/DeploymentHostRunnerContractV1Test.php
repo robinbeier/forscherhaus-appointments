@@ -453,6 +453,23 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         yield 'malformed intent identity' => [['intent_sha256' => 'not-an-intent-hash']];
     }
 
+    public function testCliRejectedResponseCannotClaimAState(): void
+    {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'action' => 'deploy',
+            'disposition' => 'rejected',
+            'state' => 'planned',
+            'result_exit_code' => 70,
+            'result_reason' => 'contract_invalid',
+        ];
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validateResponse($response);
+    }
+
     public function testCliResponseRejectsStateExitMismatchAndUnknownProgressState(): void
     {
         $response = [
@@ -706,6 +723,32 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         yield 'recovery missing state' => ['recovery', false, true];
     }
 
+    #[DataProvider('terminalAttachmentActionProvider')]
+    public function testTerminalAttachmentRejectsACompleteMismatchedBundle(string $action): void
+    {
+        $lines = $this->runThrough('succeeded');
+        $events = implode("\n", $lines) . "\n";
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
+        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = self::SHA;
+        $request = $action === 'deploy' ? $this->deployRequest() : $this->recoveryRequest();
+
+        $this->expectException(RuntimeException::class);
+        if ($action === 'deploy') {
+            DeploymentHostRunnerContractV1::deployAttachmentDisposition($lines, $request, $state, $evidenceBytes);
+        } else {
+            DeploymentHostRunnerContractV1::recoveryAttachmentDisposition($lines, $request, $state, $evidenceBytes);
+        }
+    }
+
+    public static function terminalAttachmentActionProvider(): iterable
+    {
+        yield 'deploy' => ['deploy'];
+        yield 'recovery' => ['recovery'];
+    }
+
     #[DataProvider('nonterminalAttachmentProvider')]
     public function testNonterminalAttachmentRejectsATerminalBundle(string $action, string $stateName): void
     {
@@ -806,6 +849,47 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             null,
             '228f6f52-4c87-4d4e-8b19-6a66e6e1af25',
             $this->deployRequest()['intent_sha256'],
+        );
+    }
+
+    public function testDurableActiveRunAllowsReconcileAfterNonterminalStateAdvances(): void
+    {
+        $lines = $this->runThrough('post_gates_running');
+        $events = implode("\n", $lines) . "\n";
+        $claimLines = array_slice($lines, 0, -1);
+        $claimEvents = implode("\n", $claimLines) . "\n";
+        $state = $this->state();
+        $state['intent_sha256'] = $this->deployRequest()['intent_sha256'];
+        $state['state'] = 'post_gates_running';
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['active_action'] = 'none';
+        $state['deploy']['unit_name'] = DeploymentHostRunnerContractV1::unitName(
+            'deploy',
+            self::RUN_ID,
+            $state['intent_sha256'],
+        );
+        $state['deploy']['observed_exit_code'] = 0;
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => 'deploy_running',
+            'sequence' => count($claimLines),
+            'events_sha256' => hash('sha256', $claimEvents),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+
+        self::assertSame(
+            'attach_observe_only',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                null,
+                self::RUN_ID,
+                $state['intent_sha256'],
+            ),
         );
     }
 

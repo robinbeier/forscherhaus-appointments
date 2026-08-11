@@ -479,6 +479,10 @@ advances.
 Under the global lock, a different Run-ID is exit `75` while that claim binds a
 nonterminal trusted journal, even if no runner process remains or the unit has
 already exited. The exact run and intent may only attach/reconcile. A terminal
+journal is not required for that attachment: if the trusted nonterminal
+`state.json` and journal have advanced beyond the claim's still-valid prefix,
+the exact run returns `attach_observe_only`; the claim continues to block every
+different Run-ID and never authorizes another spawn. A terminal
 journal plus matching durable state and evidence first yields
 `refresh_terminal_claim`: the runner atomically replaces and fsyncs the stale
 nonterminal claim with a terminal claim bound to the complete terminal journal.

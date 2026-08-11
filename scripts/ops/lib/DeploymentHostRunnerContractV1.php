@@ -372,13 +372,12 @@ final class DeploymentHostRunnerContractV1
             }
             return 'clear_terminal';
         }
-        if (
-            $referencedState['state'] !== $claim['state'] ||
-            $referencedState['sequence'] !== $claim['sequence'] ||
-            !hash_equals($referencedState['events_sha256'], $claim['events_sha256'])
-        ) {
-            throw new RuntimeException('active run claim is stale or contradictory');
+        if (!in_array($claim['state'], self::OBSERVE_ONLY_STATES, true)) {
+            throw new RuntimeException('nonterminal journal cannot reconcile a terminal active run claim');
         }
+
+        // The claim and state cache are independently validated journal prefixes. The
+        // durable claim remains the global exclusion even when the cache has advanced.
         return 'attach_observe_only';
     }
 
