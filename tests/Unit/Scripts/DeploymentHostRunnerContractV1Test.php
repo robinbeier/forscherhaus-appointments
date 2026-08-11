@@ -6,11 +6,13 @@ namespace Tests\Unit\Scripts;
 
 use Ops\DeploymentContractV1;
 use Ops\DeploymentHostRunnerContractV1;
+use Ops\DeployResultV1;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentContractV1.php';
+require_once __DIR__ . '/../../../scripts/ops/lib/DeployResultV1.php';
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentHostRunnerContractV1.php';
 
 final class DeploymentHostRunnerContractV1Test extends TestCase
@@ -264,7 +266,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'reason' => 'interrupted',
         ];
         $evidenceBytes = DeploymentContractV1::canonicalJson($evidence) . "\n";
-        $state = $this->terminalState('manual_recovery_required', 143, 'interrupted');
+        $state = $this->terminalState('manual_recovery_required', 143, 'interrupted', null);
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['deploy']['unit_state'] = $unitState;
@@ -335,7 +337,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'reason' => 'interrupted',
         ];
         $evidenceBytes = DeploymentContractV1::canonicalJson($evidence) . "\n";
-        $state = $this->terminalState('manual_recovery_required', 143, 'interrupted');
+        $state = $this->terminalState('manual_recovery_required', 143, 'interrupted', 'succeeded');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['deploy']['observed_exit_code'] = 0;
@@ -866,7 +868,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $lines = $this->runThrough('succeeded');
         $events = implode("\n", $lines) . "\n";
         $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
-        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
@@ -898,7 +900,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         bool $includeEvidence,
     ): void {
         $lines = $this->runThrough('succeeded');
-        $state = $includeState ? $this->terminalState('succeeded', 0, 'ok') : null;
+        $state = $includeState ? $this->terminalState('succeeded', 0, 'ok', 'succeeded') : null;
         $evidenceBytes = $includeEvidence ? "{}\n" : null;
         $request = $action === 'deploy' ? $this->deployRequest() : $this->recoveryRequest();
 
@@ -926,7 +928,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $lines = $this->runThrough('succeeded');
         $events = implode("\n", $lines) . "\n";
         $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
-        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = self::SHA;
@@ -1345,7 +1347,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     {
         $lines = $this->failedPreSwitchLines();
         $events = implode("\n", $lines) . "\n";
-        $state = $this->terminalState('failed_pre_switch', 143, 'interrupted');
+        $state = $this->terminalState('failed_pre_switch', 143, 'interrupted', 'interrupted_pre_switch');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $evidenceBytes = DeploymentContractV1::canonicalJson($this->failedPreSwitchEvidence($lines)) . "\n";
@@ -1361,7 +1363,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $lines = $this->runThrough('succeeded');
         $events = implode("\n", $lines) . "\n";
         $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
-        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
@@ -1372,12 +1374,28 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
     }
 
+    public function testTerminalStateCacheRejectsReceiptHashThatDoesNotBindDeployEvidence(): void
+    {
+        $lines = $this->runThrough('succeeded');
+        $events = implode("\n", $lines) . "\n";
+        $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
+        $state = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $state['deploy']['receipt_sha256'] = self::SHA;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('receipt hash');
+        DeploymentHostRunnerContractV1::terminalStateCacheDisposition($state, $events, $evidenceBytes);
+    }
+
     public function testTerminalStateCacheRejectsRollbackVerdictThatContradictsEvidence(): void
     {
         $lines = $this->rollbackSucceededLines();
         $events = implode("\n", $lines) . "\n";
         $evidenceBytes = DeploymentContractV1::canonicalJson($this->rollbackSucceededEvidence($lines)) . "\n";
-        $state = $this->terminalState('failed_post_switch_rollback_succeeded', 30, 'deploy_failed');
+        $state = $this->terminalState('failed_post_switch_rollback_succeeded', 30, 'deploy_failed', 'succeeded');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
@@ -1419,7 +1437,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $lines = $this->runThrough('succeeded');
         $events = implode("\n", $lines) . "\n";
         $evidenceBytes = DeploymentContractV1::canonicalJson($this->succeededEvidence($lines)) . "\n";
-        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
@@ -1509,7 +1527,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $lines = $this->failedPreSwitchLines();
         $events = implode("\n", $lines) . "\n";
         $evidenceBytes = DeploymentContractV1::canonicalJson($this->failedPreSwitchEvidence($lines)) . "\n";
-        $state = $this->terminalState('failed_pre_switch', 30, 'deploy_failed');
+        $state = $this->terminalState('failed_pre_switch', 30, 'deploy_failed', 'failed_pre_switch');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
@@ -1558,7 +1576,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     {
         $lines = $this->runThrough('succeeded');
         $events = implode("\n", $lines) . "\n";
-        $state = $this->terminalState('succeeded', 0, 'ok');
+        $state = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
         $state['sequence'] = count($lines);
         $state['events_sha256'] = hash('sha256', $events);
         $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
@@ -1769,7 +1787,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function terminalState(string $stateName, int $exitCode, string $reason): array
+    private function terminalState(string $stateName, int $exitCode, string $reason, ?string $receiptOutcome): array
     {
         $state = $this->state();
         $state['intent_sha256'] = $this->deployRequest()['intent_sha256'];
@@ -1781,10 +1799,19 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             $state['intent_sha256'],
         );
         $state['deploy']['observed_exit_code'] = $exitCode;
+        $state['deploy']['receipt_sha256'] = $receiptOutcome === null ? null : $this->receiptSha256($receiptOutcome);
         $state['evidence_sha256'] = self::SHA;
         $state['terminal'] = ['state' => $stateName, 'exit_code' => $exitCode, 'reason' => $reason];
 
         return $state;
+    }
+
+    private function receiptSha256(string $outcome): string
+    {
+        $exitCode = DeployResultV1::OUTCOME_EXIT_CODES[$outcome] ?? null;
+        self::assertIsInt($exitCode);
+
+        return hash('sha256', DeployResultV1::canonicalJson(DeployResultV1::create($outcome, $exitCode)));
     }
 
     /** @param list<string> $lines @return array<string,mixed> */

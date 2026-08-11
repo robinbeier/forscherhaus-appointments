@@ -525,11 +525,39 @@ final class DeploymentHostRunnerContractV1
             throw new RuntimeException('terminal state deploy outcome contradicts the durable evidence');
         }
         if (
+            $evidenceHasKnownDeployOutcome &&
+            !hash_equals(self::receiptSha256ForDeployEvidence($evidence['deploy']), $state['deploy']['receipt_sha256'])
+        ) {
+            throw new RuntimeException('terminal state receipt hash does not bind the durable deploy evidence');
+        }
+        if (
             $state['rollback']['invocation_count'] !== $evidence['rollback']['invocation_count'] ||
             $state['rollback']['verdict'] !== $evidence['rollback']['status']
         ) {
             throw new RuntimeException('terminal state rollback outcome contradicts the durable evidence');
         }
+    }
+
+    /** @param array<string,mixed> $deployEvidence */
+    private static function receiptSha256ForDeployEvidence(array $deployEvidence): string
+    {
+        ksort($deployEvidence);
+        $matchingOutcomes = [];
+        foreach (array_keys(DeployResultV1::OUTCOME_EXIT_CODES) as $outcome) {
+            $candidate = DeployResultV1::deployEvidence($outcome);
+            ksort($candidate);
+            if ($candidate === $deployEvidence) {
+                $matchingOutcomes[] = $outcome;
+            }
+        }
+        if (count($matchingOutcomes) !== 1) {
+            throw new RuntimeException('known deploy evidence does not identify one deploy result outcome');
+        }
+
+        $outcome = $matchingOutcomes[0];
+        $receipt = DeployResultV1::create($outcome, DeployResultV1::OUTCOME_EXIT_CODES[$outcome]);
+
+        return hash('sha256', DeployResultV1::canonicalJson($receipt));
     }
 
     /** @param array<string,mixed> $event */

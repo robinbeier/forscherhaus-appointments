@@ -417,6 +417,9 @@ accepted receipt SHA to be present. A known successful rollback verdict requires
 exit `0`; a known failed verdict requires a nonzero exit; an unknown verdict
 requires a null observed exit. A nested action
 contradiction is not a current terminal cache.
+For every known deploy outcome, the stored receipt SHA must equal the SHA-256 of
+the unique canonical `deploy_result.v1` bytes derived from the validated deploy
+evidence tuple; mere hash presence is not a binding.
 Counts are `0` or `1`. `active_action` is `deploy` only in `deploy_running`,
 `rollback` only in `rollback_running`, and otherwise `none`. Unit state is one
 of `not_created`, `starting`, `running`, `exited`, `failed`, `killed`, or
