@@ -1387,7 +1387,9 @@ final class DeploymentContractV1
         $expected = match ($state) {
             'succeeded' => ['succeeded', 1, 0, 'not_run'],
             'failed_before_write' => ['not_invoked', 0, null, 'not_applicable'],
-            'failed_pre_switch' => [['failed', 1, 30, 'not_run'], ['failed', 1, 143, 'not_run']],
+            'failed_pre_switch' => $reason === 'interrupted'
+                ? ['failed', 1, 143, 'not_run']
+                : ['failed', 1, 30, 'not_run'],
             'failed_switch_recovery_required' => ['failed', 1, 32, 'recovery_required'],
             'failed_post_switch_rollback_succeeded' => [['failed', 1, 30, 'succeeded'], ['succeeded', 1, 0, 'not_run']],
             'failed_post_switch_rollback_failed' => [['failed', 1, 31, 'failed'], ['succeeded', 1, 0, 'not_run']],

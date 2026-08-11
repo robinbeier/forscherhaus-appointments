@@ -2917,10 +2917,12 @@ rollback_after_failure() {
     failed_path="${failed_base}_$(date -u +%Y%m%d_%H%M%S)"
   fi
 
-  echo "[!] Post-switch validation failed: $reason"
-  echo "[!] Starting automatic rollback"
-  echo "    Failed path target : $failed_path"
-  echo "    Restore source     : $PREV"
+  {
+    echo "[!] Post-switch validation failed: $reason"
+    echo "[!] Starting automatic rollback"
+    echo "    Failed path target : $failed_path"
+    echo "    Restore source     : $PREV"
+  } || true
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"

@@ -371,6 +371,36 @@ final class DeploymentContractV1Test extends TestCase
         self::assertSame('terminal', $result['recovery']);
     }
 
+    #[DataProvider('failedPreSwitchEvidenceExitMismatchProvider')]
+    public function testFailedPreSwitchEvidenceExitMustMatchTerminalReason(
+        int $publicExit,
+        string $reason,
+        int $deployExit,
+    ): void {
+        $lines = $this->runThrough('deploy_running');
+        $lines[] = $this->encode($this->transition($lines, 'failed_pre_switch', 1, $publicExit, $reason));
+        $evidence = $this->invokedFailureEvidence(
+            $lines,
+            'failed_pre_switch',
+            $publicExit,
+            $reason,
+            $deployExit,
+            'not_run',
+            'not_observed',
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('deploy and rollback evidence');
+        DeploymentContractV1::validateBundle($lines, $evidence);
+    }
+
+    /** @return iterable<string,array{int,string,int}> */
+    public static function failedPreSwitchEvidenceExitMismatchProvider(): iterable
+    {
+        yield 'deploy failure cannot claim interrupted child' => [30, 'deploy_failed', 143];
+        yield 'interrupted terminal cannot claim ordinary deploy failure' => [143, 'interrupted', 30];
+    }
+
     public function testWrongExitReasonPairIsRejected(): void
     {
         $lines = $this->runThrough('lock_acquired');
