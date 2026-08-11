@@ -532,9 +532,14 @@ canonical `evidence.json`, and the complete bundle must pass the same strict
 terminal-cache validation. A terminal journal with either derived file absent
 or mismatched remains reconciliation-required.
 
-Normal stdout is one canonical `deployment_host_runner_response.v1` object with
-exactly `schema`, `run_id`, `intent_sha256`, `action`, `disposition`, `state`,
-`result_exit_code`, and `result_reason`. Disposition is `accepted`,
+Normal stdout begins only after both `run_id` and `intent_sha256` have been
+validated. A flag or request failure before that identity boundary exits `64`
+or `70` with no stdout and only a fixed, secret-free diagnostic on stderr; the
+runner never fabricates an identity or emits null identifiers. After the
+identity boundary, normal stdout is one canonical
+`deployment_host_runner_response.v1` object with exactly `schema`, `run_id`,
+`intent_sha256`, `action`, `disposition`, `state`, `result_exit_code`, and
+`result_reason`. Disposition is `accepted`,
 `attach_pre_deploy`, `attach_observe_only`, `terminal`, or `rejected`.
 Nonterminal accepted responses carry `0`/`ok`; terminal responses carry the
 stored lifecycle pair; rejected responses carry only `70`/`contract_invalid` or

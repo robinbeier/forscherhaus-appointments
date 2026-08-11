@@ -424,6 +424,35 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertSame(70, DeploymentHostRunnerContractV1::cliExitCode($response));
     }
 
+    #[DataProvider('invalidRejectedResponseIdentityProvider')]
+    public function testCliRejectionRequiresAValidatedIdentity(array $changes): void
+    {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => self::INTENT_SHA,
+            'action' => 'deploy',
+            'disposition' => 'rejected',
+            'state' => null,
+            'result_exit_code' => 70,
+            'result_reason' => 'contract_invalid',
+        ];
+        foreach ($changes as $key => $value) {
+            $response[$key] = $value;
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validateResponse($response);
+    }
+
+    public static function invalidRejectedResponseIdentityProvider(): iterable
+    {
+        yield 'missing trusted run identity' => [['run_id' => null]];
+        yield 'malformed run identity' => [['run_id' => 'not-a-run-id']];
+        yield 'missing trusted intent identity' => [['intent_sha256' => null]];
+        yield 'malformed intent identity' => [['intent_sha256' => 'not-an-intent-hash']];
+    }
+
     public function testCliResponseRejectsStateExitMismatchAndUnknownProgressState(): void
     {
         $response = [
