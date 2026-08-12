@@ -35,5 +35,16 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertStringContainsString('< scripts/ops/libexec/publish_release_pair_v1.py', $script);
         self::assertStringNotContainsString('WARNUNG: Remote-Checksumme', $script);
         self::assertStringNotContainsString("scp '\$ARCHIVE' '\${UPLOAD}':'\$REMOTE_DIR/'", $script);
+        self::assertStringNotContainsString('-mindepth', $script);
+        self::assertStringNotContainsString('-maxdepth', $script);
+        self::assertStringContainsString('shopt -s nullglob dotglob', $script);
+        self::assertStringContainsString('for child in "$directory"/*', $script);
+        self::assertStringContainsString('base="${child##*/}"', $script);
+        self::assertStringContainsString('rm -rf -- "$child"', $script);
+        self::assertStringContainsString(
+            'prune_children_except "$STAGE/docker" \'compose.zero-surprise.yml\' \'php-fpm\' \'nginx\'',
+            $script,
+        );
+        self::assertStringContainsString('prune_children_except "$STAGE/docker/nginx" \'nginx.conf\'', $script);
     }
 }

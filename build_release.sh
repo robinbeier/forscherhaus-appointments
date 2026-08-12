@@ -61,6 +61,27 @@ run() {
   fi
 }
 
+prune_children_except() (
+  set -Eeuo pipefail
+  local directory="$1"
+  shift
+  local child base allowed keep
+  shopt -s nullglob dotglob
+  for child in "$directory"/*; do
+    base="${child##*/}"
+    keep=0
+    for allowed in "$@"; do
+      if [[ "$base" == "$allowed" ]]; then
+        keep=1
+        break
+      fi
+    done
+    if [[ "$keep" -eq 0 ]]; then
+      rm -rf -- "$child"
+    fi
+  done
+)
+
 echo "[i] Build Easy!Appointments Release"
 echo "    Project : $PROJECT"
 echo "    Release : $REL"
@@ -125,9 +146,8 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   # Zero-surprise replays on the deployment host shell into docker compose
   # using the root compose file plus the dedicated override. Keep only the
   # runtime docker assets required for that flow, not local container data.
-  find "$STAGE/docker" -mindepth 1 -maxdepth 1 \
-    ! -name 'compose.zero-surprise.yml' ! -name 'php-fpm' ! -name 'nginx' -exec rm -rf -- {} +
-  find "$STAGE/docker/nginx" -mindepth 1 -maxdepth 1 ! -name 'nginx.conf' -exec rm -rf -- {} +
+  prune_children_except "$STAGE/docker" 'compose.zero-surprise.yml' 'php-fpm' 'nginx'
+  prune_children_except "$STAGE/docker/nginx" 'nginx.conf'
 else
   echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docker)"
   echo "[DRY-RUN] Würde docker/compose.zero-surprise.yml sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
