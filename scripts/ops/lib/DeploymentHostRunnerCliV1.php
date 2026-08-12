@@ -8,7 +8,9 @@ use JsonException;
 use RuntimeException;
 
 require_once __DIR__ . '/DeploymentContractV1.php';
+require_once __DIR__ . '/DeploymentHostRunnerAdmissionV1.php';
 require_once __DIR__ . '/DeploymentHostRunnerContractV1.php';
+require_once __DIR__ . '/DeploymentHostRunnerProtectedSourceV1.php';
 
 /**
  * Decodes the bounded stdin envelope produced by the privileged supervisor.
@@ -141,5 +143,168 @@ final class DeploymentHostRunnerCliEnvelopeV1
             throw new RuntimeException('host-runner CLI ' . $name . ' bytes are invalid');
         }
         return $bytes;
+    }
+}
+
+interface HostRunnerReservationReconstructor
+{
+    public function reconstruct(): string;
+}
+
+interface HostRunnerStoredReconciler
+{
+    public function reconcile(string $runId, string $intentSha256): string;
+}
+
+interface HostRunnerDeployWorkflow
+{
+    /** @param array<string,mixed> $request @param array<string,mixed> $input @return array<string,mixed> */
+    public function start(array $request, array $input): array;
+
+    /** @param array<string,mixed> $request @param array<string,mixed> $input @return array<string,mixed> */
+    public function resume(array $request, array $input): array;
+}
+
+final readonly class SystemHostRunnerReservationReconstructor implements HostRunnerReservationReconstructor
+{
+    public function __construct(private HostRunnerReservationPersistence $persistence) {}
+    public function reconstruct(): string { return $this->persistence->reconstructSoleReservedClaim(); }
+}
+
+final readonly class SystemHostRunnerStoredReconciler implements HostRunnerStoredReconciler
+{
+    public function __construct(private HostRunnerReconciliationPersistence $persistence) {}
+    public function reconcile(string $runId, string $intentSha256): string
+    {
+        return $this->persistence->reconcileStored($runId, $intentSha256);
+    }
+}
+
+final readonly class SystemHostRunnerDeployWorkflow implements HostRunnerDeployWorkflow
+{
+    public function __construct(private HostRunnerStorage $storage) {}
+
+    public function start(array $request, array $input): array
+    {
+        $source = new SystemHostRunnerProtectedObservationSource($request['expected_commit'], $this->storage);
+        $provider = new ProtectedHostPredeployObservationProvider($source, $request, $input);
+        $response = (new HostRunnerPredeployOrchestrator($this->storage))->collect($request, $input, $provider);
+        if ($response['disposition'] === 'terminal') {
+            return $response;
+        }
+        if ($response['disposition'] !== 'attach_pre_deploy' || $response['state'] !== 'artifact_verified') {
+            throw new RuntimeException('predeploy workflow returned an invalid admission handoff');
+        }
+        return (new HostRunnerDeployAdmission($this->storage))->admit($request, $input);
+    }
+
+    public function resume(array $request, array $input): array
+    {
+        return (new HostRunnerDeployAdmission($this->storage))->admit($request, $input);
+    }
+}
+
+/** Locked lifecycle router. The supervisor remains responsible for both FDs. */
+final class DeploymentHostRunnerCliApplicationV1
+{
+    private readonly HostRunnerReservationReconstructor $reconstructor;
+    private readonly HostRunnerStoredReconciler $reconciler;
+    private readonly HostRunnerDeployWorkflow $deployWorkflow;
+
+    public function __construct(
+        private readonly HostRunnerStorage $storage,
+        ?HostRunnerReservationReconstructor $reconstructor = null,
+        ?HostRunnerStoredReconciler $reconciler = null,
+        ?HostRunnerDeployWorkflow $deployWorkflow = null,
+    ) {
+        $this->reconstructor = $reconstructor ?? new SystemHostRunnerReservationReconstructor(
+            new HostRunnerReservationPersistence($storage),
+        );
+        $this->reconciler = $reconciler ?? new SystemHostRunnerStoredReconciler(
+            new HostRunnerReconciliationPersistence($storage),
+        );
+        $this->deployWorkflow = $deployWorkflow ?? new SystemHostRunnerDeployWorkflow($storage);
+    }
+
+    /** @param array<string,mixed> $envelope @return array<string,mixed> */
+    public function deploy(array $envelope): array
+    {
+        if (
+            ($envelope['action'] ?? null) !== 'deploy' ||
+            !is_array($envelope['request'] ?? null) ||
+            !is_array($envelope['execution_input'] ?? null)
+        ) {
+            throw new RuntimeException('deploy CLI application received invalid authority');
+        }
+        $request = $envelope['request'];
+        $input = $envelope['execution_input'];
+        DeploymentHostRunnerContractV1::validateDeployExecutionBundle($request, $input);
+
+        // Always scan first: this also repairs the claim-present/state-missing
+        // crash prefix because reconstructed claims are deterministic.
+        $this->reconstructor->reconstruct();
+        $claimBytes = $this->storage->read('active-run.json', 4_096);
+        if ($claimBytes === null) {
+            return $this->validated($this->deployWorkflow->start($request, $input));
+        }
+        $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
+        if (
+            $claim['run_id'] !== $request['run_id'] ||
+            !hash_equals($claim['intent_sha256'], $request['intent_sha256'])
+        ) {
+            return self::response($request, 'rejected', null, 75, 'state_conflict');
+        }
+
+        $this->reconciler->reconcile($request['run_id'], $request['intent_sha256']);
+        $stateBytes = $this->storage->read('runs/' . $request['run_id'] . '/state.json', 4_096);
+        if ($stateBytes === null) {
+            throw new RuntimeException('reconciled deploy has no durable state');
+        }
+        $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+        if (in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)) {
+            return self::response(
+                $request,
+                'terminal',
+                $state['state'],
+                $state['terminal']['exit_code'],
+                $state['terminal']['reason'],
+            );
+        }
+        if ($state['state'] === 'deploy_running') {
+            return $this->validated($this->deployWorkflow->resume($request, $input));
+        }
+        if (!in_array($state['state'], ['post_gates_running', 'rollback_running'], true)) {
+            throw new RuntimeException('active deploy claim has an unsupported durable state');
+        }
+        return self::response($request, 'attach_observe_only', $state['state'], 0, 'ok');
+    }
+
+    /** @param array<string,mixed> $response @return array<string,mixed> */
+    private function validated(array $response): array
+    {
+        DeploymentHostRunnerContractV1::validateResponse($response);
+        return $response;
+    }
+
+    /** @param array<string,mixed> $request @return array<string,mixed> */
+    private static function response(
+        array $request,
+        string $disposition,
+        ?string $state,
+        ?int $exitCode,
+        ?string $reason,
+    ): array {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => $request['run_id'],
+            'intent_sha256' => $request['intent_sha256'],
+            'action' => 'deploy',
+            'disposition' => $disposition,
+            'state' => $state,
+            'result_exit_code' => $exitCode,
+            'result_reason' => $reason,
+        ];
+        DeploymentHostRunnerContractV1::validateResponse($response);
+        return $response;
     }
 }

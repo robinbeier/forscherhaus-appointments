@@ -936,7 +936,7 @@ def fixed_php_probe_argv(milliseconds_raw: str) -> list[str]:
 
 
 def fixed_php_cli_argv(mode: str) -> list[str]:
-    if mode not in ('validate', 'probe'):
+    if mode not in ('validate', 'dispatch', 'probe'):
         reject()
     repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
     script = os.path.join(repository, 'scripts', 'ops', 'deployment_host_runner_v1.php')
@@ -1186,8 +1186,9 @@ def build_cli_envelope(action: str, first: str, second: str) -> tuple[bytes, str
     return envelope, run_id, intent_sha256
 
 
-def supervise_cli_probe(root: str, action: str, first: str, second: str) -> int:
-    if re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is None:
+def supervise_cli(root: str, action: str, first: str, second: str, *, probe: bool) -> int:
+    test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is not None
+    if (probe and not test_root) or (not probe and root != STATE_ROOT):
         reject()
     envelope, run_id, _intent_sha256 = build_cli_envelope(action, first, second)
     validation_exit, validation_output = run_fixed_child_with_input(
@@ -1202,13 +1203,16 @@ def supervise_cli_probe(root: str, action: str, first: str, second: str) -> int:
         try:
             reserve_lock_descriptors(global_lock, run_lock)
             dispatch_exit, output = run_fixed_child_with_input(
-                fixed_php_cli_argv('probe'), envelope, 3.0, inherit_locks=True,
+                fixed_php_cli_argv('probe' if probe else 'dispatch'),
+                envelope,
+                2400.0 if not probe else 3.0,
+                inherit_locks=True,
             )
-            if dispatch_exit != 0:
+            if dispatch_exit not in (0, EXIT_INVALID, EXIT_CONFLICT):
                 reject()
             sys.stdout.buffer.write(output)
             sys.stdout.buffer.flush()
-            return 0
+            return dispatch_exit
         finally:
             for descriptor in LOCK_FDS:
                 try:
@@ -2112,7 +2116,9 @@ def main(arguments: list[str]) -> int:
     if len(arguments) == 5 and arguments[1] == "probe-locks":
         return supervise_probe(arguments[2], arguments[3], arguments[4])
     if len(arguments) == 6 and arguments[1] == 'supervise-cli-probe':
-        return supervise_cli_probe(arguments[2], arguments[3], arguments[4], arguments[5])
+        return supervise_cli(arguments[2], arguments[3], arguments[4], arguments[5], probe=True)
+    if len(arguments) == 6 and arguments[1] == 'supervise-cli':
+        return supervise_cli(arguments[2], arguments[3], arguments[4], arguments[5], probe=False)
     if len(arguments) != 5 or arguments[1] not in ("read", "read-optional", "pin", "cow"):
         reject()
     operation, root, relative, raw_limit = arguments[1:]

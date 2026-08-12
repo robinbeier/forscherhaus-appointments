@@ -30,7 +30,7 @@ function deploymentHostRunnerReadEnvelope(): string
     return $bytes;
 }
 
-if ($argc === 2 && in_array($argv[1], ['--internal-envelope-validate', '--internal-envelope-probe'], true)) {
+if ($argc === 2 && in_array($argv[1], ['--internal-envelope-validate', '--internal-envelope-dispatch', '--internal-envelope-probe'], true)) {
     require_once __DIR__ . '/lib/DeploymentHostRunnerCliV1.php';
     try {
         $envelope = DeploymentHostRunnerCliEnvelopeV1::decode(deploymentHostRunnerReadEnvelope());
@@ -44,6 +44,18 @@ if ($argc === 2 && in_array($argv[1], ['--internal-envelope-validate', '--intern
                 deploymentHostRunnerInternalFailure();
             }
             $links[] = $link;
+        }
+        if ($argv[1] === '--internal-envelope-dispatch') {
+            if ($envelope['action'] !== 'deploy') {
+                deploymentHostRunnerInternalFailure();
+            }
+            $response = (new Ops\DeploymentHostRunnerCliApplicationV1(
+                new Ops\HelperBackedHostRunnerStorage(),
+            ))->deploy($envelope);
+            Ops\DeploymentHostRunnerContractV1::validateResponse($response);
+            fwrite(STDOUT, Ops\DeploymentHostRunnerContractV1::encodeFile($response));
+            fflush(STDOUT);
+            exit($response['disposition'] === 'rejected' ? $response['result_exit_code'] : 0);
         }
         $summary = [
             'action' => $envelope['action'],
