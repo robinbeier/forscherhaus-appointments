@@ -1015,7 +1015,7 @@ final class DeploymentHostRunnerContractV1
         self::assertEnum($state['active_action'], ['none', 'deploy', 'rollback'], 'active_action');
         self::assertDeployState($state['deploy'], $state['run_id'], $state['intent_sha256']);
         self::assertPostGateState($state['post_gates']);
-        self::assertRollbackState($state['rollback'], $state['run_id'], $state['intent_sha256']);
+        self::assertRollbackState($state['rollback'], $state['run_id'], $state['intent_sha256'], $state['state']);
         self::assertNullableSha256($state['evidence_sha256'], 'evidence_sha256');
         self::assertObject($state['terminal'], 'terminal');
         self::assertExactKeys($state['terminal'], self::TERMINAL_STATE_KEYS, 'terminal');
@@ -2485,6 +2485,34 @@ final class DeploymentHostRunnerContractV1
         return $order[count($durableSteps)] ?? 'complete';
     }
 
+    /** @return list<string> */
+    public static function lateTerminalObservationPersistenceOrder(): array
+    {
+        return [
+            'pinned_late_action_observation',
+            'converged_terminal_state',
+            'terminal_active_claim',
+            'active_claim_clearance',
+        ];
+    }
+
+    /** @param list<string> $durableSteps */
+    public static function lateTerminalObservationResumeDisposition(array $durableSteps): string
+    {
+        $order = self::lateTerminalObservationPersistenceOrder();
+        if ($durableSteps !== array_slice($order, 0, count($durableSteps))) {
+            throw new RuntimeException('late terminal observation crash prefix is not authoritative');
+        }
+
+        return match (count($durableSteps)) {
+            0 => 'pin_action_observation',
+            1 => 'persist_converged_terminal_state',
+            2 => 'refresh_terminal_claim',
+            3 => 'clear_terminal',
+            default => 'complete',
+        };
+    }
+
     /**
      * @param list<array{state:?array<string,mixed>,events_bytes:string}> $candidates
      */
@@ -2799,8 +2827,12 @@ final class DeploymentHostRunnerContractV1
         }
     }
 
-    private static function assertRollbackState(mixed $rollback, string $runId, string $intentSha256): void
-    {
+    private static function assertRollbackState(
+        mixed $rollback,
+        string $runId,
+        string $intentSha256,
+        string $lifecycleState,
+    ): void {
         self::assertObject($rollback, 'rollback');
         self::assertExactKeys($rollback, self::ROLLBACK_STATE_KEYS, 'rollback');
         self::assertNullableSha256($rollback['request_sha256'], 'rollback.request_sha256');
@@ -2850,7 +2882,11 @@ final class DeploymentHostRunnerContractV1
         ) {
             throw new RuntimeException('rollback verification requires exit zero');
         }
-        if ($rollback['verdict'] === 'unknown' && $rollback['observed_exit_code'] !== null) {
+        if (
+            $rollback['verdict'] === 'unknown' &&
+            $rollback['observed_exit_code'] !== null &&
+            $lifecycleState !== 'manual_recovery_required'
+        ) {
             throw new RuntimeException('unknown rollback verdict cannot retain an observed exit');
         }
     }
@@ -2928,8 +2964,11 @@ final class DeploymentHostRunnerContractV1
             $rollbackVerdict = $state['rollback']['verdict'];
             $reportCount = $postGates['rollback_submission_count'];
             $reportVerdict = $postGates['rollback_verdict'];
+            $terminalFrozenUnknownObservation =
+                $state['state'] === 'manual_recovery_required' && $rollbackVerdict === 'unknown' && $reportCount === 0;
             $validRollbackTuple = match (true) {
                 $observedExit === null => $rollbackVerdict === 'unknown' && $reportCount === 0,
+                $terminalFrozenUnknownObservation => true,
                 $observedExit === 0 && $reportCount === 0 => $rollbackVerdict === 'verification_pending',
                 $observedExit === 0 && $reportCount === 1 => ($reportVerdict === 'passed' &&
                     $rollbackVerdict === 'succeeded') ||

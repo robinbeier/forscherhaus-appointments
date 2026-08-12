@@ -467,9 +467,15 @@ including a normal exit `143`, maps uniquely to rollback failed and needs no
 verification report. Signal, core, timeout, or otherwise unproved termination
 is not passed to that normal-exit mapping and remains unknown. A bound failed
 rollback report after normal exit `0` also maps to rollback failed. An unknown
-verdict requires a null observed exit. A nested action contradiction is not a
-current terminal cache. The closed rollback tuple is therefore: null observed
-exit with `unknown` and no report; exit `0` with no report and
+verdict requires a null observed exit while the run is nonterminal. One narrow
+terminal exception preserves an already fsynced `manual_recovery_required`
+result: when its dedicated rollback verdict/evidence is frozen `unknown` and no
+rollback report exists, a later exact unit observation may add only stopped
+unit proof (including a normal exit) while the verdict, evidence, reports, and
+public terminal pair remain `unknown`/unchanged. A nested action contradiction
+is not a current terminal cache. Outside that frozen-terminal exception, the
+closed rollback tuple is therefore: null observed exit with `unknown` and no
+report; exit `0` with no report and
 `verification_pending`; exit `0` with a passed/failed report and matching
 `succeeded`/`failed` verdict; or a nonzero normal exit with `failed` and no
 report. The two direct deploy receipt outcomes `internal_rollback_succeeded`
@@ -499,6 +505,20 @@ unknown unit verdict, but an active-run claim is refreshed or cleared only when
 every reserved unit is independently known `exited`, `failed`, `killed`, or
 reboot-proven `missing`;
 `starting`, `running`, or `unknown` keeps the global exclusion in place.
+After terminal persistence, exact late unit observation may move such an
+unknown unit to one of those stopped states solely to release the claim. It
+does not refine the frozen rollback verdict, rewrite terminal evidence, add a
+post-gate report, or change the stored response.
+The later observation is a new append-only generation (or an atomic COW
+replacement retaining the prior generation) and has its own strict durability
+prefix: write and fsync the exact new observation envelope and, when first
+learned, its observed binding; publish and fsync the converged terminal state;
+refresh and fsync the terminal active claim; then clear that exact claim and
+fsync its parent directory. A crash before the converged state keeps the old
+unknown state and claim held. A crash after state publication resumes claim
+refresh; after refresh it resumes only exact claim clearance. State ahead of
+the observation bytes, claim refresh ahead of state, or clearance ahead of
+either is not authoritative and fails closed.
 
 The fixed-enum operator journal uses schema
 `deployment_host_operator_event.v1` and exactly:

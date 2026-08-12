@@ -1474,6 +1474,282 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         );
     }
 
+    public function testLateRollbackStopProofClearsTheClaimWithoutRewritingTheTerminalOutcome(): void
+    {
+        $claimLines = $this->runThrough('post_gates_running');
+        $claimLines[] = $this->transition($claimLines, DeploymentContractV1::ROLLBACK_RESERVATION_STATE);
+        $lines = $claimLines;
+        $previous = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($previous);
+        $lines[] = DeploymentContractV1::canonicalJson([
+            'schema' => DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::RUN_ID,
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-11T13:00:13Z',
+            'previous_state' => $previous['state'],
+            'state' => 'manual_recovery_required',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ]);
+        $events = implode("\n", $lines) . "\n";
+        $claimEvents = implode("\n", $claimLines) . "\n";
+        $evidence = $this->rollbackSucceededEvidence($lines);
+        $evidence['rollback'] = [
+            'status' => 'unknown',
+            'invocation_count' => 1,
+            'mode' => 'dedicated_post_gate_recovery',
+            'verified' => null,
+        ];
+        $evidence['result'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ];
+        $deployReportBytes = $this->failedDeployPostGateReportBytes();
+        $evidence['post_gates'] = DeploymentHostRunnerContractV1::decodePostGateReport($deployReportBytes)[
+            'post_gates'
+        ];
+        $evidenceBytes = DeploymentContractV1::canonicalJson($evidence) . "\n";
+        $deployLaunch = $this->systemdLaunch();
+        $rollbackLaunch = $this->rollbackSystemdLaunch();
+
+        $unknown = $this->recoveryAdmissionState($claimLines, DeploymentContractV1::ROLLBACK_RESERVATION_STATE);
+        $unknown['state'] = 'manual_recovery_required';
+        $unknown['sequence'] = count($lines);
+        $unknown['events_sha256'] = hash('sha256', $events);
+        $unknown['active_action'] = 'none';
+        $unknown['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $unknown['terminal'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ];
+        foreach (['request_sha256', 'execution_input_sha256', 'unit_name'] as $field) {
+            $unknown['deploy'][$field] = $deployLaunch[$field];
+            $unknown['rollback'][$field] = $rollbackLaunch[$field];
+        }
+        $unknown['deploy']['unit_launch_sha256'] = DeploymentHostRunnerContractV1::fileSha256(
+            DeploymentHostRunnerContractV1::encodeFile($deployLaunch),
+        );
+        $unknown['rollback']['unit_launch_sha256'] = DeploymentHostRunnerContractV1::fileSha256(
+            DeploymentHostRunnerContractV1::encodeFile($rollbackLaunch),
+        );
+        $unknown['rollback']['unit_invocation_id'] = str_repeat('d', 32);
+        $unknown['rollback']['unit_state'] = 'unknown';
+        $unknown['rollback']['observed_exit_code'] = null;
+        $unknown['rollback']['verdict'] = 'unknown';
+        $unknown['post_gates']['deploy_report_sha256'] = hash('sha256', $deployReportBytes);
+
+        $initialRollbackShow = str_replace(
+            ['ActiveState=failed', 'SubState=failed'],
+            ['ActiveState=active', 'SubState=running'],
+            $this->systemctlShowBytes($rollbackLaunch),
+        );
+        $initialBundles = [
+            ...$this->deployReconciliationBytes($unknown),
+            'rollback' => [
+                'launch' => DeploymentHostRunnerContractV1::encodeFile($rollbackLaunch),
+                'binding' => DeploymentHostRunnerContractV1::encodeFile(
+                    $this->unitBindingForLaunch($rollbackLaunch, 'observed'),
+                ),
+                'observation' => DeploymentHostRunnerContractV1::encodeFile([
+                    'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
+                    'manager_boot_id' => 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                    'systemctl_show' => $initialRollbackShow,
+                ]),
+            ],
+        ];
+        self::assertSame(
+            'current',
+            DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
+                $unknown,
+                $events,
+                $evidenceBytes,
+                $deployReportBytes,
+                null,
+                $initialBundles,
+            ),
+        );
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $unknown['intent_sha256'],
+            'state' => DeploymentContractV1::ROLLBACK_RESERVATION_STATE,
+            'sequence' => count($claimLines),
+            'events_sha256' => hash('sha256', $claimEvents),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+        self::assertSame(
+            'terminal_claim_held',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $unknown,
+                $events,
+                $evidenceBytes,
+                self::RUN_ID,
+                $unknown['intent_sha256'],
+                $deployReportBytes,
+                null,
+                $initialBundles,
+            ),
+        );
+
+        $cases = [
+            'normal exit zero' => [
+                'exited',
+                0,
+                str_replace(
+                    ['ActiveState=failed', 'SubState=failed', 'Result=exit-code', 'ExecMainStatus=30'],
+                    ['ActiveState=active', 'SubState=exited', 'Result=success', 'ExecMainStatus=0'],
+                    $this->systemctlShowBytes($rollbackLaunch),
+                ),
+                null,
+            ],
+            'normal exit nonzero' => [
+                'failed',
+                9,
+                str_replace('ExecMainStatus=30', 'ExecMainStatus=9', $this->systemctlShowBytes($rollbackLaunch)),
+                null,
+            ],
+            'signal' => [
+                'killed',
+                null,
+                str_replace(
+                    ['Result=exit-code', 'ExecMainCode=1', 'ExecMainStatus=30'],
+                    ['Result=signal', 'ExecMainCode=2', 'ExecMainStatus=15'],
+                    $this->systemctlShowBytes($rollbackLaunch),
+                ),
+                null,
+            ],
+            'different-boot missing' => ['missing', null, null, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'],
+        ];
+        foreach ($cases as $label => [$unitState, $observedExit, $showBytes, $missingBoot]) {
+            $candidate = $unknown;
+            $candidate['rollback']['unit_state'] = $unitState;
+            $candidate['rollback']['observed_exit_code'] = $observedExit;
+            $candidate['rollback']['unit_missing_observed_boot_id'] = $missingBoot;
+            $candidate['updated_at_utc'] = '2026-08-11T13:00:14Z';
+            $bundles = $initialBundles;
+            $bundles['rollback']['observation'] =
+                $showBytes === null
+                    ? DeploymentHostRunnerContractV1::encodeFile([
+                        'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
+                        'kind' => 'not_found',
+                        'manager_boot_id' => $missingBoot,
+                    ])
+                    : DeploymentHostRunnerContractV1::encodeFile([
+                        'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
+                        'manager_boot_id' => 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                        'systemctl_show' => $showBytes,
+                    ]);
+
+            DeploymentHostRunnerContractV1::validateStateEvolution($unknown, $candidate);
+            self::assertSame('unknown', $candidate['rollback']['verdict'], $label);
+            self::assertSame('unknown', $evidence['rollback']['status'], $label);
+            self::assertSame(
+                'current',
+                DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
+                    $candidate,
+                    $events,
+                    $evidenceBytes,
+                    $deployReportBytes,
+                    null,
+                    $bundles,
+                ),
+                $label,
+            );
+            self::assertSame(
+                'refresh_terminal_claim',
+                DeploymentHostRunnerContractV1::activeRunDisposition(
+                    $claim,
+                    $candidate,
+                    $events,
+                    $evidenceBytes,
+                    self::RUN_ID,
+                    $candidate['intent_sha256'],
+                    $deployReportBytes,
+                    null,
+                    $bundles,
+                ),
+                $label,
+            );
+            $terminalClaim = $claim;
+            $terminalClaim['state'] = 'manual_recovery_required';
+            $terminalClaim['sequence'] = count($lines);
+            $terminalClaim['events_sha256'] = hash('sha256', $events);
+            self::assertSame(
+                'clear_terminal',
+                DeploymentHostRunnerContractV1::activeRunDisposition(
+                    $terminalClaim,
+                    $candidate,
+                    $events,
+                    $evidenceBytes,
+                    self::RUN_ID,
+                    $candidate['intent_sha256'],
+                    $deployReportBytes,
+                    null,
+                    $bundles,
+                ),
+                $label,
+            );
+            if ($observedExit !== null) {
+                $replacedExit = $candidate;
+                $replacedExit['rollback']['observed_exit_code'] = $observedExit === 0 ? 9 : 0;
+                try {
+                    DeploymentHostRunnerContractV1::validateStateEvolution($candidate, $replacedExit);
+                    self::fail($label . ' replaced an already accepted late exit proof.');
+                } catch (RuntimeException) {
+                    self::addToAssertionCount(1);
+                }
+            }
+        }
+
+        $nonterminal = $unknown;
+        $nonterminal['state'] = DeploymentContractV1::ROLLBACK_RESERVATION_STATE;
+        $nonterminal['sequence'] = count($claimLines);
+        $nonterminal['events_sha256'] = hash('sha256', $claimEvents);
+        $nonterminal['active_action'] = 'rollback';
+        $nonterminal['evidence_sha256'] = null;
+        $nonterminal['terminal'] = ['state' => null, 'exit_code' => null, 'reason' => null];
+        $nonterminal['rollback']['unit_state'] = 'exited';
+        $nonterminal['rollback']['observed_exit_code'] = 0;
+        try {
+            DeploymentHostRunnerContractV1::validateState($nonterminal);
+            self::fail('Nonterminal rollback kept an unknown verdict after an observed normal exit.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        foreach (['verification_pending', 'failed'] as $changedVerdict) {
+            $changed = $unknown;
+            $changed['rollback']['unit_state'] = $changedVerdict === 'verification_pending' ? 'exited' : 'failed';
+            $changed['rollback']['observed_exit_code'] = $changedVerdict === 'verification_pending' ? 0 : 9;
+            $changed['rollback']['verdict'] = $changedVerdict;
+            try {
+                DeploymentHostRunnerContractV1::validateStateEvolution($unknown, $changed);
+                self::fail('Late unit proof rewrote the frozen terminal rollback verdict.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        $reported = $unknown;
+        $reported['rollback']['unit_state'] = 'exited';
+        $reported['rollback']['observed_exit_code'] = 0;
+        $reported['post_gates']['rollback_report_sha256'] = self::SHA;
+        $reported['post_gates']['rollback_submission_count'] = 1;
+        $reported['post_gates']['rollback_verdict'] = 'passed';
+        try {
+            DeploymentHostRunnerContractV1::validateState($reported);
+            self::fail('Late stop proof added a rollback report to a frozen manual terminal.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+    }
+
     #[DataProvider('rollbackVerdictExitProvider')]
     public function testRollbackVerdictMustMatchObservedExit(string $verdict, int $observedExitCode): void
     {
@@ -2308,6 +2584,54 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             try {
                 DeploymentHostRunnerContractV1::terminalPersistenceResumeStep($invalidPrefix);
                 self::fail('A non-authoritative terminal crash prefix was accepted.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testLateTerminalObservationPersistenceCannotOutrunItsPinnedProof(): void
+    {
+        $order = DeploymentHostRunnerContractV1::lateTerminalObservationPersistenceOrder();
+        self::assertSame(
+            [
+                'pinned_late_action_observation',
+                'converged_terminal_state',
+                'terminal_active_claim',
+                'active_claim_clearance',
+            ],
+            $order,
+        );
+        self::assertSame(
+            [
+                'pin_action_observation',
+                'persist_converged_terminal_state',
+                'refresh_terminal_claim',
+                'clear_terminal',
+                'complete',
+            ],
+            array_map(
+                static fn(
+                    int $length,
+                ): string => DeploymentHostRunnerContractV1::lateTerminalObservationResumeDisposition(
+                    array_slice($order, 0, $length),
+                ),
+                range(0, count($order)),
+            ),
+        );
+        foreach (
+            [
+                'state ahead of observation' => [$order[1]],
+                'clearance before state' => [$order[0], $order[3]],
+                'claim refresh before state' => [$order[0], $order[2]],
+                'duplicate observation generation' => [$order[0], $order[0]],
+                'clearance without refreshed claim' => [$order[0], $order[1], $order[3]],
+            ]
+            as $label => $invalidPrefix
+        ) {
+            try {
+                DeploymentHostRunnerContractV1::lateTerminalObservationResumeDisposition($invalidPrefix);
+                self::fail($label . ' was accepted as a durable late-observation prefix.');
             } catch (RuntimeException) {
                 self::addToAssertionCount(1);
             }
