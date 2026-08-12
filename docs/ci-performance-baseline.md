@@ -16,9 +16,9 @@ enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
-- Workload contract v4 starts at cohort epoch `2026-08-12T08:41:39Z`, when the
-  root deployment regression list added the authoritative timing-pin and
-  release-pair publication suites. Runs before this instant are excluded as
+- Workload contract v5 starts at cohort epoch `2026-08-12T17:16:32Z`, when the
+  root deployment regression list added the complete Host Runner filesystem,
+  lock, controller, and CLI supervisor suite. Runs before this instant are excluded as
   `workload_contract_mismatch` even when their deep-runtime flags happen to
   match.
 - Selection is fail-closed: a run is comparable only when its complete profile
@@ -38,9 +38,9 @@ and fully observed phase rankings in
 
 ## Versioned Workload Contract
 
-Workload contract v4 pins the canonicalized definitions of every job in
+Workload contract v5 pins the canonicalized definitions of every job in
 `.github/workflows/ci.yml` to
-`sha256:2aec03fa253132eb1537487491dfd5f2d3e3f1a809ec59b7a44ea1e6242af729`.
+`sha256:65cbd011e7fe188cc3ca39c216b2061d356cf3f1e0e19e60af0b761bf74b87ec`.
 The workflow contract test also requires every job to have an explicit expected
 `success` or `skipped` conclusion in the comparison profile. This covers the
 always-active `build-test`, JavaScript lint, PHPStan, typed request DTO, and both
