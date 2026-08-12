@@ -303,6 +303,7 @@ PYTHON;
         foreach ([
             ['read', $run . 'request.json'],
             ['pin', $run . 'request.json'],
+            ['pin', $run . 'traffic-gate-report.json'],
             ['cow', $run . 'events.jsonl'],
             ['claim-refresh', 'active-run.json'],
         ] as [$operation, $relative]) {
@@ -310,6 +311,7 @@ PYTHON;
         }
         foreach ([
             ['cow', $run . 'request.json'],
+            ['cow', $run . 'traffic-gate-report.json'],
             ['cow', 'active-run.json'],
             ['pin', $run . 'state.json'],
             ['cow', $run . 'run.lock'],

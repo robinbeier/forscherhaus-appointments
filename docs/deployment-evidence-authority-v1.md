@@ -54,6 +54,15 @@ Run-ID. The runner pins its exact SHA and creates a separate
 `deployment_run_dump_observation.v1` binding it to the deployment Run-ID and
 intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
 the expansion ratio at 100:1. Age must remain below 14,400 seconds.
+The global attestation path is derived only from the already-authorized dump
+digest: `/var/lib/fh-deploy-evidence/dump-attestations/<dump-sha256>.json`.
+Neither the request nor the execution input may supply or override that path.
+
+The traffic producer publishes the exact canonical report to
+`runs/<run-id>/traffic-gate-report.json` while the Host Runner holds both the
+global and per-run locks. This immutable run-local leaf is the sole traffic
+report authority; arbitrary report paths and caller-selected report digests are
+not accepted.
 
 Capacity uses one `statvfs` snapshot of the target filesystem (`f_frsize`,
 `f_bavail`, `f_files`, and `f_favail`) and an exact named device map for state,
@@ -66,10 +75,16 @@ The archive-derived stage bounds and this live-storage footprint are added
 before the capacity decision, so `stage_inode_count` represents the complete
 projected stage after that copy. Later artifact observations cannot reduce
 either bound.
-For the fixed host renderer mode, the provider also supplies conservative byte
-and inode upper bounds for `npm ci --omit=dev`, including the staged
-`node_modules` tree plus npm and Puppeteer state caches. Those targets must
-share the measured filesystem and are included before the capacity verdict.
+Renderer capacity comes only from the root-maintained canonical policy at
+`/etc/fh/deployment-renderer-capacity-v1.json`. Its closed
+`deployment_renderer_capacity_policy.v1` object contains exact `host` and
+`external` objects with `bytes` and `inodes`. The external values must be
+exactly `0/0`; host values must both be positive conservative upper bounds for
+`npm ci --omit=dev`, including the staged `node_modules` tree plus npm and
+Puppeteer state caches. The selected mode comes from the already-pinned
+execution input, while the numeric limits come only from this protected policy.
+Host renderer targets must share the measured filesystem and are included
+before the capacity verdict.
 Base required bytes are archive + compressed dump + archive-derived stage +
 live-storage copy + renderer installation/cache + deterministic temporary
 scratch + the uncompressed stream bound + the independently observed restored

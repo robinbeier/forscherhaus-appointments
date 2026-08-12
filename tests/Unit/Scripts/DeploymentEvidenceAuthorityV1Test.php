@@ -36,6 +36,84 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     private const COMMIT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     private const SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
+    public function testFixedAuthorityPathsAreDerivedFromDigestAndRunId(): void
+    {
+        self::assertSame(
+            '/var/lib/fh-deploy-evidence/dump-attestations/' . self::SHA . '.json',
+            DeploymentEvidenceAuthorityV1::dumpAttestationPath(self::SHA),
+        );
+        self::assertSame(
+            'runs/' . self::RUN_ID . '/traffic-gate-report.json',
+            DeploymentEvidenceAuthorityV1::trafficReportRelativePath(self::RUN_ID),
+        );
+    }
+
+    public function testInvalidAuthorityPathInputsAreRejected(): void
+    {
+        $rejected = 0;
+        foreach (
+            [
+                fn (): string => DeploymentEvidenceAuthorityV1::dumpAttestationPath(strtoupper(self::SHA)),
+                fn (): string => DeploymentEvidenceAuthorityV1::trafficReportRelativePath('not-a-run-id'),
+            ] as $derive
+        ) {
+            try {
+                $derive();
+                self::fail('invalid authority input was accepted');
+            } catch (RuntimeException) {
+                ++$rejected;
+            }
+        }
+        self::assertSame(2, $rejected);
+    }
+
+    public function testRendererCapacityComesFromClosedRootPolicy(): void
+    {
+        $policyBytes = DeploymentEvidenceAuthorityV1::encodeFile([
+            'schema' => DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_SCHEMA,
+            'external' => ['bytes' => 0, 'inodes' => 0],
+            'host' => ['bytes' => 700_000_000, 'inodes' => 7_000],
+        ]);
+
+        self::assertSame(
+            ['bytes' => 700_000_000, 'inodes' => 7_000],
+            DeploymentEvidenceAuthorityV1::rendererCapacityBounds($policyBytes, 'host'),
+        );
+        self::assertSame(
+            ['bytes' => 0, 'inodes' => 0],
+            DeploymentEvidenceAuthorityV1::rendererCapacityBounds($policyBytes, 'external'),
+        );
+        self::assertSame(
+            '/etc/fh/deployment-renderer-capacity-v1.json',
+            DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_PATH,
+        );
+    }
+
+    #[DataProvider('invalidRendererCapacityPolicyProvider')]
+    public function testInvalidRendererCapacityPolicyIsRejected(array $policy, string $mode): void
+    {
+        $this->expectException(RuntimeException::class);
+        DeploymentEvidenceAuthorityV1::rendererCapacityBounds(
+            DeploymentEvidenceAuthorityV1::encodeFile($policy),
+            $mode,
+        );
+    }
+
+    public static function invalidRendererCapacityPolicyProvider(): iterable
+    {
+        $valid = [
+            'schema' => DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_SCHEMA,
+            'external' => ['bytes' => 0, 'inodes' => 0],
+            'host' => ['bytes' => 700_000_000, 'inodes' => 7_000],
+        ];
+        yield 'external bytes are nonzero' => [[...$valid, 'external' => ['bytes' => 1, 'inodes' => 0]], 'external'];
+        yield 'external inodes are nonzero' => [[...$valid, 'external' => ['bytes' => 0, 'inodes' => 1]], 'external'];
+        yield 'host bytes are zero' => [[...$valid, 'host' => ['bytes' => 0, 'inodes' => 7_000]], 'host'];
+        yield 'host inodes are zero' => [[...$valid, 'host' => ['bytes' => 700_000_000, 'inodes' => 0]], 'host'];
+        yield 'unknown mode' => [$valid, 'caller-selected'];
+        yield 'extra key' => [[...$valid, 'caller_limit' => 1], 'host'];
+    }
+
     public function testAuthorizedProvenanceBindsExactCanonicalSidecarAndArtifact(): void
     {
         $provenance = $this->provenance();
@@ -518,6 +596,73 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
         self::assertSame(4_273_123_456, $largeRenderer['base_required_bytes']);
         self::assertFalse($largeRenderer['passed']);
+
+        $externalRenderer = DeploymentEvidenceAuthorityV1::capacityFromVerifiedAuthorities(
+            1,
+            4096,
+            1_000_000,
+            900_000,
+            10_000_000,
+            9_000_000,
+            $provenanceBytes,
+            hash('sha256', $provenanceBytes),
+            'ea_20260812_1200',
+            self::COMMIT,
+            1234,
+            2000,
+            400_000_000,
+            800_000_000,
+            $bytes,
+            hash('sha256', $bytes),
+            self::RUN_ID,
+            self::SHA,
+            self::SHA,
+            1_000_000,
+            '2026-08-12T12:30:00Z',
+            50_000_000,
+            60_000_000,
+            500,
+            0,
+            0,
+            $this->capacityDevices(1),
+        );
+        self::assertSame(1_273_123_456, $externalRenderer['base_required_bytes']);
+        self::assertSame(2500, $externalRenderer['stage_inode_count']);
+
+        try {
+            DeploymentEvidenceAuthorityV1::capacityFromVerifiedAuthorities(
+                1,
+                4096,
+                1_000_000,
+                900_000,
+                10_000_000,
+                9_000_000,
+                $provenanceBytes,
+                hash('sha256', $provenanceBytes),
+                'ea_20260812_1200',
+                self::COMMIT,
+                1234,
+                2000,
+                400_000_000,
+                800_000_000,
+                $bytes,
+                hash('sha256', $bytes),
+                self::RUN_ID,
+                self::SHA,
+                self::SHA,
+                1_000_000,
+                '2026-08-12T12:30:00Z',
+                50_000_000,
+                60_000_000,
+                500,
+                0,
+                1,
+                $this->capacityDevices(1),
+            );
+            self::fail('partial renderer capacity pair was accepted');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('one exact pair', $exception->getMessage());
+        }
 
         $provenance['capacity_bounds']['stage_unpacked_bytes'] = 1;
         $this->expectException(RuntimeException::class);
