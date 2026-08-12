@@ -27,20 +27,20 @@ repo checkout -> release archive -> upload -> staged extract -> predeploy gates 
 Build from a clean, validated repository checkout:
 
 ```bash
-./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" --skip-upload
+./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" --skip-upload
 ```
 
 For local hardening or rebuild rehearsal work, keep the build on the Node 24
 tooling target and disable upload explicitly:
 
 ```bash
-mise x node@24 -- ./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" --skip-upload
+mise x node@24 -- ./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" --skip-upload
 ```
 
 For the current production host upload path:
 
 ```bash
-./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" \
+./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" \
   --upload root@188.245.244.123 --remote-dir /root/releases
 ```
 
@@ -55,11 +55,12 @@ The builder:
   `scripts/release-gate/validate_release_artifact.php`
 - verifies upload checksum and required archive entries when upload is enabled
 
-Local release archives are written to `/tmp/<REL>.tar.gz` and include the
-staged application config. Treat local archives and `/tmp/build_ea_<REL>.log`
-as sensitive operator artifacts: do not commit, attach, or paste their contents,
-and remove them after recording validation evidence unless they are intentionally
-retained for a follow-up rehearsal.
+Local release archives and provenance sidecars are written below the randomized
+`/tmp/<REL>.output.XXXXXX/` directory and include the staged application config.
+Treat that output directory and `/tmp/build_ea_<REL>.log` as sensitive operator
+artifacts: do not commit, attach, or paste their contents, and remove them after
+recording validation evidence unless they are intentionally retained for a
+follow-up rehearsal.
 
 ## Deploy
 

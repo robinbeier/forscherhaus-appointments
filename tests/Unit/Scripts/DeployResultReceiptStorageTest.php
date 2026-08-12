@@ -881,7 +881,14 @@ final class DeployResultReceiptStorageTest extends TestCase
         self::assertSame(6, file_put_contents($target, 'marker'));
         self::assertTrue(chmod($target, 0600));
 
-        $result = $this->runCommand(['bash', 'deploy_ea.sh', '--result-file', $target]);
+        $result = $this->runCommand([
+            'bash',
+            'deploy_ea.sh',
+            '--result-file',
+            $target,
+            '--timing-run-id',
+            '128f6f52-4c87-4d4e-8b19-6a66e6e1af25',
+        ]);
 
         self::assertSame(30, $result['exit_code']);
         self::assertStringNotContainsString($target, $result['stdout'] . $result['stderr']);

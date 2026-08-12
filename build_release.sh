@@ -9,14 +9,16 @@ umask 022
 
 PROJECT="${PROJECT:-$PWD}"
 REL=""
+EXPECTED_COMMIT=""
 UPLOAD="${UPLOAD:-root@188.245.244.123}"   # Ziel-Host (user@host); mit --skip-upload deaktivieren
 REMOTE_DIR="${REMOTE_DIR:-/root/releases}" # Zielverzeichnis auf dem Server
 DRYRUN=0
 
 usage() {
   cat <<'USAGE'
-Usage: build_release.sh [--rel REL] [--project DIR] [--upload user@host] [--remote-dir DIR] [--skip-upload] [--dry-run]
+Usage: build_release.sh --expected-commit FULL_SHA [--rel REL] [--project DIR] [--upload user@host] [--remote-dir DIR] [--skip-upload] [--dry-run]
   --rel REL          Release-ID (Standard: ea_YYYYMMDD_HHMM)
+  --expected-commit  Exact lowercase 40-hex commit exported into the release
   --project DIR      Projektverzeichnis (Standard: aktuelles Verzeichnis)
   --upload TARGET    Upload-Ziel (user@host). Mit --skip-upload deaktivieren
   --remote-dir DIR   Remote-Verzeichnis (Default: /root/releases)
@@ -30,6 +32,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rel) REL="$2"; shift 2;;
+    --expected-commit) EXPECTED_COMMIT="$2"; shift 2;;
     --project) PROJECT="$2"; shift 2;;
     --upload) UPLOAD="$2"; shift 2;;
     --remote-dir) REMOTE_DIR="$2"; shift 2;;
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$REL" ]] || REL="ea_$(date +%Y%m%d_%H%M)"
+[[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "[!] --expected-commit is required and must be a full lowercase commit." >&2; exit 1; }
 
 if [[ "$REL" =~ [^A-Za-z0-9._-] ]]; then
   echo "[!] Release-ID enthält ungültige Zeichen (erlaubt: A-Z a-z 0-9 . _ -)." >&2
@@ -65,14 +69,20 @@ echo "    Remote  : $REMOTE_DIR"
 echo "    Logfile : $LOG"
 
 cd "$PROJECT"
+[[ "$(git rev-parse --verify HEAD)" == "$EXPECTED_COMMIT" ]] || { echo "[!] HEAD does not match --expected-commit." >&2; exit 1; }
+git diff --quiet --exit-code && git diff --cached --quiet --exit-code || {
+  echo "[!] Tracked source is dirty; refusing a release build." >&2; exit 1;
+}
 
 # Vorbedingung: CI-Config muss lokal existieren (sie gehört zum Code!)
 if [[ ! -f "application/config/config.php" ]]; then
   echo "[!] application/config/config.php fehlt LOKAL. Abbruch."; exit 1
 fi
 
-ARCHIVE="/tmp/${REL}.tar.gz"
-STAGE="$(mktemp -d "/tmp/${REL}.XXXXXX")"
+OUTPUT="$(mktemp -d "/tmp/${REL}.output.XXXXXX")"
+ARCHIVE="$OUTPUT/${REL}.tar.gz"
+PROVENANCE="$OUTPUT/${REL}.build-provenance.json"
+STAGE="$(mktemp -d "/tmp/${REL}.stage.XXXXXX")"
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
 
@@ -107,27 +117,15 @@ fi
 
 # 1) Stage befüllen (Root-config, runtime storage, and local build artifacts ausschließen; ankern!)
 if [[ "$DRYRUN" -eq 0 ]]; then
-  rsync -a --delete \
-    --exclude '/config.php' \
-    --exclude '/storage' \
-    --exclude '/build' \
-    --exclude '/.git' \
-    --exclude '/.DS_Store' \
-    --exclude '/node_modules' \
-    --exclude '/vendor' \
-    --exclude '/easyappointments-*.zip' \
-    --exclude '/tests' \
-    --exclude '/docker' \
-    ./ "$STAGE/"
+  git archive --format=tar "$EXPECTED_COMMIT" | tar -xf - -C "$STAGE"
+  rm -rf "$STAGE/storage" "$STAGE/build" "$STAGE/node_modules" "$STAGE/vendor" "$STAGE/tests"
 
   # Zero-surprise replays on the deployment host shell into docker compose
   # using the root compose file plus the dedicated override. Keep only the
   # runtime docker assets required for that flow, not local container data.
-  mkdir -p "$STAGE/docker"
-  cp docker/compose.zero-surprise.yml "$STAGE/docker/compose.zero-surprise.yml"
-  cp -R docker/php-fpm "$STAGE/docker/php-fpm"
-  mkdir -p "$STAGE/docker/nginx"
-  cp docker/nginx/nginx.conf "$STAGE/docker/nginx/nginx.conf"
+  find "$STAGE/docker" -mindepth 1 -maxdepth 1 \
+    ! -name 'compose.zero-surprise.yml' ! -name 'php-fpm' ! -name 'nginx' -exec rm -rf -- {} +
+  find "$STAGE/docker/nginx" -mindepth 1 -maxdepth 1 ! -name 'nginx.conf' -exec rm -rf -- {} +
 else
   echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docker)"
   echo "[DRY-RUN] Würde docker/compose.zero-surprise.yml sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
@@ -168,6 +166,10 @@ if [[ "$DRYRUN" -eq 0 ]]; then
     && echo "[OK] CI-Config im Archiv" \
     || { echo "[!] CI-Config fehlt im Archiv"; exit 1; }
   php scripts/release-gate/validate_release_artifact.php --archive="$ARCHIVE"
+  php scripts/ops/create_release_build_provenance.php \
+    --release="$REL" --commit="$EXPECTED_COMMIT" --stage="$STAGE" --archive="$ARCHIVE" \
+    --build-script="$STAGE/build_release.sh" --composer-lock="$STAGE/composer.lock" \
+    --package-lock="$STAGE/package-lock.json" --deploy-script="$STAGE/deploy_ea.sh" > "$PROVENANCE"
 else
   echo "[DRY-RUN] Würde Archiv erstellen: $ARCHIVE"
   echo "[DRY-RUN] Würde CI-Config im Archiv verifizieren"
@@ -177,6 +179,7 @@ fi
 # 5) Lokale SHA-256 ausgeben (macOS: shasum)
 if [[ "$DRYRUN" -eq 0 ]]; then
   LOCAL_SHA=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')
+  PROVENANCE_SHA=$(shasum -a 256 "$PROVENANCE" | awk '{print $1}')
   echo "[i] Local SHA-256: $LOCAL_SHA  $(basename "$ARCHIVE")"
 else
   echo "[DRY-RUN] Würde lokale SHA-256 berechnen"
@@ -185,34 +188,41 @@ fi
 # 6) Optional: Upload + Remote-Verifikation
 if [[ -n "${UPLOAD}" ]]; then
   if [[ "$DRYRUN" -eq 0 ]]; then
-    run "ssh '${UPLOAD}' 'mkdir -p \"$REMOTE_DIR\"'"
-    run "scp '$ARCHIVE' '${UPLOAD}':'$REMOTE_DIR/'"
+    [[ "$UPLOAD" =~ ^root@[A-Za-z0-9.-]+$ ]] || { echo "[!] Upload target must be root@host." >&2; exit 1; }
+    [[ "$REMOTE_DIR" == "/root/releases" ]] || { echo "[!] Remote release directory must be /root/releases." >&2; exit 1; }
+    REMOTE_NONCE=$(php -r 'echo bin2hex(random_bytes(16));')
+    ARCHIVE_SIZE=$(wc -c < "$ARCHIVE" | tr -d ' ')
+    PROVENANCE_SIZE=$(wc -c < "$PROVENANCE" | tr -d ' ')
+    ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"
+    PROVENANCE_TEMP=".${REL}.build-provenance.json.upload-${REMOTE_NONCE}"
+    remote_cleanup() {
+      ssh "$UPLOAD" /usr/bin/rm -f -- "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP" >/dev/null 2>&1 || true
+    }
+    trap 'remote_cleanup; cleanup' EXIT
 
-    # Remote-Checksumme (Linux: sha256sum)
-    REMOTE_SHA=$(ssh "${UPLOAD}" "sha256sum '${REMOTE_DIR}/$(basename "$ARCHIVE")' | awk '{print \$1}'" || true)
-    [[ -n "$REMOTE_SHA" ]] && echo "[i] Remote SHA-256: $REMOTE_SHA  $(basename "$ARCHIVE")" || echo "[i] Remote SHA-256: <nicht verfügbar>"
-
-    if [[ -n "$REMOTE_SHA" && -n "${LOCAL_SHA:-}" && "$REMOTE_SHA" != "$LOCAL_SHA" ]]; then
-      echo "[!] WARNUNG: Remote-Checksumme ≠ Lokal! Prüfe Netzwerk/Zielhost/Pfade."
-    fi
-
-    # Remote-Inhalt prüfen (tolerant ggü. Top-Level-Ordnern)
-    ssh "${UPLOAD}" "tar -tzf '${REMOTE_DIR}/$(basename "$ARCHIVE")' 2>/dev/null | tr -d '\r' | grep -E '(^|.*/)(application/config/config\.php)$' >/dev/null \
-      && echo '[OK] Remote: CI-Config im Archiv' \
-      || { echo '[!] Remote: CI-Config NICHT im Archiv (prüfe Top-Level-Ordner/Upload)'; exit 1; }"
-
-    while IFS= read -r required_path; do
-      [[ -n "$required_path" ]] || continue
-      ssh "${UPLOAD}" "tar -tzf '${REMOTE_DIR}/$(basename "$ARCHIVE")' 2>/dev/null | tr -d '\r' | grep -F -x './${required_path}' >/dev/null || tar -tzf '${REMOTE_DIR}/$(basename "$ARCHIVE")' 2>/dev/null | tr -d '\r' | grep -F -x '${required_path}' >/dev/null" \
-        && echo "[OK] Remote: ${required_path}" \
-        || { echo "[!] Remote: required artifact fehlt im Archiv: ${required_path}"; exit 1; }
-    done < <(php scripts/release-gate/validate_release_artifact.php --print-required-paths)
+    PREPARE_STATUS=$(ssh "$UPLOAD" /usr/bin/python3 -I -B - --prepare "$REMOTE_DIR" \
+      < scripts/ops/libexec/publish_release_pair_v1.py)
+    [[ "$PREPARE_STATUS" == "ready" ]] || { echo "[!] Remote release root preparation failed." >&2; exit 1; }
+    scp -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"
+    scp -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"
+    ssh "$UPLOAD" /usr/bin/chmod 0600 "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP"
+    PUBLISH_STATUS=$(ssh "$UPLOAD" /usr/bin/python3 -I -B - \
+      "$REMOTE_DIR" "$REL" "$REMOTE_NONCE" "$LOCAL_SHA" "$ARCHIVE_SIZE" \
+      "$PROVENANCE_SHA" "$PROVENANCE_SIZE" \
+      < scripts/ops/libexec/publish_release_pair_v1.py)
+    [[ "$PUBLISH_STATUS" =~ ^(published|attached):(published|attached)$ ]] || {
+      echo "[!] Remote release pair publication returned an invalid status." >&2; exit 1;
+    }
+    trap cleanup EXIT
+    echo "[OK] Remote release pair: $PUBLISH_STATUS"
   else
-    echo "[DRY-RUN] (würde hochladen + remote prüfen)"
+    echo "[DRY-RUN] (würde Archiv und Provenance als verifiziertes No-Clobber-Paar veröffentlichen)"
   fi
 fi
 
 echo "[✓] Build abgeschlossen: $ARCHIVE"
+echo "    Provenance: $PROVENANCE"
+echo "    Provenance SHA-256: ${PROVENANCE_SHA:-<dry-run>}"
 echo "    Log: $LOG"
 if [[ -n "${UPLOAD}" ]]; then
   echo "    Hochgeladen nach: ${UPLOAD}:${REMOTE_DIR}/$(basename "$ARCHIVE")"

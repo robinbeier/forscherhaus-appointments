@@ -84,9 +84,11 @@ DEPLOY_TIMING_PHASE=""
 DEPLOY_TIMING_START_MS=0
 DEPLOY_TIMING_PHASE_START_MS=0
 DEPLOY_TIMING_RUN_ID=""
+DEPLOY_TIMING_REQUESTED_RUN_ID=""
 DEPLOY_TIMING_SEQUENCE=0
 DEPLOY_TIMING_AUTHORITATIVE_ENABLED=0
 DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
+DEPLOY_TIMING_DURABLE=0
 DEPLOY_TIMING_DIR="${FH_DEPLOY_TIMING_DIR:-/var/lib/fh-deploy-timing}"
 DEPLOY_TIMING_FILE=""
 DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
@@ -248,11 +250,63 @@ deploy_timing_emit_record() {
   return 0
 }
 
+deploy_timing_fsync_authoritative_source() {
+  local file="${DEPLOY_TIMING_FILE:-}"
+
+  [[ "${DEPLOY_TIMING_AUTHORITATIVE_ACTIVE:-0}" == "1" && -n "$file" ]] || return 1
+  /usr/bin/python3 -I -B /dev/fd/3 "$file" 3<<'PY'
+import os
+import re
+import stat
+import sys
+
+try:
+    path = sys.argv[1] if len(sys.argv) == 2 else ''
+    prefix = '/var/lib/fh-deploy-timing/'
+    leaf = path[len(prefix):] if path.startswith(prefix) else ''
+    if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jsonl', leaf):
+        raise OSError('invalid timing authority')
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    root = os.open('/', flags)
+    try:
+        var = os.open('var', flags, dir_fd=root)
+        lib = os.open('lib', flags, dir_fd=var)
+        directory = os.open('fh-deploy-timing', flags, dir_fd=lib)
+        try:
+            before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+            file_fd = os.open(leaf, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            try:
+                opened = os.fstat(file_fd)
+                identity = lambda s: (s.st_dev, s.st_ino, stat.S_IMODE(s.st_mode), s.st_uid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+                if identity(before) != identity(opened):
+                    raise OSError('identity changed')
+                if not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1:
+                    raise OSError('unsafe timing file')
+                os.fsync(file_fd)
+                after = os.fstat(file_fd)
+                post = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+                if identity(opened) != identity(after) or identity(after) != identity(post):
+                    raise OSError('timing file changed')
+                os.fsync(directory)
+            finally:
+                os.close(file_fd)
+        finally:
+            os.close(directory)
+            os.close(lib)
+            os.close(var)
+    finally:
+        os.close(root)
+except (OSError, ValueError, TypeError):
+    raise SystemExit(1)
+PY
+}
+
 deploy_timing_disable() {
   DEPLOY_TIMING_ACTIVE=0
   DEPLOY_TIMING_SUMMARY_EMITTED=0
   DEPLOY_TIMING_PHASE=""
   DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
+  DEPLOY_TIMING_DURABLE=0
   return 0
 }
 
@@ -1048,6 +1102,13 @@ deploy_timing_finish() {
   deploy_timing_defer_signals
   emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms" || true
 
+  DEPLOY_TIMING_DURABLE=0
+  if deploy_timing_fsync_authoritative_source; then
+    DEPLOY_TIMING_DURABLE=1
+  else
+    DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
+  fi
+
   DEPLOY_TIMING_SUMMARY_EMITTED=1
   DEPLOY_TIMING_ACTIVE=0
   trap - EXIT
@@ -1168,7 +1229,10 @@ deploy_timing_init() {
     deploy_timing_disable
     return 0
   fi
-  if ! run_id="$(deploy_timing_new_run_id)"; then
+  if [[ -n "${DEPLOY_TIMING_REQUESTED_RUN_ID:-}" ]]; then
+    [[ "$DEPLOY_TIMING_REQUESTED_RUN_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || return 1
+    run_id="$DEPLOY_TIMING_REQUESTED_RUN_ID"
+  elif ! run_id="$(deploy_timing_new_run_id)"; then
     deploy_timing_disable
     return 0
   fi
@@ -1527,6 +1591,7 @@ Core options:
   --user WEBUSER               Web user for ownership/actions     [default: www-data]
   --reload LIST                Services to reload (CSV)           [default: apache2,<detected php-fpm>]
   --result-file PATH           Publish durable deploy_result.v1 candidate
+  --timing-run-id UUID         Runner-chosen deploy timing identity
   --dry-run                    Print actions only
   --no-mark                    Skip writing _RELEASE marker
 
@@ -3054,6 +3119,7 @@ while [[ $# -gt 0 ]]; do
     --user) WEBUSER="$2"; shift 2;;
     --reload) RELOAD_SERVICES="$2"; shift 2;;
     --result-file) DEPLOY_RESULT_RECEIPT_PATH="$2"; shift 2;;
+    --timing-run-id) DEPLOY_TIMING_REQUESTED_RUN_ID="$2"; shift 2;;
     --dry-run) DRYRUN=1; shift 1;;
     --no-mark) MARK_RELEASE=0; shift 1;;
     --renderer-service) RENDERER_SERVICE="$2"; shift 2;;
@@ -3081,6 +3147,9 @@ done
 
 if [[ -n "$DEPLOY_RESULT_RECEIPT_PATH" && "$DRYRUN" -eq 1 ]]; then
   die "[!] --result-file cannot be used with --dry-run."
+fi
+if [[ -n "$DEPLOY_RESULT_RECEIPT_PATH" && ! "$DEPLOY_TIMING_REQUESTED_RUN_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+  die "[!] --timing-run-id is required with --result-file and must be a UUIDv4."
 fi
 deploy_result_receipt_prepare || die "[!] Refusing unsafe deploy result target."
 

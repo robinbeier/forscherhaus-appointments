@@ -338,6 +338,28 @@ final class DeploymentContractV1
     }
 
     /**
+     * Validate the five ordered pre-deploy evidence sections without accepting
+     * them as a terminal bundle. Authority collectors use this at their closed
+     * assembly boundary; callers cannot use it to turn a failed section into a
+     * passed one because each section is still fully recomputed below.
+     *
+     * @param array<string,mixed> $sections
+     */
+    public static function validatePredeploySections(array $sections): void
+    {
+        self::assertExactKeys(
+            $sections,
+            ['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact'],
+            'predeploy evidence sections',
+        );
+        self::validateExpectedCommitEvidence($sections['expected_commit']);
+        self::validateTrafficEvidence($sections['traffic_gate']);
+        self::validateDumpEvidence($sections['dump']);
+        self::validateCapacityEvidence($sections['capacity']);
+        self::validateArtifactEvidence($sections['artifact']);
+    }
+
+    /**
      * @param list<string> $runLines
      * @param array<string,mixed> $evidence
      * @return array{run_id:string,state:string,records:int,recovery:string,evidence_sha256:string}
