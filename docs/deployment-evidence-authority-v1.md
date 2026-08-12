@@ -11,6 +11,10 @@ working-tree changes, exports that exact commit, and emits a detached canonical
 `<release_id>.build-provenance.json` beside the archive. The sidecar is
 `release_build_provenance.v1`; it binds the exact commit, archive digest and
 size, source digests, and conservative archive-derived stage bounds.
+Because compiled frontend outputs are intentionally ignored by Git, the build
+refreshes them first and then copies only the exact production-critical
+CSS/JS/vendor paths declared by the commit-exported release validator. Whole
+ignored directories and unrelated untracked files never enter the stage.
 Those bounds include the exact staged regular-file count and a separate inode
 count covering the stage root, directories, and regular files.
 The local archive inspector resolves an executable `python3` from the build

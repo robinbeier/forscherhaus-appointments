@@ -19,6 +19,7 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertStringContainsString('ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"', $script);
         self::assertStringContainsString('OUTPUT="$(cd "$OUTPUT" && pwd -P)"', $script);
         self::assertStringContainsString('STAGE="$(cd "$STAGE" && pwd -P)"', $script);
+        self::assertStringContainsString('PROJECT="$(pwd -P)"', $script);
         self::assertStringContainsString(
             'PROVENANCE_TEMP=".${REL}.build-provenance.json.upload-${REMOTE_NONCE}"',
             $script,
@@ -50,5 +51,21 @@ final class BuildReleasePublicationContractTest extends TestCase
             $script,
         );
         self::assertStringContainsString('prune_children_except "$STAGE/docker/nginx" \'nginx.conf\'', $script);
+        self::assertStringContainsString(
+            'php "$STAGE/scripts/release-gate/validate_release_artifact.php" \\' . "\n" .
+                '    --print-required-paths > "$GENERATED_ASSET_LIST"',
+            $script,
+        );
+        self::assertStringContainsString(
+            'assets/css/*.min.css|assets/js/*.min.js|assets/vendor/*',
+            $script,
+        );
+        self::assertStringContainsString(
+            '/usr/bin/install -m 0644 "$ASSET_SOURCE" "$ASSET_TARGET"',
+            $script,
+        );
+        self::assertStringContainsString('[[ -f "$ASSET_SOURCE" && ! -L "$ASSET_SOURCE" ]]', $script);
+        self::assertStringContainsString('[[ "$GENERATED_ASSET_COUNT" -gt 0 ]]', $script);
+        self::assertStringNotContainsString('cp -R assets', $script);
     }
 }

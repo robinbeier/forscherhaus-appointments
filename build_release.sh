@@ -90,6 +90,7 @@ echo "    Remote  : $REMOTE_DIR"
 echo "    Logfile : $LOG"
 
 cd "$PROJECT"
+PROJECT="$(pwd -P)"
 [[ "$(git rev-parse --verify HEAD)" == "$EXPECTED_COMMIT" ]] || { echo "[!] HEAD does not match --expected-commit." >&2; exit 1; }
 git diff --quiet --exit-code && git diff --cached --quiet --exit-code || {
   echo "[!] Tracked source is dirty; refusing a release build." >&2; exit 1;
@@ -128,8 +129,7 @@ echo "[i] Refresh frontend release assets"
 if [[ "$DRYRUN" -eq 0 ]]; then
   npm run assets:refresh
   git diff --quiet --exit-code -- assets/css assets/js assets/vendor || {
-    echo "[!] Frontend asset refresh produced uncommitted changes in assets/css, assets/js, or assets/vendor." >&2
-    echo "[!] Commit the generated frontend artifacts before building a release." >&2
+    echo "[!] Frontend asset refresh changed tracked source inputs in assets/css, assets/js, or assets/vendor." >&2
     git status --short -- assets/css assets/js assets/vendor >&2 || true
     exit 1
   }
@@ -148,9 +148,43 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   # runtime docker assets required for that flow, not local container data.
   prune_children_except "$STAGE/docker" 'compose.zero-surprise.yml' 'php-fpm' 'nginx'
   prune_children_except "$STAGE/docker/nginx" 'nginx.conf'
+
+  # Compiled frontend outputs are intentionally ignored by Git, so the exact
+  # commit export cannot contain them. Copy only the production-critical paths
+  # declared by the validator from the just-refreshed local build; never copy a
+  # whole ignored tree or arbitrary untracked files.
+  GENERATED_ASSET_LIST="$OUTPUT/generated-release-assets.list"
+  php "$STAGE/scripts/release-gate/validate_release_artifact.php" \
+    --print-required-paths > "$GENERATED_ASSET_LIST"
+  GENERATED_ASSET_COUNT=0
+  while IFS= read -r asset_path; do
+    case "$asset_path" in
+      assets/css/*.min.css|assets/js/*.min.js|assets/vendor/*) ;;
+      *) continue ;;
+    esac
+    [[ "$asset_path" =~ ^assets/[A-Za-z0-9._/-]+$ ]] || {
+      echo "[!] Generated release asset path is unsafe: $asset_path" >&2
+      exit 1
+    }
+    ASSET_SOURCE="$PROJECT/$asset_path"
+    ASSET_TARGET="$STAGE/$asset_path"
+    [[ -f "$ASSET_SOURCE" && ! -L "$ASSET_SOURCE" ]] || {
+      echo "[!] Refreshed release asset is missing or unsafe: $asset_path" >&2
+      exit 1
+    }
+    mkdir -p -- "$(dirname "$ASSET_TARGET")"
+    /usr/bin/install -m 0644 "$ASSET_SOURCE" "$ASSET_TARGET"
+    GENERATED_ASSET_COUNT=$((GENERATED_ASSET_COUNT + 1))
+  done < "$GENERATED_ASSET_LIST"
+  [[ "$GENERATED_ASSET_COUNT" -gt 0 ]] || {
+    echo "[!] Release validator declared no generated frontend assets." >&2
+    exit 1
+  }
+  rm -f -- "$GENERATED_ASSET_LIST"
 else
   echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docker)"
   echo "[DRY-RUN] Würde docker/compose.zero-surprise.yml sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
+  echo "[DRY-RUN] Würde ausschließlich die vom Release-Validator verlangten, frisch erzeugten CSS/JS/Vendor-Assets ins Stage kopieren"
 fi
 
 # 2) Safety-Check: CI-Config muss jetzt im Stage existieren
