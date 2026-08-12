@@ -579,6 +579,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         $commitCandidate = $provenanceBytes;
         if ($failedGate === 'expected_commit') {
             $changed = $this->provenance();
+            $changed['expected_commit'] = str_repeat('c', 40);
             $changed['observed_commit'] = str_repeat('c', 40);
             $commitCandidate = DeploymentEvidenceAuthorityV1::encodeFile($changed);
         }

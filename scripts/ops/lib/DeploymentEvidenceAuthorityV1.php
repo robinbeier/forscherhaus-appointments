@@ -1066,7 +1066,11 @@ final class DeploymentEvidenceAuthorityV1
         self::assertSame($record['release_id'], $expectedReleaseId, 'expected commit protected release');
         self::assertCommit($record['expected_commit'], 'expected commit provenance expected');
         self::assertCommit($record['observed_commit'], 'expected commit provenance observed');
-        self::assertSame($record['expected_commit'], $expectedCommit, 'expected commit protected intent');
+        self::assertSame(
+            $record['expected_commit'],
+            $record['observed_commit'],
+            'expected commit provenance internal binding',
+        );
         return self::observeExpectedCommitGate($runId, $intentSha256, $expectedCommit, $record['observed_commit']);
     }
 
