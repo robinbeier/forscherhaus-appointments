@@ -210,6 +210,77 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
     }
 
+    public function testProtectedStaleOrChangedDumpReturnsExit22ButContradictorySizeFailsClosed(): void
+    {
+        $trafficBytes = $this->trafficReportBytes('allow', 0);
+        $traffic = new TrafficObservationV1(
+            $trafficBytes,
+            hash('sha256', $trafficBytes),
+            self::SHA,
+            '2026-08-09.1',
+            1,
+            91,
+        );
+        $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
+        $cases = [
+            'stale' => [self::SHA, 1_000_000, '2026-08-12T16:00:00Z', 14_400, true],
+            'changed bytes' => [str_repeat('c', 64), 999_999, '2026-08-12T12:30:00Z', 1_800, false],
+        ];
+        foreach ($cases as $name => [$dumpSha, $dumpSize, $observedAt, $age, $shaVerified]) {
+            $provider = $this->passedProviderWithTraffic(
+                $traffic,
+                new DumpObservationV1(
+                    $attestationBytes,
+                    hash('sha256', $attestationBytes),
+                    $dumpSize,
+                    $observedAt,
+                    null,
+                    $dumpSha,
+                    null,
+                    null,
+                    null,
+                ),
+            );
+            $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+                $provider,
+                self::RUN_ID,
+                self::SHA,
+                self::RELEASE_ID,
+                self::COMMIT,
+                'normal',
+            );
+            self::assertSame(22, $assembly['exit_code'], $name);
+            self::assertSame('failed', $assembly['sections']['dump']['status'], $name);
+            self::assertSame($age, $assembly['sections']['dump']['age_seconds'], $name);
+            self::assertSame($dumpSha, $assembly['sections']['dump']['sha256'], $name);
+            self::assertSame($shaVerified, $assembly['sections']['dump']['sha256_verified'], $name);
+            self::assertSame(['expected_commit', 'traffic_gate', 'dump'], $provider->ledger, $name);
+        }
+
+        $this->expectException(RuntimeException::class);
+        DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+            $this->passedProviderWithTraffic(
+                $traffic,
+                new DumpObservationV1(
+                    $attestationBytes,
+                    hash('sha256', $attestationBytes),
+                    999_999,
+                    '2026-08-12T12:30:00Z',
+                    null,
+                    self::SHA,
+                    null,
+                    null,
+                    null,
+                ),
+            ),
+            self::RUN_ID,
+            self::SHA,
+            self::RELEASE_ID,
+            self::COMMIT,
+            'normal',
+        );
+    }
+
     /** @return iterable<string,array{string}> */
     public static function invalidDumpAttestationProvider(): iterable
     {
@@ -903,6 +974,41 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 'failed_before_write',
                 DeploymentContractV1::validateBundle($bundle['lines'], $bundle['evidence'])['state'],
             );
+        }
+    }
+
+    public function testProviderNormalizesTrafficIntentBindingMismatchesToExit21(): void
+    {
+        $bytes = $this->trafficReportBytes('allow', 0);
+        $cases = [
+            'mode' => [self::SHA, '2026-08-09.1', 1, 91, 'no-business-traffic'],
+            'producer' => [str_repeat('c', 64), '2026-08-09.1', 1, 91, 'normal'],
+            'catalog' => [self::SHA, '2026-08-09.2', 1, 91, 'normal'],
+            'window' => [self::SHA, '2026-08-09.1', 2, 91, 'normal'],
+        ];
+        foreach ($cases as $name => [$producer, $catalog, $windowStart, $windowEnd, $mode]) {
+            $provider = $this->passedProviderWithTraffic(
+                new TrafficObservationV1(
+                    $bytes,
+                    hash('sha256', $bytes),
+                    $producer,
+                    $catalog,
+                    $windowStart,
+                    $windowEnd,
+                ),
+            );
+            $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+                $provider,
+                self::RUN_ID,
+                self::SHA,
+                self::RELEASE_ID,
+                self::COMMIT,
+                $mode,
+            );
+            self::assertSame(21, $assembly['exit_code'], $name);
+            self::assertSame('invalid', $assembly['sections']['traffic_gate']['status'], $name);
+            self::assertSame(hash('sha256', $bytes), $assembly['sections']['traffic_gate']['report_sha256'], $name);
+            self::assertSame(['expected_commit', 'traffic_gate'], $provider->ledger, $name);
         }
     }
 

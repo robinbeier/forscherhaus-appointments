@@ -172,6 +172,22 @@ final class DeploymentEvidenceAuthorityV1
         int $dumpSizeBytes,
         string $observedAtUtc,
     ): array {
+        $record = self::decodePinnedDumpAttestation($bytes, $attestationSha256, $observedAtUtc);
+        self::assertSame($record['dump']['sha256'], $dumpSha256, 'dump attestation stable bytes');
+        self::assertSame($record['dump']['size_bytes'], $dumpSizeBytes, 'dump attestation stable size');
+        $age = self::utcEpoch($observedAtUtc) - self::utcEpoch($record['dump']['created_at_utc']);
+        if ($age >= 14_400) {
+            throw new RuntimeException('dump attestation is stale');
+        }
+        return $record;
+    }
+
+    /** @return array<string,mixed> */
+    private static function decodePinnedDumpAttestation(
+        string $bytes,
+        string $attestationSha256,
+        string $observedAtUtc,
+    ): array {
         self::assertSha256($attestationSha256, 'pinned dump attestation sha256');
         if (!hash_equals($attestationSha256, hash('sha256', $bytes))) {
             throw new RuntimeException('dump attestation bytes do not match pinned authority');
@@ -186,10 +202,8 @@ final class DeploymentEvidenceAuthorityV1
             'dump attestation dump',
         );
         self::assertSha256($record['dump']['sha256'], 'dump attestation sha256');
-        self::assertSame($record['dump']['sha256'], $dumpSha256, 'dump attestation stable bytes');
         self::assertPositiveInt($record['dump']['size_bytes'], 'dump attestation size');
         self::assertDumpBounds($record['dump']['size_bytes'], $record['dump']['uncompressed_size_bytes']);
-        self::assertSame($record['dump']['size_bytes'], $dumpSizeBytes, 'dump attestation stable size');
         self::assertPositiveInt($record['dump']['uncompressed_size_bytes'], 'dump attestation uncompressed size');
         self::assertUtc($record['dump']['created_at_utc'], 'dump attestation created_at');
         self::assertObject($record['verification'], 'dump attestation verification');
@@ -226,10 +240,6 @@ final class DeploymentEvidenceAuthorityV1
         $observed = self::utcEpoch($observedAtUtc);
         if ($created > $restored || $restored > $attested || $attested > $observed) {
             throw new RuntimeException('dump attestation timestamps are not ordered');
-        }
-        $age = $observed - $created;
-        if ($age < 0 || $age >= 14_400) {
-            throw new RuntimeException('dump attestation is future-dated or stale');
         }
         return $record;
     }
@@ -695,20 +705,42 @@ final class DeploymentEvidenceAuthorityV1
         int $stableDumpSizeBytes,
         string $observedAtUtc,
     ): VerifiedPredeployGateV1 {
-        return self::issueGate(
-            'dump',
-            $expectedRunId,
-            $expectedIntentSha256,
-            self::verifyAndDeriveDumpEvidence(
-                $attestationBytes,
-                $pinnedAttestationSha256,
+        self::assertUuidV4($expectedRunId, 'dump observation run_id');
+        self::assertSha256($expectedIntentSha256, 'dump observation intent_sha256');
+        self::assertSha256($stableDumpSha256, 'stable dump sha256');
+        self::assertPositiveInt($stableDumpSizeBytes, 'stable dump size');
+        $attestation = self::decodePinnedDumpAttestation(
+            $attestationBytes,
+            $pinnedAttestationSha256,
+            $observedAtUtc,
+        );
+        $digestMatches = hash_equals($attestation['dump']['sha256'], $stableDumpSha256);
+        $sizeMatches = $attestation['dump']['size_bytes'] === $stableDumpSizeBytes;
+        if ($digestMatches && !$sizeMatches) {
+            throw new RuntimeException('stable dump size contradicts its digest');
+        }
+        $age = self::utcEpoch($observedAtUtc) - self::utcEpoch($attestation['dump']['created_at_utc']);
+        if (!$digestMatches || !$sizeMatches || $age >= 14_400) {
+            return self::observeDumpFailureFromCollector(
                 $expectedRunId,
                 $expectedIntentSha256,
+                $age,
                 $stableDumpSha256,
-                $stableDumpSizeBytes,
-                $observedAtUtc,
-            ),
-        );
+                $digestMatches,
+                $digestMatches,
+                $digestMatches,
+            );
+        }
+        return self::issueGate('dump', $expectedRunId, $expectedIntentSha256, [
+            'status' => 'passed',
+            'policy' => 'fresh_verified_under_240m',
+            'age_seconds' => $age,
+            'max_age_seconds' => 14_400,
+            'sha256' => $stableDumpSha256,
+            'sha256_verified' => true,
+            'gzip_verified' => true,
+            'restore_verified' => true,
+        ]);
     }
 
     /** @return array<string,mixed> */
@@ -939,7 +971,7 @@ final class DeploymentEvidenceAuthorityV1
             ($section['window_start_epoch'] ?? null) !== $expectedWindowStartEpoch ||
             ($section['window_end_epoch'] ?? null) !== $expectedWindowEndEpoch
         ) {
-            throw new RuntimeException('traffic report does not bind the deployment intent');
+            throw new TrafficEvidenceInvalidV1('traffic report does not bind the deployment intent');
         }
         require_once __DIR__ . '/DeploymentContractV1.php';
         try {
