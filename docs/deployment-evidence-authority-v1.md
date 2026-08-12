@@ -11,6 +11,8 @@ working-tree changes, exports that exact commit, and emits a detached canonical
 `<release_id>.build-provenance.json` beside the archive. The sidecar is
 `release_build_provenance.v1`; it binds the exact commit, archive digest and
 size, source digests, and conservative archive-derived stage bounds.
+Those bounds include the exact staged regular-file count and a separate inode
+count covering the stage root, directories, and regular files.
 `temp_scratch_bytes` is an additional scratch allowance only: archive, dump,
 and stage bytes are excluded because the capacity formula counts each of them
 as a separate component.
@@ -46,12 +48,17 @@ intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
 the expansion ratio at 100:1. Age must remain below 14,400 seconds.
 
 Capacity uses one `statvfs` snapshot of the target filesystem (`f_frsize`,
-`f_bavail`) and an exact named device map for state, release, artifact, dump,
-stage, restore scratch, and temporary targets. Base required bytes are archive
-+ compressed dump + archive-derived stage + deterministic temporary/restore
-scratch; rollback bytes are zero in v1. Headroom is
+`f_bavail`, `f_files`, and `f_favail`) and an exact named device map for state,
+release, artifact, dump, stage, restore scratch, and temporary targets. The
+archive byte bound and staged inode bound come only from the authenticated
+sidecar; later artifact observations cannot reduce either bound. Base required
+bytes are archive + compressed dump + archive-derived stage + deterministic
+temporary/restore scratch; rollback bytes are zero in v1. Headroom is
 `max(512 MiB, ceil(base/10))`. Available space must cover projected required
-bytes and both observed and projected used percentages must be below 85.
+bytes and both observed and projected used percentages must be below 85. Free
+inodes must cover the authenticated staged inode count plus a fixed 64-inode
+allowance for the runner's bounded archive, pin, state, receipt, timing, and
+temporary leaves.
 
 ## Ordered provider boundary
 

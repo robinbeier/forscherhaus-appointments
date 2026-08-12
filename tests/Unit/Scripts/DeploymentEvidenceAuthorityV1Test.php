@@ -50,6 +50,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
         );
@@ -88,6 +89,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
         );
@@ -216,6 +218,9 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             blockSize: 4096,
             blocks: 1_000_000,
             blocksAvailable: 400_000,
+            inodes: 10_000_000,
+            inodesAvailable: 9_000_000,
+            stageInodeCount: 2000,
             artifactBytes: 100_000_000,
             dumpBytes: 200_000_000,
             stageBytes: 40_000_000,
@@ -228,6 +233,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         self::assertSame(350_000_000, $result['base_required_bytes']);
         self::assertSame(536_870_912, $result['headroom_bytes']);
         self::assertSame(886_870_912, $result['projected_required_bytes']);
+        self::assertSame(9_000_000, $result['available_inodes']);
+        self::assertSame(2064, $result['projected_required_inodes']);
         self::assertSame(60, $result['observed_percent']);
         self::assertSame(82, $result['projected_percent']);
         self::assertTrue($result['passed']);
@@ -237,8 +244,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     {
         foreach (
             [
-                [4096, 1_000_000, 400_000, null, 1, 1, 1, 0, $this->capacityDevices(1)],
-                [PHP_INT_MAX, 2, 1, 1, 1, 1, 1, 0, $this->capacityDevices(1)],
+                [4096, 1_000_000, 400_000, 10_000, 9_000, 100, null, 1, 1, 1, 0, $this->capacityDevices(1)],
+                [PHP_INT_MAX, 2, 1, 10_000, 9_000, 100, 1, 1, 1, 1, 0, $this->capacityDevices(1)],
             ]
             as $arguments
         ) {
@@ -254,6 +261,9 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             4096,
             244_141,
             195_313,
+            10_000,
+            9_000,
+            100,
             113_129_088,
             0,
             0,
@@ -266,10 +276,63 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         $this->expectException(RuntimeException::class);
         $devices = $this->capacityDevices(1);
         $devices['restore_scratch'] = 2;
-        DeploymentEvidenceAuthorityV1::capacityFromStatvfs(1, 4096, 1_000_000, 400_000, 1, 1, 1, 1, 0, $devices);
+        DeploymentEvidenceAuthorityV1::capacityFromStatvfs(
+            1,
+            4096,
+            1_000_000,
+            400_000,
+            10_000,
+            9_000,
+            100,
+            1,
+            1,
+            1,
+            1,
+            0,
+            $devices,
+        );
     }
 
-    public function testCapacityDerivesStageAndScratchOnlyFromVerifiedAuthorities(): void
+    public function testCapacityFailsClosedWhenAvailableInodesCannotMaterializeTheStage(): void
+    {
+        $result = DeploymentEvidenceAuthorityV1::capacityFromStatvfs(
+            filesystemDevice: 1,
+            blockSize: 4096,
+            blocks: 1_000_000,
+            blocksAvailable: 900_000,
+            inodes: 10_000,
+            inodesAvailable: 63,
+            stageInodeCount: 1,
+            artifactBytes: 1,
+            dumpBytes: 1,
+            stageBytes: 1,
+            tempBytes: 1,
+            rollbackBytes: 0,
+            componentDevices: $this->capacityDevices(1),
+        );
+
+        self::assertSame(65, $result['projected_required_inodes']);
+        self::assertFalse($result['passed']);
+
+        $this->expectException(RuntimeException::class);
+        DeploymentEvidenceAuthorityV1::capacityFromStatvfs(
+            1,
+            4096,
+            1_000_000,
+            900_000,
+            10_000,
+            10_001,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            $this->capacityDevices(1),
+        );
+    }
+
+    public function testCapacityDerivesArchiveStageScratchAndInodesOnlyFromVerifiedAuthorities(): void
     {
         $provenance = $this->provenance();
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($provenance);
@@ -279,15 +342,14 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             4096,
             1_000_000,
             900_000,
+            10_000_000,
+            9_000_000,
             $provenanceBytes,
             hash('sha256', $provenanceBytes),
             'ea_20260812_1200',
             self::COMMIT,
-            self::SHA,
-            123456,
-            self::SHA,
-            self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
             $bytes,
@@ -309,15 +371,14 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             4096,
             1_000_000,
             900_000,
+            10_000_000,
+            9_000_000,
             DeploymentEvidenceAuthorityV1::encodeFile($provenance),
             hash('sha256', DeploymentEvidenceAuthorityV1::encodeFile($provenance)),
             'ea_20260812_1200',
             self::COMMIT,
-            self::SHA,
-            123456,
-            self::SHA,
-            self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
             $bytes,
@@ -344,6 +405,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
         );
@@ -367,15 +429,14 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             4096,
             1_000_000,
             900_000,
+            10_000_000,
+            9_000_000,
             $provenanceBytes,
             hash('sha256', $provenanceBytes),
             'ea_20260812_1200',
             self::COMMIT,
-            self::SHA,
-            123456,
-            self::SHA,
-            self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
             $attestationBytes,
@@ -400,6 +461,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
         );
@@ -512,6 +574,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
         );
@@ -562,6 +625,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         4096,
                         1_000_000,
                         900_000,
+                        10_000_000,
+                        9_000_000,
                         $buildSources,
                         $attestationBytes,
                         hash('sha256', $attestationBytes),
@@ -792,6 +857,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             4096,
             1_000_000,
             900_000,
+            10_000_000,
+            9_000_000,
             $build,
             $attestationBytes,
             hash('sha256', $attestationBytes),
@@ -1121,6 +1188,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'archive' => ['name' => 'ea_20260812_1200.tar.gz', 'size_bytes' => 123456, 'sha256' => self::SHA],
             'capacity_bounds' => [
                 'stage_file_count' => 1234,
+                'stage_inode_count' => 2000,
                 'stage_unpacked_bytes' => 400_000_000,
                 'temp_scratch_bytes' => 800_000_000,
             ],
@@ -1335,6 +1403,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         4096,
                         1_000_000,
                         900_000,
+                        10_000_000,
+                        9_000_000,
                         $build,
                         $attestationBytes,
                         hash('sha256', $attestationBytes),
@@ -1363,6 +1433,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::SHA,
             1234,
+            2000,
             400_000_000,
             800_000_000,
         );

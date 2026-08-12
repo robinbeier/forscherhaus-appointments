@@ -80,9 +80,11 @@ if [[ ! -f "application/config/config.php" ]]; then
 fi
 
 OUTPUT="$(mktemp -d "/tmp/${REL}.output.XXXXXX")"
+OUTPUT="$(cd "$OUTPUT" && pwd -P)"
 ARCHIVE="$OUTPUT/${REL}.tar.gz"
 PROVENANCE="$OUTPUT/${REL}.build-provenance.json"
 STAGE="$(mktemp -d "/tmp/${REL}.stage.XXXXXX")"
+STAGE="$(cd "$STAGE" && pwd -P)"
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
 

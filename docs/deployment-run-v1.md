@@ -135,9 +135,13 @@ The future runner must normalize them into this table.
 
 ## Deploy child result candidate
 
-When normal deploy is invoked with `--result-file ABSOLUTE_PATH`,
-`deploy_ea.sh` publishes one closed, secret-free `deploy_result.v1` receipt
-candidate.
+When normal deploy is invoked with `--result-file ABSOLUTE_PATH`, it must also
+receive `--timing-run-id FRESH_UUIDV4`. The Host Runner generates the timing
+UUID internally and binds it into the launch record, fixed argv, and argv hash;
+the coordinator cannot choose it. A direct root invocation must generate a
+fresh UUIDv4 and ensure the corresponding
+`/var/lib/fh-deploy-timing/<uuid>.jsonl` leaf is absent. `deploy_ea.sh` then
+publishes one closed, secret-free `deploy_result.v1` receipt candidate.
 The object has exactly `schema`, `outcome`, and `exit_code`; it contains no
 timing, paths, commands, hosts, output, or free text. Its fixed bindings are:
 

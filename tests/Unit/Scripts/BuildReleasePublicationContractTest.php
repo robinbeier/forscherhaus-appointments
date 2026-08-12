@@ -13,6 +13,8 @@ final class BuildReleasePublicationContractTest extends TestCase
         $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
         self::assertIsString($script);
         self::assertStringContainsString('ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"', $script);
+        self::assertStringContainsString('OUTPUT="$(cd "$OUTPUT" && pwd -P)"', $script);
+        self::assertStringContainsString('STAGE="$(cd "$STAGE" && pwd -P)"', $script);
         self::assertStringContainsString(
             'PROVENANCE_TEMP=".${REL}.build-provenance.json.upload-${REMOTE_NONCE}"',
             $script,

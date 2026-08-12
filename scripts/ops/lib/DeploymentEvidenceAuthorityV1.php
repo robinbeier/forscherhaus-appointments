@@ -26,6 +26,7 @@ final class DeploymentEvidenceAuthorityV1
     public const MAX_FILE_BYTES = 4_096;
     public const MAX_DUMP_COMPRESSED_BYTES = 17_179_869_184;
     public const MAX_DUMP_UNCOMPRESSED_BYTES = 68_719_476_736;
+    private const CAPACITY_INODE_HEADROOM = 64;
     private const CAPACITY_DEVICE_KEYS = [
         'artifact',
         'dump_pin',
@@ -62,6 +63,7 @@ final class DeploymentEvidenceAuthorityV1
         string $observedHostDeployScriptSha256,
         string $observedArtifactDeployScriptSha256,
         int $observedStageFileCount,
+        int $observedStageInodeCount,
         int $observedStageUnpackedBytes,
         int $observedTempScratchBytes,
     ): array {
@@ -71,6 +73,7 @@ final class DeploymentEvidenceAuthorityV1
             $releaseId,
             $expectedCommit,
             $observedStageFileCount,
+            $observedStageInodeCount,
             $observedStageUnpackedBytes,
             $observedTempScratchBytes,
         );
@@ -104,6 +107,7 @@ final class DeploymentEvidenceAuthorityV1
         string $releaseId,
         string $expectedCommit,
         int $observedStageFileCount,
+        int $observedStageInodeCount,
         int $observedStageUnpackedBytes,
         int $observedTempScratchBytes,
     ): array {
@@ -133,14 +137,16 @@ final class DeploymentEvidenceAuthorityV1
         self::assertObject($record['capacity_bounds'], 'build provenance capacity bounds');
         self::assertExactKeys(
             $record['capacity_bounds'],
-            ['stage_file_count', 'stage_unpacked_bytes', 'temp_scratch_bytes'],
+            ['stage_file_count', 'stage_inode_count', 'stage_unpacked_bytes', 'temp_scratch_bytes'],
             'build provenance capacity bounds',
         );
         self::assertPositiveInt($record['capacity_bounds']['stage_file_count'], 'stage file count');
+        self::assertPositiveInt($record['capacity_bounds']['stage_inode_count'], 'stage inode count');
         self::assertPositiveInt($record['capacity_bounds']['stage_unpacked_bytes'], 'stage unpacked bytes');
         self::assertPositiveInt($record['capacity_bounds']['temp_scratch_bytes'], 'temp scratch bytes');
         if (
             $record['capacity_bounds']['stage_file_count'] !== $observedStageFileCount ||
+            $record['capacity_bounds']['stage_inode_count'] !== $observedStageInodeCount ||
             $record['capacity_bounds']['stage_unpacked_bytes'] !== $observedStageUnpackedBytes ||
             $record['capacity_bounds']['temp_scratch_bytes'] !== $observedTempScratchBytes
         ) {
@@ -314,6 +320,9 @@ final class DeploymentEvidenceAuthorityV1
         int $blockSize,
         int $blocks,
         int $blocksAvailable,
+        int $inodes,
+        int $inodesAvailable,
+        ?int $stageInodeCount,
         ?int $artifactBytes,
         ?int $dumpBytes,
         ?int $stageBytes,
@@ -326,14 +335,20 @@ final class DeploymentEvidenceAuthorityV1
             $blockSize !== 4096 ||
             $blocks <= 0 ||
             $blocksAvailable < 0 ||
-            $blocksAvailable > $blocks
+            $blocksAvailable > $blocks ||
+            $inodes <= 0 ||
+            $inodesAvailable < 0 ||
+            $inodesAvailable > $inodes
         ) {
             throw new RuntimeException('capacity statvfs snapshot is invalid');
         }
-        foreach ([$artifactBytes, $dumpBytes, $stageBytes, $tempBytes, $rollbackBytes] as $bound) {
+        foreach ([$stageInodeCount, $artifactBytes, $dumpBytes, $stageBytes, $tempBytes, $rollbackBytes] as $bound) {
             if (!is_int($bound) || $bound < 0) {
                 throw new RuntimeException('capacity component bound is unavailable');
             }
+        }
+        if ($stageInodeCount === 0) {
+            throw new RuntimeException('capacity stage inode bound is unavailable');
         }
         $deviceKeys = array_keys($componentDevices);
         sort($deviceKeys);
@@ -357,17 +372,26 @@ final class DeploymentEvidenceAuthorityV1
         $tenPercent = self::ceilDivide($base, 10);
         $headroom = max(536_870_912, $tenPercent);
         $required = self::checkedAdd($base, $headroom);
+        $requiredInodes = self::checkedAdd($stageInodeCount, self::CAPACITY_INODE_HEADROOM);
         $used = $total - $available;
         $projectedUsed = self::checkedAdd($used, $required);
         $observedPercent = self::ceilDivide(self::checkedMultiply($used, 100), $total);
         $projectedPercent = min(100, self::ceilDivide(self::checkedMultiply($projectedUsed, 100), $total));
-        $passed = $available >= $required && $observedPercent < 85 && $projectedPercent < 85;
+        $passed =
+            $available >= $required &&
+            $inodesAvailable >= $requiredInodes &&
+            $observedPercent < 85 &&
+            $projectedPercent < 85;
         return [
             'filesystem_device' => $filesystemDevice,
             'available_bytes' => $available,
             'base_required_bytes' => $base,
             'headroom_bytes' => $headroom,
             'projected_required_bytes' => $required,
+            'available_inodes' => $inodesAvailable,
+            'stage_inode_count' => $stageInodeCount,
+            'inode_headroom' => self::CAPACITY_INODE_HEADROOM,
+            'projected_required_inodes' => $requiredInodes,
             'observed_percent' => $observedPercent,
             'projected_percent' => $projectedPercent,
             'max_used_percent' => 85,
@@ -381,15 +405,14 @@ final class DeploymentEvidenceAuthorityV1
         int $blockSize,
         int $blocks,
         int $blocksAvailable,
+        int $inodes,
+        int $inodesAvailable,
         string $provenanceBytes,
         string $authorizedProvenanceSha256,
         string $releaseId,
         string $expectedCommit,
-        string $archiveSha256,
-        int $archiveSizeBytes,
-        string $hostDeployScriptSha256,
-        string $artifactDeployScriptSha256,
         int $stageFileCount,
+        int $stageInodeCount,
         int $stageUnpackedBytes,
         int $tempScratchBytes,
         string $attestationBytes,
@@ -407,13 +430,10 @@ final class DeploymentEvidenceAuthorityV1
             $releaseId,
             $expectedCommit,
             $stageFileCount,
+            $stageInodeCount,
             $stageUnpackedBytes,
             $tempScratchBytes,
         );
-        self::assertSha256($archiveSha256, 'capacity observed archive sha256');
-        self::assertPositiveInt($archiveSizeBytes, 'capacity observed archive size');
-        self::assertSha256($hostDeployScriptSha256, 'capacity observed host deploy script sha256');
-        self::assertSha256($artifactDeployScriptSha256, 'capacity observed artifact deploy script sha256');
         $verifiedDumpObservation = self::bindPinnedDumpAttestationToRun(
             $attestationBytes,
             $attestationSha256,
@@ -428,7 +448,10 @@ final class DeploymentEvidenceAuthorityV1
             $blockSize,
             $blocks,
             $blocksAvailable,
-            $archiveSizeBytes,
+            $inodes,
+            $inodesAvailable,
+            $verifiedProvenance['capacity_bounds']['stage_inode_count'],
+            $verifiedProvenance['archive']['size_bytes'],
             $verifiedDumpObservation['dump_size_bytes'],
             $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
             self::checkedAdd(
@@ -451,6 +474,7 @@ final class DeploymentEvidenceAuthorityV1
         string $hostDeployScriptSha256,
         string $artifactDeployScriptSha256,
         int $stageFileCount,
+        int $stageInodeCount,
         int $stageUnpackedBytes,
         int $tempScratchBytes,
     ): array {
@@ -464,6 +488,7 @@ final class DeploymentEvidenceAuthorityV1
             $hostDeployScriptSha256,
             $artifactDeployScriptSha256,
             $stageFileCount,
+            $stageInodeCount,
             $stageUnpackedBytes,
             $tempScratchBytes,
         );
@@ -498,6 +523,7 @@ final class DeploymentEvidenceAuthorityV1
         string $hostDeployScriptSha256,
         string $artifactDeployScriptSha256,
         int $stageFileCount,
+        int $stageInodeCount,
         int $stageUnpackedBytes,
         int $tempScratchBytes,
     ): VerifiedPredeployGateV1 {
@@ -507,6 +533,7 @@ final class DeploymentEvidenceAuthorityV1
             $releaseId,
             $expectedCommit,
             $stageFileCount,
+            $stageInodeCount,
             $stageUnpackedBytes,
             $tempScratchBytes,
         );
@@ -556,6 +583,7 @@ final class DeploymentEvidenceAuthorityV1
         string $hostDeployScriptSha256,
         string $artifactDeployScriptSha256,
         int $stageFileCount,
+        int $stageInodeCount,
         int $stageUnpackedBytes,
         int $tempScratchBytes,
     ): VerifiedPredeployGateV1 {
@@ -575,6 +603,7 @@ final class DeploymentEvidenceAuthorityV1
                 $hostDeployScriptSha256,
                 $artifactDeployScriptSha256,
                 $stageFileCount,
+                $stageInodeCount,
                 $stageUnpackedBytes,
                 $tempScratchBytes,
             ),
@@ -654,15 +683,14 @@ final class DeploymentEvidenceAuthorityV1
         int $blockSize,
         int $blocks,
         int $blocksAvailable,
+        int $inodes,
+        int $inodesAvailable,
         string $provenanceBytes,
         string $authorizedProvenanceSha256,
         string $releaseId,
         string $expectedCommit,
-        string $archiveSha256,
-        int $archiveSizeBytes,
-        string $hostDeployScriptSha256,
-        string $artifactDeployScriptSha256,
         int $stageFileCount,
+        int $stageInodeCount,
         int $stageUnpackedBytes,
         int $tempScratchBytes,
         string $attestationBytes,
@@ -679,15 +707,14 @@ final class DeploymentEvidenceAuthorityV1
             $blockSize,
             $blocks,
             $blocksAvailable,
+            $inodes,
+            $inodesAvailable,
             $provenanceBytes,
             $authorizedProvenanceSha256,
             $releaseId,
             $expectedCommit,
-            $archiveSha256,
-            $archiveSizeBytes,
-            $hostDeployScriptSha256,
-            $artifactDeployScriptSha256,
             $stageFileCount,
+            $stageInodeCount,
             $stageUnpackedBytes,
             $tempScratchBytes,
             $attestationBytes,
@@ -715,15 +742,14 @@ final class DeploymentEvidenceAuthorityV1
         int $blockSize,
         int $blocks,
         int $blocksAvailable,
+        int $inodes,
+        int $inodesAvailable,
         string $provenanceBytes,
         string $authorizedProvenanceSha256,
         string $releaseId,
         string $expectedCommit,
-        string $archiveSha256,
-        int $archiveSizeBytes,
-        string $hostDeployScriptSha256,
-        string $artifactDeployScriptSha256,
         int $stageFileCount,
+        int $stageInodeCount,
         int $stageUnpackedBytes,
         int $tempScratchBytes,
         string $attestationBytes,
@@ -744,15 +770,14 @@ final class DeploymentEvidenceAuthorityV1
                 $blockSize,
                 $blocks,
                 $blocksAvailable,
+                $inodes,
+                $inodesAvailable,
                 $provenanceBytes,
                 $authorizedProvenanceSha256,
                 $releaseId,
                 $expectedCommit,
-                $archiveSha256,
-                $archiveSizeBytes,
-                $hostDeployScriptSha256,
-                $artifactDeployScriptSha256,
                 $stageFileCount,
+                $stageInodeCount,
                 $stageUnpackedBytes,
                 $tempScratchBytes,
                 $attestationBytes,
@@ -1344,15 +1369,14 @@ final class DeploymentEvidenceAuthorityV1
                         $sources->blockSize,
                         $sources->blocks,
                         $sources->blocksAvailable,
+                        $sources->inodes,
+                        $sources->inodesAvailable,
                         $build->provenanceBytes,
                         $build->authorizedProvenanceSha256,
                         $build->releaseId,
                         $expectedCommit,
-                        $build->archiveSha256,
-                        $build->archiveSizeBytes,
-                        $build->hostDeployScriptSha256,
-                        $build->artifactDeployScriptSha256,
                         $build->stageFileCount,
+                        $build->stageInodeCount,
                         $build->stageUnpackedBytes,
                         $build->tempScratchBytes,
                         $sources->attestationBytes,
@@ -1404,6 +1428,7 @@ final class DeploymentEvidenceAuthorityV1
                         $sources->hostDeployScriptSha256,
                         $sources->artifactDeployScriptSha256,
                         $sources->stageFileCount,
+                        $sources->stageInodeCount,
                         $sources->stageUnpackedBytes,
                         $sources->tempScratchBytes,
                     );

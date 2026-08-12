@@ -55,6 +55,7 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
         $record = $this->create();
 
         self::assertSame(2, $record['capacity_bounds']['stage_file_count']);
+        self::assertSame(4, $record['capacity_bounds']['stage_inode_count']);
         self::assertSame(16_384, $record['capacity_bounds']['stage_unpacked_bytes']);
         self::assertSame(hash_file('sha256', $this->root . '/archive.tar.gz'), $record['archive']['sha256']);
         self::assertSame(67_108_864, $record['capacity_bounds']['temp_scratch_bytes']);
@@ -94,15 +95,14 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
             4096,
             1_000_000,
             900_000,
+            10_000_000,
+            9_000_000,
             $provenanceBytes,
             hash('sha256', $provenanceBytes),
             'ea_20260812_1200',
             str_repeat('a', 40),
-            $record['archive']['sha256'],
-            $record['archive']['size_bytes'],
-            $record['source']['deploy_ea_sha256'],
-            $record['source']['deploy_ea_sha256'],
             $record['capacity_bounds']['stage_file_count'],
+            $record['capacity_bounds']['stage_inode_count'],
             $record['capacity_bounds']['stage_unpacked_bytes'],
             $record['capacity_bounds']['temp_scratch_bytes'],
             $attestationBytes,
@@ -116,6 +116,29 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
         );
         $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 67_108_864 + 4_000;
         self::assertSame($expectedBase, $capacity['base_required_bytes']);
+        self::assertSame(68, $capacity['projected_required_inodes']);
+    }
+
+    public function testProducerCanonicalizesTrustedTemporaryStagePath(): void
+    {
+        $alias = $this->root . '-alias';
+        self::assertTrue(symlink($this->root, $alias));
+        try {
+            $record = ReleaseBuildProvenanceProducerV1::create(
+                'ea_20260812_1200',
+                str_repeat('a', 40),
+                $alias . '/stage/.',
+                $this->root . '/archive.tar.gz',
+                $this->root . '/build_release.sh',
+                $this->root . '/composer.lock',
+                $this->root . '/package-lock.json',
+                $this->root . '/deploy_ea.sh',
+            );
+        } finally {
+            unlink($alias);
+        }
+
+        self::assertSame(4, $record['capacity_bounds']['stage_inode_count']);
     }
 
     public function testProducerRejectsSymlinkOrHardlinkedStageEntries(): void

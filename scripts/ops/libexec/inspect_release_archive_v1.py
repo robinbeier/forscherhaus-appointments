@@ -61,7 +61,13 @@ def main():
         identity = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
         if identity(before) != identity(after):
             reject()
-        output = {'archive_sha256': digest.hexdigest(), 'archive_size_bytes': before.st_size, 'entry_count': count, 'stage_unpacked_bytes': unpacked}
+        output = {
+            'archive_sha256': digest.hexdigest(),
+            'archive_size_bytes': before.st_size,
+            'entry_count': count,
+            'stage_inode_count': len(names) + 1,
+            'stage_unpacked_bytes': unpacked,
+        }
         sys.stdout.write(json.dumps(output, sort_keys=True, separators=(',', ':')) + '\n')
     finally:
         os.close(fd)

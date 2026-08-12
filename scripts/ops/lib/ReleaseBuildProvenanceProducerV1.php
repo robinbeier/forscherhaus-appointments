@@ -31,6 +31,7 @@ final class ReleaseBuildProvenanceProducerV1
         $archive = self::inspectArchive($archivePath);
         if (
             $stage['file_count'] !== $archive['entry_count'] ||
+            $stage['inode_count'] !== $archive['stage_inode_count'] ||
             $stage['unpacked_bytes'] !== $archive['stage_unpacked_bytes']
         ) {
             throw new RuntimeException('release stage and finalized archive inventory disagree');
@@ -56,6 +57,7 @@ final class ReleaseBuildProvenanceProducerV1
             ],
             'capacity_bounds' => [
                 'stage_file_count' => $archive['entry_count'],
+                'stage_inode_count' => $archive['stage_inode_count'],
                 'stage_unpacked_bytes' => $archive['stage_unpacked_bytes'],
                 'temp_scratch_bytes' => $tempScratch,
             ],
@@ -71,13 +73,14 @@ final class ReleaseBuildProvenanceProducerV1
             $record['source']['deploy_ea_sha256'],
             $record['source']['deploy_ea_sha256'],
             $record['capacity_bounds']['stage_file_count'],
+            $record['capacity_bounds']['stage_inode_count'],
             $record['capacity_bounds']['stage_unpacked_bytes'],
             $record['capacity_bounds']['temp_scratch_bytes'],
         );
         return $record;
     }
 
-    /** @return array{sha256:string,size_bytes:int,entry_count:int,stage_unpacked_bytes:int} */
+    /** @return array{sha256:string,size_bytes:int,entry_count:int,stage_inode_count:int,stage_unpacked_bytes:int} */
     private static function inspectArchive(string $path): array
     {
         $command = ['/usr/bin/python3', '-I', '-B', dirname(__DIR__) . '/libexec/inspect_release_archive_v1.py', $path];
@@ -98,7 +101,13 @@ final class ReleaseBuildProvenanceProducerV1
         $record = json_decode($stdout, true);
         if (
             !is_array($record) ||
-            array_keys($record) !== ['archive_sha256', 'archive_size_bytes', 'entry_count', 'stage_unpacked_bytes']
+            array_keys($record) !== [
+                'archive_sha256',
+                'archive_size_bytes',
+                'entry_count',
+                'stage_inode_count',
+                'stage_unpacked_bytes',
+            ]
         ) {
             throw new RuntimeException('release archive observation is malformed');
         }
@@ -109,6 +118,8 @@ final class ReleaseBuildProvenanceProducerV1
             $record['archive_size_bytes'] <= 0 ||
             !is_int($record['entry_count']) ||
             $record['entry_count'] <= 0 ||
+            !is_int($record['stage_inode_count']) ||
+            $record['stage_inode_count'] <= $record['entry_count'] ||
             !is_int($record['stage_unpacked_bytes']) ||
             $record['stage_unpacked_bytes'] <= 0
         ) {
@@ -118,24 +129,28 @@ final class ReleaseBuildProvenanceProducerV1
             'sha256' => $record['archive_sha256'],
             'size_bytes' => $record['archive_size_bytes'],
             'entry_count' => $record['entry_count'],
+            'stage_inode_count' => $record['stage_inode_count'],
             'stage_unpacked_bytes' => $record['stage_unpacked_bytes'],
         ];
     }
 
-    /** @return array{file_count:int,unpacked_bytes:int} */
+    /** @return array{file_count:int,inode_count:int,unpacked_bytes:int} */
     private static function inspectStage(string $root): array
     {
         $canonical = realpath($root);
-        if ($canonical === false || $canonical !== $root || !is_dir($root) || is_link($root)) {
+        if ($canonical === false || !is_dir($canonical) || is_link($root)) {
             throw new RuntimeException('release stage root is invalid');
         }
+        $root = $canonical;
         $files = 0;
+        $inodes = 1;
         $bytes = self::BLOCK_BYTES;
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST,
         );
         foreach ($iterator as $entry) {
+            $inodes++;
             if ($entry->isLink() || (!$entry->isDir() && !$entry->isFile())) {
                 throw new RuntimeException('release stage contains an unsafe entry');
             }
@@ -157,7 +172,7 @@ final class ReleaseBuildProvenanceProducerV1
         if ($files === 0) {
             throw new RuntimeException('release stage is empty');
         }
-        return ['file_count' => $files, 'unpacked_bytes' => $bytes];
+        return ['file_count' => $files, 'inode_count' => $inodes, 'unpacked_bytes' => $bytes];
     }
 
     /** @return array{size_bytes:int,sha256:string} */

@@ -79,6 +79,7 @@ final readonly class BuildVerifiedSourcesV1
         public string $hostDeployScriptSha256,
         public string $artifactDeployScriptSha256,
         public int $stageFileCount,
+        public int $stageInodeCount,
         public int $stageUnpackedBytes,
         public int $tempScratchBytes,
     ) {}
@@ -91,6 +92,8 @@ final readonly class CapacityVerifiedSourcesV1
         public int $blockSize,
         public int $blocks,
         public int $blocksAvailable,
+        public int $inodes,
+        public int $inodesAvailable,
         public BuildVerifiedSourcesV1 $build,
         public string $attestationBytes,
         public string $attestationSha256,

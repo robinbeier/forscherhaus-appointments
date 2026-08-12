@@ -138,7 +138,12 @@ Normal deploy execution exposes a stable result seam for the host-side caller:
 
 For a machine-readable result candidate, the root caller passes
 `--result-file` with an exact absolute path beneath an existing canonical
-root-owned mode-`0700` directory. The leaf must not exist; stale regular files,
+root-owned mode-`0700` directory and must also pass
+`--timing-run-id FRESH_UUIDV4`. The Host Runner generates this timing UUID
+internally, binds it into the launch record and argv hash, and never accepts it
+from the coordinator request. A direct root invocation must generate a fresh
+UUIDv4 and ensure that `/var/lib/fh-deploy-timing/<uuid>.jsonl` is absent. The
+result leaf must not exist; stale regular files,
 symlinks, hardlinks, unsafe ancestors, and noncanonical paths are hard stops and
 are never normalized or overwritten. The terminal `deploy_result.v1` receipt
 contains only the closed keys `schema`, `outcome`, and `exit_code`, uses the six
