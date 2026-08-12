@@ -42,7 +42,7 @@ safely complete the pair.
 The isolated restore verifier produces a global
 `deployment_dump_attestation.v1` from one stable dump observation and one
 successful MariaDB 10.11 restore observation, including the allocated datadir
-bytes measured after that restore. The attestation has no deployment
+bytes and inode count measured after that restore. The attestation has no deployment
 Run-ID. The runner pins its exact SHA and creates a separate
 `deployment_run_dump_observation.v1` binding it to the deployment Run-ID and
 intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
@@ -58,10 +58,11 @@ temporary scratch + the uncompressed stream bound + the independently observed
 restored datadir footprint; rollback bytes are zero in v1. Headroom is
 `max(512 MiB, ceil(base/10))`. Available space must cover projected required
 bytes and both observed and projected used percentages must be below 85. Free
-inodes must cover the authenticated staged inode count plus a fixed 64-inode
-allowance for the runner's bounded archive, pin, state, receipt, timing, and
-temporary leaves. The closed capacity evidence retains all four inode inputs
-(`available_inodes`, `stage_inode_count`, `inode_headroom`, and
+inodes must cover the authenticated staged inode count, the independently
+observed restored-datadir inode count, and a fixed 64-inode allowance for the
+runner's bounded archive, pin, state, receipt, timing, and temporary leaves.
+The closed capacity evidence retains all five inode inputs (`available_inodes`,
+`stage_inode_count`, `restore_inode_count`, `inode_headroom`, and
 `projected_required_inodes`), and the terminal contract independently derives
 the inode decision together with the byte and percentage checks.
 

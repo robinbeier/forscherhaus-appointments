@@ -201,6 +201,7 @@ final class DeploymentEvidenceAuthorityV1
                 'gzip_verified',
                 'restore_verified',
                 'restored_datadir_allocated_bytes',
+                'restored_datadir_inode_count',
                 'restored_at_utc',
             ],
             'dump attestation verification',
@@ -215,6 +216,7 @@ final class DeploymentEvidenceAuthorityV1
             $record['verification']['restored_datadir_allocated_bytes'],
             'restored datadir allocated bytes',
         );
+        self::assertPositiveInt($record['verification']['restored_datadir_inode_count'], 'restored datadir inode count');
         self::assertUtc($record['verification']['restored_at_utc'], 'dump attestation restored_at');
         self::assertUtc($record['attested_at_utc'], 'dump attestation attested_at');
         self::assertUtc($observedAtUtc, 'dump observed_at');
@@ -250,6 +252,7 @@ final class DeploymentEvidenceAuthorityV1
                 'gzip_exit_code',
                 'restore_exit_code',
                 'restored_datadir_allocated_bytes',
+                'restored_datadir_inode_count',
                 'restored_at_utc',
             ],
             'restore observation',
@@ -272,6 +275,7 @@ final class DeploymentEvidenceAuthorityV1
             $restore['restored_datadir_allocated_bytes'],
             'restore observation datadir allocated bytes',
         );
+        self::assertPositiveInt($restore['restored_datadir_inode_count'], 'restore observation datadir inode count');
         self::assertUtc($restore['restored_at_utc'], 'restore observation restored_at');
         self::assertUtc($attestedAtUtc, 'dump attested_at');
         $record = [
@@ -283,6 +287,7 @@ final class DeploymentEvidenceAuthorityV1
                 'gzip_verified' => true,
                 'restore_verified' => true,
                 'restored_datadir_allocated_bytes' => $restore['restored_datadir_allocated_bytes'],
+                'restored_datadir_inode_count' => $restore['restored_datadir_inode_count'],
                 'restored_at_utc' => $restore['restored_at_utc'],
             ],
             'attested_at_utc' => $attestedAtUtc,
@@ -326,6 +331,7 @@ final class DeploymentEvidenceAuthorityV1
             'dump_size_bytes' => $attestation['dump']['size_bytes'],
             'uncompressed_size_bytes' => $attestation['dump']['uncompressed_size_bytes'],
             'restored_datadir_allocated_bytes' => $attestation['verification']['restored_datadir_allocated_bytes'],
+            'restored_datadir_inode_count' => $attestation['verification']['restored_datadir_inode_count'],
             'observed_at_utc' => $observedAtUtc,
         ];
     }
@@ -341,6 +347,7 @@ final class DeploymentEvidenceAuthorityV1
         int $inodes,
         int $inodesAvailable,
         ?int $stageInodeCount,
+        ?int $restoreInodeCount,
         ?int $artifactBytes,
         ?int $dumpBytes,
         ?int $stageBytes,
@@ -360,13 +367,13 @@ final class DeploymentEvidenceAuthorityV1
         ) {
             throw new RuntimeException('capacity statvfs snapshot is invalid');
         }
-        foreach ([$stageInodeCount, $artifactBytes, $dumpBytes, $stageBytes, $tempBytes, $rollbackBytes] as $bound) {
+        foreach ([$stageInodeCount, $restoreInodeCount, $artifactBytes, $dumpBytes, $stageBytes, $tempBytes, $rollbackBytes] as $bound) {
             if (!is_int($bound) || $bound < 0) {
                 throw new RuntimeException('capacity component bound is unavailable');
             }
         }
-        if ($stageInodeCount === 0) {
-            throw new RuntimeException('capacity stage inode bound is unavailable');
+        if ($stageInodeCount === 0 || $restoreInodeCount === 0) {
+            throw new RuntimeException('capacity inode bounds are unavailable');
         }
         $deviceKeys = array_keys($componentDevices);
         sort($deviceKeys);
@@ -390,7 +397,10 @@ final class DeploymentEvidenceAuthorityV1
         $tenPercent = self::ceilDivide($base, 10);
         $headroom = max(536_870_912, $tenPercent);
         $required = self::checkedAdd($base, $headroom);
-        $requiredInodes = self::checkedAdd($stageInodeCount, self::CAPACITY_INODE_HEADROOM);
+        $requiredInodes = self::checkedAdd(
+            self::checkedAdd($stageInodeCount, $restoreInodeCount),
+            self::CAPACITY_INODE_HEADROOM,
+        );
         $used = $total - $available;
         $projectedUsed = self::checkedAdd($used, $required);
         $observedPercent = self::ceilDivide(self::checkedMultiply($used, 100), $total);
@@ -408,6 +418,7 @@ final class DeploymentEvidenceAuthorityV1
             'projected_required_bytes' => $required,
             'available_inodes' => $inodesAvailable,
             'stage_inode_count' => $stageInodeCount,
+            'restore_inode_count' => $restoreInodeCount,
             'inode_headroom' => self::CAPACITY_INODE_HEADROOM,
             'projected_required_inodes' => $requiredInodes,
             'observed_percent' => $observedPercent,
@@ -469,6 +480,7 @@ final class DeploymentEvidenceAuthorityV1
             $inodes,
             $inodesAvailable,
             $verifiedProvenance['capacity_bounds']['stage_inode_count'],
+            $verifiedDumpObservation['restored_datadir_inode_count'],
             $verifiedProvenance['archive']['size_bytes'],
             $verifiedDumpObservation['dump_size_bytes'],
             $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
@@ -753,6 +765,7 @@ final class DeploymentEvidenceAuthorityV1
             'projected_required_bytes' => $observation['projected_required_bytes'],
             'available_inodes' => $observation['available_inodes'],
             'stage_inode_count' => $observation['stage_inode_count'],
+            'restore_inode_count' => $observation['restore_inode_count'],
             'inode_headroom' => $observation['inode_headroom'],
             'projected_required_inodes' => $observation['projected_required_inodes'],
             'observed_percent' => $observation['observed_percent'],
@@ -1178,6 +1191,7 @@ final class DeploymentEvidenceAuthorityV1
                 'projected_required_bytes',
                 'available_inodes',
                 'stage_inode_count',
+                'restore_inode_count',
                 'inode_headroom',
                 'projected_required_inodes',
                 'observed_percent',
@@ -1201,6 +1215,7 @@ final class DeploymentEvidenceAuthorityV1
         ?int $projectedRequiredBytes,
         ?int $availableInodes,
         ?int $stageInodeCount,
+        ?int $restoreInodeCount,
         ?int $inodeHeadroom,
         ?int $projectedRequiredInodes,
         ?int $observedPercent,
@@ -1211,6 +1226,7 @@ final class DeploymentEvidenceAuthorityV1
             $projectedRequiredBytes !== null &&
             $availableInodes !== null &&
             $stageInodeCount !== null &&
+            $restoreInodeCount !== null &&
             $inodeHeadroom !== null &&
             $projectedRequiredInodes !== null &&
             $observedPercent !== null &&
@@ -1223,6 +1239,7 @@ final class DeploymentEvidenceAuthorityV1
                 'projected_required_bytes' => $projectedRequiredBytes,
                 'available_inodes' => $availableInodes,
                 'stage_inode_count' => $stageInodeCount,
+                'restore_inode_count' => $restoreInodeCount,
                 'inode_headroom' => $inodeHeadroom,
                 'projected_required_inodes' => $projectedRequiredInodes,
                 'observed_percent' => $observedPercent,
@@ -1434,6 +1451,7 @@ final class DeploymentEvidenceAuthorityV1
                     $observation->projectedRequiredBytes !== null ||
                     $observation->availableInodes !== null ||
                     $observation->stageInodeCount !== null ||
+                    $observation->restoreInodeCount !== null ||
                     $observation->inodeHeadroom !== null ||
                     $observation->projectedRequiredInodes !== null ||
                     $observation->observedPercent !== null ||
@@ -1490,6 +1508,7 @@ final class DeploymentEvidenceAuthorityV1
                     $observation->projectedRequiredBytes,
                     $observation->availableInodes,
                     $observation->stageInodeCount,
+                    $observation->restoreInodeCount,
                     $observation->inodeHeadroom,
                     $observation->projectedRequiredInodes,
                     $observation->observedPercent,
@@ -1709,6 +1728,7 @@ final class DeploymentEvidenceAuthorityV1
             'projected_required_bytes',
             'available_inodes',
             'stage_inode_count',
+            'restore_inode_count',
             'inode_headroom',
             'projected_required_inodes',
             'observed_percent',

@@ -2138,6 +2138,7 @@ final class DeploymentContractV1Test extends TestCase
                 'projected_required_bytes',
                 'available_inodes',
                 'stage_inode_count',
+                'restore_inode_count',
                 'inode_headroom',
                 'projected_required_inodes',
                 'observed_percent',
@@ -2156,7 +2157,8 @@ final class DeploymentContractV1Test extends TestCase
                 'available_bytes' => 8_000_000_000,
                 'projected_required_bytes' => 1_000_000_000,
                 'available_inodes' => 8_000_000,
-                'stage_inode_count' => 999_936,
+                'stage_inode_count' => 999_904,
+                'restore_inode_count' => 32,
                 'inode_headroom' => 64,
                 'projected_required_inodes' => 1_000_000,
                 'observed_percent' => 81,
@@ -2439,7 +2441,8 @@ final class DeploymentContractV1Test extends TestCase
             'insufficient inodes' => ['available_inodes' => 999_999],
             'wrong inode headroom' => ['inode_headroom' => 63],
             'wrong inode projection' => ['projected_required_inodes' => 999_999],
-            'empty staged archive' => ['stage_inode_count' => 0, 'projected_required_inodes' => 64],
+            'empty staged archive' => ['stage_inode_count' => 0, 'projected_required_inodes' => 96],
+            'empty restored database' => ['restore_inode_count' => 0, 'projected_required_inodes' => 999_968],
         ];
         foreach ($mutations as $name => $mutation) {
             $evidence = $this->validEvidence($this->successfulRunLines());
@@ -2809,7 +2812,8 @@ final class DeploymentContractV1Test extends TestCase
                 'available_bytes' => 8_000_000_000,
                 'projected_required_bytes' => 1_000_000_000,
                 'available_inodes' => 8_000_000,
-                'stage_inode_count' => 999_936,
+                'stage_inode_count' => 999_904,
+                'restore_inode_count' => 32,
                 'inode_headroom' => 64,
                 'projected_required_inodes' => 1_000_000,
                 'observed_percent' => 81,

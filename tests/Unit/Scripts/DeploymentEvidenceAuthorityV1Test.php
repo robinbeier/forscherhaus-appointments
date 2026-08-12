@@ -121,6 +121,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
 
         self::assertSame(self::SHA, $decoded['dump_sha256']);
         self::assertSame(8_000_000, $decoded['restored_datadir_allocated_bytes']);
+        self::assertSame(256, $decoded['restored_datadir_inode_count']);
     }
 
     public function testDumpAttestationIsBuiltOnlyFromExactInternalRestoreObservation(): void
@@ -140,6 +141,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 'gzip_exit_code' => 0,
                 'restore_exit_code' => 0,
                 'restored_datadir_allocated_bytes' => 8_000_000,
+                'restored_datadir_inode_count' => 256,
                 'restored_at_utc' => '2026-08-12T12:20:00Z',
             ],
             '2026-08-12T12:30:00Z',
@@ -165,6 +167,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 'gzip_exit_code' => 0,
                 'restore_exit_code' => 0,
                 'restored_datadir_allocated_bytes' => 8_000_000,
+                'restored_datadir_inode_count' => 256,
                 'restored_at_utc' => '2026-08-12T12:20:00Z',
             ],
             '2026-08-12T12:30:00Z',
@@ -225,6 +228,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             inodes: 10_000_000,
             inodesAvailable: 9_000_000,
             stageInodeCount: 2000,
+            restoreInodeCount: 256,
             artifactBytes: 100_000_000,
             dumpBytes: 200_000_000,
             stageBytes: 40_000_000,
@@ -238,7 +242,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         self::assertSame(536_870_912, $result['headroom_bytes']);
         self::assertSame(886_870_912, $result['projected_required_bytes']);
         self::assertSame(9_000_000, $result['available_inodes']);
-        self::assertSame(2064, $result['projected_required_inodes']);
+        self::assertSame(2320, $result['projected_required_inodes']);
         self::assertSame(60, $result['observed_percent']);
         self::assertSame(82, $result['projected_percent']);
         self::assertTrue($result['passed']);
@@ -248,8 +252,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     {
         foreach (
             [
-                [4096, 1_000_000, 400_000, 10_000, 9_000, 100, null, 1, 1, 1, 0, $this->capacityDevices(1)],
-                [PHP_INT_MAX, 2, 1, 10_000, 9_000, 100, 1, 1, 1, 1, 0, $this->capacityDevices(1)],
+                [4096, 1_000_000, 400_000, 10_000, 9_000, 100, 1, null, 1, 1, 1, 0, $this->capacityDevices(1)],
+                [PHP_INT_MAX, 2, 1, 10_000, 9_000, 100, 1, 1, 1, 1, 1, 0, $this->capacityDevices(1)],
             ]
             as $arguments
         ) {
@@ -268,6 +272,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             10_000,
             9_000,
             100,
+            1,
             113_129_088,
             0,
             0,
@@ -292,6 +297,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             1,
             1,
             1,
+            1,
             0,
             $devices,
         );
@@ -307,6 +313,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             inodes: 10_000,
             inodesAvailable: 63,
             stageInodeCount: 1,
+            restoreInodeCount: 1,
             artifactBytes: 1,
             dumpBytes: 1,
             stageBytes: 1,
@@ -315,7 +322,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             componentDevices: $this->capacityDevices(1),
         );
 
-        self::assertSame(65, $result['projected_required_inodes']);
+        self::assertSame(66, $result['projected_required_inodes']);
         self::assertFalse($result['passed']);
 
         $this->expectException(RuntimeException::class);
@@ -326,6 +333,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             900_000,
             10_000,
             10_001,
+            1,
             1,
             1,
             1,
@@ -545,8 +553,9 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'projected_required_bytes' => $invalid ? null : 2,
             'available_inodes' => 1,
             'stage_inode_count' => $invalid ? null : 2,
+            'restore_inode_count' => $invalid ? null : 3,
             'inode_headroom' => $invalid ? null : 64,
-            'projected_required_inodes' => $invalid ? null : 66,
+            'projected_required_inodes' => $invalid ? null : 69,
             'observed_percent' => 84,
             'projected_percent' => $invalid ? null : 85,
             'max_used_percent' => 85,
@@ -626,6 +635,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     $capacityFailure['projected_required_bytes'],
                     $capacityFailure['available_inodes'],
                     $capacityFailure['stage_inode_count'],
+                    $capacityFailure['restore_inode_count'],
                     $capacityFailure['inode_headroom'],
                     $capacityFailure['projected_required_inodes'],
                     $capacityFailure['observed_percent'],
@@ -647,6 +657,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         '2026-08-12T12:30:00Z',
                         $this->capacityDevices(1),
                     ),
+                    null,
                     null,
                     null,
                     null,
@@ -779,6 +790,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 null,
                 null,
                 null,
+                null,
             ),
         );
 
@@ -795,8 +807,9 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         self::assertSame('failed', $capacity['status']);
         self::assertSame(1, $capacity['available_inodes']);
         self::assertSame(2000, $capacity['stage_inode_count']);
+        self::assertSame(256, $capacity['restore_inode_count']);
         self::assertSame(64, $capacity['inode_headroom']);
-        self::assertSame(2064, $capacity['projected_required_inodes']);
+        self::assertSame(2320, $capacity['projected_required_inodes']);
         self::assertFalse($capacity['passed']);
         $bundle = $this->failedBeforeWriteBundle($assembly);
         self::assertSame(
@@ -998,6 +1011,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         null,
                         null,
                         null,
+                        null,
                     ),
                 ),
                 ['expected_commit', 'traffic_gate', 'dump', 'capacity'],
@@ -1107,6 +1121,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     '2026-08-12T12:30:00Z',
                     $this->capacityDevices(1),
                 ),
+                null,
                 null,
                 null,
                 null,
@@ -1432,6 +1447,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 'gzip_verified' => true,
                 'restore_verified' => true,
                 'restored_datadir_allocated_bytes' => 8_000_000,
+                'restored_datadir_inode_count' => 256,
                 'restored_at_utc' => '2026-08-12T12:20:00Z',
             ],
             'attested_at_utc' => '2026-08-12T12:30:00Z',
@@ -1628,6 +1644,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         '2026-08-12T12:30:00Z',
                         $this->capacityDevices(1),
                     ),
+                    null,
                     null,
                     null,
                     null,

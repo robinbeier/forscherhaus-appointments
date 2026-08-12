@@ -53,6 +53,7 @@ final readonly class CapacityObservationV1
         public ?int $projectedRequiredBytes,
         public ?int $availableInodes,
         public ?int $stageInodeCount,
+        public ?int $restoreInodeCount,
         public ?int $inodeHeadroom,
         public ?int $projectedRequiredInodes,
         public ?int $observedPercent,

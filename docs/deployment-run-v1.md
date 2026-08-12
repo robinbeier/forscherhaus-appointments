@@ -191,7 +191,8 @@ Its sections are:
 - traffic-gate reference and normalized core;
 - dump age/SHA plus explicit checksum-, gzip-, and restore-verification evidence;
 - capacity available/projected bytes and inodes, the authenticated staged inode
-  count, fixed 64-inode allowance, observed/projected used percentages, the fixed
+  count, independently observed restored-datadir inode count, fixed 64-inode
+  allowance, observed/projected used percentages, the fixed
   `85` percent ceiling, and a derived decision;
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
 - exactly-once deploy exit and any rollback performed inside that child;

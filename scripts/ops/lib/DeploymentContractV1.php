@@ -1182,6 +1182,7 @@ final class DeploymentContractV1
                 'projected_required_bytes',
                 'available_inodes',
                 'stage_inode_count',
+                'restore_inode_count',
                 'inode_headroom',
                 'projected_required_inodes',
                 'observed_percent',
@@ -1204,6 +1205,7 @@ final class DeploymentContractV1
                     'projected_required_bytes',
                     'available_inodes',
                     'stage_inode_count',
+                    'restore_inode_count',
                     'inode_headroom',
                     'projected_required_inodes',
                     'observed_percent',
@@ -1239,6 +1241,7 @@ final class DeploymentContractV1
                     'projected_required_bytes',
                     'available_inodes',
                     'stage_inode_count',
+                    'restore_inode_count',
                     'inode_headroom',
                     'projected_required_inodes',
                     'observed_percent',
@@ -1259,6 +1262,7 @@ final class DeploymentContractV1
                 'projected_required_bytes',
                 'available_inodes',
                 'stage_inode_count',
+                'restore_inode_count',
                 'inode_headroom',
                 'projected_required_inodes',
                 'observed_percent',
@@ -1267,16 +1271,19 @@ final class DeploymentContractV1
         ) {
             self::assertNonNegativeInteger($section[$field], 'capacity.' . $field);
         }
-        if ($section['stage_inode_count'] === 0) {
-            throw new RuntimeException('capacity.stage_inode_count must be positive');
+        if ($section['stage_inode_count'] === 0 || $section['restore_inode_count'] === 0) {
+            throw new RuntimeException('capacity inode counts must be positive');
         }
         self::assertSame($section['inode_headroom'], 64, 'capacity.inode_headroom');
-        if ($section['stage_inode_count'] > PHP_INT_MAX - $section['inode_headroom']) {
+        if (
+            $section['stage_inode_count'] > PHP_INT_MAX - $section['restore_inode_count'] ||
+            $section['stage_inode_count'] + $section['restore_inode_count'] > PHP_INT_MAX - $section['inode_headroom']
+        ) {
             throw new RuntimeException('capacity inode projection overflows');
         }
         self::assertSame(
             $section['projected_required_inodes'],
-            $section['stage_inode_count'] + $section['inode_headroom'],
+            $section['stage_inode_count'] + $section['restore_inode_count'] + $section['inode_headroom'],
             'capacity.projected_required_inodes',
         );
         if ($section['observed_percent'] > 100 || $section['projected_percent'] > 100) {
