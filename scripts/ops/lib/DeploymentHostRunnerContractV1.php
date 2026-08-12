@@ -520,7 +520,7 @@ final class DeploymentHostRunnerContractV1
             'LC_ALL=' . self::FIXED_ENVIRONMENT['LC_ALL'],
             'PATH=' . self::FIXED_ENVIRONMENT['PATH'],
             '/bin/bash',
-            '/root/deploy_ea.sh',
+            self::STATE_ROOT . '/runs/' . $input['run_id'] . '/' . $input['action'] . '-script.sh',
         ];
         if ($input['action'] === 'rollback') {
             if ($timingRunId !== null) {

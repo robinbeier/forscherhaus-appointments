@@ -78,6 +78,12 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
         self::assertSame('/bin/systemctl', $adapter->calls[0][5]);
         self::assertSame('/usr/bin/systemd-run', $adapter->calls[1][5]);
         $prefix = 'runs/' . $request['run_id'] . '/';
+        self::assertSame($script, $storage->files[$prefix . 'deploy-script.sh']);
+        self::assertContains(
+            DeploymentHostRunnerContractV1::STATE_ROOT . '/runs/' . $request['run_id'] . '/deploy-script.sh',
+            $adapter->calls[1],
+        );
+        self::assertNotContains('/root/deploy_ea.sh', $adapter->calls[1]);
         $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
         $claim = DeploymentHostRunnerContractV1::decodeActiveRun($storage->files['active-run.json']);
         self::assertSame('deploy_running', $state['state']);
@@ -243,6 +249,12 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
         self::assertSame('/bin/systemctl', $rollbackAdapter->calls[0][5]);
         self::assertSame('/usr/bin/systemd-run', $rollbackAdapter->calls[1][5]);
         self::assertSame('/bin/systemctl', $rollbackAdapter->calls[2][5]);
+        self::assertSame($script, $storage->files[$prefix . 'rollback-script.sh']);
+        self::assertContains(
+            DeploymentHostRunnerContractV1::STATE_ROOT . '/runs/' . $request['run_id'] . '/rollback-script.sh',
+            $rollbackAdapter->calls[1],
+        );
+        self::assertNotContains('/root/deploy_ea.sh', $rollbackAdapter->calls[1]);
         self::assertSame(
             'rollback_running',
             DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json'])['state'],

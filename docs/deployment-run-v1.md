@@ -418,8 +418,12 @@ recovery bundle must bind both the closed recovery request and the original
 deploy request, so a recovery request alone cannot authorize a different
 release. The runner constructs one fixed argv vector through `/usr/bin/env -i`,
 the fixed `LANG=C`, `LC_ALL=C`, and `PATH`, `/bin/bash`, and
-`/root/deploy_ea.sh`. Deploy result, app, previous, failed, and runtime-user
-paths are derived from the trusted state root, Run-ID, and immutable release;
+the immutable run-local `deploy-script.sh` or `rollback-script.sh` snapshot whose
+SHA-256 is bound by the launch record. The exact protected script bytes are
+pinned without replacement and file-/directory-fsynced before the reservation
+journal is published, so a later replacement of `/root/deploy_ea.sh` cannot
+change the admitted child. Deploy result, app, previous, failed, and
+runtime-user paths are derived from the trusted state root, Run-ID, and immutable release;
 they are never caller authority. The request and execution input are each read
 once, validated, copied without replacement into the protected run directory,
 file-fsynced, parent-directory-fsynced, and SHA-bound before reservation. This
@@ -427,7 +431,7 @@ PR freezes that storage contract but does not implement the storage engine. A
 crash after the no-replace input pin but before reservation resumes only when
 the caller bytes are exactly identical to the pinned canonical bytes; changed
 bytes are a conflict and the pinned file is never replaced.
-The child argv contains only the five run-local snapshot paths; it never
+The child argv contains the run-local script and five protected-input snapshot paths; it never
 contains the original protected source paths or their digests.
 
 `deployment_host_post_gate_report.v1` is the same bounded canonical form and

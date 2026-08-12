@@ -501,6 +501,28 @@ final class DeploymentHostRunnerV1Test extends TestCase
     public function testAdmissionBundlePinsExactActionSpecificAuthoritiesBeforeReservation(): void
     {
         $fixture = $this->fixture();
+        $invalidStorage = new RecordingHostRunnerStorage();
+        $invalidPersistence = new \Ops\HostRunnerReservationPersistence(
+            $invalidStorage,
+            null,
+            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
+        );
+        try {
+            $invalidPersistence->pinAdmissionBundle(
+                self::fixtureRunId(),
+                'deploy',
+                $fixture['request'],
+                $fixture['input'],
+                $fixture['launch'],
+                $fixture['binding'],
+                $fixture['script'] . '# changed',
+            );
+            self::fail('Expected deploy script authority mismatch.');
+        } catch (RuntimeException $error) {
+            self::assertSame('admission deploy script does not match the launch authority', $error->getMessage());
+            self::assertSame([], $invalidStorage->operations);
+        }
+
         $storage = new RecordingHostRunnerStorage();
         $persistence = new \Ops\HostRunnerReservationPersistence(
             $storage,
@@ -514,6 +536,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $fixture['input'],
             $fixture['launch'],
             $fixture['binding'],
+            $fixture['script'],
         );
         self::assertSame(
             [
@@ -522,6 +545,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'predeploy-credentials',
                 'canary-credentials',
                 'incident-webhook',
+                'runs/' . self::fixtureRunId() . '/deploy-script.sh',
                 'runs/' . self::fixtureRunId() . '/request.json',
                 'runs/' . self::fixtureRunId() . '/execution-input.json',
                 'runs/' . self::fixtureRunId() . '/deploy-systemd-launch.json',
@@ -529,6 +553,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
             ],
             array_column($storage->operations, 1),
         );
+        self::assertSame($fixture['script'], $storage->files['runs/' . self::fixtureRunId() . '/deploy-script.sh']);
         $before = $storage->files;
         $changed = $fixture['launch'];
         $changed['launch_nonce'] = str_repeat('3', 64);
@@ -540,6 +565,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 $fixture['input'],
                 $changed,
                 $fixture['binding'],
+                $fixture['script'],
             );
             self::fail('Expected launch replacement conflict.');
         } catch (RuntimeException) {
@@ -648,6 +674,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'predeploy-credentials',
                 'canary-credentials',
                 'incident-webhook',
+                'deploy-script.sh',
                 'request.json',
                 'execution-input.json',
                 'deploy-systemd-launch.json',
@@ -657,6 +684,10 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'state.json',
             ],
             array_map(static fn(array $operation): string => basename($operation[1]), $storage->operations),
+        );
+        self::assertContains(
+            DeploymentHostRunnerContractV1::STATE_ROOT . '/runs/' . self::fixtureRunId() . '/deploy-script.sh',
+            $adapter->calls[1]['argv'],
         );
     }
 
@@ -1010,6 +1041,35 @@ final class DeploymentHostRunnerV1Test extends TestCase
         }
     }
 
+    public function testReservationRecoveryRequiresTheExactPinnedDeployScriptBeforeRepair(): void
+    {
+        $durable = $this->reservationPersistenceFixture();
+        foreach (['missing', 'changed'] as $case) {
+            $storage = new RecordingHostRunnerStorage();
+            $storage->files['runs/' . self::fixtureRunId() . '/events.jsonl'] = $durable['events_bytes'];
+            $this->seedDeployAdmissionAuthority($storage);
+            $leaf = 'runs/' . self::fixtureRunId() . '/deploy-script.sh';
+            if ($case === 'missing') {
+                unset($storage->files[$leaf]);
+            } else {
+                $storage->files[$leaf] .= '# changed';
+            }
+
+            try {
+                (new \Ops\HostRunnerReservationPersistence($storage))->resumeAfterReservation(
+                    self::fixtureRunId(),
+                    $durable['events_bytes'],
+                    $durable['claim_bytes'],
+                    $durable['state_bytes'],
+                );
+                self::fail('Expected pinned deploy script rejection.');
+            } catch (RuntimeException) {
+                self::assertSame([], $storage->operations, $case);
+                self::assertArrayNotHasKey('active-run.json', $storage->files, $case);
+            }
+        }
+    }
+
     public function testReservedCandidateScanIgnoresHistoryAndDerivesClaimOnlyFromJournal(): void
     {
         $durable = $this->reservationPersistenceFixture();
@@ -1342,6 +1402,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage->files[
             $prefix . 'recovery-execution-input.json'
         ] = DeploymentHostRunnerContractV1::encodeExecutionInput($input);
+        $storage->files[$prefix . 'rollback-script.sh'] = $bundle['script'];
         $storage->files[$prefix . 'rollback-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile($launch);
         $storage->files[$prefix . 'rollback-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
         $storage->files[$prefix . 'deploy-post-gate-report.json'] = $reportBytes;
@@ -2684,6 +2745,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage->files[$prefix . 'execution-input.json'] = DeploymentHostRunnerContractV1::encodeExecutionInput(
             $bundle['input'],
         );
+        $storage->files[$prefix . 'deploy-script.sh'] = $bundle['script'];
         $storage->files[$prefix . 'deploy-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile(
             $bundle['launch'],
         );

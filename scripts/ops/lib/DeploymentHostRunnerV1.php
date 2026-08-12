@@ -64,30 +64,61 @@ interface HostRunnerBootReader
 final class HelperBackedHostRunnerBootReader implements HostRunnerBootReader
 {
     private const COMMAND = [
-        '/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-        '/usr/bin/python3', '-I', '-B', __DIR__ . '/../libexec/deployment_host_runner_fs_v1.py', 'read-boot-id',
+        '/usr/bin/env',
+        '-i',
+        'LANG=C',
+        'LC_ALL=C',
+        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        '/usr/bin/python3',
+        '-I',
+        '-B',
+        __DIR__ . '/../libexec/deployment_host_runner_fs_v1.py',
+        'read-boot-id',
     ];
 
     public function read(): string
     {
         $pipes = [];
-        $process = proc_open(self::COMMAND, [['file', '/dev/null', 'r'], ['pipe', 'w'], ['file', '/dev/null', 'w'], 198 => ['file', '/dev/null', 'r'], 199 => ['file', '/dev/null', 'r']], $pipes, null, []);
-        if (!is_resource($process)) { throw new RuntimeException('host-runner boot reader unavailable'); }
+        $process = proc_open(
+            self::COMMAND,
+            [
+                ['file', '/dev/null', 'r'],
+                ['pipe', 'w'],
+                ['file', '/dev/null', 'w'],
+                198 => ['file', '/dev/null', 'r'],
+                199 => ['file', '/dev/null', 'r'],
+            ],
+            $pipes,
+            null,
+            [],
+        );
+        if (!is_resource($process)) {
+            throw new RuntimeException('host-runner boot reader unavailable');
+        }
         stream_set_blocking($pipes[1], false);
         $bytes = '';
         $deadline = microtime(true) + 5.0;
         do {
             $bytes .= (string) stream_get_contents($pipes[1]);
-            if (strlen($bytes) > 37) { proc_terminate($process, 9); break; }
+            if (strlen($bytes) > 37) {
+                proc_terminate($process, 9);
+                break;
+            }
             $status = proc_get_status($process);
-            if (!$status['running']) { break; }
+            if (!$status['running']) {
+                break;
+            }
             usleep(10_000);
         } while (microtime(true) < $deadline);
-        if ($status['running']) { proc_terminate($process, 9); }
+        if ($status['running']) {
+            proc_terminate($process, 9);
+        }
         $bytes .= (string) stream_get_contents($pipes[1]);
         fclose($pipes[1]);
         $exit = proc_close($process);
-        if ($exit === -1) { $exit = $status['exitcode']; }
+        if ($exit === -1) {
+            $exit = $status['exitcode'];
+        }
         if ($exit !== 0 || strlen($bytes) !== 37) {
             throw new RuntimeException('host-runner boot reader failed');
         }
@@ -109,8 +140,15 @@ final class HelperBackedHostRunnerStorage implements HostRunnerStorage
     private const HELPER = __DIR__ . '/../libexec/deployment_host_runner_fs_v1.py';
     private const ROOT = DeploymentHostRunnerContractV1::STATE_ROOT;
     private const COMMAND_PREFIX = [
-        '/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-        '/usr/bin/python3', '-I', '-B', self::HELPER,
+        '/usr/bin/env',
+        '-i',
+        'LANG=C',
+        'LC_ALL=C',
+        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        '/usr/bin/python3',
+        '-I',
+        '-B',
+        self::HELPER,
     ];
 
     public function read(string $relative, int $maxBytes): ?string
@@ -132,7 +170,9 @@ final class HelperBackedHostRunnerStorage implements HostRunnerStorage
             throw new RuntimeException('host-runner run ID is invalid');
         }
         $result = $this->runHelper([...self::COMMAND_PREFIX, 'prepare-run', self::ROOT, $runId], '', 0);
-        if ($result['exit_code'] !== 0 || $result['stdout'] !== '') { throw new RuntimeException('host-runner run preparation failed'); }
+        if ($result['exit_code'] !== 0 || $result['stdout'] !== '') {
+            throw new RuntimeException('host-runner run preparation failed');
+        }
     }
 
     public function pinReference(string $runId, string $field, string $sourcePath, string $sha256): void
@@ -149,7 +189,9 @@ final class HelperBackedHostRunnerStorage implements HostRunnerStorage
             preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D', $runId) !== 1 ||
             !in_array($field, $allowed, true) ||
             preg_match('/^[0-9a-f]{64}$/D', $sha256) !== 1 ||
-            $sourcePath === '' || strlen($sourcePath) > 4_096 || str_contains($sourcePath, "\0")
+            $sourcePath === '' ||
+            strlen($sourcePath) > 4_096 ||
+            str_contains($sourcePath, "\0")
         ) {
             throw new RuntimeException('host-runner protected reference is invalid');
         }
@@ -234,43 +276,76 @@ final class HelperBackedHostRunnerStorage implements HostRunnerStorage
         $cursor = '-';
         $deadline = microtime(true) + 300.0;
         do {
-            if (microtime(true) >= $deadline) { throw new RuntimeException('host-runner reserved scan deadline exceeded'); }
-            $result = $this->runHelper([...self::COMMAND_PREFIX, 'scan-run-ids', self::ROOT, $cursor], '', 16_384, 30.0);
-            if ($result['exit_code'] !== 0) { throw new RuntimeException('host-runner reserved scan failed'); }
+            if (microtime(true) >= $deadline) {
+                throw new RuntimeException('host-runner reserved scan deadline exceeded');
+            }
+            $result = $this->runHelper(
+                [...self::COMMAND_PREFIX, 'scan-run-ids', self::ROOT, $cursor],
+                '',
+                16_384,
+                30.0,
+            );
+            if ($result['exit_code'] !== 0) {
+                throw new RuntimeException('host-runner reserved scan failed');
+            }
             $page = json_decode($result['stdout'], true, 32, JSON_THROW_ON_ERROR);
-            if (!is_array($page) || array_keys($page) !== ['next_cursor', 'run_ids'] || !is_array($page['run_ids']) || !array_is_list($page['run_ids']) || count($page['run_ids']) > 128) {
+            if (
+                !is_array($page) ||
+                array_keys($page) !== ['next_cursor', 'run_ids'] ||
+                !is_array($page['run_ids']) ||
+                !array_is_list($page['run_ids']) ||
+                count($page['run_ids']) > 128
+            ) {
                 throw new RuntimeException('host-runner reserved scan response is invalid');
             }
             $prior = $cursor;
             foreach ($page['run_ids'] as $runId) {
-            if (!is_string($runId) || preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D', $runId) !== 1) {
-                throw new RuntimeException('host-runner reserved scan run ID is invalid');
-            }
-            if ($prior !== '-' && strcmp($runId, $prior) <= 0) { throw new RuntimeException('host-runner reserved scan order is invalid'); }
-            $prior = $runId;
-            $bundleResult = $this->runHelper(
-                [...self::COMMAND_PREFIX, 'scan-run-bundle', self::ROOT, $runId],
-                '',
-                1_500_000,
-                10.0,
-            );
-            if ($bundleResult['exit_code'] !== 0) { throw new RuntimeException('host-runner reserved bundle scan failed'); }
-            $candidate = json_decode($bundleResult['stdout'], true, 32, JSON_THROW_ON_ERROR);
-            if (!is_array($candidate) || array_keys($candidate) !== ['events_bytes', 'run_id', 'state_bytes']) {
-                throw new RuntimeException('host-runner reserved scan candidate is invalid');
-            }
-            if ($candidate['run_id'] !== $runId || ($candidate['events_bytes'] !== null && !is_string($candidate['events_bytes']))) {
-                throw new RuntimeException('host-runner reserved scan identity is invalid');
-            }
-            $events = $candidate['events_bytes'] === null ? null : base64_decode($candidate['events_bytes'], true);
-            $state = $candidate['state_bytes'] === null ? null : base64_decode($candidate['state_bytes'], true);
-            if (($candidate['events_bytes'] !== null && !is_string($events)) || ($candidate['state_bytes'] !== null && !is_string($state))) {
-                throw new RuntimeException('host-runner reserved scan bytes are invalid');
-            }
-            if ($events !== null) { yield ['run_id' => $runId, 'events_bytes' => $events, 'state_bytes' => $state]; }
+                if (
+                    !is_string($runId) ||
+                    preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D', $runId) !== 1
+                ) {
+                    throw new RuntimeException('host-runner reserved scan run ID is invalid');
+                }
+                if ($prior !== '-' && strcmp($runId, $prior) <= 0) {
+                    throw new RuntimeException('host-runner reserved scan order is invalid');
+                }
+                $prior = $runId;
+                $bundleResult = $this->runHelper(
+                    [...self::COMMAND_PREFIX, 'scan-run-bundle', self::ROOT, $runId],
+                    '',
+                    1_500_000,
+                    10.0,
+                );
+                if ($bundleResult['exit_code'] !== 0) {
+                    throw new RuntimeException('host-runner reserved bundle scan failed');
+                }
+                $candidate = json_decode($bundleResult['stdout'], true, 32, JSON_THROW_ON_ERROR);
+                if (!is_array($candidate) || array_keys($candidate) !== ['events_bytes', 'run_id', 'state_bytes']) {
+                    throw new RuntimeException('host-runner reserved scan candidate is invalid');
+                }
+                if (
+                    $candidate['run_id'] !== $runId ||
+                    ($candidate['events_bytes'] !== null && !is_string($candidate['events_bytes']))
+                ) {
+                    throw new RuntimeException('host-runner reserved scan identity is invalid');
+                }
+                $events = $candidate['events_bytes'] === null ? null : base64_decode($candidate['events_bytes'], true);
+                $state = $candidate['state_bytes'] === null ? null : base64_decode($candidate['state_bytes'], true);
+                if (
+                    ($candidate['events_bytes'] !== null && !is_string($events)) ||
+                    ($candidate['state_bytes'] !== null && !is_string($state))
+                ) {
+                    throw new RuntimeException('host-runner reserved scan bytes are invalid');
+                }
+                if ($events !== null) {
+                    yield ['run_id' => $runId, 'events_bytes' => $events, 'state_bytes' => $state];
+                }
             }
             $next = $page['next_cursor'];
-            if ($next !== null && (!is_string($next) || $page['run_ids'] === [] || $next !== $prior || $next === $cursor)) {
+            if (
+                $next !== null &&
+                (!is_string($next) || $page['run_ids'] === [] || $next !== $prior || $next === $cursor)
+            ) {
                 throw new RuntimeException('host-runner reserved scan cursor is invalid');
             }
             $cursor = $next ?? '-';
@@ -281,9 +356,14 @@ final class HelperBackedHostRunnerStorage implements HostRunnerStorage
     private function invoke(string $operation, string $relative, int $maxBytes, string $stdin): array
     {
         if (
-            !in_array($operation, ['read', 'read-optional', 'pin', 'cow', 'binding-refresh', 'claim-refresh', 'clear-exact'], true) ||
+            !in_array(
+                $operation,
+                ['read', 'read-optional', 'pin', 'cow', 'binding-refresh', 'claim-refresh', 'clear-exact'],
+                true,
+            ) ||
             preg_match('/^(?:active-run\.json|runs\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+)$/D', $relative) !== 1 ||
-            $maxBytes < 1 || $maxBytes > 1_048_576 ||
+            $maxBytes < 1 ||
+            $maxBytes > 1_048_576 ||
             strlen($stdin) > $maxBytes
         ) {
             throw new RuntimeException('host-runner storage operation is invalid');
@@ -375,12 +455,8 @@ final class HostRunnerReservationPersistence
         $this->clock = $clock ?? new SystemHostRunnerClock();
     }
 
-    public function persist(
-        string $runId,
-        string $eventsBytes,
-        string $claimBytes,
-        string $stateBytes,
-    ): void {
+    public function persist(string $runId, string $eventsBytes, string $claimBytes, string $stateBytes): void
+    {
         $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
         $prefix = 'runs/' . $runId . '/';
@@ -414,7 +490,13 @@ final class HostRunnerReservationPersistence
                 $existingClaim['sequence'] !== $priorState['sequence'] ||
                 !hash_equals($existingClaim['events_sha256'], $priorState['events_sha256']) ||
                 !hash_equals(
-                    hash('sha256', implode("\n", array_slice(explode("\n", rtrim($priorEventsBytes, "\n")), 0, $existingClaim['sequence'])) . "\n"),
+                    hash(
+                        'sha256',
+                        implode(
+                            "\n",
+                            array_slice(explode("\n", rtrim($priorEventsBytes, "\n")), 0, $existingClaim['sequence']),
+                        ) . "\n",
+                    ),
                     $existingClaim['events_sha256'],
                 )
             ) {
@@ -454,8 +536,7 @@ final class HostRunnerReservationPersistence
         array $state,
         array $priorState,
         bool $allowObservedBindingPrefix = false,
-    ): void
-    {
+    ): void {
         $action = $state['active_action'];
         if (!in_array($action, ['deploy', 'rollback'], true)) {
             throw new RuntimeException('reservation has no pinned action authority');
@@ -465,14 +546,22 @@ final class HostRunnerReservationPersistence
         $inputLeaf = $action === 'deploy' ? 'execution-input.json' : 'recovery-execution-input.json';
         $requestBytes = $this->storage->read($prefix . $requestLeaf, 16_384);
         $inputBytes = $this->storage->read($prefix . $inputLeaf, 16_384);
+        $scriptBytes = $this->storage->read($prefix . $action . '-script.sh', 1_048_576);
         $launchBytes = $this->storage->read($prefix . $action . '-systemd-launch.json', 16_384);
         $bindingBytes = $this->storage->read($prefix . $action . '-unit-binding.json', 16_384);
-        if ($requestBytes === null || $inputBytes === null || $launchBytes === null || $bindingBytes === null) {
+        if (
+            $requestBytes === null ||
+            $inputBytes === null ||
+            $scriptBytes === null ||
+            $launchBytes === null ||
+            $bindingBytes === null
+        ) {
             throw new RuntimeException('reservation requires the exact pinned admission authority');
         }
-        $request = $action === 'deploy'
-            ? DeploymentHostRunnerContractV1::decodeDeployRequest($requestBytes)
-            : DeploymentHostRunnerContractV1::decodeRecoveryRequest($requestBytes);
+        $request =
+            $action === 'deploy'
+                ? DeploymentHostRunnerContractV1::decodeDeployRequest($requestBytes)
+                : DeploymentHostRunnerContractV1::decodeRecoveryRequest($requestBytes);
         $input = DeploymentHostRunnerContractV1::decodeExecutionInput($inputBytes);
         $launch = DeploymentHostRunnerContractV1::decodeSystemdLaunch($launchBytes);
         $binding = DeploymentHostRunnerContractV1::decodeUnitBinding($bindingBytes);
@@ -484,6 +573,7 @@ final class HostRunnerReservationPersistence
             $binding['run_id'] !== $runId ||
             $launch['action'] !== $action ||
             $binding['action'] !== $action ||
+            !hash_equals($launch['deploy_script_sha256'], hash('sha256', $scriptBytes)) ||
             (!($binding['binding_state'] === 'reserved' && $binding['unit_invocation_id'] === null) &&
                 !$allowObservedBindingPrefix) ||
             !hash_equals($state['intent_sha256'], $request['intent_sha256']) ||
@@ -570,8 +660,19 @@ final class HostRunnerReservationPersistence
         array $input,
         array $launch,
         array $binding,
+        string $deployScriptBytes,
     ): void {
         $prefix = 'runs/' . $runId . '/';
+        if (
+            $deployScriptBytes === '' ||
+            strlen($deployScriptBytes) > 1_048_576 ||
+            str_contains($deployScriptBytes, "\0") ||
+            !isset($launch['deploy_script_sha256']) ||
+            !is_string($launch['deploy_script_sha256']) ||
+            !hash_equals($launch['deploy_script_sha256'], hash('sha256', $deployScriptBytes))
+        ) {
+            throw new RuntimeException('admission deploy script does not match the launch authority');
+        }
         if ($action === 'deploy') {
             foreach (DeploymentHostRunnerContractV1::deployReferencePins($input) as $field => $pin) {
                 $operationField = match ($field) {
@@ -587,9 +688,15 @@ final class HostRunnerReservationPersistence
                 $this->after('pinned_deploy_reference_' . str_replace('-', '_', $operationField));
             }
         }
+        $this->storage->pin($prefix . $action . '-script.sh', $deployScriptBytes, 1_048_576);
+        $this->after('pinned_' . $action . '_script');
         $items = [
-            ($action === 'deploy' ? 'request.json' : 'recovery-request.json') => DeploymentHostRunnerContractV1::encodeFile($request),
-            ($action === 'deploy' ? 'execution-input.json' : 'recovery-execution-input.json') => DeploymentHostRunnerContractV1::encodeExecutionInput($input),
+            $action === 'deploy'
+                ? 'request.json'
+                : 'recovery-request.json' => DeploymentHostRunnerContractV1::encodeFile($request),
+            $action === 'deploy'
+                ? 'execution-input.json'
+                : 'recovery-execution-input.json' => DeploymentHostRunnerContractV1::encodeExecutionInput($input),
             $action . '-systemd-launch.json' => DeploymentHostRunnerContractV1::encodeFile($launch),
             $action . '-unit-binding.json' => DeploymentHostRunnerContractV1::encodeFile($binding),
         ];
@@ -690,9 +797,10 @@ final class HostRunnerReservationPersistence
             if ($run['run_id'] !== $candidate['run_id']) {
                 throw new RuntimeException('reserved scan journal identity is invalid');
             }
-            $state = $candidate['state_bytes'] === null
-                ? null
-                : DeploymentHostRunnerContractV1::decodeState($candidate['state_bytes']);
+            $state =
+                $candidate['state_bytes'] === null
+                    ? null
+                    : DeploymentHostRunnerContractV1::decodeState($candidate['state_bytes']);
             if (!in_array($run['state'], ['deploy_running', 'post_gates_running', 'rollback_running'], true)) {
                 $this->validateHistoricalScanEntry($run, $eventsBytes, $state);
                 continue;
@@ -707,7 +815,9 @@ final class HostRunnerReservationPersistence
             }
         }
         $disposition = DeploymentHostRunnerContractV1::activeRunReconstructionDisposition($contractCandidates);
-        if ($disposition === 'no_reserved_run') { return $disposition; }
+        if ($disposition === 'no_reserved_run') {
+            return $disposition;
+        }
         if ($disposition !== 'reconstruct_claim_observe_only' || count($candidates) !== 1) {
             throw new RuntimeException('reserved scan is not uniquely reconstructable');
         }
@@ -715,7 +825,10 @@ final class HostRunnerReservationPersistence
         $eventsBytes = $candidate['events_bytes'];
         $lines = explode("\n", substr($eventsBytes, 0, -1));
         $run = DeploymentContractV1::validateRunLines($lines);
-        $state = $candidate['state_bytes'] === null ? null : DeploymentHostRunnerContractV1::decodeState($candidate['state_bytes']);
+        $state =
+            $candidate['state_bytes'] === null
+                ? null
+                : DeploymentHostRunnerContractV1::decodeState($candidate['state_bytes']);
         if ($run['run_id'] !== $candidate['run_id'] || ($state !== null && $state['run_id'] !== $candidate['run_id'])) {
             throw new RuntimeException('reserved scan identity is invalid');
         }
@@ -726,9 +839,12 @@ final class HostRunnerReservationPersistence
             'state' => $run['state'],
             'sequence' => $run['records'],
             'events_sha256' => hash('sha256', $eventsBytes),
-            'claimed_at_utc' => json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR)['recorded_at_utc'],
+            'claimed_at_utc' => json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR)[
+                'recorded_at_utc'
+            ],
         ];
-        $stateIsCurrent = $state !== null &&
+        $stateIsCurrent =
+            $state !== null &&
             DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) === 'current';
         if ($stateIsCurrent) {
             $run['state'] === 'post_gates_running'
@@ -737,7 +853,9 @@ final class HostRunnerReservationPersistence
             $reservationState = $state;
         } else {
             $reservationState = $this->deriveReservationState($run, $eventsBytes, $lines, $state);
-            if ($state !== null) { DeploymentHostRunnerContractV1::validateStateEvolution($state, $reservationState); }
+            if ($state !== null) {
+                DeploymentHostRunnerContractV1::validateStateEvolution($state, $reservationState);
+            }
         }
         $this->storage->pin('active-run.json', DeploymentHostRunnerContractV1::encodeFile($claim), 4_096);
         $this->after('reconstruction_claim_durable');
@@ -759,7 +877,9 @@ final class HostRunnerReservationPersistence
         $prefix = 'runs/' . $run['run_id'] . '/';
         $required = function (string $leaf, int $max) use ($prefix): string {
             $bytes = $this->storage->read($prefix . $leaf, $max);
-            if ($bytes === null) { throw new RuntimeException('reservation reconstruction authority is missing'); }
+            if ($bytes === null) {
+                throw new RuntimeException('reservation reconstruction authority is missing');
+            }
             return $bytes;
         };
         $requestLeaf = $action === 'deploy' ? 'request.json' : 'recovery-request.json';
@@ -768,9 +888,10 @@ final class HostRunnerReservationPersistence
         $inputBytes = $required($inputLeaf, 16_384);
         $launchBytes = $required($action . '-systemd-launch.json', 16_384);
         $bindingBytes = $required($action . '-unit-binding.json', 16_384);
-        $request = $action === 'deploy'
-            ? DeploymentHostRunnerContractV1::decodeDeployRequest($requestBytes)
-            : DeploymentHostRunnerContractV1::decodeRecoveryRequest($requestBytes);
+        $request =
+            $action === 'deploy'
+                ? DeploymentHostRunnerContractV1::decodeDeployRequest($requestBytes)
+                : DeploymentHostRunnerContractV1::decodeRecoveryRequest($requestBytes);
         $input = DeploymentHostRunnerContractV1::decodeExecutionInput($inputBytes);
         $launch = DeploymentHostRunnerContractV1::decodeSystemdLaunch($launchBytes);
         $binding = DeploymentHostRunnerContractV1::decodeUnitBinding($bindingBytes);
@@ -824,25 +945,45 @@ final class HostRunnerReservationPersistence
     {
         return [
             'schema' => DeploymentHostRunnerContractV1::STATE_SCHEMA,
-            'run_id' => $run['run_id'], 'intent_sha256' => $run['intent_sha256'],
-            'state' => $run['state'], 'sequence' => $run['records'], 'events_sha256' => str_repeat('0', 64),
+            'run_id' => $run['run_id'],
+            'intent_sha256' => $run['intent_sha256'],
+            'state' => $run['state'],
+            'sequence' => $run['records'],
+            'events_sha256' => str_repeat('0', 64),
             'active_action' => $run['state'] === 'rollback_running' ? 'rollback' : 'deploy',
             'deploy' => [
-                'request_sha256' => hash('sha256', $deployRequestBytes), 'execution_input_sha256' => null,
+                'request_sha256' => hash('sha256', $deployRequestBytes),
+                'execution_input_sha256' => null,
                 'invocation_count' => $run['state'] === 'rollback_running' ? 1 : 0,
-                'unit_name' => null, 'unit_launch_sha256' => null, 'unit_manager_boot_id' => null,
-                'unit_invocation_id' => null, 'unit_missing_observed_boot_id' => null,
-                'unit_state' => 'not_created', 'observed_exit_code' => null, 'receipt_sha256' => null,
+                'unit_name' => null,
+                'unit_launch_sha256' => null,
+                'unit_manager_boot_id' => null,
+                'unit_invocation_id' => null,
+                'unit_missing_observed_boot_id' => null,
+                'unit_state' => 'not_created',
+                'observed_exit_code' => null,
+                'receipt_sha256' => null,
             ],
             'post_gates' => [
-                'deploy_report_sha256' => null, 'deploy_submission_count' => 0, 'deploy_verdict' => 'not_submitted',
-                'rollback_report_sha256' => null, 'rollback_submission_count' => 0, 'rollback_verdict' => 'not_submitted',
+                'deploy_report_sha256' => null,
+                'deploy_submission_count' => 0,
+                'deploy_verdict' => 'not_submitted',
+                'rollback_report_sha256' => null,
+                'rollback_submission_count' => 0,
+                'rollback_verdict' => 'not_submitted',
             ],
             'rollback' => [
-                'request_sha256' => null, 'execution_input_sha256' => null, 'invocation_count' => 0,
-                'unit_name' => null, 'unit_launch_sha256' => null, 'unit_manager_boot_id' => null,
-                'unit_invocation_id' => null, 'unit_missing_observed_boot_id' => null,
-                'unit_state' => 'not_created', 'observed_exit_code' => null, 'verdict' => 'not_invoked',
+                'request_sha256' => null,
+                'execution_input_sha256' => null,
+                'invocation_count' => 0,
+                'unit_name' => null,
+                'unit_launch_sha256' => null,
+                'unit_manager_boot_id' => null,
+                'unit_invocation_id' => null,
+                'unit_missing_observed_boot_id' => null,
+                'unit_state' => 'not_created',
+                'observed_exit_code' => null,
+                'verdict' => 'not_invoked',
             ],
             'evidence_sha256' => null,
             'terminal' => ['state' => null, 'exit_code' => null, 'reason' => null],
@@ -877,16 +1018,22 @@ final class HostRunnerReservationPersistence
         }
         $prefix = 'runs/' . $run['run_id'] . '/';
         $evidence = $this->storage->read($prefix . 'evidence.json', 65_536);
-        if ($evidence === null) { throw new RuntimeException('terminal history is missing evidence'); }
-        $deployReport = $state['post_gates']['deploy_submission_count'] === 0
-            ? null
-            : $this->storage->read($prefix . 'deploy-post-gate-report.json', 16_384);
-        $rollbackReport = $state['post_gates']['rollback_submission_count'] === 0
-            ? null
-            : $this->storage->read($prefix . 'rollback-post-gate-report.json', 16_384);
+        if ($evidence === null) {
+            throw new RuntimeException('terminal history is missing evidence');
+        }
+        $deployReport =
+            $state['post_gates']['deploy_submission_count'] === 0
+                ? null
+                : $this->storage->read($prefix . 'deploy-post-gate-report.json', 16_384);
+        $rollbackReport =
+            $state['post_gates']['rollback_submission_count'] === 0
+                ? null
+                : $this->storage->read($prefix . 'rollback-post-gate-report.json', 16_384);
         $bundles = [];
         foreach (['deploy', 'rollback'] as $action) {
-            if ($state[$action]['invocation_count'] !== 1) { continue; }
+            if ($state[$action]['invocation_count'] !== 1) {
+                continue;
+            }
             $launch = $this->storage->read($prefix . $action . '-systemd-launch.json', 16_384);
             $binding = $this->storage->read($prefix . $action . '-unit-binding.json', 16_384);
             $observation = $this->storage->read($prefix . $action . '-unit-observation.json', 65_536);
@@ -911,11 +1058,14 @@ final class HostRunnerReservationPersistence
         $prefix = 'runs/' . $runId . '/';
         $required = function (string $leaf, int $max) use ($prefix): string {
             $bytes = $this->storage->read($prefix . $leaf, $max);
-            if ($bytes === null) { throw new RuntimeException('completed deploy authority is missing'); }
+            if ($bytes === null) {
+                throw new RuntimeException('completed deploy authority is missing');
+            }
             return $bytes;
         };
         $requestBytes = $required('request.json', 16_384);
         $inputBytes = $required('execution-input.json', 16_384);
+        $scriptBytes = $required('deploy-script.sh', 1_048_576);
         $launchBytes = $required('deploy-systemd-launch.json', 16_384);
         $bindingBytes = $required('deploy-unit-binding.json', 16_384);
         $observationBytes = $required('deploy-unit-observation.json', 65_536);
@@ -929,6 +1079,7 @@ final class HostRunnerReservationPersistence
         if (
             !hash_equals($state['deploy']['request_sha256'], hash('sha256', $requestBytes)) ||
             !hash_equals($state['deploy']['execution_input_sha256'], hash('sha256', $inputBytes)) ||
+            !hash_equals($launch['deploy_script_sha256'], hash('sha256', $scriptBytes)) ||
             !hash_equals($state['deploy']['unit_launch_sha256'], hash('sha256', $launchBytes)) ||
             !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes)) ||
             $receipt['exit_code'] !== $state['deploy']['observed_exit_code'] ||
@@ -956,14 +1107,18 @@ final class HostRunnerReservationPersistence
     {
         $prefix = 'runs/' . $runId . '/';
         $stateBytes = $this->storage->read($prefix . 'state.json', 4_096);
-        if ($stateBytes === null) { throw new RuntimeException('reserved run state is missing'); }
+        if ($stateBytes === null) {
+            throw new RuntimeException('reserved run state is missing');
+        }
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
         $action = $state['active_action'];
         if (!in_array($action, ['deploy', 'rollback'], true)) {
             throw new RuntimeException('reserved run has no active action');
         }
         $launchBytes = $this->storage->read($prefix . $action . '-systemd-launch.json', 16_384);
-        if ($launchBytes === null) { throw new RuntimeException('reserved launch is missing'); }
+        if ($launchBytes === null) {
+            throw new RuntimeException('reserved launch is missing');
+        }
         $launch = DeploymentHostRunnerContractV1::decodeSystemdLaunch($launchBytes);
         if (!hash_equals($state[$action]['unit_launch_sha256'], hash('sha256', $launchBytes))) {
             throw new RuntimeException('reserved launch contradicts durable state');
@@ -1011,7 +1166,10 @@ final class HostRunnerReservationPersistence
             $observation = DeploymentHostRunnerContractV1::decodeUnitAbsence($observed['pinned_bytes']);
             $absence = $observation;
             unset($absence['schema']);
-            $candidate[$action]['unit_state'] = DeploymentHostRunnerContractV1::classifyUnitObservation($binding, $absence);
+            $candidate[$action]['unit_state'] = DeploymentHostRunnerContractV1::classifyUnitObservation(
+                $binding,
+                $absence,
+            );
             if ($candidate[$action]['unit_state'] === 'missing') {
                 $candidate[$action]['unit_missing_observed_boot_id'] = $absence['manager_boot_id'];
             }
@@ -1055,7 +1213,9 @@ final class HostRunnerReservationPersistence
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
         $binding = DeploymentHostRunnerContractV1::decodeUnitBinding($bindingBytes);
         $envelope = json_decode($observationBytes, true, 32, JSON_THROW_ON_ERROR);
-        if (!is_array($envelope)) { throw new RuntimeException('durable observation is invalid'); }
+        if (!is_array($envelope)) {
+            throw new RuntimeException('durable observation is invalid');
+        }
         $candidate = $state;
         $candidate['updated_at_utc'] = $this->clock->nowUtc();
         $nextBinding = $binding;
@@ -1077,23 +1237,33 @@ final class HostRunnerReservationPersistence
             $observation = DeploymentHostRunnerContractV1::decodeUnitAbsence($observationBytes);
             $absence = $observation;
             unset($absence['schema']);
-            $candidate[$action]['unit_state'] = DeploymentHostRunnerContractV1::classifyUnitObservation($binding, $absence);
+            $candidate[$action]['unit_state'] = DeploymentHostRunnerContractV1::classifyUnitObservation(
+                $binding,
+                $absence,
+            );
             if ($candidate[$action]['unit_state'] === 'missing') {
                 $candidate[$action]['unit_missing_observed_boot_id'] = $absence['manager_boot_id'];
             }
         } else {
             throw new RuntimeException('durable observation schema is invalid');
         }
-        if ($candidate[$action]['unit_state'] === $state[$action]['unit_state'] &&
+        if (
+            $candidate[$action]['unit_state'] === $state[$action]['unit_state'] &&
             $candidate[$action]['observed_exit_code'] === $state[$action]['observed_exit_code'] &&
             $candidate[$action]['unit_invocation_id'] === $state[$action]['unit_invocation_id'] &&
             $candidate[$action]['unit_missing_observed_boot_id'] === $state[$action]['unit_missing_observed_boot_id'] &&
-            ($action !== 'rollback' || $candidate['rollback']['verdict'] === $state['rollback']['verdict'])) {
+            ($action !== 'rollback' || $candidate['rollback']['verdict'] === $state['rollback']['verdict'])
+        ) {
             DeploymentHostRunnerContractV1::validateUnitReconciliationBundle($launch, $binding, $state, $observation);
             return false;
         }
         DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
-        DeploymentHostRunnerContractV1::validateUnitReconciliationBundle($launch, $nextBinding, $candidate, $observation);
+        DeploymentHostRunnerContractV1::validateUnitReconciliationBundle(
+            $launch,
+            $nextBinding,
+            $candidate,
+            $observation,
+        );
         if ($nextBinding !== $binding) {
             $this->storage->refreshBinding(
                 $prefix . $action . '-unit-binding.json',
@@ -1113,9 +1283,8 @@ final class HostRunnerReservationPersistence
         if ($action !== 'rollback' || $candidate['rollback']['observed_exit_code'] === null) {
             return;
         }
-        $candidate['rollback']['verdict'] = $candidate['rollback']['observed_exit_code'] === 0
-            ? 'verification_pending'
-            : 'failed';
+        $candidate['rollback']['verdict'] =
+            $candidate['rollback']['observed_exit_code'] === 0 ? 'verification_pending' : 'failed';
     }
 }
 
@@ -1185,7 +1354,9 @@ final class HostRunnerReconciliationPersistence
     {
         $prefix = 'runs/' . $runId . '/';
         $required = static function (?string $bytes, string $name): string {
-            if ($bytes === null) { throw new RuntimeException('missing durable ' . $name); }
+            if ($bytes === null) {
+                throw new RuntimeException('missing durable ' . $name);
+            }
             return $bytes;
         };
         $claimBytes = $required($this->storage->read('active-run.json', 4_096), 'active claim');
@@ -1193,15 +1364,21 @@ final class HostRunnerReconciliationPersistence
         $eventsBytes = $required($this->storage->read($prefix . 'events.jsonl', 1_048_576), 'journal');
         $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
-        $evidenceBytes = $state['evidence_sha256'] === null
-            ? null
-            : $required($this->storage->read($prefix . 'evidence.json', 65_536), 'evidence');
-        $deployReportBytes = $state['post_gates']['deploy_submission_count'] === 0
-            ? null
-            : $required($this->storage->read($prefix . 'deploy-post-gate-report.json', 16_384), 'deploy report');
-        $rollbackReportBytes = $state['post_gates']['rollback_submission_count'] === 0
-            ? null
-            : $required($this->storage->read($prefix . 'rollback-post-gate-report.json', 16_384), 'rollback report');
+        $evidenceBytes =
+            $state['evidence_sha256'] === null
+                ? null
+                : $required($this->storage->read($prefix . 'evidence.json', 65_536), 'evidence');
+        $deployReportBytes =
+            $state['post_gates']['deploy_submission_count'] === 0
+                ? null
+                : $required($this->storage->read($prefix . 'deploy-post-gate-report.json', 16_384), 'deploy report');
+        $rollbackReportBytes =
+            $state['post_gates']['rollback_submission_count'] === 0
+                ? null
+                : $required(
+                    $this->storage->read($prefix . 'rollback-post-gate-report.json', 16_384),
+                    'rollback report',
+                );
         $terminal = in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true);
         if (!$terminal) {
             foreach ([$deployReportBytes, $rollbackReportBytes] as $reportBytes) {
@@ -1220,11 +1397,22 @@ final class HostRunnerReconciliationPersistence
         $bundles = [];
         if ($terminal) {
             foreach (['deploy', 'rollback'] as $action) {
-                if ($state[$action]['invocation_count'] !== 1) { continue; }
+                if ($state[$action]['invocation_count'] !== 1) {
+                    continue;
+                }
                 $bundles[$action] = [
-                    'launch' => $required($this->storage->read($prefix . $action . '-systemd-launch.json', 16_384), $action . ' launch'),
-                    'binding' => $required($this->storage->read($prefix . $action . '-unit-binding.json', 16_384), $action . ' binding'),
-                    'observation' => $required($this->storage->read($prefix . $action . '-unit-observation.json', 65_536), $action . ' observation'),
+                    'launch' => $required(
+                        $this->storage->read($prefix . $action . '-systemd-launch.json', 16_384),
+                        $action . ' launch',
+                    ),
+                    'binding' => $required(
+                        $this->storage->read($prefix . $action . '-unit-binding.json', 16_384),
+                        $action . ' binding',
+                    ),
+                    'observation' => $required(
+                        $this->storage->read($prefix . $action . '-unit-observation.json', 65_536),
+                        $action . ' observation',
+                    ),
                 ];
             }
         }
@@ -1254,11 +1442,9 @@ final class HostRunnerReconciliationPersistence
             $this->storage->clearActiveClaim($claimBytes);
         } elseif (
             $disposition === 'attach_observe_only' &&
-            (
-                $claim['state'] !== $state['state'] ||
+            ($claim['state'] !== $state['state'] ||
                 $claim['sequence'] !== $state['sequence'] ||
-                !hash_equals($claim['events_sha256'], $state['events_sha256'])
-            )
+                !hash_equals($claim['events_sha256'], $state['events_sha256']))
         ) {
             $currentClaim = [
                 'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
@@ -1269,10 +1455,7 @@ final class HostRunnerReconciliationPersistence
                 'events_sha256' => $state['events_sha256'],
                 'claimed_at_utc' => $state['updated_at_utc'],
             ];
-            $this->storage->refreshActiveClaim(
-                $claimBytes,
-                DeploymentHostRunnerContractV1::encodeFile($currentClaim),
-            );
+            $this->storage->refreshActiveClaim($claimBytes, DeploymentHostRunnerContractV1::encodeFile($currentClaim));
             $disposition = 'refresh_active_claim';
         }
         return $disposition;
@@ -1283,10 +1466,8 @@ final class HostRunnerActionCompletion
 {
     private readonly HostRunnerClock $clock;
 
-    public function __construct(
-        private readonly HostRunnerStorage $storage,
-        ?HostRunnerClock $clock = null,
-    ) {
+    public function __construct(private readonly HostRunnerStorage $storage, ?HostRunnerClock $clock = null)
+    {
         $this->clock = $clock ?? new SystemHostRunnerClock();
     }
 
@@ -1301,18 +1482,29 @@ final class HostRunnerActionCompletion
         $bindingBytes = $this->storage->read($prefix . 'deploy-unit-binding.json', 16_384);
         $observationBytes = $this->storage->read($prefix . 'deploy-unit-observation.json', 65_536);
         $receiptBytes = $this->storage->read($prefix . 'deploy-result.json', 4_096);
-        if ($stateBytes === null || $eventsBytes === null || $claimBytes === null || $launchBytes === null || $bindingBytes === null || $observationBytes === null || $receiptBytes === null) {
+        if (
+            $stateBytes === null ||
+            $eventsBytes === null ||
+            $claimBytes === null ||
+            $launchBytes === null ||
+            $bindingBytes === null ||
+            $observationBytes === null ||
+            $receiptBytes === null
+        ) {
             throw new RuntimeException('deploy completion authority is incomplete');
         }
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
         $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
         if (
             DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current' ||
-            $claim['run_id'] !== $runId || $state['run_id'] !== $runId ||
-            $state['state'] !== 'deploy_running' || $claim['state'] !== 'deploy_running' ||
+            $claim['run_id'] !== $runId ||
+            $state['run_id'] !== $runId ||
+            $state['state'] !== 'deploy_running' ||
+            $claim['state'] !== 'deploy_running' ||
             $state['deploy']['receipt_sha256'] !== null ||
             !hash_equals($claim['intent_sha256'], $state['intent_sha256']) ||
-            $claim['state'] !== $state['state'] || $claim['sequence'] !== $state['sequence'] ||
+            $claim['state'] !== $state['state'] ||
+            $claim['sequence'] !== $state['sequence'] ||
             !hash_equals($claim['events_sha256'], $state['events_sha256'])
         ) {
             throw new RuntimeException('deploy completion state and active claim are inconsistent');
@@ -1320,7 +1512,10 @@ final class HostRunnerActionCompletion
         $launch = DeploymentHostRunnerContractV1::decodeSystemdLaunch($launchBytes);
         $binding = DeploymentHostRunnerContractV1::decodeUnitBinding($bindingBytes);
         $observationEnvelope = json_decode($observationBytes, true, 32, JSON_THROW_ON_ERROR);
-        if (($observationEnvelope['schema'] ?? null) !== DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA) {
+        if (
+            ($observationEnvelope['schema'] ?? null) !==
+            DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA
+        ) {
             throw new RuntimeException('deploy receipt requires an exact loaded terminal observation');
         }
         $observation = DeploymentHostRunnerContractV1::decodeUnitLoadedObservation($observationBytes, $launch);
@@ -1365,7 +1560,10 @@ final class HostRunnerActionCompletion
         }
 
         if ($run['state'] === 'deploy_running') {
-            if ($state['state'] !== 'deploy_running' || DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current') {
+            if (
+                $state['state'] !== 'deploy_running' ||
+                DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current'
+            ) {
                 throw new RuntimeException('deploy receipt transition requires current deploy state');
             }
             $recordedAtUtc = $this->clock->nowUtc();
@@ -1418,11 +1616,7 @@ final class HostRunnerActionCompletion
         if (DeploymentHostRunnerContractV1::stateCacheDisposition($candidate, $candidateEventsBytes) !== 'current') {
             throw new RuntimeException('deploy receipt transition did not produce a current state');
         }
-        $this->storage->cow(
-            $prefix . 'state.json',
-            DeploymentHostRunnerContractV1::encodeFile($candidate),
-            4_096,
-        );
+        $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidate), 4_096);
         return $this->acceptedResponse($candidate, 'attach_observe_only');
     }
 
@@ -1440,18 +1634,22 @@ final class HostRunnerActionCompletion
         if (DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current') {
             throw new RuntimeException('post-gate state and active claim are inconsistent');
         }
-        if (DeploymentHostRunnerContractV1::activeRunDisposition(
-            $claim,
-            $state,
-            $eventsBytes,
-            null,
-            $runId,
-            $state['intent_sha256'],
-        ) !== 'attach_observe_only') {
+        if (
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $eventsBytes,
+                null,
+                $runId,
+                $state['intent_sha256'],
+            ) !== 'attach_observe_only'
+        ) {
             throw new RuntimeException('post-gate active claim is not attachable');
         }
         $report = DeploymentHostRunnerContractV1::decodePostGateReport($reportBytes);
-        if ($report['run_id'] !== $runId) { throw new RuntimeException('post-gate report run identity is invalid'); }
+        if ($report['run_id'] !== $runId) {
+            throw new RuntimeException('post-gate report run identity is invalid');
+        }
         $report['subject'] === 'deploy'
             ? $this->validateCompletedDeployAuthority($runId, $state)
             : $this->validateCompletedRollbackAuthority($runId, $state);
@@ -1506,11 +1704,7 @@ final class HostRunnerActionCompletion
         $candidate['post_gates']['deploy_verdict'] = $report['post_gates']['status'];
         $candidate['updated_at_utc'] = max($state['updated_at_utc'], $report['captured_at_utc']);
         DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
-        $this->storage->cow(
-            $prefix . 'state.json',
-            DeploymentHostRunnerContractV1::encodeFile($candidate),
-            4_096,
-        );
+        $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidate), 4_096);
         return ['disposition' => $disposition, 'state' => $candidate];
     }
 
@@ -1530,9 +1724,7 @@ final class HostRunnerActionCompletion
         }
         $prefix = 'runs/' . $runId . '/';
         $eventsBytes = $this->required($prefix . 'events.jsonl', 1_048_576);
-        $state = DeploymentHostRunnerContractV1::decodeState(
-            $this->required($prefix . 'state.json', 4_096),
-        );
+        $state = DeploymentHostRunnerContractV1::decodeState($this->required($prefix . 'state.json', 4_096));
         if (
             $state['state'] !== 'rollback_running' ||
             DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current'
@@ -1544,7 +1736,8 @@ final class HostRunnerActionCompletion
             if (
                 !hash_equals($state['post_gates']['rollback_report_sha256'], $sha) ||
                 $state['post_gates']['rollback_verdict'] !== $report['post_gates']['status'] ||
-                $state['rollback']['verdict'] !== ($report['post_gates']['status'] === 'passed' ? 'succeeded' : 'failed')
+                $state['rollback']['verdict'] !==
+                    ($report['post_gates']['status'] === 'passed' ? 'succeeded' : 'failed')
             ) {
                 throw new RuntimeException('durable rollback post-gate result conflicts with exact report bytes');
             }
@@ -1560,11 +1753,7 @@ final class HostRunnerActionCompletion
         $candidate['rollback']['verdict'] = $report['post_gates']['status'] === 'passed' ? 'succeeded' : 'failed';
         $candidate['updated_at_utc'] = max($state['updated_at_utc'], $report['captured_at_utc']);
         DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
-        $this->storage->cow(
-            $prefix . 'state.json',
-            DeploymentHostRunnerContractV1::encodeFile($candidate),
-            4_096,
-        );
+        $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidate), 4_096);
         return ['disposition' => $disposition, 'state' => $candidate];
     }
 
@@ -1641,7 +1830,8 @@ final class HostRunnerActionCompletion
         $receipt = DeployResultV1::decode($receiptBytes);
         DeploymentHostRunnerContractV1::validateUnitReconciliationBundle($launch, $binding, $state, $observation);
         if (
-            $receipt['outcome'] !== 'succeeded' || $receipt['exit_code'] !== 0 ||
+            $receipt['outcome'] !== 'succeeded' ||
+            $receipt['exit_code'] !== 0 ||
             !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes)) ||
             $state['deploy']['observed_exit_code'] !== 0
         ) {
@@ -1668,9 +1858,11 @@ final class HostRunnerActionCompletion
                 $state,
                 $deployReportBytes,
             ) !== 'attach' ||
-            $state['rollback']['unit_state'] !== 'exited' || $state['rollback']['observed_exit_code'] !== 0 ||
+            $state['rollback']['unit_state'] !== 'exited' ||
+            $state['rollback']['observed_exit_code'] !== 0 ||
             $state['post_gates']['deploy_verdict'] !== 'failed' ||
-            $deployReport['subject'] !== 'deploy' || $deployReport['post_gates']['status'] !== 'failed' ||
+            $deployReport['subject'] !== 'deploy' ||
+            $deployReport['post_gates']['status'] !== 'failed' ||
             !hash_equals($state['post_gates']['deploy_report_sha256'], hash('sha256', $deployReportBytes))
         ) {
             throw new RuntimeException('post-gate rollback authority is inconsistent');
@@ -1680,7 +1872,9 @@ final class HostRunnerActionCompletion
     private function required(string $relative, int $maxBytes): string
     {
         $bytes = $this->storage->read($relative, $maxBytes);
-        if ($bytes === null) { throw new RuntimeException('post-gate action authority is incomplete'); }
+        if ($bytes === null) {
+            throw new RuntimeException('post-gate action authority is incomplete');
+        }
         return $bytes;
     }
 }
@@ -1713,9 +1907,8 @@ final class HostRunnerStartOrchestrator
     ): string {
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
         $action = $launch['action'] ?? null;
-        $actionState = is_string($action) && isset($state[$action]) && is_array($state[$action])
-            ? $state[$action]
-            : null;
+        $actionState =
+            is_string($action) && isset($state[$action]) && is_array($state[$action]) ? $state[$action] : null;
         try {
             $preBoot = $this->bootReader->read();
         } catch (Throwable) {
@@ -1736,11 +1929,22 @@ final class HostRunnerStartOrchestrator
             $state['active_action'] !== $action ||
             $actionState['invocation_count'] !== 1 ||
             $actionState['unit_name'] !== $launch['unit_name'] ||
-            !hash_equals($actionState['unit_launch_sha256'], DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($launch))) ||
+            !hash_equals(
+                $actionState['unit_launch_sha256'],
+                DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($launch)),
+            ) ||
             !hash_equals($actionState['unit_manager_boot_id'], $binding['unit_manager_boot_id']) ||
             $actionState['unit_invocation_id'] !== null ||
-            !hash_equals($actionState['request_sha256'], DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($request))) ||
-            !hash_equals($actionState['execution_input_sha256'], DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeExecutionInput($input)))
+            !hash_equals(
+                $actionState['request_sha256'],
+                DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($request)),
+            ) ||
+            !hash_equals(
+                $actionState['execution_input_sha256'],
+                DeploymentHostRunnerContractV1::fileSha256(
+                    DeploymentHostRunnerContractV1::encodeExecutionInput($input),
+                ),
+            )
         ) {
             throw new RuntimeException('reservation state does not bind the admitted launch bundle');
         }
@@ -1748,10 +1952,7 @@ final class HostRunnerStartOrchestrator
             if ($failedDeployPostGateReportBytes === null) {
                 throw new RuntimeException('recovery reservation requires the exact failed deploy report');
             }
-            $priorStateBytes = $this->persistence->storageReadForValidation(
-                'runs/' . $runId . '/state.json',
-                4_096,
-            );
+            $priorStateBytes = $this->persistence->storageReadForValidation('runs/' . $runId . '/state.json', 4_096);
             if ($priorStateBytes === null) {
                 throw new RuntimeException('recovery reservation requires the prior state');
             }
@@ -1766,7 +1967,10 @@ final class HostRunnerStartOrchestrator
                 $report['post_gates']['status'] !== 'failed' ||
                 $state['post_gates']['deploy_submission_count'] !== 1 ||
                 $state['post_gates']['deploy_verdict'] !== 'failed' ||
-                !hash_equals($state['post_gates']['deploy_report_sha256'], hash('sha256', $failedDeployPostGateReportBytes)) ||
+                !hash_equals(
+                    $state['post_gates']['deploy_report_sha256'],
+                    hash('sha256', $failedDeployPostGateReportBytes),
+                ) ||
                 $state['deploy']['receipt_sha256'] !== $report['deploy_receipt_sha256']
             ) {
                 throw new RuntimeException('recovery reservation does not bind the failed deploy report');
@@ -1774,11 +1978,7 @@ final class HostRunnerStartOrchestrator
         } elseif ($failedDeployPostGateReportBytes !== null) {
             throw new RuntimeException('deploy reservation cannot consume a post-gate report');
         }
-        $preflight = $this->runner->preflightUnit(
-            $launch,
-            $binding['unit_manager_boot_id'],
-            $preBoot,
-        );
+        $preflight = $this->runner->preflightUnit($launch, $binding['unit_manager_boot_id'], $preBoot);
         try {
             $postBoot = $this->bootReader->read();
         } catch (Throwable) {
@@ -1790,7 +1990,15 @@ final class HostRunnerStartOrchestrator
         if ($preflight !== 'available') {
             return $preflight;
         }
-        $this->persistence->pinAdmissionBundle($runId, (string) $action, $request, $input, $launch, $binding);
+        $this->persistence->pinAdmissionBundle(
+            $runId,
+            (string) $action,
+            $request,
+            $input,
+            $launch,
+            $binding,
+            $deployScriptBytes,
+        );
         $this->persistence->persist($runId, $eventsBytes, $claimBytes, $stateBytes);
 
         try {
@@ -1814,18 +2022,9 @@ final class HostRunnerStartOrchestrator
     }
 
     /** @param array<string,mixed> $launch */
-    public function resumeReserved(
-        string $runId,
-        string $eventsBytes,
-        string $claimBytes,
-        string $stateBytes,
-    ): string {
-        $disposition = $this->persistence->resumeAfterReservation(
-            $runId,
-            $eventsBytes,
-            $claimBytes,
-            $stateBytes,
-        );
+    public function resumeReserved(string $runId, string $eventsBytes, string $claimBytes, string $stateBytes): string
+    {
+        $disposition = $this->persistence->resumeAfterReservation($runId, $eventsBytes, $claimBytes, $stateBytes);
         $launch = $this->persistence->pinnedLaunchForReservedRun($runId);
         if ($this->persistence->resumeObservationPersistence($runId, $launch)) {
             return $disposition;
@@ -1863,8 +2062,16 @@ final class HelperBackedHostRunnerSystemAdapter implements HostRunnerSystemAdapt
     private const MAX_CONTROLLER_RESPONSE_BYTES = 180_000;
     private const HELPER = __DIR__ . '/../libexec/deployment_host_runner_fs_v1.py';
     private const COMMAND = [
-        '/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-        '/usr/bin/python3', '-I', '-B', self::HELPER, 'controller',
+        '/usr/bin/env',
+        '-i',
+        'LANG=C',
+        'LC_ALL=C',
+        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        '/usr/bin/python3',
+        '-I',
+        '-B',
+        self::HELPER,
+        'controller',
     ];
 
     /** @param null|callable(list<string>,string,float):array{exit_code:int,stdout:string} $transport */
@@ -1888,11 +2095,7 @@ final class HelperBackedHostRunnerSystemAdapter implements HostRunnerSystemAdapt
             throw new RuntimeException('host-runner controller probe token is invalid');
         }
 
-        return new self(
-            null,
-            $wrapperTimeoutSeconds,
-            $token,
-        );
+        return new self(null, $wrapperTimeoutSeconds, $token);
     }
 
     public function run(array $argv, array $environment, int $timeoutSeconds): HostRunnerProcessResult
@@ -1906,11 +2109,7 @@ final class HelperBackedHostRunnerSystemAdapter implements HostRunnerSystemAdapt
         );
         $command = self::COMMAND;
         if ($this->timeoutProbeToken !== null) {
-            $command = [
-                ...array_slice(self::COMMAND, 0, -1),
-                'controller-timeout-probe',
-                $this->timeoutProbeToken,
-            ];
+            $command = [...array_slice(self::COMMAND, 0, -1), 'controller-timeout-probe', $this->timeoutProbeToken];
         }
         if (is_callable($this->transport)) {
             $transport = ($this->transport)($command, $payload, $this->wrapperTimeoutSeconds);
@@ -1993,7 +2192,11 @@ final class HelperBackedHostRunnerSystemAdapter implements HostRunnerSystemAdapt
             throw new RuntimeException('host-runner controller failed');
         }
         $decoded = json_decode($stdout, true, 8, JSON_THROW_ON_ERROR);
-        if (!is_array($decoded) || array_is_list($decoded) || array_keys($decoded) !== ['exit_code', 'stderr_base64', 'stdout_base64', 'transport_lost']) {
+        if (
+            !is_array($decoded) ||
+            array_is_list($decoded) ||
+            array_keys($decoded) !== ['exit_code', 'stderr_base64', 'stdout_base64', 'transport_lost']
+        ) {
             throw new RuntimeException('host-runner controller response is invalid');
         }
         foreach (['stdout_base64', 'stderr_base64'] as $field) {
@@ -2019,16 +2222,11 @@ final class DeploymentHostRunnerV1
         'PATH' => '/usr/sbin:/usr/bin:/sbin:/bin',
     ];
 
-    public function __construct(private readonly HostRunnerSystemAdapter $systemAdapter)
-    {
-    }
+    public function __construct(private readonly HostRunnerSystemAdapter $systemAdapter) {}
 
     /** @param array<string,mixed> $launch */
-    public function preflightUnit(
-        array $launch,
-        string $expectedManagerBootId,
-        string $managerBootIdBytes,
-    ): string {
+    public function preflightUnit(array $launch, string $expectedManagerBootId, string $managerBootIdBytes): string
+    {
         DeploymentHostRunnerContractV1::validateSystemdLaunch($launch);
         DeploymentHostRunnerContractV1::parseManagerBootId($managerBootIdBytes);
         if ($expectedManagerBootId . "\n" !== $managerBootIdBytes) {
@@ -2115,19 +2313,25 @@ final class DeploymentHostRunnerV1
             );
         } catch (Throwable) {
             $lookup = ['kind' => 'transport_error', 'manager_boot_id' => null, 'loaded_observation' => null];
-            return ['lookup' => $lookup, 'pinned_bytes' => DeploymentHostRunnerContractV1::encodeFile([
-                'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
-                'kind' => 'transport_error',
-                'manager_boot_id' => null,
-            ])];
+            return [
+                'lookup' => $lookup,
+                'pinned_bytes' => DeploymentHostRunnerContractV1::encodeFile([
+                    'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
+                    'kind' => 'transport_error',
+                    'manager_boot_id' => null,
+                ]),
+            ];
         }
         if ($result->transportLost || $result->exitCode === null) {
             $lookup = ['kind' => 'transport_error', 'manager_boot_id' => null, 'loaded_observation' => null];
-            return ['lookup' => $lookup, 'pinned_bytes' => DeploymentHostRunnerContractV1::encodeFile([
-                'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
-                'kind' => 'transport_error',
-                'manager_boot_id' => null,
-            ])];
+            return [
+                'lookup' => $lookup,
+                'pinned_bytes' => DeploymentHostRunnerContractV1::encodeFile([
+                    'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
+                    'kind' => 'transport_error',
+                    'manager_boot_id' => null,
+                ]),
+            ];
         }
 
         try {
@@ -2138,25 +2342,29 @@ final class DeploymentHostRunnerV1
                 $launch,
                 $managerBootIdBytes,
             );
-            $pinned = $lookup['kind'] === 'loaded'
-                ? [
-                    'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
-                    'manager_boot_id' => $lookup['manager_boot_id'],
-                    'systemctl_show' => $result->stdout,
-                ]
-                : [
-                    'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
-                    'kind' => $lookup['kind'],
-                    'manager_boot_id' => $lookup['manager_boot_id'],
-                ];
+            $pinned =
+                $lookup['kind'] === 'loaded'
+                    ? [
+                        'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
+                        'manager_boot_id' => $lookup['manager_boot_id'],
+                        'systemctl_show' => $result->stdout,
+                    ]
+                    : [
+                        'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
+                        'kind' => $lookup['kind'],
+                        'manager_boot_id' => $lookup['manager_boot_id'],
+                    ];
             return ['lookup' => $lookup, 'pinned_bytes' => DeploymentHostRunnerContractV1::encodeFile($pinned)];
         } catch (Throwable) {
             $lookup = ['kind' => 'transport_error', 'manager_boot_id' => null, 'loaded_observation' => null];
-            return ['lookup' => $lookup, 'pinned_bytes' => DeploymentHostRunnerContractV1::encodeFile([
-                'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
-                'kind' => 'transport_error',
-                'manager_boot_id' => null,
-            ])];
+            return [
+                'lookup' => $lookup,
+                'pinned_bytes' => DeploymentHostRunnerContractV1::encodeFile([
+                    'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
+                    'kind' => 'transport_error',
+                    'manager_boot_id' => null,
+                ]),
+            ];
         }
     }
 }

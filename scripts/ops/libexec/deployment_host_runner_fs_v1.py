@@ -93,7 +93,7 @@ def validate_storage_scope(root: str, relative: str, operation: str) -> None:
     fixed = {"active-run.json"}
     run_leaf = re.fullmatch(
         r'runs/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/'
-        r'(run\.lock|intent\.json|orchestrator-start\.json|orchestrator-finish\.json|predeploy-evidence\.json|traffic-gate-report\.json|request\.json|recovery-request\.json|execution-input\.json|recovery-execution-input\.json|state\.json|events\.jsonl|evidence\.json|operator-events\.jsonl|deploy-result\.json|deploy-child-observation\.json|deploy-timing\.jsonl|deploy-post-gate-report\.json|rollback-post-gate-report\.json|deploy-systemd-launch\.json|deploy-unit-binding\.json|deploy-unit-observation\.json|rollback-systemd-launch\.json|rollback-unit-binding\.json|rollback-unit-observation\.json)',
+        r'(run\.lock|intent\.json|orchestrator-start\.json|orchestrator-finish\.json|predeploy-evidence\.json|traffic-gate-report\.json|request\.json|recovery-request\.json|execution-input\.json|recovery-execution-input\.json|state\.json|events\.jsonl|evidence\.json|operator-events\.jsonl|deploy-result\.json|deploy-child-observation\.json|deploy-timing\.jsonl|deploy-post-gate-report\.json|rollback-post-gate-report\.json|deploy-script\.sh|rollback-script\.sh|deploy-systemd-launch\.json|deploy-unit-binding\.json|deploy-unit-observation\.json|rollback-systemd-launch\.json|rollback-unit-binding\.json|rollback-unit-observation\.json)',
         relative,
     )
     if relative not in fixed and run_leaf is None:
@@ -104,6 +104,7 @@ def validate_storage_scope(root: str, relative: str, operation: str) -> None:
         'request.json', 'recovery-request.json', 'execution-input.json', 'recovery-execution-input.json', 'deploy-result.json',
         'deploy-child-observation.json', 'deploy-timing.jsonl',
         'deploy-post-gate-report.json', 'rollback-post-gate-report.json',
+        'deploy-script.sh', 'rollback-script.sh',
         'deploy-systemd-launch.json', 'deploy-unit-binding.json',
         'rollback-systemd-launch.json', 'rollback-unit-binding.json',
     }
@@ -1357,7 +1358,10 @@ def validate_controller_argv(argv: object) -> list[str]:
         if not manager[14].startswith(description_prefix) or re.fullmatch(r'[0-9a-f]{64}', manager[14][len(description_prefix):]) is None:
             reject()
         child = argv[separator + 1:]
-        child_prefix = ['/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', '/bin/bash', '/root/deploy_ea.sh']
+        child_prefix = [
+            '/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', '/bin/bash',
+            '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/' + action + '-script.sh',
+        ]
         if child[:len(child_prefix)] != child_prefix:
             reject()
         tail = child[len(child_prefix):]

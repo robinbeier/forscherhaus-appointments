@@ -894,6 +894,16 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
             DeploymentHostRunnerContractV1::STATE_ROOT . '/runs/' . self::RUN_ID . '/deploy-ref-healthz-token',
             $deploy['argv'],
         );
+        self::assertContains(
+            DeploymentHostRunnerContractV1::STATE_ROOT . '/runs/' . self::RUN_ID . '/deploy-script.sh',
+            $deploy['argv'],
+        );
+        self::assertContains(
+            DeploymentHostRunnerContractV1::STATE_ROOT . '/runs/' . self::RUN_ID . '/rollback-script.sh',
+            $rollback['argv'],
+        );
+        self::assertNotContains('/root/deploy_ea.sh', $deploy['argv']);
+        self::assertNotContains('/root/deploy_ea.sh', $rollback['argv']);
 
         $deployArgv = $deploy['argv'];
         $separator = array_search('--', $deployArgv, true);
