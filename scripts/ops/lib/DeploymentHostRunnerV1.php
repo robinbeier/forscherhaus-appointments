@@ -1230,7 +1230,14 @@ final class HostRunnerReconciliationPersistence
 
 final class HostRunnerActionCompletion
 {
-    public function __construct(private readonly HostRunnerStorage $storage) {}
+    private readonly HostRunnerClock $clock;
+
+    public function __construct(
+        private readonly HostRunnerStorage $storage,
+        ?HostRunnerClock $clock = null,
+    ) {
+        $this->clock = $clock ?? new SystemHostRunnerClock();
+    }
 
     /** @return array{receipt_bytes:string,receipt:array{schema:string,outcome:string,exit_code:int}} */
     public function requireDeployReceiptForStoppedUnit(string $runId): array
@@ -1280,6 +1287,94 @@ final class HostRunnerActionCompletion
         return ['receipt_bytes' => $receiptBytes, 'receipt' => $receipt];
     }
 
+    /**
+     * Accept the exact successful child receipt and durably advance the
+     * authoritative journal before its derived state cache. A replay after the
+     * journal-only crash prefix derives the same state without another unit.
+     *
+     * @return array<string,mixed> canonical runner response
+     */
+    public function acceptSucceededDeployReceipt(string $runId): array
+    {
+        $prefix = 'runs/' . $runId . '/';
+        $result = $this->requireDeployReceiptForStoppedUnitOrCurrentSuccess($runId);
+        $receiptBytes = $result['receipt_bytes'];
+        $receipt = $result['receipt'];
+        if ($receipt['outcome'] !== 'succeeded' || $receipt['exit_code'] !== 0) {
+            throw new RuntimeException('post-gate transition requires a successful deploy receipt');
+        }
+
+        $eventsBytes = $this->required($prefix . 'events.jsonl', 1_048_576);
+        $stateBytes = $this->required($prefix . 'state.json', 4_096);
+        $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+        $lines = explode("\n", substr($eventsBytes, 0, -1));
+        $run = DeploymentContractV1::validateRunLines($lines);
+        if ($run['run_id'] !== $runId || !hash_equals($run['intent_sha256'], $state['intent_sha256'])) {
+            throw new RuntimeException('deploy receipt transition identity is invalid');
+        }
+
+        if ($run['state'] === 'deploy_running') {
+            if ($state['state'] !== 'deploy_running' || DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current') {
+                throw new RuntimeException('deploy receipt transition requires current deploy state');
+            }
+            $recordedAtUtc = $this->clock->nowUtc();
+            $lines[] = DeploymentContractV1::canonicalJson([
+                'schema' => DeploymentContractV1::RUN_SCHEMA,
+                'record_type' => 'transition',
+                'run_id' => $runId,
+                'sequence' => count($lines) + 1,
+                'recorded_at_utc' => $recordedAtUtc,
+                'previous_state' => 'deploy_running',
+                'state' => 'post_gates_running',
+                'deploy_invocation_count' => 1,
+                'intent_sha256' => $state['intent_sha256'],
+                'exit_code' => 0,
+                'reason' => 'ok',
+            ]);
+            $candidateEventsBytes = implode("\n", $lines) . "\n";
+            $this->storage->cow($prefix . 'events.jsonl', $candidateEventsBytes, 1_048_576);
+        } elseif ($run['state'] === 'post_gates_running') {
+            if ($state['state'] === 'post_gates_running') {
+                if (
+                    DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current' ||
+                    !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes))
+                ) {
+                    throw new RuntimeException('durable post-gate state contradicts the successful receipt');
+                }
+                return $this->acceptedResponse($state, 'attach_observe_only');
+            }
+            if (
+                $state['state'] !== 'deploy_running' ||
+                DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'stale_recoverable'
+            ) {
+                throw new RuntimeException('deploy receipt crash prefix is not recoverable');
+            }
+            $candidateEventsBytes = $eventsBytes;
+            $last = json_decode($lines[array_key_last($lines)], true, 16, JSON_THROW_ON_ERROR);
+            $recordedAtUtc = $last['recorded_at_utc'];
+        } else {
+            throw new RuntimeException('deploy receipt cannot advance the current lifecycle');
+        }
+
+        $candidate = $state;
+        $candidate['state'] = 'post_gates_running';
+        $candidate['sequence'] = count($lines);
+        $candidate['events_sha256'] = hash('sha256', $candidateEventsBytes);
+        $candidate['active_action'] = 'none';
+        $candidate['deploy']['receipt_sha256'] = hash('sha256', $receiptBytes);
+        $candidate['updated_at_utc'] = $recordedAtUtc;
+        DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
+        if (DeploymentHostRunnerContractV1::stateCacheDisposition($candidate, $candidateEventsBytes) !== 'current') {
+            throw new RuntimeException('deploy receipt transition did not produce a current state');
+        }
+        $this->storage->cow(
+            $prefix . 'state.json',
+            DeploymentHostRunnerContractV1::encodeFile($candidate),
+            4_096,
+        );
+        return $this->acceptedResponse($candidate, 'attach_observe_only');
+    }
+
     public function submitPostGateReport(string $runId, string $reportBytes): string
     {
         $prefix = 'runs/' . $runId . '/';
@@ -1318,6 +1413,113 @@ final class HostRunnerActionCompletion
             throw new RuntimeException('post-gate report conflicts with durable bytes');
         }
         return $disposition;
+    }
+
+    /**
+     * Pin and reflect a first deploy post-gate report into the monotonic state
+     * cache. Terminal publication or rollback reservation consumes that exact
+     * report in the following step.
+     *
+     * @return array{disposition:string,state:array<string,mixed>}
+     */
+    public function acceptDeployPostGateReport(string $runId, string $reportBytes): array
+    {
+        $disposition = $this->submitPostGateReport($runId, $reportBytes);
+        $report = DeploymentHostRunnerContractV1::decodePostGateReport($reportBytes);
+        if ($report['subject'] !== 'deploy') {
+            throw new RuntimeException('deploy post-gate state cannot consume a rollback report');
+        }
+        $prefix = 'runs/' . $runId . '/';
+        $eventsBytes = $this->required($prefix . 'events.jsonl', 1_048_576);
+        $stateBytes = $this->required($prefix . 'state.json', 4_096);
+        $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+        if (
+            $state['state'] !== 'post_gates_running' ||
+            DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current'
+        ) {
+            throw new RuntimeException('deploy post-gate result requires current post-gate state');
+        }
+        $sha = hash('sha256', $reportBytes);
+        if ($state['post_gates']['deploy_submission_count'] === 1) {
+            if (
+                !hash_equals($state['post_gates']['deploy_report_sha256'], $sha) ||
+                $state['post_gates']['deploy_verdict'] !== $report['post_gates']['status']
+            ) {
+                throw new RuntimeException('durable deploy post-gate result conflicts with exact report bytes');
+            }
+            return ['disposition' => $disposition, 'state' => $state];
+        }
+        $candidate = $state;
+        $candidate['post_gates']['deploy_report_sha256'] = $sha;
+        $candidate['post_gates']['deploy_submission_count'] = 1;
+        $candidate['post_gates']['deploy_verdict'] = $report['post_gates']['status'];
+        $candidate['updated_at_utc'] = max($state['updated_at_utc'], $report['captured_at_utc']);
+        DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
+        $this->storage->cow(
+            $prefix . 'state.json',
+            DeploymentHostRunnerContractV1::encodeFile($candidate),
+            4_096,
+        );
+        return ['disposition' => $disposition, 'state' => $candidate];
+    }
+
+    /** @return array{receipt_bytes:string,receipt:array{schema:string,outcome:string,exit_code:int}} */
+    private function requireDeployReceiptForStoppedUnitOrCurrentSuccess(string $runId): array
+    {
+        try {
+            return $this->requireDeployReceiptForStoppedUnit($runId);
+        } catch (RuntimeException $error) {
+            $prefix = 'runs/' . $runId . '/';
+            $stateBytes = $this->storage->read($prefix . 'state.json', 4_096);
+            $eventsBytes = $this->storage->read($prefix . 'events.jsonl', 1_048_576);
+            $receiptBytes = $this->storage->read($prefix . 'deploy-result.json', 4_096);
+            $claimBytes = $this->storage->read('active-run.json', 4_096);
+            if ($stateBytes === null || $eventsBytes === null || $receiptBytes === null || $claimBytes === null) {
+                throw $error;
+            }
+            $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+            $receipt = DeployResultV1::decode($receiptBytes);
+            $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
+            $run = DeploymentContractV1::validateRunLines(explode("\n", substr($eventsBytes, 0, -1)));
+            $isJournalOnlyPrefix =
+                $state['state'] === 'deploy_running' &&
+                $run['state'] === 'post_gates_running' &&
+                DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) === 'stale_recoverable';
+            $isCurrent =
+                $state['state'] === 'post_gates_running' &&
+                DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) === 'current';
+            if (
+                (!$isJournalOnlyPrefix && !$isCurrent) ||
+                $receipt['outcome'] !== 'succeeded' ||
+                $receipt['exit_code'] !== 0 ||
+                $state['deploy']['unit_state'] !== 'exited' ||
+                $state['deploy']['observed_exit_code'] !== 0 ||
+                ($state['deploy']['receipt_sha256'] !== null &&
+                    !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes))) ||
+                $claim['run_id'] !== $runId ||
+                !hash_equals($claim['intent_sha256'], $state['intent_sha256'])
+            ) {
+                throw $error;
+            }
+            return ['receipt_bytes' => $receiptBytes, 'receipt' => $receipt];
+        }
+    }
+
+    /** @param array<string,mixed> $state @return array<string,mixed> */
+    private function acceptedResponse(array $state, string $disposition): array
+    {
+        $response = [
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => $state['run_id'],
+            'intent_sha256' => $state['intent_sha256'],
+            'action' => 'deploy',
+            'disposition' => $disposition,
+            'state' => $state['state'],
+            'result_exit_code' => 0,
+            'result_reason' => 'ok',
+        ];
+        DeploymentHostRunnerContractV1::validateResponse($response);
+        return $response;
     }
 
     /** @param array<string,mixed> $state */

@@ -14,6 +14,7 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentHostRunnerV1.php';
+require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentHostRunnerTerminalV1.php';
 
 final class DeploymentHostRunnerV1Test extends TestCase
 {
@@ -1168,6 +1169,216 @@ final class DeploymentHostRunnerV1Test extends TestCase
         }
     }
 
+    public function testSuccessfulReceiptAdvancesJournalThenStateAndRecoversJournalOnlyPrefix(): void
+    {
+        [$storage, $durable] = $this->successfulStoppedDeployStorage();
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $completion = new \Ops\HostRunnerActionCompletion(
+            $storage,
+            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
+        );
+
+        $response = $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
+
+        self::assertSame('attach_observe_only', $response['disposition']);
+        self::assertSame('post_gates_running', $response['state']);
+        self::assertSame(['cow', 'cow'], array_column(array_slice($storage->operations, -2), 0));
+        self::assertSame(
+            [$prefix . 'events.jsonl', $prefix . 'state.json'],
+            array_column(array_slice($storage->operations, -2), 1),
+        );
+        $postEvents = $storage->files[$prefix . 'events.jsonl'];
+        $postState = $storage->files[$prefix . 'state.json'];
+
+        // Exact crash prefix: journal durable, previous deploy_running cache.
+        $storage->files[$prefix . 'state.json'] = $durable['state_bytes'];
+        $storage->operations = [];
+        $replayed = $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
+        self::assertSame('attach_observe_only', $replayed['disposition']);
+        self::assertSame($postEvents, $storage->files[$prefix . 'events.jsonl']);
+        self::assertSame($postState, $storage->files[$prefix . 'state.json']);
+        self::assertSame([['cow', $prefix . 'state.json', $postState]], $storage->operations);
+
+        $storage->operations = [];
+        self::assertSame('attach_observe_only', $completion->acceptSucceededDeployReceipt(self::fixtureRunId())['disposition']);
+        self::assertSame([], $storage->operations);
+    }
+
+    public function testAcceptedDeployPostGateReportUpdatesOnlyTheDerivedStateCache(): void
+    {
+        [$storage] = $this->successfulStoppedDeployStorage();
+        $completion = new \Ops\HostRunnerActionCompletion(
+            $storage,
+            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
+        );
+        $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        $receipt = $storage->files[$prefix . 'deploy-result.json'];
+        $report = [
+            'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $state['intent_sha256'],
+            'captured_at_utc' => '2026-08-12T10:00:13Z',
+            'subject' => 'deploy',
+            'deploy_receipt_sha256' => hash('sha256', $receipt),
+            'post_gates' => [
+                'status' => 'failed',
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+                'services_passed' => true,
+                'endpoints_passed' => true,
+                'logs_passed' => false,
+                'scanner_passed' => true,
+                'dormant_clean_passed' => true,
+                'passed' => false,
+            ],
+        ];
+        $bytes = DeploymentHostRunnerContractV1::encodePostGateReport($report);
+        $eventsBefore = $storage->files[$prefix . 'events.jsonl'];
+        $storage->operations = [];
+
+        $accepted = $completion->acceptDeployPostGateReport(self::fixtureRunId(), $bytes);
+
+        self::assertSame('recovery_required', $accepted['disposition']);
+        self::assertSame('failed', $accepted['state']['post_gates']['deploy_verdict']);
+        self::assertSame(hash('sha256', $bytes), $accepted['state']['post_gates']['deploy_report_sha256']);
+        self::assertSame($eventsBefore, $storage->files[$prefix . 'events.jsonl']);
+        self::assertSame(['pin', 'cow'], array_column($storage->operations, 0));
+        $storage->operations = [];
+        $replay = $completion->acceptDeployPostGateReport(self::fixtureRunId(), $bytes);
+        self::assertSame('attach_observe_only', $replay['disposition']);
+        self::assertSame([], $storage->operations);
+    }
+
+    public function testSucceededDeployTerminalizesExactBundleThenClearsClaimAndReplaysWithoutFreshAuthority(): void
+    {
+        $storage = $this->successfulPassedPostGateStorage();
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $clock = new FixedTerminalClock();
+        $timing = new NotObservedTimingPin();
+        $storage->operations = [];
+
+        $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
+            ->terminalizeDeploy(self::fixtureRunId());
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame('succeeded', $response['state']);
+        self::assertSame(0, $response['result_exit_code']);
+        self::assertArrayNotHasKey('active-run.json', $storage->files);
+        self::assertArrayHasKey($prefix . 'orchestrator-finish.json', $storage->files);
+        self::assertArrayHasKey($prefix . 'deploy-child-observation.json', $storage->files);
+        $terminalState = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        $terminalEvidence = json_decode($storage->files[$prefix . 'evidence.json'], true, 64, JSON_THROW_ON_ERROR);
+        self::assertSame(
+            'terminal',
+            \Ops\DeploymentContractV1::validateBundle(
+                explode("\n", substr($storage->files[$prefix . 'events.jsonl'], 0, -1)),
+                $terminalEvidence,
+            )['recovery'],
+        );
+        self::assertSame(hash('sha256', $storage->files[$prefix . 'evidence.json']), $terminalState['evidence_sha256']);
+        self::assertSame(1, $clock->nowCalls);
+        self::assertSame(1, $timing->calls);
+        self::assertSame(['claim-refresh', 'clear-exact'], array_column(array_slice($storage->operations, -2), 0));
+
+        $operations = $storage->operations;
+        $replay = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
+            ->terminalizeDeploy(self::fixtureRunId());
+        self::assertSame($response, $replay);
+        self::assertSame($operations, $storage->operations);
+        self::assertSame(1, $clock->nowCalls);
+        self::assertSame(1, $timing->calls);
+    }
+
+    public function testTerminalCrashPrefixesResumeExactBytesWithoutFreshClockOrRespawnAuthority(): void
+    {
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $source = $this->successfulPassedPostGateStorage();
+        $initial = $source->files;
+        $activeClaim = $initial['active-run.json'];
+        (new \Ops\HostRunnerTerminalPersistence($source, new FixedTerminalClock(), new NotObservedTimingPin()))
+            ->terminalizeDeploy(self::fixtureRunId());
+        $terminal = $source->files;
+
+        $prefixes = [
+            'finish' => ['orchestrator-finish.json'],
+            'child' => ['orchestrator-finish.json', 'deploy-child-observation.json'],
+            'evidence' => ['orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json'],
+            'journal' => ['orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json', 'events.jsonl'],
+            'state' => [
+                'orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json',
+                'events.jsonl', 'state.json',
+            ],
+        ];
+        foreach ($prefixes as $name => $leaves) {
+            $storage = new RecordingHostRunnerStorage();
+            $storage->files = $initial;
+            foreach ($leaves as $leaf) {
+                $storage->files[$prefix . $leaf] = $terminal[$prefix . $leaf];
+            }
+            $storage->files['active-run.json'] = $activeClaim;
+            $clock = new FixedTerminalClock();
+            $timing = new NotObservedTimingPin();
+
+            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
+                ->terminalizeDeploy(self::fixtureRunId());
+
+            self::assertSame('succeeded', $response['state'], $name);
+            self::assertSame($terminal, $storage->files, $name);
+            self::assertSame(0, $clock->nowCalls, $name);
+            self::assertSame($name === 'state' ? 0 : 1, $timing->calls, $name);
+        }
+    }
+
+    #[DataProvider('directDeployTerminalCases')]
+    public function testStoppedNonSuccessReceiptsProduceValidatedTerminalBundles(
+        string $outcome,
+        int $exitCode,
+        string $expectedState,
+        string $expectedReason,
+    ): void {
+        $storage = $this->failedStoppedDeployStorage($outcome, $exitCode);
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+
+        $response = (new \Ops\HostRunnerTerminalPersistence(
+            $storage,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        ))->terminalizeDeploy(self::fixtureRunId());
+
+        self::assertSame($expectedState, $response['state']);
+        self::assertSame($exitCode, $response['result_exit_code']);
+        self::assertSame($expectedReason, $response['result_reason']);
+        $evidence = json_decode($storage->files[$prefix . 'evidence.json'], true, 64, JSON_THROW_ON_ERROR);
+        self::assertSame('not_observed', $evidence['post_gates']['status']);
+        self::assertSame(
+            'terminal',
+            \Ops\DeploymentContractV1::validateBundle(
+                explode("\n", substr($storage->files[$prefix . 'events.jsonl'], 0, -1)),
+                $evidence,
+            )['recovery'],
+        );
+        self::assertArrayNotHasKey('active-run.json', $storage->files);
+    }
+
+    /** @return iterable<string,array{string,int,string,string}> */
+    public static function directDeployTerminalCases(): iterable
+    {
+        yield 'pre-switch failure' => ['failed_pre_switch', 30, 'failed_pre_switch', 'deploy_failed'];
+        yield 'internal rollback succeeded' => [
+            'internal_rollback_succeeded', 30, 'failed_post_switch_rollback_succeeded', 'deploy_failed',
+        ];
+        yield 'internal rollback failed' => [
+            'rollback_failed_or_unverifiable', 31, 'failed_post_switch_rollback_failed', 'rollback_failed',
+        ];
+        yield 'switch recovery required' => [
+            'switch_recovery_required', 32, 'failed_switch_recovery_required', 'switch_recovery_required',
+        ];
+        yield 'interrupted before switch' => ['interrupted_pre_switch', 143, 'failed_pre_switch', 'interrupted'];
+    }
+
     public function testPostGateSubmissionPinsFirstExactReportAndNeverReplacesIt(): void
     {
         $durable = $this->reservationPersistenceFixture();
@@ -1449,6 +1660,164 @@ final class DeploymentHostRunnerV1Test extends TestCase
         )) . "\n";
     }
 
+    private function successfulPassedPostGateStorage(): RecordingHostRunnerStorage
+    {
+        [$storage] = $this->successfulStoppedDeployStorage();
+        $this->addPassedPredeployAuthority($storage);
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $completion = new \Ops\HostRunnerActionCompletion(
+            $storage,
+            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
+        );
+        $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
+        $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        $receiptBytes = $storage->files[$prefix . 'deploy-result.json'];
+        $completion->acceptDeployPostGateReport(
+            self::fixtureRunId(),
+            DeploymentHostRunnerContractV1::encodePostGateReport([
+                'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
+                'run_id' => self::fixtureRunId(),
+                'intent_sha256' => $state['intent_sha256'],
+                'captured_at_utc' => '2026-08-12T10:00:13Z',
+                'subject' => 'deploy',
+                'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
+                'post_gates' => [
+                    'status' => 'passed', 'kuma_healthy_count' => 13, 'kuma_total_count' => 13,
+                    'runtime_config_passed' => true, 'services_passed' => true,
+                    'endpoints_passed' => true, 'logs_passed' => true,
+                    'scanner_passed' => true, 'dormant_clean_passed' => true, 'passed' => true,
+                ],
+            ]),
+        );
+        return $storage;
+    }
+
+    private function failedStoppedDeployStorage(string $outcome, int $exitCode): RecordingHostRunnerStorage
+    {
+        $durable = $this->reservationPersistenceFixture();
+        $bundle = $this->fixture();
+        $storage = new RecordingHostRunnerStorage();
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $this->seedDeployAdmissionAuthority($storage);
+        $storage->files[$prefix . 'events.jsonl'] = $durable['events_bytes'];
+        $storage->files['active-run.json'] = $durable['claim_bytes'];
+        $state = DeploymentHostRunnerContractV1::decodeState($durable['state_bytes']);
+        $state['deploy']['unit_state'] = 'failed';
+        $state['deploy']['observed_exit_code'] = $exitCode;
+        $state['deploy']['unit_invocation_id'] = str_repeat('d', 32);
+        $binding = $bundle['binding'];
+        $binding['binding_state'] = 'observed';
+        $binding['unit_invocation_id'] = str_repeat('d', 32);
+        $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
+        $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
+        $storage->files[$prefix . 'deploy-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
+            'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
+            'manager_boot_id' => self::BOOT,
+            'systemctl_show' => $this->loadedShow($bundle['launch'], 'failed', 'failed', 'exit-code', 1, $exitCode),
+        ]);
+        $storage->files[$prefix . 'deploy-result.json'] = \Ops\DeployResultV1::canonicalJson(
+            \Ops\DeployResultV1::create($outcome, $exitCode),
+        );
+        $this->addPassedPredeployAuthority($storage);
+        return $storage;
+    }
+
+    private function addPassedPredeployAuthority(RecordingHostRunnerStorage $storage): void
+    {
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $request = $this->fixture()['request'];
+        $storage->files[$prefix . 'predeploy-evidence.json'] = DeploymentHostRunnerContractV1::encodeFile([
+            'schema' => \Ops\DeploymentEvidenceAuthorityV1::PREDEPLOY_ASSEMBLY_SCHEMA,
+            'status' => 'passed',
+            'exit_code' => 0,
+            'reason' => 'ok',
+            'sections' => $this->passedPredeploySections($request),
+        ]);
+        $storage->files[$prefix . 'orchestrator-start.json'] = DeploymentHostRunnerContractV1::encodeFile([
+            'schema' => \Ops\DeploymentEvidenceAuthorityV1::ORCHESTRATOR_START_SCHEMA,
+            'run_id' => self::fixtureRunId(),
+            'started_at_utc' => '2026-08-12T10:00:00Z',
+            'boot_id' => self::BOOT,
+            'monotonic_ns' => 1_000_000_000,
+        ]);
+    }
+
+    /** @param array<string,mixed> $request @return array<string,mixed> */
+    private function passedPredeploySections(array $request): array
+    {
+        $sha = str_repeat('b', 64);
+        $counts = array_fill_keys(\Ops\DeploymentContractV1::TRAFFIC_COUNT_KEYS, 0);
+        $counts['documented_health'] = 1;
+        $counts['lines_seen'] = 1;
+        $counts['lines_in_window'] = 1;
+        $counts['total'] = 1;
+        return [
+            'expected_commit' => [
+                'expected' => $request['expected_commit'],
+                'observed' => $request['expected_commit'],
+                'verified' => true,
+            ],
+            'traffic_gate' => [
+                'status' => 'passed', 'report_sha256' => $sha, 'schema' => 'traffic_gate.v1',
+                'producer_sha256' => $sha, 'policy_version' => 'traffic_gate_policy.v1',
+                'catalog_version' => '2026-08-09.1', 'purpose' => 'deploy', 'mode' => 'normal',
+                'window_start_epoch' => 1, 'window_end_epoch' => 91, 'window_seconds' => 90,
+                'log_set_sha256' => $sha, 'rotation_complete' => true, 'parse_complete' => true,
+                'evidence_complete' => true, 'decision' => 'allow', 'exit_code' => 0, 'counts' => $counts,
+            ],
+            'dump' => [
+                'status' => 'passed', 'policy' => \Ops\DeploymentContractV1::DUMP_POLICY,
+                'age_seconds' => 60, 'max_age_seconds' => 14400, 'sha256' => $sha,
+                'sha256_verified' => true, 'gzip_verified' => true, 'restore_verified' => true,
+            ],
+            'capacity' => [
+                'status' => 'passed', 'available_bytes' => 8_000_000_000,
+                'projected_required_bytes' => 1_000_000_000, 'available_inodes' => 8_000_000,
+                'stage_inode_count' => 999_904, 'restore_inode_count' => 32, 'inode_headroom' => 64,
+                'projected_required_inodes' => 1_000_000, 'observed_percent' => 81,
+                'projected_percent' => 84,
+                'max_used_percent' => \Ops\DeploymentContractV1::MAX_CAPACITY_USED_PERCENT,
+                'passed' => true,
+            ],
+            'artifact' => [
+                'status' => 'passed', 'expectation' => \Ops\DeploymentContractV1::ARTIFACT_EXPECTATION,
+                'local_sha256' => $sha, 'remote_sha256' => $sha, 'manifest_sha256' => $sha,
+                'host_script_sha256' => $sha, 'artifact_script_sha256' => $sha, 'verified' => true,
+            ],
+        ];
+    }
+
+    /** @return array{RecordingHostRunnerStorage,array<string,string>} */
+    private function successfulStoppedDeployStorage(): array
+    {
+        $durable = $this->reservationPersistenceFixture();
+        $bundle = $this->fixture();
+        $storage = new RecordingHostRunnerStorage();
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $this->seedDeployAdmissionAuthority($storage);
+        $storage->files[$prefix . 'events.jsonl'] = $durable['events_bytes'];
+        $storage->files['active-run.json'] = $durable['claim_bytes'];
+        $state = DeploymentHostRunnerContractV1::decodeState($durable['state_bytes']);
+        $state['deploy']['unit_state'] = 'exited';
+        $state['deploy']['observed_exit_code'] = 0;
+        $state['deploy']['unit_invocation_id'] = str_repeat('d', 32);
+        $binding = $bundle['binding'];
+        $binding['binding_state'] = 'observed';
+        $binding['unit_invocation_id'] = str_repeat('d', 32);
+        $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
+        $durable['state_bytes'] = $storage->files[$prefix . 'state.json'];
+        $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
+        $storage->files[$prefix . 'deploy-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
+            'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
+            'manager_boot_id' => self::BOOT,
+            'systemctl_show' => $this->loadedShow($bundle['launch'], 'active', 'exited', 'success', 1, 0),
+        ]);
+        $storage->files[$prefix . 'deploy-result.json'] = \Ops\DeployResultV1::canonicalJson(
+            \Ops\DeployResultV1::create('succeeded', 0),
+        );
+        return [$storage, $durable];
+    }
+
     private static function fixtureRunId(): string
     {
         return '018f6f52-4c87-4d4e-8b19-6a66e6e1af25';
@@ -1553,6 +1922,24 @@ final class FixedHostRunnerClock implements \Ops\HostRunnerClock
 {
     public function __construct(private readonly string $now) {}
     public function nowUtc(): string { return $this->now; }
+}
+
+final class FixedTerminalClock implements \Ops\HostRunnerOrchestratorClock
+{
+    public int $nowCalls = 0;
+    public function nowUtc(): string { $this->nowCalls++; return '2026-08-12T10:00:20Z'; }
+    public function bootId(): string { return 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'; }
+    public function monotonicNs(): int { return 21_000_000_000; }
+}
+
+final class NotObservedTimingPin implements \Ops\HostRunnerTimingPin
+{
+    public int $calls = 0;
+    public function pin(string $timingRunId, string $runId): array
+    {
+        $this->calls++;
+        return ['status' => 'not_observed', 'bytes' => '', 'sha256' => null];
+    }
 }
 
 final class ScriptedBootReader implements \Ops\HostRunnerBootReader

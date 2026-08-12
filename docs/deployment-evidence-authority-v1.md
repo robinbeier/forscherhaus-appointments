@@ -132,3 +132,8 @@ Orchestrator timing starts durably before the intent. On the same boot,
 monotonic time supplies the duration for successful and failed terminals. A
 boot change forbids success; failed/manual recovery uses ordered UTC duration
 in the existing schema and never claims cross-boot monotonic continuity.
+Before publishing the child observation or terminal evidence, the Core pins a
+canonical run-local `orchestrator-finish.json` containing the finish UTC, boot
+ID, and monotonic sample. Exact retries consume that immutable record, so a
+crash after any later durability step cannot substitute a newer clock sample
+or change the terminal evidence bytes.
