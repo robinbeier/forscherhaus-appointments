@@ -574,11 +574,12 @@ final class DeploymentEvidenceAuthorityV1
         self::assertPositiveInt($archiveSizeBytes, 'artifact observed archive size');
         self::assertSha256($hostDeployScriptSha256, 'artifact observed host deploy script sha256');
         self::assertSha256($artifactDeployScriptSha256, 'artifact observed deploy script sha256');
-        if ($record['archive']['size_bytes'] !== $archiveSizeBytes) {
+        $archiveDigestMatches = hash_equals($record['archive']['sha256'], $archiveSha256);
+        if ($record['archive']['size_bytes'] !== $archiveSizeBytes && $archiveDigestMatches) {
             throw new RuntimeException('artifact archive size cannot be represented by deployment evidence v1');
         }
         if (
-            !hash_equals($record['archive']['sha256'], $archiveSha256) ||
+            !$archiveDigestMatches ||
             !hash_equals($record['source']['deploy_ea_sha256'], $hostDeployScriptSha256) ||
             !hash_equals($record['source']['deploy_ea_sha256'], $artifactDeployScriptSha256)
         ) {

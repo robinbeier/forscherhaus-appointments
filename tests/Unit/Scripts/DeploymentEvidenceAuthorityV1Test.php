@@ -1163,6 +1163,74 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         }
     }
 
+    public function testArchiveSizeAndDigestDriftBecomesArtifactFailureWithoutAcceptingContradictorySize(): void
+    {
+        $trafficBytes = $this->trafficReportBytes('allow', 0);
+        $traffic = new TrafficObservationV1(
+            $trafficBytes,
+            hash('sha256', $trafficBytes),
+            self::SHA,
+            '2026-08-09.1',
+            1,
+            91,
+        );
+        $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
+        $drifted = new BuildVerifiedSourcesV1(
+            $provenanceBytes,
+            hash('sha256', $provenanceBytes),
+            self::RELEASE_ID,
+            str_repeat('c', 64),
+            123457,
+            self::SHA,
+            self::SHA,
+            1234,
+            2000,
+            400_000_000,
+            800_000_000,
+        );
+        $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+            $this->passedProviderWithTraffic(
+                $traffic,
+                artifact: new ArtifactObservationV1($drifted, null, null, null, null, null),
+            ),
+            self::RUN_ID,
+            self::SHA,
+            self::RELEASE_ID,
+            self::COMMIT,
+            'normal',
+        );
+        self::assertSame(24, $assembly['exit_code']);
+        self::assertSame('failed', $assembly['sections']['artifact']['status']);
+        self::assertSame(self::SHA, $assembly['sections']['artifact']['local_sha256']);
+        self::assertSame(str_repeat('c', 64), $assembly['sections']['artifact']['remote_sha256']);
+
+        $contradictory = new BuildVerifiedSourcesV1(
+            $provenanceBytes,
+            hash('sha256', $provenanceBytes),
+            self::RELEASE_ID,
+            self::SHA,
+            123457,
+            self::SHA,
+            self::SHA,
+            1234,
+            2000,
+            400_000_000,
+            800_000_000,
+        );
+        $this->expectException(RuntimeException::class);
+        DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+            $this->passedProviderWithTraffic(
+                $traffic,
+                artifact: new ArtifactObservationV1($contradictory, null, null, null, null, null),
+            ),
+            self::RUN_ID,
+            self::SHA,
+            self::RELEASE_ID,
+            self::COMMIT,
+            'normal',
+        );
+    }
+
     public function testAuthoritativeTimingRequiresCanonicalFinalLineFeed(): void
     {
         $bytes = $this->timingBytes(0);
