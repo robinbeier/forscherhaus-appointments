@@ -2212,6 +2212,7 @@ final class DeploymentHostRunnerContractV1
             'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
             '/usr/bin/systemd-run',
             '--quiet',
+            '--expand-environment=no',
             '--unit=' . $launch['unit_name'],
         ];
         foreach (self::unitProperties($launch['action'], $launchSha) as $name => $value) {

@@ -700,7 +700,10 @@ self-asserted final state.
 
 Both `systemd-run` and `systemctl` controller processes use the same explicit
 empty/fixed environment; SSH, sudo, locale, D-Bus, or other caller variables
-are never inherited. Loaded observation parses the exact bounded
+are never inherited. `systemd-run` additionally receives
+`--expand-environment=no` before the child separator, so dollar expressions in
+the already validated and hashed child arguments remain literal rather than
+being expanded from the service manager environment. Loaded observation parses the exact bounded
 `systemctl show` field set once, rejecting missing, duplicate, unknown,
 noncanonical, or contradictory fields. It verifies unit ID, Description,
 Transient flag, all fixed properties, manager boot, and the immutable

@@ -444,6 +444,30 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 $state,
             ),
         );
+
+        $literalDollarInput = $this->deployExecutionInput();
+        $literalDollarInput['parameters']['healthz_token']['path'] = '/etc/fh/${FH_HEALTHZ_TOKEN}.token';
+        $literalDollarLaunch = DeploymentHostRunnerContractV1::createSystemdLaunch(
+            $literalDollarInput,
+            $this->deployRequest(),
+            null,
+            "#!/bin/bash\n",
+            static fn(): string => str_repeat("\xee", 32),
+        );
+        $literalDollarArgv = DeploymentHostRunnerContractV1::systemdRunArgv(
+            $literalDollarLaunch,
+            $this->unitBindingForLaunch($literalDollarLaunch, 'reserved'),
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc\n",
+            $literalDollarInput,
+            $this->deployRequest(),
+            null,
+            "#!/bin/bash\n",
+        );
+        self::assertContains('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $literalDollarArgv);
+        self::assertLessThan(
+            array_search('--', $literalDollarArgv, true),
+            array_search('--expand-environment=no', $literalDollarArgv, true),
+        );
         self::assertSame(
             'failed_post_switch_rollback_failed',
             DeploymentHostRunnerContractV1::postGateDisposition(
@@ -1908,6 +1932,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
                 '/usr/bin/systemd-run',
                 '--quiet',
+                '--expand-environment=no',
                 '--unit=' . $launch['unit_name'],
                 '--property=Type=exec',
                 '--property=RemainAfterExit=yes',
