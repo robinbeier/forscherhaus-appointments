@@ -9,6 +9,110 @@ use RuntimeException;
 final class ReleaseArtifactValidator
 {
     /**
+     * Generated vendor files emitted by the gulp `vendor` task. JavaScript and
+     * stylesheet outputs are derived from the exact committed source tree so a
+     * newly added page/component cannot silently disappear from a release.
+     *
+     * @return list<string>
+     */
+    public static function generatedVendorPaths(): array
+    {
+        return [
+            'assets/vendor/@fortawesome-fontawesome-free/fontawesome.min.js',
+            'assets/vendor/@fortawesome-fontawesome-free/solid.min.js',
+            'assets/vendor/@popperjs-core/popper.min.js',
+            'assets/vendor/bootstrap/bootstrap.min.css',
+            'assets/vendor/bootstrap/bootstrap.min.js',
+            'assets/vendor/chart.js/chart.umd.min.js',
+            'assets/vendor/chartjs-chart-matrix/chartjs-chart-matrix.min.js',
+            'assets/vendor/cookieconsent/cookieconsent.min.css',
+            'assets/vendor/cookieconsent/cookieconsent.min.js',
+            'assets/vendor/flatpickr/flatpickr.min.css',
+            'assets/vendor/flatpickr/flatpickr.min.js',
+            'assets/vendor/flatpickr/material_green.min.css',
+            'assets/vendor/fullcalendar/index.global.min.js',
+            'assets/vendor/fullcalendar-moment/index.global.min.js',
+            'assets/vendor/html2canvas/html2canvas.min.js',
+            'assets/vendor/jquery/jquery.min.js',
+            'assets/vendor/jquery-jeditable/jquery.jeditable.min.js',
+            'assets/vendor/jspdf/jspdf.umd.min.js',
+            'assets/vendor/moment/moment.min.js',
+            'assets/vendor/moment-timezone/moment-timezone-with-data.min.js',
+            'assets/vendor/qrcode/qrcode.min.js',
+            'assets/vendor/select2/select2.min.css',
+            'assets/vendor/select2/select2.min.js',
+            'assets/vendor/tippy.js/tippy-bundle.umd.min.js',
+            'assets/vendor/trumbowyg/trumbowyg.min.css',
+            'assets/vendor/trumbowyg/trumbowyg.min.js',
+            'assets/vendor/trumbowyg/ui/icons.svg',
+        ];
+    }
+
+    /**
+     * @param iterable<string> $sourcePaths
+     * @return list<string>
+     */
+    public static function generatedRuntimeAssetPaths(iterable $sourcePaths): array
+    {
+        $paths = array_fill_keys(self::generatedVendorPaths(), true);
+
+        foreach ($sourcePaths as $sourcePath) {
+            $sourcePath = self::normalizePath($sourcePath);
+
+            if (
+                str_starts_with($sourcePath, 'assets/js/') &&
+                str_ends_with($sourcePath, '.js') &&
+                !str_ends_with($sourcePath, '.min.js')
+            ) {
+                $paths[substr($sourcePath, 0, -3) . '.min.js'] = true;
+            }
+
+            if (str_starts_with($sourcePath, 'assets/css/') && str_ends_with($sourcePath, '.scss')) {
+                $base = substr($sourcePath, 0, -5);
+                $paths[$base . '.css'] = true;
+                $paths[$base . '.min.css'] = true;
+            }
+        }
+
+        $paths = array_keys($paths);
+        sort($paths, SORT_STRING);
+
+        return $paths;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function generatedRuntimeAssetPathsForDirectory(string $root): array
+    {
+        $sourcePaths = [];
+        $normalizedRoot = rtrim($root, '/\\');
+
+        foreach (['assets/js', 'assets/css'] as $relativeRoot) {
+            $absoluteRoot = $normalizedRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeRoot);
+
+            if (!is_dir($absoluteRoot) || is_link($absoluteRoot)) {
+                throw new RuntimeException('Release artifact generated-asset source tree is missing or unsafe: ' . $relativeRoot);
+            }
+
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($absoluteRoot, \FilesystemIterator::SKIP_DOTS),
+            );
+
+            foreach ($iterator as $entry) {
+                if (!$entry->isFile() || $entry->isLink()) {
+                    continue;
+                }
+
+                $absolutePath = $entry->getPathname();
+                $sourcePaths[] = str_replace(DIRECTORY_SEPARATOR, '/', substr($absolutePath, strlen($normalizedRoot) + 1));
+            }
+        }
+
+        return self::generatedRuntimeAssetPaths($sourcePaths);
+    }
+
+    /**
      * Keep this list intentionally narrow and production-critical:
      * booking, dashboard, shared runtime shell, and deploy tooling.
      *
@@ -105,6 +209,7 @@ final class ReleaseArtifactValidator
      */
     public static function missingArchivePaths(iterable $entries): array
     {
+        $entries = is_array($entries) ? $entries : iterator_to_array($entries, false);
         $normalizedEntries = [];
 
         foreach ($entries as $entry) {
@@ -119,7 +224,11 @@ final class ReleaseArtifactValidator
 
         $missing = [];
 
-        foreach (self::requiredPaths() as $requiredPath) {
+        $requiredPaths = array_values(
+            array_unique(array_merge(self::requiredPaths(), self::generatedRuntimeAssetPaths($entries))),
+        );
+
+        foreach ($requiredPaths as $requiredPath) {
             if (!isset($normalizedEntries[$requiredPath])) {
                 $missing[] = $requiredPath;
             }
@@ -197,6 +306,15 @@ final class ReleaseArtifactValidator
     public static function assertDirectoryIsValid(string $root): void
     {
         $missing = self::missingDirectoryPaths($root);
+        $generatedPaths = self::generatedRuntimeAssetPathsForDirectory($root);
+
+        foreach ($generatedPaths as $generatedPath) {
+            if (!self::isRequiredDirectoryPathSafe(rtrim($root, '/\\'), $generatedPath)) {
+                $missing[] = $generatedPath;
+            }
+        }
+
+        $missing = array_values(array_unique($missing));
         $forbidden = self::forbiddenDirectoryPaths($root);
 
         if ($missing !== []) {
@@ -221,7 +339,10 @@ final class ReleaseArtifactValidator
         $entries = is_array($entries) ? $entries : iterator_to_array($entries, false);
         $missing = self::missingArchivePaths($entries);
         $forbidden = self::forbiddenArchivePaths($entries);
-        $invalidTypes = self::invalidArchivePathTypes($entryTypes);
+        $requiredPaths = array_values(
+            array_unique(array_merge(self::requiredPaths(), self::generatedRuntimeAssetPaths($entries))),
+        );
+        $invalidTypes = self::invalidArchivePathTypes($entryTypes, $requiredPaths);
 
         if ($missing !== []) {
             throw new RuntimeException(
@@ -250,11 +371,15 @@ final class ReleaseArtifactValidator
      *
      * @return list<string>
      */
-    public static function archiveTypePaths(): array
+    public static function archiveTypePaths(iterable $entries = []): array
     {
         $paths = [];
+        $entries = is_array($entries) ? $entries : iterator_to_array($entries, false);
+        $requiredPaths = array_values(
+            array_unique(array_merge(self::requiredPaths(), self::generatedRuntimeAssetPaths($entries))),
+        );
 
-        foreach (self::requiredPaths() as $requiredPath) {
+        foreach ($requiredPaths as $requiredPath) {
             $paths[$requiredPath] = true;
             $parent = dirname($requiredPath);
 
@@ -271,12 +396,24 @@ final class ReleaseArtifactValidator
      * @param array<string,list<string>> $entryTypes
      * @return list<string>
      */
-    public static function invalidArchivePathTypes(array $entryTypes): array
+    public static function invalidArchivePathTypes(array $entryTypes, ?array $requiredPaths = null): array
     {
         $invalid = [];
-        $requiredFiles = array_fill_keys(self::requiredPaths(), true);
+        $requiredPaths ??= self::requiredPaths();
+        $requiredFiles = array_fill_keys($requiredPaths, true);
+        $typePaths = [];
 
-        foreach (self::archiveTypePaths() as $path) {
+        foreach ($requiredPaths as $requiredPath) {
+            $typePaths[$requiredPath] = true;
+            $parent = dirname($requiredPath);
+
+            while ($parent !== '.' && $parent !== '') {
+                $typePaths[$parent] = true;
+                $parent = dirname($parent);
+            }
+        }
+
+        foreach (array_keys($typePaths) as $path) {
             $types = $entryTypes[$path] ?? [];
 
             if (isset($requiredFiles[$path])) {

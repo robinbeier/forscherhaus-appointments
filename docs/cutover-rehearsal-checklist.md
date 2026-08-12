@@ -153,7 +153,7 @@ Checklist:
 
 Validation:
 
-- `./build_release.sh --rel <REL> --project "$PWD" --skip-upload`
+- `./build_release.sh --rel <REL> --expected-commit "$(git rev-parse HEAD)" --project "$PWD" --skip-upload`
 - `php scripts/release-gate/validate_release_artifact.php --archive=<archive>`
 - target-host archive checksum matches local SHA256
 - target-host extracted artifact validation passes

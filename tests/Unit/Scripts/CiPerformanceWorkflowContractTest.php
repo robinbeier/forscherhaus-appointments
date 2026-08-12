@@ -21,8 +21,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
         );
 
-        self::assertSame(2, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-11T02:14:03Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(4, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-12T08:41:39Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),
@@ -166,6 +166,11 @@ class CiPerformanceWorkflowContractTest extends TestCase
             "grep -Eq '^(OK \\([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-rob444.log",
             $rob444,
         );
+
+        $rootDeployment = $this->stepRun($steps, 'ROB-442 root deployment regression tests');
+        self::assertStringContainsString('sudo php vendor/bin/phpunit', $rootDeployment);
+        self::assertStringContainsString('tests/Unit/Scripts/PinDeployTimingRootTest.php', $rootDeployment);
+        self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeployment);
 
         $diagnostics = $steps['Diagnostics (build-test database)'];
         self::assertSame('failure()', $diagnostics['if'] ?? null);

@@ -58,6 +58,7 @@ final class DeploymentHostRunnerContractV1
     private const DEPLOY_EXECUTION_PARAMETER_KEYS = [
         'release_id',
         'renderer_deploy_mode',
+        'artifact_provenance_sha256',
         'healthz_token',
         'zero_surprise_dump',
         'zero_surprise_predeploy_credentials',
@@ -110,6 +111,7 @@ final class DeploymentHostRunnerContractV1
         'unit_name',
         'properties',
         'launch_nonce',
+        'timing_run_id',
     ];
 
     private const UNIT_BINDING_KEYS = [
@@ -377,7 +379,8 @@ final class DeploymentHostRunnerContractV1
         self::assertExactKeys($input['parameters'], self::DEPLOY_EXECUTION_PARAMETER_KEYS, 'deploy parameters');
         self::assertReleaseId($input['parameters']['release_id']);
         self::assertEnum($input['parameters']['renderer_deploy_mode'], ['host', 'external'], 'renderer mode');
-        foreach (array_slice(self::DEPLOY_EXECUTION_PARAMETER_KEYS, 2) as $field) {
+        self::assertSha256($input['parameters']['artifact_provenance_sha256'], 'artifact_provenance_sha256');
+        foreach (array_slice(self::DEPLOY_EXECUTION_PARAMETER_KEYS, 3) as $field) {
             self::assertProtectedFileReference($input['parameters'][$field], $field);
         }
         if (
@@ -503,8 +506,12 @@ final class DeploymentHostRunnerContractV1
      * @param ?array<string,mixed> $originalDeployRequest
      * @return list<string>
      */
-    public static function executionArgv(array $input, array $request, ?array $originalDeployRequest = null): array
-    {
+    public static function executionArgv(
+        array $input,
+        array $request,
+        ?array $originalDeployRequest = null,
+        ?string $timingRunId = null,
+    ): array {
         self::validateBoundExecutionInput($request, $input, $originalDeployRequest);
         $argv = [
             '/usr/bin/env',
@@ -516,6 +523,9 @@ final class DeploymentHostRunnerContractV1
             '/root/deploy_ea.sh',
         ];
         if ($input['action'] === 'rollback') {
+            if ($timingRunId !== null) {
+                throw new RuntimeException('rollback execution cannot carry deploy timing identity');
+            }
             return [
                 ...$argv,
                 '--runtime-config-rollback',
@@ -529,6 +539,7 @@ final class DeploymentHostRunnerContractV1
                 'www-data',
             ];
         }
+        self::assertUuidV4($timingRunId, 'timing_run_id');
         $parameters = $input['parameters'];
         $pinnedReference = static function (string $field) use ($input): string {
             $leaf = self::PINNED_DEPLOY_REFERENCE_LEAVES[$field];
@@ -544,6 +555,8 @@ final class DeploymentHostRunnerContractV1
             $parameters['release_id'],
             '--renderer-deploy-mode',
             $parameters['renderer_deploy_mode'],
+            '--timing-run-id',
+            $timingRunId,
             '--healthz-token-file',
             $pinnedReference('healthz_token'),
             '--zero-surprise-dump-file',
@@ -1738,7 +1751,6 @@ final class DeploymentHostRunnerContractV1
         $intentSha256 = $executionInput['intent_sha256'];
         $requestSha256 = self::fileSha256(self::encodeFile($request));
         $executionInputSha256 = self::fileSha256(self::encodeExecutionInput($executionInput));
-        $argvSha256 = self::argvSha256(self::executionArgv($executionInput, $request, $originalDeployRequest));
         if (
             $deployScriptBytes === '' ||
             strlen($deployScriptBytes) > 1_048_576 ||
@@ -1752,6 +1764,13 @@ final class DeploymentHostRunnerContractV1
             throw new RuntimeException('launch nonce generator must return 32 random bytes');
         }
         $launchNonce = bin2hex($nonceBytes);
+        $timingRunId = $action === 'deploy' ? self::uuidV4FromBytes(substr($nonceBytes, 0, 16)) : null;
+        if ($timingRunId === $runId) {
+            throw new RuntimeException('deploy timing identity must differ from the orchestrator run');
+        }
+        $argvSha256 = self::argvSha256(
+            self::executionArgv($executionInput, $request, $originalDeployRequest, $timingRunId),
+        );
         $properties = self::baseUnitProperties($action);
 
         return [
@@ -1768,6 +1787,7 @@ final class DeploymentHostRunnerContractV1
             'unit_name' => self::unitName($action, $runId, $intentSha256),
             'properties' => $properties,
             'launch_nonce' => $launchNonce,
+            'timing_run_id' => $timingRunId,
         ];
     }
 
@@ -1795,6 +1815,14 @@ final class DeploymentHostRunnerContractV1
         }
         if (hash_equals(str_repeat('0', 64), $launch['launch_nonce'])) {
             throw new RuntimeException('systemd launch nonce must not be predictable');
+        }
+        if ($launch['action'] === 'deploy') {
+            self::assertUuidV4($launch['timing_run_id'], 'timing_run_id');
+            if ($launch['timing_run_id'] === $launch['run_id']) {
+                throw new RuntimeException('deploy timing identity must differ from the orchestrator run');
+            }
+        } elseif ($launch['timing_run_id'] !== null) {
+            throw new RuntimeException('rollback launch cannot carry deploy timing identity');
         }
         self::assertSame(
             $launch['unit_name'],
@@ -2221,7 +2249,7 @@ final class DeploymentHostRunnerContractV1
         self::validateSystemdLaunch($launch);
         self::validateUnitBinding($binding);
         self::validateBoundExecutionInput($request, $executionInput, $originalDeployRequest);
-        $childArgv = self::executionArgv($executionInput, $request, $originalDeployRequest);
+        $childArgv = self::executionArgv($executionInput, $request, $originalDeployRequest, $launch['timing_run_id']);
         $launchSha = self::fileSha256(self::encodeFile($launch));
         $currentBootId = self::parseManagerBootId($managerBootIdBytes);
         if (
@@ -3228,6 +3256,24 @@ final class DeploymentHostRunnerContractV1
         ) {
             throw new RuntimeException($field . ' must be a lowercase UUIDv4');
         }
+    }
+
+    private static function uuidV4FromBytes(string $bytes): string
+    {
+        if (strlen($bytes) !== 16) {
+            throw new RuntimeException('timing UUID source is invalid');
+        }
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        $hex = bin2hex($bytes);
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20),
+        );
     }
 
     private static function assertUuid(mixed $value, string $field): void
