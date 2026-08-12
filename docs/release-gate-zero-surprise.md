@@ -104,6 +104,42 @@ Explicit overrides remain supported:
 - `--max-pdf-duration-ms`
 - `--timezone`
 
+## Deterministic replay-image cleanup
+
+Every replay uses a unique `zs-...` Compose project. After the replay—on both
+the success and failure path—the runner first executes the existing
+`docker compose down -v --remove-orphans` cleanup and then removes only locally
+built images that are proven to belong to that exact project.
+
+The image cleanup is fail-closed:
+
+- candidates come only from the exact `com.docker.compose.project` label
+- only the expected `php-fpm` and `pdf-renderer` services are accepted
+- each candidate must have exactly its project-local `:latest` tag; its only
+  optional repository digest must use the same project-local repository name
+  and a closed full SHA-256 digest
+- all containers are inspected by full ID before every deletion; any reference
+  blocks the cleanup
+- the complete image snapshot is repeated immediately before each deletion
+- deletion uses the full image digest without `--force`; image/system prune is
+  never used
+- a final inventory must contain no image for the replay project
+
+This also protects active and rollback renderer/Kuma images, foreign projects,
+and any multiply tagged or otherwise ambiguous image. The report contains only
+aggregate counts, virtual candidate bytes, free bytes before/after, and the
+actually observed free-space delta. Image IDs, tags, Docker paths, and raw
+Docker diagnostics are not written to the report.
+
+`compose_cleanup` and `image_cleanup` are mandatory report steps. Failure of
+either is a runtime failure (exit `2`), even when all replay assertions passed.
+An exact retry after a completed cleanup is idempotent and reports zero
+candidates.
+
+Repository delivery does not activate or run a production cleanup. Any first
+production execution remains a separate live-write gate with the normal
+read-only inventory and post-change validation.
+
 ## Deploy flow
 
 Before a deploy even reaches the zero-surprise replay, the release process now
