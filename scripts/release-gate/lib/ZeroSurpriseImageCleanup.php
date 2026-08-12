@@ -13,6 +13,38 @@ final class ZeroSurpriseImageCleanup
     private const PROJECT_LABEL = 'com.docker.compose.project';
     private const SERVICE_LABEL = 'com.docker.compose.service';
     private const ALLOWED_SERVICES = ['pdf-renderer', 'php-fpm'];
+    private const FAILURE_REASONS = [
+        'container_inspect_failed',
+        'container_inspect_invalid',
+        'container_inventory_failed',
+        'container_inventory_invalid',
+        'docker_command_invalid_result',
+        'docker_storage_measurement_failed',
+        'docker_storage_root_changed',
+        'docker_storage_root_invalid',
+        'docker_storage_root_unavailable',
+        'duplicate_image_identity',
+        'image_delete_failed',
+        'image_delete_unverified',
+        'image_delete_verification_failed',
+        'image_digest_mismatch',
+        'image_digests_invalid',
+        'image_has_container_reference',
+        'image_identity_mismatch',
+        'image_inspect_failed',
+        'image_inspect_invalid',
+        'image_inventory_failed',
+        'image_inventory_invalid',
+        'image_project_mismatch',
+        'image_service_mismatch',
+        'image_size_invalid',
+        'image_size_overflow',
+        'image_snapshot_changed',
+        'image_tag_mismatch',
+        'image_tags_invalid',
+        'invalid_compose_project',
+        'residual_project_image',
+    ];
 
     private readonly Closure $runner;
 
@@ -455,6 +487,6 @@ final class ZeroSurpriseImageCleanup
     {
         $reason = $error->getMessage();
 
-        return preg_match('/^[a-z][a-z0-9_]{2,63}$/D', $reason) === 1 ? $reason : 'cleanup_internal_error';
+        return in_array($reason, self::FAILURE_REASONS, true) ? $reason : 'cleanup_internal_error';
     }
 }

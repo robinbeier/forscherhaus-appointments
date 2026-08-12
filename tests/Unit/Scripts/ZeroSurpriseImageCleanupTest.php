@@ -254,6 +254,19 @@ final class ZeroSurpriseImageCleanupTest extends TestCase
         self::assertStringNotContainsString('secret-customer', json_encode($result, JSON_THROW_ON_ERROR));
     }
 
+    public function testUnexpectedSnakeCaseExceptionCannotBecomeAReportedReason(): void
+    {
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds): array {
+            throw new \RuntimeException('secret_token');
+        };
+        $cleanup = new ZeroSurpriseImageCleanup($runner, static fn(string $path): int => 2_000);
+
+        $result = $cleanup->cleanup(self::PROJECT, '/repo');
+
+        self::assertSame('cleanup_internal_error', $result['details']['reason']);
+        self::assertStringNotContainsString('secret_token', json_encode($result, JSON_THROW_ON_ERROR));
+    }
+
     /**
      * @return array<string, mixed>
      */
