@@ -27,6 +27,24 @@ final class ValidateDeployTimingSampleTest extends TestCase
         self::assertSame("/var/lib/fh-deploy-timing\n", $result['stdout']);
     }
 
+    public function testTimingDurabilityHelperFailsClosedForAnUnresolvableConfiguredDirectory(): void
+    {
+        $script = <<<'BASH'
+        source "$1"
+        set +e
+        DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=1
+        DEPLOY_TIMING_FILE="/definitely-missing-timing-root/018f6f52-4c87-4d4e-8b19-6a66e6e1af25.jsonl"
+        deploy_timing_fsync_authoritative_source
+        builtin printf 'status=%s\n' "$?"
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', dirname(__DIR__, 3) . '/deploy_ea.sh']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame("status=1\n", $result['stdout']);
+        self::assertSame('', $result['stderr']);
+    }
+
     public function testValidSuccessfulSampleIsAccepted(): void
     {
         $result = DeployTimingSampleValidator::validateLines($this->validLines());
@@ -423,6 +441,7 @@ final class ValidateDeployTimingSampleTest extends TestCase
         deploy_timing_transition switch
         deploy_timing_transition postdeploy_validation
         deploy_timing_finish ok succeeded 0
+        builtin printf 'DEPLOY_TIMING_DURABLE=%s\n' "$DEPLOY_TIMING_DURABLE"
         BASH;
 
         try {
@@ -435,6 +454,7 @@ final class ValidateDeployTimingSampleTest extends TestCase
                 $directory,
             ]);
             self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString("DEPLOY_TIMING_DURABLE=1\n", $result['stdout']);
 
             $files = glob($directory . '/*.jsonl');
             self::assertIsArray($files);

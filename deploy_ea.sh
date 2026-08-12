@@ -254,7 +254,7 @@ deploy_timing_fsync_authoritative_source() {
   local file="${DEPLOY_TIMING_FILE:-}"
 
   [[ "${DEPLOY_TIMING_AUTHORITATIVE_ACTIVE:-0}" == "1" && -n "$file" ]] || return 1
-  /usr/bin/python3 -I -B /dev/fd/3 "$file" 3<<'PY'
+  /usr/bin/python3 -I -B - "$file" <<'PY'
 import os
 import re
 import stat
@@ -262,43 +262,69 @@ import sys
 
 try:
     path = sys.argv[1] if len(sys.argv) == 2 else ''
-    prefix = '/var/lib/fh-deploy-timing/'
-    leaf = path[len(prefix):] if path.startswith(prefix) else ''
+    if not path.startswith('/') or os.path.normpath(path) != path:
+        raise OSError('invalid timing authority')
+    components = path[1:].split('/')
+    if len(components) < 2 or any(component in ('', '.', '..') for component in components):
+        raise OSError('invalid timing authority')
+    leaf = components.pop()
     if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jsonl', leaf):
         raise OSError('invalid timing authority')
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    directory_identity = lambda s: (s.st_dev, s.st_ino, stat.S_IMODE(s.st_mode), s.st_uid, s.st_nlink)
+    opened_directories = []
     root = os.open('/', flags)
+    directory_fds = [root]
     try:
-        var = os.open('var', flags, dir_fd=root)
-        lib = os.open('lib', flags, dir_fd=var)
-        directory = os.open('fh-deploy-timing', flags, dir_fd=lib)
+        root_stat = os.fstat(root)
+        if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != 0 or stat.S_IMODE(root_stat.st_mode) & 0o022:
+            raise OSError('unsafe timing ancestor')
+        parent = root
+        for index, component in enumerate(components):
+            before = os.stat(component, dir_fd=parent, follow_symlinks=False)
+            current = os.open(component, flags, dir_fd=parent)
+            directory_fds.append(current)
+            opened = os.fstat(current)
+            if directory_identity(before) != directory_identity(opened):
+                raise OSError('timing ancestor identity changed')
+            mode = stat.S_IMODE(opened.st_mode)
+            if not stat.S_ISDIR(opened.st_mode) or opened.st_uid != 0 or mode & 0o022:
+                raise OSError('unsafe timing ancestor')
+            if index == len(components) - 1 and mode != 0o700:
+                raise OSError('unsafe timing directory')
+            opened_directories.append((parent, component, current, directory_identity(opened)))
+            parent = current
+        directory = parent
+        before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+        file_fd = os.open(leaf, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
         try:
-            before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
-            file_fd = os.open(leaf, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-            try:
-                opened = os.fstat(file_fd)
-                identity = lambda s: (s.st_dev, s.st_ino, stat.S_IMODE(s.st_mode), s.st_uid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
-                if identity(before) != identity(opened):
-                    raise OSError('identity changed')
-                if not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1:
-                    raise OSError('unsafe timing file')
-                os.fsync(file_fd)
-                after = os.fstat(file_fd)
-                post = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
-                if identity(opened) != identity(after) or identity(after) != identity(post):
-                    raise OSError('timing file changed')
-                os.fsync(directory)
-            finally:
-                os.close(file_fd)
+            opened = os.fstat(file_fd)
+            identity = lambda s: (s.st_dev, s.st_ino, stat.S_IMODE(s.st_mode), s.st_uid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+            if identity(before) != identity(opened):
+                raise OSError('identity changed')
+            if not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1:
+                raise OSError('unsafe timing file')
+            os.fsync(file_fd)
+            after = os.fstat(file_fd)
+            post = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+            if identity(opened) != identity(after) or identity(after) != identity(post):
+                raise OSError('timing file changed')
+            os.fsync(directory)
+            for parent_fd, component, opened_fd, expected in opened_directories:
+                opened_now = os.fstat(opened_fd)
+                linked_now = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+                if directory_identity(opened_now) != expected or directory_identity(linked_now) != expected:
+                    raise OSError('timing ancestor changed')
         finally:
-            os.close(directory)
-            os.close(lib)
-            os.close(var)
+            os.close(file_fd)
     finally:
-        os.close(root)
+        for fd in reversed(directory_fds):
+            os.close(fd)
 except (OSError, ValueError, TypeError):
     raise SystemExit(1)
 PY
+  local fsync_status=$?
+  return "$fsync_status"
 }
 
 deploy_timing_disable() {
