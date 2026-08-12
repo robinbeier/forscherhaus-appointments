@@ -477,6 +477,8 @@ jobs:
             tests/Unit/Scripts/DeployRuntimeConfigPermissionsTest.php \
             tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
             tests/Unit/Scripts/GateCliSupportTest.php \
+            tests/Unit/Scripts/PinDeployTimingRootTest.php \
+            tests/Unit/Scripts/PublishReleasePairRootTest.php \
             tests/Unit/Scripts/ReleaseArtifactValidatorTest.php
       - name: Diagnostics (build-test database)
         if: failure()

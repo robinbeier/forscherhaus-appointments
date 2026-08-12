@@ -80,6 +80,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'ea_20260811',
                 '--renderer-deploy-mode',
                 'host',
+                '--timing-run-id',
+                '128f6f52-4c87-4d4e-8b19-6a66e6e1af25',
                 '--healthz-token-file',
                 '/etc/fh/healthz.token',
                 '--zero-surprise-dump-file',
@@ -93,7 +95,12 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 '--result-file',
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-result.json',
             ],
-            DeploymentHostRunnerContractV1::executionArgv($input, $this->deployRequest()),
+            DeploymentHostRunnerContractV1::executionArgv(
+                $input,
+                $this->deployRequest(),
+                null,
+                '128f6f52-4c87-4d4e-8b19-6a66e6e1af25',
+            ),
         );
     }
 
@@ -2196,6 +2203,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $childArgv = DeploymentHostRunnerContractV1::executionArgv(
             $this->deployExecutionInput(),
             $this->deployRequest(),
+            null,
+            $launch['timing_run_id'],
         );
         $description =
             'fh-deployment-host-runner-v1-' . hash('sha256', "deployment_host_systemd_description.v1\0" . $launchSha);
@@ -4431,6 +4440,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'parameters' => [
                 'release_id' => 'ea_20260811',
                 'renderer_deploy_mode' => 'host',
+                'artifact_provenance_sha256' => self::SHA,
                 'healthz_token' => $file('/etc/fh/healthz.token'),
                 'zero_surprise_dump' => $file('/root/backups/predeploy.sql.gz'),
                 'zero_surprise_predeploy_credentials' => $file('/etc/fh/predeploy.ini'),
@@ -5003,6 +5013,11 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'status' => 'passed',
                 'available_bytes' => 8_000_000_000,
                 'projected_required_bytes' => 1_000_000_000,
+                'available_inodes' => 8_000_000,
+                'stage_inode_count' => 999_904,
+                'restore_inode_count' => 32,
+                'inode_headroom' => 64,
+                'projected_required_inodes' => 1_000_000,
                 'observed_percent' => 81,
                 'projected_percent' => 84,
                 'max_used_percent' => DeploymentContractV1::MAX_CAPACITY_USED_PERCENT,

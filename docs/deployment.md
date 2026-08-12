@@ -27,20 +27,20 @@ repo checkout -> release archive -> upload -> staged extract -> predeploy gates 
 Build from a clean, validated repository checkout:
 
 ```bash
-./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" --skip-upload
+./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" --skip-upload
 ```
 
 For local hardening or rebuild rehearsal work, keep the build on the Node 24
 tooling target and disable upload explicitly:
 
 ```bash
-mise x node@24 -- ./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" --skip-upload
+mise x node@24 -- ./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" --skip-upload
 ```
 
 For the current production host upload path:
 
 ```bash
-./build_release.sh --rel ea_YYYYMMDD_HHMM --project "$PWD" \
+./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" \
   --upload root@188.245.244.123 --remote-dir /root/releases
 ```
 
@@ -48,18 +48,21 @@ The builder:
 
 - refreshes frontend release assets with `npm run assets:refresh`
 - fails if generated frontend assets drift
-- copies only release-relevant files into a temporary stage
+- derives the exhaustive generated-runtime manifest from the exact committed
+  JS/SCSS source tree and the closed vendor-output contract, then copies and
+  validates every listed CSS/JS/vendor file in a temporary stage
 - includes the zero-surprise Docker assets required for predeploy replay
 - installs production Composer dependencies into the stage
 - validates the staged tree and final archive with
   `scripts/release-gate/validate_release_artifact.php`
 - verifies upload checksum and required archive entries when upload is enabled
 
-Local release archives are written to `/tmp/<REL>.tar.gz` and include the
-staged application config. Treat local archives and `/tmp/build_ea_<REL>.log`
-as sensitive operator artifacts: do not commit, attach, or paste their contents,
-and remove them after recording validation evidence unless they are intentionally
-retained for a follow-up rehearsal.
+Local release archives and provenance sidecars are written below the randomized
+`/tmp/<REL>.output.XXXXXX/` directory and include the staged application config.
+Treat that output directory and `/tmp/build_ea_<REL>.log` as sensitive operator
+artifacts: do not commit, attach, or paste their contents, and remove them after
+recording validation evidence unless they are intentionally retained for a
+follow-up rehearsal.
 
 ## Deploy
 
@@ -137,7 +140,12 @@ Normal deploy execution exposes a stable result seam for the host-side caller:
 
 For a machine-readable result candidate, the root caller passes
 `--result-file` with an exact absolute path beneath an existing canonical
-root-owned mode-`0700` directory. The leaf must not exist; stale regular files,
+root-owned mode-`0700` directory and must also pass
+`--timing-run-id FRESH_UUIDV4`. The Host Runner generates this timing UUID
+internally, binds it into the launch record and argv hash, and never accepts it
+from the coordinator request. A direct root invocation must generate a fresh
+UUIDv4 and ensure that `/var/lib/fh-deploy-timing/<uuid>.jsonl` is absent. The
+result leaf must not exist; stale regular files,
 symlinks, hardlinks, unsafe ancestors, and noncanonical paths are hard stops and
 are never normalized or overwritten. The terminal `deploy_result.v1` receipt
 contains only the closed keys `schema`, `outcome`, and `exit_code`, uses the six
@@ -312,6 +320,12 @@ For a fresh Ubuntu LTS server, keep this deployment model:
    monitors are green after cutover.
 
 The full rebuild checklist lives in `docs/server-rebuild-runbook.md`.
+
+The release-pair publisher prepares `/root/releases` as `root:root` mode
+`0700` before upload. On a documented legacy/rebuild host where that exact
+root-owned directory still has mode `0755`, `--prepare` performs the single
+inode-bound migration to `0700`, fsyncs it, and revalidates the same directory.
+Other owners, types, symlinks, or modes are rejected unchanged.
 
 ## Required Host-Local Secrets
 

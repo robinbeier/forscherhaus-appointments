@@ -338,6 +338,28 @@ final class DeploymentContractV1
     }
 
     /**
+     * Validate the five ordered pre-deploy evidence sections without accepting
+     * them as a terminal bundle. Authority collectors use this at their closed
+     * assembly boundary; callers cannot use it to turn a failed section into a
+     * passed one because each section is still fully recomputed below.
+     *
+     * @param array<string,mixed> $sections
+     */
+    public static function validatePredeploySections(array $sections): void
+    {
+        self::assertExactKeys(
+            $sections,
+            ['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact'],
+            'predeploy evidence sections',
+        );
+        self::validateExpectedCommitEvidence($sections['expected_commit']);
+        self::validateTrafficEvidence($sections['traffic_gate']);
+        self::validateDumpEvidence($sections['dump']);
+        self::validateCapacityEvidence($sections['capacity']);
+        self::validateArtifactEvidence($sections['artifact']);
+    }
+
+    /**
      * @param list<string> $runLines
      * @param array<string,mixed> $evidence
      * @return array{run_id:string,state:string,records:int,recovery:string,evidence_sha256:string}
@@ -1158,6 +1180,11 @@ final class DeploymentContractV1
                 'status',
                 'available_bytes',
                 'projected_required_bytes',
+                'available_inodes',
+                'stage_inode_count',
+                'restore_inode_count',
+                'inode_headroom',
+                'projected_required_inodes',
                 'observed_percent',
                 'projected_percent',
                 'max_used_percent',
@@ -1173,7 +1200,17 @@ final class DeploymentContractV1
         self::assertSame($section['max_used_percent'], self::MAX_CAPACITY_USED_PERCENT, 'capacity.max_used_percent');
         if ($section['status'] === 'invalid') {
             foreach (
-                ['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent']
+                [
+                    'available_bytes',
+                    'projected_required_bytes',
+                    'available_inodes',
+                    'stage_inode_count',
+                    'restore_inode_count',
+                    'inode_headroom',
+                    'projected_required_inodes',
+                    'observed_percent',
+                    'projected_percent',
+                ]
                 as $field
             ) {
                 if ($section[$field] !== null) {
@@ -1199,7 +1236,18 @@ final class DeploymentContractV1
                 throw new RuntimeException('invalid capacity evidence cannot claim success');
             }
             foreach (
-                ['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent', 'passed']
+                [
+                    'available_bytes',
+                    'projected_required_bytes',
+                    'available_inodes',
+                    'stage_inode_count',
+                    'restore_inode_count',
+                    'inode_headroom',
+                    'projected_required_inodes',
+                    'observed_percent',
+                    'projected_percent',
+                    'passed',
+                ]
                 as $field
             ) {
                 if ($section[$field] === null) {
@@ -1208,15 +1256,43 @@ final class DeploymentContractV1
             }
             throw new RuntimeException('invalid capacity evidence must retain an unavailable measurement');
         }
-        foreach (['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent'] as $field) {
+        foreach (
+            [
+                'available_bytes',
+                'projected_required_bytes',
+                'available_inodes',
+                'stage_inode_count',
+                'restore_inode_count',
+                'inode_headroom',
+                'projected_required_inodes',
+                'observed_percent',
+                'projected_percent',
+            ] as $field
+        ) {
             self::assertNonNegativeInteger($section[$field], 'capacity.' . $field);
         }
+        if ($section['stage_inode_count'] === 0 || $section['restore_inode_count'] === 0) {
+            throw new RuntimeException('capacity inode counts must be positive');
+        }
+        self::assertSame($section['inode_headroom'], 64, 'capacity.inode_headroom');
+        if (
+            $section['stage_inode_count'] > PHP_INT_MAX - $section['restore_inode_count'] ||
+            $section['stage_inode_count'] + $section['restore_inode_count'] > PHP_INT_MAX - $section['inode_headroom']
+        ) {
+            throw new RuntimeException('capacity inode projection overflows');
+        }
+        self::assertSame(
+            $section['projected_required_inodes'],
+            $section['stage_inode_count'] + $section['restore_inode_count'] + $section['inode_headroom'],
+            'capacity.projected_required_inodes',
+        );
         if ($section['observed_percent'] > 100 || $section['projected_percent'] > 100) {
             throw new RuntimeException('capacity percentages must not exceed 100');
         }
         self::assertBoolean($section['passed'], 'capacity.passed');
         $passed =
             $section['available_bytes'] >= $section['projected_required_bytes'] &&
+            $section['available_inodes'] >= $section['projected_required_inodes'] &&
             $section['observed_percent'] < $section['max_used_percent'] &&
             $section['projected_percent'] < $section['max_used_percent'] &&
             $section['projected_percent'] >= $section['observed_percent'];

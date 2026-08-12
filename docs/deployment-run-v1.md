@@ -135,9 +135,13 @@ The future runner must normalize them into this table.
 
 ## Deploy child result candidate
 
-When normal deploy is invoked with `--result-file ABSOLUTE_PATH`,
-`deploy_ea.sh` publishes one closed, secret-free `deploy_result.v1` receipt
-candidate.
+When normal deploy is invoked with `--result-file ABSOLUTE_PATH`, it must also
+receive `--timing-run-id FRESH_UUIDV4`. The Host Runner generates the timing
+UUID internally and binds it into the launch record, fixed argv, and argv hash;
+the coordinator cannot choose it. A direct root invocation must generate a
+fresh UUIDv4 and ensure the corresponding
+`/var/lib/fh-deploy-timing/<uuid>.jsonl` leaf is absent. `deploy_ea.sh` then
+publishes one closed, secret-free `deploy_result.v1` receipt candidate.
 The object has exactly `schema`, `outcome`, and `exit_code`; it contains no
 timing, paths, commands, hosts, output, or free text. Its fixed bindings are:
 
@@ -186,8 +190,10 @@ Its sections are:
 - expected and observed commit plus exact verification result;
 - traffic-gate reference and normalized core;
 - dump age/SHA plus explicit checksum-, gzip-, and restore-verification evidence;
-- capacity available/projected bytes, observed/projected used percentages, the
-  fixed `85` percent ceiling, and a derived decision;
+- capacity available/projected bytes and inodes, the authenticated staged inode
+  count, independently observed restored-datadir inode count, fixed 64-inode
+  allowance, observed/projected used percentages, the fixed
+  `85` percent ceiling, and a derived decision;
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
 - exactly-once deploy exit and any rollback performed inside that child;
 - a separate at-most-once dedicated post-gate rollback reservation and verdict;

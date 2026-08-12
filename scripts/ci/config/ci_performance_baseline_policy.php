@@ -7,9 +7,9 @@ return [
     'minimum_samples' => 5,
     'percentile_method' => 'nearest_rank',
     'workload_contract' => [
-        'version' => 2,
-        'cohort_epoch_utc' => '2026-08-11T02:14:03Z',
-        'workflow_jobs_sha256' => 'sha256:62355c5c11f6726326acb93e7ae5269dd5aaa52a3238781205ae553808217c80',
+        'version' => 4,
+        'cohort_epoch_utc' => '2026-08-12T08:41:39Z',
+        'workflow_jobs_sha256' => 'sha256:2aec03fa253132eb1537487491dfd5f2d3e3f1a809ec59b7a44ea1e6242af729',
     ],
     'required_success_jobs' => [
         'changes',

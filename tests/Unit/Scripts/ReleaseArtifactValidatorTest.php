@@ -29,13 +29,52 @@ final class ReleaseArtifactValidatorTest extends TestCase
     public function testMissingArchivePathsDetectsFrontendAssetGap(): void
     {
         $entries = array_filter(
-            ReleaseArtifactValidator::requiredPaths(),
+            $this->completeStaticRequiredPaths(),
             static fn(string $path): bool => $path !== 'assets/vendor/jquery/jquery.min.js',
         );
 
         $missing = ReleaseArtifactValidator::missingArchivePaths($entries);
 
         self::assertSame(['assets/vendor/jquery/jquery.min.js'], $missing);
+    }
+
+    public function testGeneratedRuntimeManifestCoversEveryCommittedScriptStylesheetAndVendorOutput(): void
+    {
+        $paths = ReleaseArtifactValidator::generatedRuntimeAssetPaths([
+            'assets/js/app.js',
+            'assets/js/pages/login.js',
+            'assets/css/general.scss',
+            'assets/css/themes/default.scss',
+        ]);
+
+        foreach (
+            [
+                'assets/js/app.min.js',
+                'assets/js/pages/login.min.js',
+                'assets/css/general.css',
+                'assets/css/general.min.css',
+                'assets/css/themes/default.css',
+                'assets/css/themes/default.min.css',
+                'assets/vendor/@popperjs-core/popper.min.js',
+                'assets/vendor/bootstrap/bootstrap.min.css',
+            ] as $expectedPath
+        ) {
+            self::assertContains($expectedPath, $paths);
+        }
+    }
+
+    public function testArchiveManifestRejectsMissingGeneratedPageAssetOutsideNarrowSmokeList(): void
+    {
+        $sourcePaths = ['assets/js/pages/login.js', 'assets/css/themes/default.scss'];
+        $generatedPaths = ReleaseArtifactValidator::generatedRuntimeAssetPaths($sourcePaths);
+        $entries = array_values(
+            array_filter(
+                [...$this->completeStaticRequiredPaths(), ...$sourcePaths, ...$generatedPaths],
+                static fn(string $path): bool => $path !== 'assets/js/pages/login.min.js',
+            ),
+        );
+
+        self::assertContains('assets/js/pages/login.min.js', ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
     public function testRequiredPathsCoverCompleteProviderUiSmokeRuntimeSurface(): void
@@ -78,7 +117,9 @@ final class ReleaseArtifactValidatorTest extends TestCase
         }
 
         $missingPath = 'scripts/release-gate/playwright/provider_ui_smoke.js';
-        $entries = array_values(array_filter($requiredPaths, static fn(string $path): bool => $path !== $missingPath));
+        $entries = array_values(
+            array_filter($this->completeStaticRequiredPaths(), static fn(string $path): bool => $path !== $missingPath),
+        );
 
         self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
@@ -122,7 +163,9 @@ final class ReleaseArtifactValidatorTest extends TestCase
         }
 
         $missingPath = 'scripts/ops/prod_traffic_gate.sh';
-        $entries = array_values(array_filter($requiredPaths, static fn(string $path): bool => $path !== $missingPath));
+        $entries = array_values(
+            array_filter($this->completeStaticRequiredPaths(), static fn(string $path): bool => $path !== $missingPath),
+        );
 
         self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
@@ -203,7 +246,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
     public function testArchiveTypeValidationRejectsSymlinkAndDuplicateRequiredFiles(): void
     {
         $entryTypes = [];
-        $requiredFiles = array_fill_keys(ReleaseArtifactValidator::requiredPaths(), true);
+        $requiredFiles = array_fill_keys($this->completeStaticRequiredPaths(), true);
 
         foreach (ReleaseArtifactValidator::archiveTypePaths() as $path) {
             $entryTypes[$path] = [isset($requiredFiles[$path]) ? '-' : 'd'];
@@ -295,7 +338,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
                 $archive,
                 '-C',
                 $root,
-                ...ReleaseArtifactValidator::requiredPaths(),
+                ...$this->completeStaticRequiredPaths(),
                 'unlisted-config-alias.php',
             ]);
             self::assertSame(0, $tar['exit_code'], $tar['stderr']);
@@ -444,7 +487,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
                 $archive,
                 '-C',
                 $root,
-                ...ReleaseArtifactValidator::requiredPaths(),
+                ...$this->completeStaticRequiredPaths(),
                 'unlisted-original.txt',
                 'unlisted-alias.txt',
             ]);
@@ -481,7 +524,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
                 $root,
                 'application',
                 'application',
-                ...ReleaseArtifactValidator::requiredPaths(),
+                ...$this->completeStaticRequiredPaths(),
             ]);
             self::assertSame(0, $tar['exit_code'], $tar['stderr']);
 
@@ -501,7 +544,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
 
     private function createCompleteArtifactTree(string $root): void
     {
-        foreach (ReleaseArtifactValidator::requiredPaths() as $requiredPath) {
+        foreach ($this->completeStaticRequiredPaths() as $requiredPath) {
             $absolutePath = $root . '/' . $requiredPath;
             $directory = dirname($absolutePath);
 
@@ -518,7 +561,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
      */
     private function validArchiveTypeLines(): array
     {
-        $requiredFiles = array_fill_keys(ReleaseArtifactValidator::requiredPaths(), true);
+        $requiredFiles = array_fill_keys($this->completeStaticRequiredPaths(), true);
 
         return array_map(
             static fn(string $path): string => (isset($requiredFiles[$path]) ? '-' : 'd') . ' ' . $path,
@@ -545,7 +588,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
             file_put_contents($archive, $archiveContents);
             file_put_contents(
                 $archive . '.entries',
-                implode("\n", [...ReleaseArtifactValidator::requiredPaths(), ...$additionalEntries]) . "\n",
+                implode("\n", [...$this->completeStaticRequiredPaths(), ...$additionalEntries]) . "\n",
             );
             file_put_contents($archive . '.types', implode("\n", $typeLines) . "\n");
             file_put_contents(
@@ -577,6 +620,16 @@ final class ReleaseArtifactValidatorTest extends TestCase
         } finally {
             $this->removeDirectory($workspace);
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function completeStaticRequiredPaths(): array
+    {
+        return array_values(
+            array_unique(array_merge(ReleaseArtifactValidator::requiredPaths(), ReleaseArtifactValidator::generatedVendorPaths())),
+        );
     }
 
     /**
