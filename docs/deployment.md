@@ -319,6 +319,12 @@ For a fresh Ubuntu LTS server, keep this deployment model:
 
 The full rebuild checklist lives in `docs/server-rebuild-runbook.md`.
 
+The release-pair publisher prepares `/root/releases` as `root:root` mode
+`0700` before upload. On a documented legacy/rebuild host where that exact
+root-owned directory still has mode `0755`, `--prepare` performs the single
+inode-bound migration to `0700`, fsyncs it, and revalidates the same directory.
+Other owners, types, symlinks, or modes are rejected unchanged.
+
 ## Required Host-Local Secrets
 
 These files are intentionally not committed:

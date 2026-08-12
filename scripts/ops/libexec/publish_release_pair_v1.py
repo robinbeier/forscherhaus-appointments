@@ -169,7 +169,7 @@ def open_lock(directory, expected_uid):
     return fd
 
 
-def open_production_root(create):
+def open_production_root(create, migrate_legacy=False):
     slash = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
         validate_directory(slash, 0)
@@ -192,6 +192,19 @@ def open_production_root(create):
                     os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
                     dir_fd=root,
                 )
+            current = os.fstat(releases)
+            if migrate_legacy and stat.S_IMODE(current.st_mode) == 0o755:
+                validate_directory(releases, 0, 0o755)
+                identity = (current.st_dev, current.st_ino, current.st_uid, current.st_nlink)
+                os.fchmod(releases, 0o700)
+                os.fsync(releases)
+                os.fsync(root)
+                migrated = os.fstat(releases)
+                if (
+                    identity != (migrated.st_dev, migrated.st_ino, migrated.st_uid, migrated.st_nlink)
+                    or stat.S_IMODE(migrated.st_mode) != 0o700
+                ):
+                    raise OSError("release directory migration failed")
             validate_directory(releases, 0, 0o700)
             return releases
         finally:
@@ -202,7 +215,7 @@ def open_production_root(create):
 
 def main():
     if sys.argv[1:] == ["--prepare", "/root/releases"]:
-        directory = open_production_root(True)
+        directory = open_production_root(True, migrate_legacy=True)
         os.fsync(directory)
         os.close(directory)
         sys.stdout.write("ready\n")

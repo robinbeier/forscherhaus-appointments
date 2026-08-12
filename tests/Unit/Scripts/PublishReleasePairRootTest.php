@@ -36,7 +36,7 @@ final class PublishReleasePairRootTest extends TestCase
         }
     }
 
-    public function testPrepareCreatesExactRootDirectoryWithoutNormalizingUnsafeExistingMode(): void
+    public function testPrepareCreatesOrMigratesExactRootDirectoryWithoutNormalizingUnsafeModes(): void
     {
         $created = $this->prepare();
         self::assertSame(0, $created['exit']);
@@ -45,6 +45,18 @@ final class PublishReleasePairRootTest extends TestCase
         self::assertIsArray($metadata);
         self::assertSame(0, $metadata['uid']);
         self::assertSame(0700, $metadata['mode'] & 0777);
+
+        chmod('/root/releases', 0755);
+        $legacy = lstat('/root/releases');
+        self::assertIsArray($legacy);
+        $migrated = $this->prepare();
+        self::assertSame(0, $migrated['exit']);
+        self::assertSame("ready\n", $migrated['stdout']);
+        $after = lstat('/root/releases');
+        self::assertIsArray($after);
+        self::assertSame([$legacy['dev'], $legacy['ino']], [$after['dev'], $after['ino']]);
+        self::assertSame(0, $after['uid']);
+        self::assertSame(0700, $after['mode'] & 0777);
 
         chmod('/root/releases', 0777);
         $rejected = $this->prepare();
