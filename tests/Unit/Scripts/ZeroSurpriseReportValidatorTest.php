@@ -223,6 +223,71 @@ class ZeroSurpriseReportValidatorTest extends TestCase
         @unlink($path);
     }
 
+    public function testValidateFileFailsWhenPredeployCleanupStepIsMissingOrFailed(): void
+    {
+        $validator = new ZeroSurpriseReportValidator();
+        $missing = $this->validReportFixture();
+        array_pop($missing['steps']);
+        $missingPath = $this->writeTempReport($missing);
+
+        $missingResult = $validator->validateFile(
+            $missingPath,
+            'ea_20260312_1200',
+            'predeploy',
+            240,
+            new DateTimeImmutable('2026-03-12T12:00:00Z'),
+        );
+
+        $this->assertFalse($missingResult['ok']);
+        $this->assertStringContainsString(
+            'Required predeploy cleanup step missing: image_cleanup.',
+            implode("\n", $missingResult['errors']),
+        );
+        @unlink($missingPath);
+
+        $failed = $this->validReportFixture();
+        $failed['steps'][1]['status'] = 'fail';
+        $failedPath = $this->writeTempReport($failed);
+
+        $failedResult = $validator->validateFile(
+            $failedPath,
+            'ea_20260312_1200',
+            'predeploy',
+            240,
+            new DateTimeImmutable('2026-03-12T12:00:00Z'),
+        );
+
+        $this->assertFalse($failedResult['ok']);
+        $this->assertStringContainsString(
+            'Predeploy cleanup step must pass with exit 0: image_cleanup.',
+            implode("\n", $failedResult['errors']),
+        );
+        @unlink($failedPath);
+    }
+
+    public function testValidateFileRejectsContradictoryImageCleanupEvidence(): void
+    {
+        $validator = new ZeroSurpriseReportValidator();
+        $fixture = $this->validReportFixture();
+        $fixture['steps'][1]['details']['deleted_count'] = 1;
+        $fixture['steps'][1]['details']['freed_bytes'] = 999;
+        $path = $this->writeTempReport($fixture);
+
+        $result = $validator->validateFile(
+            $path,
+            'ea_20260312_1200',
+            'predeploy',
+            240,
+            new DateTimeImmutable('2026-03-12T12:00:00Z'),
+        );
+
+        $this->assertFalse($result['ok']);
+        $errors = implode("\n", $result['errors']);
+        $this->assertStringContainsString('image_cleanup must delete every exact candidate.', $errors);
+        $this->assertStringContainsString('freed_bytes does not match', $errors);
+        @unlink($path);
+    }
+
     /**
      * @param array<string, mixed> $report
      */
@@ -253,6 +318,30 @@ class ZeroSurpriseReportValidatorTest extends TestCase
                 'mode' => 'predeploy',
                 'started_at_utc' => '2026-03-12T10:20:00Z',
                 'finished_at_utc' => '2026-03-12T11:30:00Z',
+            ],
+            'steps' => [
+                [
+                    'name' => 'compose_cleanup',
+                    'status' => 'pass',
+                    'exit_code' => 0,
+                    'duration_ms' => 10.0,
+                    'timed_out' => false,
+                ],
+                [
+                    'name' => 'image_cleanup',
+                    'status' => 'pass',
+                    'exit_code' => 0,
+                    'duration_ms' => 20.0,
+                    'details' => [
+                        'candidate_count' => 2,
+                        'deleted_count' => 2,
+                        'candidate_virtual_bytes' => 200,
+                        'free_bytes_before' => 1_000,
+                        'free_bytes_after' => 1_150,
+                        'freed_bytes' => 150,
+                        'reason' => null,
+                    ],
+                ],
             ],
             'invariants' => [
                 'unexpected_5xx' => ['status' => 'pass'],

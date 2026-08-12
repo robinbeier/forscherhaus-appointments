@@ -16,6 +16,11 @@ final class ZeroSurpriseReportValidator
     public const REQUIRED_INVARIANTS = ['unexpected_5xx', 'overbooking', 'fill_rate_math', 'pdf_exports'];
 
     /**
+     * @var string[]
+     */
+    private const REQUIRED_PREDEPLOY_CLEANUP_STEPS = ['compose_cleanup', 'image_cleanup'];
+
+    /**
      * @return array{ok:bool,errors:array<int, string>,normalized:array<string, mixed>}
      */
     public function validateFile(
@@ -158,6 +163,10 @@ final class ZeroSurpriseReportValidator
             $normalized['mode'] = $mode;
         }
 
+        if ($expectedMode === 'predeploy') {
+            $this->validatePredeployCleanupSteps($decoded['steps'] ?? null, $errors, $normalized);
+        }
+
         $invariants = $decoded['invariants'] ?? null;
         if (!is_array($invariants)) {
             $errors[] = 'Report misses object "invariants".';
@@ -209,6 +218,110 @@ final class ZeroSurpriseReportValidator
             'errors' => $errors,
             'normalized' => $normalized,
         ];
+    }
+
+    /**
+     * @param array<int, string> $errors
+     * @param array<string, mixed> $normalized
+     */
+    private function validatePredeployCleanupSteps(mixed $rawSteps, array &$errors, array &$normalized): void
+    {
+        if (!is_array($rawSteps) || !array_is_list($rawSteps)) {
+            $errors[] = 'Predeploy report misses list "steps".';
+
+            return;
+        }
+
+        $steps = [];
+        foreach ($rawSteps as $step) {
+            if (!is_array($step)) {
+                $errors[] = 'Predeploy step must be an object.';
+                continue;
+            }
+
+            $name = $step['name'] ?? null;
+            if (!is_string($name) || $name === '') {
+                $errors[] = 'Predeploy step name must be a non-empty string.';
+                continue;
+            }
+
+            if (isset($steps[$name])) {
+                $errors[] = 'Predeploy step appears more than once: ' . $name . '.';
+                continue;
+            }
+
+            $steps[$name] = $step;
+        }
+
+        foreach (self::REQUIRED_PREDEPLOY_CLEANUP_STEPS as $requiredStep) {
+            if (!isset($steps[$requiredStep])) {
+                $errors[] = 'Required predeploy cleanup step missing: ' . $requiredStep . '.';
+                continue;
+            }
+
+            $status = $steps[$requiredStep]['status'] ?? null;
+            $exitCode = self::toIntOrNull($steps[$requiredStep]['exit_code'] ?? null);
+            if ($status !== 'pass' || $exitCode !== 0) {
+                $errors[] = 'Predeploy cleanup step must pass with exit 0: ' . $requiredStep . '.';
+            }
+        }
+
+        if (isset($steps['compose_cleanup']) && ($steps['compose_cleanup']['timed_out'] ?? null) !== false) {
+            $errors[] = 'compose_cleanup.timed_out must be false.';
+        }
+
+        if (!isset($steps['image_cleanup'])) {
+            return;
+        }
+
+        $details = $steps['image_cleanup']['details'] ?? null;
+        if (!is_array($details)) {
+            $errors[] = 'image_cleanup.details must be an object.';
+
+            return;
+        }
+
+        $metrics = [];
+        foreach (
+            [
+                'candidate_count',
+                'deleted_count',
+                'candidate_virtual_bytes',
+                'free_bytes_before',
+                'free_bytes_after',
+                'freed_bytes',
+            ]
+            as $field
+        ) {
+            $value = self::toIntOrNull($details[$field] ?? null);
+            if ($value === null || $value < 0) {
+                $errors[] = 'image_cleanup.details.' . $field . ' must be a non-negative integer.';
+                continue;
+            }
+
+            $metrics[$field] = $value;
+        }
+
+        if (!array_key_exists('reason', $details) || $details['reason'] !== null) {
+            $errors[] = 'image_cleanup.details.reason must be null for a passing cleanup.';
+        }
+
+        if (isset($metrics['candidate_count'], $metrics['deleted_count'])) {
+            if ($metrics['candidate_count'] !== $metrics['deleted_count']) {
+                $errors[] = 'image_cleanup must delete every exact candidate.';
+            }
+        }
+
+        if (isset($metrics['free_bytes_before'], $metrics['free_bytes_after'], $metrics['freed_bytes'])) {
+            $expectedFreed = max(0, $metrics['free_bytes_after'] - $metrics['free_bytes_before']);
+            if ($metrics['freed_bytes'] !== $expectedFreed) {
+                $errors[] = 'image_cleanup.details.freed_bytes does not match the observed free-space delta.';
+            }
+        }
+
+        if ($metrics !== []) {
+            $normalized['image_cleanup'] = $metrics;
+        }
     }
 
     private static function toIntOrNull(mixed $value): ?int

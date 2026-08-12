@@ -5,9 +5,11 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib/GateProcessRunner.php';
 require_once __DIR__ . '/lib/ZeroSurpriseReport.php';
 require_once __DIR__ . '/lib/ZeroSurpriseCredentials.php';
+require_once __DIR__ . '/lib/ZeroSurpriseImageCleanup.php';
 
 use ReleaseGate\GateProcessRunner;
 use ReleaseGate\ZeroSurpriseCredentials;
+use ReleaseGate\ZeroSurpriseImageCleanup;
 use ReleaseGate\ZeroSurpriseReport;
 
 const ZERO_SURPRISE_EXIT_SUCCESS = 0;
@@ -184,21 +186,8 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
     }
 
     if ($composeProject !== null) {
-        $downCommand = composeCommand(composePrefix($composeProject), ['down', '-v', '--remove-orphans']);
-
-        $downResult = GateProcessRunner::run($downCommand, $repoRoot, null, 180);
-
-        if ((int) $downResult['exit_code'] !== 0) {
-            $message = 'Failed to cleanup zero-surprise compose stack: ' . trim((string) $downResult['stderr']);
-
-            if ($report !== null) {
-                $report->setFailure(
-                    $message !== '' ? $message : 'Failed to cleanup zero-surprise compose stack.',
-                    RuntimeException::class,
-                    'runtime_error',
-                );
-            }
-
+        $teardown = runReplayTeardown($repoRoot, $composeProject, $report);
+        if ($teardown['runtime_failed']) {
             $exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
         }
     }
@@ -507,6 +496,83 @@ function composePrefix(string $project): array
 function composeCommand(array $prefix, array $arguments): array
 {
     return array_merge($prefix, $arguments);
+}
+
+/**
+ * @param callable(array<int, string>, string, int): array<string, mixed>|null $runner
+ * @return array{runtime_failed:bool}
+ */
+function runReplayTeardown(
+    string $repoRoot,
+    string $composeProject,
+    ?ZeroSurpriseReport $report,
+    ?callable $runner = null,
+    ?ZeroSurpriseImageCleanup $imageCleaner = null,
+): array {
+    $runner ??= static fn(
+        array $command,
+        string $workingDirectory,
+        int $timeoutSeconds,
+    ): array => GateProcessRunner::run($command, $workingDirectory, null, $timeoutSeconds);
+    $imageCleaner ??= ZeroSurpriseImageCleanup::production();
+    try {
+        $downResult = $runner(
+            composeCommand(composePrefix($composeProject), ['down', '-v', '--remove-orphans']),
+            $repoRoot,
+            180,
+        );
+    } catch (Throwable) {
+        $downResult = [
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+            'timed_out' => false,
+        ];
+    }
+    $downExitCode = is_array($downResult) ? (int) ($downResult['exit_code'] ?? 1) : 1;
+    $downTimedOut = is_array($downResult) && (bool) ($downResult['timed_out'] ?? false);
+    $downPassed = $downExitCode === 0 && !$downTimedOut;
+
+    if ($report !== null) {
+        $report->addStep(
+            'compose_cleanup',
+            $downPassed ? ZeroSurpriseReport::STATUS_PASS : ZeroSurpriseReport::STATUS_FAIL,
+            $downPassed ? ZERO_SURPRISE_EXIT_SUCCESS : ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            is_array($downResult) ? (float) ($downResult['duration_ms'] ?? 0.0) : 0.0,
+            [
+                'timed_out' => $downTimedOut,
+            ],
+        );
+    }
+
+    $imageCleanup = $imageCleaner->cleanup($composeProject, $repoRoot);
+    if ($report !== null) {
+        $report->addStep(
+            'image_cleanup',
+            $imageCleanup['status'],
+            $imageCleanup['exit_code'],
+            $imageCleanup['duration_ms'],
+            [
+                'details' => $imageCleanup['details'],
+            ],
+        );
+    }
+
+    $imagePassed = $imageCleanup['status'] === ZeroSurpriseReport::STATUS_PASS;
+    $runtimeFailed = !$downPassed || !$imagePassed;
+
+    if ($runtimeFailed && $report !== null) {
+        $report->setFailure(
+            !$downPassed
+                ? 'Zero-surprise compose cleanup failed closed.'
+                : 'Zero-surprise image cleanup failed closed.',
+            RuntimeException::class,
+            'runtime_error',
+        );
+    }
+
+    return [
+        'runtime_failed' => $runtimeFailed,
+    ];
 }
 
 /**
