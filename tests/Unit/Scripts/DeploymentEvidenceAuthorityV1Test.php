@@ -1017,6 +1017,95 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         }
     }
 
+    public function testCapacityAndArtifactMustReuseThePrecedingProtectedSources(): void
+    {
+        $trafficBytes = $this->trafficReportBytes('allow', 0);
+        $traffic = new TrafficObservationV1(
+            $trafficBytes,
+            hash('sha256', $trafficBytes),
+            self::SHA,
+            '2026-08-09.1',
+            1,
+            91,
+        );
+        $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
+        $alternate = $this->provenance();
+        $alternate['archive']['size_bytes'] = 123457;
+        $alternateBytes = DeploymentEvidenceAuthorityV1::encodeFile($alternate);
+        $alternateBuild = new BuildVerifiedSourcesV1(
+            $alternateBytes,
+            hash('sha256', $alternateBytes),
+            'ea_20260812_1200',
+            self::SHA,
+            123457,
+            self::SHA,
+            self::SHA,
+            1234,
+            2000,
+            400_000_000,
+            800_000_000,
+        );
+        $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
+        $alternateAttestation = $this->dumpAttestation();
+        $alternateAttestation['dump']['size_bytes'] = 999_999;
+        $alternateAttestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($alternateAttestation);
+        $baseBuild = $this->buildSources($provenanceBytes);
+        $capacity = fn (BuildVerifiedSourcesV1 $build, string $dumpBytes, int $dumpSize): CapacityObservationV1 =>
+            new CapacityObservationV1(
+                new CapacityVerifiedSourcesV1(
+                    1,
+                    4096,
+                    1_000_000,
+                    900_000,
+                    10_000_000,
+                    9_000_000,
+                    $build,
+                    $dumpBytes,
+                    hash('sha256', $dumpBytes),
+                    self::SHA,
+                    $dumpSize,
+                    '2026-08-12T12:30:00Z',
+                    $this->capacityDevices(1),
+                ),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+            );
+        $cases = [
+            'capacity provenance substitution' => $this->passedProviderWithTraffic(
+                $traffic,
+                capacity: $capacity($alternateBuild, $attestationBytes, 1_000_000),
+            ),
+            'capacity dump substitution' => $this->passedProviderWithTraffic(
+                $traffic,
+                capacity: $capacity($baseBuild, $alternateAttestationBytes, 999_999),
+            ),
+            'artifact provenance substitution' => $this->passedProviderWithTraffic(
+                $traffic,
+                artifact: new ArtifactObservationV1($alternateBuild, null, null, null, null, null),
+            ),
+        ];
+        foreach ($cases as $name => $provider) {
+            try {
+                DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+                    $provider,
+                    self::RUN_ID,
+                    self::SHA,
+                    self::COMMIT,
+                    'normal',
+                );
+                self::fail($name . ' was accepted');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('preceding protected gates', $exception->getMessage(), $name);
+            }
+        }
+    }
+
     public function testAuthoritativeTimingRequiresCanonicalFinalLineFeed(): void
     {
         $bytes = $this->timingBytes(0);

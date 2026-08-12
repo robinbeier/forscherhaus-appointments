@@ -1275,21 +1275,28 @@ final class DeploymentEvidenceAuthorityV1
         self::assertUuidV4($runId, 'predeploy provider run_id');
         self::assertSha256($intentSha256, 'predeploy provider intent_sha256');
         self::assertCommit($expectedCommit, 'predeploy provider expected commit');
+        $boundProvenanceSha256 = null;
+        $boundAttestationSha256 = null;
+        $boundDumpSha256 = null;
+        $boundDumpSizeBytes = null;
         $collectors = [
             'expected_commit' => static function () use (
                 $provider,
                 $runId,
                 $intentSha256,
                 $expectedCommit,
+                &$boundProvenanceSha256,
             ): VerifiedPredeployGateV1 {
                 $observation = $provider->expectedCommit();
-                return self::observeExpectedCommitFromPinnedProvenance(
+                $result = self::observeExpectedCommitFromPinnedProvenance(
                     $runId,
                     $intentSha256,
                     $observation->provenanceBytes,
                     $observation->pinnedProvenanceSha256,
                     $expectedCommit,
                 );
+                $boundProvenanceSha256 = $observation->pinnedProvenanceSha256;
+                return $result;
             },
             'traffic_gate' => static function () use (
                 $provider,
@@ -1326,7 +1333,14 @@ final class DeploymentEvidenceAuthorityV1
                     return self::observeMissingTrafficGate($runId, $intentSha256, $observation->pinnedReportSha256);
                 }
             },
-            'dump' => static function () use ($provider, $runId, $intentSha256): VerifiedPredeployGateV1 {
+            'dump' => static function () use (
+                $provider,
+                $runId,
+                $intentSha256,
+                &$boundAttestationSha256,
+                &$boundDumpSha256,
+                &$boundDumpSizeBytes,
+            ): VerifiedPredeployGateV1 {
                 $observation = $provider->dump();
                 $hasAttestation =
                     $observation->attestationBytes !== null ||
@@ -1348,7 +1362,7 @@ final class DeploymentEvidenceAuthorityV1
                     $observation->stableDumpSizeBytes !== null &&
                     $observation->observedAtUtc !== null
                 ) {
-                    return self::verifyDumpGate(
+                    $result = self::verifyDumpGate(
                         $observation->attestationBytes,
                         $observation->pinnedAttestationSha256,
                         $runId,
@@ -1357,6 +1371,10 @@ final class DeploymentEvidenceAuthorityV1
                         $observation->stableDumpSizeBytes,
                         $observation->observedAtUtc,
                     );
+                    $boundAttestationSha256 = $observation->pinnedAttestationSha256;
+                    $boundDumpSha256 = $observation->dumpSha256;
+                    $boundDumpSizeBytes = $observation->stableDumpSizeBytes;
+                    return $result;
                 }
                 if ($hasAttestation) {
                     throw new RuntimeException('dump protected source tuple is incomplete');
@@ -1376,6 +1394,10 @@ final class DeploymentEvidenceAuthorityV1
                 $runId,
                 $intentSha256,
                 $expectedCommit,
+                &$boundProvenanceSha256,
+                &$boundAttestationSha256,
+                &$boundDumpSha256,
+                &$boundDumpSizeBytes,
             ): VerifiedPredeployGateV1 {
                 $observation = $provider->capacity();
                 $hasFallback =
@@ -1393,6 +1415,20 @@ final class DeploymentEvidenceAuthorityV1
                 if ($observation->verifiedSources !== null) {
                     $sources = $observation->verifiedSources;
                     $build = $sources->build;
+                    if (
+                        $boundProvenanceSha256 === null ||
+                        $boundAttestationSha256 === null ||
+                        $boundDumpSha256 === null ||
+                        $boundDumpSizeBytes === null ||
+                        !hash_equals($boundProvenanceSha256, $build->authorizedProvenanceSha256) ||
+                        !hash_equals($boundProvenanceSha256, hash('sha256', $build->provenanceBytes)) ||
+                        !hash_equals($boundAttestationSha256, $sources->attestationSha256) ||
+                        !hash_equals($boundAttestationSha256, hash('sha256', $sources->attestationBytes)) ||
+                        !hash_equals($boundDumpSha256, $sources->dumpSha256) ||
+                        $boundDumpSizeBytes !== $sources->dumpSizeBytes
+                    ) {
+                        throw new RuntimeException('capacity sources contradict preceding protected gates');
+                    }
                     return self::verifyCapacityGate(
                         $sources->filesystemDevice,
                         $sources->blockSize,
@@ -1436,6 +1472,7 @@ final class DeploymentEvidenceAuthorityV1
                 $runId,
                 $intentSha256,
                 $expectedCommit,
+                &$boundProvenanceSha256,
             ): VerifiedPredeployGateV1 {
                 $observation = $provider->artifact();
                 $hasFallback =
@@ -1449,6 +1486,13 @@ final class DeploymentEvidenceAuthorityV1
                 }
                 if ($observation->verifiedSources !== null) {
                     $sources = $observation->verifiedSources;
+                    if (
+                        $boundProvenanceSha256 === null ||
+                        !hash_equals($boundProvenanceSha256, $sources->authorizedProvenanceSha256) ||
+                        !hash_equals($boundProvenanceSha256, hash('sha256', $sources->provenanceBytes))
+                    ) {
+                        throw new RuntimeException('artifact source contradicts preceding protected gates');
+                    }
                     return self::verifyArtifactGate(
                         $runId,
                         $intentSha256,
