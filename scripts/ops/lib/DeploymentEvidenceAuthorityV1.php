@@ -32,6 +32,7 @@ final class DeploymentEvidenceAuthorityV1
         'dump_pin',
         'live_storage',
         'release_root',
+        'renderer_state',
         'restore_scratch',
         'stage',
         'state_root',
@@ -465,6 +466,8 @@ final class DeploymentEvidenceAuthorityV1
         int $liveStorageAllocatedBytes,
         int $liveStorageLogicalBytes,
         int $liveStorageInodeCount,
+        int $rendererInstallBytes,
+        int $rendererInstallInodeCount,
         array $componentDevices,
     ): array {
         $verifiedProvenance = self::decodeAuthorizedBuildProvenanceBounds(
@@ -489,6 +492,8 @@ final class DeploymentEvidenceAuthorityV1
         self::assertPositiveInt($liveStorageAllocatedBytes, 'live storage allocated bytes');
         self::assertPositiveInt($liveStorageLogicalBytes, 'live storage logical bytes');
         self::assertPositiveInt($liveStorageInodeCount, 'live storage inode count');
+        self::assertPositiveInt($rendererInstallBytes, 'renderer install bytes');
+        self::assertPositiveInt($rendererInstallInodeCount, 'renderer install inode count');
         $liveStorageCopyBytes = max($liveStorageAllocatedBytes, $liveStorageLogicalBytes);
         return self::capacityFromStatvfs(
             $filesystemDevice,
@@ -498,15 +503,21 @@ final class DeploymentEvidenceAuthorityV1
             $inodes,
             $inodesAvailable,
             self::checkedAdd(
-                $verifiedProvenance['capacity_bounds']['stage_inode_count'],
-                $liveStorageInodeCount,
+                self::checkedAdd(
+                    $verifiedProvenance['capacity_bounds']['stage_inode_count'],
+                    $liveStorageInodeCount,
+                ),
+                $rendererInstallInodeCount,
             ),
             $verifiedDumpObservation['restored_datadir_inode_count'],
             $verifiedProvenance['archive']['size_bytes'],
             $verifiedDumpObservation['dump_size_bytes'],
             self::checkedAdd(
-                $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
-                $liveStorageCopyBytes,
+                self::checkedAdd(
+                    $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
+                    $liveStorageCopyBytes,
+                ),
+                $rendererInstallBytes,
             ),
             self::checkedAdd(
                 $verifiedProvenance['capacity_bounds']['temp_scratch_bytes'],
@@ -783,6 +794,8 @@ final class DeploymentEvidenceAuthorityV1
         int $liveStorageAllocatedBytes,
         int $liveStorageLogicalBytes,
         int $liveStorageInodeCount,
+        int $rendererInstallBytes,
+        int $rendererInstallInodeCount,
         array $componentDevices,
     ): array {
         $observation = self::capacityFromVerifiedAuthorities(
@@ -810,6 +823,8 @@ final class DeploymentEvidenceAuthorityV1
             $liveStorageAllocatedBytes,
             $liveStorageLogicalBytes,
             $liveStorageInodeCount,
+            $rendererInstallBytes,
+            $rendererInstallInodeCount,
             $componentDevices,
         );
         return [
@@ -853,6 +868,8 @@ final class DeploymentEvidenceAuthorityV1
         int $liveStorageAllocatedBytes,
         int $liveStorageLogicalBytes,
         int $liveStorageInodeCount,
+        int $rendererInstallBytes,
+        int $rendererInstallInodeCount,
         array $componentDevices,
     ): VerifiedPredeployGateV1 {
         return self::issueGate(
@@ -884,6 +901,8 @@ final class DeploymentEvidenceAuthorityV1
                 $liveStorageAllocatedBytes,
                 $liveStorageLogicalBytes,
                 $liveStorageInodeCount,
+                $rendererInstallBytes,
+                $rendererInstallInodeCount,
                 $componentDevices,
             ),
         );
@@ -1564,6 +1583,8 @@ final class DeploymentEvidenceAuthorityV1
                         $sources->liveStorageAllocatedBytes,
                         $sources->liveStorageLogicalBytes,
                         $sources->liveStorageInodeCount,
+                        $sources->rendererInstallBytes,
+                        $sources->rendererInstallInodeCount,
                         $sources->componentDevices,
                     );
                 }

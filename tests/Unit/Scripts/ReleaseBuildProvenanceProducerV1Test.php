@@ -89,7 +89,17 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
         );
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($attestation);
         $devices = array_fill_keys(
-            ['artifact', 'dump_pin', 'live_storage', 'release_root', 'restore_scratch', 'stage', 'state_root', 'temp'],
+            [
+                'artifact',
+                'dump_pin',
+                'live_storage',
+                'release_root',
+                'renderer_state',
+                'restore_scratch',
+                'stage',
+                'state_root',
+                'temp',
+            ],
             1,
         );
         $capacity = DeploymentEvidenceAuthorityV1::capacityFromVerifiedAuthorities(
@@ -117,11 +127,14 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
             20_000,
             25_000,
             5,
+            30_000,
+            7,
             $devices,
         );
-        $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 25_000 + 67_108_864 + 4_000 + 8_000;
+        $expectedBase =
+            $record['archive']['size_bytes'] + 1_000 + 16_384 + 25_000 + 30_000 + 67_108_864 + 4_000 + 8_000;
         self::assertSame($expectedBase, $capacity['base_required_bytes']);
-        self::assertSame(81, $capacity['projected_required_inodes']);
+        self::assertSame(88, $capacity['projected_required_inodes']);
     }
 
     public function testProducerCanonicalizesTrustedTemporaryStagePath(): void

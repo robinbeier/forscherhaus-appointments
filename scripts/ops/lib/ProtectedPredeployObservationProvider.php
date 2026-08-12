@@ -108,6 +108,8 @@ final readonly class CapacityVerifiedSourcesV1
         public int $liveStorageAllocatedBytes,
         public int $liveStorageLogicalBytes,
         public int $liveStorageInodeCount,
+        public int $rendererInstallBytes,
+        public int $rendererInstallInodeCount,
         /** @var array<string,int> */ public array $componentDevices,
     ) {}
 }
