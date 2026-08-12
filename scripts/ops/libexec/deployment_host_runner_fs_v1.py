@@ -33,6 +33,7 @@ MAX_CHILD_OUTPUT = 65_536
 MAX_TRAFFIC_REPORT = 262_144
 CONTROLLER_ENVIRONMENT = {"LANG": "C", "LC_ALL": "C", "PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
 STATE_ROOT = "/var/lib/fh-deploy-orchestrator"
+DUMP_ATTESTATION_ROOT = "/var/lib/fh-deploy-evidence/dump-attestations"
 
 
 class Rejected(Exception):
@@ -1391,6 +1392,64 @@ def collect_traffic(root: str, run_id: str, mode: str) -> bytes:
         os.close(parent)
 
 
+def observe_dump(root: str, run_id: str, leaf: str, expected_sha256: str) -> bytes:
+    test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is not None
+    if (root != STATE_ROOT and not test_root) or re.fullmatch(r'[0-9a-f]{64}', expected_sha256) is None:
+        reject()
+    validate_run_id(run_id)
+    if leaf not in ('deploy-ref-zero-surprise-dump.sql', 'deploy-ref-zero-surprise-dump.sql.gz'):
+        reject()
+    parent, actual_leaf = open_parent(root, 'runs/' + run_id + '/' + leaf)
+    descriptor = -1
+    try:
+        before = os.stat(actual_leaf, dir_fd=parent, follow_symlinks=False)
+        validate_regular(before)
+        if before.st_size <= 0 or before.st_size > MAX_REFERENCE_DUMP:
+            reject()
+        descriptor = os.open(
+            actual_leaf,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            dir_fd=parent,
+        )
+        opened = os.fstat(descriptor)
+        if not same_read_snapshot(before, opened):
+            reject()
+        digest, size = stream_hash(descriptor, destination=None, limit=MAX_REFERENCE_DUMP)
+        after = os.fstat(descriptor)
+        post = os.stat(actual_leaf, dir_fd=parent, follow_symlinks=False)
+        if digest != expected_sha256 or size != opened.st_size:
+            raise Conflict()
+        if not same_read_snapshot(opened, after) or not same_read_snapshot(after, post):
+            reject()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(parent)
+
+    observed_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    attestation = None
+    if not test_root:
+        authority_root = open_root(DUMP_ATTESTATION_ROOT)
+        try:
+            attestation = bounded_read_at(
+                authority_root,
+                expected_sha256 + '.json',
+                4096,
+                optional=True,
+            )
+        finally:
+            os.close(authority_root)
+    value = {
+        'attestation_bytes_base64': None if attestation is None else base64.b64encode(attestation).decode('ascii'),
+        'attestation_sha256': None if attestation is None else hashlib.sha256(attestation).hexdigest(),
+        'dump_sha256': expected_sha256,
+        'dump_size_bytes': size,
+        'observed_at_utc': observed_at,
+        'status': 'not_observed' if attestation is None else 'observed',
+    }
+    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+
+
 def validate_storage_scope_probe(root: str, relative: str, operation: str) -> int:
     validate_storage_scope(root, relative, operation)
     return 0
@@ -1427,6 +1486,9 @@ def main(arguments: list[str]) -> int:
         return validate_storage_scope_probe(arguments[2], arguments[3], arguments[4])
     if len(arguments) == 5 and arguments[1] == 'collect-traffic':
         sys.stdout.buffer.write(collect_traffic(arguments[2], arguments[3], arguments[4]))
+        return 0
+    if len(arguments) == 6 and arguments[1] == 'observe-dump':
+        sys.stdout.buffer.write(observe_dump(arguments[2], arguments[3], arguments[4], arguments[5]))
         return 0
     if len(arguments) == 4 and arguments[1] == 'prepare-run':
         prepare_run(arguments[2], arguments[3])

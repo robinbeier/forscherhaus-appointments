@@ -347,6 +347,34 @@ PYTHON;
         self::assertFileDoesNotExist($this->root . '/runs/' . self::OTHER_RUN_ID . '/traffic-gate-report.json');
     }
 
+    public function testDumpObserverHashesExactPinnedRunCopyBeforeReportingMissingAttestation(): void
+    {
+        self::assertSame(0, $this->runHelper(['prepare-run', $this->root, self::RUN_ID])['exit_code']);
+        $dump = "CREATE TABLE exact_dump (id INT);\n";
+        $sha = hash('sha256', $dump);
+        $path = $this->root . '/runs/' . self::RUN_ID . '/deploy-ref-zero-surprise-dump.sql';
+        self::assertSame(strlen($dump), file_put_contents($path, $dump));
+        self::assertTrue(chmod($path, 0600));
+
+        $result = $this->runHelper([
+            'observe-dump', $this->root, self::RUN_ID, 'deploy-ref-zero-surprise-dump.sql', $sha,
+        ]);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $decoded = json_decode($result['stdout'], true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame('not_observed', $decoded['status']);
+        self::assertSame($sha, $decoded['dump_sha256']);
+        self::assertSame(strlen($dump), $decoded['dump_size_bytes']);
+        self::assertNull($decoded['attestation_bytes_base64']);
+        self::assertNull($decoded['attestation_sha256']);
+
+        $changed = $this->runHelper([
+            'observe-dump', $this->root, self::RUN_ID, 'deploy-ref-zero-surprise-dump.sql', str_repeat('a', 64),
+        ]);
+        self::assertSame(75, $changed['exit_code']);
+        self::assertSame($dump, file_get_contents($path));
+    }
+
     public function testPrepareRunIsIdempotentAndRejectsUnsafeExistingRunLeaf(): void
     {
         self::assertTrue(mkdir($this->root . '/runs', 0700));

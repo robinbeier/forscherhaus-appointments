@@ -57,6 +57,13 @@ the expansion ratio at 100:1. Age must remain below 14,400 seconds.
 The global attestation path is derived only from the already-authorized dump
 digest: `/var/lib/fh-deploy-evidence/dump-attestations/<dump-sha256>.json`.
 Neither the request nor the execution input may supply or override that path.
+At the dump gate, the protected source first copies the execution-input dump
+to its fixed immutable run leaf with an exact streaming SHA-256 check. A second
+stable-FD observation hashes that run copy again before reading the global
+attestation through a no-follow root-owned directory walk. The attestation is
+accepted only as exact bounded root-owned mode-0600 bytes. A missing, unsafe,
+or contradictory observation normalizes to failed/invalid dump evidence and
+cannot proceed to capacity or reservation.
 
 The traffic producer publishes the exact canonical report to
 `runs/<run-id>/traffic-gate-report.json` while the Host Runner holds both the
