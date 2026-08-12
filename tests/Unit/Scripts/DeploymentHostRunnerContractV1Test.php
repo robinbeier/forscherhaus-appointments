@@ -75,7 +75,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'LC_ALL=C',
                 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
                 '/bin/bash',
-                '/root/deploy_ea.sh',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-script.sh',
                 '--rel',
                 'ea_20260811',
                 '--renderer-deploy-mode',
@@ -83,15 +83,15 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 '--timing-run-id',
                 '128f6f52-4c87-4d4e-8b19-6a66e6e1af25',
                 '--healthz-token-file',
-                '/etc/fh/healthz.token',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-healthz-token',
                 '--zero-surprise-dump-file',
-                '/root/backups/predeploy.sql.gz',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-zero-surprise-dump.sql.gz',
                 '--zero-surprise-predeploy-credentials-file',
-                '/etc/fh/predeploy.ini',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-predeploy-credentials',
                 '--zero-surprise-canary-credentials-file',
-                '/etc/fh/canary.ini',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-canary-credentials',
                 '--zero-surprise-incident-webhook-file',
-                '/etc/fh/incident.ini',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-incident-webhook',
                 '--result-file',
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-result.json',
             ],
@@ -156,7 +156,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'LC_ALL=C',
                 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
                 '/bin/bash',
-                '/root/deploy_ea.sh',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/rollback-script.sh',
                 '--runtime-config-rollback',
                 '--active',
                 '/var/www/html/easyappointments',
@@ -470,7 +470,11 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             null,
             "#!/bin/bash\n",
         );
-        self::assertContains('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $literalDollarArgv);
+        self::assertNotContains('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $literalDollarArgv);
+        self::assertContains(
+            '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-healthz-token',
+            $literalDollarArgv,
+        );
         self::assertLessThan(
             array_search('--', $literalDollarArgv, true),
             array_search('--expand-environment=no', $literalDollarArgv, true),
@@ -2684,6 +2688,16 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $rollbackLines = $postGateLines;
         $rollbackLines[] = $this->transition($rollbackLines, 'rollback_running');
         $rollbackEvents = implode("\n", $rollbackLines) . "\n";
+        foreach ([$postGateEvents, $rollbackEvents] as $eventsWithoutCache) {
+            try {
+                DeploymentHostRunnerContractV1::activeRunReconstructionDisposition([
+                    ['state' => null, 'events_bytes' => $eventsWithoutCache],
+                ]);
+                self::fail('A non-deploy missing state cache was reconstructable.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
         self::assertSame(
             'reconstruct_claim_observe_only',
             DeploymentHostRunnerContractV1::activeRunReconstructionDisposition([
@@ -3655,6 +3669,20 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             $documentation,
         );
         self::assertStringContainsString('4. start the reserved unit exactly once.', $documentation);
+    }
+
+    public function testDeploySupervisorDeadlineCoversEverySequentialInnerDeadline(): void
+    {
+        $source = (string) file_get_contents(
+            dirname(__DIR__, 3) . '/scripts/ops/libexec/deployment_host_runner_fs_v1.py',
+        );
+        self::assertMatchesRegularExpression('/^DEPLOY_CLI_TIMEOUT_SECONDS = 6300\\.0$/mD', $source);
+        self::assertMatchesRegularExpression('/^OTHER_CLI_TIMEOUT_SECONDS = 2400\\.0$/mD', $source);
+        self::assertStringContainsString(
+            "dispatch_timeout = DEPLOY_CLI_TIMEOUT_SECONDS if action == 'deploy' else OTHER_CLI_TIMEOUT_SECONDS",
+            $source,
+        );
+        self::assertGreaterThanOrEqual(1_805 + 125 + 1_805 + 305 + 1_800 + 4 * 30 + 2 * 60, 6_300);
     }
 
     public function testCompleteJournalCanProveARecoverablyStaleStateCache(): void

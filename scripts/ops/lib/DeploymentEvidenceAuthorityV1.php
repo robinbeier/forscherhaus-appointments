@@ -23,6 +23,9 @@ final class DeploymentEvidenceAuthorityV1
     public const CHILD_OBSERVATION_SCHEMA = 'deployment_child_observation.v1';
     public const ORCHESTRATOR_START_SCHEMA = 'deployment_orchestrator_start.v1';
     public const PREDEPLOY_ASSEMBLY_SCHEMA = 'deployment_predeploy_evidence_assembly.v1';
+    public const RENDERER_CAPACITY_POLICY_SCHEMA = 'deployment_renderer_capacity_policy.v1';
+    public const DUMP_ATTESTATION_ROOT = '/var/lib/fh-deploy-evidence/dump-attestations';
+    public const RENDERER_CAPACITY_POLICY_PATH = '/etc/fh/deployment-renderer-capacity-v1.json';
     public const MAX_FILE_BYTES = 4_096;
     public const MAX_DUMP_COMPRESSED_BYTES = 17_179_869_184;
     public const MAX_DUMP_UNCOMPRESSED_BYTES = 68_719_476_736;
@@ -52,6 +55,41 @@ final class DeploymentEvidenceAuthorityV1
             throw new RuntimeException('authority record exceeds its exact byte contract');
         }
         return $encoded . "\n";
+    }
+
+    public static function dumpAttestationPath(string $dumpSha256): string
+    {
+        self::assertSha256($dumpSha256, 'dump sha256');
+        return self::DUMP_ATTESTATION_ROOT . '/' . $dumpSha256 . '.json';
+    }
+
+    public static function trafficReportRelativePath(string $runId): string
+    {
+        self::assertUuidV4($runId, 'traffic report run_id');
+        return 'runs/' . $runId . '/traffic-gate-report.json';
+    }
+
+    /** @return array{bytes:int,inodes:int} */
+    public static function rendererCapacityBounds(string $policyBytes, string $rendererMode): array
+    {
+        $record = self::decodeCanonical($policyBytes, self::MAX_FILE_BYTES);
+        self::assertExactKeys($record, ['schema', 'external', 'host'], 'renderer capacity policy');
+        if ($record['schema'] !== self::RENDERER_CAPACITY_POLICY_SCHEMA) {
+            throw new RuntimeException('renderer capacity policy schema is invalid');
+        }
+        foreach (['external', 'host'] as $mode) {
+            self::assertObject($record[$mode], 'renderer capacity policy ' . $mode);
+            self::assertExactKeys($record[$mode], ['bytes', 'inodes'], 'renderer capacity policy ' . $mode);
+        }
+        if ($record['external']['bytes'] !== 0 || $record['external']['inodes'] !== 0) {
+            throw new RuntimeException('external renderer capacity must be exactly zero');
+        }
+        self::assertPositiveInt($record['host']['bytes'], 'host renderer capacity bytes');
+        self::assertPositiveInt($record['host']['inodes'], 'host renderer capacity inodes');
+        if (!in_array($rendererMode, ['host', 'external'], true)) {
+            throw new RuntimeException('renderer capacity mode is invalid');
+        }
+        return $record[$rendererMode];
     }
 
     /** @return array<string,mixed> */
@@ -232,7 +270,10 @@ final class DeploymentEvidenceAuthorityV1
             $record['verification']['restored_datadir_allocated_bytes'],
             'restored datadir allocated bytes',
         );
-        self::assertPositiveInt($record['verification']['restored_datadir_inode_count'], 'restored datadir inode count');
+        self::assertPositiveInt(
+            $record['verification']['restored_datadir_inode_count'],
+            'restored datadir inode count',
+        );
         self::assertUtc($record['verification']['restored_at_utc'], 'dump attestation restored_at');
         self::assertUtc($record['attested_at_utc'], 'dump attestation attested_at');
         self::assertUtc($observedAtUtc, 'dump observed_at');
@@ -379,7 +420,10 @@ final class DeploymentEvidenceAuthorityV1
         ) {
             throw new RuntimeException('capacity statvfs snapshot is invalid');
         }
-        foreach ([$stageInodeCount, $restoreInodeCount, $artifactBytes, $dumpBytes, $stageBytes, $tempBytes, $rollbackBytes] as $bound) {
+        foreach (
+            [$stageInodeCount, $restoreInodeCount, $artifactBytes, $dumpBytes, $stageBytes, $tempBytes, $rollbackBytes]
+            as $bound
+        ) {
             if (!is_int($bound) || $bound < 0) {
                 throw new RuntimeException('capacity component bound is unavailable');
             }
@@ -492,8 +536,11 @@ final class DeploymentEvidenceAuthorityV1
         self::assertPositiveInt($liveStorageAllocatedBytes, 'live storage allocated bytes');
         self::assertPositiveInt($liveStorageLogicalBytes, 'live storage logical bytes');
         self::assertPositiveInt($liveStorageInodeCount, 'live storage inode count');
-        self::assertPositiveInt($rendererInstallBytes, 'renderer install bytes');
-        self::assertPositiveInt($rendererInstallInodeCount, 'renderer install inode count');
+        self::assertNonNegativeInt($rendererInstallBytes, 'renderer install bytes');
+        self::assertNonNegativeInt($rendererInstallInodeCount, 'renderer install inode count');
+        if (($rendererInstallBytes === 0) !== ($rendererInstallInodeCount === 0)) {
+            throw new RuntimeException('renderer capacity must be zero or positive as one exact pair');
+        }
         $liveStorageCopyBytes = max($liveStorageAllocatedBytes, $liveStorageLogicalBytes);
         return self::capacityFromStatvfs(
             $filesystemDevice,
@@ -503,20 +550,14 @@ final class DeploymentEvidenceAuthorityV1
             $inodes,
             $inodesAvailable,
             self::checkedAdd(
-                self::checkedAdd(
-                    $verifiedProvenance['capacity_bounds']['stage_inode_count'],
-                    $liveStorageInodeCount,
-                ),
+                self::checkedAdd($verifiedProvenance['capacity_bounds']['stage_inode_count'], $liveStorageInodeCount),
                 $rendererInstallInodeCount,
             ),
             $verifiedDumpObservation['restored_datadir_inode_count'],
             $verifiedProvenance['archive']['size_bytes'],
             $verifiedDumpObservation['dump_size_bytes'],
             self::checkedAdd(
-                self::checkedAdd(
-                    $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
-                    $liveStorageCopyBytes,
-                ),
+                self::checkedAdd($verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'], $liveStorageCopyBytes),
                 $rendererInstallBytes,
             ),
             self::checkedAdd(
@@ -734,11 +775,7 @@ final class DeploymentEvidenceAuthorityV1
         self::assertSha256($expectedIntentSha256, 'dump observation intent_sha256');
         self::assertSha256($stableDumpSha256, 'stable dump sha256');
         self::assertPositiveInt($stableDumpSizeBytes, 'stable dump size');
-        $attestation = self::decodePinnedDumpAttestation(
-            $attestationBytes,
-            $pinnedAttestationSha256,
-            $observedAtUtc,
-        );
+        $attestation = self::decodePinnedDumpAttestation($attestationBytes, $pinnedAttestationSha256, $observedAtUtc);
         $digestMatches = hash_equals($attestation['dump']['sha256'], $stableDumpSha256);
         $sizeMatches = $attestation['dump']['size_bytes'] === $stableDumpSizeBytes;
         if ($digestMatches && !$sizeMatches) {
@@ -1697,6 +1734,37 @@ final class DeploymentEvidenceAuthorityV1
             $sections['capacity'],
             $sections['artifact'],
         );
+    }
+
+    /**
+     * Decode an immutable assembly that was already produced by the ordered
+     * protected collectors. This validates replay bytes; it does not issue a
+     * new collector result.
+     *
+     * @return array<string,mixed>
+     */
+    public static function decodePinnedPredeployAssembly(string $bytes): array
+    {
+        $record = self::decodeCanonical($bytes, self::MAX_FILE_BYTES);
+        if (
+            array_keys($record) !== ['exit_code', 'reason', 'schema', 'sections', 'status'] ||
+            !is_array($record['sections'] ?? null) ||
+            array_keys($record['sections']) !== ['artifact', 'capacity', 'dump', 'expected_commit', 'traffic_gate']
+        ) {
+            throw new RuntimeException('pinned predeploy assembly shape is invalid');
+        }
+        $sections = $record['sections'];
+        $expected = self::assemblePredeployEvidence(
+            $sections['expected_commit'],
+            $sections['traffic_gate'],
+            $sections['dump'],
+            $sections['capacity'],
+            $sections['artifact'],
+        );
+        if (!hash_equals($bytes, self::encodeFile($expected))) {
+            throw new RuntimeException('pinned predeploy assembly contradicts its gate sections');
+        }
+        return $expected;
     }
 
     private static function assembleVerifiedPredeployEvidence(

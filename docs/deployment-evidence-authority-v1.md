@@ -54,6 +54,31 @@ Run-ID. The runner pins its exact SHA and creates a separate
 `deployment_run_dump_observation.v1` binding it to the deployment Run-ID and
 intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
 the expansion ratio at 100:1. Age must remain below 14,400 seconds.
+The global attestation path is derived only from the already-authorized dump
+digest: `/var/lib/fh-deploy-evidence/dump-attestations/<dump-sha256>.json`.
+Neither the request nor the execution input may supply or override that path.
+At the dump gate, the protected source first copies the execution-input dump
+to its fixed immutable run leaf with an exact streaming SHA-256 check. A second
+stable-FD observation hashes that run copy again before reading the global
+attestation through a no-follow root-owned directory walk. The attestation is
+accepted only as exact bounded root-owned mode-0600 bytes. A missing, unsafe,
+or contradictory observation normalizes to failed/invalid dump evidence and
+cannot proceed to capacity or reservation.
+
+The traffic producer publishes the exact canonical report to
+`runs/<run-id>/traffic-gate-report.json` while the Host Runner holds both the
+global and per-run locks. This immutable run-local leaf is the sole traffic
+report authority; arbitrary report paths and caller-selected report digests are
+not accepted.
+The production collector always requests a 90-second deploy window. It stages
+the producer output under a nonce leaf in the already protected run directory,
+accepts only producer exits `0`, `20`, or `21`, and atomically publishes with
+no replacement followed by file and directory fsync. A first publication must
+place the observed window inside the helper's independently captured start and
+finish times and cover at least 90 seconds. An exact immutable replay may
+attach its original window. The PHP boundary recomputes the producer
+fingerprint and catalog version from the fixed producer/catalog sources before
+and after helper execution; any drift rejects the observation.
 
 Capacity uses one `statvfs` snapshot of the target filesystem (`f_frsize`,
 `f_bavail`, `f_files`, and `f_favail`) and an exact named device map for state,
@@ -66,10 +91,28 @@ The archive-derived stage bounds and this live-storage footprint are added
 before the capacity decision, so `stage_inode_count` represents the complete
 projected stage after that copy. Later artifact observations cannot reduce
 either bound.
-For the fixed host renderer mode, the provider also supplies conservative byte
-and inode upper bounds for `npm ci --omit=dev`, including the staged
-`node_modules` tree plus npm and Puppeteer state caches. Those targets must
-share the measured filesystem and are included before the capacity verdict.
+Renderer capacity comes only from the root-maintained canonical policy at
+`/etc/fh/deployment-renderer-capacity-v1.json`. Its closed
+`deployment_renderer_capacity_policy.v1` object contains exact `host` and
+`external` objects with `bytes` and `inodes`. The external values must be
+exactly `0/0`; host values must both be positive conservative upper bounds for
+`npm ci --omit=dev`, including the staged `node_modules` tree plus npm and
+Puppeteer state caches. The selected mode comes from the already-pinned
+execution input, while the numeric limits come only from this protected policy.
+Host renderer targets must share the measured filesystem and are included
+before the capacity verdict.
+The Core collector resolves those names only to fixed host targets: the
+protected state/run directory for state and the pinned dump, `/root/releases`
+for the release and artifact, `/var/www/html` for the stage and deploy
+temporary target, `/var/www/html/easyappointments/storage` for the live tree,
+and `/var/lib` descendants for host renderer and restore scratch state. It
+opens every component without following links and rejects the observation if
+any target is unsafe or has a different device from the single `/var/www/html`
+`statvfs` snapshot. Test roots are separately closed to the Linux root suite.
+The live-tree walk accepts ordinary POSIX file names but only regular files and
+directories with stable identities and safe ownership/modes; links and special
+files make the capacity observation invalid. No file contents, names, or paths
+are emitted by the helper.
 Base required bytes are archive + compressed dump + archive-derived stage +
 live-storage copy + renderer installation/cache + deterministic temporary
 scratch + the uncompressed stream bound + the independently observed restored
@@ -132,3 +175,8 @@ Orchestrator timing starts durably before the intent. On the same boot,
 monotonic time supplies the duration for successful and failed terminals. A
 boot change forbids success; failed/manual recovery uses ordered UTC duration
 in the existing schema and never claims cross-boot monotonic continuity.
+Before publishing the child observation or terminal evidence, the Core pins a
+canonical run-local `orchestrator-finish.json` containing the finish UTC, boot
+ID, and monotonic sample. Exact retries consume that immutable record, so a
+crash after any later durability step cannot substitute a newer clock sample
+or change the terminal evidence bytes.
