@@ -8,7 +8,9 @@ use Ops\DeploymentHostRunnerCliEnvelopeV1;
 use Ops\DeploymentHostRunnerCliApplicationV1;
 use Ops\DeploymentHostRunnerContractV1;
 use Ops\HostRunnerDeployWorkflow;
+use Ops\HostRunnerPostGateWorkflow;
 use Ops\HostRunnerReservationReconstructor;
+use Ops\HostRunnerRecoveryWorkflow;
 use Ops\HostRunnerStorage;
 use Ops\HostRunnerStoredReconciler;
 use PHPUnit\Framework\TestCase;
@@ -200,6 +202,128 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         self::assertSame(1, $workflow->resumeCalls);
     }
 
+    public function testPostGateApplicationRequiresSameClaimAndRoutesExactReportOnce(): void
+    {
+        $deploy = (string) file_get_contents(self::FIXTURES . 'deploy-request.json');
+        $report = (string) file_get_contents(self::FIXTURES . 'post-gate-report.json');
+        $request = DeploymentHostRunnerContractV1::decodeDeployRequest($deploy);
+        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
+            'post-gates', $request['run_id'], $request['intent_sha256'], $deploy, null, $report,
+        ));
+        $storage = new CliMemoryStorage([
+            'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+        ]);
+        $postGates = new CliPostGateWorkflowFake([
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => $request['run_id'], 'intent_sha256' => $request['intent_sha256'],
+            'action' => 'post-gates', 'disposition' => 'attach_observe_only',
+            'state' => 'post_gates_running', 'result_exit_code' => 0, 'result_reason' => 'ok',
+        ]);
+        $app = new DeploymentHostRunnerCliApplicationV1(
+            $storage,
+            new CliReconstructorFake(),
+            new CliReconcilerFake(),
+            new CliDeployWorkflowFake($this->response($this->deployEnvelope(), 'accepted', 'deploy_running')),
+            $postGates,
+        );
+
+        $response = $app->postGates($envelope);
+
+        self::assertSame('attach_observe_only', $response['disposition']);
+        self::assertSame(1, $postGates->calls);
+        self::assertSame($report, $postGates->reportBytes);
+    }
+
+    public function testReconcileNeverStartsAWorkflowAndReturnsCurrentClaimState(): void
+    {
+        $envelope = $this->deployEnvelope();
+        $reconcileEnvelope = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
+            'reconcile', $envelope['run_id'], $envelope['intent_sha256'], null, null, null,
+        ));
+        $storage = new CliMemoryStorage([
+            'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+            'runs/' . $envelope['run_id'] . '/state.json' => (string) file_get_contents(self::FIXTURES . 'state.json'),
+        ]);
+        $workflow = new CliDeployWorkflowFake($this->response($envelope, 'accepted', 'deploy_running'));
+        $reconciler = new CliReconcilerFake();
+        $app = new DeploymentHostRunnerCliApplicationV1(
+            $storage, new CliReconstructorFake(), $reconciler, $workflow, new CliPostGateWorkflowFake([]),
+        );
+
+        $response = $app->reconcile($reconcileEnvelope);
+
+        self::assertSame('reconcile', $response['action']);
+        self::assertSame('attach_observe_only', $response['disposition']);
+        self::assertSame('deploy_running', $response['state']);
+        self::assertSame(1, $reconciler->calls);
+        self::assertSame(0, $workflow->startCalls + $workflow->resumeCalls);
+    }
+
+    public function testRecoveryRequiresSameClaimAndRoutesExactBoundInput(): void
+    {
+        $recoveryBytes = (string) file_get_contents(self::FIXTURES . 'recovery-request.json');
+        $request = DeploymentHostRunnerContractV1::decodeRecoveryRequest($recoveryBytes);
+        $deployInput = DeploymentHostRunnerContractV1::decodeExecutionInput(
+            (string) file_get_contents(self::FIXTURES . 'execution-input.json'),
+        );
+        $input = [
+            'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
+            'run_id' => $request['run_id'], 'intent_sha256' => $request['intent_sha256'],
+            'action' => 'rollback', 'parameters' => ['release_id' => $deployInput['parameters']['release_id']],
+        ];
+        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
+            'recovery', $request['run_id'], $request['intent_sha256'],
+            $recoveryBytes, DeploymentHostRunnerContractV1::encodeExecutionInput($input), null,
+        ));
+        $storage = new CliMemoryStorage([
+            'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+        ]);
+        $workflow = new CliRecoveryWorkflowFake([
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => $request['run_id'], 'intent_sha256' => $request['intent_sha256'],
+            'action' => 'recovery', 'disposition' => 'accepted', 'state' => 'rollback_running',
+            'result_exit_code' => 0, 'result_reason' => 'ok',
+        ]);
+        $app = new DeploymentHostRunnerCliApplicationV1(
+            $storage,
+            new CliReconstructorFake(),
+            new CliReconcilerFake(),
+            new CliDeployWorkflowFake($this->response($this->deployEnvelope(), 'accepted', 'deploy_running')),
+            new CliPostGateWorkflowFake([]),
+            $workflow,
+        );
+
+        $response = $app->recovery($envelope);
+
+        self::assertSame('accepted', $response['disposition']);
+        self::assertSame(1, $workflow->calls);
+        self::assertSame('rollback', $workflow->input['action']);
+    }
+
+    public function testPublicCliRejectsWrongShapeWithFixedUsageExitAndNoStdout(): void
+    {
+        $script = __DIR__ . '/../../../scripts/ops/deployment_host_runner_v1.php';
+        foreach ([
+            [],
+            ['--action=deploy'],
+            ['--action=deploy', '--request-file=/tmp/request', '--report-file=/tmp/report'],
+            ['--action=reconcile', '--intent-sha256=' . str_repeat('a', 64), '--run-id=018f6f52-4c87-4d4e-8b19-6a66e6e1af25'],
+        ] as $arguments) {
+            $pipes = [];
+            $process = proc_open([PHP_BINARY, $script, ...$arguments], [
+                ['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w'],
+            ], $pipes, null, []);
+            self::assertIsResource($process);
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            self::assertSame(64, proc_close($process));
+            self::assertSame('', $stdout);
+            self::assertSame("deployment host runner usage invalid\n", $stderr);
+        }
+    }
+
     private function envelope(
         string $action,
         string $runId,
@@ -269,6 +393,35 @@ final class CliDeployWorkflowFake implements HostRunnerDeployWorkflow
     public function __construct(private readonly array $response) {}
     public function start(array $request, array $input): array { $this->startCalls++; return $this->response; }
     public function resume(array $request, array $input): array { $this->resumeCalls++; return $this->response; }
+}
+
+final class CliPostGateWorkflowFake implements HostRunnerPostGateWorkflow
+{
+    public int $calls = 0;
+    public ?string $reportBytes = null;
+    /** @param array<string,mixed> $response */
+    public function __construct(private readonly array $response) {}
+    public function submit(array $request, array $report, string $reportBytes): array
+    {
+        $this->calls++;
+        $this->reportBytes = $reportBytes;
+        return $this->response;
+    }
+}
+
+final class CliRecoveryWorkflowFake implements HostRunnerRecoveryWorkflow
+{
+    public int $calls = 0;
+    /** @var array<string,mixed> */
+    public array $input = [];
+    /** @param array<string,mixed> $response */
+    public function __construct(private readonly array $response) {}
+    public function admit(array $request, array $input): array
+    {
+        $this->calls++;
+        $this->input = $input;
+        return $this->response;
+    }
 }
 
 final class CliMemoryStorage implements HostRunnerStorage

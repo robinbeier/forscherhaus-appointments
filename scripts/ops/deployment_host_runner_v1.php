@@ -46,12 +46,15 @@ if ($argc === 2 && in_array($argv[1], ['--internal-envelope-validate', '--intern
             $links[] = $link;
         }
         if ($argv[1] === '--internal-envelope-dispatch') {
-            if ($envelope['action'] !== 'deploy') {
-                deploymentHostRunnerInternalFailure();
-            }
-            $response = (new Ops\DeploymentHostRunnerCliApplicationV1(
+            $application = new Ops\DeploymentHostRunnerCliApplicationV1(
                 new Ops\HelperBackedHostRunnerStorage(),
-            ))->deploy($envelope);
+            );
+            $response = match ($envelope['action']) {
+                'deploy' => $application->deploy($envelope),
+                'post-gates' => $application->postGates($envelope),
+                'recovery' => $application->recovery($envelope),
+                'reconcile' => $application->reconcile($envelope),
+            };
             Ops\DeploymentHostRunnerContractV1::validateResponse($response);
             fwrite(STDOUT, Ops\DeploymentHostRunnerContractV1::encodeFile($response));
             fflush(STDOUT);
@@ -95,6 +98,44 @@ if ($argc === 2 && preg_match('/^--internal-lock-probe-ms=([1-9][0-9]{1,3})$/D',
     fwrite(STDOUT, "done\n");
     fflush(STDOUT);
     exit(0);
+}
+
+if ($argc === 4 && in_array($argv[1], ['--action=deploy', '--action=post-gates', '--action=recovery'], true)) {
+    $action = substr($argv[1], strlen('--action='));
+    $expectedSecond = $action === 'post-gates' ? '--report-file=' : '--execution-input-file=';
+    if (!str_starts_with($argv[2], '--request-file=') || !str_starts_with($argv[3], $expectedSecond)) {
+        deploymentHostRunnerUsage();
+    }
+    $requestPath = substr($argv[2], strlen('--request-file='));
+    $secondPath = substr($argv[3], strlen($expectedSecond));
+    if ($requestPath === '' || $secondPath === '') {
+        deploymentHostRunnerUsage();
+    }
+    pcntl_exec('/usr/bin/env', [
+        '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        '/usr/bin/python3', '-I', '-B', __DIR__ . '/libexec/deployment_host_runner_fs_v1.py',
+        'supervise-cli', '/var/lib/fh-deploy-orchestrator',
+        $action, $requestPath, $secondPath,
+    ]);
+    deploymentHostRunnerInternalFailure();
+}
+
+if (
+    $argc === 4 && $argv[1] === '--action=reconcile' &&
+    str_starts_with($argv[2], '--run-id=') && str_starts_with($argv[3], '--intent-sha256=')
+) {
+    $runId = substr($argv[2], strlen('--run-id='));
+    $intentSha256 = substr($argv[3], strlen('--intent-sha256='));
+    if ($runId === '' || $intentSha256 === '') {
+        deploymentHostRunnerUsage();
+    }
+    pcntl_exec('/usr/bin/env', [
+        '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        '/usr/bin/python3', '-I', '-B', __DIR__ . '/libexec/deployment_host_runner_fs_v1.py',
+        'supervise-cli', '/var/lib/fh-deploy-orchestrator',
+        'reconcile', $runId, $intentSha256,
+    ]);
+    deploymentHostRunnerInternalFailure();
 }
 
 deploymentHostRunnerUsage();

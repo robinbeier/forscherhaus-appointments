@@ -789,7 +789,8 @@ later authoritative unit/receipt reconciliation may persist a terminal result,
 including justified `manual_recovery_required`/`70`; terminal attachment still
 uses CLI exit zero and the stored lifecycle pair.
 
-The future root-only executable has four internal actions:
+The root-only executable exposes exactly four actions through the privileged
+supervisor; its PHP dispatch modes remain internal:
 
 ```text
 --action=deploy --request-file=ABSOLUTE_PATH --execution-input-file=ABSOLUTE_PATH

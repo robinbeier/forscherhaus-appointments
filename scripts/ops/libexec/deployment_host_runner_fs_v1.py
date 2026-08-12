@@ -806,6 +806,62 @@ def prepare_run(root: str, run_id: str) -> None:
         os.close(runs)
 
 
+def prepare_host(root: str) -> None:
+    test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is not None
+    if root != STATE_ROOT and not test_root:
+        reject()
+    if test_root:
+        state = open_root(root)
+    else:
+        parent = open_system_read_root('/var/lib')
+        try:
+            try:
+                os.mkdir('fh-deploy-orchestrator', 0o700, dir_fd=parent)
+                os.fsync(parent)
+            except FileExistsError:
+                pass
+        finally:
+            os.close(parent)
+        state = open_root(root)
+    try:
+        for leaf in ('locks', 'runs'):
+            try:
+                os.mkdir(leaf, 0o700, dir_fd=state)
+                os.fsync(state)
+            except FileExistsError:
+                pass
+            before = os.stat(leaf, dir_fd=state, follow_symlinks=False)
+            validate_directory(before, leaf=True)
+            child = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=state)
+            try:
+                opened = os.fstat(child)
+                post = os.stat(leaf, dir_fd=state, follow_symlinks=False)
+                if not same_identity(before, opened) or not same_identity(opened, post):
+                    reject()
+                if leaf == 'locks':
+                    try:
+                        lock = os.open(
+                            'fh-production-change.lock',
+                            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                            0o600,
+                            dir_fd=child,
+                        )
+                        os.fchmod(lock, 0o600)
+                        os.fsync(lock)
+                        os.close(lock)
+                        os.fsync(child)
+                    except FileExistsError:
+                        metadata = os.stat('fh-production-change.lock', dir_fd=child, follow_symlinks=False)
+                        validate_regular(metadata)
+                        if metadata.st_size != 0:
+                            reject()
+            finally:
+                os.close(child)
+        os.fsync(state)
+    finally:
+        os.close(state)
+
+
 def scan_run_ids(root: str, cursor: str) -> bytes:
     import heapq
     import json
@@ -1196,6 +1252,7 @@ def supervise_cli(root: str, action: str, first: str, second: str, *, probe: boo
     )
     if validation_exit != 0 or validation_output != b'':
         reject()
+    prepare_host(root)
     global_lock = open_lock(root, 'locks/fh-production-change.lock')
     try:
         prepare_run(root, run_id)
@@ -2075,6 +2132,9 @@ def main(arguments: list[str]) -> int:
         return 0
     if len(arguments) == 4 and arguments[1] == 'prepare-run':
         prepare_run(arguments[2], arguments[3])
+        return 0
+    if len(arguments) == 3 and arguments[1] == 'prepare-host':
+        prepare_host(arguments[2])
         return 0
     if len(arguments) == 4 and arguments[1] == 'scan-run-ids':
         sys.stdout.buffer.write(scan_run_ids(arguments[2], arguments[3]))

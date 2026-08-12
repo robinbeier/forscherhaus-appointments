@@ -516,6 +516,26 @@ PYTHON;
         self::assertSame("host-runner storage rejected\n", $unsafe['stderr']);
     }
 
+    public function testPrepareHostCreatesOnlyTheFixedPrivateTreeAndRejectsUnsafeExistingLeaf(): void
+    {
+        self::assertSame(0, $this->runHelper(['prepare-host', $this->root])['exit_code']);
+        self::assertSame(0, $this->runHelper(['prepare-host', $this->root])['exit_code']);
+        foreach (['locks', 'runs'] as $leaf) {
+            self::assertDirectoryExists($this->root . '/' . $leaf);
+            self::assertSame(0700, fileperms($this->root . '/' . $leaf) & 07777);
+        }
+        $lock = $this->root . '/locks/fh-production-change.lock';
+        self::assertSame('', file_get_contents($lock));
+        self::assertSame(0600, fileperms($lock) & 07777);
+        self::assertSame(1, lstat($lock)['nlink']);
+
+        $this->removeTree($this->root . '/runs');
+        self::assertTrue(symlink($this->root . '/locks', $this->root . '/runs'));
+        $unsafe = $this->runHelper(['prepare-host', $this->root]);
+        self::assertSame(70, $unsafe['exit_code']);
+        self::assertTrue(is_link($this->root . '/runs'));
+    }
+
     public function testExactActiveClaimClearRejectsChangedBytesAndUnlinksOnlyExactSafeLeaf(): void
     {
         $claim = "{\"claim\":1}\n";
