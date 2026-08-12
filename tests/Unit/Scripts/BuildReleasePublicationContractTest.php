@@ -12,6 +12,10 @@ final class BuildReleasePublicationContractTest extends TestCase
     {
         $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
         self::assertIsString($script);
+        self::assertStringContainsString(
+            './build_release.sh --expected-commit "$(git rev-parse HEAD)" --rel ea_20251005_2000',
+            $script,
+        );
         self::assertStringContainsString('ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"', $script);
         self::assertStringContainsString('OUTPUT="$(cd "$OUTPUT" && pwd -P)"', $script);
         self::assertStringContainsString('STAGE="$(cd "$STAGE" && pwd -P)"', $script);

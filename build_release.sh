@@ -25,7 +25,7 @@ Usage: build_release.sh --expected-commit FULL_SHA [--rel REL] [--project DIR] [
   --skip-upload      Archiv NICHT hochladen
   --dry-run          Nur anzeigen, was passieren würde (keine Änderungen)
 Beispiel:
-  ./build_release.sh --rel ea_20251005_2000 --project "/Users/robinbeier/Documents/forscherhaus-appointments"
+  ./build_release.sh --expected-commit "$(git rev-parse HEAD)" --rel ea_20251005_2000 --project "/Users/robinbeier/Documents/forscherhaus-appointments"
 USAGE
 }
 
