@@ -1202,8 +1202,23 @@ final class HostRunnerReconciliationPersistence
         $rollbackReportBytes = $state['post_gates']['rollback_submission_count'] === 0
             ? null
             : $required($this->storage->read($prefix . 'rollback-post-gate-report.json', 16_384), 'rollback report');
+        $terminal = in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true);
+        if (!$terminal) {
+            foreach ([$deployReportBytes, $rollbackReportBytes] as $reportBytes) {
+                if (
+                    $reportBytes !== null &&
+                    DeploymentHostRunnerContractV1::postGateSubmissionDisposition(
+                        $reportBytes,
+                        $state,
+                        $reportBytes,
+                    ) !== 'attach'
+                ) {
+                    throw new RuntimeException('nonterminal post-gate report is not durably attached');
+                }
+            }
+        }
         $bundles = [];
-        if (in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)) {
+        if ($terminal) {
             foreach (['deploy', 'rollback'] as $action) {
                 if ($state[$action]['invocation_count'] !== 1) { continue; }
                 $bundles[$action] = [
@@ -1220,8 +1235,8 @@ final class HostRunnerReconciliationPersistence
             $evidenceBytes,
             $runId,
             $intentSha256,
-            $deployReportBytes,
-            $rollbackReportBytes,
+            $terminal ? $deployReportBytes : null,
+            $terminal ? $rollbackReportBytes : null,
             $bundles,
         );
         if ($disposition === 'refresh_terminal_claim') {
@@ -1237,6 +1252,28 @@ final class HostRunnerReconciliationPersistence
             $this->storage->refreshActiveClaim($claimBytes, DeploymentHostRunnerContractV1::encodeFile($terminalClaim));
         } elseif ($disposition === 'clear_terminal') {
             $this->storage->clearActiveClaim($claimBytes);
+        } elseif (
+            $disposition === 'attach_observe_only' &&
+            (
+                $claim['state'] !== $state['state'] ||
+                $claim['sequence'] !== $state['sequence'] ||
+                !hash_equals($claim['events_sha256'], $state['events_sha256'])
+            )
+        ) {
+            $currentClaim = [
+                'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+                'run_id' => $state['run_id'],
+                'intent_sha256' => $state['intent_sha256'],
+                'state' => $state['state'],
+                'sequence' => $state['sequence'],
+                'events_sha256' => $state['events_sha256'],
+                'claimed_at_utc' => $state['updated_at_utc'],
+            ];
+            $this->storage->refreshActiveClaim(
+                $claimBytes,
+                DeploymentHostRunnerContractV1::encodeFile($currentClaim),
+            );
+            $disposition = 'refresh_active_claim';
         }
         return $disposition;
     }

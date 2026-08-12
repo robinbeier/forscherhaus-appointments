@@ -1346,6 +1346,32 @@ final class DeploymentHostRunnerV1Test extends TestCase
         }
     }
 
+    public function testNonterminalReconciliationRejectsChangedPinnedReportBeforeClaimRefresh(): void
+    {
+        $storage = $this->successfulPassedPostGateStorage();
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $report = DeploymentHostRunnerContractV1::decodePostGateReport(
+            $storage->files[$prefix . 'deploy-post-gate-report.json'],
+        );
+        $report['captured_at_utc'] = '2026-08-12T10:00:14Z';
+        $storage->files[$prefix . 'deploy-post-gate-report.json'] =
+            DeploymentHostRunnerContractV1::encodePostGateReport($report);
+        $storage->operations = [];
+        $before = $storage->files;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('conflicts with the write-once submission');
+        try {
+            (new \Ops\HostRunnerReconciliationPersistence($storage))->reconcileStored(
+                self::fixtureRunId(),
+                $report['intent_sha256'],
+            );
+        } finally {
+            self::assertSame($before, $storage->files);
+            self::assertSame([], $storage->operations);
+        }
+    }
+
     public function testTerminalCrashPrefixesResumeExactBytesWithoutFreshClockOrRespawnAuthority(): void
     {
         $prefix = 'runs/' . self::fixtureRunId() . '/';

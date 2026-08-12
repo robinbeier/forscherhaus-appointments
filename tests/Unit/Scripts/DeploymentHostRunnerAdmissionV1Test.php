@@ -10,10 +10,12 @@ use Ops\DeploymentHostRunnerContractV1;
 use Ops\DeploymentHostRunnerV1;
 use Ops\HostRunnerBootReader;
 use Ops\HostRunnerClock;
+use Ops\HostRunnerActionCompletion;
 use Ops\HostRunnerDeployAdmission;
 use Ops\HostRunnerDeployScriptReader;
 use Ops\HostRunnerLaunchNonceSource;
 use Ops\HostRunnerProcessResult;
+use Ops\HostRunnerRecoveryAdmission;
 use Ops\HostRunnerReservationPersistence;
 use Ops\HostRunnerStartOrchestrator;
 use Ops\HostRunnerStorage;
@@ -22,6 +24,7 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentHostRunnerAdmissionV1.php';
+require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentHostRunnerRecoveryV1.php';
 
 final class DeploymentHostRunnerAdmissionV1Test extends TestCase
 {
@@ -73,6 +76,128 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
         self::assertEquals($launch, DeploymentHostRunnerContractV1::decodeSystemdLaunch(
             $storage->files[$prefix . 'deploy-systemd-launch.json'],
         ));
+    }
+
+    public function testFailedPostGatesReserveExactlyOneRollbackAndReplayOnlyObserves(): void
+    {
+        $request = DeploymentHostRunnerContractV1::decodeDeployRequest(
+            (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json'),
+        );
+        $input = DeploymentHostRunnerContractV1::decodeExecutionInput(
+            (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json'),
+        );
+        $script = "#!/bin/bash\nexit 0\n";
+        $storage = new AdmissionStorageFake();
+        $this->seedArtifactVerified($storage, $request, $input, hash('sha256', $script));
+        $deployNonce = str_repeat("\x11", 32);
+        $deployLaunch = DeploymentHostRunnerContractV1::createSystemdLaunch(
+            $input, $request, null, $script, static fn(): string => $deployNonce,
+        );
+        $boot = new AdmissionBootReaderFake(self::BOOT . "\n");
+        $clock = new AdmissionClockFake('2026-08-12T12:01:00Z');
+        $deployAdapter = new AdmissionSystemAdapterFake([
+            new HostRunnerProcessResult(0, $this->notFoundShow($deployLaunch), ''),
+            new HostRunnerProcessResult(0, '', ''),
+        ]);
+        $deployStart = new HostRunnerStartOrchestrator(
+            new HostRunnerReservationPersistence($storage, null, $clock),
+            new DeploymentHostRunnerV1($deployAdapter),
+            $boot,
+        );
+        (new HostRunnerDeployAdmission(
+            $storage, $deployStart, new AdmissionScriptReaderFake($script),
+            new AdmissionNonceSourceFake($deployNonce), $boot, $clock,
+        ))->admit($request, $input);
+
+        $prefix = 'runs/' . $request['run_id'] . '/';
+        $deployObservation = $this->loadedShow($deployLaunch, 'deploy', 'active', 'exited', 'success', 1, 0);
+        self::assertEquals($deployLaunch, DeploymentHostRunnerContractV1::decodeSystemdLaunch(
+            $storage->files[$prefix . 'deploy-systemd-launch.json'],
+        ));
+        self::assertSame('exited', DeploymentHostRunnerContractV1::classifySystemdObservation(
+            $deployLaunch,
+            DeploymentHostRunnerContractV1::parseSystemctlShow($deployObservation, $deployLaunch),
+        )['unit_state']);
+        $observe = new HostRunnerStartOrchestrator(
+            new HostRunnerReservationPersistence($storage, null, $clock),
+            new DeploymentHostRunnerV1(new AdmissionSystemAdapterFake([
+                new HostRunnerProcessResult(0, $deployObservation, ''),
+            ])),
+            $boot,
+        );
+        $observe->resumeReserved(
+            $request['run_id'],
+            $storage->files[$prefix . 'events.jsonl'],
+            $storage->files['active-run.json'],
+            $storage->files[$prefix . 'state.json'],
+        );
+        $observedState = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        self::assertSame('exited', $observedState['deploy']['unit_state']);
+        self::assertSame(0, $observedState['deploy']['observed_exit_code']);
+        $receiptBytes = \Ops\DeployResultV1::canonicalJson(\Ops\DeployResultV1::create('succeeded', 0));
+        $storage->files[$prefix . 'deploy-result.json'] = $receiptBytes;
+        $completion = new HostRunnerActionCompletion($storage, $clock);
+        $completion->acceptSucceededDeployReceipt($request['run_id']);
+        $postGateState = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        $reportBytes = DeploymentHostRunnerContractV1::encodePostGateReport([
+            'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
+            'run_id' => $request['run_id'], 'intent_sha256' => $request['intent_sha256'],
+            'captured_at_utc' => '2026-08-12T12:02:00Z', 'subject' => 'deploy',
+            'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
+            'post_gates' => [
+                'status' => 'failed', 'kuma_healthy_count' => 12, 'kuma_total_count' => 13,
+                'runtime_config_passed' => true, 'services_passed' => true,
+                'endpoints_passed' => true, 'logs_passed' => false,
+                'scanner_passed' => true, 'dormant_clean_passed' => true, 'passed' => false,
+            ],
+        ]);
+        $completion->acceptDeployPostGateReport($request['run_id'], $reportBytes);
+        self::assertSame('post_gates_running', $postGateState['state']);
+        self::assertSame('refresh_active_claim', (new \Ops\HostRunnerReconciliationPersistence($storage))->reconcileStored(
+            $request['run_id'],
+            $request['intent_sha256'],
+        ));
+
+        $recoveryRequest = DeploymentHostRunnerContractV1::decodeRecoveryRequest(
+            (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/recovery-request.json'),
+        );
+        $recoveryInput = $input;
+        $recoveryInput['action'] = 'rollback';
+        $recoveryInput['parameters'] = ['release_id' => $input['parameters']['release_id']];
+        $rollbackNonce = str_repeat("\x22", 32);
+        $rollbackLaunch = DeploymentHostRunnerContractV1::createSystemdLaunch(
+            $recoveryInput, $recoveryRequest, $request, $script, static fn(): string => $rollbackNonce,
+        );
+        $rollbackAdapter = new AdmissionSystemAdapterFake([
+            new HostRunnerProcessResult(0, $this->notFoundShow($rollbackLaunch), ''),
+            new HostRunnerProcessResult(0, '', ''),
+            new HostRunnerProcessResult(0, $this->loadedShow($rollbackLaunch, 'rollback', 'active', 'running', 'success', 0, 0), ''),
+        ]);
+        $recoveryClock = new AdmissionClockFake('2026-08-12T12:03:00Z');
+        $rollbackStart = new HostRunnerStartOrchestrator(
+            new HostRunnerReservationPersistence($storage, null, $recoveryClock),
+            new DeploymentHostRunnerV1($rollbackAdapter),
+            $boot,
+        );
+        $recovery = new HostRunnerRecoveryAdmission(
+            $storage, $rollbackStart, new AdmissionScriptReaderFake($script),
+            new AdmissionNonceSourceFake($rollbackNonce), $boot, $recoveryClock,
+        );
+
+        $first = $recovery->admit($recoveryRequest, $recoveryInput);
+        $second = $recovery->admit($recoveryRequest, $recoveryInput);
+
+        self::assertSame('accepted', $first['disposition']);
+        self::assertSame('attach_observe_only', $second['disposition']);
+        self::assertSame('rollback_running', $second['state']);
+        self::assertCount(3, $rollbackAdapter->calls);
+        self::assertSame('/bin/systemctl', $rollbackAdapter->calls[0][5]);
+        self::assertSame('/usr/bin/systemd-run', $rollbackAdapter->calls[1][5]);
+        self::assertSame('/bin/systemctl', $rollbackAdapter->calls[2][5]);
+        self::assertSame('rollback_running', DeploymentHostRunnerContractV1::decodeState(
+            $storage->files[$prefix . 'state.json'],
+        )['state']);
+        self::assertSame($reportBytes, $storage->files[$prefix . 'deploy-post-gate-report.json']);
     }
 
     /** @param array<string,mixed> $request @param array<string,mixed> $input */
@@ -137,13 +262,28 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
     /** @param array<string,mixed> $launch */
     private function notFoundShow(array $launch): string
     {
+        return $this->show($launch, $launch['action'], 'not-found', 'inactive', 'dead', 'success', 0, 0, '', 'no');
+    }
+
+    /** @param array<string,mixed> $launch */
+    private function loadedShow(
+        array $launch, string $action, string $active, string $sub, string $result, int $code, int $status,
+    ): string {
+        return $this->show($launch, $action, 'loaded', $active, $sub, $result, $code, $status, str_repeat('d', 32), 'yes');
+    }
+
+    /** @param array<string,mixed> $launch */
+    private function show(
+        array $launch, string $action, string $load, string $active, string $sub,
+        string $result, int $code, int $status, string $invocation, string $transient,
+    ): string {
         $properties = DeploymentHostRunnerContractV1::observedUnitProperties(
-            'deploy', hash('sha256', DeploymentHostRunnerContractV1::encodeFile($launch)),
+            $action, hash('sha256', DeploymentHostRunnerContractV1::encodeFile($launch)),
         );
         return implode("\n", [
-            'Id=' . $launch['unit_name'], 'LoadState=not-found', 'ActiveState=inactive', 'SubState=dead',
-            'Result=success', 'ExecMainCode=0', 'ExecMainStatus=0', 'InvocationID=',
-            'Description=' . $properties['Description'], 'Transient=no', 'Type=' . $properties['Type'],
+            'Id=' . $launch['unit_name'], 'LoadState=' . $load, 'ActiveState=' . $active, 'SubState=' . $sub,
+            'Result=' . $result, 'ExecMainCode=' . $code, 'ExecMainStatus=' . $status, 'InvocationID=' . $invocation,
+            'Description=' . $properties['Description'], 'Transient=' . $transient, 'Type=' . $properties['Type'],
             'RemainAfterExit=' . $properties['RemainAfterExit'], 'UMask=' . $properties['UMask'],
             'KillMode=' . $properties['KillMode'], 'Restart=' . $properties['Restart'],
             'RuntimeMaxUSec=' . $properties['RuntimeMaxUSec'], 'TimeoutStopUSec=' . $properties['TimeoutStopUSec'],
