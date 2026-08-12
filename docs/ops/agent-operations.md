@@ -188,6 +188,10 @@ Disk, memory, or swap pressure:
 - Use `prod_doctor.sh` for resource facts first.
 - Use `prod_cleanup_inventory.sh` for read-only cleanup classification before
   proposing any deletion.
+- Use `prod_build_cache_retention.sh` for the separate, read-only Docker
+  build-cache policy snapshot. Its execute path still requires an explicit
+  ROB-450 live-write confirmation; see
+  `docs/ops/production-build-cache-retention.md`.
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 

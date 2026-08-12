@@ -64,6 +64,11 @@ Candidate classes are decision aids, not deletion commands.
 5. Create an explicit live write gate for any deletion.
 6. Re-run `prod_doctor.sh` and `prod_cleanup_inventory.sh` after cleanup.
 
+Docker build cache is a separate retention class. Use
+`scripts/ops/prod_build_cache_retention.sh` and the fixed policy in
+`docs/ops/production-build-cache-retention.md`; never infer permission for a
+builder, image, or system prune from this general inventory.
+
 ## Stop Conditions
 
 Stop before any cleanup plan if:

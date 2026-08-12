@@ -86,6 +86,10 @@ Script inventory:
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything
+- `prod_build_cache_retention.sh` reports aggregate Docker build-cache facts in
+  read-only mode by default and exposes a separately confirmed, age- and
+  storage-bounded builder-cache-only execute gate; see
+  `docs/ops/production-build-cache-retention.md`
 - `install_prod_agent_readme.sh` installs the server-local agent orientation file in explicit execute mode
 - `lib/prod_sensitive_paths.sh` checks fixed sensitive web path classes without
   printing URLs, file contents, tokens, session data, or discovered filenames

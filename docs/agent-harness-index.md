@@ -26,6 +26,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | CI performance measurement and baseline | `docs/ci-performance-baseline.md` | Versioned workload epoch, timing definitions, exclusions, and post-epoch cohort status. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
 | Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
+| Production Docker build-cache retention | `docs/ops/production-build-cache-retention.md` | Fixed dry-run/execute boundary, cache policy, stop conditions, and validation. |
 | Production traffic gate | `docs/traffic-gate-v1.md` | Shared versioned passive traffic contract for deploy and Customers smoke. |
 | Canonical deploy state/result/evidence contract | `docs/deployment-run-v1.md` | Closed ROB-455 intent, lifecycle, child receipt, evidence, and future host-state boundary. |
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |
