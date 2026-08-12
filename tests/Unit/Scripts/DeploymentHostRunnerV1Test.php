@@ -1379,6 +1379,87 @@ final class DeploymentHostRunnerV1Test extends TestCase
         yield 'interrupted before switch' => ['interrupted_pre_switch', 143, 'failed_pre_switch', 'interrupted'];
     }
 
+    #[DataProvider('dedicatedRollbackTerminalCases')]
+    public function testDedicatedRollbackReportTerminalizesPreservedDeployAuthority(
+        bool $reportPassed,
+        string $expectedState,
+        int $expectedExit,
+        string $expectedReason,
+    ): void {
+        $storage = $this->completedRollbackStorage($reportPassed);
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+
+        $response = (new \Ops\HostRunnerTerminalPersistence(
+            $storage,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        ))->terminalizeRollback(self::fixtureRunId());
+
+        self::assertSame('recovery', $response['action']);
+        self::assertSame($expectedState, $response['state']);
+        self::assertSame($expectedExit, $response['result_exit_code']);
+        self::assertSame($expectedReason, $response['result_reason']);
+        self::assertArrayNotHasKey('active-run.json', $storage->files);
+        $evidence = json_decode($storage->files[$prefix . 'evidence.json'], true, 64, JSON_THROW_ON_ERROR);
+        self::assertSame($reportPassed ? 'succeeded' : 'failed', $evidence['rollback']['status']);
+        self::assertSame('failed', $evidence['post_gates']['status']);
+        self::assertSame(
+            'terminal',
+            \Ops\DeploymentContractV1::validateBundle(
+                explode("\n", substr($storage->files[$prefix . 'events.jsonl'], 0, -1)),
+                $evidence,
+            )['recovery'],
+        );
+    }
+
+    /** @return iterable<string,array{bool,string,int,string}> */
+    public static function dedicatedRollbackTerminalCases(): iterable
+    {
+        yield 'verified rollback' => [true, 'failed_post_switch_rollback_succeeded', 30, 'deploy_failed'];
+        yield 'failed verification' => [false, 'failed_post_switch_rollback_failed', 31, 'rollback_failed'];
+    }
+
+    public function testDedicatedRollbackTerminalCrashPrefixesResumeExactBytes(): void
+    {
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $source = $this->completedRollbackStorage(true);
+        $initial = $source->files;
+        $activeClaim = $initial['active-run.json'];
+        (new \Ops\HostRunnerTerminalPersistence($source, new FixedTerminalClock(), new NotObservedTimingPin()))
+            ->terminalizeRollback(self::fixtureRunId());
+        $terminal = $source->files;
+        foreach (
+            [
+                'finish' => ['orchestrator-finish.json'],
+                'child' => ['orchestrator-finish.json', 'deploy-child-observation.json'],
+                'evidence' => ['orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json'],
+                'journal' => [
+                    'orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json', 'events.jsonl',
+                ],
+                'state' => [
+                    'orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json',
+                    'events.jsonl', 'state.json',
+                ],
+            ]
+            as $name => $leaves
+        ) {
+            $storage = new RecordingHostRunnerStorage();
+            $storage->files = $initial;
+            foreach ($leaves as $leaf) {
+                $storage->files[$prefix . $leaf] = $terminal[$prefix . $leaf];
+            }
+            $storage->files['active-run.json'] = $activeClaim;
+            $clock = new FixedTerminalClock();
+            $timing = new NotObservedTimingPin();
+            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
+                ->terminalizeRollback(self::fixtureRunId());
+            self::assertSame('failed_post_switch_rollback_succeeded', $response['state'], $name);
+            self::assertSame($terminal, $storage->files, $name);
+            self::assertSame(0, $clock->nowCalls, $name);
+            self::assertSame($name === 'state' ? 0 : 1, $timing->calls, $name);
+        }
+    }
+
     public function testPostGateSubmissionPinsFirstExactReportAndNeverReplacesIt(): void
     {
         $durable = $this->reservationPersistenceFixture();
@@ -1720,6 +1801,156 @@ final class DeploymentHostRunnerV1Test extends TestCase
         );
         $this->addPassedPredeployAuthority($storage);
         return $storage;
+    }
+
+    private function completedRollbackStorage(bool $reportPassed): RecordingHostRunnerStorage
+    {
+        [$storage] = $this->successfulStoppedDeployStorage();
+        $this->addPassedPredeployAuthority($storage);
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $bundle = $this->fixture();
+        $completion = new \Ops\HostRunnerActionCompletion(
+            $storage,
+            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
+        );
+        $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
+        $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        $receiptBytes = $storage->files[$prefix . 'deploy-result.json'];
+        $deployReport = [
+            'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $state['intent_sha256'],
+            'captured_at_utc' => '2026-08-12T10:00:13Z',
+            'subject' => 'deploy',
+            'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
+            'post_gates' => [
+                'status' => 'failed', 'kuma_healthy_count' => 12, 'kuma_total_count' => 13,
+                'runtime_config_passed' => true, 'services_passed' => true,
+                'endpoints_passed' => true, 'logs_passed' => false,
+                'scanner_passed' => true, 'dormant_clean_passed' => true, 'passed' => false,
+            ],
+        ];
+        $deployReportBytes = DeploymentHostRunnerContractV1::encodePostGateReport($deployReport);
+        $completion->acceptDeployPostGateReport(self::fixtureRunId(), $deployReportBytes);
+        $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        $recoveryRequest = DeploymentHostRunnerContractV1::decodeRecoveryRequest(
+            (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/recovery-request.json'),
+        );
+        $recoveryInput = [
+            'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $state['intent_sha256'],
+            'action' => 'rollback',
+            'parameters' => ['release_id' => $bundle['request']['release_id']],
+        ];
+        $rollbackLaunch = DeploymentHostRunnerContractV1::createSystemdLaunch(
+            $recoveryInput,
+            $recoveryRequest,
+            $bundle['request'],
+            $bundle['script'],
+            static fn(): string => str_repeat("\x22", 32),
+        );
+        $rollbackBinding = [
+            'schema' => DeploymentHostRunnerContractV1::UNIT_BINDING_SCHEMA,
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $state['intent_sha256'],
+            'action' => 'rollback',
+            'unit_name' => $rollbackLaunch['unit_name'],
+            'unit_launch_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeFile($rollbackLaunch)),
+            'unit_manager_boot_id' => self::BOOT,
+            'unit_invocation_id' => str_repeat('e', 32),
+            'binding_state' => 'observed',
+        ];
+        $lines = explode("\n", substr($storage->files[$prefix . 'events.jsonl'], 0, -1));
+        $lines[] = \Ops\DeploymentContractV1::canonicalJson([
+            'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::fixtureRunId(),
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-12T10:00:14Z',
+            'previous_state' => 'post_gates_running',
+            'state' => 'rollback_running',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $state['intent_sha256'],
+            'exit_code' => 0,
+            'reason' => 'ok',
+        ]);
+        $eventsBytes = implode("\n", $lines) . "\n";
+        $state['state'] = 'rollback_running';
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $eventsBytes);
+        $state['active_action'] = 'rollback';
+        $state['rollback'] = [
+            'request_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeFile($recoveryRequest)),
+            'execution_input_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeExecutionInput($recoveryInput)),
+            'invocation_count' => 1,
+            'unit_name' => $rollbackLaunch['unit_name'],
+            'unit_launch_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeFile($rollbackLaunch)),
+            'unit_manager_boot_id' => self::BOOT,
+            'unit_invocation_id' => str_repeat('e', 32),
+            'unit_missing_observed_boot_id' => null,
+            'unit_state' => 'exited',
+            'observed_exit_code' => 0,
+            'verdict' => 'verification_pending',
+        ];
+        $state['updated_at_utc'] = '2026-08-12T10:00:15Z';
+        $storage->files[$prefix . 'events.jsonl'] = $eventsBytes;
+        $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
+        $storage->files[$prefix . 'recovery-request.json'] = DeploymentHostRunnerContractV1::encodeFile($recoveryRequest);
+        $storage->files[$prefix . 'recovery-execution-input.json'] = DeploymentHostRunnerContractV1::encodeExecutionInput($recoveryInput);
+        $storage->files[$prefix . 'rollback-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile($rollbackLaunch);
+        $storage->files[$prefix . 'rollback-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($rollbackBinding);
+        $storage->files[$prefix . 'rollback-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
+            'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
+            'manager_boot_id' => self::BOOT,
+            'systemctl_show' => $this->loadedRollbackShow($rollbackLaunch, 0),
+        ]);
+        $storage->files['active-run.json'] = DeploymentHostRunnerContractV1::encodeFile([
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => 'rollback_running',
+            'sequence' => $state['sequence'],
+            'events_sha256' => $state['events_sha256'],
+            'claimed_at_utc' => '2026-08-12T10:00:14Z',
+        ]);
+        $rollbackPostGates = $deployReport['post_gates'];
+        $rollbackPostGates['status'] = $reportPassed ? 'passed' : 'failed';
+        $rollbackPostGates['kuma_healthy_count'] = $reportPassed ? 13 : 12;
+        $rollbackPostGates['logs_passed'] = $reportPassed;
+        $rollbackPostGates['passed'] = $reportPassed;
+        $completion->acceptRollbackPostGateReport(
+            self::fixtureRunId(),
+            DeploymentHostRunnerContractV1::encodePostGateReport([
+                'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
+                'run_id' => self::fixtureRunId(),
+                'intent_sha256' => $state['intent_sha256'],
+                'captured_at_utc' => '2026-08-12T10:00:16Z',
+                'subject' => 'rollback',
+                'deploy_receipt_sha256' => null,
+                'post_gates' => $rollbackPostGates,
+            ]),
+        );
+        return $storage;
+    }
+
+    /** @param array<string,mixed> $launch */
+    private function loadedRollbackShow(array $launch, int $exitCode): string
+    {
+        $properties = DeploymentHostRunnerContractV1::observedUnitProperties(
+            'rollback',
+            DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($launch)),
+        );
+        return implode("\n", [
+            'Id=' . $launch['unit_name'], 'LoadState=loaded', 'ActiveState=active', 'SubState=exited',
+            'Result=success', 'ExecMainCode=1', 'ExecMainStatus=' . $exitCode,
+            'InvocationID=' . str_repeat('e', 32), 'Description=' . $properties['Description'],
+            'Transient=yes', 'Type=' . $properties['Type'], 'RemainAfterExit=' . $properties['RemainAfterExit'],
+            'UMask=' . $properties['UMask'], 'KillMode=' . $properties['KillMode'], 'Restart=' . $properties['Restart'],
+            'RuntimeMaxUSec=' . $properties['RuntimeMaxUSec'], 'TimeoutStopUSec=' . $properties['TimeoutStopUSec'],
+            'StandardInput=' . $properties['StandardInput'], 'StandardOutput=' . $properties['StandardOutput'],
+            'StandardError=' . $properties['StandardError'],
+        ]) . "\n";
     }
 
     private function addPassedPredeployAuthority(RecordingHostRunnerStorage $storage): void

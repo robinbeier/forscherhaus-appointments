@@ -1002,6 +1002,7 @@ final class HostRunnerReservationPersistence
             $candidate[$action]['unit_state'] = $result['unit_state'];
             $candidate[$action]['observed_exit_code'] = $result['observed_exit_code'];
             $candidate[$action]['unit_invocation_id'] = $result['unit_invocation_id'];
+            $this->applyRollbackVerdict($candidate, $action);
             if ($binding['binding_state'] === 'reserved' && $result['unit_invocation_id'] !== null) {
                 $nextBinding['binding_state'] = 'observed';
                 $nextBinding['unit_invocation_id'] = $result['unit_invocation_id'];
@@ -1067,6 +1068,7 @@ final class HostRunnerReservationPersistence
             $candidate[$action]['unit_state'] = $result['unit_state'];
             $candidate[$action]['observed_exit_code'] = $result['observed_exit_code'];
             $candidate[$action]['unit_invocation_id'] = $result['unit_invocation_id'];
+            $this->applyRollbackVerdict($candidate, $action);
             if ($binding['binding_state'] === 'reserved' && $result['unit_invocation_id'] !== null) {
                 $nextBinding['binding_state'] = 'observed';
                 $nextBinding['unit_invocation_id'] = $result['unit_invocation_id'];
@@ -1085,7 +1087,8 @@ final class HostRunnerReservationPersistence
         if ($candidate[$action]['unit_state'] === $state[$action]['unit_state'] &&
             $candidate[$action]['observed_exit_code'] === $state[$action]['observed_exit_code'] &&
             $candidate[$action]['unit_invocation_id'] === $state[$action]['unit_invocation_id'] &&
-            $candidate[$action]['unit_missing_observed_boot_id'] === $state[$action]['unit_missing_observed_boot_id']) {
+            $candidate[$action]['unit_missing_observed_boot_id'] === $state[$action]['unit_missing_observed_boot_id'] &&
+            ($action !== 'rollback' || $candidate['rollback']['verdict'] === $state['rollback']['verdict'])) {
             DeploymentHostRunnerContractV1::validateUnitReconciliationBundle($launch, $binding, $state, $observation);
             return false;
         }
@@ -1102,6 +1105,17 @@ final class HostRunnerReservationPersistence
         $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidate), 4_096);
         $this->after('unit_state_durable');
         return true;
+    }
+
+    /** @param array<string,mixed> $candidate */
+    private function applyRollbackVerdict(array &$candidate, string $action): void
+    {
+        if ($action !== 'rollback' || $candidate['rollback']['observed_exit_code'] === null) {
+            return;
+        }
+        $candidate['rollback']['verdict'] = $candidate['rollback']['observed_exit_code'] === 0
+            ? 'verification_pending'
+            : 'failed';
     }
 }
 
@@ -1453,6 +1467,60 @@ final class HostRunnerActionCompletion
         $candidate['post_gates']['deploy_report_sha256'] = $sha;
         $candidate['post_gates']['deploy_submission_count'] = 1;
         $candidate['post_gates']['deploy_verdict'] = $report['post_gates']['status'];
+        $candidate['updated_at_utc'] = max($state['updated_at_utc'], $report['captured_at_utc']);
+        DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
+        $this->storage->cow(
+            $prefix . 'state.json',
+            DeploymentHostRunnerContractV1::encodeFile($candidate),
+            4_096,
+        );
+        return ['disposition' => $disposition, 'state' => $candidate];
+    }
+
+    /**
+     * Pin the exact dedicated rollback verification report and bind its verdict
+     * into the derived state cache. The rollback unit must already have a
+     * normal observed exit zero and the failed deploy report remains immutable.
+     *
+     * @return array{disposition:string,state:array<string,mixed>}
+     */
+    public function acceptRollbackPostGateReport(string $runId, string $reportBytes): array
+    {
+        $disposition = $this->submitPostGateReport($runId, $reportBytes);
+        $report = DeploymentHostRunnerContractV1::decodePostGateReport($reportBytes);
+        if ($report['subject'] !== 'rollback') {
+            throw new RuntimeException('rollback post-gate state cannot consume a deploy report');
+        }
+        $prefix = 'runs/' . $runId . '/';
+        $eventsBytes = $this->required($prefix . 'events.jsonl', 1_048_576);
+        $state = DeploymentHostRunnerContractV1::decodeState(
+            $this->required($prefix . 'state.json', 4_096),
+        );
+        if (
+            $state['state'] !== 'rollback_running' ||
+            DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current'
+        ) {
+            throw new RuntimeException('rollback post-gate result requires current rollback state');
+        }
+        $sha = hash('sha256', $reportBytes);
+        if ($state['post_gates']['rollback_submission_count'] === 1) {
+            if (
+                !hash_equals($state['post_gates']['rollback_report_sha256'], $sha) ||
+                $state['post_gates']['rollback_verdict'] !== $report['post_gates']['status'] ||
+                $state['rollback']['verdict'] !== ($report['post_gates']['status'] === 'passed' ? 'succeeded' : 'failed')
+            ) {
+                throw new RuntimeException('durable rollback post-gate result conflicts with exact report bytes');
+            }
+            return ['disposition' => $disposition, 'state' => $state];
+        }
+        if ($state['rollback']['verdict'] !== 'verification_pending') {
+            throw new RuntimeException('first rollback post-gate result requires verification-pending state');
+        }
+        $candidate = $state;
+        $candidate['post_gates']['rollback_report_sha256'] = $sha;
+        $candidate['post_gates']['rollback_submission_count'] = 1;
+        $candidate['post_gates']['rollback_verdict'] = $report['post_gates']['status'];
+        $candidate['rollback']['verdict'] = $report['post_gates']['status'] === 'passed' ? 'succeeded' : 'failed';
         $candidate['updated_at_utc'] = max($state['updated_at_utc'], $report['captured_at_utc']);
         DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
         $this->storage->cow(
