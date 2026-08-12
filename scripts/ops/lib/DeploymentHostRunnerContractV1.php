@@ -1127,8 +1127,21 @@ final class DeploymentHostRunnerContractV1
         ) {
             throw new RuntimeException('rollback verdict evolution is invalid');
         }
-        if ($current['terminal']['state'] !== null && $candidate !== $current) {
-            throw new RuntimeException('terminal runner state is immutable');
+        if ($current['terminal']['state'] !== null) {
+            $currentImmutable = $current;
+            $candidateImmutable = $candidate;
+            $candidateImmutable['updated_at_utc'] = $currentImmutable['updated_at_utc'];
+            foreach (['deploy', 'rollback'] as $action) {
+                foreach (
+                    ['unit_invocation_id', 'unit_missing_observed_boot_id', 'unit_state', 'observed_exit_code']
+                    as $field
+                ) {
+                    $candidateImmutable[$action][$field] = $currentImmutable[$action][$field];
+                }
+            }
+            if ($candidateImmutable !== $currentImmutable) {
+                throw new RuntimeException('terminal result and durable authority are immutable');
+            }
         }
     }
 

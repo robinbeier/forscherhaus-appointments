@@ -1120,6 +1120,261 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         }
     }
 
+    public function testRebootProvenMissingUnitRefreshesAndClearsOnlyWithImmutableExactProof(): void
+    {
+        $claimLines = $this->runThrough('deploy_running');
+        $lines = $claimLines;
+        $previous = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($previous);
+        $lines[] = DeploymentContractV1::canonicalJson([
+            'schema' => DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::RUN_ID,
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-11T13:00:11Z',
+            'previous_state' => $previous['state'],
+            'state' => 'manual_recovery_required',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $this->deployRequest()['intent_sha256'],
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ]);
+        $events = implode("\n", $lines) . "\n";
+        $evidence = $this->succeededEvidence($lines);
+        $evidence['deploy'] = [
+            'status' => 'unknown',
+            'invocation_count' => 1,
+            'exit_code' => null,
+            'rollback_outcome' => 'not_observed',
+        ];
+        $evidence['post_gates'] = array_map(static fn(mixed $_value): mixed => null, $evidence['post_gates']);
+        $evidence['post_gates']['status'] = 'not_observed';
+        $evidence['result'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ];
+        $evidenceBytes = DeploymentContractV1::canonicalJson($evidence) . "\n";
+
+        $launch = $this->systemdLaunch();
+        $reservedBootId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+        $missingBootId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+        $notFoundShow = str_replace(
+            [
+                'LoadState=loaded',
+                'ActiveState=failed',
+                'SubState=failed',
+                'ExecMainCode=1',
+                'ExecMainStatus=30',
+                'InvocationID=' . str_repeat('d', 32),
+                'Transient=yes',
+            ],
+            [
+                'LoadState=not-found',
+                'ActiveState=inactive',
+                'SubState=dead',
+                'ExecMainCode=0',
+                'ExecMainStatus=0',
+                'InvocationID=',
+                'Transient=no',
+            ],
+            $this->systemctlShowBytes($launch),
+        );
+        $absence = DeploymentHostRunnerContractV1::unitAbsenceFromSystemctlResult(
+            0,
+            $notFoundShow,
+            '',
+            $launch,
+            $missingBootId . "\n",
+        );
+        self::assertSame('not_found', $absence['kind']);
+        self::assertSame($missingBootId, $absence['manager_boot_id']);
+
+        $state = $this->terminalState('manual_recovery_required', 143, 'interrupted', null);
+        $state['sequence'] = count($lines);
+        $state['events_sha256'] = hash('sha256', $events);
+        $state['deploy']['unit_invocation_id'] = null;
+        $state['deploy']['unit_missing_observed_boot_id'] = $missingBootId;
+        $state['deploy']['unit_state'] = 'missing';
+        $state['deploy']['observed_exit_code'] = null;
+        $state['deploy']['receipt_sha256'] = null;
+        $state['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        DeploymentHostRunnerContractV1::validateState($state);
+
+        $unknown = $state;
+        $unknown['deploy']['unit_missing_observed_boot_id'] = null;
+        $unknown['deploy']['unit_state'] = 'unknown';
+        DeploymentHostRunnerContractV1::validateState($unknown);
+        DeploymentHostRunnerContractV1::validateStateEvolution($unknown, $state);
+
+        $immutableMutations = [];
+        $terminalResult = $unknown;
+        $terminalResult['terminal'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 70,
+            'reason' => 'contract_invalid',
+        ];
+        $immutableMutations['terminal result'] = $terminalResult;
+        $journalPrefix = $unknown;
+        $journalPrefix['sequence']++;
+        $journalPrefix['events_sha256'] = str_repeat('e', 64);
+        $immutableMutations['journal prefix'] = $journalPrefix;
+        $evidenceBinding = $unknown;
+        $evidenceBinding['evidence_sha256'] = str_repeat('e', 64);
+        $immutableMutations['evidence binding'] = $evidenceBinding;
+        foreach (['request_sha256', 'execution_input_sha256', 'unit_launch_sha256'] as $field) {
+            $identity = $unknown;
+            $identity['deploy'][$field] = str_repeat('e', 64);
+            $immutableMutations[$field] = $identity;
+        }
+        $managerBoot = $unknown;
+        $managerBoot['deploy']['unit_manager_boot_id'] = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+        $immutableMutations['manager boot binding'] = $managerBoot;
+        foreach ($immutableMutations as $label => $candidate) {
+            try {
+                DeploymentHostRunnerContractV1::validateStateEvolution($unknown, $candidate);
+                self::fail($label . ' changed after terminal persistence.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        $completed = $this->terminalState('succeeded', 0, 'ok', 'succeeded');
+        $completedMutations = [];
+        $receipt = $completed;
+        $receipt['deploy']['receipt_sha256'] = str_repeat('e', 64);
+        $completedMutations['receipt'] = $receipt;
+        $report = $completed;
+        $report['post_gates']['deploy_report_sha256'] = str_repeat('e', 64);
+        $completedMutations['post-gate report'] = $report;
+        foreach ($completedMutations as $label => $candidate) {
+            try {
+                DeploymentHostRunnerContractV1::validateStateEvolution($completed, $candidate);
+                self::fail($label . ' changed after terminal persistence.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        $bundle = [
+            'deploy' => [
+                'launch' => DeploymentHostRunnerContractV1::encodeFile($launch),
+                'binding' => DeploymentHostRunnerContractV1::encodeFile(
+                    $this->unitBindingForLaunch($launch, 'reserved'),
+                ),
+                'observation' => DeploymentHostRunnerContractV1::encodeFile($absence),
+            ],
+        ];
+        self::assertSame(
+            'current',
+            DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
+                $state,
+                $events,
+                $evidenceBytes,
+                null,
+                null,
+                $bundle,
+            ),
+        );
+
+        $claimEvents = implode("\n", $claimLines) . "\n";
+        $claim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => self::RUN_ID,
+            'intent_sha256' => $state['intent_sha256'],
+            'state' => 'deploy_running',
+            'sequence' => count($claimLines),
+            'events_sha256' => hash('sha256', $claimEvents),
+            'claimed_at_utc' => '2026-08-11T13:00:00Z',
+        ];
+        self::assertSame(
+            'refresh_terminal_claim',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                $evidenceBytes,
+                self::RUN_ID,
+                $state['intent_sha256'],
+                null,
+                null,
+                $bundle,
+            ),
+        );
+        $claim['state'] = 'manual_recovery_required';
+        $claim['sequence'] = count($lines);
+        $claim['events_sha256'] = hash('sha256', $events);
+        self::assertSame(
+            'clear_terminal',
+            DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $events,
+                $evidenceBytes,
+                self::RUN_ID,
+                $state['intent_sha256'],
+                null,
+                null,
+                $bundle,
+            ),
+        );
+
+        $changedProof = $state;
+        $changedProof['deploy']['unit_missing_observed_boot_id'] = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+        try {
+            DeploymentHostRunnerContractV1::validateStateEvolution($state, $changedProof);
+            self::fail('A persisted missing-unit boot proof was replaced.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $removedProof = $state;
+        $removedProof['deploy']['unit_missing_observed_boot_id'] = null;
+        try {
+            DeploymentHostRunnerContractV1::validateState($removedProof);
+            self::fail('A missing unit remained authoritative without its reboot proof.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $regressed = $state;
+        $regressed['deploy']['unit_missing_observed_boot_id'] = null;
+        $regressed['deploy']['unit_state'] = 'running';
+        try {
+            DeploymentHostRunnerContractV1::validateStateEvolution($state, $regressed);
+            self::fail('A reboot-proven missing unit regressed to running.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $impossibleExit = $state;
+        $impossibleExit['deploy']['observed_exit_code'] = 0;
+        try {
+            DeploymentHostRunnerContractV1::validateState($impossibleExit);
+            self::fail('A reboot-proven missing unit carried a synthesized exit code.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $sameBootBundle = $bundle;
+        $sameBootAbsence = $absence;
+        $sameBootAbsence['manager_boot_id'] = $reservedBootId;
+        $sameBootBundle['deploy']['observation'] = DeploymentHostRunnerContractV1::encodeFile($sameBootAbsence);
+        try {
+            DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
+                $state,
+                $events,
+                $evidenceBytes,
+                null,
+                null,
+                $sameBootBundle,
+            );
+            self::fail('Same-boot absence cleared a reboot-proven missing unit.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+    }
+
     public function testTerminalClaimCannotClearWhileRollbackUnitStateIsUnknown(): void
     {
         $claimLines = $this->runThrough('post_gates_running');
