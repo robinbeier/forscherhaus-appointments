@@ -28,11 +28,8 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         if (PHP_OS_FAMILY !== 'Linux' || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
             self::markTestSkipped('Host-runner storage requires Linux root.');
         }
-        if (!is_executable('/usr/bin/python3')) {
-            self::fail('The documented target Python runtime is unavailable in the root gate.');
-        }
-        if (!is_executable('/usr/bin/php')) {
-            self::fail('The documented target PHP CLI runtime is unavailable in the root gate.');
+        if (!is_executable('/usr/bin/python3') || !is_executable('/usr/bin/php')) {
+            self::markTestSkipped('The documented target runtimes are unavailable outside the dedicated root gate.');
         }
 
         $this->root = '/root/fh-host-runner-core-' . bin2hex(random_bytes(8));
@@ -136,16 +133,30 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         $target = $this->root . '/runs/' . self::RUN_ID . '/deploy-ref-healthz-token';
         self::assertSame($bytes, file_get_contents($target));
         self::assertSame(0600, fileperms($target) & 07777);
-        self::assertSame(0, $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'healthz-token'], $payload)['exit_code']);
+        self::assertSame(
+            0,
+            $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'healthz-token'], $payload)['exit_code'],
+        );
 
         self::assertSame(strlen($bytes), file_put_contents($source, "changed data\n"));
         self::assertTrue(chmod($source, 0600));
-        $changed = json_encode(['source_path' => $source, 'sha256' => hash('sha256', "changed data\n")], JSON_THROW_ON_ERROR);
-        self::assertSame(75, $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'healthz-token'], $changed)['exit_code']);
+        $changed = json_encode(
+            ['source_path' => $source, 'sha256' => hash('sha256', "changed data\n")],
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            75,
+            $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'healthz-token'], $changed)['exit_code'],
+        );
         self::assertSame($bytes, file_get_contents($target));
 
         $wrongHash = json_encode(['source_path' => $source, 'sha256' => str_repeat('0', 64)], JSON_THROW_ON_ERROR);
-        self::assertSame(70, $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'canary-credentials'], $wrongHash)['exit_code']);
+        self::assertSame(
+            70,
+            $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'canary-credentials'], $wrongHash)[
+                'exit_code'
+            ],
+        );
         self::assertFileDoesNotExist($this->root . '/runs/' . self::RUN_ID . '/deploy-ref-canary-credentials');
 
         $oversized = $this->root . '/oversized';
@@ -154,19 +165,43 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         self::assertTrue(ftruncate($handle, 1_048_577));
         fclose($handle);
         self::assertTrue(chmod($oversized, 0600));
-        $oversizedPayload = json_encode(['source_path' => $oversized, 'sha256' => str_repeat('0', 64)], JSON_THROW_ON_ERROR);
-        self::assertSame(70, $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'incident-webhook'], $oversizedPayload)['exit_code']);
+        $oversizedPayload = json_encode(
+            ['source_path' => $oversized, 'sha256' => str_repeat('0', 64)],
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            70,
+            $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'incident-webhook'], $oversizedPayload)[
+                'exit_code'
+            ],
+        );
 
         self::assertTrue(symlink($source, $this->root . '/source-link'));
-        $symlinkPayload = json_encode(['source_path' => $this->root . '/source-link', 'sha256' => hash('sha256', "changed data\n")], JSON_THROW_ON_ERROR);
-        self::assertSame(70, $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'predeploy-credentials'], $symlinkPayload)['exit_code']);
+        $symlinkPayload = json_encode(
+            ['source_path' => $this->root . '/source-link', 'sha256' => hash('sha256', "changed data\n")],
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            70,
+            $this->runHelper(['pin-reference', $this->root, self::RUN_ID, 'predeploy-credentials'], $symlinkPayload)[
+                'exit_code'
+            ],
+        );
 
         $literal = $this->root . '/${FH_HEALTHZ_TOKEN}.token';
         self::assertTrue(mkdir($this->root . '/runs/' . self::OTHER_RUN_ID, 0700));
         self::assertSame(strlen($bytes), file_put_contents($literal, $bytes));
         self::assertTrue(chmod($literal, 0600));
-        $literalPayload = json_encode(['source_path' => $literal, 'sha256' => hash('sha256', $bytes)], JSON_THROW_ON_ERROR);
-        self::assertSame(0, $this->runHelper(['pin-reference', $this->root, self::OTHER_RUN_ID, 'healthz-token'], $literalPayload)['exit_code']);
+        $literalPayload = json_encode(
+            ['source_path' => $literal, 'sha256' => hash('sha256', $bytes)],
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            0,
+            $this->runHelper(['pin-reference', $this->root, self::OTHER_RUN_ID, 'healthz-token'], $literalPayload)[
+                'exit_code'
+            ],
+        );
     }
 
     public function testPinAndCowRejectUnsafeExistingLeavesWithoutTouchingTheirReferents(): void
@@ -193,7 +228,21 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
 
     public function testConcurrentNoReplacePinHasOneWinnerAndNoTemporaryLeak(): void
     {
-        $command = ['/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', '/usr/bin/python3', '-I', '-B', $this->helper, 'pin', $this->root, 'winner', '64'];
+        $command = [
+            '/usr/bin/env',
+            '-i',
+            'LANG=C',
+            'LC_ALL=C',
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+            '/usr/bin/python3',
+            '-I',
+            '-B',
+            $this->helper,
+            'pin',
+            $this->root,
+            'winner',
+            '64',
+        ];
         $processes = [];
         foreach (["one\n", "two\n"] as $value) {
             $pipes = [];
@@ -220,16 +269,16 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
     public function testKernelCapabilitiesRequiredByTheHelperExistOnTargetLinux(): void
     {
         $script = <<<'PYTHON'
-import os
-import ctypes
-required = ['O_CLOEXEC', 'O_DIRECTORY', 'O_NOFOLLOW', 'O_NONBLOCK']
-assert all(hasattr(os, name) for name in required)
-assert os.open in os.supports_dir_fd
-assert os.stat in os.supports_dir_fd
-assert os.unlink in os.supports_dir_fd
-assert os.stat in os.supports_follow_symlinks
-assert getattr(ctypes.CDLL(None), 'renameat2', None) is not None
-PYTHON;
+        import os
+        import ctypes
+        required = ['O_CLOEXEC', 'O_DIRECTORY', 'O_NOFOLLOW', 'O_NONBLOCK']
+        assert all(hasattr(os, name) for name in required)
+        assert os.open in os.supports_dir_fd
+        assert os.stat in os.supports_dir_fd
+        assert os.unlink in os.supports_dir_fd
+        assert os.stat in os.supports_follow_symlinks
+        assert getattr(ctypes.CDLL(None), 'renameat2', None) is not None
+        PYTHON;
         $result = $this->runCommand(['/usr/bin/python3', '-I', '-B', '-c', $script]);
         self::assertSame(0, $result['exit_code'], $result['stderr']);
         self::assertSame('', $result['stdout']);
@@ -263,9 +312,17 @@ PYTHON;
             $page = json_decode($result['stdout'], true, 8, JSON_THROW_ON_ERROR);
             self::assertLessThanOrEqual(128, count($page['run_ids']));
             self::assertSame($page['run_ids'], array_values(array_unique($page['run_ids'])));
-            self::assertSame($page['run_ids'], (static function (array $ids): array { sort($ids); return $ids; })($page['run_ids']));
+            self::assertSame(
+                $page['run_ids'],
+                (static function (array $ids): array {
+                    sort($ids);
+                    return $ids;
+                })($page['run_ids']),
+            );
             array_push($seen, ...$page['run_ids']);
-            if ($page['next_cursor'] === null) { break; }
+            if ($page['next_cursor'] === null) {
+                break;
+            }
             self::assertSame($page['run_ids'][array_key_last($page['run_ids'])], $page['next_cursor']);
             self::assertNotSame($cursor, $page['next_cursor']);
             $cursor = $page['next_cursor'];
@@ -300,24 +357,33 @@ PYTHON;
     {
         $root = DeploymentHostRunnerContractV1::STATE_ROOT;
         $run = 'runs/' . self::RUN_ID . '/';
-        foreach ([
-            ['read', $run . 'request.json'],
-            ['pin', $run . 'request.json'],
-            ['pin', $run . 'traffic-gate-report.json'],
-            ['cow', $run . 'events.jsonl'],
-            ['claim-refresh', 'active-run.json'],
-        ] as [$operation, $relative]) {
-            self::assertSame(0, $this->runHelper(['validate-storage-scope', $root, $relative, $operation])['exit_code']);
+        foreach (
+            [
+                ['read', $run . 'request.json'],
+                ['pin', $run . 'request.json'],
+                ['pin', $run . 'traffic-gate-report.json'],
+                ['cow', $run . 'events.jsonl'],
+                ['claim-refresh', 'active-run.json'],
+            ]
+            as [$operation, $relative]
+        ) {
+            self::assertSame(
+                0,
+                $this->runHelper(['validate-storage-scope', $root, $relative, $operation])['exit_code'],
+            );
         }
-        foreach ([
-            ['cow', $run . 'request.json'],
-            ['cow', $run . 'traffic-gate-report.json'],
-            ['cow', 'active-run.json'],
-            ['pin', $run . 'state.json'],
-            ['cow', $run . 'run.lock'],
-            ['pin', 'locks/fh-production-change.lock'],
-            ['cow', '../escape'],
-        ] as [$operation, $relative]) {
+        foreach (
+            [
+                ['cow', $run . 'request.json'],
+                ['cow', $run . 'traffic-gate-report.json'],
+                ['cow', 'active-run.json'],
+                ['pin', $run . 'state.json'],
+                ['cow', $run . 'run.lock'],
+                ['pin', 'locks/fh-production-change.lock'],
+                ['cow', '../escape'],
+            ]
+            as [$operation, $relative]
+        ) {
             $result = $this->runHelper(['validate-storage-scope', $root, $relative, $operation]);
             self::assertSame(70, $result['exit_code']);
             self::assertSame("host-runner storage rejected\n", $result['stderr']);
@@ -357,7 +423,11 @@ PYTHON;
         self::assertTrue(chmod($path, 0600));
 
         $result = $this->runHelper([
-            'observe-dump', $this->root, self::RUN_ID, 'deploy-ref-zero-surprise-dump.sql', $sha,
+            'observe-dump',
+            $this->root,
+            self::RUN_ID,
+            'deploy-ref-zero-surprise-dump.sql',
+            $sha,
         ]);
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
@@ -369,7 +439,11 @@ PYTHON;
         self::assertNull($decoded['attestation_sha256']);
 
         $changed = $this->runHelper([
-            'observe-dump', $this->root, self::RUN_ID, 'deploy-ref-zero-surprise-dump.sql', str_repeat('a', 64),
+            'observe-dump',
+            $this->root,
+            self::RUN_ID,
+            'deploy-ref-zero-surprise-dump.sql',
+            str_repeat('a', 64),
         ]);
         self::assertSame(75, $changed['exit_code']);
         self::assertSame($dump, file_get_contents($path));
@@ -390,35 +464,42 @@ PYTHON;
         self::assertSame(0, $tar['exit_code'], $tar['stderr']);
         self::assertTrue(chmod($archivePath, 0600));
         $inspection = $this->runCommand([
-            '/usr/bin/python3', '-I', '-B', dirname(__DIR__, 3) . '/scripts/ops/libexec/inspect_release_archive_v1.py',
+            '/usr/bin/python3',
+            '-I',
+            '-B',
+            dirname(__DIR__, 3) . '/scripts/ops/libexec/inspect_release_archive_v1.py',
             $archivePath,
         ]);
         self::assertSame(0, $inspection['exit_code'], $inspection['stderr']);
         $archive = json_decode($inspection['stdout'], true, 16, JSON_THROW_ON_ERROR);
         $digest = hash('sha256', $deployScript);
-        $provenance = json_encode([
-            'archive' => [
-                'name' => $release . '.tar.gz',
-                'sha256' => $archive['archive_sha256'],
-                'size_bytes' => $archive['archive_size_bytes'],
-            ],
-            'capacity_bounds' => [
-                'stage_file_count' => $archive['entry_count'],
-                'stage_inode_count' => $archive['stage_inode_count'],
-                'stage_unpacked_bytes' => $archive['stage_unpacked_bytes'],
-                'temp_scratch_bytes' => 67_108_864,
-            ],
-            'expected_commit' => str_repeat('a', 40),
-            'observed_commit' => str_repeat('a', 40),
-            'release_id' => $release,
-            'schema' => 'release_build_provenance.v1',
-            'source' => [
-                'build_script_sha256' => str_repeat('b', 64),
-                'composer_lock_sha256' => str_repeat('c', 64),
-                'deploy_ea_sha256' => $digest,
-                'package_lock_sha256' => str_repeat('d', 64),
-            ],
-        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        $provenance =
+            json_encode(
+                [
+                    'archive' => [
+                        'name' => $release . '.tar.gz',
+                        'sha256' => $archive['archive_sha256'],
+                        'size_bytes' => $archive['archive_size_bytes'],
+                    ],
+                    'capacity_bounds' => [
+                        'stage_file_count' => $archive['entry_count'],
+                        'stage_inode_count' => $archive['stage_inode_count'],
+                        'stage_unpacked_bytes' => $archive['stage_unpacked_bytes'],
+                        'temp_scratch_bytes' => 67_108_864,
+                    ],
+                    'expected_commit' => str_repeat('a', 40),
+                    'observed_commit' => str_repeat('a', 40),
+                    'release_id' => $release,
+                    'schema' => 'release_build_provenance.v1',
+                    'source' => [
+                        'build_script_sha256' => str_repeat('b', 64),
+                        'composer_lock_sha256' => str_repeat('c', 64),
+                        'deploy_ea_sha256' => $digest,
+                        'package_lock_sha256' => str_repeat('d', 64),
+                    ],
+                ],
+                JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ) . "\n";
         $sidecarPath = $this->root . '/' . $release . '.build-provenance.json';
         self::assertSame(strlen($provenance), file_put_contents($sidecarPath, $provenance));
         self::assertTrue(chmod($sidecarPath, 0600));
@@ -453,15 +534,22 @@ PYTHON;
         $sparse = fopen($this->root . '/live-storage/nested/sparse.bin', 'x+b');
         self::assertIsResource($sparse);
         self::assertSame(0, fseek($sparse, 1_048_575));
-        self::assertSame(1, fwrite($sparse, "x"));
+        self::assertSame(1, fwrite($sparse, 'x'));
         self::assertTrue(fclose($sparse));
         self::assertTrue(chmod($this->root . '/live-storage/nested/sparse.bin', 0600));
-        $policy = json_encode([
-            'external' => ['bytes' => 0, 'inodes' => 0],
-            'host' => ['bytes' => 1_000_000, 'inodes' => 1_000],
-            'schema' => 'deployment_renderer_capacity_policy.v1',
-        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-        self::assertSame(strlen($policy), file_put_contents($this->root . '/deployment-renderer-capacity-v1.json', $policy));
+        $policy =
+            json_encode(
+                [
+                    'external' => ['bytes' => 0, 'inodes' => 0],
+                    'host' => ['bytes' => 1_000_000, 'inodes' => 1_000],
+                    'schema' => 'deployment_renderer_capacity_policy.v1',
+                ],
+                JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ) . "\n";
+        self::assertSame(
+            strlen($policy),
+            file_put_contents($this->root . '/deployment-renderer-capacity-v1.json', $policy),
+        );
         self::assertTrue(chmod($this->root . '/deployment-renderer-capacity-v1.json', 0600));
 
         $result = $this->runHelper(['observe-capacity', $this->root, self::RUN_ID, 'ea_20260812', 'external']);
@@ -473,10 +561,20 @@ PYTHON;
         self::assertSame(3, $decoded['live_storage_inode_count']);
         self::assertSame(base64_encode($policy), $decoded['policy_bytes_base64']);
         self::assertSame(
-            array_fill_keys([
-                'artifact', 'dump_pin', 'live_storage', 'release_root', 'renderer_state',
-                'restore_scratch', 'stage', 'state_root', 'temp',
-            ], $decoded['filesystem_device']),
+            array_fill_keys(
+                [
+                    'artifact',
+                    'dump_pin',
+                    'live_storage',
+                    'release_root',
+                    'renderer_state',
+                    'restore_scratch',
+                    'stage',
+                    'state_root',
+                    'temp',
+                ],
+                $decoded['filesystem_device'],
+            ),
             $decoded['component_devices'],
         );
     }
@@ -540,9 +638,15 @@ PYTHON;
     {
         $claim = "{\"claim\":1}\n";
         self::assertSame(0, $this->runHelper(['pin', $this->root, 'active-run.json', '64'], $claim)['exit_code']);
-        self::assertSame(75, $this->runHelper(['clear-exact', $this->root, 'active-run.json', '64'], "{\"claim\":2}\n")['exit_code']);
+        self::assertSame(
+            75,
+            $this->runHelper(['clear-exact', $this->root, 'active-run.json', '64'], "{\"claim\":2}\n")['exit_code'],
+        );
         self::assertSame($claim, file_get_contents($this->root . '/active-run.json'));
-        self::assertSame(0, $this->runHelper(['clear-exact', $this->root, 'active-run.json', '64'], $claim)['exit_code']);
+        self::assertSame(
+            0,
+            $this->runHelper(['clear-exact', $this->root, 'active-run.json', '64'], $claim)['exit_code'],
+        );
         self::assertFileDoesNotExist($this->root . '/active-run.json');
     }
 
@@ -577,7 +681,10 @@ PYTHON;
 
         $after = $this->runHelper(['probe-locks', $this->root, self::OTHER_RUN_ID, '50']);
         self::assertSame(0, $after['exit_code'], $after['stderr']);
-        self::assertStringContainsString('run=' . $this->root . '/runs/' . self::OTHER_RUN_ID . "/run.lock\n", $after['stdout']);
+        self::assertStringContainsString(
+            'run=' . $this->root . '/runs/' . self::OTHER_RUN_ID . "/run.lock\n",
+            $after['stdout'],
+        );
     }
 
     public function testCliSupervisorValidatesExactProtectedBytesBeforePreparingAndPassesOnlyTheirHashes(): void
@@ -586,7 +693,9 @@ PYTHON;
         self::assertTrue(mkdir($this->root . '/runs', 0700));
         self::assertSame(0, file_put_contents($this->root . '/locks/fh-production-change.lock', ''));
         self::assertTrue(chmod($this->root . '/locks/fh-production-change.lock', 0600));
-        $request = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json');
+        $request = (string) file_get_contents(
+            __DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json',
+        );
         $input = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json');
         foreach (['request.json' => $request, 'input.json' => $input] as $leaf => $bytes) {
             self::assertSame(strlen($bytes), file_put_contents($this->root . '/' . $leaf, $bytes));
@@ -594,8 +703,11 @@ PYTHON;
         }
 
         $result = $this->runHelper([
-            'supervise-cli-probe', $this->root, 'deploy',
-            $this->root . '/request.json', $this->root . '/input.json',
+            'supervise-cli-probe',
+            $this->root,
+            'deploy',
+            $this->root . '/request.json',
+            $this->root . '/input.json',
         ]);
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
@@ -615,7 +727,9 @@ PYTHON;
         self::assertTrue(mkdir($this->root . '/runs', 0700));
         self::assertSame(0, file_put_contents($this->root . '/locks/fh-production-change.lock', ''));
         self::assertTrue(chmod($this->root . '/locks/fh-production-change.lock', 0600));
-        $request = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json');
+        $request = (string) file_get_contents(
+            __DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json',
+        );
         $decoded = json_decode(
             (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json'),
             true,
@@ -631,8 +745,11 @@ PYTHON;
         }
 
         $result = $this->runHelper([
-            'supervise-cli-probe', $this->root, 'deploy',
-            $this->root . '/request.json', $this->root . '/input.json',
+            'supervise-cli-probe',
+            $this->root,
+            'deploy',
+            $this->root . '/request.json',
+            $this->root . '/input.json',
         ]);
 
         self::assertSame(70, $result['exit_code']);
@@ -647,7 +764,9 @@ PYTHON;
         self::assertTrue(mkdir($this->root . '/runs', 0700));
         self::assertSame(0, file_put_contents($this->root . '/locks/fh-production-change.lock', ''));
         self::assertTrue(chmod($this->root . '/locks/fh-production-change.lock', 0600));
-        $request = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json');
+        $request = (string) file_get_contents(
+            __DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json',
+        );
         $input = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json');
         self::assertSame(strlen($request), file_put_contents($this->root . '/request.json', $request));
         self::assertTrue(chmod($this->root . '/request.json', 0600));
@@ -656,8 +775,11 @@ PYTHON;
         self::assertTrue(symlink($this->root . '/input-source.json', $this->root . '/input.json'));
 
         $result = $this->runHelper([
-            'supervise-cli-probe', $this->root, 'deploy',
-            $this->root . '/request.json', $this->root . '/input.json',
+            'supervise-cli-probe',
+            $this->root,
+            'deploy',
+            $this->root . '/request.json',
+            $this->root . '/input.json',
         ]);
 
         self::assertSame(70, $result['exit_code']);
@@ -681,21 +803,18 @@ PYTHON;
         self::assertMatchesRegularExpression('/^[1-9][0-9]* $/D', $children);
         $phpPid = (int) trim($children);
         self::assertDirectoryExists('/proc/' . $phpPid);
-        self::assertSame(
-            $this->root . '/locks/fh-production-change.lock',
-            readlink('/proc/' . $phpPid . '/fd/198'),
-        );
-        self::assertSame(
-            $this->root . '/runs/' . self::RUN_ID . '/run.lock',
-            readlink('/proc/' . $phpPid . '/fd/199'),
-        );
+        self::assertSame($this->root . '/locks/fh-production-change.lock', readlink('/proc/' . $phpPid . '/fd/198'));
+        self::assertSame($this->root . '/runs/' . self::RUN_ID . '/run.lock', readlink('/proc/' . $phpPid . '/fd/199'));
         $lockInodes = [
             (int) lstat($this->root . '/locks/fh-production-change.lock')['ino'],
             (int) lstat($this->root . '/runs/' . self::RUN_ID . '/run.lock')['ino'],
         ];
         $fdInfo = (string) file_get_contents('/proc/locks');
         foreach ($lockInodes as $inode) {
-            self::assertMatchesRegularExpression('/FLOCK\s+ADVISORY\s+WRITE\s+\d+\s+[^:]+:[^:]+:' . $inode . '\s+0\s+EOF/', $fdInfo);
+            self::assertMatchesRegularExpression(
+                '/FLOCK\s+ADVISORY\s+WRITE\s+\d+\s+[^:]+:[^:]+:' . $inode . '\s+0\s+EOF/',
+                $fdInfo,
+            );
         }
 
         self::assertTrue(posix_kill($status['pid'], 9));
@@ -703,7 +822,10 @@ PYTHON;
         self::assertDirectoryExists('/proc/' . $phpPid);
         $locksAfterKill = (string) file_get_contents('/proc/locks');
         foreach ($lockInodes as $inode) {
-            self::assertMatchesRegularExpression('/FLOCK\s+ADVISORY\s+WRITE\s+\d+\s+[^:]+:[^:]+:' . $inode . '\s+0\s+EOF/', $locksAfterKill);
+            self::assertMatchesRegularExpression(
+                '/FLOCK\s+ADVISORY\s+WRITE\s+\d+\s+[^:]+:[^:]+:' . $inode . '\s+0\s+EOF/',
+                $locksAfterKill,
+            );
         }
         $contender = $this->runHelper(['probe-locks', $this->root, self::OTHER_RUN_ID, '50']);
         self::assertSame(75, $contender['exit_code']);
@@ -721,23 +843,32 @@ PYTHON;
         $argv = DeploymentHostRunnerContractV1::systemctlShowArgv(
             DeploymentHostRunnerContractV1::unitName('deploy', self::RUN_ID, str_repeat('a', 64)),
         );
-        $payload = json_encode([
-            'argv' => $argv,
-            'environment' => ['LANG' => 'C', 'LC_ALL' => 'C', 'PATH' => '/usr/sbin:/usr/bin:/sbin:/bin'],
-            'timeout_seconds' => 30,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        self::assertSame(0, $this->runHelper(['validate-controller-payload', $payload])['exit_code']);
-
-        foreach ([
-            array_replace($argv, [5 => '/usr/bin/systemctl']),
-            [...$argv, '--extra'],
-            array_replace($argv, [9 => 'fh-deploy-bad.service']),
-        ] as $mutated) {
-            $invalid = json_encode([
-                'argv' => $mutated,
+        $payload = json_encode(
+            [
+                'argv' => $argv,
                 'environment' => ['LANG' => 'C', 'LC_ALL' => 'C', 'PATH' => '/usr/sbin:/usr/bin:/sbin:/bin'],
                 'timeout_seconds' => 30,
-            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            ],
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+        );
+        self::assertSame(0, $this->runHelper(['validate-controller-payload', $payload])['exit_code']);
+
+        foreach (
+            [
+                array_replace($argv, [5 => '/usr/bin/systemctl']),
+                [...$argv, '--extra'],
+                array_replace($argv, [9 => 'fh-deploy-bad.service']),
+            ]
+            as $mutated
+        ) {
+            $invalid = json_encode(
+                [
+                    'argv' => $mutated,
+                    'environment' => ['LANG' => 'C', 'LC_ALL' => 'C', 'PATH' => '/usr/sbin:/usr/bin:/sbin:/bin'],
+                    'timeout_seconds' => 30,
+                ],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+            );
             $result = $this->runHelper(['validate-controller-payload', $invalid]);
             self::assertSame(70, $result['exit_code']);
             self::assertSame('', $result['stdout']);
@@ -753,10 +884,7 @@ PYTHON;
         foreach ([$deploy['argv'], $externalDeploy['argv'], $rollback['argv']] as $argv) {
             self::assertSame(0, $this->validateControllerArgv($argv), implode(' ', $argv));
             self::assertContains('--expand-environment=no', $argv);
-            self::assertLessThan(
-                array_search('--', $argv, true),
-                array_search('--expand-environment=no', $argv, true),
-            );
+            self::assertLessThan(array_search('--', $argv, true), array_search('--expand-environment=no', $argv, true));
         }
         self::assertNotContains('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $deploy['argv']);
         self::assertContains(
@@ -788,24 +916,25 @@ PYTHON;
         self::assertIsInt($newSeparator);
         array_splice($expandAfter, $newSeparator + 1, 0, ['--expand-environment=no']);
         $mutations['expand after separator'] = $expandAfter;
-        $mutations['missing separator'] = array_values(array_filter(
-            $deployArgv,
-            static fn(string $value): bool => $value !== '--',
-        ));
-        $mutations['wrong unit action'] = array_replace(
-            $deployArgv,
-            [$unit => str_replace('fh-deploy-', 'fh-rollback-', $deployArgv[$unit])],
+        $mutations['missing separator'] = array_values(
+            array_filter($deployArgv, static fn(string $value): bool => $value !== '--'),
         );
-        $mutations['manager option'] = [...array_slice($deployArgv, 0, $separator), '--wait', ...array_slice($deployArgv, $separator)];
+        $mutations['wrong unit action'] = array_replace($deployArgv, [
+            $unit => str_replace('fh-deploy-', 'fh-rollback-', $deployArgv[$unit]),
+        ]);
+        $mutations['manager option'] = [
+            ...array_slice($deployArgv, 0, $separator),
+            '--wait',
+            ...array_slice($deployArgv, $separator),
+        ];
         $mutations['child executable'] = array_replace($deployArgv, [$separator + 7 => '/bin/sh']);
-        $mutations['noncanonical path'] = array_replace(
-            $deployArgv,
-            [array_search('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $deployArgv, true) => '/etc//fh/token'],
-        );
-        $mutations['different result run'] = array_replace(
-            $deployArgv,
-            [count($deployArgv) - 1 => '/var/lib/fh-deploy-orchestrator/runs/' . self::OTHER_RUN_ID . '/deploy-result.json'],
-        );
+        $mutations['noncanonical path'] = array_replace($deployArgv, [
+            array_search('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $deployArgv, true) => '/etc//fh/token',
+        ]);
+        $mutations['different result run'] = array_replace($deployArgv, [
+            count($deployArgv) - 1 =>
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::OTHER_RUN_ID . '/deploy-result.json',
+        ]);
         $renderer = array_search('--renderer-deploy-mode', $deployArgv, true);
         self::assertIsInt($renderer);
         $mutations['undocumented docker renderer'] = array_replace($deployArgv, [$renderer + 1 => 'docker']);
@@ -819,16 +948,17 @@ PYTHON;
         $failed = array_search('--failed', $rollbackArgv, true);
         self::assertIsInt($previous);
         self::assertIsInt($failed);
-        foreach ([
-            'noncanonical previous path' => array_replace(
-                $rollbackArgv,
-                [$previous + 1 => '/var/www/html//easyappointments_prev_ea_20260811'],
-            ),
-            'different failed run' => array_replace(
-                $rollbackArgv,
-                [$failed + 1 => '/var/www/html/.fh-failed-' . self::OTHER_RUN_ID],
-            ),
-        ] as $name => $mutated) {
+        foreach (
+            [
+                'noncanonical previous path' => array_replace($rollbackArgv, [
+                    $previous + 1 => '/var/www/html//easyappointments_prev_ea_20260811',
+                ]),
+                'different failed run' => array_replace($rollbackArgv, [
+                    $failed + 1 => '/var/www/html/.fh-failed-' . self::OTHER_RUN_ID,
+                ]),
+            ]
+            as $name => $mutated
+        ) {
             self::assertSame(70, $this->validateControllerArgv($mutated), 'rollback ' . $name);
         }
     }
@@ -859,8 +989,16 @@ PYTHON;
         $extra = fopen($this->root . '/inherited-extra', 'w+');
         self::assertIsResource($extra);
         $command = [
-            '/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-            '/usr/bin/python3', '-I', '-B', $this->helper, 'controller-fd-probe',
+            '/usr/bin/env',
+            '-i',
+            'LANG=C',
+            'LC_ALL=C',
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+            '/usr/bin/python3',
+            '-I',
+            '-B',
+            $this->helper,
+            'controller-fd-probe',
         ];
         $pipes = [];
         $process = proc_open(
@@ -899,14 +1037,36 @@ PYTHON;
     /** @param list<string> $arguments @return array{exit_code:int,stdout:string,stderr:string} */
     private function runHelper(array $arguments, string $stdin = ''): array
     {
-        $command = ['/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', '/usr/bin/python3', '-I', '-B', $this->helper, ...$arguments];
+        $command = [
+            '/usr/bin/env',
+            '-i',
+            'LANG=C',
+            'LC_ALL=C',
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+            '/usr/bin/python3',
+            '-I',
+            '-B',
+            $this->helper,
+            ...$arguments,
+        ];
         return $this->runCommand($command, $stdin);
     }
 
     /** @param list<string> $arguments @return array{resource,array<int,resource>} */
     private function startHelper(array $arguments): array
     {
-        $command = ['/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', '/usr/bin/python3', '-I', '-B', $this->helper, ...$arguments];
+        $command = [
+            '/usr/bin/env',
+            '-i',
+            'LANG=C',
+            'LC_ALL=C',
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+            '/usr/bin/python3',
+            '-I',
+            '-B',
+            $this->helper,
+            ...$arguments,
+        ];
         $pipes = [];
         $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, []);
         self::assertIsResource($process);
@@ -942,11 +1102,14 @@ PYTHON;
     /** @param list<string> $argv */
     private function validateControllerArgv(array $argv): int
     {
-        $payload = json_encode([
-            'argv' => $argv,
-            'environment' => ['LANG' => 'C', 'LC_ALL' => 'C', 'PATH' => '/usr/sbin:/usr/bin:/sbin:/bin'],
-            'timeout_seconds' => 60,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $payload = json_encode(
+            [
+                'argv' => $argv,
+                'environment' => ['LANG' => 'C', 'LC_ALL' => 'C', 'PATH' => '/usr/sbin:/usr/bin:/sbin:/bin'],
+                'timeout_seconds' => 60,
+            ],
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+        );
 
         return $this->runHelper(['validate-controller-payload', $payload])['exit_code'];
     }

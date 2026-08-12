@@ -170,7 +170,9 @@ final class DeployTimingSampleValidator
     private static function assertRootProtectedSource(string $path): void
     {
         if ($path === '' || $path[0] !== '/' || is_link($path) || !is_file($path) || realpath($path) !== $path) {
-            throw new RuntimeException('timing source must be an absolute regular non-symlink file');
+            throw new RuntimeException(
+                'timing source must be an absolute regular non-symlink file with a canonical and symlink-free path',
+            );
         }
         $stat = lstat($path);
         if (
