@@ -1483,6 +1483,48 @@ def hash_regular_at(parent: int, leaf: str, limit: int, allowed_modes: tuple[int
             os.close(descriptor)
 
 
+def read_regular_at(parent: int, leaf: str, limit: int, allowed_modes: tuple[int, ...]) -> bytes:
+    descriptor = -1
+    before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    if (
+        not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or before.st_nlink != 1 or
+        stat.S_IMODE(before.st_mode) not in allowed_modes or before.st_size <= 0 or before.st_size > limit
+    ):
+        reject()
+    try:
+        descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+        opened = os.fstat(descriptor)
+        if not same_read_snapshot(before, opened):
+            reject()
+        chunks: list[bytes] = []
+        remaining = limit + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        value = b''.join(chunks)
+        after = os.fstat(descriptor)
+        post = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if len(value) != opened.st_size or len(value) > limit or not same_read_snapshot(opened, after) or not same_read_snapshot(after, post):
+            reject()
+        return value
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def read_host_deploy_script(root: str) -> bytes:
+    if root != '/root' and re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is None:
+        reject()
+    parent = open_system_read_root(root)
+    try:
+        return read_regular_at(parent, 'deploy_ea.sh', MAX_REFERENCE_SMALL, (0o755,))
+    finally:
+        os.close(parent)
+
+
 def observe_build(authority_root: str, release_id: str, authorized_sha256: str) -> bytes:
     test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', authority_root) is not None
     if (authority_root != '/root/releases' and not test_root):
@@ -1843,6 +1885,9 @@ def main(arguments: list[str]) -> int:
         return 0
     if len(arguments) == 5 and arguments[1] == 'observe-build':
         sys.stdout.buffer.write(observe_build(arguments[2], arguments[3], arguments[4]))
+        return 0
+    if len(arguments) == 3 and arguments[1] == 'read-host-deploy-script':
+        sys.stdout.buffer.write(read_host_deploy_script(arguments[2]))
         return 0
     if len(arguments) == 6 and arguments[1] == 'observe-capacity':
         sys.stdout.buffer.write(observe_capacity(arguments[2], arguments[3], arguments[4], arguments[5]))

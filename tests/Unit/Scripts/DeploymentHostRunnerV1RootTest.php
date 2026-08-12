@@ -481,6 +481,23 @@ PYTHON;
         );
     }
 
+    public function testDeployScriptReaderReturnsOnlyStableRootExecutableBytes(): void
+    {
+        $script = "#!/bin/bash\nexit 0\n";
+        $path = $this->root . '/deploy_ea.sh';
+        self::assertSame(strlen($script), file_put_contents($path, $script));
+        self::assertTrue(chmod($path, 0755));
+
+        $result = $this->runHelper(['read-host-deploy-script', $this->root]);
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame($script, $result['stdout']);
+
+        self::assertTrue(chmod($path, 0777));
+        $unsafe = $this->runHelper(['read-host-deploy-script', $this->root]);
+        self::assertSame(70, $unsafe['exit_code']);
+        self::assertSame('', $unsafe['stdout']);
+    }
+
     public function testPrepareRunIsIdempotentAndRejectsUnsafeExistingRunLeaf(): void
     {
         self::assertTrue(mkdir($this->root . '/runs', 0700));
