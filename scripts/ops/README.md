@@ -78,10 +78,11 @@ Script inventory:
   independently observed matching child exit and durable runner-state binding
 - `lib/DeploymentHostRunnerContractV1.php` freezes the closed deploy/recovery
   requests, pinned semantic execution input, exact-byte post-gate submissions,
-  state/response bindings, protected lock path, and null-stream policy for the
-  later root Host Runner; systemd identity/reconciliation remains a later
-  prerequisite and this library does not spawn a unit or activate production
-  behavior
+  state/response bindings, protected lock path, null-stream policy, deterministic
+  transient-unit launch/observation identity, crash-prefix reconciliation, and
+  exact terminal report/unit-byte proof for the later root Host Runner; the
+  library performs no filesystem mutation, process execution, or production
+  activation
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes without deleting anything

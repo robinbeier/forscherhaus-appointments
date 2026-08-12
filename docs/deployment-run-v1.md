@@ -335,7 +335,7 @@ runner slice must establish and test these invariants before activation:
 
 - canonical, non-symlink, root-controlled ancestor chain;
 - root-owned state root and per-run directory, mode `0700`;
-- root-owned regular non-symlink files, mode `0600`, one hardlink;
+- root-owned regular non-symlink files, mode `0600`, link count exactly `1`;
 - one global root-controlled lock plus the normal deploy and dedicated rollback
   invocation reservations in the same state root;
 - atomic complete-record append/replacement and durability before process
@@ -345,10 +345,10 @@ runner slice must establish and test these invariants before activation:
 - no automatic truncation of a corrupt tail.
 
 Expected files are `intent.json`, `state.json`, `events.jsonl`,
-`evidence.json`, and a redacted fixed-enum operator journal. Their persistence,
-systemd unit, locking, crash injection, and process reconciliation belong to
-the Host-runner PR. SSH/build/upload/start/status/wait belong to the Coordinator
-PR.
+`evidence.json`, and a redacted fixed-enum operator journal. This prerequisite
+freezes systemd identity and pure reconciliation decisions; the executable
+Host-runner PR owns filesystem persistence, locking, crash injection, and real
+process calls. SSH/build/upload/start/status/wait belong to the Coordinator PR.
 
 ## Host-runner request contracts
 
@@ -433,7 +433,9 @@ post_gates rollback evidence_sha256 terminal updated_at_utc
 ```
 
 `deploy` contains exactly `request_sha256`, `execution_input_sha256`,
-`invocation_count`, `unit_name`, `unit_state`, `observed_exit_code`, and
+`invocation_count`, `unit_name`, `unit_launch_sha256`,
+`unit_manager_boot_id`, `unit_invocation_id`,
+`unit_missing_observed_boot_id`, `unit_state`, `observed_exit_code`, and
 `receipt_sha256`. `rollback` keeps the independent corresponding request,
 execution-input, count, unit, and observed-exit fields plus its fixed
 `not_invoked`/`verification_pending`/`succeeded`/`failed`/`unknown` verdict.
@@ -465,9 +467,15 @@ including a normal exit `143`, maps uniquely to rollback failed and needs no
 verification report. Signal, core, timeout, or otherwise unproved termination
 is not passed to that normal-exit mapping and remains unknown. A bound failed
 rollback report after normal exit `0` also maps to rollback failed. An unknown
-verdict requires a null observed exit. A nested action contradiction is not a
-current terminal cache. The closed rollback tuple is therefore: null observed
-exit with `unknown` and no report; exit `0` with no report and
+verdict requires a null observed exit while the run is nonterminal. One narrow
+terminal exception preserves an already fsynced `manual_recovery_required`
+result: when its dedicated rollback verdict/evidence is frozen `unknown` and no
+rollback report exists, a later exact unit observation may add only stopped
+unit proof (including a normal exit) while the verdict, evidence, reports, and
+public terminal pair remain `unknown`/unchanged. A nested action contradiction
+is not a current terminal cache. Outside that frozen-terminal exception, the
+closed rollback tuple is therefore: null observed exit with `unknown` and no
+report; exit `0` with no report and
 `verification_pending`; exit `0` with a passed/failed report and matching
 `succeeded`/`failed` verdict; or a nonzero normal exit with `failed` and no
 report. The two direct deploy receipt outcomes `internal_rollback_succeeded`
@@ -477,10 +485,15 @@ requirements apply only when the independent rollback invocation count is `1`.
 For every known deploy outcome, the stored receipt SHA must equal the SHA-256 of
 the unique canonical `deploy_result.v1` bytes derived from the validated deploy
 evidence tuple; mere hash presence is not a binding.
-Counts are `0` or `1`. `active_action` is `deploy` only in `deploy_running`,
+Counts are `0` or `1`. A reserved action binds the canonical launch-record SHA
+and the manager boot ID. The first complete matching loaded-unit observation
+binds one lowercase systemd InvocationID permanently. A later manager reboot
+plus an exact not-found result may add the distinct observed boot ID and
+classify the transient unit `missing`; same-boot absence or transport ambiguity
+remains `unknown`. `active_action` is `deploy` only in `deploy_running`,
 `rollback` only in `rollback_running`, and otherwise `none`. Unit state is one
-of `not_created`, `starting`, `running`, `exited`, `failed`, `killed`, or
-`unknown`. Arbitrary child exits may be retained only as the independently
+of `not_created`, `starting`, `running`, `exited`, `failed`, `killed`,
+`missing`, or `unknown`. Arbitrary child exits may be retained only as the independently
 observed byte-sized exit in runner state; `killed` records a systemd signal
 verdict with a null normal exit, never a synthesized `143`. Public terminal
 evidence still uses only the frozen stable pairs. A receipt SHA requires an
@@ -489,8 +502,23 @@ Terminal fields and evidence SHA are all absent before terminal state and all
 present afterwards. Every `manual_recovery_required` state preserves the
 fsynced deploy reservation and count `1`. A terminal bundle may preserve an
 unknown unit verdict, but an active-run claim is refreshed or cleared only when
-every reserved unit is independently known `exited`, `failed`, or `killed`;
+every reserved unit is independently known `exited`, `failed`, `killed`, or
+reboot-proven `missing`;
 `starting`, `running`, or `unknown` keeps the global exclusion in place.
+After terminal persistence, exact late unit observation may move such an
+unknown unit to one of those stopped states solely to release the claim. It
+does not refine the frozen rollback verdict, rewrite terminal evidence, add a
+post-gate report, or change the stored response.
+The later observation is a new append-only generation (or an atomic COW
+replacement retaining the prior generation) and has its own strict durability
+prefix: write and fsync the exact new observation envelope and, when first
+learned, its observed binding; publish and fsync the converged terminal state;
+refresh and fsync the terminal active claim; then clear that exact claim and
+fsync its parent directory. A crash before the converged state keeps the old
+unknown state and claim held. A crash after state publication resumes claim
+refresh; after refresh it resumes only exact claim clearance. State ahead of
+the observation bytes, claim refresh ahead of state, or clearance ahead of
+either is not authoritative and fails closed.
 
 The fixed-enum operator journal uses schema
 `deployment_host_operator_event.v1` and exactly:
@@ -499,26 +527,32 @@ The fixed-enum operator journal uses schema
 schema run_id intent_sha256 sequence recorded_at_utc action event status reason
 ```
 
-Actions are `none`, `deploy`, `rollback`, or `reconcile`. Status is `ok`,
+Actions are `deploy`, `post_gates`, `rollback`, or `reconcile`. Status is `ok`,
 `running`, `failed`, `unknown`, or `terminal`. Events are limited to request
 acceptance, attachment, durable reservation, unit start/observation, receipt
 acceptance/rejection, post-gate observation, rollback reservation,
 reconciliation required, terminal persistence, and active-run clearance.
-Reasons are fixed codes for same-intent attachment, contract/state/lock/unit
+Reasons are fixed codes for same-intent attachment, contract/state/unit
 classification, receipt classification, interruption, post-gate failure,
-rollback verdict, and manual recovery. No detail, exception, path, command,
-host, stdout, stderr, or raw journal field exists.
+rollback verdict, manual recovery, and the stable lifecycle reasons reachable
+by `terminal_persisted`. Action, event, status, and reason are validated as one
+closed reachability matrix; an enum-valid Cartesian tuple is not sufficient.
+No detail, exception, path, command, host, stdout, stderr, or raw journal field
+exists.
 
 The exact event enum is `request_accepted`, `attached`,
 `reservation_persisted`, `unit_started`, `unit_observed`, `receipt_accepted`,
 `receipt_rejected`, `post_gates_observed`, `rollback_reserved`,
 `reconciliation_required`, `terminal_persisted`, or `active_run_cleared`.
 The exact reason enum is `none`, `same_intent`, `state_conflict`,
-`contract_invalid`, `lock_busy`, `unit_collision`, `unit_running`,
+`contract_invalid`, `unit_running`,
 `unit_exited`, `unit_failed`, `unit_killed`, `unit_missing`, `receipt_valid`,
 `receipt_missing`, `receipt_invalid`, `receipt_mismatch`, `child_exit_74`,
-`interrupted`, `post_gate_failed`, `rollback_succeeded`, `rollback_failed`, or
-`manual_recovery_required`.
+`interrupted`, `post_gate_failed`, `ok`, `traffic_hard_stop`,
+`traffic_evidence_invalid`, `dump_verification_failed`,
+`capacity_gate_failed`, `artifact_verification_failed`,
+`expected_commit_mismatch`, `deploy_failed`, `rollback_failed`,
+`switch_recovery_required`, or `manual_recovery_required`.
 
 ## Locks and durable active run
 
@@ -581,6 +615,44 @@ The candidate Run-ID and intent are checked against the durable claim before
 both attach and terminal-clear decisions; terminal clearance never bypasses a
 candidate mismatch.
 
+State evolution is independently monotonic. An unchanged lifecycle state keeps
+the same authoritative journal sequence/hash while nested observation fields
+may move through their closed forward matrix. A lifecycle transition advances
+by exactly one valid journal record, changes the journal hash, and may not skip
+or cross branches. Launch SHA, manager boot, InvocationID, accepted exit,
+receipt, report bytes/SHA/verdict, and terminal result are write-once. Unknown
+observation may later resolve to starting/running/terminal/missing; a terminal
+unit state and terminal lifecycle never regress.
+
+Terminal persistence has one recoverable prefix order:
+
+1. pin exact action observation bytes (canonical launch/binding plus the
+   canonical loaded-observation envelope containing raw systemctl bytes, or a
+   canonical absence observation) and all submitted report bytes;
+2. fsync the prevalidated evidence candidate;
+3. append and fsync the unique terminal journal record;
+4. publish and fsync canonical terminal evidence;
+5. publish and fsync matching terminal state;
+6. refresh and fsync the terminal active claim;
+7. clear the exact terminal claim and fsync its parent.
+
+Every crash prefix resumes at its unique next step; a skipped, duplicated, or
+reordered prefix fails closed. Terminal cache/attachment requires exact pinned
+report bytes for every submitted subject and one exact reconciliation bundle
+for every reserved action. It may preserve `unit_state=unknown` and return the
+stored terminal status. For the exact same run, an otherwise current terminal
+bundle with a live/unknown unit returns internal `terminal_claim_held`: the
+immutable terminal response is attachable, but the active claim is neither
+refreshed nor cleared and still blocks every different Run-ID. Active-claim
+refresh/clear is stricter: every reserved
+unit must be independently stopped or reboot-proven missing, so unknown/live
+state continues to block other runs. When `active-run.json` is absent, zero
+reserved candidates means normal candidate handling may continue. Exactly one
+journal-proven reserved candidate is reconstructed observe-only when its state
+cache is absent or is exactly the final `deploy_running`/`rollback_running`
+reservation record behind; multiple, corrupt,
+terminal-only, or unprovable candidates fail closed.
+
 ## Transient unit and internal CLI contract
 
 Unit identity binds action, full Run-ID, and the first 12 hex characters of the
@@ -598,6 +670,80 @@ output, and error, `RuntimeMaxSec=7200s` for deploy or `1800s` for rollback, and
 scope units, `--wait`, `--pipe`, `--pty`, `--collect`, or unit-name reuse as an
 attachment mechanism. A pre-existing unit-name collision is `75`; attachment
 comes only from the bound durable run state.
+
+Before reservation, the runner queries the exact unit name with fixed absolute
+argv under `/usr/bin/env -i`, `LANG=C`, `LC_ALL=C`, and the fixed system PATH.
+Only a complete current-boot systemctl result with the exact unit ID,
+`LoadState=not-found`, `ActiveState=inactive`, `SubState=dead`, empty
+InvocationID, zero exec fields, and `Transient=no` proves availability. Any
+loaded same-name unit is a collision even when its Description or properties
+do not match; malformed, transport-failed, contradictory, or boot-raced output
+is unknown. Neither collision nor unknown may reserve or spawn.
+
+The transient launch record is canonical
+`deployment_host_systemd_launch.v1`. It binds action, full Run-ID and intent,
+request and execution-input hashes, the exact deploy-script byte hash, exact
+child argv hash, unit name, every fixed unit property, and a root-protected
+256-bit CSPRNG nonce. Its exact keys are `schema`, `action`, `run_id`,
+`intent_sha256`, `request_sha256`, `execution_input_sha256`,
+`deploy_script_sha256`, `argv_sha256`, `environment_sha256`,
+`properties_sha256`, `unit_name`, `properties`, and `launch_nonce`; canonical
+bytes are bounded to 16,384 bytes. The nonce is generated
+inside the trusted launch boundary; the injectable generator exists only for
+pure tests and the executable must never supply it. A secret-free Description
+contains only a domain-separated hash of the complete launch record. The nonce,
+input hash, protected paths, and component file hashes never enter the
+Description, operator event, or response. Immediately before admission the
+runner revalidates the bound request/input bundle, exact script bytes, launch
+hash, reserved unit binding, current manager boot, and child argv; a
+caller-selected command or matching forged argv hash is not authority.
+
+Canonical `deployment_host_systemd_unit_binding.v1` bytes are bounded to
+16,384 bytes and contain exactly `schema`, `run_id`, `intent_sha256`, `action`,
+`unit_name`, `unit_launch_sha256`, `unit_manager_boot_id`,
+`unit_invocation_id`, and `binding_state`. `reserved` has a null InvocationID;
+the first exact loaded observation advances once to `observed`, after which the
+InvocationID and every identity field are immutable. The binding, not the
+launch record alone, commits the reservation-manager boot and is rechecked
+against `/proc/sys/kernel/random/boot_id` immediately before admission.
+
+Exact loaded observations use canonical
+`deployment_host_systemd_loaded_observation.v1` bytes, bounded to 65,536 bytes,
+with exactly `schema`, `manager_boot_id`, and `systemctl_show`; the last field
+contains the bounded raw fixed-field systemctl bytes. Exact absence/transport
+observations use canonical `deployment_host_systemd_absence.v1` bytes, bounded
+to 1,024 bytes, with exactly `schema`, `kind`, and `manager_boot_id`.
+`not_found` requires a boot ID; `transport_error` requires null. Terminal
+reconciliation decodes the schema first and then derives `unknown`/`missing`
+or the loaded unit result; it never chooses the evidence format from a
+self-asserted final state.
+
+Both `systemd-run` and `systemctl` controller processes use the same explicit
+empty/fixed environment; SSH, sudo, locale, D-Bus, or other caller variables
+are never inherited. `systemd-run` additionally receives
+`--expand-environment=no` before the child separator, so dollar expressions in
+the already validated and hashed child arguments remain literal rather than
+being expanded from the service manager environment. Loaded observation parses the exact bounded
+`systemctl show` field set once, rejecting missing, duplicate, unknown,
+noncanonical, or contradictory fields. It verifies unit ID, Description,
+Transient flag, all fixed properties, manager boot, and the immutable
+InvocationID. Normal exit `143` remains a normal exit; signal 15, core dump,
+timeout, and watchdog are killed/unknown rather than normal-exit or synthesized
+`143` results.
+
+The durable reservation is the irreversible public admission boundary. A
+successful systemd-run request becomes observe-only. A nonzero or missing
+systemd-run result becomes internal
+`observe_only_reconciliation_required`: it is never a preflight collision,
+never a rejected/no-state response, and never authorizes another admission.
+The originating invocation still returns `accepted` in the durable
+`deploy_running` or `rollback_running` state with `0`/`ok`; a later exact
+invocation returns `attach_observe_only` in the same reserved or advanced
+observe-only state. These pairs mean admission/attachment status succeeded,
+not that the child succeeded. Only a
+later authoritative unit/receipt reconciliation may persist a terminal result,
+including justified `manual_recovery_required`/`70`; terminal attachment still
+uses CLI exit zero and the stored lifecycle pair.
 
 The future root-only executable has four internal actions:
 
@@ -654,12 +800,16 @@ observe-only attachment, terminal result, or rejection. `succeeded` and every
 terminal failure always use disposition `terminal`, never a nonterminal
 disposition.
 
-This remains an additive prerequisite, not a runnable Host Runner. The next
-serial contract slice still owns launch nonce and Description binding,
-systemd-run/systemctl observation, manager boot and InvocationID identity,
-missing-unit classification, monotonic state evolution, durable active-claim
-clearance and terminal ordering, the closed operator tuple matrix, and exact
-report-byte participation in terminal evidence clearance. Child standard
+This remains an additive prerequisite, not a runnable Host Runner. This serial
+contract slice freezes launch and controller identity, systemd admission and
+observation, manager boot and InvocationID binding, missing-unit proof,
+monotonic state evolution, active-claim reconstruction/clearance, terminal
+crash-prefix ordering, the closed operator tuple matrix, and exact
+report/observation-byte participation in terminal attachment and clearance.
+The later executable slice still owns protected filesystem creation and
+identity rechecks, global/run flock acquisition, atomic no-replace/COW writes,
+file and parent fsync calls, actual process execution, and root/Linux crash and
+race tests. Child standard
 streams are discarded at the systemd boundary, but `deploy_ea.sh` still owns
 its internal deployment logfile; activation therefore requires a separate
 root-owned mode-`0600` secure-log and redaction audit. No claim here treats that
