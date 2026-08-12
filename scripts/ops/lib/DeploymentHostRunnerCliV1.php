@@ -420,6 +420,24 @@ final class DeploymentHostRunnerCliApplicationV1
         $this->reconstructor->reconstruct();
         $claimBytes = $this->storage->read('active-run.json', 4_096);
         if ($claimBytes === null) {
+            $prefix = 'runs/' . $request['run_id'] . '/';
+            $stateBytes = $this->storage->read($prefix . 'state.json', 4_096);
+            if ($stateBytes !== null) {
+                $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+                if (
+                    $state['run_id'] === $request['run_id'] &&
+                    hash_equals($state['intent_sha256'], $request['intent_sha256']) &&
+                    in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)
+                ) {
+                    $storedReport = $this->storage->read(
+                        $prefix . $envelope['report']['subject'] . '-post-gate-report.json',
+                        16_384,
+                    );
+                    if ($storedReport !== null && hash_equals($storedReport, $envelope['report_bytes'])) {
+                        return $this->validated($this->terminal->resumeTerminal($request['run_id'], 'post-gates'));
+                    }
+                }
+            }
             return self::response('post-gates', $request, 'rejected', null, 75, 'state_conflict');
         }
         $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
@@ -445,6 +463,17 @@ final class DeploymentHostRunnerCliApplicationV1
         $this->reconstructor->reconstruct();
         $claimBytes = $this->storage->read('active-run.json', 4_096);
         if ($claimBytes === null) {
+            $stateBytes = $this->storage->read('runs/' . $envelope['run_id'] . '/state.json', 4_096);
+            if ($stateBytes !== null) {
+                $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+                if (
+                    $state['run_id'] === $envelope['run_id'] &&
+                    hash_equals($state['intent_sha256'], $envelope['intent_sha256']) &&
+                    in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)
+                ) {
+                    return $this->validated($this->terminal->resumeTerminal($envelope['run_id'], 'reconcile'));
+                }
+            }
             return self::response('reconcile', $identity, 'rejected', null, 75, 'state_conflict');
         }
         $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
