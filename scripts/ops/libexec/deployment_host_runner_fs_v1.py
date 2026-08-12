@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
 import secrets
 import selectors
@@ -18,6 +19,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tarfile
 import time
 
 
@@ -31,6 +33,13 @@ FIXED_ERROR = b"host-runner storage rejected\n"
 LOCK_FDS = (198, 199)
 MAX_CHILD_OUTPUT = 65_536
 MAX_TRAFFIC_REPORT = 262_144
+MAX_RELEASE_UNPACKED = 68_719_476_736
+RELEASE_BLOCK = 4096
+RELEASE_TEMP_SCRATCH = 67_108_864
+CAPACITY_DEVICE_KEYS = (
+    'artifact', 'dump_pin', 'live_storage', 'release_root', 'renderer_state',
+    'restore_scratch', 'stage', 'state_root', 'temp',
+)
 CONTROLLER_ENVIRONMENT = {"LANG": "C", "LC_ALL": "C", "PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
 STATE_ROOT = "/var/lib/fh-deploy-orchestrator"
 DUMP_ATTESTATION_ROOT = "/var/lib/fh-deploy-evidence/dump-attestations"
@@ -1450,6 +1459,348 @@ def observe_dump(root: str, run_id: str, leaf: str, expected_sha256: str) -> byt
     return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
 
 
+def hash_regular_at(parent: int, leaf: str, limit: int, allowed_modes: tuple[int, ...]) -> tuple[str, int, os.stat_result]:
+    descriptor = -1
+    before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    if (
+        not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or before.st_nlink != 1 or
+        stat.S_IMODE(before.st_mode) not in allowed_modes or before.st_size <= 0 or before.st_size > limit
+    ):
+        reject()
+    try:
+        descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+        opened = os.fstat(descriptor)
+        if not same_read_snapshot(before, opened):
+            reject()
+        digest, size = stream_hash(descriptor, destination=None, limit=limit)
+        after = os.fstat(descriptor)
+        post = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if not same_read_snapshot(opened, after) or not same_read_snapshot(after, post):
+            reject()
+        return digest, size, opened
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def observe_build(authority_root: str, release_id: str, authorized_sha256: str) -> bytes:
+    test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', authority_root) is not None
+    if (authority_root != '/root/releases' and not test_root):
+        reject()
+    if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', release_id) is None:
+        reject()
+    if re.fullmatch(r'[0-9a-f]{64}', authorized_sha256) is None:
+        reject()
+    parent = open_root(authority_root)
+    archive_descriptor = -1
+    try:
+        sidecar_leaf = release_id + '.build-provenance.json'
+        sidecar = bounded_read_at(parent, sidecar_leaf, 4096)
+        if hashlib.sha256(sidecar).hexdigest() != authorized_sha256:
+            raise Conflict()
+        try:
+            provenance = json.loads(sidecar.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            reject()
+        if (
+            not isinstance(provenance, dict) or
+            (json.dumps(provenance, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8') != sidecar or
+            provenance.get('schema') != 'release_build_provenance.v1' or
+            provenance.get('release_id') != release_id
+        ):
+            reject()
+        archive_authority = provenance.get('archive')
+        if (
+            not isinstance(archive_authority, dict) or
+            archive_authority.get('name') != release_id + '.tar.gz' or
+            not isinstance(archive_authority.get('size_bytes'), int) or archive_authority['size_bytes'] <= 0 or
+            re.fullmatch(r'[0-9a-f]{64}', archive_authority.get('sha256', '')) is None
+        ):
+            reject()
+        archive_leaf = release_id + '.tar.gz'
+        archive_before = os.stat(archive_leaf, dir_fd=parent, follow_symlinks=False)
+        validate_regular(archive_before)
+        if archive_before.st_size != archive_authority['size_bytes'] or archive_before.st_size > MAX_REFERENCE_DUMP:
+            raise Conflict()
+        archive_descriptor = os.open(
+            archive_leaf,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            dir_fd=parent,
+        )
+        archive_opened = os.fstat(archive_descriptor)
+        if not same_read_snapshot(archive_before, archive_opened):
+            reject()
+        archive_sha256, archive_size = stream_hash(
+            archive_descriptor,
+            destination=None,
+            limit=MAX_REFERENCE_DUMP,
+        )
+        if archive_sha256 != archive_authority['sha256'] or archive_size != archive_authority['size_bytes']:
+            raise Conflict()
+        os.lseek(archive_descriptor, 0, os.SEEK_SET)
+        names: set[str] = set()
+        entry_count = 0
+        unpacked = RELEASE_BLOCK
+        artifact_script_sha256 = None
+        with os.fdopen(os.dup(archive_descriptor), 'rb', closefd=True) as source, tarfile.open(fileobj=source, mode='r:gz') as archive:
+            for member in archive:
+                name = member.name[2:] if member.name.startswith('./') else member.name
+                if name in ('', '.') and member.isdir():
+                    continue
+                if (
+                    not name or name.startswith('/') or len(name.encode('utf-8')) > 4096 or
+                    name in ('.', '..') or any(part in ('', '.', '..') or len(part.encode('utf-8')) > 255 for part in name.split('/')) or
+                    any(part.startswith('._') for part in name.split('/')) or name in names or
+                    not (member.isfile() or member.isdir())
+                ):
+                    reject()
+                names.add(name)
+                if len(names) > 1_000_000:
+                    reject()
+                if member.isdir():
+                    unpacked += RELEASE_BLOCK
+                else:
+                    entry_count += 1
+                    unpacked += max(RELEASE_BLOCK, ((member.size + RELEASE_BLOCK - 1) // RELEASE_BLOCK) * RELEASE_BLOCK)
+                    if unpacked > MAX_RELEASE_UNPACKED:
+                        reject()
+                    if name == 'deploy_ea.sh':
+                        extracted = archive.extractfile(member)
+                        if extracted is None:
+                            reject()
+                        digest = hashlib.sha256()
+                        total = 0
+                        while True:
+                            chunk = extracted.read(65536)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > MAX_REFERENCE_SMALL:
+                                reject()
+                            digest.update(chunk)
+                        artifact_script_sha256 = digest.hexdigest()
+        archive_after = os.fstat(archive_descriptor)
+        archive_post = os.stat(archive_leaf, dir_fd=parent, follow_symlinks=False)
+        if not same_read_snapshot(archive_opened, archive_after) or not same_read_snapshot(archive_after, archive_post):
+            reject()
+        if artifact_script_sha256 is None:
+            reject()
+    finally:
+        if archive_descriptor >= 0:
+            os.close(archive_descriptor)
+        os.close(parent)
+
+    host_parent = open_system_read_root('/root' if not test_root else authority_root)
+    try:
+        host_sha256, _, _ = hash_regular_at(host_parent, 'deploy_ea.sh', MAX_REFERENCE_SMALL, (0o755,))
+    finally:
+        os.close(host_parent)
+    value = {
+        'archive_sha256': archive_sha256,
+        'archive_size_bytes': archive_size,
+        'artifact_deploy_script_sha256': artifact_script_sha256,
+        'host_deploy_script_sha256': host_sha256,
+        'provenance_bytes_base64': base64.b64encode(sidecar).decode('ascii'),
+        'provenance_sha256': authorized_sha256,
+        'stage_file_count': entry_count,
+        'stage_inode_count': len(names) + 1,
+        'stage_unpacked_bytes': unpacked,
+        'temp_scratch_bytes': RELEASE_TEMP_SCRATCH,
+    }
+    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+
+
+def open_capacity_directory(path: str, writable_tail: int = 0) -> int:
+    if not path.startswith('/') or path == '/' or path.endswith('/') or os.path.normpath(path) != path:
+        reject()
+    components = path[1:].split('/')
+    for component in components:
+        validate_component(component)
+    try:
+        web_uid = pwd.getpwnam('www-data').pw_uid
+    except KeyError:
+        web_uid = -1
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = os.open('/', flags)
+    try:
+        validate_directory(os.fstat(descriptor), leaf=False)
+        writable_start = len(components) - writable_tail
+        for index, component in enumerate(components):
+            before = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode) or before.st_mode & 0o022:
+                reject()
+            allowed_uids = (0, web_uid) if index >= writable_start else (0,)
+            if before.st_uid not in allowed_uids:
+                reject()
+            child = os.open(component, flags, dir_fd=descriptor)
+            opened = os.fstat(child)
+            post = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            if not same_identity(before, opened) or not same_identity(opened, post):
+                os.close(child)
+                reject()
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def observe_regular_tree(root: int) -> tuple[int, int, int]:
+    entry_limit = 1_000_000
+    allocated = 0
+    logical = 0
+    inodes = 0
+    try:
+        web_uid = pwd.getpwnam('www-data').pw_uid
+    except KeyError:
+        web_uid = -1
+
+    def walk(directory: int) -> None:
+        nonlocal allocated, logical, inodes
+        before = os.fstat(directory)
+        if not stat.S_ISDIR(before.st_mode) or before.st_uid not in (0, web_uid) or before.st_mode & 0o022:
+            reject()
+        allocated += before.st_blocks * 512
+        inodes += 1
+        if inodes > entry_limit:
+            reject()
+        names = sorted(os.listdir(directory))
+        for name in names:
+            if name in ('', '.', '..') or '/' in name or '\x00' in name or len(name.encode('utf-8')) > 255:
+                reject()
+            metadata = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            if stat.S_ISDIR(metadata.st_mode):
+                if metadata.st_uid not in (0, web_uid) or metadata.st_mode & 0o022:
+                    reject()
+                child = os.open(
+                    name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=directory,
+                )
+                try:
+                    opened = os.fstat(child)
+                    if not same_identity(metadata, opened):
+                        reject()
+                    walk(child)
+                    post = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                    after = os.fstat(child)
+                    if not same_read_snapshot(opened, after) or not same_read_snapshot(after, post):
+                        reject()
+                finally:
+                    os.close(child)
+                continue
+            if (
+                not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or
+                metadata.st_uid not in (0, web_uid) or metadata.st_mode & 0o022
+            ):
+                reject()
+            child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=directory)
+            try:
+                opened = os.fstat(child)
+                if not same_read_snapshot(metadata, opened):
+                    reject()
+                allocated += opened.st_blocks * 512
+                logical += opened.st_size
+                inodes += 1
+                if inodes > entry_limit or allocated > 9_223_372_036_854_775_807 or logical > 9_223_372_036_854_775_807:
+                    reject()
+                after = os.fstat(child)
+                post = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                if not same_read_snapshot(opened, after) or not same_read_snapshot(after, post):
+                    reject()
+            finally:
+                os.close(child)
+        after = os.fstat(directory)
+        if not same_read_snapshot(before, after):
+            reject()
+
+    walk(root)
+    return allocated, logical, inodes
+
+
+def observe_capacity(authority_root: str, run_id: str, release_id: str, renderer_mode: str) -> bytes:
+    test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', authority_root) is not None
+    if authority_root != STATE_ROOT and not test_root:
+        reject()
+    validate_run_id(run_id)
+    if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', release_id) is None or renderer_mode not in ('host', 'external'):
+        reject()
+    if test_root:
+        paths = {
+            'artifact': authority_root,
+            'dump_pin': authority_root + '/runs/' + run_id,
+            'live_storage': authority_root + '/live-storage',
+            'release_root': authority_root,
+            'renderer_state': authority_root + '/renderer-state',
+            'restore_scratch': authority_root + '/restore-scratch',
+            'stage': authority_root + '/target',
+            'state_root': authority_root,
+            'temp': authority_root + '/target',
+        }
+        policy_root = authority_root
+        writable_tails = {key: 0 for key in CAPACITY_DEVICE_KEYS}
+    else:
+        paths = {
+            'artifact': '/root/releases',
+            'dump_pin': STATE_ROOT + '/runs/' + run_id,
+            'live_storage': '/var/www/html/easyappointments/storage',
+            'release_root': '/root/releases',
+            'renderer_state': '/var/lib/fh-pdf-renderer' if renderer_mode == 'host' else '/var/lib',
+            'restore_scratch': '/var/lib/docker' if os.path.isdir('/var/lib/docker') else '/var/lib',
+            'stage': '/var/www/html',
+            'state_root': STATE_ROOT,
+            'temp': '/var/www/html',
+        }
+        policy_root = '/etc/fh'
+        writable_tails = {key: 0 for key in CAPACITY_DEVICE_KEYS}
+        writable_tails['live_storage'] = 2
+        writable_tails['renderer_state'] = 1 if renderer_mode == 'host' else 0
+
+    descriptors: dict[str, int] = {}
+    try:
+        for key in CAPACITY_DEVICE_KEYS:
+            descriptors[key] = open_capacity_directory(paths[key], writable_tails[key])
+        target = descriptors['stage']
+        snapshot = os.fstatvfs(target)
+        if (
+            snapshot.f_frsize <= 0 or snapshot.f_blocks <= 0 or snapshot.f_bavail < 0 or
+            snapshot.f_bavail > snapshot.f_blocks or snapshot.f_files <= 0 or
+            snapshot.f_favail < 0 or snapshot.f_favail > snapshot.f_files
+        ):
+            reject()
+        filesystem_device = os.fstat(target).st_dev
+        devices = {key: os.fstat(descriptors[key]).st_dev for key in CAPACITY_DEVICE_KEYS}
+        if any(device != filesystem_device for device in devices.values()):
+            reject()
+        live_allocated, live_logical, live_inodes = observe_regular_tree(descriptors['live_storage'])
+        if live_allocated <= 0 or live_logical <= 0 or live_inodes <= 0:
+            reject()
+        policy_parent = open_system_read_root(policy_root)
+        try:
+            policy = bounded_read_at(policy_parent, 'deployment-renderer-capacity-v1.json', 4096)
+        finally:
+            os.close(policy_parent)
+    finally:
+        for descriptor in descriptors.values():
+            os.close(descriptor)
+
+    value = {
+        'block_size': snapshot.f_frsize,
+        'blocks': snapshot.f_blocks,
+        'blocks_available': snapshot.f_bavail,
+        'component_devices': devices,
+        'filesystem_device': filesystem_device,
+        'inodes': snapshot.f_files,
+        'inodes_available': snapshot.f_favail,
+        'live_storage_allocated_bytes': live_allocated,
+        'live_storage_inode_count': live_inodes,
+        'live_storage_logical_bytes': live_logical,
+        'policy_bytes_base64': base64.b64encode(policy).decode('ascii'),
+    }
+    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+
+
 def validate_storage_scope_probe(root: str, relative: str, operation: str) -> int:
     validate_storage_scope(root, relative, operation)
     return 0
@@ -1489,6 +1840,12 @@ def main(arguments: list[str]) -> int:
         return 0
     if len(arguments) == 6 and arguments[1] == 'observe-dump':
         sys.stdout.buffer.write(observe_dump(arguments[2], arguments[3], arguments[4], arguments[5]))
+        return 0
+    if len(arguments) == 5 and arguments[1] == 'observe-build':
+        sys.stdout.buffer.write(observe_build(arguments[2], arguments[3], arguments[4]))
+        return 0
+    if len(arguments) == 6 and arguments[1] == 'observe-capacity':
+        sys.stdout.buffer.write(observe_capacity(arguments[2], arguments[3], arguments[4], arguments[5]))
         return 0
     if len(arguments) == 4 and arguments[1] == 'prepare-run':
         prepare_run(arguments[2], arguments[3])
@@ -1557,6 +1914,6 @@ if __name__ == "__main__":
     except Conflict:
         sys.stderr.buffer.write(FIXED_ERROR)
         raise SystemExit(EXIT_CONFLICT)
-    except (Rejected, OSError, ValueError, OverflowError, TypeError, UnicodeError):
+    except (Rejected, OSError, ValueError, OverflowError, TypeError, UnicodeError, tarfile.TarError):
         sys.stderr.buffer.write(FIXED_ERROR)
         raise SystemExit(EXIT_INVALID)

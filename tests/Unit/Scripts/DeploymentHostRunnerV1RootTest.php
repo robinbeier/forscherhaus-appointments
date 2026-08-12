@@ -375,6 +375,112 @@ PYTHON;
         self::assertSame($dump, file_get_contents($path));
     }
 
+    public function testBuildObserverBindsAuthorizedSidecarArchiveInventoryAndBothDeployScripts(): void
+    {
+        $release = 'ea_20260812';
+        $stage = $this->root . '/stage';
+        self::assertTrue(mkdir($stage, 0700));
+        $deployScript = "#!/bin/bash\nexit 0\n";
+        self::assertSame(strlen($deployScript), file_put_contents($stage . '/deploy_ea.sh', $deployScript));
+        self::assertTrue(chmod($stage . '/deploy_ea.sh', 0755));
+        self::assertSame(strlen($deployScript), file_put_contents($this->root . '/deploy_ea.sh', $deployScript));
+        self::assertTrue(chmod($this->root . '/deploy_ea.sh', 0755));
+        $archivePath = $this->root . '/' . $release . '.tar.gz';
+        $tar = $this->runCommand(['/bin/tar', '-czf', $archivePath, '-C', $stage, '.']);
+        self::assertSame(0, $tar['exit_code'], $tar['stderr']);
+        self::assertTrue(chmod($archivePath, 0600));
+        $inspection = $this->runCommand([
+            '/usr/bin/python3', '-I', '-B', dirname(__DIR__, 3) . '/scripts/ops/libexec/inspect_release_archive_v1.py',
+            $archivePath,
+        ]);
+        self::assertSame(0, $inspection['exit_code'], $inspection['stderr']);
+        $archive = json_decode($inspection['stdout'], true, 16, JSON_THROW_ON_ERROR);
+        $digest = hash('sha256', $deployScript);
+        $provenance = json_encode([
+            'archive' => [
+                'name' => $release . '.tar.gz',
+                'sha256' => $archive['archive_sha256'],
+                'size_bytes' => $archive['archive_size_bytes'],
+            ],
+            'capacity_bounds' => [
+                'stage_file_count' => $archive['entry_count'],
+                'stage_inode_count' => $archive['stage_inode_count'],
+                'stage_unpacked_bytes' => $archive['stage_unpacked_bytes'],
+                'temp_scratch_bytes' => 67_108_864,
+            ],
+            'expected_commit' => str_repeat('a', 40),
+            'observed_commit' => str_repeat('a', 40),
+            'release_id' => $release,
+            'schema' => 'release_build_provenance.v1',
+            'source' => [
+                'build_script_sha256' => str_repeat('b', 64),
+                'composer_lock_sha256' => str_repeat('c', 64),
+                'deploy_ea_sha256' => $digest,
+                'package_lock_sha256' => str_repeat('d', 64),
+            ],
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        $sidecarPath = $this->root . '/' . $release . '.build-provenance.json';
+        self::assertSame(strlen($provenance), file_put_contents($sidecarPath, $provenance));
+        self::assertTrue(chmod($sidecarPath, 0600));
+        $authorized = hash('sha256', $provenance);
+
+        $result = $this->runHelper(['observe-build', $this->root, $release, $authorized]);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $decoded = json_decode($result['stdout'], true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame($authorized, $decoded['provenance_sha256']);
+        self::assertSame(base64_encode($provenance), $decoded['provenance_bytes_base64']);
+        self::assertSame($archive['archive_sha256'], $decoded['archive_sha256']);
+        self::assertSame($archive['archive_size_bytes'], $decoded['archive_size_bytes']);
+        self::assertSame($archive['entry_count'], $decoded['stage_file_count']);
+        self::assertSame($archive['stage_inode_count'], $decoded['stage_inode_count']);
+        self::assertSame($archive['stage_unpacked_bytes'], $decoded['stage_unpacked_bytes']);
+        self::assertSame($digest, $decoded['host_deploy_script_sha256']);
+        self::assertSame($digest, $decoded['artifact_deploy_script_sha256']);
+
+        $wrongAuthority = $this->runHelper(['observe-build', $this->root, $release, str_repeat('e', 64)]);
+        self::assertSame(75, $wrongAuthority['exit_code']);
+        self::assertSame('', $wrongAuthority['stdout']);
+    }
+
+    public function testCapacityObserverMeasuresLogicalAndAllocatedLiveStorageFromOneFilesystem(): void
+    {
+        self::assertSame(0, $this->runHelper(['prepare-run', $this->root, self::RUN_ID])['exit_code']);
+        foreach (['live-storage', 'live-storage/nested', 'renderer-state', 'restore-scratch', 'target'] as $relative) {
+            self::assertTrue(mkdir($this->root . '/' . $relative, 0700));
+            self::assertTrue(chmod($this->root . '/' . $relative, 0700));
+        }
+        $sparse = fopen($this->root . '/live-storage/nested/sparse.bin', 'x+b');
+        self::assertIsResource($sparse);
+        self::assertSame(0, fseek($sparse, 1_048_575));
+        self::assertSame(1, fwrite($sparse, "x"));
+        self::assertTrue(fclose($sparse));
+        self::assertTrue(chmod($this->root . '/live-storage/nested/sparse.bin', 0600));
+        $policy = json_encode([
+            'external' => ['bytes' => 0, 'inodes' => 0],
+            'host' => ['bytes' => 1_000_000, 'inodes' => 1_000],
+            'schema' => 'deployment_renderer_capacity_policy.v1',
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        self::assertSame(strlen($policy), file_put_contents($this->root . '/deployment-renderer-capacity-v1.json', $policy));
+        self::assertTrue(chmod($this->root . '/deployment-renderer-capacity-v1.json', 0600));
+
+        $result = $this->runHelper(['observe-capacity', $this->root, self::RUN_ID, 'ea_20260812', 'external']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $decoded = json_decode($result['stdout'], true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame(1_048_576, $decoded['live_storage_logical_bytes']);
+        self::assertGreaterThan(0, $decoded['live_storage_allocated_bytes']);
+        self::assertSame(3, $decoded['live_storage_inode_count']);
+        self::assertSame(base64_encode($policy), $decoded['policy_bytes_base64']);
+        self::assertSame(
+            array_fill_keys([
+                'artifact', 'dump_pin', 'live_storage', 'release_root', 'renderer_state',
+                'restore_scratch', 'stage', 'state_root', 'temp',
+            ], $decoded['filesystem_device']),
+            $decoded['component_devices'],
+        );
+    }
+
     public function testPrepareRunIsIdempotentAndRejectsUnsafeExistingRunLeaf(): void
     {
         self::assertTrue(mkdir($this->root . '/runs', 0700));

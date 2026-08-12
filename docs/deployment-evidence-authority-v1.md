@@ -101,6 +101,18 @@ Puppeteer state caches. The selected mode comes from the already-pinned
 execution input, while the numeric limits come only from this protected policy.
 Host renderer targets must share the measured filesystem and are included
 before the capacity verdict.
+The Core collector resolves those names only to fixed host targets: the
+protected state/run directory for state and the pinned dump, `/root/releases`
+for the release and artifact, `/var/www/html` for the stage and deploy
+temporary target, `/var/www/html/easyappointments/storage` for the live tree,
+and `/var/lib` descendants for host renderer and restore scratch state. It
+opens every component without following links and rejects the observation if
+any target is unsafe or has a different device from the single `/var/www/html`
+`statvfs` snapshot. Test roots are separately closed to the Linux root suite.
+The live-tree walk accepts ordinary POSIX file names but only regular files and
+directories with stable identities and safe ownership/modes; links and special
+files make the capacity observation invalid. No file contents, names, or paths
+are emitted by the helper.
 Base required bytes are archive + compressed dump + archive-derived stage +
 live-storage copy + renderer installation/cache + deterministic temporary
 scratch + the uncompressed stream bound + the independently observed restored
