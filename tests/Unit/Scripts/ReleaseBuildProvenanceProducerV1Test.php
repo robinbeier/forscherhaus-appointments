@@ -115,10 +115,11 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
             1_000,
             '2026-08-12T12:01:01Z',
             20_000,
+            25_000,
             5,
             $devices,
         );
-        $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 20_000 + 67_108_864 + 4_000 + 8_000;
+        $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 25_000 + 67_108_864 + 4_000 + 8_000;
         self::assertSame($expectedBase, $capacity['base_required_bytes']);
         self::assertSame(81, $capacity['projected_required_inodes']);
     }

@@ -463,6 +463,7 @@ final class DeploymentEvidenceAuthorityV1
         int $dumpSizeBytes,
         string $observedAtUtc,
         int $liveStorageAllocatedBytes,
+        int $liveStorageLogicalBytes,
         int $liveStorageInodeCount,
         array $componentDevices,
     ): array {
@@ -486,7 +487,9 @@ final class DeploymentEvidenceAuthorityV1
             $observedAtUtc,
         );
         self::assertPositiveInt($liveStorageAllocatedBytes, 'live storage allocated bytes');
+        self::assertPositiveInt($liveStorageLogicalBytes, 'live storage logical bytes');
         self::assertPositiveInt($liveStorageInodeCount, 'live storage inode count');
+        $liveStorageCopyBytes = max($liveStorageAllocatedBytes, $liveStorageLogicalBytes);
         return self::capacityFromStatvfs(
             $filesystemDevice,
             $blockSize,
@@ -503,7 +506,7 @@ final class DeploymentEvidenceAuthorityV1
             $verifiedDumpObservation['dump_size_bytes'],
             self::checkedAdd(
                 $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
-                $liveStorageAllocatedBytes,
+                $liveStorageCopyBytes,
             ),
             self::checkedAdd(
                 $verifiedProvenance['capacity_bounds']['temp_scratch_bytes'],
@@ -778,6 +781,7 @@ final class DeploymentEvidenceAuthorityV1
         int $dumpSizeBytes,
         string $observedAtUtc,
         int $liveStorageAllocatedBytes,
+        int $liveStorageLogicalBytes,
         int $liveStorageInodeCount,
         array $componentDevices,
     ): array {
@@ -804,6 +808,7 @@ final class DeploymentEvidenceAuthorityV1
             $dumpSizeBytes,
             $observedAtUtc,
             $liveStorageAllocatedBytes,
+            $liveStorageLogicalBytes,
             $liveStorageInodeCount,
             $componentDevices,
         );
@@ -846,6 +851,7 @@ final class DeploymentEvidenceAuthorityV1
         int $dumpSizeBytes,
         string $observedAtUtc,
         int $liveStorageAllocatedBytes,
+        int $liveStorageLogicalBytes,
         int $liveStorageInodeCount,
         array $componentDevices,
     ): VerifiedPredeployGateV1 {
@@ -876,6 +882,7 @@ final class DeploymentEvidenceAuthorityV1
                 $dumpSizeBytes,
                 $observedAtUtc,
                 $liveStorageAllocatedBytes,
+                $liveStorageLogicalBytes,
                 $liveStorageInodeCount,
                 $componentDevices,
             ),
@@ -1555,6 +1562,7 @@ final class DeploymentEvidenceAuthorityV1
                         $sources->dumpSizeBytes,
                         $sources->observedAtUtc,
                         $sources->liveStorageAllocatedBytes,
+                        $sources->liveStorageLogicalBytes,
                         $sources->liveStorageInodeCount,
                         $sources->componentDevices,
                     );

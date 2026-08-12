@@ -106,6 +106,7 @@ final readonly class CapacityVerifiedSourcesV1
         public int $dumpSizeBytes,
         public string $observedAtUtc,
         public int $liveStorageAllocatedBytes,
+        public int $liveStorageLogicalBytes,
         public int $liveStorageInodeCount,
         /** @var array<string,int> */ public array $componentDevices,
     ) {}

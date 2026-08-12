@@ -443,11 +443,12 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             1_000_000,
             '2026-08-12T12:30:00Z',
             50_000_000,
+            60_000_000,
             500,
             $this->capacityDevices(1),
         );
 
-        self::assertSame(1_263_123_456, $result['base_required_bytes']);
+        self::assertSame(1_273_123_456, $result['base_required_bytes']);
         self::assertSame(2500, $result['stage_inode_count']);
         self::assertSame(2820, $result['projected_required_inodes']);
         self::assertTrue($result['passed']);
@@ -475,10 +476,11 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             1_000_000,
             '2026-08-12T12:30:00Z',
             3_000_000_000,
+            3_100_000_000,
             500,
             $this->capacityDevices(1),
         );
-        self::assertSame(4_213_123_456, $largeStorage['base_required_bytes']);
+        self::assertSame(4_313_123_456, $largeStorage['base_required_bytes']);
         self::assertFalse($largeStorage['passed']);
 
         $provenance['capacity_bounds']['stage_unpacked_bytes'] = 1;
@@ -506,6 +508,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             1_000_000,
             '2026-08-12T12:30:00Z',
             50_000_000,
+            60_000_000,
             500,
             $this->capacityDevices(1),
         );
@@ -566,6 +569,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             1_000_000,
             '2026-08-12T12:30:00Z',
             50_000_000,
+            60_000_000,
             500,
             $this->capacityDevices(1),
         );
@@ -766,6 +770,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         1_000_000,
                         '2026-08-12T12:30:00Z',
                         50_000_000,
+                        60_000_000,
                         500,
                         $this->capacityDevices(1),
                     ),
@@ -893,6 +898,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     1_000_000,
                     '2026-08-12T12:30:00Z',
                     50_000_000,
+                    60_000_000,
                     500,
                     $this->capacityDevices(1),
                 ),
@@ -1111,6 +1117,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             1_000_000,
             '2026-08-12T12:30:00Z',
             50_000_000,
+            60_000_000,
             500,
             $this->capacityDevices(1),
         );
@@ -1271,6 +1278,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     $dumpSize,
                     '2026-08-12T12:30:00Z',
                     50_000_000,
+                    60_000_000,
                     500,
                     $this->capacityDevices(1),
                 ),
@@ -1864,6 +1872,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         1_000_000,
                         '2026-08-12T12:30:00Z',
                         50_000_000,
+                        60_000_000,
                         500,
                         $this->capacityDevices(1),
                     ),

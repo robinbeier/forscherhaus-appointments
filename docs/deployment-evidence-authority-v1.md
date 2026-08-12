@@ -54,11 +54,14 @@ the expansion ratio at 100:1. Age must remain below 14,400 seconds.
 Capacity uses one `statvfs` snapshot of the target filesystem (`f_frsize`,
 `f_bavail`, `f_files`, and `f_favail`) and an exact named device map for state,
 release, artifact, dump, live storage, stage, restore scratch, and temporary
-targets. The protected provider measures allocated bytes and inodes for the
-exact live `storage` tree that the child later copies into the stage. The
-archive-derived stage bounds and this live-storage footprint are added before
-the capacity decision, so `stage_inode_count` represents the complete projected
-stage after that copy. Later artifact observations cannot reduce either bound.
+targets. The protected provider measures allocated bytes, logical bytes, and
+inodes for the exact live `storage` tree that the child later copies with
+`rsync -a` into the stage. The projected copy uses the larger of allocated and
+logical bytes, so sparse source files cannot understate their destination cost.
+The archive-derived stage bounds and this live-storage footprint are added
+before the capacity decision, so `stage_inode_count` represents the complete
+projected stage after that copy. Later artifact observations cannot reduce
+either bound.
 Base required bytes are archive + compressed dump + archive-derived stage +
 live-storage copy + deterministic temporary scratch + the uncompressed stream
 bound + the independently observed restored datadir footprint; rollback bytes
