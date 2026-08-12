@@ -36,7 +36,10 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertSame('unknown', $runner->preflightUnit($fixture['launch'], self::BOOT, self::BOOT . "\n"));
         self::assertCount(3, $adapter->calls);
         foreach ($adapter->calls as $call) {
-            self::assertSame(DeploymentHostRunnerContractV1::systemctlShowArgv($fixture['launch']['unit_name']), $call['argv']);
+            self::assertSame(
+                DeploymentHostRunnerContractV1::systemctlShowArgv($fixture['launch']['unit_name']),
+                $call['argv'],
+            );
             self::assertSame(DeploymentHostRunnerV1::CONTROLLER_ENVIRONMENT, $call['environment']);
             self::assertSame(30, $call['timeout']);
         }
@@ -85,8 +88,14 @@ final class DeploymentHostRunnerV1Test extends TestCase
     {
         yield 'accepted by manager' => [new HostRunnerProcessResult(0, '', ''), 'observe_only'];
         yield 'nonzero after call' => [new HostRunnerProcessResult(1, '', ''), 'observe_only_reconciliation_required'];
-        yield 'response lost' => [new HostRunnerProcessResult(null, '', '', true), 'observe_only_reconciliation_required'];
-        yield 'adapter throws' => [new RuntimeException('secret transport detail'), 'observe_only_reconciliation_required'];
+        yield 'response lost' => [
+            new HostRunnerProcessResult(null, '', '', true),
+            'observe_only_reconciliation_required',
+        ];
+        yield 'adapter throws' => [
+            new RuntimeException('secret transport detail'),
+            'observe_only_reconciliation_required',
+        ];
     }
 
     public function testObservationUsesRawParserAndKeepsSignalDistinctFromNormalExit143(): void
@@ -102,15 +111,24 @@ final class DeploymentHostRunnerV1Test extends TestCase
 
         $normal = $runner->observeUnit($fixture['launch'], self::BOOT . "\n");
         $signal = $runner->observeUnit($fixture['launch'], self::BOOT . "\n");
-        $decoded = DeploymentHostRunnerContractV1::decodeUnitLoadedObservation($normal['pinned_bytes'], $fixture['launch']);
+        $decoded = DeploymentHostRunnerContractV1::decodeUnitLoadedObservation(
+            $normal['pinned_bytes'],
+            $fixture['launch'],
+        );
         self::assertSame($normal143, $decoded['systemctl_show']);
         self::assertSame(
             ['unit_state' => 'failed', 'observed_exit_code' => 143, 'unit_invocation_id' => str_repeat('d', 32)],
-            DeploymentHostRunnerContractV1::classifySystemdObservation($fixture['launch'], $normal['lookup']['loaded_observation']),
+            DeploymentHostRunnerContractV1::classifySystemdObservation(
+                $fixture['launch'],
+                $normal['lookup']['loaded_observation'],
+            ),
         );
         self::assertSame(
             ['unit_state' => 'killed', 'observed_exit_code' => null, 'unit_invocation_id' => str_repeat('d', 32)],
-            DeploymentHostRunnerContractV1::classifySystemdObservation($fixture['launch'], $signal['lookup']['loaded_observation']),
+            DeploymentHostRunnerContractV1::classifySystemdObservation(
+                $fixture['launch'],
+                $signal['lookup']['loaded_observation'],
+            ),
         );
     }
 
@@ -120,7 +138,16 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $adapter = new ScriptedSystemAdapter([new HostRunnerProcessResult(0, '', '')]);
         $runner = new DeploymentHostRunnerV1($adapter);
         try {
-            $runner->admitReservedUnit($fixture['launch'], $fixture['binding'], self::BOOT . "\n", $fixture['input'], $fixture['request'], null, $fixture['script'], false);
+            $runner->admitReservedUnit(
+                $fixture['launch'],
+                $fixture['binding'],
+                self::BOOT . "\n",
+                $fixture['input'],
+                $fixture['request'],
+                null,
+                $fixture['script'],
+                false,
+            );
             self::fail('Expected reservation guard.');
         } catch (RuntimeException $error) {
             self::assertSame('systemd admission requires the durable reservation boundary', $error->getMessage());
@@ -150,10 +177,16 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertSame('unknown', $runner->preflightUnit($fixture['launch'], self::BOOT, self::BOOT . "\n"));
         $thrown = $runner->observeUnit($fixture['launch'], self::BOOT . "\n");
         self::assertSame('transport_error', $thrown['lookup']['kind']);
-        self::assertSame('transport_error', DeploymentHostRunnerContractV1::decodeUnitAbsence($thrown['pinned_bytes'])['kind']);
+        self::assertSame(
+            'transport_error',
+            DeploymentHostRunnerContractV1::decodeUnitAbsence($thrown['pinned_bytes'])['kind'],
+        );
         $malformed = $runner->observeUnit($fixture['launch'], self::BOOT . "\n");
         self::assertSame('transport_error', $malformed['lookup']['kind']);
-        self::assertSame('transport_error', DeploymentHostRunnerContractV1::decodeUnitAbsence($malformed['pinned_bytes'])['kind']);
+        self::assertSame(
+            'transport_error',
+            DeploymentHostRunnerContractV1::decodeUnitAbsence($malformed['pinned_bytes'])['kind'],
+        );
     }
 
     public function testCorruptBootBytesRejectBeforeObservationCall(): void
@@ -188,27 +221,39 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $sameAbsence = DeploymentHostRunnerContractV1::decodeUnitAbsence($same['pinned_bytes']);
         $changedAbsence = DeploymentHostRunnerContractV1::decodeUnitAbsence($changed['pinned_bytes']);
         unset($sameAbsence['schema'], $changedAbsence['schema']);
-        self::assertSame('unknown', DeploymentHostRunnerContractV1::classifyUnitObservation($fixture['binding'], $sameAbsence));
-        self::assertSame('missing', DeploymentHostRunnerContractV1::classifyUnitObservation($fixture['binding'], $changedAbsence));
+        self::assertSame(
+            'unknown',
+            DeploymentHostRunnerContractV1::classifyUnitObservation($fixture['binding'], $sameAbsence),
+        );
+        self::assertSame(
+            'missing',
+            DeploymentHostRunnerContractV1::classifyUnitObservation($fixture['binding'], $changedAbsence),
+        );
     }
 
     public function testProductAdapterUsesFixedHelperCommandAndDecodesOnlyCanonicalBoundedResponse(): void
     {
         $captured = [];
-        $adapter = new HelperBackedHostRunnerSystemAdapter(
-            static function (array $command, string $payload, float $timeout) use (&$captured): array {
-                $captured = compact('command', 'payload', 'timeout');
-                return [
-                    'exit_code' => 0,
-                    'stdout' => json_encode([
-                        'exit_code' => 0,
-                        'stderr_base64' => base64_encode(''),
-                        'stdout_base64' => base64_encode("raw\n"),
-                        'transport_lost' => false,
-                    ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
-                ];
-            },
-        );
+        $adapter = new HelperBackedHostRunnerSystemAdapter(static function (
+            array $command,
+            string $payload,
+            float $timeout,
+        ) use (&$captured): array {
+            $captured = compact('command', 'payload', 'timeout');
+            return [
+                'exit_code' => 0,
+                'stdout' =>
+                    json_encode(
+                        [
+                            'exit_code' => 0,
+                            'stderr_base64' => base64_encode(''),
+                            'stdout_base64' => base64_encode("raw\n"),
+                            'transport_lost' => false,
+                        ],
+                        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+                    ) . "\n",
+            ];
+        });
         $fixture = $this->fixture();
         $result = $adapter->run(
             DeploymentHostRunnerContractV1::systemctlShowArgv($fixture['launch']['unit_name']),
@@ -218,7 +263,19 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertSame(0, $result->exitCode);
         self::assertSame("raw\n", $result->stdout);
         self::assertSame(125.0, $captured['timeout']);
-        self::assertSame(['/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', '/usr/bin/python3', '-I', '-B'], array_slice($captured['command'], 0, 8));
+        self::assertSame(
+            [
+                '/usr/bin/env',
+                '-i',
+                'LANG=C',
+                'LC_ALL=C',
+                'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+                '/usr/bin/python3',
+                '-I',
+                '-B',
+            ],
+            array_slice($captured['command'], 0, 8),
+        );
         $payload = json_decode($captured['payload'], true, 8, JSON_THROW_ON_ERROR);
         self::assertSame(30, $payload['timeout_seconds']);
         self::assertSame(DeploymentHostRunnerV1::CONTROLLER_ENVIRONMENT, $payload['environment']);
@@ -226,15 +283,15 @@ final class DeploymentHostRunnerV1Test extends TestCase
 
     public function testProductAdapterRejectsTimedOutOrMalformedControllerWithoutLeakingOutput(): void
     {
-        foreach ([
-            ['exit_code' => 70, 'stdout' => 'partial secret'],
-            ['exit_code' => 0, 'stdout' => str_repeat('x', 180_001)],
-            ['exit_code' => 0, 'stdout' => "{}\n"],
-        ] as $transportResult) {
-            $adapter = new HelperBackedHostRunnerSystemAdapter(
-                static fn(): array => $transportResult,
-                0.05,
-            );
+        foreach (
+            [
+                ['exit_code' => 70, 'stdout' => 'partial secret'],
+                ['exit_code' => 0, 'stdout' => str_repeat('x', 180_001)],
+                ['exit_code' => 0, 'stdout' => "{}\n"],
+            ]
+            as $transportResult
+        ) {
+            $adapter = new HelperBackedHostRunnerSystemAdapter(static fn(): array => $transportResult, 0.05);
             try {
                 $adapter->run(['/bin/false'], DeploymentHostRunnerV1::CONTROLLER_ENVIRONMENT, 30);
                 self::fail('Expected fixed controller failure.');
@@ -265,11 +322,14 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $fixture['state_bytes'],
         );
 
-        self::assertSame([
-            ['cow', 'runs/' . self::fixtureRunId() . '/events.jsonl', $fixture['events_bytes']],
-            ['pin', 'active-run.json', $fixture['claim_bytes']],
-            ['cow', 'runs/' . self::fixtureRunId() . '/state.json', $fixture['state_bytes']],
-        ], $storage->operations);
+        self::assertSame(
+            [
+                ['cow', 'runs/' . self::fixtureRunId() . '/events.jsonl', $fixture['events_bytes']],
+                ['pin', 'active-run.json', $fixture['claim_bytes']],
+                ['cow', 'runs/' . self::fixtureRunId() . '/state.json', $fixture['state_bytes']],
+            ],
+            $storage->operations,
+        );
     }
 
     #[DataProvider('reservationCrashStepProvider')]
@@ -290,7 +350,12 @@ final class DeploymentHostRunnerV1Test extends TestCase
             new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
         );
         try {
-            $persistence->persist($fixture['run_id'], $fixture['events_bytes'], $fixture['claim_bytes'], $fixture['state_bytes']);
+            $persistence->persist(
+                $fixture['run_id'],
+                $fixture['events_bytes'],
+                $fixture['claim_bytes'],
+                $fixture['state_bytes'],
+            );
             self::fail('Expected injected crash.');
         } catch (RuntimeException $error) {
             self::assertSame('injected crash', $error->getMessage());
@@ -301,7 +366,11 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $adapter = new ScriptedSystemAdapter([
             new HostRunnerProcessResult(0, $this->notFoundShow($bundle['launch']), ''),
         ]);
-        $orchestrator = new \Ops\HostRunnerStartOrchestrator($persistence, new DeploymentHostRunnerV1($adapter), new ScriptedBootReader());
+        $orchestrator = new \Ops\HostRunnerStartOrchestrator(
+            $persistence,
+            new DeploymentHostRunnerV1($adapter),
+            new ScriptedBootReader(),
+        );
         self::assertSame(
             'attach_observe_only',
             $orchestrator->resumeReserved(
@@ -321,8 +390,14 @@ final class DeploymentHostRunnerV1Test extends TestCase
     {
         $run = self::fixtureRunId();
         yield 'journal durable only' => ['reservation_journal_durable', ['runs/' . $run . '/events.jsonl']];
-        yield 'claim durable after journal' => ['reservation_claim_durable', ['runs/' . $run . '/events.jsonl', 'active-run.json']];
-        yield 'state durable after claim' => ['reservation_state_durable', ['runs/' . $run . '/events.jsonl', 'active-run.json', 'runs/' . $run . '/state.json']];
+        yield 'claim durable after journal' => [
+            'reservation_claim_durable',
+            ['runs/' . $run . '/events.jsonl', 'active-run.json'],
+        ];
+        yield 'state durable after claim' => [
+            'reservation_state_durable',
+            ['runs/' . $run . '/events.jsonl', 'active-run.json', 'runs/' . $run . '/state.json'],
+        ];
     }
 
     public function testReservationPersistenceRejectsOverwriteTruncationExtraRecordAndNonReservation(): void
@@ -337,7 +412,11 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $claim = $fixture['claim_bytes'];
             $state = $fixture['state_bytes'];
             if ($case === 'overwrite') {
-                $storage->files['runs/' . self::fixtureRunId() . '/events.jsonl'] = str_replace('artifact_verified', 'capacity_passed', $fixture['prior_events_bytes']);
+                $storage->files['runs/' . self::fixtureRunId() . '/events.jsonl'] = str_replace(
+                    'artifact_verified',
+                    'capacity_passed',
+                    $fixture['prior_events_bytes'],
+                );
             } elseif ($case === 'truncate') {
                 $events = $fixture['prior_events_bytes'];
             } elseif ($case === 'extra') {
@@ -349,7 +428,12 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 $state = DeploymentHostRunnerContractV1::encodeFile($decoded);
             }
             try {
-                (new \Ops\HostRunnerReservationPersistence($storage))->persist($fixture['run_id'], $events, $claim, $state);
+                (new \Ops\HostRunnerReservationPersistence($storage))->persist(
+                    $fixture['run_id'],
+                    $events,
+                    $claim,
+                    $state,
+                );
                 self::fail('Expected ' . $case . ' rejection.');
             } catch (RuntimeException) {
                 self::assertSame([], $storage->operations, $case);
@@ -366,18 +450,22 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $storage->files['runs/' . self::fixtureRunId() . '/state.json'] = $fixture['prior_state_bytes'];
             if ($case !== 'missing') {
                 $this->seedDeployAdmissionAuthority($storage);
-                $leaf = 'runs/' . self::fixtureRunId() . '/' . ($case === 'changed_launch'
-                    ? 'deploy-systemd-launch.json'
-                    : 'deploy-unit-binding.json');
+                $leaf =
+                    'runs/' .
+                    self::fixtureRunId() .
+                    '/' .
+                    ($case === 'changed_launch' ? 'deploy-systemd-launch.json' : 'deploy-unit-binding.json');
                 $decoded = json_decode($storage->files[$leaf], true, 32, JSON_THROW_ON_ERROR);
-                $decoded[$case === 'changed_launch' ? 'launch_nonce' : 'unit_manager_boot_id'] = $case === 'changed_launch'
-                    ? str_repeat('4', 64)
-                    : 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+                $decoded[$case === 'changed_launch' ? 'launch_nonce' : 'unit_manager_boot_id'] =
+                    $case === 'changed_launch' ? str_repeat('4', 64) : 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
                 $storage->files[$leaf] = DeploymentHostRunnerContractV1::encodeFile($decoded);
             }
             try {
                 (new \Ops\HostRunnerReservationPersistence($storage))->persist(
-                    $fixture['run_id'], $fixture['events_bytes'], $fixture['claim_bytes'], $fixture['state_bytes'],
+                    $fixture['run_id'],
+                    $fixture['events_bytes'],
+                    $fixture['claim_bytes'],
+                    $fixture['state_bytes'],
                 );
                 self::fail('Expected pinned authority rejection.');
             } catch (RuntimeException) {
@@ -427,22 +515,32 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $fixture['launch'],
             $fixture['binding'],
         );
-        self::assertSame([
-            'healthz-token',
-            'zero-surprise-dump-sql-gz',
-            'predeploy-credentials',
-            'canary-credentials',
-            'incident-webhook',
-            'runs/' . self::fixtureRunId() . '/request.json',
-            'runs/' . self::fixtureRunId() . '/execution-input.json',
-            'runs/' . self::fixtureRunId() . '/deploy-systemd-launch.json',
-            'runs/' . self::fixtureRunId() . '/deploy-unit-binding.json',
-        ], array_column($storage->operations, 1));
+        self::assertSame(
+            [
+                'healthz-token',
+                'zero-surprise-dump-sql-gz',
+                'predeploy-credentials',
+                'canary-credentials',
+                'incident-webhook',
+                'runs/' . self::fixtureRunId() . '/request.json',
+                'runs/' . self::fixtureRunId() . '/execution-input.json',
+                'runs/' . self::fixtureRunId() . '/deploy-systemd-launch.json',
+                'runs/' . self::fixtureRunId() . '/deploy-unit-binding.json',
+            ],
+            array_column($storage->operations, 1),
+        );
         $before = $storage->files;
         $changed = $fixture['launch'];
         $changed['launch_nonce'] = str_repeat('3', 64);
         try {
-            $persistence->pinAdmissionBundle(self::fixtureRunId(), 'deploy', $fixture['request'], $fixture['input'], $changed, $fixture['binding']);
+            $persistence->pinAdmissionBundle(
+                self::fixtureRunId(),
+                'deploy',
+                $fixture['request'],
+                $fixture['input'],
+                $changed,
+                $fixture['binding'],
+            );
             self::fail('Expected launch replacement conflict.');
         } catch (RuntimeException) {
             self::assertSame($before, $storage->files);
@@ -485,11 +583,21 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $reconciliation = new \Ops\HostRunnerReconciliationPersistence($validatorStorage);
         $reconciliation->refreshBinding('deploy', $reserved, $observed);
         self::assertSame($observed, $validatorStorage->files[$leaf]);
-        foreach ([
-            " \n" . $observed,
-            DeploymentHostRunnerContractV1::encodeFile([...$observedBinding, 'unit_invocation_id' => str_repeat('e', 32)]),
-            DeploymentHostRunnerContractV1::encodeFile([...$observedBinding, 'binding_state' => 'reserved', 'unit_invocation_id' => null]),
-        ] as $invalid) {
+        foreach (
+            [
+                " \n" . $observed,
+                DeploymentHostRunnerContractV1::encodeFile([
+                    ...$observedBinding,
+                    'unit_invocation_id' => str_repeat('e', 32),
+                ]),
+                DeploymentHostRunnerContractV1::encodeFile([
+                    ...$observedBinding,
+                    'binding_state' => 'reserved',
+                    'unit_invocation_id' => null,
+                ]),
+            ]
+            as $invalid
+        ) {
             try {
                 $reconciliation->refreshBinding('deploy', $observed, $invalid);
                 self::fail('Expected binding evolution rejection.');
@@ -515,26 +623,41 @@ final class DeploymentHostRunnerV1Test extends TestCase
             new DeploymentHostRunnerV1($adapter),
             new ScriptedBootReader(),
         );
-        self::assertSame('observe_only_reconciliation_required', $orchestrator->persistThenAdmit(
-            self::fixtureRunId(),
-            $durable['events_bytes'],
-            $durable['claim_bytes'],
-            $durable['state_bytes'],
-            $bundle['launch'],
-            $bundle['binding'],
-            $bundle['input'],
-            $bundle['request'],
-            null,
-            $bundle['script'],
-        ));
+        self::assertSame(
+            'observe_only_reconciliation_required',
+            $orchestrator->persistThenAdmit(
+                self::fixtureRunId(),
+                $durable['events_bytes'],
+                $durable['claim_bytes'],
+                $durable['state_bytes'],
+                $bundle['launch'],
+                $bundle['binding'],
+                $bundle['input'],
+                $bundle['request'],
+                null,
+                $bundle['script'],
+            ),
+        );
         self::assertCount(2, $adapter->calls);
         self::assertSame('/bin/systemctl', $adapter->calls[0]['argv'][5]);
         self::assertSame('/usr/bin/systemd-run', $adapter->calls[1]['argv'][5]);
-        self::assertSame([
-            'healthz-token', 'zero-surprise-dump-sql-gz', 'predeploy-credentials', 'canary-credentials', 'incident-webhook',
-            'request.json', 'execution-input.json', 'deploy-systemd-launch.json', 'deploy-unit-binding.json',
-            'events.jsonl', 'active-run.json', 'state.json',
-        ], array_map(static fn(array $operation): string => basename($operation[1]), $storage->operations));
+        self::assertSame(
+            [
+                'healthz-token',
+                'zero-surprise-dump-sql-gz',
+                'predeploy-credentials',
+                'canary-credentials',
+                'incident-webhook',
+                'request.json',
+                'execution-input.json',
+                'deploy-systemd-launch.json',
+                'deploy-unit-binding.json',
+                'events.jsonl',
+                'active-run.json',
+                'state.json',
+            ],
+            array_map(static fn(array $operation): string => basename($operation[1]), $storage->operations),
+        );
     }
 
     public function testIntegratedCollisionNeverWritesOrRunsAndCrossBindingRejectsBeforeShow(): void
@@ -549,10 +672,21 @@ final class DeploymentHostRunnerV1Test extends TestCase
             new DeploymentHostRunnerV1($adapter),
             new ScriptedBootReader(),
         );
-        self::assertSame('collision', $orchestrator->persistThenAdmit(
-            self::fixtureRunId(), $durable['events_bytes'], $durable['claim_bytes'], $durable['state_bytes'],
-            $bundle['launch'], $bundle['binding'], $bundle['input'], $bundle['request'], null, $bundle['script'],
-        ));
+        self::assertSame(
+            'collision',
+            $orchestrator->persistThenAdmit(
+                self::fixtureRunId(),
+                $durable['events_bytes'],
+                $durable['claim_bytes'],
+                $durable['state_bytes'],
+                $bundle['launch'],
+                $bundle['binding'],
+                $bundle['input'],
+                $bundle['request'],
+                null,
+                $bundle['script'],
+            ),
+        );
         self::assertSame([], $storage->operations);
         self::assertCount(1, $adapter->calls);
 
@@ -560,8 +694,16 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $changed['launch_nonce'] = str_repeat('3', 64);
         try {
             $orchestrator->persistThenAdmit(
-                self::fixtureRunId(), $durable['events_bytes'], $durable['claim_bytes'], $durable['state_bytes'],
-                $changed, $bundle['binding'], $bundle['input'], $bundle['request'], null, $bundle['script'],
+                self::fixtureRunId(),
+                $durable['events_bytes'],
+                $durable['claim_bytes'],
+                $durable['state_bytes'],
+                $changed,
+                $bundle['binding'],
+                $bundle['input'],
+                $bundle['request'],
+                null,
+                $bundle['script'],
             );
             self::fail('Expected cross-binding rejection.');
         } catch (RuntimeException) {
@@ -574,11 +716,14 @@ final class DeploymentHostRunnerV1Test extends TestCase
     {
         $bundle = $this->fixture();
         $durable = $this->reservationPersistenceFixture();
-        foreach ([
-            new HostRunnerProcessResult(null, '', '', true),
-            new HostRunnerProcessResult(0, "malformed\n", ''),
-            new RuntimeException('private transport'),
-        ] as $outcome) {
+        foreach (
+            [
+                new HostRunnerProcessResult(null, '', '', true),
+                new HostRunnerProcessResult(0, "malformed\n", ''),
+                new RuntimeException('private transport'),
+            ]
+            as $outcome
+        ) {
             $storage = new RecordingHostRunnerStorage();
             $adapter = new ScriptedSystemAdapter([$outcome]);
             $orchestrator = new \Ops\HostRunnerStartOrchestrator(
@@ -586,10 +731,21 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 new DeploymentHostRunnerV1($adapter),
                 new ScriptedBootReader(),
             );
-            self::assertSame('unknown', $orchestrator->persistThenAdmit(
-                self::fixtureRunId(), $durable['events_bytes'], $durable['claim_bytes'], $durable['state_bytes'],
-                $bundle['launch'], $bundle['binding'], $bundle['input'], $bundle['request'], null, $bundle['script'],
-            ));
+            self::assertSame(
+                'unknown',
+                $orchestrator->persistThenAdmit(
+                    self::fixtureRunId(),
+                    $durable['events_bytes'],
+                    $durable['claim_bytes'],
+                    $durable['state_bytes'],
+                    $bundle['launch'],
+                    $bundle['binding'],
+                    $bundle['input'],
+                    $bundle['request'],
+                    null,
+                    $bundle['script'],
+                ),
+            );
             self::assertSame([], $storage->operations);
             self::assertCount(1, $adapter->calls);
             self::assertSame('/bin/systemctl', $adapter->calls[0]['argv'][5]);
@@ -608,9 +764,10 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $adapter = new ScriptedSystemAdapter([
                 new HostRunnerProcessResult(0, $this->notFoundShow($bundle['launch']), ''),
             ]);
-            $boots = $case === 'during_show'
-                ? [self::BOOT . "\n", $otherBoot]
-                : [self::BOOT . "\n", self::BOOT . "\n", $otherBoot];
+            $boots =
+                $case === 'during_show'
+                    ? [self::BOOT . "\n", $otherBoot]
+                    : [self::BOOT . "\n", self::BOOT . "\n", $otherBoot];
             $orchestrator = new \Ops\HostRunnerStartOrchestrator(
                 new \Ops\HostRunnerReservationPersistence($storage),
                 new DeploymentHostRunnerV1($adapter),
@@ -619,14 +776,27 @@ final class DeploymentHostRunnerV1Test extends TestCase
             self::assertSame(
                 $case === 'during_show' ? 'unknown' : 'observe_only_reconciliation_required',
                 $orchestrator->persistThenAdmit(
-                    self::fixtureRunId(), $durable['events_bytes'], $durable['claim_bytes'], $durable['state_bytes'],
-                    $bundle['launch'], $bundle['binding'], $bundle['input'], $bundle['request'], null, $bundle['script'],
+                    self::fixtureRunId(),
+                    $durable['events_bytes'],
+                    $durable['claim_bytes'],
+                    $durable['state_bytes'],
+                    $bundle['launch'],
+                    $bundle['binding'],
+                    $bundle['input'],
+                    $bundle['request'],
+                    null,
+                    $bundle['script'],
                 ),
             );
-            self::assertSame(0, count(array_filter(
-                $adapter->calls,
-                static fn(array $call): bool => $call['argv'][5] === '/usr/bin/systemd-run',
-            )));
+            self::assertSame(
+                0,
+                count(
+                    array_filter(
+                        $adapter->calls,
+                        static fn(array $call): bool => $call['argv'][5] === '/usr/bin/systemd-run',
+                    ),
+                ),
+            );
             if ($case === 'during_show') {
                 self::assertSame([], $storage->operations);
             } else {
@@ -672,9 +842,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $durable = $this->reservationPersistenceFixture();
         $bundle = $this->fixture();
         $raw = $this->loadedShow($bundle['launch'], 'active', 'running', 'success', 0, 0);
-        $observed = (new DeploymentHostRunnerV1(new ScriptedSystemAdapter([
-            new HostRunnerProcessResult(0, $raw, ''),
-        ])))->observeUnit($bundle['launch'], self::BOOT . "\n");
+        $observed = (new DeploymentHostRunnerV1(
+            new ScriptedSystemAdapter([new HostRunnerProcessResult(0, $raw, '')]),
+        ))->observeUnit($bundle['launch'], self::BOOT . "\n");
 
         $storage = new RecordingHostRunnerStorage();
         $storage->files['runs/' . self::fixtureRunId() . '/state.json'] = $durable['state_bytes'];
@@ -682,7 +852,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $crashing = new \Ops\HostRunnerReservationPersistence(
             $storage,
             static function (string $step): void {
-                if ($step === 'unit_observation_durable') { throw new RuntimeException('injected crash'); }
+                if ($step === 'unit_observation_durable') {
+                    throw new RuntimeException('injected crash');
+                }
             },
             new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
         );
@@ -692,17 +864,27 @@ final class DeploymentHostRunnerV1Test extends TestCase
         } catch (RuntimeException $error) {
             self::assertSame('injected crash', $error->getMessage());
         }
-        self::assertSame($observed['pinned_bytes'], $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-observation.json']);
-        self::assertSame(DeploymentHostRunnerContractV1::encodeFile($bundle['binding']), $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-binding.json']);
+        self::assertSame(
+            $observed['pinned_bytes'],
+            $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-observation.json'],
+        );
+        self::assertSame(
+            DeploymentHostRunnerContractV1::encodeFile($bundle['binding']),
+            $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'],
+        );
         self::assertSame($durable['state_bytes'], $storage->files['runs/' . self::fixtureRunId() . '/state.json']);
 
         $badBinding = $bundle['binding'];
         $badBinding['unit_manager_boot_id'] = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
-        $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($badBinding);
+        $storage->files[
+            'runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'
+        ] = DeploymentHostRunnerContractV1::encodeFile($badBinding);
         $storage->operations = [];
         foreach (['identity', 'clock'] as $case) {
             if ($case === 'clock') {
-                $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($bundle['binding']);
+                $storage->files[
+                    'runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'
+                ] = DeploymentHostRunnerContractV1::encodeFile($bundle['binding']);
             }
             try {
                 (new \Ops\HostRunnerReservationPersistence(
@@ -728,13 +910,15 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage->files['active-run.json'] = $durable['claim_bytes'];
         $this->seedDeployAdmissionAuthority($storage);
         $rawA = $this->loadedShow($bundle['launch'], 'active', 'running', 'success', 0, 0);
-        $observedA = (new DeploymentHostRunnerV1(new ScriptedSystemAdapter([
-            new HostRunnerProcessResult(0, $rawA, ''),
-        ])))->observeUnit($bundle['launch'], self::BOOT . "\n");
+        $observedA = (new DeploymentHostRunnerV1(
+            new ScriptedSystemAdapter([new HostRunnerProcessResult(0, $rawA, '')]),
+        ))->observeUnit($bundle['launch'], self::BOOT . "\n");
         $crashing = new \Ops\HostRunnerReservationPersistence(
             $storage,
             static function (string $step) use ($crashStep): void {
-                if ($step === $crashStep) { throw new RuntimeException('injected crash'); }
+                if ($step === $crashStep) {
+                    throw new RuntimeException('injected crash');
+                }
             },
             new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
         );
@@ -751,34 +935,49 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 : new HostRunnerProcessResult(null, '', '', true),
         ]);
         $resume = new \Ops\HostRunnerStartOrchestrator(
-            new \Ops\HostRunnerReservationPersistence(
-                $storage,
-                null,
-                new FixedHostRunnerClock('2026-08-12T10:00:13Z'),
-            ),
+            new \Ops\HostRunnerReservationPersistence($storage, null, new FixedHostRunnerClock('2026-08-12T10:00:13Z')),
             new DeploymentHostRunnerV1($adapter),
             new ScriptedBootReader(),
         );
         $resumeStateBytes = $storage->files['runs/' . self::fixtureRunId() . '/state.json'];
-        self::assertSame('attach_observe_only', $resume->resumeReserved(
-            self::fixtureRunId(), $durable['events_bytes'], $durable['claim_bytes'], $resumeStateBytes,
-        ));
+        self::assertSame(
+            'attach_observe_only',
+            $resume->resumeReserved(
+                self::fixtureRunId(),
+                $durable['events_bytes'],
+                $durable['claim_bytes'],
+                $resumeStateBytes,
+            ),
+        );
         self::assertCount($crashStep === 'unit_state_durable' ? 1 : 0, $adapter->calls);
-        self::assertSame($pinnedBeforeRetry, $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-observation.json']);
-        $state = DeploymentHostRunnerContractV1::decodeState($storage->files['runs/' . self::fixtureRunId() . '/state.json']);
+        self::assertSame(
+            $pinnedBeforeRetry,
+            $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-observation.json'],
+        );
+        $state = DeploymentHostRunnerContractV1::decodeState(
+            $storage->files['runs/' . self::fixtureRunId() . '/state.json'],
+        );
         self::assertSame('running', $state['deploy']['unit_state']);
         self::assertSame(str_repeat('d', 32), $state['deploy']['unit_invocation_id']);
         $adapter->addOutcome(new HostRunnerProcessResult(0, $rawA, ''));
-        self::assertSame('attach_observe_only', $resume->resumeReserved(
-            self::fixtureRunId(),
-            $durable['events_bytes'],
-            $durable['claim_bytes'],
-            $storage->files['runs/' . self::fixtureRunId() . '/state.json'],
-        ));
-        self::assertSame(0, count(array_filter(
-            $adapter->calls,
-            static fn(array $call): bool => $call['argv'][5] === '/usr/bin/systemd-run',
-        )));
+        self::assertSame(
+            'attach_observe_only',
+            $resume->resumeReserved(
+                self::fixtureRunId(),
+                $durable['events_bytes'],
+                $durable['claim_bytes'],
+                $storage->files['runs/' . self::fixtureRunId() . '/state.json'],
+            ),
+        );
+        self::assertSame(
+            0,
+            count(
+                array_filter(
+                    $adapter->calls,
+                    static fn(array $call): bool => $call['argv'][5] === '/usr/bin/systemd-run',
+                ),
+            ),
+        );
     }
 
     /** @return iterable<string,array{string}> */
@@ -856,11 +1055,13 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $durable = $this->reservationPersistenceFixture();
         $storage = new RecordingHostRunnerStorage();
         $this->seedDeployAdmissionAuthority($storage);
-        $storage->candidates = [[
-            'run_id' => self::fixtureRunId(),
-            'events_bytes' => $durable['events_bytes'],
-            'state_bytes' => $durable['prior_state_bytes'],
-        ]];
+        $storage->candidates = [
+            [
+                'run_id' => self::fixtureRunId(),
+                'events_bytes' => $durable['events_bytes'],
+                'state_bytes' => $durable['prior_state_bytes'],
+            ],
+        ];
         self::assertSame(
             'reconstruct_claim_observe_only',
             (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim(),
@@ -883,9 +1084,8 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'events_bytes' => $durable['events_bytes'],
                 'state_bytes' => $durable['state_bytes'],
             ];
-            $storage->candidates = $case === 'multiple'
-                ? [$candidate, $candidate]
-                : [[...$candidate, 'events_bytes' => "not-json\n"]];
+            $storage->candidates =
+                $case === 'multiple' ? [$candidate, $candidate] : [[...$candidate, 'events_bytes' => "not-json\n"]];
             try {
                 (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim();
                 self::fail('Expected reserved scan rejection.');
@@ -900,11 +1100,13 @@ final class DeploymentHostRunnerV1Test extends TestCase
     {
         $durable = $this->reservationPersistenceFixture();
         $storage = new RecordingHostRunnerStorage();
-        $storage->candidates = [[
-            'run_id' => self::fixtureRunId(),
-            'events_bytes' => $durable['events_bytes'],
-            'state_bytes' => null,
-        ]];
+        $storage->candidates = [
+            [
+                'run_id' => self::fixtureRunId(),
+                'events_bytes' => $durable['events_bytes'],
+                'state_bytes' => null,
+            ],
+        ];
         try {
             (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim();
             self::fail('Expected missing pinned authority rejection.');
@@ -924,9 +1126,13 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $binding = $bundle['binding'];
         $binding['binding_state'] = 'observed';
         $binding['unit_invocation_id'] = str_repeat('d', 32);
-        $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
+        $storage->files[
+            'runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'
+        ] = DeploymentHostRunnerContractV1::encodeFile($binding);
         $raw = $this->loadedShow($bundle['launch'], 'active', 'running', 'success', 0, 0);
-        $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
+        $storage->files[
+            'runs/' . self::fixtureRunId() . '/deploy-unit-observation.json'
+        ] = DeploymentHostRunnerContractV1::encodeFile([
             'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
             'manager_boot_id' => self::BOOT,
             'systemctl_show' => $raw,
@@ -934,9 +1140,13 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $state['deploy']['unit_invocation_id'] = str_repeat('d', 32);
         $state['deploy']['unit_state'] = 'running';
         $stateBytes = DeploymentHostRunnerContractV1::encodeFile($state);
-        $storage->candidates = [[
-            'run_id' => self::fixtureRunId(), 'events_bytes' => $durable['events_bytes'], 'state_bytes' => $stateBytes,
-        ]];
+        $storage->candidates = [
+            [
+                'run_id' => self::fixtureRunId(),
+                'events_bytes' => $durable['events_bytes'],
+                'state_bytes' => $stateBytes,
+            ],
+        ];
         self::assertSame(
             'reconstruct_claim_observe_only',
             (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim(),
@@ -953,11 +1163,16 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $previous = json_decode($lines[array_key_last($lines)], true, 16, JSON_THROW_ON_ERROR);
         $lines[] = \Ops\DeploymentContractV1::canonicalJson([
             'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA,
-            'record_type' => 'transition', 'run_id' => self::fixtureRunId(),
-            'sequence' => count($lines) + 1, 'recorded_at_utc' => '2026-08-12T10:00:12Z',
-            'previous_state' => $previous['state'], 'state' => 'post_gates_running',
-            'deploy_invocation_count' => 1, 'intent_sha256' => $previous['intent_sha256'],
-            'exit_code' => 0, 'reason' => 'ok',
+            'record_type' => 'transition',
+            'run_id' => self::fixtureRunId(),
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-12T10:00:12Z',
+            'previous_state' => $previous['state'],
+            'state' => 'post_gates_running',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $previous['intent_sha256'],
+            'exit_code' => 0,
+            'reason' => 'ok',
         ]);
         $eventsBytes = implode("\n", $lines) . "\n";
         $state = DeploymentHostRunnerContractV1::decodeState($durable['state_bytes']);
@@ -979,20 +1194,33 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $binding = $bundle['binding'];
         $binding['binding_state'] = 'observed';
         $binding['unit_invocation_id'] = str_repeat('d', 32);
-        $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
-        $storage->files['runs/' . self::fixtureRunId() . '/deploy-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
+        $storage->files[
+            'runs/' . self::fixtureRunId() . '/deploy-unit-binding.json'
+        ] = DeploymentHostRunnerContractV1::encodeFile($binding);
+        $storage->files[
+            'runs/' . self::fixtureRunId() . '/deploy-unit-observation.json'
+        ] = DeploymentHostRunnerContractV1::encodeFile([
             'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
             'manager_boot_id' => self::BOOT,
             'systemctl_show' => $this->loadedShow($bundle['launch'], 'active', 'exited', 'success', 1, 0),
         ]);
         $storage->files['runs/' . self::fixtureRunId() . '/deploy-result.json'] = $receipt;
-        $storage->candidates = [[
-            'run_id' => self::fixtureRunId(), 'events_bytes' => $eventsBytes,
-            'state_bytes' => DeploymentHostRunnerContractV1::encodeFile($state),
-        ]];
-        self::assertSame('reconstruct_claim_observe_only', (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim());
+        $storage->candidates = [
+            [
+                'run_id' => self::fixtureRunId(),
+                'events_bytes' => $eventsBytes,
+                'state_bytes' => DeploymentHostRunnerContractV1::encodeFile($state),
+            ],
+        ];
+        self::assertSame(
+            'reconstruct_claim_observe_only',
+            (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim(),
+        );
         self::assertSame(['pin'], array_column($storage->operations, 0));
-        self::assertSame('post_gates_running', DeploymentHostRunnerContractV1::decodeActiveRun($storage->files['active-run.json'])['state']);
+        self::assertSame(
+            'post_gates_running',
+            DeploymentHostRunnerContractV1::decodeActiveRun($storage->files['active-run.json'])['state'],
+        );
         unset($storage->files['active-run.json']);
         $storage->operations = [];
         unset($storage->files['runs/' . self::fixtureRunId() . '/deploy-result.json']);
@@ -1013,11 +1241,17 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $lines = explode("\n", rtrim($durable['events_bytes'], "\n"));
         $previous = json_decode($lines[array_key_last($lines)], true, 16, JSON_THROW_ON_ERROR);
         $lines[] = \Ops\DeploymentContractV1::canonicalJson([
-            'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA, 'record_type' => 'transition',
-            'run_id' => self::fixtureRunId(), 'sequence' => count($lines) + 1,
-            'recorded_at_utc' => '2026-08-12T10:00:12Z', 'previous_state' => $previous['state'],
-            'state' => 'post_gates_running', 'deploy_invocation_count' => 1,
-            'intent_sha256' => $previous['intent_sha256'], 'exit_code' => 0, 'reason' => 'ok',
+            'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::fixtureRunId(),
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-12T10:00:12Z',
+            'previous_state' => $previous['state'],
+            'state' => 'post_gates_running',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $previous['intent_sha256'],
+            'exit_code' => 0,
+            'reason' => 'ok',
         ]);
         $postEvents = implode("\n", $lines) . "\n";
         $postState = DeploymentHostRunnerContractV1::decodeState($durable['state_bytes']);
@@ -1031,29 +1265,47 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $postState['deploy']['receipt_sha256'] = hash('sha256', $receipt);
         $report = [
             'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
-            'run_id' => self::fixtureRunId(), 'intent_sha256' => $postState['intent_sha256'],
-            'captured_at_utc' => '2026-08-12T10:00:13Z', 'subject' => 'deploy',
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $postState['intent_sha256'],
+            'captured_at_utc' => '2026-08-12T10:00:13Z',
+            'subject' => 'deploy',
             'deploy_receipt_sha256' => hash('sha256', $receipt),
             'post_gates' => [
-                'status' => 'failed', 'kuma_healthy_count' => 12, 'kuma_total_count' => 13,
-                'runtime_config_passed' => true, 'services_passed' => true, 'endpoints_passed' => true,
-                'logs_passed' => false, 'scanner_passed' => true, 'dormant_clean_passed' => true, 'passed' => false,
+                'status' => 'failed',
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+                'services_passed' => true,
+                'endpoints_passed' => true,
+                'logs_passed' => false,
+                'scanner_passed' => true,
+                'dormant_clean_passed' => true,
+                'passed' => false,
             ],
         ];
         $reportBytes = DeploymentHostRunnerContractV1::encodePostGateReport($report);
         $postState['post_gates'] = [
-            'deploy_report_sha256' => hash('sha256', $reportBytes), 'deploy_submission_count' => 1,
-            'deploy_verdict' => 'failed', 'rollback_report_sha256' => null,
-            'rollback_submission_count' => 0, 'rollback_verdict' => 'not_submitted',
+            'deploy_report_sha256' => hash('sha256', $reportBytes),
+            'deploy_submission_count' => 1,
+            'deploy_verdict' => 'failed',
+            'rollback_report_sha256' => null,
+            'rollback_submission_count' => 0,
+            'rollback_verdict' => 'not_submitted',
         ];
         $postState['updated_at_utc'] = '2026-08-12T10:00:13Z';
         $previous = json_decode($lines[array_key_last($lines)], true, 16, JSON_THROW_ON_ERROR);
         $lines[] = \Ops\DeploymentContractV1::canonicalJson([
-            'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA, 'record_type' => 'transition',
-            'run_id' => self::fixtureRunId(), 'sequence' => count($lines) + 1,
-            'recorded_at_utc' => '2026-08-12T10:00:14Z', 'previous_state' => $previous['state'],
-            'state' => 'rollback_running', 'deploy_invocation_count' => 1,
-            'intent_sha256' => $previous['intent_sha256'], 'exit_code' => 0, 'reason' => 'ok',
+            'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::fixtureRunId(),
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-12T10:00:14Z',
+            'previous_state' => $previous['state'],
+            'state' => 'rollback_running',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $previous['intent_sha256'],
+            'exit_code' => 0,
+            'reason' => 'ok',
         ]);
         $rollbackEvents = implode("\n", $lines) . "\n";
         $request = DeploymentHostRunnerContractV1::decodeRecoveryRequest(
@@ -1061,28 +1313,49 @@ final class DeploymentHostRunnerV1Test extends TestCase
         );
         $input = [
             'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
-            'run_id' => self::fixtureRunId(), 'intent_sha256' => $postState['intent_sha256'],
-            'action' => 'rollback', 'parameters' => ['release_id' => $bundle['request']['release_id']],
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $postState['intent_sha256'],
+            'action' => 'rollback',
+            'parameters' => ['release_id' => $bundle['request']['release_id']],
         ];
-        $launch = DeploymentHostRunnerContractV1::createSystemdLaunch($input, $request, $bundle['request'], $bundle['script'], static fn(): string => str_repeat("\x22", 32));
+        $launch = DeploymentHostRunnerContractV1::createSystemdLaunch(
+            $input,
+            $request,
+            $bundle['request'],
+            $bundle['script'],
+            static fn(): string => str_repeat("\x22", 32),
+        );
         $binding = [
-            'schema' => DeploymentHostRunnerContractV1::UNIT_BINDING_SCHEMA, 'run_id' => self::fixtureRunId(),
-            'intent_sha256' => $postState['intent_sha256'], 'action' => 'rollback',
-            'unit_name' => $launch['unit_name'], 'unit_launch_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeFile($launch)),
-            'unit_manager_boot_id' => self::BOOT, 'unit_invocation_id' => null, 'binding_state' => 'reserved',
+            'schema' => DeploymentHostRunnerContractV1::UNIT_BINDING_SCHEMA,
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $postState['intent_sha256'],
+            'action' => 'rollback',
+            'unit_name' => $launch['unit_name'],
+            'unit_launch_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeFile($launch)),
+            'unit_manager_boot_id' => self::BOOT,
+            'unit_invocation_id' => null,
+            'binding_state' => 'reserved',
         ];
         $storage = new RecordingHostRunnerStorage();
         $this->seedDeployAdmissionAuthority($storage);
         $storage->files[$prefix . 'recovery-request.json'] = DeploymentHostRunnerContractV1::encodeFile($request);
-        $storage->files[$prefix . 'recovery-execution-input.json'] = DeploymentHostRunnerContractV1::encodeExecutionInput($input);
+        $storage->files[
+            $prefix . 'recovery-execution-input.json'
+        ] = DeploymentHostRunnerContractV1::encodeExecutionInput($input);
         $storage->files[$prefix . 'rollback-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile($launch);
         $storage->files[$prefix . 'rollback-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
         $storage->files[$prefix . 'deploy-post-gate-report.json'] = $reportBytes;
-        $storage->candidates = [[
-            'run_id' => self::fixtureRunId(), 'events_bytes' => $rollbackEvents,
-            'state_bytes' => DeploymentHostRunnerContractV1::encodeFile($postState),
-        ]];
-        self::assertSame('reconstruct_claim_observe_only', (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim());
+        $storage->candidates = [
+            [
+                'run_id' => self::fixtureRunId(),
+                'events_bytes' => $rollbackEvents,
+                'state_bytes' => DeploymentHostRunnerContractV1::encodeFile($postState),
+            ],
+        ];
+        self::assertSame(
+            'reconstruct_claim_observe_only',
+            (new \Ops\HostRunnerReservationPersistence($storage))->reconstructSoleReservedClaim(),
+        );
         $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
         self::assertSame('rollback_running', $state['state']);
         self::assertSame(1, $state['rollback']['invocation_count']);
@@ -1107,28 +1380,40 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $binding['binding_state'] = 'observed';
             $binding['unit_invocation_id'] = str_repeat('d', 32);
             $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
-            $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
+            $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile(
+                $binding,
+            );
             $storage->files[$prefix . 'deploy-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
                 'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
                 'manager_boot_id' => self::BOOT,
-                'systemctl_show' => $exit === 0
-                    ? $this->loadedShow($bundle['launch'], 'active', 'exited', 'success', 1, 0)
-                    : $this->loadedShow($bundle['launch'], 'failed', 'failed', 'exit-code', 1, $exit),
+                'systemctl_show' =>
+                    $exit === 0
+                        ? $this->loadedShow($bundle['launch'], 'active', 'exited', 'success', 1, 0)
+                        : $this->loadedShow($bundle['launch'], 'failed', 'failed', 'exit-code', 1, $exit),
             ]);
             $outcome = match ($exit) {
-                0 => 'succeeded', 30 => 'failed_pre_switch', 31 => 'rollback_failed_or_unverifiable',
-                32 => 'switch_recovery_required', 143 => 'interrupted_pre_switch',
+                0 => 'succeeded',
+                30 => 'failed_pre_switch',
+                31 => 'rollback_failed_or_unverifiable',
+                32 => 'switch_recovery_required',
+                143 => 'interrupted_pre_switch',
             };
             $receiptBytes = \Ops\DeployResultV1::canonicalJson(\Ops\DeployResultV1::create($outcome, $exit));
             $storage->files[$prefix . 'deploy-result.json'] = $receiptBytes;
-            $result = (new \Ops\HostRunnerActionCompletion($storage))->requireDeployReceiptForStoppedUnit(self::fixtureRunId());
+            $result = (new \Ops\HostRunnerActionCompletion($storage))->requireDeployReceiptForStoppedUnit(
+                self::fixtureRunId(),
+            );
             self::assertSame($receiptBytes, $result['receipt_bytes']);
             self::assertSame($exit, $result['receipt']['exit_code']);
 
-            $storage->files[$prefix . 'deploy-result.json'] = \Ops\DeployResultV1::canonicalJson(\Ops\DeployResultV1::create('succeeded', 0));
+            $storage->files[$prefix . 'deploy-result.json'] = \Ops\DeployResultV1::canonicalJson(
+                \Ops\DeployResultV1::create('succeeded', 0),
+            );
             if ($exit !== 0) {
                 try {
-                    (new \Ops\HostRunnerActionCompletion($storage))->requireDeployReceiptForStoppedUnit(self::fixtureRunId());
+                    (new \Ops\HostRunnerActionCompletion($storage))->requireDeployReceiptForStoppedUnit(
+                        self::fixtureRunId(),
+                    );
                     self::fail('Expected receipt/exit mismatch rejection.');
                 } catch (RuntimeException) {
                     self::addToAssertionCount(1);
@@ -1151,17 +1436,27 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $state['deploy']['unit_state'] = $case === 'running' ? 'running' : $case;
             $state['deploy']['unit_invocation_id'] = str_repeat('d', 32);
             $binding = $bundle['binding'];
-            $binding['binding_state'] = 'observed'; $binding['unit_invocation_id'] = str_repeat('d', 32);
+            $binding['binding_state'] = 'observed';
+            $binding['unit_invocation_id'] = str_repeat('d', 32);
             $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
-            $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($binding);
-            $storage->files[$prefix . 'deploy-unit-observation.json'] = $case === 'malformed' ? "{}\n" : DeploymentHostRunnerContractV1::encodeFile([
-                'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
-                'manager_boot_id' => self::BOOT,
-                'systemctl_show' => $this->loadedShow($bundle['launch'], 'active', 'running', 'success', 0, 0),
-            ]);
-            $storage->files[$prefix . 'deploy-result.json'] = \Ops\DeployResultV1::canonicalJson(\Ops\DeployResultV1::create('succeeded', 0));
+            $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile(
+                $binding,
+            );
+            $storage->files[$prefix . 'deploy-unit-observation.json'] =
+                $case === 'malformed'
+                    ? "{}\n"
+                    : DeploymentHostRunnerContractV1::encodeFile([
+                        'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
+                        'manager_boot_id' => self::BOOT,
+                        'systemctl_show' => $this->loadedShow($bundle['launch'], 'active', 'running', 'success', 0, 0),
+                    ]);
+            $storage->files[$prefix . 'deploy-result.json'] = \Ops\DeployResultV1::canonicalJson(
+                \Ops\DeployResultV1::create('succeeded', 0),
+            );
             try {
-                (new \Ops\HostRunnerActionCompletion($storage))->requireDeployReceiptForStoppedUnit(self::fixtureRunId());
+                (new \Ops\HostRunnerActionCompletion($storage))->requireDeployReceiptForStoppedUnit(
+                    self::fixtureRunId(),
+                );
                 self::fail('Expected unsafe completion rejection.');
             } catch (RuntimeException) {
                 self::addToAssertionCount(1);
@@ -1173,10 +1468,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
     {
         [$storage, $durable] = $this->successfulStoppedDeployStorage();
         $prefix = 'runs/' . self::fixtureRunId() . '/';
-        $completion = new \Ops\HostRunnerActionCompletion(
-            $storage,
-            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
-        );
+        $completion = new \Ops\HostRunnerActionCompletion($storage, new FixedHostRunnerClock('2026-08-12T10:00:12Z'));
 
         $response = $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
 
@@ -1200,17 +1492,17 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertSame([['cow', $prefix . 'state.json', $postState]], $storage->operations);
 
         $storage->operations = [];
-        self::assertSame('attach_observe_only', $completion->acceptSucceededDeployReceipt(self::fixtureRunId())['disposition']);
+        self::assertSame(
+            'attach_observe_only',
+            $completion->acceptSucceededDeployReceipt(self::fixtureRunId())['disposition'],
+        );
         self::assertSame([], $storage->operations);
     }
 
     public function testAcceptedDeployPostGateReportUpdatesOnlyTheDerivedStateCache(): void
     {
         [$storage] = $this->successfulStoppedDeployStorage();
-        $completion = new \Ops\HostRunnerActionCompletion(
-            $storage,
-            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
-        );
+        $completion = new \Ops\HostRunnerActionCompletion($storage, new FixedHostRunnerClock('2026-08-12T10:00:12Z'));
         $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
         $prefix = 'runs/' . self::fixtureRunId() . '/';
         $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
@@ -1260,8 +1552,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $timing = new NotObservedTimingPin();
         $storage->operations = [];
 
-        $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
-            ->terminalizeDeploy(self::fixtureRunId());
+        $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeDeploy(
+            self::fixtureRunId(),
+        );
 
         self::assertSame('terminal', $response['disposition']);
         self::assertSame('succeeded', $response['state']);
@@ -1284,12 +1577,30 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertSame(['claim-refresh', 'clear-exact'], array_column(array_slice($storage->operations, -2), 0));
 
         $operations = $storage->operations;
-        $replay = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
-            ->terminalizeDeploy(self::fixtureRunId());
+        $replay = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeDeploy(
+            self::fixtureRunId(),
+        );
         self::assertSame($response, $replay);
         self::assertSame($operations, $storage->operations);
         self::assertSame(1, $clock->nowCalls);
         self::assertSame(1, $timing->calls);
+
+        $replayedFromDurableBundle = (new \Ops\HostRunnerTerminalPersistence(
+            $storage,
+            $clock,
+            $timing,
+        ))->resumeTerminal(self::fixtureRunId());
+        self::assertSame($response, $replayedFromDurableBundle);
+        self::assertSame($operations, $storage->operations);
+
+        $evidenceBytes = $storage->files[$prefix . 'evidence.json'];
+        $storage->files[$prefix . 'evidence.json'] = $evidenceBytes . "\n";
+        try {
+            (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->resumeTerminal(self::fixtureRunId());
+            self::fail('terminal replay must reject mutated evidence bytes');
+        } catch (RuntimeException) {
+            self::assertTrue(true);
+        }
     }
 
     public function testMissingReceiptTerminalizesManualRecoveryAndRetainsBlockingClaim(): void
@@ -1354,8 +1665,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $storage->files[$prefix . 'deploy-post-gate-report.json'],
         );
         $report['captured_at_utc'] = '2026-08-12T10:00:14Z';
-        $storage->files[$prefix . 'deploy-post-gate-report.json'] =
-            DeploymentHostRunnerContractV1::encodePostGateReport($report);
+        $storage->files[
+            $prefix . 'deploy-post-gate-report.json'
+        ] = DeploymentHostRunnerContractV1::encodePostGateReport($report);
         $storage->operations = [];
         $before = $storage->files;
 
@@ -1378,8 +1690,11 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $source = $this->successfulPassedPostGateStorage();
         $initial = $source->files;
         $activeClaim = $initial['active-run.json'];
-        (new \Ops\HostRunnerTerminalPersistence($source, new FixedTerminalClock(), new NotObservedTimingPin()))
-            ->terminalizeDeploy(self::fixtureRunId());
+        (new \Ops\HostRunnerTerminalPersistence(
+            $source,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        ))->terminalizeDeploy(self::fixtureRunId());
         $terminal = $source->files;
 
         $prefixes = [
@@ -1388,8 +1703,11 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'evidence' => ['orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json'],
             'journal' => ['orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json', 'events.jsonl'],
             'state' => [
-                'orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json',
-                'events.jsonl', 'state.json',
+                'orchestrator-finish.json',
+                'deploy-child-observation.json',
+                'evidence.json',
+                'events.jsonl',
+                'state.json',
             ],
         ];
         foreach ($prefixes as $name => $leaves) {
@@ -1402,8 +1720,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $clock = new FixedTerminalClock();
             $timing = new NotObservedTimingPin();
 
-            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
-                ->terminalizeDeploy(self::fixtureRunId());
+            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeDeploy(
+                self::fixtureRunId(),
+            );
 
             self::assertSame('succeeded', $response['state'], $name);
             self::assertSame($terminal, $storage->files, $name);
@@ -1448,13 +1767,22 @@ final class DeploymentHostRunnerV1Test extends TestCase
     {
         yield 'pre-switch failure' => ['failed_pre_switch', 30, 'failed_pre_switch', 'deploy_failed'];
         yield 'internal rollback succeeded' => [
-            'internal_rollback_succeeded', 30, 'failed_post_switch_rollback_succeeded', 'deploy_failed',
+            'internal_rollback_succeeded',
+            30,
+            'failed_post_switch_rollback_succeeded',
+            'deploy_failed',
         ];
         yield 'internal rollback failed' => [
-            'rollback_failed_or_unverifiable', 31, 'failed_post_switch_rollback_failed', 'rollback_failed',
+            'rollback_failed_or_unverifiable',
+            31,
+            'failed_post_switch_rollback_failed',
+            'rollback_failed',
         ];
         yield 'switch recovery required' => [
-            'switch_recovery_required', 32, 'failed_switch_recovery_required', 'switch_recovery_required',
+            'switch_recovery_required',
+            32,
+            'failed_switch_recovery_required',
+            'switch_recovery_required',
         ];
         yield 'interrupted before switch' => ['interrupted_pre_switch', 143, 'failed_pre_switch', 'interrupted'];
     }
@@ -1499,14 +1827,37 @@ final class DeploymentHostRunnerV1Test extends TestCase
         yield 'failed verification' => [false, 'failed_post_switch_rollback_failed', 31, 'rollback_failed'];
     }
 
+    public function testNonzeroDedicatedRollbackExitTerminalizesWithoutVerificationReport(): void
+    {
+        $storage = $this->completedRollbackStorage(false, 31);
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+
+        $response = (new \Ops\HostRunnerTerminalPersistence(
+            $storage,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        ))->terminalizeRollback(self::fixtureRunId());
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame('recovery', $response['action']);
+        self::assertSame('failed_post_switch_rollback_failed', $response['state']);
+        self::assertSame(31, $response['result_exit_code']);
+        self::assertSame('rollback_failed', $response['result_reason']);
+        self::assertArrayNotHasKey($prefix . 'rollback-post-gate-report.json', $storage->files);
+        self::assertArrayNotHasKey('active-run.json', $storage->files);
+    }
+
     public function testDedicatedRollbackTerminalCrashPrefixesResumeExactBytes(): void
     {
         $prefix = 'runs/' . self::fixtureRunId() . '/';
         $source = $this->completedRollbackStorage(true);
         $initial = $source->files;
         $activeClaim = $initial['active-run.json'];
-        (new \Ops\HostRunnerTerminalPersistence($source, new FixedTerminalClock(), new NotObservedTimingPin()))
-            ->terminalizeRollback(self::fixtureRunId());
+        (new \Ops\HostRunnerTerminalPersistence(
+            $source,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        ))->terminalizeRollback(self::fixtureRunId());
         $terminal = $source->files;
         foreach (
             [
@@ -1514,11 +1865,17 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'child' => ['orchestrator-finish.json', 'deploy-child-observation.json'],
                 'evidence' => ['orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json'],
                 'journal' => [
-                    'orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json', 'events.jsonl',
+                    'orchestrator-finish.json',
+                    'deploy-child-observation.json',
+                    'evidence.json',
+                    'events.jsonl',
                 ],
                 'state' => [
-                    'orchestrator-finish.json', 'deploy-child-observation.json', 'evidence.json',
-                    'events.jsonl', 'state.json',
+                    'orchestrator-finish.json',
+                    'deploy-child-observation.json',
+                    'evidence.json',
+                    'events.jsonl',
+                    'state.json',
                 ],
             ]
             as $name => $leaves
@@ -1531,8 +1888,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
             $storage->files['active-run.json'] = $activeClaim;
             $clock = new FixedTerminalClock();
             $timing = new NotObservedTimingPin();
-            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))
-                ->terminalizeRollback(self::fixtureRunId());
+            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeRollback(
+                self::fixtureRunId(),
+            );
             self::assertSame('failed_post_switch_rollback_succeeded', $response['state'], $name);
             self::assertSame($terminal, $storage->files, $name);
             self::assertSame(0, $clock->nowCalls, $name);
@@ -1557,11 +1915,17 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $lines = explode("\n", rtrim($durable['events_bytes'], "\n"));
         $previous = json_decode($lines[array_key_last($lines)], true, 16, JSON_THROW_ON_ERROR);
         $lines[] = \Ops\DeploymentContractV1::canonicalJson([
-            'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA, 'record_type' => 'transition',
-            'run_id' => self::fixtureRunId(), 'sequence' => count($lines) + 1,
-            'recorded_at_utc' => '2026-08-12T10:00:12Z', 'previous_state' => $previous['state'],
-            'state' => 'post_gates_running', 'deploy_invocation_count' => 1,
-            'intent_sha256' => $previous['intent_sha256'], 'exit_code' => 0, 'reason' => 'ok',
+            'schema' => \Ops\DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => self::fixtureRunId(),
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => '2026-08-12T10:00:12Z',
+            'previous_state' => $previous['state'],
+            'state' => 'post_gates_running',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $previous['intent_sha256'],
+            'exit_code' => 0,
+            'reason' => 'ok',
         ]);
         $eventsBytes = implode("\n", $lines) . "\n";
         $state['sequence'] = count($lines);
@@ -1583,13 +1947,22 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
         $report = [
             'schema' => DeploymentHostRunnerContractV1::POST_GATE_REPORT_SCHEMA,
-            'run_id' => self::fixtureRunId(), 'intent_sha256' => $state['intent_sha256'],
-            'captured_at_utc' => '2026-08-12T10:00:13Z', 'subject' => 'deploy',
+            'run_id' => self::fixtureRunId(),
+            'intent_sha256' => $state['intent_sha256'],
+            'captured_at_utc' => '2026-08-12T10:00:13Z',
+            'subject' => 'deploy',
             'deploy_receipt_sha256' => hash('sha256', $receipt),
             'post_gates' => [
-                'status' => 'failed', 'kuma_healthy_count' => 12, 'kuma_total_count' => 13,
-                'runtime_config_passed' => true, 'services_passed' => true, 'endpoints_passed' => true,
-                'logs_passed' => false, 'scanner_passed' => true, 'dormant_clean_passed' => true, 'passed' => false,
+                'status' => 'failed',
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+                'services_passed' => true,
+                'endpoints_passed' => true,
+                'logs_passed' => false,
+                'scanner_passed' => true,
+                'dormant_clean_passed' => true,
+                'passed' => false,
             ],
         ];
         $bytes = DeploymentHostRunnerContractV1::encodePostGateReport($report);
@@ -1600,7 +1973,10 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $changed = $report;
         $changed['captured_at_utc'] = '2026-08-12T10:00:14Z';
         try {
-            $completion->submitPostGateReport(self::fixtureRunId(), DeploymentHostRunnerContractV1::encodePostGateReport($changed));
+            $completion->submitPostGateReport(
+                self::fixtureRunId(),
+                DeploymentHostRunnerContractV1::encodePostGateReport($changed),
+            );
             self::fail('Expected changed post-gate report rejection.');
         } catch (RuntimeException) {
             self::assertSame($bytes, $storage->files[$prefix . 'deploy-post-gate-report.json']);
@@ -1612,15 +1988,18 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $durable = $this->reservationPersistenceFixture();
         $storage = new RecordingHostRunnerStorage();
         $this->seedDeployAdmissionAuthority($storage);
-        $storage->candidates = [[
-            'run_id' => self::fixtureRunId(), 'events_bytes' => $durable['events_bytes'], 'state_bytes' => null,
-        ]];
-        $crashing = new \Ops\HostRunnerReservationPersistence(
-            $storage,
-            static function (string $step): void {
-                if ($step === 'reconstruction_claim_durable') { throw new RuntimeException('injected crash'); }
-            },
-        );
+        $storage->candidates = [
+            [
+                'run_id' => self::fixtureRunId(),
+                'events_bytes' => $durable['events_bytes'],
+                'state_bytes' => null,
+            ],
+        ];
+        $crashing = new \Ops\HostRunnerReservationPersistence($storage, static function (string $step): void {
+            if ($step === 'reconstruction_claim_durable') {
+                throw new RuntimeException('injected crash');
+            }
+        });
         try {
             $crashing->reconstructSoleReservedClaim();
             self::fail('Expected reconstructed claim crash.');
@@ -1658,21 +2037,47 @@ final class DeploymentHostRunnerV1Test extends TestCase
             null,
             new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
         );
-        $orchestrator = new \Ops\HostRunnerStartOrchestrator($persistence, new DeploymentHostRunnerV1($adapter), new ScriptedBootReader());
-        self::assertSame($expectedDisposition, $orchestrator->persistThenAdmit(
-            self::fixtureRunId(), $durable['events_bytes'], $durable['claim_bytes'], $durable['state_bytes'],
-            $bundle['launch'], $bundle['binding'], $bundle['input'], $bundle['request'], null, $bundle['script'],
-        ));
+        $orchestrator = new \Ops\HostRunnerStartOrchestrator(
+            $persistence,
+            new DeploymentHostRunnerV1($adapter),
+            new ScriptedBootReader(),
+        );
+        self::assertSame(
+            $expectedDisposition,
+            $orchestrator->persistThenAdmit(
+                self::fixtureRunId(),
+                $durable['events_bytes'],
+                $durable['claim_bytes'],
+                $durable['state_bytes'],
+                $bundle['launch'],
+                $bundle['binding'],
+                $bundle['input'],
+                $bundle['request'],
+                null,
+                $bundle['script'],
+            ),
+        );
         self::assertCount(2, $adapter->calls);
         $adapter->addOutcome(new HostRunnerProcessResult(0, $this->notFoundShow($bundle['launch']), ''));
-        self::assertSame('attach_observe_only', $orchestrator->resumeReserved(
-            self::fixtureRunId(), $durable['events_bytes'], $durable['claim_bytes'], $durable['state_bytes'],
-        ));
+        self::assertSame(
+            'attach_observe_only',
+            $orchestrator->resumeReserved(
+                self::fixtureRunId(),
+                $durable['events_bytes'],
+                $durable['claim_bytes'],
+                $durable['state_bytes'],
+            ),
+        );
         self::assertCount(3, $adapter->calls);
-        self::assertSame(1, count(array_filter(
-            $adapter->calls,
-            static fn(array $call): bool => $call['argv'][5] === '/usr/bin/systemd-run',
-        )));
+        self::assertSame(
+            1,
+            count(
+                array_filter(
+                    $adapter->calls,
+                    static fn(array $call): bool => $call['argv'][5] === '/usr/bin/systemd-run',
+                ),
+            ),
+        );
     }
 
     /** @return iterable<string,array{HostRunnerProcessResult|RuntimeException,string}> */
@@ -1680,7 +2085,10 @@ final class DeploymentHostRunnerV1Test extends TestCase
     {
         yield 'manager accepted' => [new HostRunnerProcessResult(0, '', ''), 'observe_only'];
         yield 'manager nonzero' => [new HostRunnerProcessResult(1, '', ''), 'observe_only_reconciliation_required'];
-        yield 'response lost' => [new HostRunnerProcessResult(null, '', '', true), 'observe_only_reconciliation_required'];
+        yield 'response lost' => [
+            new HostRunnerProcessResult(null, '', '', true),
+            'observe_only_reconciliation_required',
+        ];
         yield 'adapter throws' => [new RuntimeException('private'), 'observe_only_reconciliation_required'];
     }
 
@@ -1695,13 +2103,17 @@ final class DeploymentHostRunnerV1Test extends TestCase
             (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json'),
         );
         $intentSha = $request['intent_sha256'];
-        $lines = [\Ops\DeploymentContractV1::canonicalJson(\Ops\DeploymentContractV1::createIntentRecord(
-            $runId,
-            '2026-08-12T10:00:00Z',
-            $request['expected_commit'],
-            $request['release_id'],
-            $request['traffic_mode'],
-        ))];
+        $lines = [
+            \Ops\DeploymentContractV1::canonicalJson(
+                \Ops\DeploymentContractV1::createIntentRecord(
+                    $runId,
+                    '2026-08-12T10:00:00Z',
+                    $request['expected_commit'],
+                    $request['release_id'],
+                    $request['traffic_mode'],
+                ),
+            ),
+        ];
         foreach (array_slice(\Ops\DeploymentContractV1::PROGRESS_STATES, 1) as $lifecycle) {
             $previous = json_decode($lines[array_key_last($lines)], true, 16, JSON_THROW_ON_ERROR);
             $lines[] = \Ops\DeploymentContractV1::canonicalJson([
@@ -1747,8 +2159,12 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'events_sha256' => $eventsSha,
             'active_action' => 'deploy',
             'deploy' => [
-                'request_sha256' => DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($request)),
-                'execution_input_sha256' => DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeExecutionInput($input)),
+                'request_sha256' => DeploymentHostRunnerContractV1::fileSha256(
+                    DeploymentHostRunnerContractV1::encodeFile($request),
+                ),
+                'execution_input_sha256' => DeploymentHostRunnerContractV1::fileSha256(
+                    DeploymentHostRunnerContractV1::encodeExecutionInput($input),
+                ),
                 'invocation_count' => 1,
                 'unit_name' => $unitName,
                 'unit_launch_sha256' => $sha,
@@ -1812,13 +2228,15 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $request = DeploymentHostRunnerContractV1::decodeDeployRequest(
             (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json'),
         );
-        return \Ops\DeploymentContractV1::canonicalJson(\Ops\DeploymentContractV1::createIntentRecord(
-            $runId,
-            '2026-08-12T10:00:00Z',
-            $request['expected_commit'],
-            $request['release_id'],
-            $request['traffic_mode'],
-        )) . "\n";
+        return \Ops\DeploymentContractV1::canonicalJson(
+            \Ops\DeploymentContractV1::createIntentRecord(
+                $runId,
+                '2026-08-12T10:00:00Z',
+                $request['expected_commit'],
+                $request['release_id'],
+                $request['traffic_mode'],
+            ),
+        ) . "\n";
     }
 
     private function successfulPassedPostGateStorage(): RecordingHostRunnerStorage
@@ -1826,10 +2244,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
         [$storage] = $this->successfulStoppedDeployStorage();
         $this->addPassedPredeployAuthority($storage);
         $prefix = 'runs/' . self::fixtureRunId() . '/';
-        $completion = new \Ops\HostRunnerActionCompletion(
-            $storage,
-            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
-        );
+        $completion = new \Ops\HostRunnerActionCompletion($storage, new FixedHostRunnerClock('2026-08-12T10:00:12Z'));
         $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
         $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
         $receiptBytes = $storage->files[$prefix . 'deploy-result.json'];
@@ -1843,10 +2258,16 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'subject' => 'deploy',
                 'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
                 'post_gates' => [
-                    'status' => 'passed', 'kuma_healthy_count' => 13, 'kuma_total_count' => 13,
-                    'runtime_config_passed' => true, 'services_passed' => true,
-                    'endpoints_passed' => true, 'logs_passed' => true,
-                    'scanner_passed' => true, 'dormant_clean_passed' => true, 'passed' => true,
+                    'status' => 'passed',
+                    'kuma_healthy_count' => 13,
+                    'kuma_total_count' => 13,
+                    'runtime_config_passed' => true,
+                    'services_passed' => true,
+                    'endpoints_passed' => true,
+                    'logs_passed' => true,
+                    'scanner_passed' => true,
+                    'dormant_clean_passed' => true,
+                    'passed' => true,
                 ],
             ]),
         );
@@ -1883,16 +2304,13 @@ final class DeploymentHostRunnerV1Test extends TestCase
         return $storage;
     }
 
-    private function completedRollbackStorage(bool $reportPassed): RecordingHostRunnerStorage
+    private function completedRollbackStorage(bool $reportPassed, int $rollbackExitCode = 0): RecordingHostRunnerStorage
     {
         [$storage] = $this->successfulStoppedDeployStorage();
         $this->addPassedPredeployAuthority($storage);
         $prefix = 'runs/' . self::fixtureRunId() . '/';
         $bundle = $this->fixture();
-        $completion = new \Ops\HostRunnerActionCompletion(
-            $storage,
-            new FixedHostRunnerClock('2026-08-12T10:00:12Z'),
-        );
+        $completion = new \Ops\HostRunnerActionCompletion($storage, new FixedHostRunnerClock('2026-08-12T10:00:12Z'));
         $completion->acceptSucceededDeployReceipt(self::fixtureRunId());
         $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
         $receiptBytes = $storage->files[$prefix . 'deploy-result.json'];
@@ -1904,10 +2322,16 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'subject' => 'deploy',
             'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
             'post_gates' => [
-                'status' => 'failed', 'kuma_healthy_count' => 12, 'kuma_total_count' => 13,
-                'runtime_config_passed' => true, 'services_passed' => true,
-                'endpoints_passed' => true, 'logs_passed' => false,
-                'scanner_passed' => true, 'dormant_clean_passed' => true, 'passed' => false,
+                'status' => 'failed',
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 13,
+                'runtime_config_passed' => true,
+                'services_passed' => true,
+                'endpoints_passed' => true,
+                'logs_passed' => false,
+                'scanner_passed' => true,
+                'dormant_clean_passed' => true,
+                'passed' => false,
             ],
         ];
         $deployReportBytes = DeploymentHostRunnerContractV1::encodePostGateReport($deployReport);
@@ -1962,28 +2386,39 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $state['active_action'] = 'rollback';
         $state['rollback'] = [
             'request_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeFile($recoveryRequest)),
-            'execution_input_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeExecutionInput($recoveryInput)),
+            'execution_input_sha256' => hash(
+                'sha256',
+                DeploymentHostRunnerContractV1::encodeExecutionInput($recoveryInput),
+            ),
             'invocation_count' => 1,
             'unit_name' => $rollbackLaunch['unit_name'],
             'unit_launch_sha256' => hash('sha256', DeploymentHostRunnerContractV1::encodeFile($rollbackLaunch)),
             'unit_manager_boot_id' => self::BOOT,
             'unit_invocation_id' => str_repeat('e', 32),
             'unit_missing_observed_boot_id' => null,
-            'unit_state' => 'exited',
-            'observed_exit_code' => 0,
-            'verdict' => 'verification_pending',
+            'unit_state' => $rollbackExitCode === 0 ? 'exited' : 'failed',
+            'observed_exit_code' => $rollbackExitCode,
+            'verdict' => $rollbackExitCode === 0 ? 'verification_pending' : 'failed',
         ];
         $state['updated_at_utc'] = '2026-08-12T10:00:15Z';
         $storage->files[$prefix . 'events.jsonl'] = $eventsBytes;
         $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
-        $storage->files[$prefix . 'recovery-request.json'] = DeploymentHostRunnerContractV1::encodeFile($recoveryRequest);
-        $storage->files[$prefix . 'recovery-execution-input.json'] = DeploymentHostRunnerContractV1::encodeExecutionInput($recoveryInput);
-        $storage->files[$prefix . 'rollback-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile($rollbackLaunch);
-        $storage->files[$prefix . 'rollback-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($rollbackBinding);
+        $storage->files[$prefix . 'recovery-request.json'] = DeploymentHostRunnerContractV1::encodeFile(
+            $recoveryRequest,
+        );
+        $storage->files[
+            $prefix . 'recovery-execution-input.json'
+        ] = DeploymentHostRunnerContractV1::encodeExecutionInput($recoveryInput);
+        $storage->files[$prefix . 'rollback-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile(
+            $rollbackLaunch,
+        );
+        $storage->files[$prefix . 'rollback-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile(
+            $rollbackBinding,
+        );
         $storage->files[$prefix . 'rollback-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
             'schema' => DeploymentHostRunnerContractV1::UNIT_LOADED_OBSERVATION_SCHEMA,
             'manager_boot_id' => self::BOOT,
-            'systemctl_show' => $this->loadedRollbackShow($rollbackLaunch, 0),
+            'systemctl_show' => $this->loadedRollbackShow($rollbackLaunch, $rollbackExitCode),
         ]);
         $storage->files['active-run.json'] = DeploymentHostRunnerContractV1::encodeFile([
             'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
@@ -1994,6 +2429,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'events_sha256' => $state['events_sha256'],
             'claimed_at_utc' => '2026-08-12T10:00:14Z',
         ]);
+        if ($rollbackExitCode !== 0) {
+            return $storage;
+        }
         $rollbackPostGates = $deployReport['post_gates'];
         $rollbackPostGates['status'] = $reportPassed ? 'passed' : 'failed';
         $rollbackPostGates['kuma_healthy_count'] = $reportPassed ? 13 : 12;
@@ -2022,13 +2460,25 @@ final class DeploymentHostRunnerV1Test extends TestCase
             DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($launch)),
         );
         return implode("\n", [
-            'Id=' . $launch['unit_name'], 'LoadState=loaded', 'ActiveState=active', 'SubState=exited',
-            'Result=success', 'ExecMainCode=1', 'ExecMainStatus=' . $exitCode,
-            'InvocationID=' . str_repeat('e', 32), 'Description=' . $properties['Description'],
-            'Transient=yes', 'Type=' . $properties['Type'], 'RemainAfterExit=' . $properties['RemainAfterExit'],
-            'UMask=' . $properties['UMask'], 'KillMode=' . $properties['KillMode'], 'Restart=' . $properties['Restart'],
-            'RuntimeMaxUSec=' . $properties['RuntimeMaxUSec'], 'TimeoutStopUSec=' . $properties['TimeoutStopUSec'],
-            'StandardInput=' . $properties['StandardInput'], 'StandardOutput=' . $properties['StandardOutput'],
+            'Id=' . $launch['unit_name'],
+            'LoadState=loaded',
+            'ActiveState=' . ($exitCode === 0 ? 'active' : 'failed'),
+            'SubState=' . ($exitCode === 0 ? 'exited' : 'failed'),
+            'Result=' . ($exitCode === 0 ? 'success' : 'exit-code'),
+            'ExecMainCode=1',
+            'ExecMainStatus=' . $exitCode,
+            'InvocationID=' . str_repeat('e', 32),
+            'Description=' . $properties['Description'],
+            'Transient=yes',
+            'Type=' . $properties['Type'],
+            'RemainAfterExit=' . $properties['RemainAfterExit'],
+            'UMask=' . $properties['UMask'],
+            'KillMode=' . $properties['KillMode'],
+            'Restart=' . $properties['Restart'],
+            'RuntimeMaxUSec=' . $properties['RuntimeMaxUSec'],
+            'TimeoutStopUSec=' . $properties['TimeoutStopUSec'],
+            'StandardInput=' . $properties['StandardInput'],
+            'StandardOutput=' . $properties['StandardOutput'],
             'StandardError=' . $properties['StandardError'],
         ]) . "\n";
     }
@@ -2069,31 +2519,58 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'verified' => true,
             ],
             'traffic_gate' => [
-                'status' => 'passed', 'report_sha256' => $sha, 'schema' => 'traffic_gate.v1',
-                'producer_sha256' => $sha, 'policy_version' => 'traffic_gate_policy.v1',
-                'catalog_version' => '2026-08-09.1', 'purpose' => 'deploy', 'mode' => 'normal',
-                'window_start_epoch' => 1, 'window_end_epoch' => 91, 'window_seconds' => 90,
-                'log_set_sha256' => $sha, 'rotation_complete' => true, 'parse_complete' => true,
-                'evidence_complete' => true, 'decision' => 'allow', 'exit_code' => 0, 'counts' => $counts,
+                'status' => 'passed',
+                'report_sha256' => $sha,
+                'schema' => 'traffic_gate.v1',
+                'producer_sha256' => $sha,
+                'policy_version' => 'traffic_gate_policy.v1',
+                'catalog_version' => '2026-08-09.1',
+                'purpose' => 'deploy',
+                'mode' => 'normal',
+                'window_start_epoch' => 1,
+                'window_end_epoch' => 91,
+                'window_seconds' => 90,
+                'log_set_sha256' => $sha,
+                'rotation_complete' => true,
+                'parse_complete' => true,
+                'evidence_complete' => true,
+                'decision' => 'allow',
+                'exit_code' => 0,
+                'counts' => $counts,
             ],
             'dump' => [
-                'status' => 'passed', 'policy' => \Ops\DeploymentContractV1::DUMP_POLICY,
-                'age_seconds' => 60, 'max_age_seconds' => 14400, 'sha256' => $sha,
-                'sha256_verified' => true, 'gzip_verified' => true, 'restore_verified' => true,
+                'status' => 'passed',
+                'policy' => \Ops\DeploymentContractV1::DUMP_POLICY,
+                'age_seconds' => 60,
+                'max_age_seconds' => 14400,
+                'sha256' => $sha,
+                'sha256_verified' => true,
+                'gzip_verified' => true,
+                'restore_verified' => true,
             ],
             'capacity' => [
-                'status' => 'passed', 'available_bytes' => 8_000_000_000,
-                'projected_required_bytes' => 1_000_000_000, 'available_inodes' => 8_000_000,
-                'stage_inode_count' => 999_904, 'restore_inode_count' => 32, 'inode_headroom' => 64,
-                'projected_required_inodes' => 1_000_000, 'observed_percent' => 81,
+                'status' => 'passed',
+                'available_bytes' => 8_000_000_000,
+                'projected_required_bytes' => 1_000_000_000,
+                'available_inodes' => 8_000_000,
+                'stage_inode_count' => 999_904,
+                'restore_inode_count' => 32,
+                'inode_headroom' => 64,
+                'projected_required_inodes' => 1_000_000,
+                'observed_percent' => 81,
                 'projected_percent' => 84,
                 'max_used_percent' => \Ops\DeploymentContractV1::MAX_CAPACITY_USED_PERCENT,
                 'passed' => true,
             ],
             'artifact' => [
-                'status' => 'passed', 'expectation' => \Ops\DeploymentContractV1::ARTIFACT_EXPECTATION,
-                'local_sha256' => $sha, 'remote_sha256' => $sha, 'manifest_sha256' => $sha,
-                'host_script_sha256' => $sha, 'artifact_script_sha256' => $sha, 'verified' => true,
+                'status' => 'passed',
+                'expectation' => \Ops\DeploymentContractV1::ARTIFACT_EXPECTATION,
+                'local_sha256' => $sha,
+                'remote_sha256' => $sha,
+                'manifest_sha256' => $sha,
+                'host_script_sha256' => $sha,
+                'artifact_script_sha256' => $sha,
+                'verified' => true,
             ],
         ];
     }
@@ -2139,9 +2616,15 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $bundle = $this->fixture();
         $prefix = 'runs/' . self::fixtureRunId() . '/';
         $storage->files[$prefix . 'request.json'] = DeploymentHostRunnerContractV1::encodeFile($bundle['request']);
-        $storage->files[$prefix . 'execution-input.json'] = DeploymentHostRunnerContractV1::encodeExecutionInput($bundle['input']);
-        $storage->files[$prefix . 'deploy-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile($bundle['launch']);
-        $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile($bundle['binding']);
+        $storage->files[$prefix . 'execution-input.json'] = DeploymentHostRunnerContractV1::encodeExecutionInput(
+            $bundle['input'],
+        );
+        $storage->files[$prefix . 'deploy-systemd-launch.json'] = DeploymentHostRunnerContractV1::encodeFile(
+            $bundle['launch'],
+        );
+        $storage->files[$prefix . 'deploy-unit-binding.json'] = DeploymentHostRunnerContractV1::encodeFile(
+            $bundle['binding'],
+        );
     }
 
     /** @return array{request:array<string,mixed>,input:array<string,mixed>,launch:array<string,mixed>,binding:array<string,mixed>,script:string} */
@@ -2167,7 +2650,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'intent_sha256' => $request['intent_sha256'],
             'action' => 'deploy',
             'unit_name' => $launch['unit_name'],
-            'unit_launch_sha256' => DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($launch)),
+            'unit_launch_sha256' => DeploymentHostRunnerContractV1::fileSha256(
+                DeploymentHostRunnerContractV1::encodeFile($launch),
+            ),
             'unit_manager_boot_id' => self::BOOT,
             'unit_invocation_id' => null,
             'binding_state' => 'reserved',
@@ -2183,26 +2668,53 @@ final class DeploymentHostRunnerV1Test extends TestCase
     }
 
     /** @param array<string,mixed> $launch */
-    private function loadedShow(array $launch, string $active, string $sub, string $result, int $code, int $status): string
-    {
+    private function loadedShow(
+        array $launch,
+        string $active,
+        string $sub,
+        string $result,
+        int $code,
+        int $status,
+    ): string {
         return $this->show($launch, 'loaded', $active, $sub, $result, $code, $status, str_repeat('d', 32), 'yes');
     }
 
     /** @param array<string,mixed> $launch */
-    private function show(array $launch, string $load, string $active, string $sub, string $result, int $code, int $status, string $invocation, string $transient): string
-    {
+    private function show(
+        array $launch,
+        string $load,
+        string $active,
+        string $sub,
+        string $result,
+        int $code,
+        int $status,
+        string $invocation,
+        string $transient,
+    ): string {
         $properties = DeploymentHostRunnerContractV1::observedUnitProperties(
             'deploy',
             DeploymentHostRunnerContractV1::fileSha256(DeploymentHostRunnerContractV1::encodeFile($launch)),
         );
         return implode("\n", [
-            'Id=' . $launch['unit_name'], 'LoadState=' . $load, 'ActiveState=' . $active, 'SubState=' . $sub,
-            'Result=' . $result, 'ExecMainCode=' . $code, 'ExecMainStatus=' . $status,
-            'InvocationID=' . $invocation, 'Description=' . $properties['Description'],
-            'Transient=' . $transient, 'Type=' . $properties['Type'], 'RemainAfterExit=' . $properties['RemainAfterExit'],
-            'UMask=' . $properties['UMask'], 'KillMode=' . $properties['KillMode'], 'Restart=' . $properties['Restart'],
-            'RuntimeMaxUSec=' . $properties['RuntimeMaxUSec'], 'TimeoutStopUSec=' . $properties['TimeoutStopUSec'],
-            'StandardInput=' . $properties['StandardInput'], 'StandardOutput=' . $properties['StandardOutput'],
+            'Id=' . $launch['unit_name'],
+            'LoadState=' . $load,
+            'ActiveState=' . $active,
+            'SubState=' . $sub,
+            'Result=' . $result,
+            'ExecMainCode=' . $code,
+            'ExecMainStatus=' . $status,
+            'InvocationID=' . $invocation,
+            'Description=' . $properties['Description'],
+            'Transient=' . $transient,
+            'Type=' . $properties['Type'],
+            'RemainAfterExit=' . $properties['RemainAfterExit'],
+            'UMask=' . $properties['UMask'],
+            'KillMode=' . $properties['KillMode'],
+            'Restart=' . $properties['Restart'],
+            'RuntimeMaxUSec=' . $properties['RuntimeMaxUSec'],
+            'TimeoutStopUSec=' . $properties['TimeoutStopUSec'],
+            'StandardInput=' . $properties['StandardInput'],
+            'StandardOutput=' . $properties['StandardOutput'],
             'StandardError=' . $properties['StandardError'],
         ]) . "\n";
     }
@@ -2216,15 +2728,25 @@ final class ScriptedSystemAdapter implements HostRunnerSystemAdapter
     public array $calls = [];
 
     /** @param list<HostRunnerProcessResult|RuntimeException> $outcomes */
-    public function __construct(array $outcomes) { $this->outcomes = $outcomes; }
-    public function addOutcome(HostRunnerProcessResult|RuntimeException $outcome): void { $this->outcomes[] = $outcome; }
+    public function __construct(array $outcomes)
+    {
+        $this->outcomes = $outcomes;
+    }
+    public function addOutcome(HostRunnerProcessResult|RuntimeException $outcome): void
+    {
+        $this->outcomes[] = $outcome;
+    }
 
     public function run(array $argv, array $environment, int $timeoutSeconds): HostRunnerProcessResult
     {
         $this->calls[] = compact('argv', 'environment') + ['timeout' => $timeoutSeconds];
         $outcome = array_shift($this->outcomes);
-        if ($outcome instanceof RuntimeException) { throw $outcome; }
-        if (!$outcome instanceof HostRunnerProcessResult) { throw new RuntimeException('unexpected adapter call'); }
+        if ($outcome instanceof RuntimeException) {
+            throw $outcome;
+        }
+        if (!$outcome instanceof HostRunnerProcessResult) {
+            throw new RuntimeException('unexpected adapter call');
+        }
         return $outcome;
     }
 }
@@ -2232,15 +2754,28 @@ final class ScriptedSystemAdapter implements HostRunnerSystemAdapter
 final class FixedHostRunnerClock implements \Ops\HostRunnerClock
 {
     public function __construct(private readonly string $now) {}
-    public function nowUtc(): string { return $this->now; }
+    public function nowUtc(): string
+    {
+        return $this->now;
+    }
 }
 
 final class FixedTerminalClock implements \Ops\HostRunnerOrchestratorClock
 {
     public int $nowCalls = 0;
-    public function nowUtc(): string { $this->nowCalls++; return '2026-08-12T10:00:20Z'; }
-    public function bootId(): string { return 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'; }
-    public function monotonicNs(): int { return 21_000_000_000; }
+    public function nowUtc(): string
+    {
+        $this->nowCalls++;
+        return '2026-08-12T10:00:20Z';
+    }
+    public function bootId(): string
+    {
+        return 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    }
+    public function monotonicNs(): int
+    {
+        return 21_000_000_000;
+    }
 }
 
 final class NotObservedTimingPin implements \Ops\HostRunnerTimingPin
@@ -2257,7 +2792,10 @@ final class ScriptedBootReader implements \Ops\HostRunnerBootReader
 {
     /** @var list<string> */
     private array $values;
-    public function __construct(array $values = []) { $this->values = $values; }
+    public function __construct(array $values = [])
+    {
+        $this->values = $values;
+    }
     public function read(): string
     {
         return array_shift($this->values) ?? 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' . "\n";
@@ -2273,14 +2811,23 @@ final class RecordingHostRunnerStorage implements \Ops\HostRunnerStorage
     /** @var list<array{run_id:string,events_bytes:string,state_bytes:?string}> */
     public array $candidates = [];
 
-    public function prepareRun(string $runId): void { $this->operations[] = ['prepare-run', $runId, '']; }
-    public function reservedCandidates(): iterable { return $this->candidates; }
+    public function prepareRun(string $runId): void
+    {
+        $this->operations[] = ['prepare-run', $runId, ''];
+    }
+    public function reservedCandidates(): iterable
+    {
+        return $this->candidates;
+    }
     public function pinReference(string $runId, string $field, string $sourcePath, string $sha256): void
     {
         $this->operations[] = ['pin-reference', $field, $sourcePath . ':' . $sha256];
     }
 
-    public function read(string $relative, int $maxBytes): ?string { return $this->files[$relative] ?? null; }
+    public function read(string $relative, int $maxBytes): ?string
+    {
+        return $this->files[$relative] ?? null;
+    }
     public function pin(string $relative, string $bytes, int $maxBytes): string
     {
         if (isset($this->files[$relative]) && $this->files[$relative] !== $bytes) {
@@ -2297,19 +2844,25 @@ final class RecordingHostRunnerStorage implements \Ops\HostRunnerStorage
     }
     public function refreshBinding(string $relative, string $currentBytes, string $candidateBytes): void
     {
-        if (($this->files[$relative] ?? null) !== $currentBytes) { throw new RuntimeException('binding CAS conflict'); }
+        if (($this->files[$relative] ?? null) !== $currentBytes) {
+            throw new RuntimeException('binding CAS conflict');
+        }
         $this->operations[] = ['binding-refresh', $relative, $candidateBytes];
         $this->files[$relative] = $candidateBytes;
     }
     public function clearActiveClaim(string $expectedBytes): void
     {
-        if (($this->files['active-run.json'] ?? null) !== $expectedBytes) { throw new RuntimeException('claim clear conflict'); }
+        if (($this->files['active-run.json'] ?? null) !== $expectedBytes) {
+            throw new RuntimeException('claim clear conflict');
+        }
         $this->operations[] = ['clear-exact', 'active-run.json', $expectedBytes];
         unset($this->files['active-run.json']);
     }
     public function refreshActiveClaim(string $currentBytes, string $candidateBytes): void
     {
-        if (($this->files['active-run.json'] ?? null) !== $currentBytes) { throw new RuntimeException('claim CAS conflict'); }
+        if (($this->files['active-run.json'] ?? null) !== $currentBytes) {
+            throw new RuntimeException('claim CAS conflict');
+        }
         $this->operations[] = ['claim-refresh', 'active-run.json', $candidateBytes];
         $this->files['active-run.json'] = $candidateBytes;
     }

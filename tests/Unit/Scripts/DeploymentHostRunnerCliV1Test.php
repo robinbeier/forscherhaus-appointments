@@ -13,6 +13,7 @@ use Ops\HostRunnerReservationReconstructor;
 use Ops\HostRunnerRecoveryWorkflow;
 use Ops\HostRunnerStorage;
 use Ops\HostRunnerStoredReconciler;
+use Ops\HostRunnerTerminalizer;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -28,14 +29,16 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $input = (string) file_get_contents(self::FIXTURES . 'execution-input.json');
         $decodedRequest = DeploymentHostRunnerContractV1::decodeDeployRequest($request);
 
-        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'deploy',
-            $decodedRequest['run_id'],
-            $decodedRequest['intent_sha256'],
-            $request,
-            $input,
-            null,
-        ));
+        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope(
+                'deploy',
+                $decodedRequest['run_id'],
+                $decodedRequest['intent_sha256'],
+                $request,
+                $input,
+                null,
+            ),
+        );
 
         self::assertSame($request, $envelope['request_bytes']);
         self::assertSame($input, $envelope['execution_input_bytes']);
@@ -55,27 +58,31 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $recoveryInput['parameters'] = ['release_id' => $deployInput['parameters']['release_id']];
         $recoveryInputBytes = DeploymentHostRunnerContractV1::encodeExecutionInput($recoveryInput);
 
-        $decoded = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'recovery',
-            $recoveryRequest['run_id'],
-            $recoveryRequest['intent_sha256'],
-            $recovery,
-            $recoveryInputBytes,
-            null,
-        ));
+        $decoded = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope(
+                'recovery',
+                $recoveryRequest['run_id'],
+                $recoveryRequest['intent_sha256'],
+                $recovery,
+                $recoveryInputBytes,
+                null,
+            ),
+        );
         self::assertSame('rollback', $decoded['execution_input']['action']);
 
         $deploy = (string) file_get_contents(self::FIXTURES . 'deploy-request.json');
         $report = (string) file_get_contents(self::FIXTURES . 'post-gate-report.json');
         $deployRequest = DeploymentHostRunnerContractV1::decodeDeployRequest($deploy);
-        $decoded = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'post-gates',
-            $deployRequest['run_id'],
-            $deployRequest['intent_sha256'],
-            $deploy,
-            null,
-            $report,
-        ));
+        $decoded = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope(
+                'post-gates',
+                $deployRequest['run_id'],
+                $deployRequest['intent_sha256'],
+                $deploy,
+                null,
+                $report,
+            ),
+        );
         self::assertSame($report, $decoded['report_bytes']);
     }
 
@@ -85,16 +92,26 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $input = (string) file_get_contents(self::FIXTURES . 'execution-input.json');
         $request = DeploymentHostRunnerContractV1::decodeDeployRequest($deploy);
 
-        $reconcile = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'reconcile', $request['run_id'], $request['intent_sha256'], null, null, null,
-        ));
+        $reconcile = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope('reconcile', $request['run_id'], $request['intent_sha256'], null, null, null),
+        );
         self::assertNull($reconcile['request']);
 
-        foreach ([
-            $this->envelope('reconcile', $request['run_id'], $request['intent_sha256'], $deploy, null, null),
-            $this->envelope('deploy', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', $request['intent_sha256'], $deploy, $input, null),
-            $this->envelope('deploy', $request['run_id'], str_repeat('f', 64), $deploy, $input, null),
-        ] as $invalid) {
+        foreach (
+            [
+                $this->envelope('reconcile', $request['run_id'], $request['intent_sha256'], $deploy, null, null),
+                $this->envelope(
+                    'deploy',
+                    'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                    $request['intent_sha256'],
+                    $deploy,
+                    $input,
+                    null,
+                ),
+                $this->envelope('deploy', $request['run_id'], str_repeat('f', 64), $deploy, $input, null),
+            ]
+            as $invalid
+        ) {
             try {
                 DeploymentHostRunnerCliEnvelopeV1::decode($invalid);
                 self::fail('substituted CLI authority must be rejected');
@@ -109,9 +126,12 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $deploy = (string) file_get_contents(self::FIXTURES . 'deploy-request.json');
         $input = (string) file_get_contents(self::FIXTURES . 'execution-input.json');
         $request = DeploymentHostRunnerContractV1::decodeDeployRequest($deploy);
-        $valid = json_decode($this->envelope(
-            'deploy', $request['run_id'], $request['intent_sha256'], $deploy, $input, null,
-        ), true, 32, JSON_THROW_ON_ERROR);
+        $valid = json_decode(
+            $this->envelope('deploy', $request['run_id'], $request['intent_sha256'], $deploy, $input, null),
+            true,
+            32,
+            JSON_THROW_ON_ERROR,
+        );
 
         $cases = [];
         $extra = $valid;
@@ -121,9 +141,11 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $badBase64['request_bytes_base64'] = '*';
         $cases[] = json_encode($badBase64, JSON_THROW_ON_ERROR) . "\n";
         $cases[] = str_repeat('x', 65_537);
-        $cases[] = substr($this->envelope(
-            'deploy', $request['run_id'], $request['intent_sha256'], $deploy, $input, null,
-        ), 0, -1);
+        $cases[] = substr(
+            $this->envelope('deploy', $request['run_id'], $request['intent_sha256'], $deploy, $input, null),
+            0,
+            -1,
+        );
 
         foreach ($cases as $case) {
             try {
@@ -144,7 +166,10 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $workflow = new CliDeployWorkflowFake($this->response($envelope, 'accepted', 'deploy_running'));
 
         $response = (new DeploymentHostRunnerCliApplicationV1(
-            $storage, $reconstructor, $reconciler, $workflow,
+            $storage,
+            $reconstructor,
+            $reconciler,
+            $workflow,
         ))->deploy($envelope);
 
         self::assertSame('accepted', $response['disposition']);
@@ -152,6 +177,52 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         self::assertSame(1, $workflow->startCalls);
         self::assertSame(0, $workflow->resumeCalls);
         self::assertSame(0, $reconciler->calls);
+    }
+
+    public function testDeployApplicationReturnsDurableTerminalRunBeforeAnyNewPredeployWork(): void
+    {
+        $envelope = $this->deployEnvelope();
+        $state = DeploymentHostRunnerContractV1::decodeState((string) file_get_contents(self::FIXTURES . 'state.json'));
+        $state['state'] = 'failed_pre_switch';
+        $state['active_action'] = 'none';
+        $state['evidence_sha256'] = str_repeat('e', 64);
+        $state['terminal'] = [
+            'state' => 'failed_pre_switch',
+            'exit_code' => 30,
+            'reason' => 'deploy_failed',
+        ];
+        DeploymentHostRunnerContractV1::validateState($state);
+        $storage = new CliMemoryStorage([
+            'runs/' . $envelope['run_id'] . '/state.json' => DeploymentHostRunnerContractV1::encodeFile($state),
+        ]);
+        $workflow = new CliDeployWorkflowFake($this->response($envelope, 'accepted', 'deploy_running'));
+        $terminal = new CliTerminalizerFake([
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => $envelope['run_id'],
+            'intent_sha256' => $envelope['intent_sha256'],
+            'action' => 'deploy',
+            'disposition' => 'terminal',
+            'state' => 'failed_pre_switch',
+            'result_exit_code' => 30,
+            'result_reason' => 'deploy_failed',
+        ]);
+
+        $response = (new DeploymentHostRunnerCliApplicationV1(
+            $storage,
+            new CliReconstructorFake(),
+            new CliReconcilerFake(),
+            $workflow,
+            new CliPostGateWorkflowFake([]),
+            new CliRecoveryWorkflowFake([]),
+            $terminal,
+        ))->deploy($envelope);
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame('failed_pre_switch', $response['state']);
+        self::assertSame(1, $terminal->calls);
+        self::assertSame('deploy', $terminal->action);
+        self::assertSame(0, $workflow->startCalls + $workflow->resumeCalls);
+        self::assertSame([], $storage->writes);
     }
 
     public function testDeployApplicationRejectsDifferentActiveClaimBeforeAnyCandidateWork(): void
@@ -169,7 +240,10 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $workflow = new CliDeployWorkflowFake($this->response($envelope, 'accepted', 'deploy_running'));
 
         $response = (new DeploymentHostRunnerCliApplicationV1(
-            $storage, $reconstructor, $reconciler, $workflow,
+            $storage,
+            $reconstructor,
+            $reconciler,
+            $workflow,
         ))->deploy($envelope);
 
         self::assertSame('rejected', $response['disposition']);
@@ -192,7 +266,10 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $workflow = new CliDeployWorkflowFake($this->response($envelope, 'attach_observe_only', 'deploy_running'));
 
         $response = (new DeploymentHostRunnerCliApplicationV1(
-            $storage, $reconstructor, $reconciler, $workflow,
+            $storage,
+            $reconstructor,
+            $reconciler,
+            $workflow,
         ))->deploy($envelope);
 
         self::assertSame('attach_observe_only', $response['disposition']);
@@ -207,17 +284,21 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $deploy = (string) file_get_contents(self::FIXTURES . 'deploy-request.json');
         $report = (string) file_get_contents(self::FIXTURES . 'post-gate-report.json');
         $request = DeploymentHostRunnerContractV1::decodeDeployRequest($deploy);
-        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'post-gates', $request['run_id'], $request['intent_sha256'], $deploy, null, $report,
-        ));
+        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope('post-gates', $request['run_id'], $request['intent_sha256'], $deploy, null, $report),
+        );
         $storage = new CliMemoryStorage([
             'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
         ]);
         $postGates = new CliPostGateWorkflowFake([
             'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
-            'run_id' => $request['run_id'], 'intent_sha256' => $request['intent_sha256'],
-            'action' => 'post-gates', 'disposition' => 'attach_observe_only',
-            'state' => 'post_gates_running', 'result_exit_code' => 0, 'result_reason' => 'ok',
+            'run_id' => $request['run_id'],
+            'intent_sha256' => $request['intent_sha256'],
+            'action' => 'post-gates',
+            'disposition' => 'attach_observe_only',
+            'state' => 'post_gates_running',
+            'result_exit_code' => 0,
+            'result_reason' => 'ok',
         ]);
         $app = new DeploymentHostRunnerCliApplicationV1(
             $storage,
@@ -237,9 +318,9 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
     public function testReconcileNeverStartsAWorkflowAndReturnsCurrentClaimState(): void
     {
         $envelope = $this->deployEnvelope();
-        $reconcileEnvelope = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'reconcile', $envelope['run_id'], $envelope['intent_sha256'], null, null, null,
-        ));
+        $reconcileEnvelope = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope('reconcile', $envelope['run_id'], $envelope['intent_sha256'], null, null, null),
+        );
         $storage = new CliMemoryStorage([
             'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
             'runs/' . $envelope['run_id'] . '/state.json' => (string) file_get_contents(self::FIXTURES . 'state.json'),
@@ -247,7 +328,11 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $workflow = new CliDeployWorkflowFake($this->response($envelope, 'accepted', 'deploy_running'));
         $reconciler = new CliReconcilerFake();
         $app = new DeploymentHostRunnerCliApplicationV1(
-            $storage, new CliReconstructorFake(), $reconciler, $workflow, new CliPostGateWorkflowFake([]),
+            $storage,
+            new CliReconstructorFake(),
+            $reconciler,
+            $workflow,
+            new CliPostGateWorkflowFake([]),
         );
 
         $response = $app->reconcile($reconcileEnvelope);
@@ -268,21 +353,33 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         );
         $input = [
             'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
-            'run_id' => $request['run_id'], 'intent_sha256' => $request['intent_sha256'],
-            'action' => 'rollback', 'parameters' => ['release_id' => $deployInput['parameters']['release_id']],
+            'run_id' => $request['run_id'],
+            'intent_sha256' => $request['intent_sha256'],
+            'action' => 'rollback',
+            'parameters' => ['release_id' => $deployInput['parameters']['release_id']],
         ];
-        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'recovery', $request['run_id'], $request['intent_sha256'],
-            $recoveryBytes, DeploymentHostRunnerContractV1::encodeExecutionInput($input), null,
-        ));
+        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope(
+                'recovery',
+                $request['run_id'],
+                $request['intent_sha256'],
+                $recoveryBytes,
+                DeploymentHostRunnerContractV1::encodeExecutionInput($input),
+                null,
+            ),
+        );
         $storage = new CliMemoryStorage([
             'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
         ]);
         $workflow = new CliRecoveryWorkflowFake([
             'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
-            'run_id' => $request['run_id'], 'intent_sha256' => $request['intent_sha256'],
-            'action' => 'recovery', 'disposition' => 'accepted', 'state' => 'rollback_running',
-            'result_exit_code' => 0, 'result_reason' => 'ok',
+            'run_id' => $request['run_id'],
+            'intent_sha256' => $request['intent_sha256'],
+            'action' => 'recovery',
+            'disposition' => 'accepted',
+            'state' => 'rollback_running',
+            'result_exit_code' => 0,
+            'result_reason' => 'ok',
         ]);
         $app = new DeploymentHostRunnerCliApplicationV1(
             $storage,
@@ -303,16 +400,27 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
     public function testPublicCliRejectsWrongShapeWithFixedUsageExitAndNoStdout(): void
     {
         $script = __DIR__ . '/../../../scripts/ops/deployment_host_runner_v1.php';
-        foreach ([
-            [],
-            ['--action=deploy'],
-            ['--action=deploy', '--request-file=/tmp/request', '--report-file=/tmp/report'],
-            ['--action=reconcile', '--intent-sha256=' . str_repeat('a', 64), '--run-id=018f6f52-4c87-4d4e-8b19-6a66e6e1af25'],
-        ] as $arguments) {
+        foreach (
+            [
+                [],
+                ['--action=deploy'],
+                ['--action=deploy', '--request-file=/tmp/request', '--report-file=/tmp/report'],
+                [
+                    '--action=reconcile',
+                    '--intent-sha256=' . str_repeat('a', 64),
+                    '--run-id=018f6f52-4c87-4d4e-8b19-6a66e6e1af25',
+                ],
+            ]
+            as $arguments
+        ) {
             $pipes = [];
-            $process = proc_open([PHP_BINARY, $script, ...$arguments], [
-                ['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w'],
-            ], $pipes, null, []);
+            $process = proc_open(
+                [PHP_BINARY, $script, ...$arguments],
+                [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+                $pipes,
+                null,
+                [],
+            );
             self::assertIsResource($process);
             $stdout = stream_get_contents($pipes[1]);
             $stderr = stream_get_contents($pipes[2]);
@@ -332,14 +440,17 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         ?string $input,
         ?string $report,
     ): string {
-        return json_encode([
-            'action' => $action,
-            'execution_input_bytes_base64' => $input === null ? null : base64_encode($input),
-            'intent_sha256' => $intentSha256,
-            'report_bytes_base64' => $report === null ? null : base64_encode($report),
-            'request_bytes_base64' => $request === null ? null : base64_encode($request),
-            'run_id' => $runId,
-        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        return json_encode(
+            [
+                'action' => $action,
+                'execution_input_bytes_base64' => $input === null ? null : base64_encode($input),
+                'intent_sha256' => $intentSha256,
+                'report_bytes_base64' => $report === null ? null : base64_encode($report),
+                'request_bytes_base64' => $request === null ? null : base64_encode($request),
+                'run_id' => $runId,
+            ],
+            JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+        ) . "\n";
     }
 
     /** @return array<string,mixed> */
@@ -348,9 +459,9 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         $request = (string) file_get_contents(self::FIXTURES . 'deploy-request.json');
         $input = (string) file_get_contents(self::FIXTURES . 'execution-input.json');
         $decoded = DeploymentHostRunnerContractV1::decodeDeployRequest($request);
-        return DeploymentHostRunnerCliEnvelopeV1::decode($this->envelope(
-            'deploy', $decoded['run_id'], $decoded['intent_sha256'], $request, $input, null,
-        ));
+        return DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope('deploy', $decoded['run_id'], $decoded['intent_sha256'], $request, $input, null),
+        );
     }
 
     /** @param array<string,mixed> $envelope @return array<string,mixed> */
@@ -372,7 +483,11 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
 final class CliReconstructorFake implements HostRunnerReservationReconstructor
 {
     public int $calls = 0;
-    public function reconstruct(): string { $this->calls++; return 'no_reserved_run'; }
+    public function reconstruct(): string
+    {
+        $this->calls++;
+        return 'no_reserved_run';
+    }
 }
 
 final class CliReconcilerFake implements HostRunnerStoredReconciler
@@ -391,8 +506,16 @@ final class CliDeployWorkflowFake implements HostRunnerDeployWorkflow
     public int $resumeCalls = 0;
     /** @param array<string,mixed> $response */
     public function __construct(private readonly array $response) {}
-    public function start(array $request, array $input): array { $this->startCalls++; return $this->response; }
-    public function resume(array $request, array $input): array { $this->resumeCalls++; return $this->response; }
+    public function start(array $request, array $input): array
+    {
+        $this->startCalls++;
+        return $this->response;
+    }
+    public function resume(array $request, array $input): array
+    {
+        $this->resumeCalls++;
+        return $this->response;
+    }
 }
 
 final class CliPostGateWorkflowFake implements HostRunnerPostGateWorkflow
@@ -424,19 +547,78 @@ final class CliRecoveryWorkflowFake implements HostRunnerRecoveryWorkflow
     }
 }
 
+final class CliTerminalizerFake implements HostRunnerTerminalizer
+{
+    public int $calls = 0;
+    public ?string $action = null;
+    /** @param array<string,mixed> $response */
+    public function __construct(private readonly array $response) {}
+    public function resumeTerminal(string $runId, string $action = 'deploy'): array
+    {
+        $this->calls++;
+        $this->action = $action;
+        return $this->response;
+    }
+    public function terminalizeDeploy(string $runId): array
+    {
+        throw new RuntimeException('not expected');
+    }
+    public function terminalizeUnverifiableDeploy(string $runId): array
+    {
+        throw new RuntimeException('not expected');
+    }
+    public function terminalizeRollback(string $runId): array
+    {
+        throw new RuntimeException('not expected');
+    }
+}
+
 final class CliMemoryStorage implements HostRunnerStorage
 {
     /** @var list<string> */
     public array $writes = [];
     /** @param array<string,string> $files */
     public function __construct(public array $files = []) {}
-    public function prepareRun(string $runId): void { $this->writes[] = 'prepare:' . $runId; }
-    public function reservedCandidates(): iterable { return []; }
-    public function read(string $relative, int $maxBytes): ?string { return $this->files[$relative] ?? null; }
-    public function pin(string $relative, string $bytes, int $maxBytes): string { $this->writes[] = 'pin:' . $relative; $this->files[$relative] = $bytes; return 'pinned_or_resumed_exact'; }
-    public function cow(string $relative, string $bytes, int $maxBytes): void { $this->writes[] = 'cow:' . $relative; $this->files[$relative] = $bytes; }
-    public function pinReference(string $runId, string $field, string $sourcePath, string $sha256): void { $this->writes[] = 'reference:' . $field; }
-    public function refreshBinding(string $relative, string $currentBytes, string $candidateBytes): void { $this->writes[] = 'binding:' . $relative; $this->files[$relative] = $candidateBytes; }
-    public function clearActiveClaim(string $expectedBytes): void { $this->writes[] = 'clear:active-run.json'; unset($this->files['active-run.json']); }
-    public function refreshActiveClaim(string $currentBytes, string $candidateBytes): void { $this->writes[] = 'claim:active-run.json'; $this->files['active-run.json'] = $candidateBytes; }
+    public function prepareRun(string $runId): void
+    {
+        $this->writes[] = 'prepare:' . $runId;
+    }
+    public function reservedCandidates(): iterable
+    {
+        return [];
+    }
+    public function read(string $relative, int $maxBytes): ?string
+    {
+        return $this->files[$relative] ?? null;
+    }
+    public function pin(string $relative, string $bytes, int $maxBytes): string
+    {
+        $this->writes[] = 'pin:' . $relative;
+        $this->files[$relative] = $bytes;
+        return 'pinned_or_resumed_exact';
+    }
+    public function cow(string $relative, string $bytes, int $maxBytes): void
+    {
+        $this->writes[] = 'cow:' . $relative;
+        $this->files[$relative] = $bytes;
+    }
+    public function pinReference(string $runId, string $field, string $sourcePath, string $sha256): void
+    {
+        $this->writes[] = 'reference:' . $field;
+    }
+    public function refreshBinding(string $relative, string $currentBytes, string $candidateBytes): void
+    {
+        $this->writes[] = 'binding:' . $relative;
+        $this->files[$relative] = $candidateBytes;
+    }
+    public function clearActiveClaim(string $expectedBytes): void
+    {
+        $this->writes[] = 'clear:active-run.json';
+        unset($this->files['active-run.json']);
+    }
+    public function refreshActiveClaim(string $currentBytes, string $candidateBytes): void
+    {
+        $this->writes[] = 'claim:active-run.json';
+        $this->files['active-run.json'] = $candidateBytes;
+    }
 }

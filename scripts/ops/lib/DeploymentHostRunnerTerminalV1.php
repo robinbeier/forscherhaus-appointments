@@ -20,8 +20,15 @@ interface HostRunnerTimingPin
 final class HelperBackedHostRunnerTimingPin implements HostRunnerTimingPin
 {
     private const COMMAND_PREFIX = [
-        '/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-        '/usr/bin/python3', '-I', '-B', __DIR__ . '/../libexec/pin_deploy_timing_v1.py',
+        '/usr/bin/env',
+        '-i',
+        'LANG=C',
+        'LC_ALL=C',
+        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        '/usr/bin/python3',
+        '-I',
+        '-B',
+        __DIR__ . '/../libexec/pin_deploy_timing_v1.py',
     ];
 
     public function pin(string $timingRunId, string $runId): array
@@ -29,7 +36,13 @@ final class HelperBackedHostRunnerTimingPin implements HostRunnerTimingPin
         $pipes = [];
         $process = proc_open(
             [...self::COMMAND_PREFIX, $timingRunId, $runId],
-            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['file', '/dev/null', 'w'], 198 => ['file', '/dev/null', 'r'], 199 => ['file', '/dev/null', 'r']],
+            [
+                ['file', '/dev/null', 'r'],
+                ['pipe', 'w'],
+                ['file', '/dev/null', 'w'],
+                198 => ['file', '/dev/null', 'r'],
+                199 => ['file', '/dev/null', 'r'],
+            ],
             $pipes,
             null,
             [],
@@ -87,7 +100,22 @@ final class HelperBackedHostRunnerTimingPin implements HostRunnerTimingPin
     }
 }
 
-final class HostRunnerTerminalPersistence
+interface HostRunnerTerminalizer
+{
+    /** @return array<string,mixed> */
+    public function resumeTerminal(string $runId, string $action = 'deploy'): array;
+
+    /** @return array<string,mixed> */
+    public function terminalizeDeploy(string $runId): array;
+
+    /** @return array<string,mixed> */
+    public function terminalizeUnverifiableDeploy(string $runId): array;
+
+    /** @return array<string,mixed> */
+    public function terminalizeRollback(string $runId): array;
+}
+
+final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
 {
     private const ORCHESTRATOR_FINISH_SCHEMA = 'deployment_orchestrator_finish.v1';
 
@@ -96,6 +124,57 @@ final class HostRunnerTerminalPersistence
         private readonly HostRunnerOrchestratorClock $clock = new SystemHostRunnerOrchestratorClock(),
         private readonly HostRunnerTimingPin $timingPin = new HelperBackedHostRunnerTimingPin(),
     ) {}
+
+    /**
+     * Return an already durable terminal result only after revalidating the
+     * exact journal, evidence, reports, and every reserved unit bundle.
+     *
+     * @return array<string,mixed> canonical runner response
+     */
+    public function resumeTerminal(string $runId, string $action = 'deploy'): array
+    {
+        $prefix = 'runs/' . $runId . '/';
+        $state = DeploymentHostRunnerContractV1::decodeState($this->required($prefix . 'state.json', 4_096));
+        if (
+            $state['run_id'] !== $runId ||
+            !in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)
+        ) {
+            throw new RuntimeException('durable terminal replay state is inconsistent');
+        }
+
+        $reports = [];
+        foreach (['deploy', 'rollback'] as $subject) {
+            $reports[$subject] =
+                $state['post_gates'][$subject . '_submission_count'] === 0
+                    ? null
+                    : $this->required($prefix . $subject . '-post-gate-report.json', 16_384);
+        }
+        $units = [];
+        foreach (['deploy', 'rollback'] as $unitAction) {
+            if ($state[$unitAction]['invocation_count'] === 0) {
+                continue;
+            }
+            $units[$unitAction] = [
+                'launch' => $this->required($prefix . $unitAction . '-systemd-launch.json', 16_384),
+                'binding' => $this->required($prefix . $unitAction . '-unit-binding.json', 16_384),
+                'observation' => $this->required($prefix . $unitAction . '-unit-observation.json', 65_536),
+            ];
+        }
+        if (
+            DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
+                $state,
+                $this->required($prefix . 'events.jsonl', 1_048_576),
+                $this->required($prefix . 'evidence.json', 1_048_576),
+                $reports['deploy'],
+                $reports['rollback'],
+                $units,
+            ) !== 'current'
+        ) {
+            throw new RuntimeException('durable terminal replay bundle is not current');
+        }
+        $this->clearTerminalClaimIfPresent($runId, $state['intent_sha256']);
+        return $this->terminalResponse($state, $action);
+    }
 
     /**
      * Terminalize either a known non-success deploy receipt or a successful
@@ -160,8 +239,11 @@ final class HostRunnerTerminalPersistence
             );
         }
 
-        [$terminalStateName, $terminalExit, $terminalReason, $postGates] =
-            $this->terminalResult($state, $receipt, $prefix);
+        [$terminalStateName, $terminalExit, $terminalReason, $postGates] = $this->terminalResult(
+            $state,
+            $receipt,
+            $prefix,
+        );
         $existingEvidenceBytes = $this->storage->read($prefix . 'evidence.json', 1_048_576);
 
         $timing = $this->timingPin->pin($launch['timing_run_id'], $runId);
@@ -199,7 +281,11 @@ final class HostRunnerTerminalPersistence
         $this->storage->pin($prefix . 'deploy-child-observation.json', $childObservationBytes, 65_536);
 
         $start = json_decode($startBytes, true, 16, JSON_THROW_ON_ERROR);
-        if (!is_array($start) || array_is_list($start) || DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes) {
+        if (
+            !is_array($start) ||
+            array_is_list($start) ||
+            DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes
+        ) {
             throw new RuntimeException('terminal orchestrator start is invalid');
         }
         $orchestratorTiming = DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
@@ -247,7 +333,12 @@ final class HostRunnerTerminalPersistence
             'captured_at_utc' => $observedAtUtc,
             ...$predeploy['sections'],
             'deploy' => DeployResultV1::deployEvidence($receipt['outcome']),
-            'rollback' => ['status' => 'not_invoked', 'invocation_count' => 0, 'mode' => 'not_applicable', 'verified' => null],
+            'rollback' => [
+                'status' => 'not_invoked',
+                'invocation_count' => 0,
+                'mode' => 'not_applicable',
+                'verified' => null,
+            ],
             'post_gates' => $postGates,
             'deploy_timing' => $timingSection,
             'orchestrator_timing' => $orchestratorTiming,
@@ -265,7 +356,11 @@ final class HostRunnerTerminalPersistence
         $candidateState['active_action'] = 'none';
         $candidateState['deploy']['receipt_sha256'] = hash('sha256', $receiptBytes);
         $candidateState['evidence_sha256'] = hash('sha256', $evidenceBytes);
-        $candidateState['terminal'] = ['state' => $terminalStateName, 'exit_code' => $terminalExit, 'reason' => $terminalReason];
+        $candidateState['terminal'] = [
+            'state' => $terminalStateName,
+            'exit_code' => $terminalExit,
+            'reason' => $terminalReason,
+        ];
         $candidateState['updated_at_utc'] = $observedAtUtc;
         DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidateState);
 
@@ -278,13 +373,17 @@ final class HostRunnerTerminalPersistence
                 $candidateState,
                 $candidateEventsBytes,
                 $evidenceBytes,
-                $postGates['status'] === 'not_observed' ? null : $this->required($prefix . 'deploy-post-gate-report.json', 16_384),
+                $postGates['status'] === 'not_observed'
+                    ? null
+                    : $this->required($prefix . 'deploy-post-gate-report.json', 16_384),
                 null,
-                ['deploy' => [
-                    'launch' => $launchBytes,
-                    'binding' => $bindingBytes,
-                    'observation' => $observationBytes,
-                ]],
+                [
+                    'deploy' => [
+                        'launch' => $launchBytes,
+                        'binding' => $bindingBytes,
+                        'observation' => $observationBytes,
+                    ],
+                ],
             ) !== 'current'
         ) {
             throw new RuntimeException('terminal deploy persistence did not produce a current bundle');
@@ -314,38 +413,59 @@ final class HostRunnerTerminalPersistence
         $startBytes = $this->required($prefix . 'orchestrator-start.json', 4_096);
         if (in_array($state['state'], DeploymentContractV1::TERMINAL_FAILURE_STATES, true)) {
             return $this->resumeTerminalDeploy(
-                $runId, $state, $eventsBytes, $this->required($prefix . 'evidence.json', 1_048_576),
-                $launchBytes, $bindingBytes, $observationBytes, $prefix, $claimBytes, $claim,
+                $runId,
+                $state,
+                $eventsBytes,
+                $this->required($prefix . 'evidence.json', 1_048_576),
+                $launchBytes,
+                $bindingBytes,
+                $observationBytes,
+                $prefix,
+                $claimBytes,
+                $claim,
             );
         }
         if (
-            $state['state'] !== 'deploy_running' || $state['active_action'] !== 'deploy' ||
+            $state['state'] !== 'deploy_running' ||
+            $state['active_action'] !== 'deploy' ||
             !in_array($state['deploy']['unit_state'], ['exited', 'failed', 'killed', 'missing', 'unknown'], true) ||
-            $claim['run_id'] !== $runId || $state['run_id'] !== $runId ||
+            $claim['run_id'] !== $runId ||
+            $state['run_id'] !== $runId ||
             !hash_equals($claim['intent_sha256'], $state['intent_sha256']) ||
-            $claim['state'] !== $state['state'] || $claim['sequence'] !== $state['sequence'] ||
+            $claim['state'] !== $state['state'] ||
+            $claim['sequence'] !== $state['sequence'] ||
             !hash_equals($claim['events_sha256'], $state['events_sha256'])
         ) {
             throw new RuntimeException('unverifiable terminal deploy requires a stopped or absent reservation');
         }
         $predeploy = json_decode($predeployBytes, true, 64, JSON_THROW_ON_ERROR);
         if (
-            !is_array($predeploy) || array_is_list($predeploy) ||
+            !is_array($predeploy) ||
+            array_is_list($predeploy) ||
             DeploymentEvidenceAuthorityV1::encodeFile($predeploy) !== $predeployBytes ||
             ($predeploy['schema'] ?? null) !== DeploymentEvidenceAuthorityV1::PREDEPLOY_ASSEMBLY_SCHEMA ||
-            ($predeploy['status'] ?? null) !== 'passed' || !is_array($predeploy['sections'] ?? null)
+            ($predeploy['status'] ?? null) !== 'passed' ||
+            !is_array($predeploy['sections'] ?? null)
         ) {
             throw new RuntimeException('unverifiable deploy lacks passed predeploy evidence');
         }
         DeploymentContractV1::validatePredeploySections($predeploy['sections']);
         $start = json_decode($startBytes, true, 16, JSON_THROW_ON_ERROR);
-        if (!is_array($start) || array_is_list($start) || DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes) {
+        if (
+            !is_array($start) ||
+            array_is_list($start) ||
+            DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes
+        ) {
             throw new RuntimeException('unverifiable deploy orchestrator start is invalid');
         }
         $finish = $this->loadOrPinFinish($prefix, $runId);
         $recordedAtUtc = $finish['finished_at_utc'];
         $orchestratorTiming = DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
-            $start, $recordedAtUtc, $finish['boot_id'], $finish['monotonic_ns'], false,
+            $start,
+            $recordedAtUtc,
+            $finish['boot_id'],
+            $finish['monotonic_ns'],
+            false,
         );
         $interrupted = $state['deploy']['unit_state'] === 'killed';
         $exitCode = $interrupted ? 143 : 70;
@@ -359,22 +479,44 @@ final class HostRunnerTerminalPersistence
             throw new RuntimeException('unverifiable deploy state is not current');
         }
         $lines[] = DeploymentContractV1::canonicalJson([
-            'schema' => DeploymentContractV1::RUN_SCHEMA, 'record_type' => 'transition',
-            'run_id' => $runId, 'sequence' => count($lines) + 1, 'recorded_at_utc' => $recordedAtUtc,
-            'previous_state' => 'deploy_running', 'state' => 'manual_recovery_required',
-            'deploy_invocation_count' => 1, 'intent_sha256' => $state['intent_sha256'],
-            'exit_code' => $exitCode, 'reason' => $reason,
+            'schema' => DeploymentContractV1::RUN_SCHEMA,
+            'record_type' => 'transition',
+            'run_id' => $runId,
+            'sequence' => count($lines) + 1,
+            'recorded_at_utc' => $recordedAtUtc,
+            'previous_state' => 'deploy_running',
+            'state' => 'manual_recovery_required',
+            'deploy_invocation_count' => 1,
+            'intent_sha256' => $state['intent_sha256'],
+            'exit_code' => $exitCode,
+            'reason' => $reason,
         ]);
         $candidateEvents = implode("\n", $lines) . "\n";
         $evidence = [
             'schema' => DeploymentContractV1::EVIDENCE_SCHEMA,
-            'run_id' => $runId, 'intent_sha256' => $state['intent_sha256'],
+            'run_id' => $runId,
+            'intent_sha256' => $state['intent_sha256'],
             'captured_at_utc' => $recordedAtUtc,
             ...$predeploy['sections'],
-            'deploy' => ['status' => 'unknown', 'invocation_count' => 1, 'exit_code' => null, 'rollback_outcome' => 'not_observed'],
-            'rollback' => ['status' => 'not_invoked', 'invocation_count' => 0, 'mode' => 'not_applicable', 'verified' => null],
+            'deploy' => [
+                'status' => 'unknown',
+                'invocation_count' => 1,
+                'exit_code' => null,
+                'rollback_outcome' => 'not_observed',
+            ],
+            'rollback' => [
+                'status' => 'not_invoked',
+                'invocation_count' => 0,
+                'mode' => 'not_applicable',
+                'verified' => null,
+            ],
             'post_gates' => $this->notObservedPostGates(),
-            'deploy_timing' => ['status' => 'not_observed', 'authoritative_sha256' => null, 'run_id' => null, 'total_ms' => null],
+            'deploy_timing' => [
+                'status' => 'not_observed',
+                'authoritative_sha256' => null,
+                'run_id' => null,
+                'total_ms' => null,
+            ],
             'orchestrator_timing' => $orchestratorTiming,
             'result' => ['state' => 'manual_recovery_required', 'exit_code' => $exitCode, 'reason' => $reason],
         ];
@@ -395,8 +537,18 @@ final class HostRunnerTerminalPersistence
         $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidate), 4_096);
         if (
             DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
-                $candidate, $candidateEvents, $evidenceBytes, null, null,
-                ['deploy' => ['launch' => $launchBytes, 'binding' => $bindingBytes, 'observation' => $observationBytes]],
+                $candidate,
+                $candidateEvents,
+                $evidenceBytes,
+                null,
+                null,
+                [
+                    'deploy' => [
+                        'launch' => $launchBytes,
+                        'binding' => $bindingBytes,
+                        'observation' => $observationBytes,
+                    ],
+                ],
             ) !== 'current'
         ) {
             throw new RuntimeException('unverifiable terminal deploy persistence is not current');
@@ -410,10 +562,7 @@ final class HostRunnerTerminalPersistence
             'events_sha256' => $candidate['events_sha256'],
             'claimed_at_utc' => $candidate['updated_at_utc'],
         ];
-        $this->storage->refreshActiveClaim(
-            $claimBytes,
-            DeploymentHostRunnerContractV1::encodeFile($terminalClaim),
-        );
+        $this->storage->refreshActiveClaim($claimBytes, DeploymentHostRunnerContractV1::encodeFile($terminalClaim));
         return $this->terminalResponse($candidate);
     }
 
@@ -459,9 +608,10 @@ final class HostRunnerTerminalPersistence
             $rollbackObservation,
         );
         $deployReport = DeploymentHostRunnerContractV1::decodePostGateReport($deployReportBytes);
-        $rollbackReportBytes = $state['post_gates']['rollback_submission_count'] === 0
-            ? null
-            : $this->required($prefix . 'rollback-post-gate-report.json', 16_384);
+        $rollbackReportBytes =
+            $state['post_gates']['rollback_submission_count'] === 0
+                ? null
+                : $this->required($prefix . 'rollback-post-gate-report.json', 16_384);
         if (in_array($state['state'], DeploymentContractV1::TERMINAL_FAILURE_STATES, true)) {
             if (
                 DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
@@ -497,9 +647,11 @@ final class HostRunnerTerminalPersistence
                 ['current', 'stale_recoverable'],
                 true,
             ) ||
-            $receipt['outcome'] !== 'succeeded' || $receipt['exit_code'] !== 0 ||
+            $receipt['outcome'] !== 'succeeded' ||
+            $receipt['exit_code'] !== 0 ||
             !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes)) ||
-            $deployReport['subject'] !== 'deploy' || $deployReport['post_gates']['status'] !== 'failed' ||
+            $deployReport['subject'] !== 'deploy' ||
+            $deployReport['post_gates']['status'] !== 'failed' ||
             !hash_equals($state['post_gates']['deploy_report_sha256'], hash('sha256', $deployReportBytes)) ||
             $state['post_gates']['deploy_verdict'] !== 'failed' ||
             !in_array($state['rollback']['verdict'], ['succeeded', 'failed'], true) ||
@@ -516,10 +668,7 @@ final class HostRunnerTerminalPersistence
             if (
                 $rollbackReport['subject'] !== 'rollback' ||
                 ($rollbackReport['post_gates']['status'] === 'passed') !== $rollbackPassed ||
-                !hash_equals(
-                    $state['post_gates']['rollback_report_sha256'],
-                    hash('sha256', $rollbackReportBytes),
-                )
+                !hash_equals($state['post_gates']['rollback_report_sha256'], hash('sha256', $rollbackReportBytes))
             ) {
                 throw new RuntimeException('terminal rollback report contradicts its verdict');
             }
@@ -529,7 +678,8 @@ final class HostRunnerTerminalPersistence
 
         $predeploy = json_decode($predeployBytes, true, 64, JSON_THROW_ON_ERROR);
         if (
-            !is_array($predeploy) || array_is_list($predeploy) ||
+            !is_array($predeploy) ||
+            array_is_list($predeploy) ||
             DeploymentEvidenceAuthorityV1::encodeFile($predeploy) !== $predeployBytes ||
             ($predeploy['schema'] ?? null) !== DeploymentEvidenceAuthorityV1::PREDEPLOY_ASSEMBLY_SCHEMA ||
             ($predeploy['status'] ?? null) !== 'passed' ||
@@ -572,7 +722,11 @@ final class HostRunnerTerminalPersistence
         );
         $this->storage->pin($prefix . 'deploy-child-observation.json', $childObservationBytes, 65_536);
         $start = json_decode($startBytes, true, 16, JSON_THROW_ON_ERROR);
-        if (!is_array($start) || array_is_list($start) || DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes) {
+        if (
+            !is_array($start) ||
+            array_is_list($start) ||
+            DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes
+        ) {
             throw new RuntimeException('terminal rollback orchestrator start is invalid');
         }
         $orchestratorTiming = DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
@@ -658,11 +812,7 @@ final class HostRunnerTerminalPersistence
         $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
         $this->storage->cow($prefix . 'events.jsonl', $candidateEventsBytes, 1_048_576);
         $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
-        $this->storage->cow(
-            $prefix . 'state.json',
-            DeploymentHostRunnerContractV1::encodeFile($candidateState),
-            4_096,
-        );
+        $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidateState), 4_096);
         if (
             DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
                 $candidateState,
@@ -740,18 +890,33 @@ final class HostRunnerTerminalPersistence
                 'total_ms' => $timing['total_ms'],
             ];
         } catch (Throwable) {
-            return ['status' => 'invalid', 'authoritative_sha256' => $pin['sha256'], 'run_id' => null, 'total_ms' => null];
+            return [
+                'status' => 'invalid',
+                'authoritative_sha256' => $pin['sha256'],
+                'run_id' => null,
+                'total_ms' => null,
+            ];
         }
     }
 
     /** @return array<string,mixed> */
     private function notObservedPostGates(): array
     {
-        $value = array_fill_keys([
-            'status', 'kuma_healthy_count', 'kuma_total_count', 'runtime_config_passed',
-            'services_passed', 'endpoints_passed', 'logs_passed', 'scanner_passed',
-            'dormant_clean_passed', 'passed',
-        ], null);
+        $value = array_fill_keys(
+            [
+                'status',
+                'kuma_healthy_count',
+                'kuma_total_count',
+                'runtime_config_passed',
+                'services_passed',
+                'endpoints_passed',
+                'logs_passed',
+                'scanner_passed',
+                'dormant_clean_passed',
+                'passed',
+            ],
+            null,
+        );
         $value['status'] = 'not_observed';
         return $value;
     }
@@ -775,7 +940,8 @@ final class HostRunnerTerminalPersistence
         }
         $finish = json_decode($bytes, true, 16, JSON_THROW_ON_ERROR);
         if (
-            !is_array($finish) || array_is_list($finish) ||
+            !is_array($finish) ||
+            array_is_list($finish) ||
             array_keys($finish) !== ['boot_id', 'finished_at_utc', 'monotonic_ns', 'run_id', 'schema'] ||
             DeploymentHostRunnerContractV1::encodeFile($finish) !== $bytes ||
             ($finish['schema'] ?? null) !== self::ORCHESTRATOR_FINISH_SCHEMA ||
@@ -803,9 +969,10 @@ final class HostRunnerTerminalPersistence
         ?string $claimBytes = null,
         ?array $claim = null,
     ): array {
-        $deployReportBytes = $state['post_gates']['deploy_submission_count'] === 0
-            ? null
-            : $this->required($prefix . 'deploy-post-gate-report.json', 16_384);
+        $deployReportBytes =
+            $state['post_gates']['deploy_submission_count'] === 0
+                ? null
+                : $this->required($prefix . 'deploy-post-gate-report.json', 16_384);
         if (
             DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
                 $state,
@@ -813,11 +980,13 @@ final class HostRunnerTerminalPersistence
                 $evidenceBytes,
                 $deployReportBytes,
                 null,
-                ['deploy' => [
-                    'launch' => $launchBytes,
-                    'binding' => $bindingBytes,
-                    'observation' => $observationBytes,
-                ]],
+                [
+                    'deploy' => [
+                        'launch' => $launchBytes,
+                        'binding' => $bindingBytes,
+                        'observation' => $observationBytes,
+                    ],
+                ],
             ) !== 'current'
         ) {
             throw new RuntimeException('durable terminal deploy bundle is not current');
@@ -835,11 +1004,13 @@ final class HostRunnerTerminalPersistence
                 $state['intent_sha256'],
                 $deployReportBytes,
                 null,
-                ['deploy' => [
-                    'launch' => $launchBytes,
-                    'binding' => $bindingBytes,
-                    'observation' => $observationBytes,
-                ]],
+                [
+                    'deploy' => [
+                        'launch' => $launchBytes,
+                        'binding' => $bindingBytes,
+                        'observation' => $observationBytes,
+                    ],
+                ],
             );
             if ($disposition === 'refresh_terminal_claim') {
                 $terminalClaim = [
