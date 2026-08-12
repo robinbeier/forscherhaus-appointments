@@ -310,6 +310,7 @@ try:
             if identity(opened) != identity(after) or identity(after) != identity(post):
                 raise OSError('timing file changed')
             os.fsync(directory)
+            os.fsync(opened_directories[-1][0])
             for parent_fd, component, opened_fd, expected in opened_directories:
                 opened_now = os.fstat(opened_fd)
                 linked_now = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)

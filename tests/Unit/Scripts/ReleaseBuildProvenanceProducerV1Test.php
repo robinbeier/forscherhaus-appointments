@@ -81,6 +81,7 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
                 'uncompressed_size_bytes' => 4_000,
                 'gzip_exit_code' => 0,
                 'restore_exit_code' => 0,
+                'restored_datadir_allocated_bytes' => 8_000,
                 'restored_at_utc' => '2026-08-12T12:01:00Z',
             ],
             '2026-08-12T12:01:01Z',
@@ -114,7 +115,7 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
             '2026-08-12T12:01:01Z',
             $devices,
         );
-        $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 67_108_864 + 4_000;
+        $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 67_108_864 + 4_000 + 8_000;
         self::assertSame($expectedBase, $capacity['base_required_bytes']);
         self::assertSame(68, $capacity['projected_required_inodes']);
     }

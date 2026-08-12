@@ -41,7 +41,8 @@ safely complete the pair.
 
 The isolated restore verifier produces a global
 `deployment_dump_attestation.v1` from one stable dump observation and one
-successful MariaDB 10.11 restore observation. The attestation has no deployment
+successful MariaDB 10.11 restore observation, including the allocated datadir
+bytes measured after that restore. The attestation has no deployment
 Run-ID. The runner pins its exact SHA and creates a separate
 `deployment_run_dump_observation.v1` binding it to the deployment Run-ID and
 intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
@@ -53,7 +54,8 @@ release, artifact, dump, stage, restore scratch, and temporary targets. The
 archive byte bound and staged inode bound come only from the authenticated
 sidecar; later artifact observations cannot reduce either bound. Base required
 bytes are archive + compressed dump + archive-derived stage + deterministic
-temporary/restore scratch; rollback bytes are zero in v1. Headroom is
+temporary scratch + the uncompressed stream bound + the independently observed
+restored datadir footprint; rollback bytes are zero in v1. Headroom is
 `max(512 MiB, ceil(base/10))`. Available space must cover projected required
 bytes and both observed and projected used percentages must be below 85. Free
 inodes must cover the authenticated staged inode count plus a fixed 64-inode
@@ -67,7 +69,7 @@ the inode decision together with the byte and percentage checks.
 
 The contract assembles predeploy evidence only through one
 `ProtectedPredeployObservationProvider`. It receives the immutable deployment
-Run-ID, intent SHA, expected commit and traffic mode separately. Provider
+Run-ID, intent SHA, expected release ID, expected commit and traffic mode separately. Provider
 methods are invoked exactly in the order expected commit, traffic, dump,
 capacity, artifact; the first failed or invalid observation prevents every
 later method call. The provider returns closed raw-observation value objects,

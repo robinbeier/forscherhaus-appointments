@@ -120,6 +120,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
 
         self::assertSame(self::SHA, $decoded['dump_sha256']);
+        self::assertSame(8_000_000, $decoded['restored_datadir_allocated_bytes']);
     }
 
     public function testDumpAttestationIsBuiltOnlyFromExactInternalRestoreObservation(): void
@@ -138,6 +139,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 'uncompressed_size_bytes' => 4_000_000,
                 'gzip_exit_code' => 0,
                 'restore_exit_code' => 0,
+                'restored_datadir_allocated_bytes' => 8_000_000,
                 'restored_at_utc' => '2026-08-12T12:20:00Z',
             ],
             '2026-08-12T12:30:00Z',
@@ -162,6 +164,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 'uncompressed_size_bytes' => 4_000_000,
                 'gzip_exit_code' => 0,
                 'restore_exit_code' => 0,
+                'restored_datadir_allocated_bytes' => 8_000_000,
                 'restored_at_utc' => '2026-08-12T12:20:00Z',
             ],
             '2026-08-12T12:30:00Z',
@@ -363,7 +366,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             $this->capacityDevices(1),
         );
 
-        self::assertSame(1_205_123_456, $result['base_required_bytes']);
+        self::assertSame(1_213_123_456, $result['base_required_bytes']);
 
         $provenance['capacity_bounds']['stage_unpacked_bytes'] = 1;
         $this->expectException(RuntimeException::class);
@@ -1428,6 +1431,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 'sha256_verified' => true,
                 'gzip_verified' => true,
                 'restore_verified' => true,
+                'restored_datadir_allocated_bytes' => 8_000_000,
                 'restored_at_utc' => '2026-08-12T12:20:00Z',
             ],
             'attested_at_utc' => '2026-08-12T12:30:00Z',

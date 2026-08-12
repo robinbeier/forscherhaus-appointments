@@ -195,7 +195,14 @@ final class DeploymentEvidenceAuthorityV1
         self::assertObject($record['verification'], 'dump attestation verification');
         self::assertExactKeys(
             $record['verification'],
-            ['method', 'sha256_verified', 'gzip_verified', 'restore_verified', 'restored_at_utc'],
+            [
+                'method',
+                'sha256_verified',
+                'gzip_verified',
+                'restore_verified',
+                'restored_datadir_allocated_bytes',
+                'restored_at_utc',
+            ],
             'dump attestation verification',
         );
         self::assertSame($record['verification']['method'], 'mariadb_10_11_isolated_restore_v1', 'restore method');
@@ -204,6 +211,10 @@ final class DeploymentEvidenceAuthorityV1
                 throw new RuntimeException('dump attestation verification is incomplete');
             }
         }
+        self::assertPositiveInt(
+            $record['verification']['restored_datadir_allocated_bytes'],
+            'restored datadir allocated bytes',
+        );
         self::assertUtc($record['verification']['restored_at_utc'], 'dump attestation restored_at');
         self::assertUtc($record['attested_at_utc'], 'dump attestation attested_at');
         self::assertUtc($observedAtUtc, 'dump observed_at');
@@ -238,6 +249,7 @@ final class DeploymentEvidenceAuthorityV1
                 'uncompressed_size_bytes',
                 'gzip_exit_code',
                 'restore_exit_code',
+                'restored_datadir_allocated_bytes',
                 'restored_at_utc',
             ],
             'restore observation',
@@ -256,6 +268,10 @@ final class DeploymentEvidenceAuthorityV1
         }
         self::assertSame($restore['gzip_exit_code'], 0, 'restore observation gzip exit');
         self::assertSame($restore['restore_exit_code'], 0, 'restore observation restore exit');
+        self::assertPositiveInt(
+            $restore['restored_datadir_allocated_bytes'],
+            'restore observation datadir allocated bytes',
+        );
         self::assertUtc($restore['restored_at_utc'], 'restore observation restored_at');
         self::assertUtc($attestedAtUtc, 'dump attested_at');
         $record = [
@@ -266,6 +282,7 @@ final class DeploymentEvidenceAuthorityV1
                 'sha256_verified' => true,
                 'gzip_verified' => true,
                 'restore_verified' => true,
+                'restored_datadir_allocated_bytes' => $restore['restored_datadir_allocated_bytes'],
                 'restored_at_utc' => $restore['restored_at_utc'],
             ],
             'attested_at_utc' => $attestedAtUtc,
@@ -308,6 +325,7 @@ final class DeploymentEvidenceAuthorityV1
             'dump_sha256' => $attestation['dump']['sha256'],
             'dump_size_bytes' => $attestation['dump']['size_bytes'],
             'uncompressed_size_bytes' => $attestation['dump']['uncompressed_size_bytes'],
+            'restored_datadir_allocated_bytes' => $attestation['verification']['restored_datadir_allocated_bytes'],
             'observed_at_utc' => $observedAtUtc,
         ];
     }
@@ -456,7 +474,10 @@ final class DeploymentEvidenceAuthorityV1
             $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
             self::checkedAdd(
                 $verifiedProvenance['capacity_bounds']['temp_scratch_bytes'],
-                $verifiedDumpObservation['uncompressed_size_bytes'],
+                self::checkedAdd(
+                    $verifiedDumpObservation['uncompressed_size_bytes'],
+                    $verifiedDumpObservation['restored_datadir_allocated_bytes'],
+                ),
             ),
             0,
             $componentDevices,

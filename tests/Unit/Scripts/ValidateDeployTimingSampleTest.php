@@ -25,6 +25,10 @@ final class ValidateDeployTimingSampleTest extends TestCase
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
         self::assertSame("/var/lib/fh-deploy-timing\n", $result['stdout']);
+        self::assertStringContainsString(
+            'os.fsync(opened_directories[-1][0])',
+            (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh'),
+        );
     }
 
     public function testTimingDurabilityHelperFailsClosedForAnUnresolvableConfiguredDirectory(): void
