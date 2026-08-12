@@ -63,6 +63,15 @@ The traffic producer publishes the exact canonical report to
 global and per-run locks. This immutable run-local leaf is the sole traffic
 report authority; arbitrary report paths and caller-selected report digests are
 not accepted.
+The production collector always requests a 90-second deploy window. It stages
+the producer output under a nonce leaf in the already protected run directory,
+accepts only producer exits `0`, `20`, or `21`, and atomically publishes with
+no replacement followed by file and directory fsync. A first publication must
+place the observed window inside the helper's independently captured start and
+finish times and cover at least 90 seconds. An exact immutable replay may
+attach its original window. The PHP boundary recomputes the producer
+fingerprint and catalog version from the fixed producer/catalog sources before
+and after helper execution; any drift rejects the observation.
 
 Capacity uses one `statvfs` snapshot of the target filesystem (`f_frsize`,
 `f_bavail`, `f_files`, and `f_favail`) and an exact named device map for state,

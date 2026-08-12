@@ -324,6 +324,29 @@ PYTHON;
         }
     }
 
+    public function testTrafficCollectorAttachesExactImmutableRunReportWithoutProducerExecution(): void
+    {
+        self::assertSame(0, $this->runHelper(['prepare-run', $this->root, self::RUN_ID])['exit_code']);
+        $report = "{\"schema\":\"traffic_gate.v1\"}\n";
+        $path = $this->root . '/runs/' . self::RUN_ID . '/traffic-gate-report.json';
+        self::assertSame(strlen($report), file_put_contents($path, $report));
+        self::assertTrue(chmod($path, 0600));
+
+        $result = $this->runHelper(['collect-traffic', $this->root, self::RUN_ID, 'normal']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $decoded = json_decode($result['stdout'], true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame('attached', $decoded['status']);
+        self::assertSame(base64_encode($report), $decoded['bytes_base64']);
+        self::assertSame(hash('sha256', $report), $decoded['sha256']);
+        self::assertSame('', $result['stderr']);
+
+        self::assertSame(0, $this->runHelper(['prepare-run', $this->root, self::OTHER_RUN_ID])['exit_code']);
+        $missing = $this->runHelper(['collect-traffic', $this->root, self::OTHER_RUN_ID, 'normal']);
+        self::assertSame(70, $missing['exit_code']);
+        self::assertFileDoesNotExist($this->root . '/runs/' . self::OTHER_RUN_ID . '/traffic-gate-report.json');
+    }
+
     public function testPrepareRunIsIdempotentAndRejectsUnsafeExistingRunLeaf(): void
     {
         self::assertTrue(mkdir($this->root . '/runs', 0700));
