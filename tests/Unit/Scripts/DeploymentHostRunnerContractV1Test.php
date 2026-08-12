@@ -3671,6 +3671,20 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertStringContainsString('4. start the reserved unit exactly once.', $documentation);
     }
 
+    public function testDeploySupervisorDeadlineCoversEverySequentialInnerDeadline(): void
+    {
+        $source = (string) file_get_contents(
+            dirname(__DIR__, 3) . '/scripts/ops/libexec/deployment_host_runner_fs_v1.py',
+        );
+        self::assertMatchesRegularExpression('/^DEPLOY_CLI_TIMEOUT_SECONDS = 6300\\.0$/mD', $source);
+        self::assertMatchesRegularExpression('/^OTHER_CLI_TIMEOUT_SECONDS = 2400\\.0$/mD', $source);
+        self::assertStringContainsString(
+            "dispatch_timeout = DEPLOY_CLI_TIMEOUT_SECONDS if action == 'deploy' else OTHER_CLI_TIMEOUT_SECONDS",
+            $source,
+        );
+        self::assertGreaterThanOrEqual(1_805 + 125 + 1_805 + 305 + 1_800 + 4 * 30 + 2 * 60, 6_300);
+    }
+
     public function testCompleteJournalCanProveARecoverablyStaleStateCache(): void
     {
         $lines = $this->runThrough('deploy_running');

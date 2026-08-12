@@ -116,6 +116,36 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
         );
     }
 
+    public function testPinnedPredeployAssemblyResumesBeforeAnyProtectedCollectorRuns(): void
+    {
+        $request = DeploymentHostRunnerContractV1::decodeDeployRequest(
+            (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json'),
+        );
+        $input = DeploymentHostRunnerContractV1::decodeExecutionInput(
+            (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json'),
+        );
+        $storage = new PredeployMemoryStorage();
+        (new HostRunnerPredeployOrchestrator($storage, new PredeployFixedClock()))->collect(
+            $request,
+            $input,
+            $this->passedProvider($request),
+        );
+        $prefix = 'runs/' . $request['run_id'] . '/';
+        unset($storage->files[$prefix . 'events.jsonl'], $storage->files[$prefix . 'state.json']);
+        $durableAssembly = $storage->files[$prefix . 'predeploy-evidence.json'];
+        $provider = $this->passedProvider($request);
+
+        $response = (new HostRunnerPredeployOrchestrator($storage, new PredeployFixedClock()))->collect(
+            $request,
+            $input,
+            $provider,
+        );
+
+        self::assertSame('attach_pre_deploy', $response['disposition']);
+        self::assertSame([], $provider->ledger);
+        self::assertSame($durableAssembly, $storage->files[$prefix . 'predeploy-evidence.json']);
+    }
+
     public function testExpectedCommitMismatchPersistsValidatedTerminalBundleBeforeAnyReservation(): void
     {
         $request = DeploymentHostRunnerContractV1::decodeDeployRequest(

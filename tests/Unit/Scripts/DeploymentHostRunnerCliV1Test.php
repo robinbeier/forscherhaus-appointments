@@ -192,8 +192,11 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
             'reason' => 'deploy_failed',
         ];
         DeploymentHostRunnerContractV1::validateState($state);
+        $prefix = 'runs/' . $envelope['run_id'] . '/';
         $storage = new CliMemoryStorage([
-            'runs/' . $envelope['run_id'] . '/state.json' => DeploymentHostRunnerContractV1::encodeFile($state),
+            $prefix . 'state.json' => DeploymentHostRunnerContractV1::encodeFile($state),
+            $prefix . 'request.json' => $envelope['request_bytes'],
+            $prefix . 'execution-input.json' => $envelope['execution_input_bytes'],
         ]);
         $workflow = new CliDeployWorkflowFake($this->response($envelope, 'accepted', 'deploy_running'));
         $terminal = new CliTerminalizerFake([
@@ -221,6 +224,57 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         self::assertSame('failed_pre_switch', $response['state']);
         self::assertSame(1, $terminal->calls);
         self::assertSame('deploy', $terminal->action);
+        self::assertSame(0, $workflow->startCalls + $workflow->resumeCalls);
+        self::assertSame([], $storage->writes);
+    }
+
+    public function testDeployApplicationRejectsChangedExecutionInputBeforeClaimlessTerminalReplay(): void
+    {
+        $original = $this->deployEnvelope();
+        $changedInput = $original['execution_input'];
+        $changedInput['parameters']['renderer_deploy_mode'] =
+            $changedInput['parameters']['renderer_deploy_mode'] === 'host' ? 'external' : 'host';
+        $changedInputBytes = DeploymentHostRunnerContractV1::encodeExecutionInput($changedInput);
+        $changed = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope(
+                'deploy',
+                $original['run_id'],
+                $original['intent_sha256'],
+                $original['request_bytes'],
+                $changedInputBytes,
+                null,
+            ),
+        );
+        $state = DeploymentHostRunnerContractV1::decodeState((string) file_get_contents(self::FIXTURES . 'state.json'));
+        $state['state'] = 'failed_pre_switch';
+        $state['active_action'] = 'none';
+        $state['evidence_sha256'] = str_repeat('e', 64);
+        $state['terminal'] = ['state' => 'failed_pre_switch', 'exit_code' => 30, 'reason' => 'deploy_failed'];
+        DeploymentHostRunnerContractV1::validateState($state);
+        $prefix = 'runs/' . $original['run_id'] . '/';
+        $storage = new CliMemoryStorage([
+            $prefix . 'state.json' => DeploymentHostRunnerContractV1::encodeFile($state),
+            $prefix . 'request.json' => $original['request_bytes'],
+            $prefix . 'execution-input.json' => $original['execution_input_bytes'],
+        ]);
+        $workflow = new CliDeployWorkflowFake($this->response($original, 'accepted', 'deploy_running'));
+        $terminal = new CliTerminalizerFake(
+            $this->terminalResponse($original['run_id'], $original['intent_sha256'], 'deploy'),
+        );
+
+        $response = (new DeploymentHostRunnerCliApplicationV1(
+            $storage,
+            new CliReconstructorFake(),
+            new CliReconcilerFake(),
+            $workflow,
+            new CliPostGateWorkflowFake([]),
+            new CliRecoveryWorkflowFake([]),
+            $terminal,
+        ))->deploy($changed);
+
+        self::assertSame('rejected', $response['disposition']);
+        self::assertSame(75, $response['result_exit_code']);
+        self::assertSame(0, $terminal->calls);
         self::assertSame(0, $workflow->startCalls + $workflow->resumeCalls);
         self::assertSame([], $storage->writes);
     }

@@ -367,6 +367,9 @@ final class DeploymentHostRunnerCliApplicationV1
                     return self::response('deploy', $request, 'rejected', null, 75, 'state_conflict');
                 }
                 if (in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)) {
+                    if (!$this->matchesPinnedDeployAuthority($request['run_id'], $envelope)) {
+                        return self::response('deploy', $request, 'rejected', null, 75, 'state_conflict');
+                    }
                     return $this->validated($this->terminal->resumeTerminal($request['run_id'], 'deploy'));
                 }
             }
@@ -379,15 +382,7 @@ final class DeploymentHostRunnerCliApplicationV1
         ) {
             return self::response('deploy', $request, 'rejected', null, 75, 'state_conflict');
         }
-        $prefix = 'runs/' . $request['run_id'] . '/';
-        $pinnedRequestBytes = $this->storage->read($prefix . 'request.json', 16_384);
-        $pinnedInputBytes = $this->storage->read($prefix . 'execution-input.json', 16_384);
-        if (
-            $pinnedRequestBytes === null ||
-            $pinnedInputBytes === null ||
-            !hash_equals($pinnedRequestBytes, $envelope['request_bytes']) ||
-            !hash_equals($pinnedInputBytes, $envelope['execution_input_bytes'])
-        ) {
+        if (!$this->matchesPinnedDeployAuthority($request['run_id'], $envelope)) {
             return self::response('deploy', $request, 'rejected', null, 75, 'state_conflict');
         }
 
@@ -407,6 +402,18 @@ final class DeploymentHostRunnerCliApplicationV1
             throw new RuntimeException('active deploy claim has an unsupported durable state');
         }
         return self::response('deploy', $request, 'attach_observe_only', $state['state'], 0, 'ok');
+    }
+
+    /** @param array<string,mixed> $envelope */
+    private function matchesPinnedDeployAuthority(string $runId, array $envelope): bool
+    {
+        $prefix = 'runs/' . $runId . '/';
+        $pinnedRequestBytes = $this->storage->read($prefix . 'request.json', 16_384);
+        $pinnedInputBytes = $this->storage->read($prefix . 'execution-input.json', 16_384);
+        return $pinnedRequestBytes !== null &&
+            $pinnedInputBytes !== null &&
+            hash_equals($pinnedRequestBytes, $envelope['request_bytes']) &&
+            hash_equals($pinnedInputBytes, $envelope['execution_input_bytes']);
     }
 
     /** @param array<string,mixed> $envelope @return array<string,mixed> */

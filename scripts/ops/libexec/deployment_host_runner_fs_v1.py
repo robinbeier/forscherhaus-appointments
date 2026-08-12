@@ -42,6 +42,8 @@ CAPACITY_DEVICE_KEYS = (
 )
 CONTROLLER_ENVIRONMENT = {"LANG": "C", "LC_ALL": "C", "PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
 STATE_ROOT = "/var/lib/fh-deploy-orchestrator"
+DEPLOY_CLI_TIMEOUT_SECONDS = 6300.0
+OTHER_CLI_TIMEOUT_SECONDS = 2400.0
 DUMP_ATTESTATION_ROOT = "/var/lib/fh-deploy-evidence/dump-attestations"
 
 
@@ -1259,10 +1261,11 @@ def supervise_cli(root: str, action: str, first: str, second: str, *, probe: boo
         run_lock = open_lock(root, 'runs/%s/run.lock' % run_id)
         try:
             reserve_lock_descriptors(global_lock, run_lock)
+            dispatch_timeout = DEPLOY_CLI_TIMEOUT_SECONDS if action == 'deploy' else OTHER_CLI_TIMEOUT_SECONDS
             dispatch_exit, output = run_fixed_child_with_input(
                 fixed_php_cli_argv('probe' if probe else 'dispatch'),
                 envelope,
-                2400.0 if not probe else 3.0,
+                3.0 if probe else dispatch_timeout,
                 inherit_locks=True,
             )
             if dispatch_exit not in (0, EXIT_INVALID, EXIT_CONFLICT):

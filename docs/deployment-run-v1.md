@@ -599,6 +599,12 @@ envelope supplies both the Run-ID used for lock selection and the bytes later
 consumed by the locked PHP action; PHP never reopens the caller paths. Invalid
 or identity-mismatched input therefore creates no run-local state.
 
+The supervisor keeps an action-specific bounded outer deadline while holding
+both locks. Deploy allows 6300 seconds so the sequential protected build,
+traffic, dump, capacity, reference-pin, preflight, and admission deadlines can
+all complete; the other production actions retain a 2400-second bound. The
+test-only lock probe remains limited to three seconds.
+
 The production-change lock is global across conforming Host Runner invocations,
 not across manual root actions or non-participating tools. Those privileged
 actors remain outside this exclusion boundary until they explicitly adopt the

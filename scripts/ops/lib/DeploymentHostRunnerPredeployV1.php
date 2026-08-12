@@ -90,16 +90,21 @@ final class HostRunnerPredeployOrchestrator
             16_384,
         );
 
-        $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-            $provider,
-            $runId,
-            $intentSha256,
-            $request['release_id'],
-            $request['expected_commit'],
-            $request['traffic_mode'],
-        );
-        $assemblyBytes = DeploymentEvidenceAuthorityV1::encodeFile($assembly);
-        $this->storage->pin($prefix . 'predeploy-evidence.json', $assemblyBytes, 65_536);
+        $assemblyBytes = $this->storage->read($prefix . 'predeploy-evidence.json', 65_536);
+        if ($assemblyBytes === null) {
+            $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+                $provider,
+                $runId,
+                $intentSha256,
+                $request['release_id'],
+                $request['expected_commit'],
+                $request['traffic_mode'],
+            );
+            $assemblyBytes = DeploymentEvidenceAuthorityV1::encodeFile($assembly);
+            $this->storage->pin($prefix . 'predeploy-evidence.json', $assemblyBytes, 65_536);
+        } else {
+            $assembly = DeploymentEvidenceAuthorityV1::decodePinnedPredeployAssembly($assemblyBytes);
+        }
 
         $baseStates = ['built', 'uploaded', 'accepted', 'lock_acquired'];
         $verifiedStates = [
