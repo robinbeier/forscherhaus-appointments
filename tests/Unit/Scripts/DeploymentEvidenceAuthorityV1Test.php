@@ -32,6 +32,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
 {
     private const RUN_ID = '018f6f52-4c87-4d4e-8b19-6a66e6e1af25';
     private const TIMING_RUN_ID = '128f6f52-4c87-4d4e-8b19-6a66e6e1af25';
+    private const RELEASE_ID = 'ea_20260812_1200';
     private const COMMIT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     private const SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
@@ -670,6 +671,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             $provider,
             self::RUN_ID,
             self::SHA,
+            self::RELEASE_ID,
             self::COMMIT,
             'normal',
         );
@@ -781,6 +783,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             $provider,
             self::RUN_ID,
             self::SHA,
+            self::RELEASE_ID,
             self::COMMIT,
             'normal',
         );
@@ -871,6 +874,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 $provider,
                 self::RUN_ID,
                 self::SHA,
+                self::RELEASE_ID,
                 self::COMMIT,
                 'normal',
             );
@@ -894,6 +898,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             $provider,
             self::RUN_ID,
             self::SHA,
+            self::RELEASE_ID,
             self::COMMIT,
             'normal',
         );
@@ -907,6 +912,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             ),
             self::RUN_ID,
             self::SHA,
+            self::RELEASE_ID,
             self::COMMIT,
             'normal',
         );
@@ -1007,6 +1013,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     $provider,
                     self::RUN_ID,
                     self::SHA,
+                    self::RELEASE_ID,
                     self::COMMIT,
                     'normal',
                 );
@@ -1014,6 +1021,36 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             } catch (RuntimeException) {
                 self::assertSame($expectedLedger, $provider->ledger, $name);
             }
+        }
+    }
+
+    public function testRequestedReleaseCannotBeSubstitutedByAnotherValidProvenance(): void
+    {
+        $trafficBytes = $this->trafficReportBytes('allow', 0);
+        $provider = $this->passedProviderWithTraffic(
+            new TrafficObservationV1(
+                $trafficBytes,
+                hash('sha256', $trafficBytes),
+                self::SHA,
+                '2026-08-09.1',
+                1,
+                91,
+            ),
+        );
+
+        try {
+            DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+                $provider,
+                self::RUN_ID,
+                self::SHA,
+                'ea_20260812_1201',
+                self::COMMIT,
+                'normal',
+            );
+            self::fail('A different valid release provenance was accepted for the requested release.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('protected release', $exception->getMessage());
+            self::assertSame(['expected_commit'], $provider->ledger);
         }
     }
 
@@ -1096,6 +1133,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     $provider,
                     self::RUN_ID,
                     self::SHA,
+                    self::RELEASE_ID,
                     self::COMMIT,
                     'normal',
                 );

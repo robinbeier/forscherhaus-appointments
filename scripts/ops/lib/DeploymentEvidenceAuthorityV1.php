@@ -1014,6 +1014,7 @@ final class DeploymentEvidenceAuthorityV1
         string $intentSha256,
         string $provenanceBytes,
         string $pinnedProvenanceSha256,
+        string $expectedReleaseId,
         string $expectedCommit,
     ): VerifiedPredeployGateV1 {
         self::assertSha256($pinnedProvenanceSha256, 'expected commit pinned provenance sha256');
@@ -1027,6 +1028,8 @@ final class DeploymentEvidenceAuthorityV1
             'expected commit provenance',
         );
         self::assertSame($record['schema'], self::BUILD_PROVENANCE_SCHEMA, 'expected commit provenance schema');
+        self::assertReleaseId($record['release_id']);
+        self::assertSame($record['release_id'], $expectedReleaseId, 'expected commit protected release');
         self::assertCommit($record['expected_commit'], 'expected commit provenance expected');
         self::assertCommit($record['observed_commit'], 'expected commit provenance observed');
         self::assertSame($record['expected_commit'], $expectedCommit, 'expected commit protected intent');
@@ -1268,12 +1271,14 @@ final class DeploymentEvidenceAuthorityV1
         ProtectedPredeployObservationProvider $provider,
         string $runId,
         string $intentSha256,
+        string $expectedReleaseId,
         string $expectedCommit,
         string $expectedTrafficMode,
     ): array {
         require_once __DIR__ . '/ProtectedPredeployObservationProvider.php';
         self::assertUuidV4($runId, 'predeploy provider run_id');
         self::assertSha256($intentSha256, 'predeploy provider intent_sha256');
+        self::assertReleaseId($expectedReleaseId);
         self::assertCommit($expectedCommit, 'predeploy provider expected commit');
         $boundProvenanceSha256 = null;
         $boundAttestationSha256 = null;
@@ -1284,6 +1289,7 @@ final class DeploymentEvidenceAuthorityV1
                 $provider,
                 $runId,
                 $intentSha256,
+                $expectedReleaseId,
                 $expectedCommit,
                 &$boundProvenanceSha256,
             ): VerifiedPredeployGateV1 {
@@ -1293,6 +1299,7 @@ final class DeploymentEvidenceAuthorityV1
                     $intentSha256,
                     $observation->provenanceBytes,
                     $observation->pinnedProvenanceSha256,
+                    $expectedReleaseId,
                     $expectedCommit,
                 );
                 $boundProvenanceSha256 = $observation->pinnedProvenanceSha256;
@@ -1393,6 +1400,7 @@ final class DeploymentEvidenceAuthorityV1
                 $provider,
                 $runId,
                 $intentSha256,
+                $expectedReleaseId,
                 $expectedCommit,
                 &$boundProvenanceSha256,
                 &$boundAttestationSha256,
@@ -1438,7 +1446,7 @@ final class DeploymentEvidenceAuthorityV1
                         $sources->inodesAvailable,
                         $build->provenanceBytes,
                         $build->authorizedProvenanceSha256,
-                        $build->releaseId,
+                        $expectedReleaseId,
                         $expectedCommit,
                         $build->stageFileCount,
                         $build->stageInodeCount,
@@ -1471,6 +1479,7 @@ final class DeploymentEvidenceAuthorityV1
                 $provider,
                 $runId,
                 $intentSha256,
+                $expectedReleaseId,
                 $expectedCommit,
                 &$boundProvenanceSha256,
             ): VerifiedPredeployGateV1 {
@@ -1498,7 +1507,7 @@ final class DeploymentEvidenceAuthorityV1
                         $intentSha256,
                         $sources->provenanceBytes,
                         $sources->authorizedProvenanceSha256,
-                        $sources->releaseId,
+                        $expectedReleaseId,
                         $expectedCommit,
                         $sources->archiveSha256,
                         $sources->archiveSizeBytes,
