@@ -89,10 +89,13 @@ final class ReleaseArtifactValidator
         $normalizedRoot = rtrim($root, '/\\');
 
         foreach (['assets/js', 'assets/css'] as $relativeRoot) {
-            $absoluteRoot = $normalizedRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeRoot);
+            $absoluteRoot =
+                $normalizedRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeRoot);
 
             if (!is_dir($absoluteRoot) || is_link($absoluteRoot)) {
-                throw new RuntimeException('Release artifact generated-asset source tree is missing or unsafe: ' . $relativeRoot);
+                throw new RuntimeException(
+                    'Release artifact generated-asset source tree is missing or unsafe: ' . $relativeRoot,
+                );
             }
 
             $iterator = new \RecursiveIteratorIterator(
@@ -105,7 +108,11 @@ final class ReleaseArtifactValidator
                 }
 
                 $absolutePath = $entry->getPathname();
-                $sourcePaths[] = str_replace(DIRECTORY_SEPARATOR, '/', substr($absolutePath, strlen($normalizedRoot) + 1));
+                $sourcePaths[] = str_replace(
+                    DIRECTORY_SEPARATOR,
+                    '/',
+                    substr($absolutePath, strlen($normalizedRoot) + 1),
+                );
             }
         }
 
@@ -160,6 +167,7 @@ final class ReleaseArtifactValidator
             'scripts/release-gate/lib/ProviderUiSmokeCredentials.php',
             'scripts/release-gate/lib/ProviderUiSmokePdfInspector.php',
             'scripts/release-gate/lib/ProviderUiSmokeRunCodeResult.php',
+            'scripts/release-gate/lib/ZeroSurpriseImageCleanup.php',
             'scripts/release-gate/playwright/playwright_cli.sh',
             'scripts/release-gate/playwright/customers_ui_smoke.js',
             'scripts/release-gate/playwright/provider_ui_smoke.js',

@@ -57,7 +57,8 @@ final class ReleaseArtifactValidatorTest extends TestCase
                 'assets/css/themes/default.min.css',
                 'assets/vendor/@popperjs-core/popper.min.js',
                 'assets/vendor/bootstrap/bootstrap.min.css',
-            ] as $expectedPath
+            ]
+            as $expectedPath
         ) {
             self::assertContains($expectedPath, $paths);
         }
@@ -130,6 +131,19 @@ final class ReleaseArtifactValidatorTest extends TestCase
             'scripts/ops/validate_deploy_timing_sample.php',
             ReleaseArtifactValidator::requiredPaths(),
         );
+    }
+
+    public function testRequiredPathsIncludeZeroSurpriseImageCleanupRuntime(): void
+    {
+        $path = 'scripts/release-gate/lib/ZeroSurpriseImageCleanup.php';
+
+        self::assertContains($path, ReleaseArtifactValidator::requiredPaths());
+
+        $entries = array_values(
+            array_filter($this->completeStaticRequiredPaths(), static fn(string $entry): bool => $entry !== $path),
+        );
+
+        self::assertSame([$path], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
     public function testRequiredPathsCoverCompleteCustomersUiSmokeRuntimeSurface(): void
@@ -628,7 +642,12 @@ final class ReleaseArtifactValidatorTest extends TestCase
     private function completeStaticRequiredPaths(): array
     {
         return array_values(
-            array_unique(array_merge(ReleaseArtifactValidator::requiredPaths(), ReleaseArtifactValidator::generatedVendorPaths())),
+            array_unique(
+                array_merge(
+                    ReleaseArtifactValidator::requiredPaths(),
+                    ReleaseArtifactValidator::generatedVendorPaths(),
+                ),
+            ),
         );
     }
 
