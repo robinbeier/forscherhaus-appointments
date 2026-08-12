@@ -392,6 +392,7 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
 
     public function testTrafficCollectorAttachesExactImmutableRunReportWithoutProducerExecution(): void
     {
+        self::assertSame(0, $this->runHelper(['prepare-host', $this->root])['exit_code']);
         self::assertSame(0, $this->runHelper(['prepare-run', $this->root, self::RUN_ID])['exit_code']);
         $report = "{\"schema\":\"traffic_gate.v1\"}\n";
         $path = $this->root . '/runs/' . self::RUN_ID . '/traffic-gate-report.json';
@@ -415,6 +416,7 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
 
     public function testDumpObserverHashesExactPinnedRunCopyBeforeReportingMissingAttestation(): void
     {
+        self::assertSame(0, $this->runHelper(['prepare-host', $this->root])['exit_code']);
         self::assertSame(0, $this->runHelper(['prepare-run', $this->root, self::RUN_ID])['exit_code']);
         $dump = "CREATE TABLE exact_dump (id INT);\n";
         $sha = hash('sha256', $dump);
@@ -526,6 +528,7 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
 
     public function testCapacityObserverMeasuresLogicalAndAllocatedLiveStorageFromOneFilesystem(): void
     {
+        self::assertSame(0, $this->runHelper(['prepare-host', $this->root])['exit_code']);
         self::assertSame(0, $this->runHelper(['prepare-run', $this->root, self::RUN_ID])['exit_code']);
         foreach (['live-storage', 'live-storage/nested', 'renderer-state', 'restore-scratch', 'target'] as $relative) {
             self::assertTrue(mkdir($this->root . '/' . $relative, 0700));
@@ -936,8 +939,12 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::OTHER_RUN_ID . '/deploy-result.json',
         ]);
         $renderer = array_search('--renderer-deploy-mode', $deployArgv, true);
+        $timing = array_search('--timing-run-id', $deployArgv, true);
         self::assertIsInt($renderer);
+        self::assertIsInt($timing);
         $mutations['undocumented docker renderer'] = array_replace($deployArgv, [$renderer + 1 => 'docker']);
+        $mutations['invalid timing run'] = array_replace($deployArgv, [$timing + 1 => 'not-a-uuid']);
+        $mutations['orchestrator timing run'] = array_replace($deployArgv, [$timing + 1 => self::RUN_ID]);
 
         foreach ($mutations as $name => $mutated) {
             self::assertSame(70, $this->validateControllerArgv($mutated), $name);
