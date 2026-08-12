@@ -1292,6 +1292,60 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertSame(1, $timing->calls);
     }
 
+    public function testMissingReceiptTerminalizesManualRecoveryAndRetainsBlockingClaim(): void
+    {
+        $storage = $this->failedStoppedDeployStorage('failed_pre_switch', 30);
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        unset($storage->files[$prefix . 'deploy-result.json']);
+        $terminal = new \Ops\HostRunnerTerminalPersistence(
+            $storage,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        );
+
+        $response = $terminal->terminalizeUnverifiableDeploy(self::fixtureRunId());
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame('manual_recovery_required', $response['state']);
+        self::assertSame(70, $response['result_exit_code']);
+        self::assertSame('contract_invalid', $response['result_reason']);
+        self::assertArrayHasKey('active-run.json', $storage->files);
+        $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        self::assertSame('manual_recovery_required', $state['state']);
+        $evidence = json_decode($storage->files[$prefix . 'evidence.json'], true, 64, JSON_THROW_ON_ERROR);
+        self::assertSame('unknown', $evidence['deploy']['status']);
+        self::assertSame('not_observed', $evidence['post_gates']['status']);
+
+        $storage->operations = [];
+        $replay = $terminal->terminalizeUnverifiableDeploy(self::fixtureRunId());
+        self::assertSame($response, $replay);
+        self::assertArrayHasKey('active-run.json', $storage->files);
+        self::assertSame([], $storage->operations);
+    }
+
+    public function testUnverifiableDeployRejectsMismatchedClaimBeforeWrites(): void
+    {
+        $storage = $this->failedStoppedDeployStorage('failed_pre_switch', 30);
+        $claim = DeploymentHostRunnerContractV1::decodeActiveRun($storage->files['active-run.json']);
+        $claim['intent_sha256'] = str_repeat('f', 64);
+        $storage->files['active-run.json'] = DeploymentHostRunnerContractV1::encodeFile($claim);
+        $storage->operations = [];
+        $before = $storage->files;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('requires a stopped or absent reservation');
+        try {
+            (new \Ops\HostRunnerTerminalPersistence(
+                $storage,
+                new FixedTerminalClock(),
+                new NotObservedTimingPin(),
+            ))->terminalizeUnverifiableDeploy(self::fixtureRunId());
+        } finally {
+            self::assertSame($before, $storage->files);
+            self::assertSame([], $storage->operations);
+        }
+    }
+
     public function testTerminalCrashPrefixesResumeExactBytesWithoutFreshClockOrRespawnAuthority(): void
     {
         $prefix = 'runs/' . self::fixtureRunId() . '/';

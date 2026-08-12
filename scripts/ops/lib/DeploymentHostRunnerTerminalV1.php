@@ -293,6 +293,130 @@ final class HostRunnerTerminalPersistence
         return $this->terminalResponse($candidateState);
     }
 
+    /**
+     * Freeze a reserved deploy whose stopped/missing unit cannot be bound to a
+     * valid receipt. The active claim intentionally remains: unknown execution
+     * authority must never become permission for another deployment.
+     *
+     * @return array<string,mixed> canonical runner response
+     */
+    public function terminalizeUnverifiableDeploy(string $runId): array
+    {
+        $prefix = 'runs/' . $runId . '/';
+        $eventsBytes = $this->required($prefix . 'events.jsonl', 1_048_576);
+        $state = DeploymentHostRunnerContractV1::decodeState($this->required($prefix . 'state.json', 4_096));
+        $claimBytes = $this->required('active-run.json', 4_096);
+        $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
+        $predeployBytes = $this->required($prefix . 'predeploy-evidence.json', 65_536);
+        $launchBytes = $this->required($prefix . 'deploy-systemd-launch.json', 16_384);
+        $bindingBytes = $this->required($prefix . 'deploy-unit-binding.json', 16_384);
+        $observationBytes = $this->required($prefix . 'deploy-unit-observation.json', 65_536);
+        $startBytes = $this->required($prefix . 'orchestrator-start.json', 4_096);
+        if (in_array($state['state'], DeploymentContractV1::TERMINAL_FAILURE_STATES, true)) {
+            return $this->resumeTerminalDeploy(
+                $runId, $state, $eventsBytes, $this->required($prefix . 'evidence.json', 1_048_576),
+                $launchBytes, $bindingBytes, $observationBytes, $prefix, $claimBytes, $claim,
+            );
+        }
+        if (
+            $state['state'] !== 'deploy_running' || $state['active_action'] !== 'deploy' ||
+            !in_array($state['deploy']['unit_state'], ['exited', 'failed', 'killed', 'missing', 'unknown'], true) ||
+            $claim['run_id'] !== $runId || $state['run_id'] !== $runId ||
+            !hash_equals($claim['intent_sha256'], $state['intent_sha256']) ||
+            $claim['state'] !== $state['state'] || $claim['sequence'] !== $state['sequence'] ||
+            !hash_equals($claim['events_sha256'], $state['events_sha256'])
+        ) {
+            throw new RuntimeException('unverifiable terminal deploy requires a stopped or absent reservation');
+        }
+        $predeploy = json_decode($predeployBytes, true, 64, JSON_THROW_ON_ERROR);
+        if (
+            !is_array($predeploy) || array_is_list($predeploy) ||
+            DeploymentEvidenceAuthorityV1::encodeFile($predeploy) !== $predeployBytes ||
+            ($predeploy['schema'] ?? null) !== DeploymentEvidenceAuthorityV1::PREDEPLOY_ASSEMBLY_SCHEMA ||
+            ($predeploy['status'] ?? null) !== 'passed' || !is_array($predeploy['sections'] ?? null)
+        ) {
+            throw new RuntimeException('unverifiable deploy lacks passed predeploy evidence');
+        }
+        DeploymentContractV1::validatePredeploySections($predeploy['sections']);
+        $start = json_decode($startBytes, true, 16, JSON_THROW_ON_ERROR);
+        if (!is_array($start) || array_is_list($start) || DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes) {
+            throw new RuntimeException('unverifiable deploy orchestrator start is invalid');
+        }
+        $finish = $this->loadOrPinFinish($prefix, $runId);
+        $recordedAtUtc = $finish['finished_at_utc'];
+        $orchestratorTiming = DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
+            $start, $recordedAtUtc, $finish['boot_id'], $finish['monotonic_ns'], false,
+        );
+        $interrupted = $state['deploy']['unit_state'] === 'killed';
+        $exitCode = $interrupted ? 143 : 70;
+        $reason = $interrupted ? 'interrupted' : 'contract_invalid';
+        $lines = explode("\n", substr($eventsBytes, 0, -1));
+        $run = DeploymentContractV1::validateRunLines($lines);
+        if (
+            $run['state'] !== 'deploy_running' ||
+            DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes) !== 'current'
+        ) {
+            throw new RuntimeException('unverifiable deploy state is not current');
+        }
+        $lines[] = DeploymentContractV1::canonicalJson([
+            'schema' => DeploymentContractV1::RUN_SCHEMA, 'record_type' => 'transition',
+            'run_id' => $runId, 'sequence' => count($lines) + 1, 'recorded_at_utc' => $recordedAtUtc,
+            'previous_state' => 'deploy_running', 'state' => 'manual_recovery_required',
+            'deploy_invocation_count' => 1, 'intent_sha256' => $state['intent_sha256'],
+            'exit_code' => $exitCode, 'reason' => $reason,
+        ]);
+        $candidateEvents = implode("\n", $lines) . "\n";
+        $evidence = [
+            'schema' => DeploymentContractV1::EVIDENCE_SCHEMA,
+            'run_id' => $runId, 'intent_sha256' => $state['intent_sha256'],
+            'captured_at_utc' => $recordedAtUtc,
+            ...$predeploy['sections'],
+            'deploy' => ['status' => 'unknown', 'invocation_count' => 1, 'exit_code' => null, 'rollback_outcome' => 'not_observed'],
+            'rollback' => ['status' => 'not_invoked', 'invocation_count' => 0, 'mode' => 'not_applicable', 'verified' => null],
+            'post_gates' => $this->notObservedPostGates(),
+            'deploy_timing' => ['status' => 'not_observed', 'authoritative_sha256' => null, 'run_id' => null, 'total_ms' => null],
+            'orchestrator_timing' => $orchestratorTiming,
+            'result' => ['state' => 'manual_recovery_required', 'exit_code' => $exitCode, 'reason' => $reason],
+        ];
+        DeploymentContractV1::validateBundle($lines, $evidence);
+        $evidenceBytes = DeploymentHostRunnerContractV1::encodeFile($evidence);
+        $candidate = $state;
+        $candidate['state'] = 'manual_recovery_required';
+        $candidate['sequence'] = count($lines);
+        $candidate['events_sha256'] = hash('sha256', $candidateEvents);
+        $candidate['active_action'] = 'none';
+        $candidate['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $candidate['terminal'] = ['state' => 'manual_recovery_required', 'exit_code' => $exitCode, 'reason' => $reason];
+        $candidate['updated_at_utc'] = $recordedAtUtc;
+        DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidate);
+        $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
+        $this->storage->cow($prefix . 'events.jsonl', $candidateEvents, 1_048_576);
+        $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
+        $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidate), 4_096);
+        if (
+            DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
+                $candidate, $candidateEvents, $evidenceBytes, null, null,
+                ['deploy' => ['launch' => $launchBytes, 'binding' => $bindingBytes, 'observation' => $observationBytes]],
+            ) !== 'current'
+        ) {
+            throw new RuntimeException('unverifiable terminal deploy persistence is not current');
+        }
+        $terminalClaim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => $runId,
+            'intent_sha256' => $candidate['intent_sha256'],
+            'state' => $candidate['state'],
+            'sequence' => $candidate['sequence'],
+            'events_sha256' => $candidate['events_sha256'],
+            'claimed_at_utc' => $candidate['updated_at_utc'],
+        ];
+        $this->storage->refreshActiveClaim(
+            $claimBytes,
+            DeploymentHostRunnerContractV1::encodeFile($terminalClaim),
+        );
+        return $this->terminalResponse($candidate);
+    }
+
     /** @return array<string,mixed> canonical runner response */
     public function terminalizeRollback(string $runId): array
     {
@@ -676,6 +800,8 @@ final class HostRunnerTerminalPersistence
         string $bindingBytes,
         string $observationBytes,
         string $prefix,
+        ?string $claimBytes = null,
+        ?array $claim = null,
     ): array {
         $deployReportBytes = $state['post_gates']['deploy_submission_count'] === 0
             ? null
@@ -696,7 +822,45 @@ final class HostRunnerTerminalPersistence
         ) {
             throw new RuntimeException('durable terminal deploy bundle is not current');
         }
-        $this->clearTerminalClaimIfPresent($runId, $state['intent_sha256']);
+        if ($state['state'] === 'manual_recovery_required') {
+            if ($claimBytes === null || $claim === null) {
+                throw new RuntimeException('manual recovery terminal claim is missing');
+            }
+            $disposition = DeploymentHostRunnerContractV1::activeRunDisposition(
+                $claim,
+                $state,
+                $eventsBytes,
+                $evidenceBytes,
+                $runId,
+                $state['intent_sha256'],
+                $deployReportBytes,
+                null,
+                ['deploy' => [
+                    'launch' => $launchBytes,
+                    'binding' => $bindingBytes,
+                    'observation' => $observationBytes,
+                ]],
+            );
+            if ($disposition === 'refresh_terminal_claim') {
+                $terminalClaim = [
+                    'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+                    'run_id' => $runId,
+                    'intent_sha256' => $state['intent_sha256'],
+                    'state' => $state['state'],
+                    'sequence' => $state['sequence'],
+                    'events_sha256' => $state['events_sha256'],
+                    'claimed_at_utc' => $state['updated_at_utc'],
+                ];
+                $this->storage->refreshActiveClaim(
+                    $claimBytes,
+                    DeploymentHostRunnerContractV1::encodeFile($terminalClaim),
+                );
+            } elseif ($disposition !== 'clear_terminal') {
+                throw new RuntimeException('manual recovery terminal claim is inconsistent');
+            }
+        } else {
+            $this->clearTerminalClaimIfPresent($runId, $state['intent_sha256']);
+        }
         return $this->terminalResponse($state);
     }
 

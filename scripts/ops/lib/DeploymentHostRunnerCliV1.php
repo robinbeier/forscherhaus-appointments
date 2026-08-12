@@ -227,15 +227,23 @@ final readonly class SystemHostRunnerDeployWorkflow implements HostRunnerDeployW
             throw new RuntimeException('resumed deploy has no durable state');
         }
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
-        if (!in_array($state['deploy']['unit_state'], ['exited', 'failed'], true)) {
+        if (in_array($state['deploy']['unit_state'], ['starting', 'running'], true)) {
             return $response;
         }
+        $terminal = new HostRunnerTerminalPersistence($this->storage);
+        if (in_array($state['deploy']['unit_state'], ['killed', 'missing', 'unknown'], true)) {
+            return $terminal->terminalizeUnverifiableDeploy($request['run_id']);
+        }
         $completion = new HostRunnerActionCompletion($this->storage);
-        $receipt = $completion->requireDeployReceiptForStoppedUnit($request['run_id']);
+        try {
+            $receipt = $completion->requireDeployReceiptForStoppedUnit($request['run_id']);
+        } catch (RuntimeException) {
+            return $terminal->terminalizeUnverifiableDeploy($request['run_id']);
+        }
         if ($receipt['receipt']['outcome'] === 'succeeded') {
             return $completion->acceptSucceededDeployReceipt($request['run_id']);
         }
-        return (new HostRunnerTerminalPersistence($this->storage))->terminalizeDeploy($request['run_id']);
+        return $terminal->terminalizeDeploy($request['run_id']);
     }
 }
 
