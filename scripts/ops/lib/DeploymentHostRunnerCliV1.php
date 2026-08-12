@@ -398,14 +398,7 @@ final class DeploymentHostRunnerCliApplicationV1
         }
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
         if (in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)) {
-            return self::response(
-                'deploy',
-                $request,
-                'terminal',
-                $state['state'],
-                $state['terminal']['exit_code'],
-                $state['terminal']['reason'],
-            );
+            return $this->validated($this->terminal->resumeTerminal($request['run_id'], 'deploy'));
         }
         if ($state['state'] === 'deploy_running') {
             return $this->validated($this->deployWorkflow->resume($request, $input));
@@ -459,6 +452,22 @@ final class DeploymentHostRunnerCliApplicationV1
             return self::response('post-gates', $request, 'rejected', null, 75, 'state_conflict');
         }
         $this->reconciler->reconcile($request['run_id'], $request['intent_sha256']);
+        $prefix = 'runs/' . $request['run_id'] . '/';
+        $stateBytes = $this->storage->read($prefix . 'state.json', 4_096);
+        if ($stateBytes === null) {
+            throw new RuntimeException('reconciled post-gates run has no durable state');
+        }
+        $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+        if (in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)) {
+            $storedReport = $this->storage->read(
+                $prefix . $envelope['report']['subject'] . '-post-gate-report.json',
+                16_384,
+            );
+            if ($storedReport === null || !hash_equals($storedReport, $envelope['report_bytes'])) {
+                return self::response('post-gates', $request, 'rejected', null, 75, 'state_conflict');
+            }
+            return $this->validated($this->terminal->resumeTerminal($request['run_id'], 'post-gates'));
+        }
         return $this->validated(
             $this->postGateWorkflow->submit($request, $envelope['report'], $envelope['report_bytes']),
         );
@@ -551,6 +560,25 @@ final class DeploymentHostRunnerCliApplicationV1
             return self::response('recovery', $request, 'rejected', null, 75, 'state_conflict');
         }
         $this->reconciler->reconcile($request['run_id'], $request['intent_sha256']);
+        $prefix = 'runs/' . $request['run_id'] . '/';
+        $stateBytes = $this->storage->read($prefix . 'state.json', 4_096);
+        if ($stateBytes === null) {
+            throw new RuntimeException('reconciled recovery run has no durable state');
+        }
+        $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+        if (in_array($state['state'], DeploymentContractV1::TERMINAL_FAILURE_STATES, true)) {
+            $pinnedRequestBytes = $this->storage->read($prefix . 'recovery-request.json', 16_384);
+            $pinnedInputBytes = $this->storage->read($prefix . 'recovery-execution-input.json', 16_384);
+            if (
+                $pinnedRequestBytes === null ||
+                $pinnedInputBytes === null ||
+                !hash_equals($pinnedRequestBytes, $envelope['request_bytes']) ||
+                !hash_equals($pinnedInputBytes, $envelope['execution_input_bytes'])
+            ) {
+                return self::response('recovery', $request, 'rejected', null, 75, 'state_conflict');
+            }
+            return $this->validated($this->terminal->resumeTerminal($request['run_id'], 'recovery'));
+        }
         return $this->validated($this->recoveryWorkflow->admit($request, $envelope['execution_input']));
     }
 

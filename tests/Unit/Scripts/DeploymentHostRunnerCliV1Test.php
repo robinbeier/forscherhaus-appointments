@@ -321,6 +321,43 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         self::assertSame([], $storage->writes);
     }
 
+    public function testDeployApplicationReplaysTerminalStateProducedByClaimReconciliation(): void
+    {
+        $envelope = $this->deployEnvelope();
+        $report = (string) file_get_contents(self::FIXTURES . 'post-gate-report.json');
+        $prefix = 'runs/' . $envelope['run_id'] . '/';
+        $storage = new CliMemoryStorage([
+            'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+            $prefix . 'state.json' => (string) file_get_contents(self::FIXTURES . 'state.json'),
+            $prefix . 'request.json' => $envelope['request_bytes'],
+            $prefix . 'execution-input.json' => $envelope['execution_input_bytes'],
+        ]);
+        $reconciler = new CliReconcilerFake(static function () use ($storage, $prefix, $report): void {
+            $storage->files[$prefix . 'state.json'] = self::terminalStateBytesStatic($report);
+        });
+        $workflow = new CliDeployWorkflowFake($this->response($envelope, 'attach_observe_only', 'deploy_running'));
+        $terminal = new CliTerminalizerFake(
+            $this->terminalResponse($envelope['run_id'], $envelope['intent_sha256'], 'deploy'),
+        );
+        $app = new DeploymentHostRunnerCliApplicationV1(
+            $storage,
+            new CliReconstructorFake(),
+            $reconciler,
+            $workflow,
+            new CliPostGateWorkflowFake([]),
+            new CliRecoveryWorkflowFake([]),
+            $terminal,
+        );
+
+        $response = $app->deploy($envelope);
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame(1, $reconciler->calls);
+        self::assertSame(1, $terminal->calls);
+        self::assertSame('deploy', $terminal->action);
+        self::assertSame(0, $workflow->startCalls + $workflow->resumeCalls);
+    }
+
     public function testPostGateApplicationRequiresSameClaimAndRoutesExactReportOnce(): void
     {
         $deploy = (string) file_get_contents(self::FIXTURES . 'deploy-request.json');
@@ -331,6 +368,7 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         );
         $storage = new CliMemoryStorage([
             'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+            'runs/' . $request['run_id'] . '/state.json' => (string) file_get_contents(self::FIXTURES . 'state.json'),
         ]);
         $postGates = new CliPostGateWorkflowFake([
             'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
@@ -355,6 +393,46 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         self::assertSame('attach_observe_only', $response['disposition']);
         self::assertSame(1, $postGates->calls);
         self::assertSame($report, $postGates->reportBytes);
+    }
+
+    public function testPostGateApplicationReplaysTerminalStateProducedByClaimReconciliation(): void
+    {
+        $deploy = (string) file_get_contents(self::FIXTURES . 'deploy-request.json');
+        $report = (string) file_get_contents(self::FIXTURES . 'post-gate-report.json');
+        $request = DeploymentHostRunnerContractV1::decodeDeployRequest($deploy);
+        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope('post-gates', $request['run_id'], $request['intent_sha256'], $deploy, null, $report),
+        );
+        $prefix = 'runs/' . $request['run_id'] . '/';
+        $storage = new CliMemoryStorage([
+            'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+            $prefix . 'state.json' => (string) file_get_contents(self::FIXTURES . 'state.json'),
+            $prefix . 'deploy-post-gate-report.json' => $report,
+        ]);
+        $reconciler = new CliReconcilerFake(static function () use ($storage, $prefix, $report): void {
+            $storage->files[$prefix . 'state.json'] = self::terminalStateBytesStatic($report);
+        });
+        $postGates = new CliPostGateWorkflowFake([]);
+        $terminal = new CliTerminalizerFake(
+            $this->terminalResponse($request['run_id'], $request['intent_sha256'], 'post-gates'),
+        );
+        $app = new DeploymentHostRunnerCliApplicationV1(
+            $storage,
+            new CliReconstructorFake(),
+            $reconciler,
+            new CliDeployWorkflowFake($this->response($this->deployEnvelope(), 'accepted', 'deploy_running')),
+            $postGates,
+            new CliRecoveryWorkflowFake([]),
+            $terminal,
+        );
+
+        $response = $app->postGates($envelope);
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame(1, $reconciler->calls);
+        self::assertSame(1, $terminal->calls);
+        self::assertSame('post-gates', $terminal->action);
+        self::assertSame(0, $postGates->calls);
     }
 
     public function testPostGateApplicationReplaysMatchingDurableTerminalReportWithoutClaim(): void
@@ -559,6 +637,7 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         );
         $storage = new CliMemoryStorage([
             'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+            'runs/' . $request['run_id'] . '/state.json' => (string) file_get_contents(self::FIXTURES . 'state.json'),
         ]);
         $workflow = new CliRecoveryWorkflowFake([
             'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
@@ -584,6 +663,75 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
         self::assertSame('accepted', $response['disposition']);
         self::assertSame(1, $workflow->calls);
         self::assertSame('rollback', $workflow->input['action']);
+    }
+
+    public function testRecoveryReplaysTerminalStateProducedByClaimReconciliation(): void
+    {
+        $recoveryBytes = (string) file_get_contents(self::FIXTURES . 'recovery-request.json');
+        $request = DeploymentHostRunnerContractV1::decodeRecoveryRequest($recoveryBytes);
+        $deployInput = DeploymentHostRunnerContractV1::decodeExecutionInput(
+            (string) file_get_contents(self::FIXTURES . 'execution-input.json'),
+        );
+        $input = [
+            'schema' => DeploymentHostRunnerContractV1::EXECUTION_INPUT_SCHEMA,
+            'run_id' => $request['run_id'],
+            'intent_sha256' => $request['intent_sha256'],
+            'action' => 'rollback',
+            'parameters' => ['release_id' => $deployInput['parameters']['release_id']],
+        ];
+        $inputBytes = DeploymentHostRunnerContractV1::encodeExecutionInput($input);
+        $envelope = DeploymentHostRunnerCliEnvelopeV1::decode(
+            $this->envelope(
+                'recovery',
+                $request['run_id'],
+                $request['intent_sha256'],
+                $recoveryBytes,
+                $inputBytes,
+                null,
+            ),
+        );
+        $report = (string) file_get_contents(self::FIXTURES . 'post-gate-report.json');
+        $prefix = 'runs/' . $request['run_id'] . '/';
+        $storage = new CliMemoryStorage([
+            'active-run.json' => (string) file_get_contents(self::FIXTURES . 'active-run.json'),
+            $prefix . 'state.json' => (string) file_get_contents(self::FIXTURES . 'state.json'),
+            $prefix . 'recovery-request.json' => $recoveryBytes,
+            $prefix . 'recovery-execution-input.json' => $inputBytes,
+        ]);
+        $reconciler = new CliReconcilerFake(static function () use ($storage, $prefix, $report): void {
+            $storage->files[$prefix . 'state.json'] = self::terminalStateBytesStatic(
+                $report,
+                'failed_post_switch_rollback_failed',
+            );
+        });
+        $workflow = new CliRecoveryWorkflowFake([]);
+        $terminal = new CliTerminalizerFake([
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => $request['run_id'],
+            'intent_sha256' => $request['intent_sha256'],
+            'action' => 'recovery',
+            'disposition' => 'terminal',
+            'state' => 'failed_post_switch_rollback_failed',
+            'result_exit_code' => 31,
+            'result_reason' => 'rollback_failed',
+        ]);
+        $app = new DeploymentHostRunnerCliApplicationV1(
+            $storage,
+            new CliReconstructorFake(),
+            $reconciler,
+            new CliDeployWorkflowFake($this->response($this->deployEnvelope(), 'accepted', 'deploy_running')),
+            new CliPostGateWorkflowFake([]),
+            $workflow,
+            $terminal,
+        );
+
+        $response = $app->recovery($envelope);
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame(1, $reconciler->calls);
+        self::assertSame(1, $terminal->calls);
+        self::assertSame('recovery', $terminal->action);
+        self::assertSame(0, $workflow->calls);
     }
 
     public function testRecoveryReplaysDurableTerminalRunWithoutClaim(): void
@@ -718,6 +866,13 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
 
     private function terminalStateBytes(string $deployReportBytes, string $terminalState = 'succeeded'): string
     {
+        return self::terminalStateBytesStatic($deployReportBytes, $terminalState);
+    }
+
+    private static function terminalStateBytesStatic(
+        string $deployReportBytes,
+        string $terminalState = 'succeeded',
+    ): string {
         $state = DeploymentHostRunnerContractV1::decodeState((string) file_get_contents(self::FIXTURES . 'state.json'));
         $state['state'] = $terminalState;
         $state['active_action'] = 'none';
@@ -797,9 +952,13 @@ final class CliReconstructorFake implements HostRunnerReservationReconstructor
 final class CliReconcilerFake implements HostRunnerStoredReconciler
 {
     public int $calls = 0;
+    public function __construct(private readonly ?\Closure $onReconcile = null) {}
     public function reconcile(string $runId, string $intentSha256): string
     {
         $this->calls++;
+        if ($this->onReconcile !== null) {
+            ($this->onReconcile)($runId, $intentSha256);
+        }
         return 'attach_observe_only';
     }
 }

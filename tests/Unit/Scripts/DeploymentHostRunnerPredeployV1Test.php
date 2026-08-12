@@ -143,6 +143,12 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
         $eventsBytes = $storage->files[$prefix . 'events.jsonl'];
         $evidenceBytes = $storage->files[$prefix . 'evidence.json'];
         $stateBytes = $storage->files[$prefix . 'state.json'];
+        self::assertArrayHasKey($prefix . 'orchestrator-finish.json', $storage->files);
+        $finishPin = array_search(['pin', $prefix . 'orchestrator-finish.json'], $storage->operations, true);
+        $firstEvidenceWrite = array_search(['cow', $prefix . 'evidence.json'], $storage->operations, true);
+        self::assertIsInt($finishPin);
+        self::assertIsInt($firstEvidenceWrite);
+        self::assertLessThan($firstEvidenceWrite, $finishPin);
         $lines = explode("\n", substr($eventsBytes, 0, -1));
         $evidence = json_decode($evidenceBytes, true, 64, JSON_THROW_ON_ERROR);
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
@@ -150,10 +156,7 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
         self::assertSame('failed_before_write', $state['state']);
         self::assertSame(hash('sha256', $evidenceBytes), $state['evidence_sha256']);
         self::assertSame('terminal', DeploymentContractV1::validateBundle($lines, $evidence)['recovery']);
-        self::assertSame(
-            ['cow', $prefix . 'evidence.json'],
-            array_slice($storage->operations, -4, 1)[0],
-        );
+        self::assertSame(['cow', $prefix . 'evidence.json'], array_slice($storage->operations, -4, 1)[0]);
         self::assertSame(
             [
                 ['cow', $prefix . 'evidence.json'],
@@ -181,10 +184,7 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
         $first->collect($request, $input, new ExpectedCommitOnlyProvider($provenanceBytes));
         $durable = $storage->files;
 
-        $secondClock = new PredeployFixedClock(
-            ['2026-08-12T13:00:00Z'],
-            [99_000_000_000],
-        );
+        $secondClock = new PredeployFixedClock(['2026-08-12T13:00:00Z'], [99_000_000_000]);
         $response = (new HostRunnerPredeployOrchestrator($storage, $secondClock))->collect(
             $request,
             $input,
@@ -319,44 +319,75 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
 
     private function trafficReportBytes(): string
     {
-        $counts = array_fill_keys([
-            'documented_health', 'documented_periodic_ops', 'public_read', 'denied_external',
-            'business_or_authenticated', 'unclassified', 'status_5xx', 'write', 'authenticated',
-            'customers_or_sensitive', 'scanner_success', 'source_unknown', 'method_unknown',
-            'target_unknown', 'pre_window_completion', 'lines_seen', 'lines_in_window',
-            'parse_errors', 'rotation_errors', 'total',
-        ], 0);
+        $counts = array_fill_keys(
+            [
+                'documented_health',
+                'documented_periodic_ops',
+                'public_read',
+                'denied_external',
+                'business_or_authenticated',
+                'unclassified',
+                'status_5xx',
+                'write',
+                'authenticated',
+                'customers_or_sensitive',
+                'scanner_success',
+                'source_unknown',
+                'method_unknown',
+                'target_unknown',
+                'pre_window_completion',
+                'lines_seen',
+                'lines_in_window',
+                'parse_errors',
+                'rotation_errors',
+                'total',
+            ],
+            0,
+        );
         $counts['documented_health'] = 1;
         $counts['lines_seen'] = 1;
         $counts['lines_in_window'] = 1;
         $counts['total'] = 1;
-        return json_encode([
-            'schema' => 'traffic_gate.v1',
-            'producer_sha256' => str_repeat('b', 64),
-            'policy_version' => 'traffic_gate_policy.v1',
-            'catalog_version' => '2026-08-09.1',
-            'purpose' => 'deploy',
-            'mode' => 'normal',
-            'window_start_epoch' => 1,
-            'window_end_epoch' => 91,
-            'window_seconds' => 90,
-            'log_set_sha256' => str_repeat('b', 64),
-            'rotation_complete' => true,
-            'parse_complete' => true,
-            'evidence_complete' => true,
-            'decision' => 'allow',
-            'exit_code' => 0,
-            'counts' => $counts,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        return json_encode(
+            [
+                'schema' => 'traffic_gate.v1',
+                'producer_sha256' => str_repeat('b', 64),
+                'policy_version' => 'traffic_gate_policy.v1',
+                'catalog_version' => '2026-08-09.1',
+                'purpose' => 'deploy',
+                'mode' => 'normal',
+                'window_start_epoch' => 1,
+                'window_end_epoch' => 91,
+                'window_seconds' => 90,
+                'log_set_sha256' => str_repeat('b', 64),
+                'rotation_complete' => true,
+                'parse_complete' => true,
+                'evidence_complete' => true,
+                'decision' => 'allow',
+                'exit_code' => 0,
+                'counts' => $counts,
+            ],
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+        ) . "\n";
     }
 
     /** @return array<string,int> */
     private function capacityDevices(int $device): array
     {
-        return array_fill_keys([
-            'artifact', 'dump_pin', 'live_storage', 'release_root', 'renderer_state',
-            'restore_scratch', 'stage', 'state_root', 'temp',
-        ], $device);
+        return array_fill_keys(
+            [
+                'artifact',
+                'dump_pin',
+                'live_storage',
+                'release_root',
+                'renderer_state',
+                'restore_scratch',
+                'stage',
+                'state_root',
+                'temp',
+            ],
+            $device,
+        );
     }
 }
 
@@ -373,11 +404,31 @@ final class PassedPredeployProvider implements ProtectedPredeployObservationProv
         private readonly ArtifactObservationV1 $artifactValue,
     ) {}
 
-    public function expectedCommit(): ExpectedCommitObservationV1 { $this->ledger[] = 'expected_commit'; return $this->expected; }
-    public function traffic(): TrafficObservationV1 { $this->ledger[] = 'traffic_gate'; return $this->trafficValue; }
-    public function dump(): DumpObservationV1 { $this->ledger[] = 'dump'; return $this->dumpValue; }
-    public function capacity(): CapacityObservationV1 { $this->ledger[] = 'capacity'; return $this->capacityValue; }
-    public function artifact(): ArtifactObservationV1 { $this->ledger[] = 'artifact'; return $this->artifactValue; }
+    public function expectedCommit(): ExpectedCommitObservationV1
+    {
+        $this->ledger[] = 'expected_commit';
+        return $this->expected;
+    }
+    public function traffic(): TrafficObservationV1
+    {
+        $this->ledger[] = 'traffic_gate';
+        return $this->trafficValue;
+    }
+    public function dump(): DumpObservationV1
+    {
+        $this->ledger[] = 'dump';
+        return $this->dumpValue;
+    }
+    public function capacity(): CapacityObservationV1
+    {
+        $this->ledger[] = 'capacity';
+        return $this->capacityValue;
+    }
+    public function artifact(): ArtifactObservationV1
+    {
+        $this->ledger[] = 'artifact';
+        return $this->artifactValue;
+    }
 }
 
 final class DelegatingProtectedObservationSource implements HostRunnerProtectedObservationSource
@@ -390,8 +441,11 @@ final class DelegatingProtectedObservationSource implements HostRunnerProtectedO
 
     public function __construct(private readonly PassedPredeployProvider $delegate) {}
 
-    public function buildProvenance(string $runId, string $releaseId, string $authorizedSha256): ExpectedCommitObservationV1
-    {
+    public function buildProvenance(
+        string $runId,
+        string $releaseId,
+        string $authorizedSha256,
+    ): ExpectedCommitObservationV1 {
         $this->ledger[] = 'expected_commit';
         $this->authorizedProvenanceSha256 = $authorizedSha256;
         return $this->delegate->expectedCommit();
@@ -445,10 +499,22 @@ final class ExpectedCommitOnlyProvider implements ProtectedPredeployObservationP
         return new ExpectedCommitObservationV1($this->provenanceBytes, hash('sha256', $this->provenanceBytes));
     }
 
-    public function traffic(): TrafficObservationV1 { throw new RuntimeException('traffic must not run'); }
-    public function dump(): DumpObservationV1 { throw new RuntimeException('dump must not run'); }
-    public function capacity(): CapacityObservationV1 { throw new RuntimeException('capacity must not run'); }
-    public function artifact(): ArtifactObservationV1 { throw new RuntimeException('artifact must not run'); }
+    public function traffic(): TrafficObservationV1
+    {
+        throw new RuntimeException('traffic must not run');
+    }
+    public function dump(): DumpObservationV1
+    {
+        throw new RuntimeException('dump must not run');
+    }
+    public function capacity(): CapacityObservationV1
+    {
+        throw new RuntimeException('capacity must not run');
+    }
+    public function artifact(): ArtifactObservationV1
+    {
+        throw new RuntimeException('artifact must not run');
+    }
 }
 
 final class PredeployFixedClock implements HostRunnerOrchestratorClock
@@ -491,9 +557,18 @@ final class PredeployMemoryStorage implements HostRunnerStorage
     /** @var list<array{string,string}> */
     public array $operations = [];
 
-    public function prepareRun(string $runId): void { $this->operations[] = ['prepare', $runId]; }
-    public function pinReference(string $runId, string $field, string $sourcePath, string $sha256): void { throw new RuntimeException('unused'); }
-    public function read(string $relative, int $maxBytes): ?string { return $this->files[$relative] ?? null; }
+    public function prepareRun(string $runId): void
+    {
+        $this->operations[] = ['prepare', $runId];
+    }
+    public function pinReference(string $runId, string $field, string $sourcePath, string $sha256): void
+    {
+        throw new RuntimeException('unused');
+    }
+    public function read(string $relative, int $maxBytes): ?string
+    {
+        return $this->files[$relative] ?? null;
+    }
     public function pin(string $relative, string $bytes, int $maxBytes): string
     {
         if (isset($this->files[$relative]) && !hash_equals($this->files[$relative], $bytes)) {
@@ -508,8 +583,20 @@ final class PredeployMemoryStorage implements HostRunnerStorage
         $this->files[$relative] = $bytes;
         $this->operations[] = ['cow', $relative];
     }
-    public function refreshBinding(string $relative, string $currentBytes, string $candidateBytes): void { throw new RuntimeException('unused'); }
-    public function refreshActiveClaim(string $currentBytes, string $candidateBytes): void { throw new RuntimeException('unused'); }
-    public function clearActiveClaim(string $expectedBytes): void { throw new RuntimeException('unused'); }
-    public function reservedCandidates(): iterable { return []; }
+    public function refreshBinding(string $relative, string $currentBytes, string $candidateBytes): void
+    {
+        throw new RuntimeException('unused');
+    }
+    public function refreshActiveClaim(string $currentBytes, string $candidateBytes): void
+    {
+        throw new RuntimeException('unused');
+    }
+    public function clearActiveClaim(string $expectedBytes): void
+    {
+        throw new RuntimeException('unused');
+    }
+    public function reservedCandidates(): iterable
+    {
+        return [];
+    }
 }

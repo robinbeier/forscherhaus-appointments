@@ -20,7 +20,9 @@ interface HostRunnerOrchestratorClock extends HostRunnerClock
 
 final class SystemHostRunnerOrchestratorClock implements HostRunnerOrchestratorClock
 {
-    public function __construct(private readonly HostRunnerBootReader $bootReader = new HelperBackedHostRunnerBootReader()) {}
+    public function __construct(
+        private readonly HostRunnerBootReader $bootReader = new HelperBackedHostRunnerBootReader(),
+    ) {}
 
     public function nowUtc(): string
     {
@@ -48,6 +50,8 @@ final class SystemHostRunnerOrchestratorClock implements HostRunnerOrchestratorC
  */
 final class HostRunnerPredeployOrchestrator
 {
+    private const ORCHESTRATOR_FINISH_SCHEMA = 'deployment_orchestrator_finish.v1';
+
     public function __construct(
         private readonly HostRunnerStorage $storage,
         private readonly HostRunnerOrchestratorClock $clock = new SystemHostRunnerOrchestratorClock(),
@@ -58,11 +62,8 @@ final class HostRunnerPredeployOrchestrator
      * @param array<string,mixed> $input
      * @return array<string,mixed> canonical deployment_host_runner_response.v1
      */
-    public function collect(
-        array $request,
-        array $input,
-        ProtectedPredeployObservationProvider $provider,
-    ): array {
+    public function collect(array $request, array $input, ProtectedPredeployObservationProvider $provider): array
+    {
         DeploymentHostRunnerContractV1::validateDeployExecutionBundle($request, $input);
         $runId = $request['run_id'];
         $intentSha256 = $request['intent_sha256'];
@@ -108,16 +109,17 @@ final class HostRunnerPredeployOrchestrator
             'capacity_passed',
             'artifact_verified',
         ];
-        $lastVerified = $assembly['status'] === 'passed'
-            ? 'artifact_verified'
-            : match ($assembly['reason']) {
-                'expected_commit_mismatch' => 'lock_acquired',
-                'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
-                'dump_verification_failed' => 'traffic_gate_passed',
-                'capacity_gate_failed' => 'dump_verified',
-                'artifact_verification_failed' => 'capacity_passed',
-                default => throw new RuntimeException('predeploy authority returned an unsupported result'),
-            };
+        $lastVerified =
+            $assembly['status'] === 'passed'
+                ? 'artifact_verified'
+                : match ($assembly['reason']) {
+                    'expected_commit_mismatch' => 'lock_acquired',
+                    'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
+                    'dump_verification_failed' => 'traffic_gate_passed',
+                    'capacity_gate_failed' => 'dump_verified',
+                    'artifact_verification_failed' => 'capacity_passed',
+                    default => throw new RuntimeException('predeploy authority returned an unsupported result'),
+                };
         $states = $baseStates;
         foreach ($verifiedStates as $state) {
             if ($states[array_key_last($states)] === $lastVerified) {
@@ -140,24 +142,21 @@ final class HostRunnerPredeployOrchestrator
             return $this->response($request, 'attach_pre_deploy', $previous, 0, 'ok');
         }
 
+        // The immutable finish observation is authority for terminal timing and
+        // must be durable before terminal evidence can be published.
+        $finish = $this->loadOrPinFinish($runId, $prefix);
+        $orchestratorTiming = DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
+            $start,
+            $finish['finished_at_utc'],
+            $finish['boot_id'],
+            $finish['monotonic_ns'],
+            false,
+        );
         $existingEvidenceBytes = $this->storage->read($prefix . 'evidence.json', 1_048_576);
         if ($existingEvidenceBytes === null) {
-            $finishedAtUtc = $this->clock->nowUtc();
-            $orchestratorTiming = DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
-                $start,
-                $finishedAtUtc,
-                $this->clock->bootId(),
-                $this->clock->monotonicNs(),
-                false,
-            );
-            $terminalRecordedAtUtc = $finishedAtUtc;
-            $capturedAtUtc = $finishedAtUtc;
-            $evidence = $this->failedBeforeWriteEvidence(
-                $request,
-                $assembly,
-                $capturedAtUtc,
-                $orchestratorTiming,
-            );
+            $terminalRecordedAtUtc = $finish['finished_at_utc'];
+            $capturedAtUtc = $finish['finished_at_utc'];
+            $evidence = $this->failedBeforeWriteEvidence($request, $assembly, $capturedAtUtc, $orchestratorTiming);
             $evidenceBytes = DeploymentHostRunnerContractV1::encodeFile($evidence);
         } else {
             $evidence = json_decode($existingEvidenceBytes, true, 64, JSON_THROW_ON_ERROR);
@@ -179,7 +178,8 @@ final class HostRunnerPredeployOrchestrator
                 $evidence['traffic_gate'] != $assembly['sections']['traffic_gate'] ||
                 $evidence['dump'] != $assembly['sections']['dump'] ||
                 $evidence['capacity'] != $assembly['sections']['capacity'] ||
-                $evidence['artifact'] != $assembly['sections']['artifact']
+                $evidence['artifact'] != $assembly['sections']['artifact'] ||
+                $evidence['orchestrator_timing'] != $orchestratorTiming
             ) {
                 throw new RuntimeException('durable predeploy terminal evidence conflicts with current authority');
             }
@@ -212,11 +212,7 @@ final class HostRunnerPredeployOrchestrator
         $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
         $this->storage->cow($prefix . 'events.jsonl', $eventsBytes, 1_048_576);
         $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
-        $this->storage->cow(
-            $prefix . 'state.json',
-            DeploymentHostRunnerContractV1::encodeFile($terminalState),
-            4_096,
-        );
+        $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($terminalState), 4_096);
         return $this->response(
             $request,
             'terminal',
@@ -224,6 +220,40 @@ final class HostRunnerPredeployOrchestrator
             $assembly['exit_code'],
             $assembly['reason'],
         );
+    }
+
+    /** @return array<string,mixed> */
+    private function loadOrPinFinish(string $runId, string $prefix): array
+    {
+        $relative = $prefix . 'orchestrator-finish.json';
+        $bytes = $this->storage->read($relative, 4_096);
+        if ($bytes === null) {
+            $finish = [
+                'schema' => self::ORCHESTRATOR_FINISH_SCHEMA,
+                'run_id' => $runId,
+                'finished_at_utc' => $this->clock->nowUtc(),
+                'boot_id' => $this->clock->bootId(),
+                'monotonic_ns' => $this->clock->monotonicNs(),
+            ];
+            $this->storage->pin($relative, DeploymentHostRunnerContractV1::encodeFile($finish), 4_096);
+            return $finish;
+        }
+        $finish = json_decode($bytes, true, 16, JSON_THROW_ON_ERROR);
+        if (
+            !is_array($finish) ||
+            array_is_list($finish) ||
+            array_keys($finish) !== ['boot_id', 'finished_at_utc', 'monotonic_ns', 'run_id', 'schema'] ||
+            DeploymentHostRunnerContractV1::encodeFile($finish) !== $bytes ||
+            ($finish['schema'] ?? null) !== self::ORCHESTRATOR_FINISH_SCHEMA ||
+            ($finish['run_id'] ?? null) !== $runId ||
+            !is_string($finish['finished_at_utc'] ?? null) ||
+            !is_string($finish['boot_id'] ?? null) ||
+            !is_int($finish['monotonic_ns'] ?? null) ||
+            $finish['monotonic_ns'] < 0
+        ) {
+            throw new RuntimeException('durable predeploy orchestrator finish is invalid');
+        }
+        return $finish;
     }
 
     /** @return array<string,mixed> */
@@ -254,7 +284,11 @@ final class HostRunnerPredeployOrchestrator
             return $start;
         }
         $decoded = json_decode($existing, true, 16, JSON_THROW_ON_ERROR);
-        if (!is_array($decoded) || array_is_list($decoded) || DeploymentHostRunnerContractV1::encodeFile($decoded) !== $existing) {
+        if (
+            !is_array($decoded) ||
+            array_is_list($decoded) ||
+            DeploymentHostRunnerContractV1::encodeFile($decoded) !== $existing
+        ) {
             throw new RuntimeException('durable orchestrator start is invalid');
         }
         DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
@@ -369,11 +403,21 @@ final class HostRunnerPredeployOrchestrator
         string $capturedAtUtc,
         array $timing,
     ): array {
-        $postGates = array_fill_keys([
-            'status', 'kuma_healthy_count', 'kuma_total_count', 'runtime_config_passed',
-            'services_passed', 'endpoints_passed', 'logs_passed', 'scanner_passed',
-            'dormant_clean_passed', 'passed',
-        ], null);
+        $postGates = array_fill_keys(
+            [
+                'status',
+                'kuma_healthy_count',
+                'kuma_total_count',
+                'runtime_config_passed',
+                'services_passed',
+                'endpoints_passed',
+                'logs_passed',
+                'scanner_passed',
+                'dormant_clean_passed',
+                'passed',
+            ],
+            null,
+        );
         $postGates['status'] = 'not_observed';
         $value = [
             'schema' => DeploymentContractV1::EVIDENCE_SCHEMA,
@@ -381,12 +425,31 @@ final class HostRunnerPredeployOrchestrator
             'intent_sha256' => $request['intent_sha256'],
             'captured_at_utc' => $capturedAtUtc,
             ...$assembly['sections'],
-            'deploy' => ['status' => 'not_invoked', 'invocation_count' => 0, 'exit_code' => null, 'rollback_outcome' => 'not_applicable'],
-            'rollback' => ['status' => 'not_invoked', 'invocation_count' => 0, 'mode' => 'not_applicable', 'verified' => null],
+            'deploy' => [
+                'status' => 'not_invoked',
+                'invocation_count' => 0,
+                'exit_code' => null,
+                'rollback_outcome' => 'not_applicable',
+            ],
+            'rollback' => [
+                'status' => 'not_invoked',
+                'invocation_count' => 0,
+                'mode' => 'not_applicable',
+                'verified' => null,
+            ],
             'post_gates' => $postGates,
-            'deploy_timing' => ['status' => 'not_observed', 'authoritative_sha256' => null, 'run_id' => null, 'total_ms' => null],
+            'deploy_timing' => [
+                'status' => 'not_observed',
+                'authoritative_sha256' => null,
+                'run_id' => null,
+                'total_ms' => null,
+            ],
             'orchestrator_timing' => $timing,
-            'result' => ['state' => 'failed_before_write', 'exit_code' => $assembly['exit_code'], 'reason' => $assembly['reason']],
+            'result' => [
+                'state' => 'failed_before_write',
+                'exit_code' => $assembly['exit_code'],
+                'reason' => $assembly['reason'],
+            ],
         ];
         DeploymentContractV1::validateEvidence($value);
         return $value;
@@ -405,7 +468,10 @@ final class HostRunnerPredeployOrchestrator
             if ($decoded['sequence'] > $state['sequence']) {
                 throw new RuntimeException('predeploy state cannot replace a later durable lifecycle');
             }
-            if ($decoded['sequence'] === $state['sequence'] && !hash_equals($existingState, DeploymentHostRunnerContractV1::encodeFile($state))) {
+            if (
+                $decoded['sequence'] === $state['sequence'] &&
+                !hash_equals($existingState, DeploymentHostRunnerContractV1::encodeFile($state))
+            ) {
                 throw new RuntimeException('predeploy state conflicts with durable bytes');
             }
         }
@@ -414,13 +480,8 @@ final class HostRunnerPredeployOrchestrator
     }
 
     /** @param array<string,mixed> $request @return array<string,mixed> */
-    private function response(
-        array $request,
-        string $disposition,
-        string $state,
-        int $exitCode,
-        string $reason,
-    ): array {
+    private function response(array $request, string $disposition, string $state, int $exitCode, string $reason): array
+    {
         $response = [
             'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
             'run_id' => $request['run_id'],
