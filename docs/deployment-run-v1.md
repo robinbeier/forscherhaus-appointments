@@ -591,6 +591,14 @@ canonical ancestors. They are opened, identity-checked, locked, rechecked, and
 never unlinked or recreated. The invocation keeps both locks until its response
 has been derived from durable state.
 
+For file-backed CLI actions, the privileged supervisor reads every root-owned
+mode-`0600` single-link input through one bounded, no-follow file descriptor.
+It builds one closed in-memory envelope from those exact bytes and validates
+the full request/action contract before creating a run directory. The same
+envelope supplies both the Run-ID used for lock selection and the bytes later
+consumed by the locked PHP action; PHP never reopens the caller paths. Invalid
+or identity-mismatched input therefore creates no run-local state.
+
 The production-change lock is global across conforming Host Runner invocations,
 not across manual root actions or non-participating tools. Those privileged
 actors remain outside this exclusion boundary until they explicitly adopt the

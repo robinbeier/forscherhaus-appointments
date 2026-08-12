@@ -560,6 +560,91 @@ PYTHON;
         self::assertStringContainsString('run=' . $this->root . '/runs/' . self::OTHER_RUN_ID . "/run.lock\n", $after['stdout']);
     }
 
+    public function testCliSupervisorValidatesExactProtectedBytesBeforePreparingAndPassesOnlyTheirHashes(): void
+    {
+        self::assertTrue(mkdir($this->root . '/locks', 0700));
+        self::assertTrue(mkdir($this->root . '/runs', 0700));
+        self::assertSame(0, file_put_contents($this->root . '/locks/fh-production-change.lock', ''));
+        self::assertTrue(chmod($this->root . '/locks/fh-production-change.lock', 0600));
+        $request = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json');
+        $input = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json');
+        foreach (['request.json' => $request, 'input.json' => $input] as $leaf => $bytes) {
+            self::assertSame(strlen($bytes), file_put_contents($this->root . '/' . $leaf, $bytes));
+            self::assertTrue(chmod($this->root . '/' . $leaf, 0600));
+        }
+
+        $result = $this->runHelper([
+            'supervise-cli-probe', $this->root, 'deploy',
+            $this->root . '/request.json', $this->root . '/input.json',
+        ]);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('', $result['stderr']);
+        $summary = json_decode($result['stdout'], true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame('deploy', $summary['action']);
+        self::assertSame(self::RUN_ID, $summary['run_id']);
+        self::assertSame(hash('sha256', $request), $summary['request_sha256']);
+        self::assertSame(hash('sha256', $input), $summary['execution_input_sha256']);
+        self::assertArrayNotHasKey('request_bytes', $summary);
+        self::assertFileExists($this->root . '/runs/' . self::RUN_ID . '/run.lock');
+    }
+
+    public function testCliSupervisorRejectsFullContractFailureBeforeCreatingRunDirectory(): void
+    {
+        self::assertTrue(mkdir($this->root . '/locks', 0700));
+        self::assertTrue(mkdir($this->root . '/runs', 0700));
+        self::assertSame(0, file_put_contents($this->root . '/locks/fh-production-change.lock', ''));
+        self::assertTrue(chmod($this->root . '/locks/fh-production-change.lock', 0600));
+        $request = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json');
+        $decoded = json_decode(
+            (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json'),
+            true,
+            32,
+            JSON_THROW_ON_ERROR,
+        );
+        $decoded['action'] = 'rollback';
+        $decoded['parameters'] = ['release_id' => $decoded['parameters']['release_id']];
+        $invalidInput = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        foreach (['request.json' => $request, 'input.json' => $invalidInput] as $leaf => $bytes) {
+            self::assertSame(strlen($bytes), file_put_contents($this->root . '/' . $leaf, $bytes));
+            self::assertTrue(chmod($this->root . '/' . $leaf, 0600));
+        }
+
+        $result = $this->runHelper([
+            'supervise-cli-probe', $this->root, 'deploy',
+            $this->root . '/request.json', $this->root . '/input.json',
+        ]);
+
+        self::assertSame(70, $result['exit_code']);
+        self::assertSame('', $result['stdout']);
+        self::assertSame("host-runner storage rejected\n", $result['stderr']);
+        self::assertFileDoesNotExist($this->root . '/runs/' . self::RUN_ID);
+    }
+
+    public function testCliSupervisorRejectsUnsafeInputLeafWithoutPreparingRun(): void
+    {
+        self::assertTrue(mkdir($this->root . '/locks', 0700));
+        self::assertTrue(mkdir($this->root . '/runs', 0700));
+        self::assertSame(0, file_put_contents($this->root . '/locks/fh-production-change.lock', ''));
+        self::assertTrue(chmod($this->root . '/locks/fh-production-change.lock', 0600));
+        $request = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json');
+        $input = (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/execution-input.json');
+        self::assertSame(strlen($request), file_put_contents($this->root . '/request.json', $request));
+        self::assertTrue(chmod($this->root . '/request.json', 0600));
+        self::assertSame(strlen($input), file_put_contents($this->root . '/input-source.json', $input));
+        self::assertTrue(chmod($this->root . '/input-source.json', 0600));
+        self::assertTrue(symlink($this->root . '/input-source.json', $this->root . '/input.json'));
+
+        $result = $this->runHelper([
+            'supervise-cli-probe', $this->root, 'deploy',
+            $this->root . '/request.json', $this->root . '/input.json',
+        ]);
+
+        self::assertSame(70, $result['exit_code']);
+        self::assertSame('', $result['stdout']);
+        self::assertFileDoesNotExist($this->root . '/runs/' . self::RUN_ID);
+    }
+
     public function testPhpCoHoldsExactlyTheTwoReservedLocksAfterSupervisorDies(): void
     {
         $this->createLockTree();

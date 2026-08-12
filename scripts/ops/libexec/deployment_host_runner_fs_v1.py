@@ -279,6 +279,17 @@ def open_absolute_parent(path: str) -> tuple[int, str]:
         raise
 
 
+def read_protected_absolute(path: str, limit: int) -> bytes:
+    parent, leaf = open_absolute_parent(path)
+    try:
+        value = bounded_read_at(parent, leaf, limit)
+        if value is None or value == b'' or b'\x00' in value:
+            reject()
+        return value
+    finally:
+        os.close(parent)
+
+
 def read_stdin(limit: int) -> bytes:
     value = sys.stdin.buffer.read(limit + 1)
     if len(value) > limit:
@@ -924,6 +935,14 @@ def fixed_php_probe_argv(milliseconds_raw: str) -> list[str]:
     ]
 
 
+def fixed_php_cli_argv(mode: str) -> list[str]:
+    if mode not in ('validate', 'probe'):
+        reject()
+    repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+    script = os.path.join(repository, 'scripts', 'ops', 'deployment_host_runner_v1.php')
+    return ['/usr/bin/php', script, '--internal-envelope-' + mode]
+
+
 def reserve_lock_descriptors(global_lock: int, run_lock: int) -> None:
     for source, destination in zip((global_lock, run_lock), LOCK_FDS):
         if source in LOCK_FDS:
@@ -1041,6 +1060,164 @@ def relay_fixed_child(argv: list[str], timeout_seconds: float) -> int:
         selector.close()
         if process.poll() is None:
             kill_and_reap(process)
+
+
+def run_fixed_child_with_input(
+    argv: list[str],
+    input_bytes: bytes,
+    timeout_seconds: float,
+    *,
+    inherit_locks: bool,
+) -> tuple[int, bytes]:
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env=CONTROLLER_ENVIRONMENT,
+        close_fds=True,
+        pass_fds=LOCK_FDS if inherit_locks else (),
+        start_new_session=True,
+    )
+    if process.stdin is None or process.stdout is None:
+        kill_and_reap(process)
+        reject()
+    os.set_blocking(process.stdin.fileno(), False)
+    os.set_blocking(process.stdout.fileno(), False)
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdin, selectors.EVENT_WRITE, 'stdin')
+    selector.register(process.stdout, selectors.EVENT_READ, 'stdout')
+    written = 0
+    output = bytearray()
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(argv[0], timeout_seconds)
+            for key, _ in selector.select(min(remaining, 0.1)):
+                if key.data == 'stdin':
+                    if written == len(input_bytes):
+                        selector.unregister(process.stdin)
+                        process.stdin.close()
+                        continue
+                    try:
+                        count = os.write(process.stdin.fileno(), input_bytes[written:written + 65536])
+                    except BrokenPipeError:
+                        selector.unregister(process.stdin)
+                        process.stdin.close()
+                        continue
+                    written += count
+                    continue
+                chunk = os.read(process.stdout.fileno(), min(65536, MAX_CHILD_OUTPUT + 1 - len(output)))
+                if chunk:
+                    output.extend(chunk)
+                    if len(output) > MAX_CHILD_OUTPUT:
+                        raise subprocess.SubprocessError('child output exceeded the fixed bound')
+                else:
+                    selector.unregister(process.stdout)
+            if process.poll() is not None and written < len(input_bytes):
+                raise subprocess.SubprocessError('child rejected its bounded input')
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(argv[0], timeout_seconds)
+        process.wait(timeout=remaining)
+        if written != len(input_bytes):
+            reject()
+        return process.returncode, bytes(output)
+    except (subprocess.SubprocessError, OSError):
+        kill_and_reap(process)
+        reject()
+    finally:
+        selector.close()
+        if process.poll() is None:
+            kill_and_reap(process)
+
+
+def cli_identity(value: bytes) -> tuple[str, str]:
+    try:
+        decoded = json.loads(value.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        reject()
+    if not isinstance(decoded, dict):
+        reject()
+    run_id = decoded.get('run_id')
+    intent_sha256 = decoded.get('intent_sha256')
+    if not isinstance(run_id, str) or not isinstance(intent_sha256, str):
+        reject()
+    validate_run_id(run_id)
+    if re.fullmatch(r'[0-9a-f]{64}', intent_sha256) is None:
+        reject()
+    return run_id, intent_sha256
+
+
+def build_cli_envelope(action: str, first: str, second: str) -> tuple[bytes, str, str]:
+    if action not in ('deploy', 'post-gates', 'recovery', 'reconcile'):
+        reject()
+    request: bytes | None = None
+    execution_input: bytes | None = None
+    report: bytes | None = None
+    if action == 'reconcile':
+        run_id, intent_sha256 = first, second
+        validate_run_id(run_id)
+        if re.fullmatch(r'[0-9a-f]{64}', intent_sha256) is None:
+            reject()
+    else:
+        request = read_protected_absolute(first, 16_384)
+        run_id, intent_sha256 = cli_identity(request)
+        candidate = read_protected_absolute(second, 16_384)
+        candidate_run_id, candidate_intent_sha256 = cli_identity(candidate)
+        if candidate_run_id != run_id or not secrets.compare_digest(candidate_intent_sha256, intent_sha256):
+            reject()
+        if action == 'post-gates':
+            report = candidate
+        else:
+            execution_input = candidate
+    envelope = (json.dumps({
+        'action': action,
+        'execution_input_bytes_base64': None if execution_input is None else base64.b64encode(execution_input).decode('ascii'),
+        'intent_sha256': intent_sha256,
+        'report_bytes_base64': None if report is None else base64.b64encode(report).decode('ascii'),
+        'request_bytes_base64': None if request is None else base64.b64encode(request).decode('ascii'),
+        'run_id': run_id,
+    }, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+    if len(envelope) > 65_536:
+        reject()
+    return envelope, run_id, intent_sha256
+
+
+def supervise_cli_probe(root: str, action: str, first: str, second: str) -> int:
+    if re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is None:
+        reject()
+    envelope, run_id, _intent_sha256 = build_cli_envelope(action, first, second)
+    validation_exit, validation_output = run_fixed_child_with_input(
+        fixed_php_cli_argv('validate'), envelope, 3.0, inherit_locks=False,
+    )
+    if validation_exit != 0 or validation_output != b'':
+        reject()
+    global_lock = open_lock(root, 'locks/fh-production-change.lock')
+    try:
+        prepare_run(root, run_id)
+        run_lock = open_lock(root, 'runs/%s/run.lock' % run_id)
+        try:
+            reserve_lock_descriptors(global_lock, run_lock)
+            dispatch_exit, output = run_fixed_child_with_input(
+                fixed_php_cli_argv('probe'), envelope, 3.0, inherit_locks=True,
+            )
+            if dispatch_exit != 0:
+                reject()
+            sys.stdout.buffer.write(output)
+            sys.stdout.buffer.flush()
+            return 0
+        finally:
+            for descriptor in LOCK_FDS:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            os.close(run_lock)
+    finally:
+        os.close(global_lock)
 
 
 def supervise_probe(root: str, run_id: str, milliseconds_raw: str) -> int:
@@ -1934,6 +2111,8 @@ def main(arguments: list[str]) -> int:
         return 0
     if len(arguments) == 5 and arguments[1] == "probe-locks":
         return supervise_probe(arguments[2], arguments[3], arguments[4])
+    if len(arguments) == 6 and arguments[1] == 'supervise-cli-probe':
+        return supervise_cli_probe(arguments[2], arguments[3], arguments[4], arguments[5])
     if len(arguments) != 5 or arguments[1] not in ("read", "read-optional", "pin", "cow"):
         reject()
     operation, root, relative, raw_limit = arguments[1:]
