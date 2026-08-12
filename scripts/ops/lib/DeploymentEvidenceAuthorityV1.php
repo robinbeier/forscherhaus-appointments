@@ -1973,7 +1973,7 @@ final class DeploymentEvidenceAuthorityV1
 
     private static function assertReleaseId(mixed $value): void
     {
-        if (!is_string($value) || preg_match('/^ea_[A-Za-z0-9._-]{1,61}$/D', $value) !== 1) {
+        if (!is_string($value) || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/D', $value) !== 1) {
             throw new RuntimeException('release_id is invalid');
         }
     }

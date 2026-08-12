@@ -46,8 +46,8 @@ done
 [[ -n "$REL" ]] || REL="ea_$(date +%Y%m%d_%H%M)"
 [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "[!] --expected-commit is required and must be a full lowercase commit." >&2; exit 1; }
 
-if [[ "$REL" =~ [^A-Za-z0-9._-] ]]; then
-  echo "[!] Release-ID enthält ungültige Zeichen (erlaubt: A-Z a-z 0-9 . _ -)." >&2
+if [[ ! "$REL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+  echo "[!] Release-ID muss 1-128 Zeichen lang sein, alphanumerisch beginnen und darf danach A-Z a-z 0-9 . _ - enthalten." >&2
   exit 1
 fi
 LOG="/tmp/build_ea_${REL}.log"

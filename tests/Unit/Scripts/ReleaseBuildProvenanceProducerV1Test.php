@@ -141,6 +141,42 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
         self::assertSame(4, $record['capacity_bounds']['stage_inode_count']);
     }
 
+    public function testProducerUsesThePublicReleaseIdContract(): void
+    {
+        foreach (['release_2026', 'r' . str_repeat('a', 127)] as $releaseId) {
+            $record = ReleaseBuildProvenanceProducerV1::create(
+                $releaseId,
+                str_repeat('a', 40),
+                $this->root . '/stage',
+                $this->root . '/archive.tar.gz',
+                $this->root . '/build_release.sh',
+                $this->root . '/composer.lock',
+                $this->root . '/package-lock.json',
+                $this->root . '/deploy_ea.sh',
+            );
+            self::assertSame($releaseId, $record['release_id']);
+            self::assertSame($releaseId . '.tar.gz', $record['archive']['name']);
+        }
+
+        foreach (['_leading', 'r' . str_repeat('a', 128)] as $releaseId) {
+            try {
+                ReleaseBuildProvenanceProducerV1::create(
+                    $releaseId,
+                    str_repeat('a', 40),
+                    $this->root . '/stage',
+                    $this->root . '/archive.tar.gz',
+                    $this->root . '/build_release.sh',
+                    $this->root . '/composer.lock',
+                    $this->root . '/package-lock.json',
+                    $this->root . '/deploy_ea.sh',
+                );
+                self::fail('Invalid public release ID was accepted.');
+            } catch (RuntimeException $exception) {
+                self::assertSame('release_id is invalid', $exception->getMessage());
+            }
+        }
+    }
+
     public function testProducerRejectsSymlinkOrHardlinkedStageEntries(): void
     {
         self::assertTrue(symlink($this->root . '/stage/a', $this->root . '/stage/link'));
