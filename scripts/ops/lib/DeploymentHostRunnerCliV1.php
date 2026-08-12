@@ -379,6 +379,17 @@ final class DeploymentHostRunnerCliApplicationV1
         ) {
             return self::response('deploy', $request, 'rejected', null, 75, 'state_conflict');
         }
+        $prefix = 'runs/' . $request['run_id'] . '/';
+        $pinnedRequestBytes = $this->storage->read($prefix . 'request.json', 16_384);
+        $pinnedInputBytes = $this->storage->read($prefix . 'execution-input.json', 16_384);
+        if (
+            $pinnedRequestBytes === null ||
+            $pinnedInputBytes === null ||
+            !hash_equals($pinnedRequestBytes, $envelope['request_bytes']) ||
+            !hash_equals($pinnedInputBytes, $envelope['execution_input_bytes'])
+        ) {
+            return self::response('deploy', $request, 'rejected', null, 75, 'state_conflict');
+        }
 
         $this->reconciler->reconcile($request['run_id'], $request['intent_sha256']);
         $stateBytes = $this->storage->read('runs/' . $request['run_id'] . '/state.json', 4_096);
@@ -490,14 +501,7 @@ final class DeploymentHostRunnerCliApplicationV1
         }
         $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
         if (in_array($state['state'], ['succeeded', ...DeploymentContractV1::TERMINAL_FAILURE_STATES], true)) {
-            return self::response(
-                'reconcile',
-                $identity,
-                'terminal',
-                $state['state'],
-                $state['terminal']['exit_code'],
-                $state['terminal']['reason'],
-            );
+            return $this->validated($this->terminal->resumeTerminal($envelope['run_id'], 'reconcile'));
         }
         return self::response('reconcile', $identity, 'attach_observe_only', $state['state'], 0, 'ok');
     }
@@ -516,6 +520,27 @@ final class DeploymentHostRunnerCliApplicationV1
         $this->reconstructor->reconstruct();
         $claimBytes = $this->storage->read('active-run.json', 4_096);
         if ($claimBytes === null) {
+            $prefix = 'runs/' . $request['run_id'] . '/';
+            $stateBytes = $this->storage->read($prefix . 'state.json', 4_096);
+            if ($stateBytes !== null) {
+                $state = DeploymentHostRunnerContractV1::decodeState($stateBytes);
+                if (
+                    $state['run_id'] === $request['run_id'] &&
+                    hash_equals($state['intent_sha256'], $request['intent_sha256']) &&
+                    in_array($state['state'], DeploymentContractV1::TERMINAL_FAILURE_STATES, true)
+                ) {
+                    $pinnedRequestBytes = $this->storage->read($prefix . 'recovery-request.json', 16_384);
+                    $pinnedInputBytes = $this->storage->read($prefix . 'recovery-execution-input.json', 16_384);
+                    if (
+                        $pinnedRequestBytes !== null &&
+                        $pinnedInputBytes !== null &&
+                        hash_equals($pinnedRequestBytes, $envelope['request_bytes']) &&
+                        hash_equals($pinnedInputBytes, $envelope['execution_input_bytes'])
+                    ) {
+                        return $this->validated($this->terminal->resumeTerminal($request['run_id'], 'recovery'));
+                    }
+                }
+            }
             return self::response('recovery', $request, 'rejected', null, 75, 'state_conflict');
         }
         $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);

@@ -248,6 +248,7 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
             DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json'])['state'],
         );
         self::assertSame($reportBytes, $storage->files[$prefix . 'deploy-post-gate-report.json']);
+        $unknownStorage = clone $storage;
 
         $failedAdapter = new AdmissionSystemAdapterFake([
             new HostRunnerProcessResult(
@@ -291,6 +292,43 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
         self::assertSame('failed', $failedState['rollback']['unit_state']);
         self::assertSame(31, $failedState['rollback']['observed_exit_code']);
         self::assertSame('failed', $failedState['rollback']['verdict']);
+
+        $unknownAdapter = new AdmissionSystemAdapterFake([new HostRunnerProcessResult(1, '', 'private transport')]);
+        $unknownStart = new HostRunnerStartOrchestrator(
+            new HostRunnerReservationPersistence($unknownStorage, null, $recoveryClock),
+            new DeploymentHostRunnerV1($unknownAdapter),
+            $boot,
+        );
+        $unknownTerminal = new AdmissionTerminalizerFake([
+            'schema' => DeploymentHostRunnerContractV1::RESPONSE_SCHEMA,
+            'run_id' => $request['run_id'],
+            'intent_sha256' => $request['intent_sha256'],
+            'action' => 'recovery',
+            'disposition' => 'terminal',
+            'state' => 'manual_recovery_required',
+            'result_exit_code' => 143,
+            'result_reason' => 'interrupted',
+        ]);
+        $unknownRecovery = new HostRunnerRecoveryAdmission(
+            $unknownStorage,
+            $unknownStart,
+            new AdmissionScriptReaderFake($script),
+            new AdmissionNonceSourceFake($rollbackNonce),
+            $boot,
+            $recoveryClock,
+            $unknownTerminal,
+        );
+
+        $unknown = $unknownRecovery->admit($recoveryRequest, $recoveryInput);
+
+        self::assertSame('terminal', $unknown['disposition']);
+        self::assertSame('manual_recovery_required', $unknown['state']);
+        self::assertSame(1, $unknownTerminal->rollbackCalls);
+        self::assertCount(1, $unknownAdapter->calls);
+        $unknownState = DeploymentHostRunnerContractV1::decodeState($unknownStorage->files[$prefix . 'state.json']);
+        self::assertSame('unknown', $unknownState['rollback']['unit_state']);
+        self::assertNull($unknownState['rollback']['observed_exit_code']);
+        self::assertSame('unknown', $unknownState['rollback']['verdict']);
     }
 
     /** @param array<string,mixed> $request @param array<string,mixed> $input */

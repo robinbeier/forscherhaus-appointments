@@ -591,10 +591,17 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
         );
         $rollbackLaunch = DeploymentHostRunnerContractV1::decodeSystemdLaunch($rollbackLaunchBytes);
         $rollbackBinding = DeploymentHostRunnerContractV1::decodeUnitBinding($rollbackBindingBytes);
-        $rollbackObservation = DeploymentHostRunnerContractV1::decodeUnitLoadedObservation(
-            $rollbackObservationBytes,
-            $rollbackLaunch,
-        );
+        $rollbackObservationEnvelope = json_decode($rollbackObservationBytes, true, 32, JSON_THROW_ON_ERROR);
+        if (!is_array($rollbackObservationEnvelope) || array_is_list($rollbackObservationEnvelope)) {
+            throw new RuntimeException('rollback unit observation is invalid');
+        }
+        $rollbackObservation =
+            ($rollbackObservationEnvelope['schema'] ?? null) === DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA
+                ? DeploymentHostRunnerContractV1::decodeUnitAbsence($rollbackObservationBytes)
+                : DeploymentHostRunnerContractV1::decodeUnitLoadedObservation(
+                    $rollbackObservationBytes,
+                    $rollbackLaunch,
+                );
         DeploymentHostRunnerContractV1::validateUnitReconciliationBundle(
             $deployLaunch,
             $deployBinding,
@@ -638,6 +645,30 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             }
             $this->clearTerminalClaimIfPresent($runId, $state['intent_sha256']);
             return $this->terminalResponse($state, 'recovery');
+        }
+        if ($state['rollback']['verdict'] === 'unknown') {
+            $claimBytes = $this->required('active-run.json', 4_096);
+            $claim = DeploymentHostRunnerContractV1::decodeActiveRun($claimBytes);
+            return $this->terminalizeUnverifiableRollback(
+                $runId,
+                $state,
+                $eventsBytes,
+                $predeployBytes,
+                $receiptBytes,
+                $deployLaunchBytes,
+                $deployBindingBytes,
+                $deployObservationBytes,
+                $rollbackLaunchBytes,
+                $rollbackBindingBytes,
+                $rollbackObservationBytes,
+                $deployReportBytes,
+                $startBytes,
+                $claimBytes,
+                $claim,
+                $deployLaunch,
+                $deployReport,
+                $prefix,
+            );
         }
         if (
             $state['run_id'] !== $runId ||
@@ -837,6 +868,212 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             throw new RuntimeException('terminal rollback persistence did not produce a current bundle');
         }
         $this->clearTerminalClaimIfPresent($runId, $state['intent_sha256']);
+        return $this->terminalResponse($candidateState, 'recovery');
+    }
+
+    /**
+     * Freeze a reserved rollback whose unit outcome cannot be proved. The
+     * terminal claim deliberately remains while unit stoppage cannot be proved.
+     *
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $claim
+     * @param array<string,mixed> $deployLaunch
+     * @param array<string,mixed> $deployReport
+     * @return array<string,mixed>
+     */
+    private function terminalizeUnverifiableRollback(
+        string $runId,
+        array $state,
+        string $eventsBytes,
+        string $predeployBytes,
+        string $receiptBytes,
+        string $deployLaunchBytes,
+        string $deployBindingBytes,
+        string $deployObservationBytes,
+        string $rollbackLaunchBytes,
+        string $rollbackBindingBytes,
+        string $rollbackObservationBytes,
+        string $deployReportBytes,
+        string $startBytes,
+        string $claimBytes,
+        array $claim,
+        array $deployLaunch,
+        array $deployReport,
+        string $prefix,
+    ): array {
+        if (
+            $state['run_id'] !== $runId ||
+            $state['state'] !== 'rollback_running' ||
+            $state['active_action'] !== 'rollback' ||
+            !in_array($state['rollback']['unit_state'], ['killed', 'missing', 'unknown'], true) ||
+            $state['rollback']['observed_exit_code'] !== null ||
+            $claim['run_id'] !== $runId ||
+            !hash_equals($claim['intent_sha256'], $state['intent_sha256']) ||
+            $claim['state'] !== $state['state'] ||
+            $claim['sequence'] !== $state['sequence'] ||
+            !hash_equals($claim['events_sha256'], $state['events_sha256']) ||
+            !in_array(
+                DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes),
+                ['current', 'stale_recoverable'],
+                true,
+            ) ||
+            $deployReport['subject'] !== 'deploy' ||
+            $deployReport['post_gates']['status'] !== 'failed' ||
+            DeploymentHostRunnerContractV1::postGateSubmissionDisposition(
+                $deployReportBytes,
+                $state,
+                $deployReportBytes,
+            ) !== 'attach' ||
+            !hash_equals($state['post_gates']['deploy_report_sha256'], hash('sha256', $deployReportBytes))
+        ) {
+            throw new RuntimeException('unverifiable rollback authority is inconsistent');
+        }
+        $receipt = DeployResultV1::decode($receiptBytes);
+        if (
+            $receipt['outcome'] !== 'succeeded' ||
+            $receipt['exit_code'] !== 0 ||
+            !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes)) ||
+            $deployLaunch['timing_run_id'] === null
+        ) {
+            throw new RuntimeException('unverifiable rollback lacks a completed deploy authority');
+        }
+        $predeploy = json_decode($predeployBytes, true, 64, JSON_THROW_ON_ERROR);
+        if (
+            !is_array($predeploy) ||
+            array_is_list($predeploy) ||
+            DeploymentEvidenceAuthorityV1::encodeFile($predeploy) !== $predeployBytes ||
+            ($predeploy['schema'] ?? null) !== DeploymentEvidenceAuthorityV1::PREDEPLOY_ASSEMBLY_SCHEMA ||
+            ($predeploy['status'] ?? null) !== 'passed' ||
+            !is_array($predeploy['sections'] ?? null)
+        ) {
+            throw new RuntimeException('unverifiable rollback lacks passed predeploy evidence');
+        }
+        DeploymentContractV1::validatePredeploySections($predeploy['sections']);
+
+        $timing = $this->timingPin->pin($deployLaunch['timing_run_id'], $runId);
+        $timingSection = $this->timingSection($timing, $deployLaunch['timing_run_id']);
+        $finish = $this->loadOrPinFinish($prefix, $runId);
+        $recordedAtUtc = $finish['finished_at_utc'];
+        $start = json_decode($startBytes, true, 16, JSON_THROW_ON_ERROR);
+        if (
+            !is_array($start) ||
+            array_is_list($start) ||
+            DeploymentHostRunnerContractV1::encodeFile($start) !== $startBytes
+        ) {
+            throw new RuntimeException('unverifiable rollback orchestrator start is invalid');
+        }
+        $orchestratorTiming = DeploymentEvidenceAuthorityV1::finishOrchestratorTiming(
+            $start,
+            $recordedAtUtc,
+            $finish['boot_id'],
+            $finish['monotonic_ns'],
+            false,
+        );
+        $lines = explode("\n", substr($eventsBytes, 0, -1));
+        $run = DeploymentContractV1::validateRunLines($lines);
+        $cacheDisposition = DeploymentHostRunnerContractV1::stateCacheDisposition($state, $eventsBytes);
+        if ($run['state'] === 'rollback_running' && $cacheDisposition === 'current') {
+            $lines[] = DeploymentContractV1::canonicalJson([
+                'schema' => DeploymentContractV1::RUN_SCHEMA,
+                'record_type' => 'transition',
+                'run_id' => $runId,
+                'sequence' => count($lines) + 1,
+                'recorded_at_utc' => $recordedAtUtc,
+                'previous_state' => 'rollback_running',
+                'state' => 'manual_recovery_required',
+                'deploy_invocation_count' => 1,
+                'intent_sha256' => $state['intent_sha256'],
+                'exit_code' => 143,
+                'reason' => 'interrupted',
+            ]);
+        } elseif ($run['state'] === 'manual_recovery_required' && $cacheDisposition === 'stale_recoverable') {
+            $last = json_decode($lines[array_key_last($lines)], true, 32, JSON_THROW_ON_ERROR);
+            if (
+                !is_array($last) ||
+                ($last['previous_state'] ?? null) !== 'rollback_running' ||
+                ($last['exit_code'] ?? null) !== 143 ||
+                ($last['reason'] ?? null) !== 'interrupted'
+            ) {
+                throw new RuntimeException('unverifiable rollback journal-ahead prefix is inconsistent');
+            }
+        } else {
+            throw new RuntimeException('unverifiable rollback journal is inconsistent');
+        }
+        $candidateEventsBytes = implode("\n", $lines) . "\n";
+        $evidence = [
+            'schema' => DeploymentContractV1::EVIDENCE_SCHEMA,
+            'run_id' => $runId,
+            'intent_sha256' => $state['intent_sha256'],
+            'captured_at_utc' => $recordedAtUtc,
+            ...$predeploy['sections'],
+            'deploy' => DeployResultV1::deployEvidence('succeeded'),
+            'rollback' => [
+                'status' => 'unknown',
+                'invocation_count' => 1,
+                'mode' => 'dedicated_post_gate_recovery',
+                'verified' => null,
+            ],
+            'post_gates' => $deployReport['post_gates'],
+            'deploy_timing' => $timingSection,
+            'orchestrator_timing' => $orchestratorTiming,
+            'result' => ['state' => 'manual_recovery_required', 'exit_code' => 143, 'reason' => 'interrupted'],
+        ];
+        DeploymentContractV1::validateBundle($lines, $evidence);
+        $evidenceBytes = DeploymentHostRunnerContractV1::encodeFile($evidence);
+        $existingEvidenceBytes = $this->storage->read($prefix . 'evidence.json', 1_048_576);
+        if ($existingEvidenceBytes !== null && !hash_equals($existingEvidenceBytes, $evidenceBytes)) {
+            throw new RuntimeException('unverifiable rollback evidence conflicts with durable candidate bytes');
+        }
+        $candidateState = $state;
+        $candidateState['state'] = 'manual_recovery_required';
+        $candidateState['sequence'] = count($lines);
+        $candidateState['events_sha256'] = hash('sha256', $candidateEventsBytes);
+        $candidateState['active_action'] = 'none';
+        $candidateState['evidence_sha256'] = hash('sha256', $evidenceBytes);
+        $candidateState['terminal'] = [
+            'state' => 'manual_recovery_required',
+            'exit_code' => 143,
+            'reason' => 'interrupted',
+        ];
+        $candidateState['updated_at_utc'] = $recordedAtUtc;
+        DeploymentHostRunnerContractV1::validateStateEvolution($state, $candidateState);
+        $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
+        $this->storage->cow($prefix . 'events.jsonl', $candidateEventsBytes, 1_048_576);
+        $this->storage->cow($prefix . 'evidence.json', $evidenceBytes, 1_048_576);
+        $this->storage->cow($prefix . 'state.json', DeploymentHostRunnerContractV1::encodeFile($candidateState), 4_096);
+        if (
+            DeploymentHostRunnerContractV1::terminalStateCacheDisposition(
+                $candidateState,
+                $candidateEventsBytes,
+                $evidenceBytes,
+                $deployReportBytes,
+                null,
+                [
+                    'deploy' => [
+                        'launch' => $deployLaunchBytes,
+                        'binding' => $deployBindingBytes,
+                        'observation' => $deployObservationBytes,
+                    ],
+                    'rollback' => [
+                        'launch' => $rollbackLaunchBytes,
+                        'binding' => $rollbackBindingBytes,
+                        'observation' => $rollbackObservationBytes,
+                    ],
+                ],
+            ) !== 'current'
+        ) {
+            throw new RuntimeException('unverifiable terminal rollback persistence is not current');
+        }
+        $terminalClaim = [
+            'schema' => DeploymentHostRunnerContractV1::ACTIVE_RUN_SCHEMA,
+            'run_id' => $runId,
+            'intent_sha256' => $candidateState['intent_sha256'],
+            'state' => $candidateState['state'],
+            'sequence' => $candidateState['sequence'],
+            'events_sha256' => $candidateState['events_sha256'],
+            'claimed_at_utc' => $candidateState['updated_at_utc'],
+        ];
+        $this->storage->refreshActiveClaim($claimBytes, DeploymentHostRunnerContractV1::encodeFile($terminalClaim));
         return $this->terminalResponse($candidateState, 'recovery');
     }
 
@@ -1045,6 +1282,9 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
         $disposition = $reconciler->reconcileStored($runId, $intentSha256);
         if ($disposition === 'refresh_terminal_claim') {
             $disposition = $reconciler->reconcileStored($runId, $intentSha256);
+        }
+        if ($disposition === 'terminal_claim_held') {
+            return;
         }
         if ($disposition !== 'clear_terminal') {
             throw new RuntimeException('terminal deploy claim cannot be cleared');

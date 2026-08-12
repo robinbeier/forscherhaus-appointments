@@ -1847,6 +1847,71 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertArrayNotHasKey('active-run.json', $storage->files);
     }
 
+    public function testUnverifiableDedicatedRollbackFreezesManualRecoveryAndTerminalClaim(): void
+    {
+        $storage = $this->completedRollbackStorage(false, 31);
+        $prefix = 'runs/' . self::fixtureRunId() . '/';
+        $state = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        $state['rollback']['unit_state'] = 'unknown';
+        $state['rollback']['observed_exit_code'] = null;
+        $state['rollback']['verdict'] = 'unknown';
+        $storage->files[$prefix . 'state.json'] = DeploymentHostRunnerContractV1::encodeFile($state);
+        $storage->files[$prefix . 'rollback-unit-observation.json'] = DeploymentHostRunnerContractV1::encodeFile([
+            'schema' => DeploymentHostRunnerContractV1::UNIT_ABSENCE_SCHEMA,
+            'kind' => 'transport_error',
+            'manager_boot_id' => null,
+        ]);
+        $initial = $storage->files;
+        $terminal = new \Ops\HostRunnerTerminalPersistence(
+            $storage,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        );
+
+        $response = $terminal->terminalizeRollback(self::fixtureRunId());
+
+        self::assertSame('terminal', $response['disposition']);
+        self::assertSame('recovery', $response['action']);
+        self::assertSame('manual_recovery_required', $response['state']);
+        self::assertSame(143, $response['result_exit_code']);
+        self::assertSame('interrupted', $response['result_reason']);
+        $terminalState = DeploymentHostRunnerContractV1::decodeState($storage->files[$prefix . 'state.json']);
+        self::assertSame('manual_recovery_required', $terminalState['state']);
+        self::assertSame('unknown', $terminalState['rollback']['verdict']);
+        $claim = DeploymentHostRunnerContractV1::decodeActiveRun($storage->files['active-run.json']);
+        self::assertSame('manual_recovery_required', $claim['state']);
+        $evidence = json_decode($storage->files[$prefix . 'evidence.json'], true, 64, JSON_THROW_ON_ERROR);
+        self::assertSame('unknown', $evidence['rollback']['status']);
+        self::assertSame(
+            'terminal',
+            \Ops\DeploymentContractV1::validateBundle(
+                explode("\n", substr($storage->files[$prefix . 'events.jsonl'], 0, -1)),
+                $evidence,
+            )['recovery'],
+        );
+
+        $replayed = $terminal->resumeTerminal(self::fixtureRunId(), 'recovery');
+
+        self::assertSame($response, $replayed);
+        self::assertArrayHasKey('active-run.json', $storage->files);
+
+        $journalAhead = new RecordingHostRunnerStorage();
+        $journalAhead->files = $initial;
+        foreach (['orchestrator-finish.json', 'evidence.json', 'events.jsonl'] as $leaf) {
+            $journalAhead->files[$prefix . $leaf] = $storage->files[$prefix . $leaf];
+        }
+        $recovered = (new \Ops\HostRunnerTerminalPersistence(
+            $journalAhead,
+            new FixedTerminalClock(),
+            new NotObservedTimingPin(),
+        ))->terminalizeRollback(self::fixtureRunId());
+
+        self::assertSame($response, $recovered);
+        self::assertSame($storage->files[$prefix . 'state.json'], $journalAhead->files[$prefix . 'state.json']);
+        $recoveredClaim = DeploymentHostRunnerContractV1::decodeActiveRun($journalAhead->files['active-run.json']);
+        self::assertSame('manual_recovery_required', $recoveredClaim['state']);
+    }
+
     public function testDedicatedRollbackTerminalCrashPrefixesResumeExactBytes(): void
     {
         $prefix = 'runs/' . self::fixtureRunId() . '/';

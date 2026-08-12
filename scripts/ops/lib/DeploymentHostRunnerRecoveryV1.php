@@ -57,7 +57,9 @@ final class HostRunnerRecoveryAdmission
             }
             if (
                 $resumed['state'] === 'rollback_running' &&
-                in_array($resumed['rollback']['verdict'], ['succeeded', 'failed'], true)
+                (in_array($resumed['rollback']['verdict'], ['succeeded', 'failed'], true) ||
+                    ($resumed['rollback']['verdict'] === 'unknown' &&
+                        in_array($resumed['rollback']['unit_state'], ['killed', 'missing', 'unknown'], true)))
             ) {
                 return $this->terminal->terminalizeRollback($runId);
             }
