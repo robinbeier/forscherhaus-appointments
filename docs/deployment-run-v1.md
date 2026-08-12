@@ -190,8 +190,9 @@ Its sections are:
 - expected and observed commit plus exact verification result;
 - traffic-gate reference and normalized core;
 - dump age/SHA plus explicit checksum-, gzip-, and restore-verification evidence;
-- capacity available/projected bytes, observed/projected used percentages, the
-  fixed `85` percent ceiling, and a derived decision;
+- capacity available/projected bytes and inodes, the authenticated staged inode
+  count, fixed 64-inode allowance, observed/projected used percentages, the fixed
+  `85` percent ceiling, and a derived decision;
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
 - exactly-once deploy exit and any rollback performed inside that child;
 - a separate at-most-once dedicated post-gate rollback reservation and verdict;

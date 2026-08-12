@@ -1180,6 +1180,10 @@ final class DeploymentContractV1
                 'status',
                 'available_bytes',
                 'projected_required_bytes',
+                'available_inodes',
+                'stage_inode_count',
+                'inode_headroom',
+                'projected_required_inodes',
                 'observed_percent',
                 'projected_percent',
                 'max_used_percent',
@@ -1195,7 +1199,16 @@ final class DeploymentContractV1
         self::assertSame($section['max_used_percent'], self::MAX_CAPACITY_USED_PERCENT, 'capacity.max_used_percent');
         if ($section['status'] === 'invalid') {
             foreach (
-                ['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent']
+                [
+                    'available_bytes',
+                    'projected_required_bytes',
+                    'available_inodes',
+                    'stage_inode_count',
+                    'inode_headroom',
+                    'projected_required_inodes',
+                    'observed_percent',
+                    'projected_percent',
+                ]
                 as $field
             ) {
                 if ($section[$field] !== null) {
@@ -1221,7 +1234,17 @@ final class DeploymentContractV1
                 throw new RuntimeException('invalid capacity evidence cannot claim success');
             }
             foreach (
-                ['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent', 'passed']
+                [
+                    'available_bytes',
+                    'projected_required_bytes',
+                    'available_inodes',
+                    'stage_inode_count',
+                    'inode_headroom',
+                    'projected_required_inodes',
+                    'observed_percent',
+                    'projected_percent',
+                    'passed',
+                ]
                 as $field
             ) {
                 if ($section[$field] === null) {
@@ -1230,15 +1253,39 @@ final class DeploymentContractV1
             }
             throw new RuntimeException('invalid capacity evidence must retain an unavailable measurement');
         }
-        foreach (['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent'] as $field) {
+        foreach (
+            [
+                'available_bytes',
+                'projected_required_bytes',
+                'available_inodes',
+                'stage_inode_count',
+                'inode_headroom',
+                'projected_required_inodes',
+                'observed_percent',
+                'projected_percent',
+            ] as $field
+        ) {
             self::assertNonNegativeInteger($section[$field], 'capacity.' . $field);
         }
+        if ($section['stage_inode_count'] === 0) {
+            throw new RuntimeException('capacity.stage_inode_count must be positive');
+        }
+        self::assertSame($section['inode_headroom'], 64, 'capacity.inode_headroom');
+        if ($section['stage_inode_count'] > PHP_INT_MAX - $section['inode_headroom']) {
+            throw new RuntimeException('capacity inode projection overflows');
+        }
+        self::assertSame(
+            $section['projected_required_inodes'],
+            $section['stage_inode_count'] + $section['inode_headroom'],
+            'capacity.projected_required_inodes',
+        );
         if ($section['observed_percent'] > 100 || $section['projected_percent'] > 100) {
             throw new RuntimeException('capacity percentages must not exceed 100');
         }
         self::assertBoolean($section['passed'], 'capacity.passed');
         $passed =
             $section['available_bytes'] >= $section['projected_required_bytes'] &&
+            $section['available_inodes'] >= $section['projected_required_inodes'] &&
             $section['observed_percent'] < $section['max_used_percent'] &&
             $section['projected_percent'] < $section['max_used_percent'] &&
             $section['projected_percent'] >= $section['observed_percent'];

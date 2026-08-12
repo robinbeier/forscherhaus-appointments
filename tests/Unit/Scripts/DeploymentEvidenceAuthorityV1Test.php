@@ -539,6 +539,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'status' => $invalid ? 'invalid' : 'failed',
             'available_bytes' => 1,
             'projected_required_bytes' => $invalid ? null : 2,
+            'available_inodes' => 1,
+            'stage_inode_count' => $invalid ? null : 2,
+            'inode_headroom' => $invalid ? null : 64,
+            'projected_required_inodes' => $invalid ? null : 66,
             'observed_percent' => 84,
             'projected_percent' => $invalid ? null : 85,
             'max_used_percent' => 85,
@@ -616,6 +620,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     null,
                     $capacityFailure['available_bytes'],
                     $capacityFailure['projected_required_bytes'],
+                    $capacityFailure['available_inodes'],
+                    $capacityFailure['stage_inode_count'],
+                    $capacityFailure['inode_headroom'],
+                    $capacityFailure['projected_required_inodes'],
                     $capacityFailure['observed_percent'],
                     $capacityFailure['projected_percent'],
                 )
@@ -635,6 +643,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         '2026-08-12T12:30:00Z',
                         $this->capacityDevices(1),
                     ),
+                    null,
+                    null,
+                    null,
+                    null,
                     null,
                     null,
                     null,
@@ -723,6 +735,68 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         yield 'capacity invalid' => ['capacity', true, 23, 'capacity_gate_failed'];
         yield 'artifact failed' => ['artifact', false, 24, 'artifact_verification_failed'];
         yield 'artifact invalid' => ['artifact', true, 24, 'artifact_verification_failed'];
+    }
+
+    public function testInodeOnlyCapacityShortageRemainsAValidExit23Bundle(): void
+    {
+        $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
+        $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
+        $provider = $this->passedProviderWithTraffic(
+            new TrafficObservationV1(
+                $this->trafficReportBytes('allow', 0),
+                hash('sha256', $this->trafficReportBytes('allow', 0)),
+                self::SHA,
+                '2026-08-09.1',
+                1,
+                91,
+            ),
+            capacity: new CapacityObservationV1(
+                new CapacityVerifiedSourcesV1(
+                    1,
+                    4096,
+                    1_000_000,
+                    900_000,
+                    10_000_000,
+                    1,
+                    $this->buildSources($provenanceBytes),
+                    $attestationBytes,
+                    hash('sha256', $attestationBytes),
+                    self::SHA,
+                    1_000_000,
+                    '2026-08-12T12:30:00Z',
+                    $this->capacityDevices(1),
+                ),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+            ),
+        );
+
+        $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
+            $provider,
+            self::RUN_ID,
+            self::SHA,
+            self::COMMIT,
+            'normal',
+        );
+        $capacity = $assembly['sections']['capacity'];
+        self::assertSame(23, $assembly['exit_code']);
+        self::assertSame('failed', $capacity['status']);
+        self::assertSame(1, $capacity['available_inodes']);
+        self::assertSame(2000, $capacity['stage_inode_count']);
+        self::assertSame(64, $capacity['inode_headroom']);
+        self::assertSame(2064, $capacity['projected_required_inodes']);
+        self::assertFalse($capacity['passed']);
+        $bundle = $this->failedBeforeWriteBundle($assembly);
+        self::assertSame(
+            'failed_before_write',
+            DeploymentContractV1::validateBundle($bundle['lines'], $bundle['evidence'])['state'],
+        );
     }
 
     public function testTrafficPinModeAndCanonicalBytesCannotBeSubstituted(): void
@@ -905,7 +979,17 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'capacity conflicting modes' => [
                 $this->passedProviderWithTraffic(
                     $traffic,
-                    capacity: new CapacityObservationV1($capacitySources, 1, null, null, null),
+                    capacity: new CapacityObservationV1(
+                        $capacitySources,
+                        1,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                    ),
                 ),
                 ['expected_commit', 'traffic_gate', 'dump', 'capacity'],
             ],
@@ -1413,6 +1497,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         '2026-08-12T12:30:00Z',
                         $this->capacityDevices(1),
                     ),
+                    null,
+                    null,
+                    null,
+                    null,
                     null,
                     null,
                     null,

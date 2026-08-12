@@ -58,7 +58,10 @@ temporary/restore scratch; rollback bytes are zero in v1. Headroom is
 bytes and both observed and projected used percentages must be below 85. Free
 inodes must cover the authenticated staged inode count plus a fixed 64-inode
 allowance for the runner's bounded archive, pin, state, receipt, timing, and
-temporary leaves.
+temporary leaves. The closed capacity evidence retains all four inode inputs
+(`available_inodes`, `stage_inode_count`, `inode_headroom`, and
+`projected_required_inodes`), and the terminal contract independently derives
+the inode decision together with the byte and percentage checks.
 
 ## Ordered provider boundary
 

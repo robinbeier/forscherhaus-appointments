@@ -51,6 +51,10 @@ final readonly class CapacityObservationV1
         public ?CapacityVerifiedSourcesV1 $verifiedSources,
         public ?int $availableBytes,
         public ?int $projectedRequiredBytes,
+        public ?int $availableInodes,
+        public ?int $stageInodeCount,
+        public ?int $inodeHeadroom,
+        public ?int $projectedRequiredInodes,
         public ?int $observedPercent,
         public ?int $projectedPercent,
     ) {}

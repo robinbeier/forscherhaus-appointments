@@ -730,6 +730,10 @@ final class DeploymentEvidenceAuthorityV1
             'status' => $observation['passed'] ? 'passed' : 'failed',
             'available_bytes' => $observation['available_bytes'],
             'projected_required_bytes' => $observation['projected_required_bytes'],
+            'available_inodes' => $observation['available_inodes'],
+            'stage_inode_count' => $observation['stage_inode_count'],
+            'inode_headroom' => $observation['inode_headroom'],
+            'projected_required_inodes' => $observation['projected_required_inodes'],
             'observed_percent' => $observation['observed_percent'],
             'projected_percent' => $observation['projected_percent'],
             'max_used_percent' => $observation['max_used_percent'],
@@ -1145,7 +1149,16 @@ final class DeploymentEvidenceAuthorityV1
     ): VerifiedPredeployGateV1 {
         self::assertExactKeys(
             $statvfsObservation,
-            ['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent'],
+            [
+                'available_bytes',
+                'projected_required_bytes',
+                'available_inodes',
+                'stage_inode_count',
+                'inode_headroom',
+                'projected_required_inodes',
+                'observed_percent',
+                'projected_percent',
+            ],
             'failed capacity collector observation',
         );
         $section = [
@@ -1162,12 +1175,20 @@ final class DeploymentEvidenceAuthorityV1
         string $intentSha256,
         ?int $availableBytes,
         ?int $projectedRequiredBytes,
+        ?int $availableInodes,
+        ?int $stageInodeCount,
+        ?int $inodeHeadroom,
+        ?int $projectedRequiredInodes,
         ?int $observedPercent,
         ?int $projectedPercent,
     ): VerifiedPredeployGateV1 {
         $complete =
             $availableBytes !== null &&
             $projectedRequiredBytes !== null &&
+            $availableInodes !== null &&
+            $stageInodeCount !== null &&
+            $inodeHeadroom !== null &&
+            $projectedRequiredInodes !== null &&
             $observedPercent !== null &&
             $projectedPercent !== null;
         return self::observeCapacityGateFailure(
@@ -1176,6 +1197,10 @@ final class DeploymentEvidenceAuthorityV1
             [
                 'available_bytes' => $availableBytes,
                 'projected_required_bytes' => $projectedRequiredBytes,
+                'available_inodes' => $availableInodes,
+                'stage_inode_count' => $stageInodeCount,
+                'inode_headroom' => $inodeHeadroom,
+                'projected_required_inodes' => $projectedRequiredInodes,
                 'observed_percent' => $observedPercent,
                 'projected_percent' => $projectedPercent,
             ],
@@ -1356,6 +1381,10 @@ final class DeploymentEvidenceAuthorityV1
                 $hasFallback =
                     $observation->availableBytes !== null ||
                     $observation->projectedRequiredBytes !== null ||
+                    $observation->availableInodes !== null ||
+                    $observation->stageInodeCount !== null ||
+                    $observation->inodeHeadroom !== null ||
+                    $observation->projectedRequiredInodes !== null ||
                     $observation->observedPercent !== null ||
                     $observation->projectedPercent !== null;
                 if ($observation->verifiedSources !== null && $hasFallback) {
@@ -1394,6 +1423,10 @@ final class DeploymentEvidenceAuthorityV1
                     $intentSha256,
                     $observation->availableBytes,
                     $observation->projectedRequiredBytes,
+                    $observation->availableInodes,
+                    $observation->stageInodeCount,
+                    $observation->inodeHeadroom,
+                    $observation->projectedRequiredInodes,
                     $observation->observedPercent,
                     $observation->projectedPercent,
                 );
@@ -1600,6 +1633,10 @@ final class DeploymentEvidenceAuthorityV1
             'status',
             'available_bytes',
             'projected_required_bytes',
+            'available_inodes',
+            'stage_inode_count',
+            'inode_headroom',
+            'projected_required_inodes',
             'observed_percent',
             'projected_percent',
             'max_used_percent',

@@ -2132,7 +2132,18 @@ final class DeploymentContractV1Test extends TestCase
     public static function invalidCapacityEvidenceShapeProvider(): iterable
     {
         yield 'wrong maximum percentage' => [['max_used_percent' => 84]];
-        foreach (['available_bytes', 'projected_required_bytes', 'observed_percent', 'projected_percent'] as $field) {
+        foreach (
+            [
+                'available_bytes',
+                'projected_required_bytes',
+                'available_inodes',
+                'stage_inode_count',
+                'inode_headroom',
+                'projected_required_inodes',
+                'observed_percent',
+                'projected_percent',
+            ] as $field
+        ) {
             yield 'wrong ' . $field . ' type' => [[$field => '1']];
             yield 'negative ' . $field => [[$field => -1]];
         }
@@ -2144,6 +2155,10 @@ final class DeploymentContractV1Test extends TestCase
             [
                 'available_bytes' => 8_000_000_000,
                 'projected_required_bytes' => 1_000_000_000,
+                'available_inodes' => 8_000_000,
+                'stage_inode_count' => 999_936,
+                'inode_headroom' => 64,
+                'projected_required_inodes' => 1_000_000,
                 'observed_percent' => 81,
                 'projected_percent' => 84,
                 'passed' => false,
@@ -2416,6 +2431,26 @@ final class DeploymentContractV1Test extends TestCase
         yield 'observed threshold reached' => [8_000_000_000, 1_000_000_000, 85, 85];
         yield 'projected threshold reached' => [8_000_000_000, 1_000_000_000, 81, 85];
         yield 'projection moves backwards' => [8_000_000_000, 1_000_000_000, 84, 81];
+    }
+
+    public function testCapacityDecisionAndProjectionAreDerivedFromInodeMeasurements(): void
+    {
+        $mutations = [
+            'insufficient inodes' => ['available_inodes' => 999_999],
+            'wrong inode headroom' => ['inode_headroom' => 63],
+            'wrong inode projection' => ['projected_required_inodes' => 999_999],
+            'empty staged archive' => ['stage_inode_count' => 0, 'projected_required_inodes' => 64],
+        ];
+        foreach ($mutations as $name => $mutation) {
+            $evidence = $this->validEvidence($this->successfulRunLines());
+            $evidence['capacity'] = array_replace($evidence['capacity'], $mutation);
+            try {
+                DeploymentContractV1::validateEvidence($evidence);
+                self::fail($name . ' was accepted');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('capacity', $exception->getMessage(), $name);
+            }
+        }
     }
 
     public function testOuterWallClockNeverReplacesOrMixesDeployTiming(): void
@@ -2773,6 +2808,10 @@ final class DeploymentContractV1Test extends TestCase
                 'status' => 'passed',
                 'available_bytes' => 8_000_000_000,
                 'projected_required_bytes' => 1_000_000_000,
+                'available_inodes' => 8_000_000,
+                'stage_inode_count' => 999_936,
+                'inode_headroom' => 64,
+                'projected_required_inodes' => 1_000_000,
                 'observed_percent' => 81,
                 'projected_percent' => 84,
                 'max_used_percent' => DeploymentContractV1::MAX_CAPACITY_USED_PERCENT,
