@@ -390,6 +390,23 @@ health token, dump, predeploy credentials, canary credentials, and incident
 webhook. The execution-input producer is a fully trusted root authority for
 selecting those protected files; web/user-authored input is rejected, and a
 path plus digest is integrity evidence rather than authorization by itself.
+Before a deploy reservation, the executable snapshots those five references
+into immutable root-owned mode-`0600` single-link files in the protected run
+directory: `deploy-ref-healthz-token`,
+`deploy-ref-zero-surprise-dump.sql` or
+`deploy-ref-zero-surprise-dump.sql.gz`,
+`deploy-ref-predeploy-credentials`, `deploy-ref-canary-credentials`, and
+`deploy-ref-incident-webhook`. The helper receives source path and expected SHA
+only on bounded stdin, opens components without following links, streams and
+hashes one stable source descriptor, fsyncs a hidden same-directory temporary,
+publishes with Linux `renameat2(RENAME_NOREPLACE)`, and fsyncs the run
+directory. An exact existing snapshot is authoritative for retry even if the
+source has rotated; another expected digest conflicts. Small snapshots are
+bounded to 1 MiB. The dump is streamed with a 16 GiB cap, a 30-minute helper
+deadline, and free-space headroom equal to the greater of 512 MiB or ten
+percent of its size. Snapshot bytes persist with the protected run record and
+never enter stdout, stderr, operator events, evidence, responses, descriptions,
+or process argv.
 Recovery parameters contain only the original immutable `release_id`. The
 recovery bundle must bind both the closed recovery request and the original
 deploy request, so a recovery request alone cannot authorize a different
@@ -404,6 +421,8 @@ PR freezes that storage contract but does not implement the storage engine. A
 crash after the no-replace input pin but before reservation resumes only when
 the caller bytes are exactly identical to the pinned canonical bytes; changed
 bytes are a conflict and the pinned file is never replaced.
+The child argv contains only the five run-local snapshot paths; it never
+contains the original protected source paths or their digests.
 
 `deployment_host_post_gate_report.v1` is the same bounded canonical form and
 contains exactly `schema`, `run_id`, `intent_sha256`, `captured_at_utc`,
@@ -595,6 +614,15 @@ lock must scan the trusted run journals and reconstruct the one provable
 missing claim before handling any candidate; it never spawns from that recovery
 path.
 
+For missing-claim reconstruction, an absent `state.json` is valid only for the
+first `deploy_running` reservation journal prefix. A present cache may be
+current, or it may lag exactly one `deploy_running` or `rollback_running`
+reservation record. Current bytes are validated and preserved exactly; a
+one-record-lag cache may advance only through the normal immutable state
+evolution checks. `post_gates_running` is not a reservation write and a
+rollback reservation always retains its authoritative prior post-gate cache,
+so neither may use an absent cache as reconstruction authority.
+
 Under the global lock, a different Run-ID is exit `75` while that claim binds a
 nonterminal trusted journal, even if no runner process remains or the unit has
 already exited. The exact run and intent may only attach/reconcile. A terminal
@@ -648,10 +676,12 @@ refresh/clear is stricter: every reserved
 unit must be independently stopped or reboot-proven missing, so unknown/live
 state continues to block other runs. When `active-run.json` is absent, zero
 reserved candidates means normal candidate handling may continue. Exactly one
-journal-proven reserved candidate is reconstructed observe-only when its state
-cache is absent or is exactly the final `deploy_running`/`rollback_running`
-reservation record behind; multiple, corrupt,
-terminal-only, or unprovable candidates fail closed.
+journal-proven reserved candidate is reconstructed observe-only. Its cache may
+be current, absent only at the first `deploy_running` reservation seam, or
+exactly one final `deploy_running`/`rollback_running` reservation record
+behind. Current bytes are preserved; a lagging cache advances only through the
+normal immutable evolution checks. Multiple, corrupt, incomplete-terminal, or
+otherwise unprovable candidates fail closed.
 
 ## Transient unit and internal CLI contract
 

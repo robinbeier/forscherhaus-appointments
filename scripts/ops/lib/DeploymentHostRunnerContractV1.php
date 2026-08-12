@@ -65,6 +65,14 @@ final class DeploymentHostRunnerContractV1
         'zero_surprise_incident_webhook',
     ];
 
+    private const PINNED_DEPLOY_REFERENCE_LEAVES = [
+        'healthz_token' => 'deploy-ref-healthz-token',
+        'zero_surprise_dump' => 'deploy-ref-zero-surprise-dump.sql.gz',
+        'zero_surprise_predeploy_credentials' => 'deploy-ref-predeploy-credentials',
+        'zero_surprise_canary_credentials' => 'deploy-ref-canary-credentials',
+        'zero_surprise_incident_webhook' => 'deploy-ref-incident-webhook',
+    ];
+
     private const POST_GATE_REPORT_KEYS = [
         'schema',
         'run_id',
@@ -372,6 +380,12 @@ final class DeploymentHostRunnerContractV1
         foreach (array_slice(self::DEPLOY_EXECUTION_PARAMETER_KEYS, 2) as $field) {
             self::assertProtectedFileReference($input['parameters'][$field], $field);
         }
+        if (
+            !str_ends_with($input['parameters']['zero_surprise_dump']['path'], '.sql') &&
+            !str_ends_with($input['parameters']['zero_surprise_dump']['path'], '.sql.gz')
+        ) {
+            throw new RuntimeException('zero-surprise dump reference must identify .sql or .sql.gz bytes');
+        }
     }
 
     /** @return array<string,mixed> */
@@ -516,6 +530,13 @@ final class DeploymentHostRunnerContractV1
             ];
         }
         $parameters = $input['parameters'];
+        $pinnedReference = static function (string $field) use ($input): string {
+            $leaf = self::PINNED_DEPLOY_REFERENCE_LEAVES[$field];
+            if ($field === 'zero_surprise_dump' && str_ends_with($input['parameters'][$field]['path'], '.sql')) {
+                $leaf = 'deploy-ref-zero-surprise-dump.sql';
+            }
+            return self::STATE_ROOT . '/runs/' . $input['run_id'] . '/' . $leaf;
+        };
 
         return [
             ...$argv,
@@ -524,18 +545,41 @@ final class DeploymentHostRunnerContractV1
             '--renderer-deploy-mode',
             $parameters['renderer_deploy_mode'],
             '--healthz-token-file',
-            $parameters['healthz_token']['path'],
+            $pinnedReference('healthz_token'),
             '--zero-surprise-dump-file',
-            $parameters['zero_surprise_dump']['path'],
+            $pinnedReference('zero_surprise_dump'),
             '--zero-surprise-predeploy-credentials-file',
-            $parameters['zero_surprise_predeploy_credentials']['path'],
+            $pinnedReference('zero_surprise_predeploy_credentials'),
             '--zero-surprise-canary-credentials-file',
-            $parameters['zero_surprise_canary_credentials']['path'],
+            $pinnedReference('zero_surprise_canary_credentials'),
             '--zero-surprise-incident-webhook-file',
-            $parameters['zero_surprise_incident_webhook']['path'],
+            $pinnedReference('zero_surprise_incident_webhook'),
             '--result-file',
             self::STATE_ROOT . '/runs/' . $input['run_id'] . '/deploy-result.json',
         ];
+    }
+
+    /** @param array<string,mixed> $input @return array<string,array{source_path:string,sha256:string,leaf:string}> */
+    public static function deployReferencePins(array $input): array
+    {
+        self::validateExecutionInput($input);
+        if ($input['action'] !== 'deploy') {
+            return [];
+        }
+        $pins = [];
+        foreach (self::PINNED_DEPLOY_REFERENCE_LEAVES as $field => $leaf) {
+            if ($field === 'zero_surprise_dump') {
+                $leaf = str_ends_with($input['parameters'][$field]['path'], '.sql.gz')
+                    ? 'deploy-ref-zero-surprise-dump.sql.gz'
+                    : 'deploy-ref-zero-surprise-dump.sql';
+            }
+            $pins[$field] = [
+                'source_path' => $input['parameters'][$field]['path'],
+                'sha256' => $input['parameters'][$field]['sha256'],
+                'leaf' => $leaf,
+            ];
+        }
+        return $pins;
     }
 
     /** @param array<string,mixed> $report */
@@ -2550,6 +2594,9 @@ final class DeploymentHostRunnerContractV1
         }
         $lines = explode("\n", substr($candidate['events_bytes'], 0, -1));
         $run = DeploymentContractV1::validateRunLines($lines);
+        if ($candidate['state'] === null && $run['state'] !== 'deploy_running') {
+            throw new RuntimeException('only the first deploy reservation may lack a prior state cache');
+        }
         if (
             $candidate['state'] !== null &&
             $cacheDisposition === 'stale_recoverable' &&

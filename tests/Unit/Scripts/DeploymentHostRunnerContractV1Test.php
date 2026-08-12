@@ -81,15 +81,15 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 '--renderer-deploy-mode',
                 'host',
                 '--healthz-token-file',
-                '/etc/fh/healthz.token',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-healthz-token',
                 '--zero-surprise-dump-file',
-                '/root/backups/predeploy.sql.gz',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-zero-surprise-dump.sql.gz',
                 '--zero-surprise-predeploy-credentials-file',
-                '/etc/fh/predeploy.ini',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-predeploy-credentials',
                 '--zero-surprise-canary-credentials-file',
-                '/etc/fh/canary.ini',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-canary-credentials',
                 '--zero-surprise-incident-webhook-file',
-                '/etc/fh/incident.ini',
+                '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-incident-webhook',
                 '--result-file',
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-result.json',
             ],
@@ -463,7 +463,11 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             null,
             "#!/bin/bash\n",
         );
-        self::assertContains('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $literalDollarArgv);
+        self::assertNotContains('/etc/fh/${FH_HEALTHZ_TOKEN}.token', $literalDollarArgv);
+        self::assertContains(
+            '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-healthz-token',
+            $literalDollarArgv,
+        );
         self::assertLessThan(
             array_search('--', $literalDollarArgv, true),
             array_search('--expand-environment=no', $literalDollarArgv, true),
@@ -2675,6 +2679,16 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         $rollbackLines = $postGateLines;
         $rollbackLines[] = $this->transition($rollbackLines, 'rollback_running');
         $rollbackEvents = implode("\n", $rollbackLines) . "\n";
+        foreach ([$postGateEvents, $rollbackEvents] as $eventsWithoutCache) {
+            try {
+                DeploymentHostRunnerContractV1::activeRunReconstructionDisposition([
+                    ['state' => null, 'events_bytes' => $eventsWithoutCache],
+                ]);
+                self::fail('A non-deploy missing state cache was reconstructable.');
+            } catch (RuntimeException) {
+                self::addToAssertionCount(1);
+            }
+        }
         self::assertSame(
             'reconstruct_claim_observe_only',
             DeploymentHostRunnerContractV1::activeRunReconstructionDisposition([
