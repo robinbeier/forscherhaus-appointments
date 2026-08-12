@@ -53,13 +53,14 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertStringContainsString('prune_children_except "$STAGE/docker/nginx" \'nginx.conf\'', $script);
         self::assertStringContainsString(
             'php "$STAGE/scripts/release-gate/validate_release_artifact.php" \\' . "\n" .
-                '    --print-required-paths > "$GENERATED_ASSET_LIST"',
+                '    --root="$STAGE" --print-generated-runtime-paths > "$GENERATED_ASSET_LIST"',
             $script,
         );
         self::assertStringContainsString(
-            'assets/css/*.min.css|assets/js/*.min.js|assets/vendor/*',
+            'assets/css/*.css|assets/js/*.min.js|assets/vendor/*',
             $script,
         );
+        self::assertStringContainsString('^assets/[A-Za-z0-9.@_/-]+$', $script);
         self::assertStringContainsString(
             '/usr/bin/install -m 0644 "$ASSET_SOURCE" "$ASSET_TARGET"',
             $script,

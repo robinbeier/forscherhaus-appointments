@@ -48,7 +48,9 @@ The builder:
 
 - refreshes frontend release assets with `npm run assets:refresh`
 - fails if generated frontend assets drift
-- copies only release-relevant files into a temporary stage
+- derives the exhaustive generated-runtime manifest from the exact committed
+  JS/SCSS source tree and the closed vendor-output contract, then copies and
+  validates every listed CSS/JS/vendor file in a temporary stage
 - includes the zero-surprise Docker assets required for predeploy replay
 - installs production Composer dependencies into the stage
 - validates the staged tree and final archive with

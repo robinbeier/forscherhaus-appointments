@@ -6,7 +6,7 @@ use ReleaseGate\ReleaseArtifactValidator;
 
 require_once __DIR__ . '/lib/ReleaseArtifactValidator.php';
 
-$options = getopt('', ['root:', 'archive:', 'print-required-paths']);
+$options = getopt('', ['root:', 'archive:', 'print-required-paths', 'print-generated-runtime-paths']);
 
 if (isset($options['print-required-paths'])) {
     foreach (ReleaseArtifactValidator::requiredPaths() as $requiredPath) {
@@ -14,6 +14,26 @@ if (isset($options['print-required-paths'])) {
     }
 
     exit(0);
+}
+
+if (isset($options['print-generated-runtime-paths'])) {
+    $root = isset($options['root']) ? trim((string) $options['root']) : '';
+
+    if ($root === '') {
+        fwrite(STDERR, "--print-generated-runtime-paths requires --root=PATH\n");
+        exit(1);
+    }
+
+    try {
+        foreach (ReleaseArtifactValidator::generatedRuntimeAssetPathsForDirectory($root) as $generatedPath) {
+            fwrite(STDOUT, $generatedPath . PHP_EOL);
+        }
+
+        exit(0);
+    } catch (Throwable $exception) {
+        fwrite(STDERR, $exception->getMessage() . PHP_EOL);
+        exit(1);
+    }
 }
 
 $root = isset($options['root']) ? trim((string) $options['root']) : '';
@@ -31,9 +51,10 @@ try {
         exit(0);
     }
 
+    $archiveEntries = readArchiveEntries($archive);
     ReleaseArtifactValidator::assertArchiveEntriesAreValid(
-        readArchiveEntries($archive),
-        readArchiveEntryTypes($archive, ReleaseArtifactValidator::archiveTypePaths()),
+        $archiveEntries,
+        readArchiveEntryTypes($archive, ReleaseArtifactValidator::archiveTypePaths($archiveEntries)),
     );
     fwrite(STDOUT, "[OK] Release artifact archive contains required files and no forbidden paths.\n");
     exit(0);
@@ -66,7 +87,7 @@ function readArchiveEntryTypes(string $archivePath, array $paths): array
     $stdout = runTarCommand(['tar', '-tvzf', $archivePath], $archivePath);
     $lines = preg_split('/\r?\n/', $stdout) ?: [];
     $types = [];
-    $requiredPaths = array_fill_keys(ReleaseArtifactValidator::requiredPaths(), true);
+    $requiredPaths = array_fill_keys($paths, true);
 
     foreach ($lines as $line) {
         if ($line === '') {

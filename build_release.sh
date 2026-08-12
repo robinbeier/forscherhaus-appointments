@@ -150,19 +150,20 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   prune_children_except "$STAGE/docker/nginx" 'nginx.conf'
 
   # Compiled frontend outputs are intentionally ignored by Git, so the exact
-  # commit export cannot contain them. Copy only the production-critical paths
-  # declared by the validator from the just-refreshed local build; never copy a
-  # whole ignored tree or arbitrary untracked files.
+  # commit export cannot contain them. Derive the exhaustive runtime manifest
+  # from the exported JS/SCSS sources plus the closed vendor-output contract,
+  # then copy exactly those refreshed files. Never copy an arbitrary ignored or
+  # untracked tree.
   GENERATED_ASSET_LIST="$OUTPUT/generated-release-assets.list"
   php "$STAGE/scripts/release-gate/validate_release_artifact.php" \
-    --print-required-paths > "$GENERATED_ASSET_LIST"
+    --root="$STAGE" --print-generated-runtime-paths > "$GENERATED_ASSET_LIST"
   GENERATED_ASSET_COUNT=0
   while IFS= read -r asset_path; do
     case "$asset_path" in
-      assets/css/*.min.css|assets/js/*.min.js|assets/vendor/*) ;;
+      assets/css/*.css|assets/js/*.min.js|assets/vendor/*) ;;
       *) continue ;;
     esac
-    [[ "$asset_path" =~ ^assets/[A-Za-z0-9._/-]+$ ]] || {
+    [[ "$asset_path" =~ ^assets/[A-Za-z0-9.@_/-]+$ ]] || {
       echo "[!] Generated release asset path is unsafe: $asset_path" >&2
       exit 1
     }
@@ -184,7 +185,7 @@ if [[ "$DRYRUN" -eq 0 ]]; then
 else
   echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docker)"
   echo "[DRY-RUN] Würde docker/compose.zero-surprise.yml sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
-  echo "[DRY-RUN] Würde ausschließlich die vom Release-Validator verlangten, frisch erzeugten CSS/JS/Vendor-Assets ins Stage kopieren"
+  echo "[DRY-RUN] Würde das vollständige, aus Commit-Quellen und Vendor-Vertrag abgeleitete Runtime-Assetmanifest ins Stage kopieren"
 fi
 
 # 2) Safety-Check: CI-Config muss jetzt im Stage existieren

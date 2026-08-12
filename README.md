@@ -83,8 +83,8 @@ Primary references:
 Release artifact builds should go through `./build_release.sh`. The builder now
 requires `--expected-commit <full 40-hex commit>`, exports that exact clean Git
 object, fails on uncommitted generated asset drift, and validates that
-booking/dashboard runtime assets plus release-gate tooling are present in both
-the staged tree and the final tarball.
+the exhaustive generated JS/CSS/vendor runtime manifest plus release-gate
+tooling are present in both the staged tree and the final tarball.
 
 ## Local Services (Docker)
 
