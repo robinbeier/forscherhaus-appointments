@@ -105,6 +105,8 @@ final readonly class CapacityVerifiedSourcesV1
         public string $dumpSha256,
         public int $dumpSizeBytes,
         public string $observedAtUtc,
+        public int $liveStorageAllocatedBytes,
+        public int $liveStorageInodeCount,
         /** @var array<string,int> */ public array $componentDevices,
     ) {}
 }

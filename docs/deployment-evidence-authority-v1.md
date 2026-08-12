@@ -13,6 +13,9 @@ working-tree changes, exports that exact commit, and emits a detached canonical
 size, source digests, and conservative archive-derived stage bounds.
 Those bounds include the exact staged regular-file count and a separate inode
 count covering the stage root, directories, and regular files.
+The local archive inspector resolves an executable `python3` from the build
+machine's absolute `PATH` entries, supporting the documented macOS build path;
+the fixed remote publication helper remains `/usr/bin/python3` on Ubuntu.
 `temp_scratch_bytes` is an additional scratch allowance only: archive, dump,
 and stage bytes are excluded because the capacity formula counts each of them
 as a separate component.
@@ -50,16 +53,21 @@ the expansion ratio at 100:1. Age must remain below 14,400 seconds.
 
 Capacity uses one `statvfs` snapshot of the target filesystem (`f_frsize`,
 `f_bavail`, `f_files`, and `f_favail`) and an exact named device map for state,
-release, artifact, dump, stage, restore scratch, and temporary targets. The
-archive byte bound and staged inode bound come only from the authenticated
-sidecar; later artifact observations cannot reduce either bound. Base required
-bytes are archive + compressed dump + archive-derived stage + deterministic
-temporary scratch + the uncompressed stream bound + the independently observed
-restored datadir footprint; rollback bytes are zero in v1. Headroom is
+release, artifact, dump, live storage, stage, restore scratch, and temporary
+targets. The protected provider measures allocated bytes and inodes for the
+exact live `storage` tree that the child later copies into the stage. The
+archive-derived stage bounds and this live-storage footprint are added before
+the capacity decision, so `stage_inode_count` represents the complete projected
+stage after that copy. Later artifact observations cannot reduce either bound.
+Base required bytes are archive + compressed dump + archive-derived stage +
+live-storage copy + deterministic temporary scratch + the uncompressed stream
+bound + the independently observed restored datadir footprint; rollback bytes
+are zero in v1. Headroom is
 `max(512 MiB, ceil(base/10))`. Available space must cover projected required
 bytes and both observed and projected used percentages must be below 85. Free
-inodes must cover the authenticated staged inode count, the independently
-observed restored-datadir inode count, and a fixed 64-inode allowance for the
+inodes must cover the authenticated archive-stage and live-storage inode
+counts, the independently observed restored-datadir inode count, and a fixed
+64-inode allowance for the
 runner's bounded archive, pin, state, receipt, timing, and temporary leaves.
 The closed capacity evidence retains all five inode inputs (`available_inodes`,
 `stage_inode_count`, `restore_inode_count`, `inode_headroom`, and

@@ -89,7 +89,7 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
         );
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($attestation);
         $devices = array_fill_keys(
-            ['artifact', 'dump_pin', 'release_root', 'restore_scratch', 'stage', 'state_root', 'temp'],
+            ['artifact', 'dump_pin', 'live_storage', 'release_root', 'restore_scratch', 'stage', 'state_root', 'temp'],
             1,
         );
         $capacity = DeploymentEvidenceAuthorityV1::capacityFromVerifiedAuthorities(
@@ -114,11 +114,13 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
             $dumpSha,
             1_000,
             '2026-08-12T12:01:01Z',
+            20_000,
+            5,
             $devices,
         );
-        $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 67_108_864 + 4_000 + 8_000;
+        $expectedBase = $record['archive']['size_bytes'] + 1_000 + 16_384 + 20_000 + 67_108_864 + 4_000 + 8_000;
         self::assertSame($expectedBase, $capacity['base_required_bytes']);
-        self::assertSame(76, $capacity['projected_required_inodes']);
+        self::assertSame(81, $capacity['projected_required_inodes']);
     }
 
     public function testProducerCanonicalizesTrustedTemporaryStagePath(): void
@@ -141,6 +143,23 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
         }
 
         self::assertSame(4, $record['capacity_bounds']['stage_inode_count']);
+    }
+
+    public function testProducerResolvesLocalPythonFromAbsolutePathEntries(): void
+    {
+        $bin = $this->root . '/homebrew-bin';
+        self::assertTrue(mkdir($bin, 0700));
+        $python = $bin . '/python3';
+        self::assertSame(17, file_put_contents($python, "#!/bin/sh\nexit 0\n"));
+        self::assertTrue(chmod($python, 0700));
+        $previousPath = getenv('PATH');
+        try {
+            putenv('PATH=relative-entry:' . $bin);
+            $method = new \ReflectionMethod(ReleaseBuildProvenanceProducerV1::class, 'resolveLocalPython3');
+            self::assertSame(realpath($python), $method->invoke(null));
+        } finally {
+            is_string($previousPath) ? putenv('PATH=' . $previousPath) : putenv('PATH');
+        }
     }
 
     public function testProducerUsesThePublicReleaseIdContract(): void

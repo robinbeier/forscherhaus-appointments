@@ -83,7 +83,7 @@ final class ReleaseBuildProvenanceProducerV1
     /** @return array{sha256:string,size_bytes:int,entry_count:int,stage_inode_count:int,stage_unpacked_bytes:int} */
     private static function inspectArchive(string $path): array
     {
-        $command = ['/usr/bin/python3', '-I', '-B', dirname(__DIR__) . '/libexec/inspect_release_archive_v1.py', $path];
+        $command = [self::resolveLocalPython3(), '-I', '-B', dirname(__DIR__) . '/libexec/inspect_release_archive_v1.py', $path];
         $pipes = [];
         $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, []);
         if (!is_resource($process)) {
@@ -132,6 +132,30 @@ final class ReleaseBuildProvenanceProducerV1
             'stage_inode_count' => $record['stage_inode_count'],
             'stage_unpacked_bytes' => $record['stage_unpacked_bytes'],
         ];
+    }
+
+    private static function resolveLocalPython3(): string
+    {
+        $path = getenv('PATH');
+        if (!is_string($path) || $path === '') {
+            throw new RuntimeException('local python3 is unavailable');
+        }
+        foreach (explode(PATH_SEPARATOR, $path) as $directory) {
+            if ($directory === '' || !str_starts_with($directory, DIRECTORY_SEPARATOR)) {
+                continue;
+            }
+            $candidate = $directory . DIRECTORY_SEPARATOR . 'python3';
+            $resolved = realpath($candidate);
+            if (
+                is_string($resolved) &&
+                str_starts_with($resolved, DIRECTORY_SEPARATOR) &&
+                is_file($resolved) &&
+                is_executable($resolved)
+            ) {
+                return $resolved;
+            }
+        }
+        throw new RuntimeException('local python3 is unavailable');
     }
 
     /** @return array{file_count:int,inode_count:int,unpacked_bytes:int} */

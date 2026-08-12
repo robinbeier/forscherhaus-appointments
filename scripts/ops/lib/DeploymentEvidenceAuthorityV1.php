@@ -30,6 +30,7 @@ final class DeploymentEvidenceAuthorityV1
     private const CAPACITY_DEVICE_KEYS = [
         'artifact',
         'dump_pin',
+        'live_storage',
         'release_root',
         'restore_scratch',
         'stage',
@@ -461,6 +462,8 @@ final class DeploymentEvidenceAuthorityV1
         string $dumpSha256,
         int $dumpSizeBytes,
         string $observedAtUtc,
+        int $liveStorageAllocatedBytes,
+        int $liveStorageInodeCount,
         array $componentDevices,
     ): array {
         $verifiedProvenance = self::decodeAuthorizedBuildProvenanceBounds(
@@ -482,6 +485,8 @@ final class DeploymentEvidenceAuthorityV1
             $dumpSizeBytes,
             $observedAtUtc,
         );
+        self::assertPositiveInt($liveStorageAllocatedBytes, 'live storage allocated bytes');
+        self::assertPositiveInt($liveStorageInodeCount, 'live storage inode count');
         return self::capacityFromStatvfs(
             $filesystemDevice,
             $blockSize,
@@ -489,11 +494,17 @@ final class DeploymentEvidenceAuthorityV1
             $blocksAvailable,
             $inodes,
             $inodesAvailable,
-            $verifiedProvenance['capacity_bounds']['stage_inode_count'],
+            self::checkedAdd(
+                $verifiedProvenance['capacity_bounds']['stage_inode_count'],
+                $liveStorageInodeCount,
+            ),
             $verifiedDumpObservation['restored_datadir_inode_count'],
             $verifiedProvenance['archive']['size_bytes'],
             $verifiedDumpObservation['dump_size_bytes'],
-            $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
+            self::checkedAdd(
+                $verifiedProvenance['capacity_bounds']['stage_unpacked_bytes'],
+                $liveStorageAllocatedBytes,
+            ),
             self::checkedAdd(
                 $verifiedProvenance['capacity_bounds']['temp_scratch_bytes'],
                 self::checkedAdd(
@@ -766,6 +777,8 @@ final class DeploymentEvidenceAuthorityV1
         string $dumpSha256,
         int $dumpSizeBytes,
         string $observedAtUtc,
+        int $liveStorageAllocatedBytes,
+        int $liveStorageInodeCount,
         array $componentDevices,
     ): array {
         $observation = self::capacityFromVerifiedAuthorities(
@@ -790,6 +803,8 @@ final class DeploymentEvidenceAuthorityV1
             $dumpSha256,
             $dumpSizeBytes,
             $observedAtUtc,
+            $liveStorageAllocatedBytes,
+            $liveStorageInodeCount,
             $componentDevices,
         );
         return [
@@ -830,6 +845,8 @@ final class DeploymentEvidenceAuthorityV1
         string $dumpSha256,
         int $dumpSizeBytes,
         string $observedAtUtc,
+        int $liveStorageAllocatedBytes,
+        int $liveStorageInodeCount,
         array $componentDevices,
     ): VerifiedPredeployGateV1 {
         return self::issueGate(
@@ -858,6 +875,8 @@ final class DeploymentEvidenceAuthorityV1
                 $dumpSha256,
                 $dumpSizeBytes,
                 $observedAtUtc,
+                $liveStorageAllocatedBytes,
+                $liveStorageInodeCount,
                 $componentDevices,
             ),
         );
@@ -1535,6 +1554,8 @@ final class DeploymentEvidenceAuthorityV1
                         $sources->dumpSha256,
                         $sources->dumpSizeBytes,
                         $sources->observedAtUtc,
+                        $sources->liveStorageAllocatedBytes,
+                        $sources->liveStorageInodeCount,
                         $sources->componentDevices,
                     );
                 }

@@ -415,7 +415,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
     }
 
-    public function testCapacityDerivesArchiveStageScratchAndInodesOnlyFromVerifiedAuthorities(): void
+    public function testCapacityDerivesArchiveStageLiveStorageScratchAndInodesOnlyFromVerifiedAuthorities(): void
     {
         $provenance = $this->provenance();
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($provenance);
@@ -442,10 +442,44 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             1_000_000,
             '2026-08-12T12:30:00Z',
+            50_000_000,
+            500,
             $this->capacityDevices(1),
         );
 
-        self::assertSame(1_213_123_456, $result['base_required_bytes']);
+        self::assertSame(1_263_123_456, $result['base_required_bytes']);
+        self::assertSame(2500, $result['stage_inode_count']);
+        self::assertSame(2820, $result['projected_required_inodes']);
+        self::assertTrue($result['passed']);
+
+        $largeStorage = DeploymentEvidenceAuthorityV1::capacityFromVerifiedAuthorities(
+            1,
+            4096,
+            1_000_000,
+            900_000,
+            10_000_000,
+            9_000_000,
+            $provenanceBytes,
+            hash('sha256', $provenanceBytes),
+            'ea_20260812_1200',
+            self::COMMIT,
+            1234,
+            2000,
+            400_000_000,
+            800_000_000,
+            $bytes,
+            hash('sha256', $bytes),
+            self::RUN_ID,
+            self::SHA,
+            self::SHA,
+            1_000_000,
+            '2026-08-12T12:30:00Z',
+            3_000_000_000,
+            500,
+            $this->capacityDevices(1),
+        );
+        self::assertSame(4_213_123_456, $largeStorage['base_required_bytes']);
+        self::assertFalse($largeStorage['passed']);
 
         $provenance['capacity_bounds']['stage_unpacked_bytes'] = 1;
         $this->expectException(RuntimeException::class);
@@ -471,6 +505,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             1_000_000,
             '2026-08-12T12:30:00Z',
+            50_000_000,
+            500,
             $this->capacityDevices(1),
         );
     }
@@ -529,6 +565,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             1_000_000,
             '2026-08-12T12:30:00Z',
+            50_000_000,
+            500,
             $this->capacityDevices(1),
         );
         self::assertContains($capacity['status'], ['passed', 'failed']);
@@ -727,6 +765,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         self::SHA,
                         1_000_000,
                         '2026-08-12T12:30:00Z',
+                        50_000_000,
+                        500,
                         $this->capacityDevices(1),
                     ),
                     null,
@@ -852,6 +892,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     self::SHA,
                     1_000_000,
                     '2026-08-12T12:30:00Z',
+                    50_000_000,
+                    500,
                     $this->capacityDevices(1),
                 ),
                 null,
@@ -878,10 +920,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         self::assertSame(23, $assembly['exit_code']);
         self::assertSame('failed', $capacity['status']);
         self::assertSame(1, $capacity['available_inodes']);
-        self::assertSame(2000, $capacity['stage_inode_count']);
+        self::assertSame(2500, $capacity['stage_inode_count']);
         self::assertSame(256, $capacity['restore_inode_count']);
         self::assertSame(64, $capacity['inode_headroom']);
-        self::assertSame(2320, $capacity['projected_required_inodes']);
+        self::assertSame(2820, $capacity['projected_required_inodes']);
         self::assertFalse($capacity['passed']);
         $bundle = $this->failedBeforeWriteBundle($assembly);
         self::assertSame(
@@ -1068,6 +1110,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             1_000_000,
             '2026-08-12T12:30:00Z',
+            50_000_000,
+            500,
             $this->capacityDevices(1),
         );
         $cases = [
@@ -1226,6 +1270,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     self::SHA,
                     $dumpSize,
                     '2026-08-12T12:30:00Z',
+                    50_000_000,
+                    500,
                     $this->capacityDevices(1),
                 ),
                 null,
@@ -1817,6 +1863,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         self::SHA,
                         1_000_000,
                         '2026-08-12T12:30:00Z',
+                        50_000_000,
+                        500,
                         $this->capacityDevices(1),
                     ),
                     null,
@@ -2061,6 +2109,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         return [
             'artifact' => $device,
             'dump_pin' => $device,
+            'live_storage' => $device,
             'release_root' => $device,
             'restore_scratch' => $device,
             'stage' => $device,
