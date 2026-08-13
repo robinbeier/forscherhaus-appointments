@@ -492,6 +492,7 @@ jobs:
             tests/Unit/Scripts/PublishReleasePairRootTest.php \
             tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php \
             tests/Unit/Scripts/SessionRetentionRootTest.php \
+            tests/Unit/Scripts/ZeroSurpriseProductionImageCleanupRootTest.php \
             tests/Unit/Scripts/ReleaseArtifactValidatorTest.php
       - name: Diagnostics (build-test database)
         if: failure()
