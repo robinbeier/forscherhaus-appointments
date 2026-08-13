@@ -60,6 +60,10 @@ Script inventory:
   restore-verified-dump policy; it is dry-run by default and its disabled
   systemd activation path is documented in
   [`docs/ops/production-release-archive-dump-retention.md`](../../docs/ops/production-release-archive-dump-retention.md)
+- `prod_backup_set_producer.sh` executes one closed ROB-466 production backup
+  set only with its exact live confirmation. ROB-466 deliberately ships no
+  service or timer; every pass is manual. See
+  [`docs/ops/production-backup-set-producer.md`](../../docs/ops/production-backup-set-producer.md).
 - `prod_journald_retention.sh` inspects the fixed 1 GiB / 30-day journald
   contract by default. Configuration activation, one-time vacuum, and rollback
   use distinct confirmation tokens and remain unexecuted by repository delivery;
@@ -282,3 +286,15 @@ Dump restore attestation:
   images, timestamps, and environment overrides are not accepted.
 - Code or installation approval is not approval to execute a production
   restore or publish production evidence.
+
+Closed production backup sets:
+
+- Install `scripts/ops/libexec/backup_set_producer_v1.py` as root-owned mode
+  `0555` at `/usr/local/libexec/fh-backup-set-producer-v1`.
+- Provision the dedicated `fh_backup` database account with only `SELECT` and
+  `SHOW VIEW` on `easyappointments.*`. Provide the exact six-line connection
+  authority at `/etc/fh/backup-set-producer.cnf` as root-owned mode `0600`;
+  only its bounded base64url password varies. Never commit, print, or pass its
+  contents through argv or environment variables.
+- The production sequence, atomic set contract and ROB-461 two-set gate live
+  in `docs/ops/production-backup-set-producer.md`.

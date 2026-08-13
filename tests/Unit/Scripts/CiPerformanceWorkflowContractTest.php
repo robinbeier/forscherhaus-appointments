@@ -21,8 +21,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
         );
 
-        self::assertSame(10, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-13T12:47:00Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(11, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-13T18:57:35Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),
@@ -183,6 +183,7 @@ class CiPerformanceWorkflowContractTest extends TestCase
             'tests/Unit/Scripts/DeploymentDumpAttestationProducerV1RootTest.php',
             $rootDeployment,
         );
+        self::assertStringContainsString('tests/Unit/Scripts/BackupSetProducerRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/AppLogRetentionRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PinDeployTimingRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeployment);

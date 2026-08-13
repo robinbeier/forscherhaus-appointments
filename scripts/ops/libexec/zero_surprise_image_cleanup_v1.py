@@ -335,7 +335,7 @@ ACTIVITY_PATTERNS = (
     re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)--build(=\S+)?(\s|$)"),
     re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--watch|-[A-Za-z]*w[A-Za-z]*)(=\S+)?(\s|$)"),
     re.compile(r"(^|/)buildctl(\s|$)"),
-    re.compile(r"(^|/)(mysqldump|mariadb-dump|backup_easyappointments\.sh)(\s|$)"),
+    re.compile(r"(^|/)(mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|prod_backup_set_producer\.sh)(\s|$)"),
 )
 COMPOSE_UP_PATTERNS = (
     re.compile(r"(^|/|\s)docker\s+compose\b.*\sup(\s|$)"),

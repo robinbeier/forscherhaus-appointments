@@ -149,6 +149,42 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame('pass', $this->decode($this->runHelper('marker-status', '1209600'))['status']);
     }
 
+    public function testProducerLockAndExactHandoffAreClassifiedAndBoundToAttestedSet(): void
+    {
+        file_put_contents(self::BACKUPS . '/.backup-set-producer.lock', '');
+        chmod(self::BACKUPS . '/.backup-set-producer.lock', 0600);
+        $leaf = $this->dumpLeaf('new');
+        $bytes = 'dump-new';
+        file_put_contents(
+            self::BACKUPS . '/last_backup_set.json',
+            $this->canonical([
+                'backup_set_id' => $leaf,
+                'compressed_size_bytes' => strlen($bytes),
+                'dump_sha256' => hash('sha256', $bytes),
+                'schema' => 'production_backup_set_handoff.v1',
+                'uncompressed_size_bytes' => strlen($bytes),
+            ]),
+        );
+        chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+
+        $result = $this->runHelper('dry-run');
+
+        self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame(0, $this->decode($result)['dump_foreign_count']);
+        self::assertSame(3, $this->decode($result)['protected_verified_dump_count']);
+
+        $handoff = json_decode(
+            (string) file_get_contents(self::BACKUPS . '/last_backup_set.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        $handoff['dump_sha256'] = str_repeat('f', 64);
+        file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
+        chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        self::assertSame(70, $this->runHelper('dry-run')['exit']);
+    }
+
     public function testUnknownEntryBusyLockAndOpenCandidateFailClosedWithoutDeletion(): void
     {
         file_put_contents(self::RELEASES . '/unknown-secret', 'do not print');

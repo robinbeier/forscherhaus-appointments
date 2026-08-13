@@ -487,6 +487,7 @@ jobs:
             tests/Unit/Scripts/GateCliSupportTest.php \
             tests/Unit/Scripts/DeploymentHostRunnerV1RootTest.php \
             tests/Unit/Scripts/DeploymentDumpAttestationProducerV1RootTest.php \
+            tests/Unit/Scripts/BackupSetProducerRootTest.php \
             tests/Unit/Scripts/AppLogRetentionRootTest.php \
             tests/Unit/Scripts/PinDeployTimingRootTest.php \
             tests/Unit/Scripts/PublishReleasePairRootTest.php \
