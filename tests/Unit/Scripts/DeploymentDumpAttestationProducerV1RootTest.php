@@ -521,6 +521,46 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         self::assertSame('', trim($this->docker(['volume', 'ls', '-q', '--filter', 'label=fh.dump-attestation=v1'])));
     }
 
+    public function testContainerExitRecordIsExactStableAndRootProtected(): void
+    {
+        $result = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            root = os.environ['ROB465_TEST_ROOT']
+
+            def make_run(nonce, value=b'0\n', mode=0o600, extra=False):
+                run = os.path.join(root, '.run-' + nonce)
+                os.mkdir(run, 0o700)
+                target = os.path.join(run, 'container-exit')
+                os.mkdir(target, 0o700)
+                descriptor = os.open(os.path.join(target, 'exit'), os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+                os.write(descriptor, value)
+                os.close(descriptor)
+                if extra:
+                    descriptor = os.open(os.path.join(target, '.exit.tmp'),
+                                         os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    os.close(descriptor)
+                return run
+
+            module.observe_container_exit(make_run('2' * 32))
+            for nonce, value, mode, extra in (
+                    ('3' * 32, b'137\n', 0o600, False),
+                    ('4' * 32, b'0\n', 0o640, False),
+                    ('5' * 32, b'0\n', 0o600, True)):
+                try:
+                    module.observe_container_exit(make_run(nonce, value, mode, extra))
+                except SystemExit as error:
+                    if error.code != 70:
+                        raise
+                else:
+                    raise RuntimeError('unsafe container exit record accepted')
+            PY
+            ,
+        );
+        self::assertSame(0, $result['exit'], $result['stderr']);
+    }
+
     /** @return array{exit:int,stdout:string,stderr:string} */
     private function python(string $body): array
     {

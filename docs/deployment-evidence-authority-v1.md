@@ -109,7 +109,15 @@ bind-mounted read-only into the `docker run --rm` container. The host holds an
 exclusive advisory lock; the in-container watchdog waits for a shared lock.
 Loss of the helper releases the lock, causing the watchdog to terminate MariaDB
 and Docker to auto-remove the ROB-465-labeled temporary container. No named
-volume is used.
+volume is used. The fixed container wrapper writes a canonical clean-shutdown
+record to a dedicated run-local bind only after MariaDB has exited and its fixed
+private error log contains the normal server, InnoDB, and final shutdown
+confirmations. After requesting a clean shutdown, the verifier requires
+disappearance of the exact container in every container state, then stable-reads
+and durably pins that exact root-owned record. The shutdown client's and wrapper
+child's exit statuses are diagnostic only: neither can override a missing
+server-side clean-shutdown confirmation, a retained container, or a confirmed
+clean shutdown whose client happened to lose the connection during completion.
 The global attestation path is derived only from the already-authorized dump
 digest: `/var/lib/fh-deploy-evidence/dump-attestations/<dump-sha256>.json`.
 Neither the request nor the execution input may supply or override that path.

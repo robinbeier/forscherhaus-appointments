@@ -412,6 +412,92 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         self::assertSame(0, proc_close($process), $stdout . $stderr);
     }
 
+    public function testShutdownAuthorityIsStableDatabaseExitRecordNotClientStatus(): void
+    {
+        self::assertStringContainsString('--log-error=/var/lib/mysql/fh-restore.log', $this->helper);
+        self::assertStringContainsString('): Normal shutdown', $this->helper);
+        self::assertStringContainsString('InnoDB: Shutdown completed;', $this->helper);
+        self::assertStringContainsString('mariadbd: Shutdown complete', $this->helper);
+        self::assertStringContainsString('&& authority=0', $this->helper);
+        $program = <<<'PY'
+        import importlib.util
+        import sys
+        spec = importlib.util.spec_from_file_location('rob465_helper', sys.argv[1])
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class Result:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+        calls = []
+        module.docker_run = lambda arguments, **kwargs: calls.append(
+            ('request', arguments, kwargs)
+        ) or Result(1)
+        observations = iter(('still-running\n', ''))
+        module.docker = lambda arguments, timeout=120: calls.append(
+            ('observe', arguments, timeout)
+        ) or next(observations)
+        module.observe_container_exit = lambda run_path: calls.append(('exit', run_path))
+        module.time.sleep = lambda _: None
+
+        module.shutdown_and_observe('fixed-name', '/fixed-run')
+        assert calls[0][0:2] == (
+            'request',
+            ['exec', 'fixed-name', 'mariadb-admin', '-uroot', 'shutdown'],
+        )
+        assert calls[0][2]['check'] is False
+        assert [call[1] for call in calls if call[0] == 'observe'] == [
+            ['ps', '-aq', '--filter', 'name=^/fixed-name$'],
+            ['ps', '-aq', '--filter', 'name=^/fixed-name$'],
+        ]
+        assert calls[-1] == ('exit', '/fixed-run')
+
+        calls = []
+        def timeout_request(arguments, **kwargs):
+            calls.append(('request', arguments, kwargs))
+            raise module.subprocess.TimeoutExpired(arguments, kwargs['timeout'])
+        module.docker_run = timeout_request
+        module.docker = lambda arguments, timeout=120: calls.append(
+            ('observe', arguments, timeout)
+        ) or ''
+        module.observe_container_exit = lambda run_path: calls.append(('exit', run_path))
+        module.shutdown_and_observe('fixed-name', '/fixed-run')
+        assert calls[-1] == ('exit', '/fixed-run')
+
+        module.docker_run = lambda arguments, **kwargs: Result(0)
+        module.docker = lambda arguments, timeout=120: ''
+        module.observe_container_exit = lambda run_path: module.reject()
+        try:
+            module.shutdown_and_observe('fixed-name', '/fixed-run')
+        except SystemExit as error:
+            assert error.code == 70
+        else:
+            raise AssertionError('container disappearance must not mask a nonzero exit record')
+
+        module.observe_container_exit = lambda run_path: None
+        module.docker = lambda arguments, timeout=120: 'still-running\n'
+        try:
+            module.shutdown_and_observe('fixed-name', '/fixed-run')
+        except SystemExit as error:
+            assert error.code == 70
+        else:
+            raise AssertionError('a clean main-process exit must not mask a retained container')
+        PY;
+        $process = proc_open(
+            ['/usr/bin/python3', '-I', '-B', '-c', $program, $this->helperPath],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]) ?: '';
+        $stderr = stream_get_contents($pipes[2]) ?: '';
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), $stdout . $stderr);
+    }
+
     public function testHistoricalTerminalRunRequiresCanonicalJournalBinding(): void
     {
         $program = <<<'PY'
