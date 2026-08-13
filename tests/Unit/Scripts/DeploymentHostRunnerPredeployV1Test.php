@@ -269,6 +269,7 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
             ],
             'verification' => [
                 'method' => 'mariadb_10_11_isolated_restore_v1',
+                'image' => DeploymentEvidenceAuthorityV1::DUMP_RESTORE_IMAGE,
                 'sha256_verified' => true,
                 'gzip_verified' => true,
                 'restore_verified' => true,

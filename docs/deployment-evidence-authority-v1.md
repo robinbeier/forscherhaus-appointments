@@ -54,6 +54,52 @@ Run-ID. The runner pins its exact SHA and creates a separate
 `deployment_run_dump_observation.v1` binding it to the deployment Run-ID and
 intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
 the expansion ratio at 100:1. Age must remain below 14,400 seconds.
+The root-only producer `scripts/ops/verify_deployment_dump_v1.php` accepts only
+the backup-set ID `20YYMMDDTHHMMSSZ`. It derives the fixed
+`/root/backups/easyappointments/<id>/db/easyappointments.sql.gz` source and
+`created_at_utc` from that ID. Callers cannot supply a path, digest, image,
+environment override, SQL, or timestamp. The producer owns the pinned MariaDB
+10.11 image identity, disables pulls and networking, and checks only the fixed
+`ea_appointments`, `ea_roles`, `ea_services`, `ea_settings`, and `ea_users`
+core tables. It runs no migration, HTTP probe, or zero-surprise gate.
+
+The root-owned mode-0555 installed helper at
+`/usr/local/libexec/fh/deployment_dump_attestation_v1.py` is execution
+authority. Its historical-run check invokes the root-owned mode-0555
+`/usr/local/libexec/fh/validate_deployment_terminal_bundle_v1.php` together
+with a root-owned mode-0444 sibling `DeploymentContractV1.php`, so terminal
+journals and evidence use the same canonical bundle validator as the Host
+Runner. The deploy-tree copies are installation material. Publication uses a
+private nonce leaf, file fsync, atomic no-replace rename, and directory fsync.
+Exact replay attaches and converges the existing protected
+`/root/backups/easyappointments/last_verify_success.utc` marker from the frozen
+restore timestamp without regressing a newer marker. The producer holds the
+shared production-change lock nonblocking and returns busy exit `75`.
+
+Restore capacity is derived after the bounded gzip scan from the actual
+compressed and uncompressed byte counts. The container enforces InnoDB,
+restricts the restore principal, caps the shared tablespace, redo and temporary
+files, and has fixed memory, swap, CPU, and PID limits. Before restore, a
+streaming source-authority parser accepts only the standard table/data subset
+of MariaDB 10.11 single-database dump output: the exact sandbox preamble,
+closed standard session `SET` forms, table drop/create, table locks, key
+disable/enable, and `INSERT ... VALUES`. Database-selection and database-DDL
+statements are not part of this subset.
+Triggers, routines, events, views, dynamic SQL, alternate engines, partitions,
+external directories, client commands and every other statement class reject.
+The exact accepted `CREATE TABLE` count is capped at 10,000 and supplies the
+conservative pre-restore and post-restore inode bounds; quoted data and ordinary
+comments cannot create false statement matches, while MariaDB executable
+comments are parsed as SQL. The backup producer must therefore use the normal
+single-database table/data mode without routines, triggers, or non-default
+object options.
+Attach replay runs before the restore-only capacity gate. A root-owned
+mode-0600 regular lease file is
+bind-mounted read-only into the `docker run --rm` container. The host holds an
+exclusive advisory lock; the in-container watchdog waits for a shared lock.
+Loss of the helper releases the lock, causing the watchdog to terminate MariaDB
+and Docker to auto-remove the ROB-465-labeled temporary container. No named
+volume is used.
 The global attestation path is derived only from the already-authorized dump
 digest: `/var/lib/fh-deploy-evidence/dump-attestations/<dump-sha256>.json`.
 Neither the request nor the execution input may supply or override that path.

@@ -53,9 +53,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         $rejected = 0;
         foreach (
             [
-                fn (): string => DeploymentEvidenceAuthorityV1::dumpAttestationPath(strtoupper(self::SHA)),
-                fn (): string => DeploymentEvidenceAuthorityV1::trafficReportRelativePath('not-a-run-id'),
-            ] as $derive
+                fn(): string => DeploymentEvidenceAuthorityV1::dumpAttestationPath(strtoupper(self::SHA)),
+                fn(): string => DeploymentEvidenceAuthorityV1::trafficReportRelativePath('not-a-run-id'),
+            ]
+            as $derive
         ) {
             try {
                 $derive();
@@ -202,52 +203,24 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         self::assertSame(256, $decoded['restored_datadir_inode_count']);
     }
 
-    public function testDumpAttestationIsBuiltOnlyFromExactInternalRestoreObservation(): void
+    public function testProducerValidationAcceptsOnlyExactCanonicalAttestationBytes(): void
     {
-        $attestation = DeploymentEvidenceAuthorityV1::createDumpAttestation(
-            [
-                'sha256' => self::SHA,
-                'size_bytes' => 1_000_000,
-                'uncompressed_size_bytes' => 4_000_000,
-                'created_at_utc' => '2026-08-12T12:00:00Z',
-            ],
-            [
-                'method' => 'mariadb_10_11_isolated_restore_v1',
-                'dump_sha256' => self::SHA,
-                'dump_size_bytes' => 1_000_000,
-                'uncompressed_size_bytes' => 4_000_000,
-                'gzip_exit_code' => 0,
-                'restore_exit_code' => 0,
-                'restored_datadir_allocated_bytes' => 8_000_000,
-                'restored_datadir_inode_count' => 256,
-                'restored_at_utc' => '2026-08-12T12:20:00Z',
-            ],
+        $bytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
+        $attestation = DeploymentEvidenceAuthorityV1::validateProducedDumpAttestation(
+            $bytes,
+            self::SHA,
+            1_000_000,
+            '2026-08-12T12:00:00Z',
             '2026-08-12T12:30:00Z',
         );
-        self::assertSame(
-            DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation()),
-            DeploymentEvidenceAuthorityV1::encodeFile($attestation),
-        );
+        self::assertSame($bytes, DeploymentEvidenceAuthorityV1::encodeFile($attestation));
 
         $this->expectException(RuntimeException::class);
-        DeploymentEvidenceAuthorityV1::createDumpAttestation(
-            [
-                'sha256' => self::SHA,
-                'size_bytes' => 1_000_000,
-                'uncompressed_size_bytes' => 4_000_000,
-                'created_at_utc' => '2026-08-12T12:00:00Z',
-            ],
-            [
-                'method' => 'mariadb_10_11_isolated_restore_v1',
-                'dump_sha256' => str_repeat('c', 64),
-                'dump_size_bytes' => 1_000_000,
-                'uncompressed_size_bytes' => 4_000_000,
-                'gzip_exit_code' => 0,
-                'restore_exit_code' => 0,
-                'restored_datadir_allocated_bytes' => 8_000_000,
-                'restored_datadir_inode_count' => 256,
-                'restored_at_utc' => '2026-08-12T12:20:00Z',
-            ],
+        DeploymentEvidenceAuthorityV1::validateProducedDumpAttestation(
+            $bytes,
+            str_repeat('c', 64),
+            1_000_000,
+            '2026-08-12T12:00:00Z',
             '2026-08-12T12:30:00Z',
         );
     }
@@ -273,6 +246,12 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         }
         if ($mutation === 'restore') {
             $attestation['verification']['restore_verified'] = false;
+        }
+        if ($mutation === 'image tag') {
+            $attestation['verification']['image'] = 'mariadb:10.11';
+        }
+        if ($mutation === 'image digest') {
+            $attestation['verification']['image'] = 'mariadb@sha256:' . str_repeat('c', 64);
         }
 
         $this->expectException(RuntimeException::class);
@@ -362,7 +341,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     /** @return iterable<string,array{string}> */
     public static function invalidDumpAttestationProvider(): iterable
     {
-        foreach (['sha', 'size', 'future', 'stale', 'gzip', 'restore'] as $case) {
+        foreach (['sha', 'size', 'future', 'stale', 'gzip', 'restore', 'image tag', 'image digest'] as $case) {
             yield $case => [$case];
         }
     }
@@ -1225,14 +1204,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         ];
         foreach ($cases as $name => [$producer, $catalog, $windowStart, $windowEnd, $mode]) {
             $provider = $this->passedProviderWithTraffic(
-                new TrafficObservationV1(
-                    $bytes,
-                    hash('sha256', $bytes),
-                    $producer,
-                    $catalog,
-                    $windowStart,
-                    $windowEnd,
-                ),
+                new TrafficObservationV1($bytes, hash('sha256', $bytes), $producer, $catalog, $windowStart, $windowEnd),
             );
             $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
                 $provider,
@@ -1394,14 +1366,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     {
         $trafficBytes = $this->trafficReportBytes('allow', 0);
         $provider = $this->passedProviderWithTraffic(
-            new TrafficObservationV1(
-                $trafficBytes,
-                hash('sha256', $trafficBytes),
-                self::SHA,
-                '2026-08-09.1',
-                1,
-                91,
-            ),
+            new TrafficObservationV1($trafficBytes, hash('sha256', $trafficBytes), self::SHA, '2026-08-09.1', 1, 91),
         );
 
         try {
@@ -1453,38 +1418,41 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         $alternateAttestation['dump']['size_bytes'] = 999_999;
         $alternateAttestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($alternateAttestation);
         $baseBuild = $this->buildSources($provenanceBytes);
-        $capacity = fn (BuildVerifiedSourcesV1 $build, string $dumpBytes, int $dumpSize): CapacityObservationV1 =>
-            new CapacityObservationV1(
-                new CapacityVerifiedSourcesV1(
-                    1,
-                    4096,
-                    1_000_000,
-                    900_000,
-                    10_000_000,
-                    9_000_000,
-                    $build,
-                    $dumpBytes,
-                    hash('sha256', $dumpBytes),
-                    self::SHA,
-                    $dumpSize,
-                    '2026-08-12T12:30:00Z',
-                    50_000_000,
-                    60_000_000,
-                    500,
-                    70_000_000,
-                    700,
-                    $this->capacityDevices(1),
-                ),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-            );
+        $capacity = fn(
+            BuildVerifiedSourcesV1 $build,
+            string $dumpBytes,
+            int $dumpSize,
+        ): CapacityObservationV1 => new CapacityObservationV1(
+            new CapacityVerifiedSourcesV1(
+                1,
+                4096,
+                1_000_000,
+                900_000,
+                10_000_000,
+                9_000_000,
+                $build,
+                $dumpBytes,
+                hash('sha256', $dumpBytes),
+                self::SHA,
+                $dumpSize,
+                '2026-08-12T12:30:00Z',
+                50_000_000,
+                60_000_000,
+                500,
+                70_000_000,
+                700,
+                $this->capacityDevices(1),
+            ),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+        );
         $cases = [
             'capacity provenance substitution' => $this->passedProviderWithTraffic(
                 $traffic,
@@ -1865,6 +1833,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             ],
             'verification' => [
                 'method' => 'mariadb_10_11_isolated_restore_v1',
+                'image' => DeploymentEvidenceAuthorityV1::DUMP_RESTORE_IMAGE,
                 'sha256_verified' => true,
                 'gzip_verified' => true,
                 'restore_verified' => true,

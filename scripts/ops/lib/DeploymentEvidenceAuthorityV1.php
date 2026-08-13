@@ -18,6 +18,7 @@ final class DeploymentEvidenceAuthorityV1
     private static ?WeakMap $issuedPredeployGates = null;
     public const BUILD_PROVENANCE_SCHEMA = 'release_build_provenance.v1';
     public const DUMP_ATTESTATION_SCHEMA = 'deployment_dump_attestation.v1';
+    public const DUMP_RESTORE_IMAGE = 'mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590';
     public const RUN_DUMP_OBSERVATION_SCHEMA = 'deployment_run_dump_observation.v1';
     public const CAPACITY_SCHEMA = 'deployment_capacity_observation.v1';
     public const CHILD_OBSERVATION_SCHEMA = 'deployment_child_observation.v1';
@@ -251,6 +252,7 @@ final class DeploymentEvidenceAuthorityV1
             $record['verification'],
             [
                 'method',
+                'image',
                 'sha256_verified',
                 'gzip_verified',
                 'restore_verified',
@@ -261,6 +263,7 @@ final class DeploymentEvidenceAuthorityV1
             'dump attestation verification',
         );
         self::assertSame($record['verification']['method'], 'mariadb_10_11_isolated_restore_v1', 'restore method');
+        self::assertSame($record['verification']['image'], self::DUMP_RESTORE_IMAGE, 'restore image');
         foreach (['sha256_verified', 'gzip_verified', 'restore_verified'] as $field) {
             if ($record['verification'][$field] !== true) {
                 throw new RuntimeException('dump attestation verification is incomplete');
@@ -287,72 +290,22 @@ final class DeploymentEvidenceAuthorityV1
         return $record;
     }
 
-    /** @param array<string,mixed> $dump @param array<string,mixed> $restore @return array<string,mixed> */
-    public static function createDumpAttestation(array $dump, array $restore, string $attestedAtUtc): array
-    {
-        self::assertExactKeys(
-            $dump,
-            ['sha256', 'size_bytes', 'uncompressed_size_bytes', 'created_at_utc'],
-            'stable dump',
-        );
-        self::assertExactKeys(
-            $restore,
-            [
-                'method',
-                'dump_sha256',
-                'dump_size_bytes',
-                'uncompressed_size_bytes',
-                'gzip_exit_code',
-                'restore_exit_code',
-                'restored_datadir_allocated_bytes',
-                'restored_datadir_inode_count',
-                'restored_at_utc',
-            ],
-            'restore observation',
-        );
-        self::assertSha256($dump['sha256'], 'stable dump sha256');
-        self::assertPositiveInt($dump['size_bytes'], 'stable dump size');
-        self::assertPositiveInt($dump['uncompressed_size_bytes'], 'stable dump uncompressed size');
-        self::assertDumpBounds($dump['size_bytes'], $dump['uncompressed_size_bytes']);
-        self::assertUtc($dump['created_at_utc'], 'stable dump created_at');
-        self::assertSame($restore['method'], 'mariadb_10_11_isolated_restore_v1', 'restore observation method');
-        self::assertSha256($restore['dump_sha256'], 'restore observation dump sha256');
-        self::assertSame($restore['dump_sha256'], $dump['sha256'], 'restore observation stable sha256');
-        self::assertSame($restore['dump_size_bytes'], $dump['size_bytes'], 'restore observation stable size');
-        if (($restore['uncompressed_size_bytes'] ?? null) !== $dump['uncompressed_size_bytes']) {
-            throw new RuntimeException('restore observation uncompressed size is inconsistent');
-        }
-        self::assertSame($restore['gzip_exit_code'], 0, 'restore observation gzip exit');
-        self::assertSame($restore['restore_exit_code'], 0, 'restore observation restore exit');
-        self::assertPositiveInt(
-            $restore['restored_datadir_allocated_bytes'],
-            'restore observation datadir allocated bytes',
-        );
-        self::assertPositiveInt($restore['restored_datadir_inode_count'], 'restore observation datadir inode count');
-        self::assertUtc($restore['restored_at_utc'], 'restore observation restored_at');
-        self::assertUtc($attestedAtUtc, 'dump attested_at');
-        $record = [
-            'schema' => self::DUMP_ATTESTATION_SCHEMA,
-            'dump' => $dump,
-            'verification' => [
-                'method' => $restore['method'],
-                'sha256_verified' => true,
-                'gzip_verified' => true,
-                'restore_verified' => true,
-                'restored_datadir_allocated_bytes' => $restore['restored_datadir_allocated_bytes'],
-                'restored_datadir_inode_count' => $restore['restored_datadir_inode_count'],
-                'restored_at_utc' => $restore['restored_at_utc'],
-            ],
-            'attested_at_utc' => $attestedAtUtc,
-        ];
-        $bytes = self::encodeFile($record);
-        self::decodeDumpAttestation(
+    /** @return array<string,mixed> */
+    public static function validateProducedDumpAttestation(
+        string $bytes,
+        string $dumpSha256,
+        int $dumpSizeBytes,
+        string $createdAtUtc,
+        string $observedAtUtc,
+    ): array {
+        $record = self::decodeDumpAttestation(
             $bytes,
             hash('sha256', $bytes),
-            $dump['sha256'],
-            $dump['size_bytes'],
-            $attestedAtUtc,
+            $dumpSha256,
+            $dumpSizeBytes,
+            $observedAtUtc,
         );
+        self::assertSame($record['dump']['created_at_utc'], $createdAtUtc, 'dump created_at authority');
         return $record;
     }
 

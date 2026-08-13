@@ -67,26 +67,26 @@ final class ReleaseBuildProvenanceProducerV1Test extends TestCase
         $record = $this->create();
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($record);
         $dumpSha = str_repeat('b', 64);
-        $attestation = DeploymentEvidenceAuthorityV1::createDumpAttestation(
-            [
+        $attestation = [
+            'schema' => DeploymentEvidenceAuthorityV1::DUMP_ATTESTATION_SCHEMA,
+            'dump' => [
                 'sha256' => $dumpSha,
                 'size_bytes' => 1_000,
                 'uncompressed_size_bytes' => 4_000,
                 'created_at_utc' => '2026-08-12T12:00:00Z',
             ],
-            [
+            'verification' => [
                 'method' => 'mariadb_10_11_isolated_restore_v1',
-                'dump_sha256' => $dumpSha,
-                'dump_size_bytes' => 1_000,
-                'uncompressed_size_bytes' => 4_000,
-                'gzip_exit_code' => 0,
-                'restore_exit_code' => 0,
+                'image' => DeploymentEvidenceAuthorityV1::DUMP_RESTORE_IMAGE,
+                'sha256_verified' => true,
+                'gzip_verified' => true,
+                'restore_verified' => true,
                 'restored_datadir_allocated_bytes' => 8_000,
                 'restored_datadir_inode_count' => 8,
                 'restored_at_utc' => '2026-08-12T12:01:00Z',
             ],
-            '2026-08-12T12:01:01Z',
-        );
+            'attested_at_utc' => '2026-08-12T12:01:01Z',
+        ];
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($attestation);
         $devices = array_fill_keys(
             [

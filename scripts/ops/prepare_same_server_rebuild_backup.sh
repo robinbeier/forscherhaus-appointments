@@ -169,8 +169,7 @@ fi
 "${dump_bin}" \
     --single-transaction \
     --quick \
-    --routines \
-    --triggers \
+    --skip-triggers \
     "${DB_NAME}" | gzip -9 > "${REMOTE_WORK_DIR}/db/${DB_NAME}.sql.gz"
 gzip -t "${REMOTE_WORK_DIR}/db/${DB_NAME}.sql.gz"
 
