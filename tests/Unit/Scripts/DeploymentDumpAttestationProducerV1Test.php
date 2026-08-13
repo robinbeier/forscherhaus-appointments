@@ -205,9 +205,10 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
         /*M!100616 SET @OLD_NOTE_VERBOSITY=@@NOTE_VERBOSITY, NOTE_VERBOSITY=0 */;
         DROP TABLE IF EXISTS `ea_x`;
+        /*!40101 SET @saved_cs_client=@@character_set_client */;
         /*!40101 SET CHARACTER_SET_CLIENT=utf8mb4 */;
         CREATE TABLE `ea_x` (`v` text) ENGINE=InnoDB;
-        /*!40101 SET CHARACTER_SET_CLIENT=utf8mb3 */;
+        /*!40101 SET CHARACTER_SET_CLIENT=@saved_cs_client */;
         LOCK TABLES `ea_x` WRITE; ALTER TABLE `ea_x` DISABLE KEYS;
         INSERT INTO `ea_x` VALUES ('PREPARE x','CREATE TRIGGER'),('quote\\'d','x');
         ALTER TABLE `ea_x` ENABLE KEYS; UNLOCK TABLES;
@@ -237,6 +238,16 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
             b'CREATE TABLE x(v text, FULLTEXT(v)) ENGINE=InnoDB;',
             b"SET SQL_MODE='', enforce_storage_engine='', default_storage_engine=Aria; CREATE TABLE x(id int);",
             b"SET SQL_MODE='NO_BACKSLASH_ESCAPES'; CREATE TABLE x(v text) ENGINE=InnoDB;",
+            b'SET @saved_cs_client=@@character_set_client, SQL_MODE=\'\';',
+            b'SET SESSION @saved_cs_client=@@character_set_client;',
+            b'SET @saved_cs_client=@untrusted_source;',
+            b'CREATE TABLE `x` (`id` int) ENGINE=InnoDB; SET @saved_cs_client=@@character_set_client;',
+            b'SET @saved_cs_client=@@character_set_client; CREATE TABLE `x` (`id` int) ENGINE=InnoDB;',
+            b'SET @saved_cs_client=@@character_set_client; SET CHARACTER_SET_CLIENT=utf8mb4;'
+            b' LOCK TABLES `x` WRITE;',
+            b'SET @saved_cs_client=@@character_set_client; SET CHARACTER_SET_CLIENT=utf8mb4;'
+            b' CREATE TABLE `x` (`id` int) ENGINE=InnoDB;',
+            b'SET CHARACTER_SET_CLIENT=@saved_cs_client;',
             b'USE `mysql`; CREATE TABLE x(id int) ENGINE=InnoDB;',
             b'CREATE DATABASE `other`;',
             b'CREATE TABLE x(id int) ENGINE=InnoDB;',
