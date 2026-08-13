@@ -21,6 +21,8 @@ The script connects to the production host and emits stable key/value facts for:
 - rebuild restore-input artifacts;
 - app `storage/sessions`, `storage/cache`, `storage/logs`, and
   `storage/uploads`;
+- session-retention timer state and aggregate success-marker freshness, without
+  exposing session names or marker bytes;
 - explicit cleanup candidate classes.
 
 ## Output Boundary
