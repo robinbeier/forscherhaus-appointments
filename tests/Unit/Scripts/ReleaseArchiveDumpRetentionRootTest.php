@@ -153,8 +153,11 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
     {
         file_put_contents(self::BACKUPS . '/.backup-set-producer.lock', '');
         chmod(self::BACKUPS . '/.backup-set-producer.lock', 0600);
-        $leaf = $this->dumpLeaf('new');
-        $bytes = 'dump-new';
+        // Bind the producer handoff to the otherwise eligible oldest set. The
+        // handoff must extend the two-newest retention set before eligibility
+        // is calculated, not merely restate an already protected digest.
+        $leaf = $this->dumpLeaf('old');
+        $bytes = 'dump-old';
         file_put_contents(
             self::BACKUPS . '/last_backup_set.json',
             $this->canonical([
