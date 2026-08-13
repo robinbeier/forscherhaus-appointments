@@ -218,6 +218,13 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         for offset in range(0, len(valid), 3):
             inspector.feed(valid[offset:offset + 3])
         assert inspector.finish() == 1
+        body = valid.split(b'\n', 1)[1]
+        for preamble in module.SANDBOX_PREAMBLES:
+            official = module.DumpSqlInspector()
+            candidate = preamble + body
+            for offset in range(0, len(candidate), 2):
+                official.feed(candidate[offset:offset + 2])
+            assert official.finish() == 1
         invalid = (
             b'CREATE TABLE x(id int) ENGINE=CSV;',
             b'/*!50000 CREATE TRIGGER x BEFORE INSERT ON t FOR EACH ROW SET @x=1 */;',
@@ -234,6 +241,8 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
             b'CREATE DATABASE `other`;',
             b'CREATE TABLE x(id int) ENGINE=InnoDB;',
             b'\\-\nCREATE TABLE x(id int) ENGINE=InnoDB;',
+            b'/*M!999999\\- enable the sandbox mode */  \n'
+            b'CREATE TABLE \x60x\x60 (\x60id\x60 int) ENGINE=InnoDB;',
             b"/*M!999999\\- enable the sandbox mode */\nSET SQL_MODE='NO_BACKSLASH_ESCAPES'; "
             b"INSERT INTO `x` VALUES ('x\\'); CREATE TABLE `hidden` (`id` int) ENGINE=InnoDB; -- '\n",
         )
