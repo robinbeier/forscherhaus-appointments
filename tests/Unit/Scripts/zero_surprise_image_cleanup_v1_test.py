@@ -246,6 +246,7 @@ class CleanupEngineTest(unittest.TestCase):
         for executable, command in (
             ("/usr/bin/watch", b"watch\0-n\0900\0/usr/bin/docker\0compose\0up\0-d\0"),
             ("/usr/bin/bash", b"bash\0-c\0/usr/bin/docker compose up --detach\0"),
+            ("/opt/bin/docker-compose", b"/opt/bin/docker-compose\0up\0-d\0"),
         ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")
@@ -256,6 +257,17 @@ class CleanupEngineTest(unittest.TestCase):
                 self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
                 with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
                     module.assert_idle(proc_root)
+
+    def test_activity_scan_allows_supported_compose_v2_plugin_executables(self) -> None:
+        for executable in sorted(module.COMPOSE_EXECUTABLES - {module.DOCKER, "/usr/bin/docker-compose"}):
+            with self.subTest(executable=executable), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(executable.encode() + b"\0compose\0up\0-d\0")
+                self.write_process_executable(process, executable)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+                module.assert_idle(proc_root)
 
     def test_activity_scan_blocks_new_nonsleeping_or_unclassifiable_compose_up(self) -> None:
         for state, age in (("S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS - 1), ("R", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)):

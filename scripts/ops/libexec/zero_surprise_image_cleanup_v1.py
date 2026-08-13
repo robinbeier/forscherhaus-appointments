@@ -33,6 +33,16 @@ MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 MIN_STABLE_COMPOSE_UP_AGE_SECONDS = 86_400
 GLOBAL_LOCK = "/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock"
 DOCKER = "/usr/bin/docker"
+COMPOSE_EXECUTABLES = frozenset(
+    (
+        DOCKER,
+        "/usr/bin/docker-compose",
+        "/usr/lib/docker/cli-plugins/docker-compose",
+        "/usr/libexec/docker/cli-plugins/docker-compose",
+        "/usr/local/lib/docker/cli-plugins/docker-compose",
+        "/usr/local/libexec/docker/cli-plugins/docker-compose",
+    )
+)
 REPORT_KEYS = (
     "schema",
     "mode",
@@ -373,7 +383,7 @@ def _actual_compose_executable(proc_fd: int, entry: str) -> bool:
         return False
     except OSError as error:
         raise CleanupError("activity_state_unknown") from error
-    return executable in (DOCKER, "/usr/bin/docker-compose")
+    return executable in COMPOSE_EXECUTABLES
 
 
 def assert_idle(proc_root: str = "/proc") -> None:
