@@ -40,6 +40,9 @@ The producer uses only `/usr/bin/mariadb-dump` and the closed single-database
 table/data surface accepted by the ROB-465 parser. It never falls back to
 `mysqldump` and does not include routines, triggers, events, databases,
 external directories or caller-selected options.
+The parser accepts only the reviewed MariaDB sandbox preamble spellings,
+including the official form with exactly one trailing space before the line
+ending. Additional whitespace and malformed control lines remain rejected.
 
 ## Publication and recovery
 

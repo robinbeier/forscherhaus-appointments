@@ -39,6 +39,8 @@ MAX_ATTESTATION = 4096
 MAX_HANDOFF = 4096
 MAX_CREATE_TABLES = 10_000
 SANDBOX_PREAMBLES = (
+    b'/*M!999999\\- enable the sandbox mode */ \n',
+    b'/*M!999999\\- enable the sandbox mode */ \r\n',
     b'/*M!999999\\- enable the sandbox mode */\n',
     b'/*M!999999\\- enable the sandbox mode */\r\n',
 )
