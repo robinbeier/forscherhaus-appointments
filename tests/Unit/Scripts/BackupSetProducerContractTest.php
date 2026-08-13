@@ -78,6 +78,19 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString("'sha256':", $this->helper);
     }
 
+    public function testDocumentationFreezesManualTcpOnlyOperation(): void
+    {
+        $docs = (string) file_get_contents($this->root . '/docs/ops/production-backup-set-producer.md');
+        $readme = (string) file_get_contents($this->root . '/scripts/ops/README.md');
+
+        self::assertStringContainsString('127.0.0.1:3306', $docs);
+        self::assertStringContainsString('Unix-domain socket is not an', $docs);
+        self::assertStringContainsString('manual uninstall', $docs);
+        self::assertStringContainsString('no producer unit or timer', $docs);
+        self::assertStringContainsString('manual-only', $readme);
+        self::assertStringContainsString('installs no producer service or timer', $readme);
+    }
+
     public function testEveryRetentionAndRestoreClassifierRecognizesProducerActivity(): void
     {
         foreach (

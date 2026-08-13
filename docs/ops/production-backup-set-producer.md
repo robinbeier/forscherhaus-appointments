@@ -19,8 +19,9 @@ The identifier and `created_at_utc` come from the same internally captured UTC
 second. The database name, output root, connection file, dump executable and
 dump arguments are fixed. The root-owned, mode `0600`, single-link
 `/etc/fh/backup-set-producer.cnf` must contain exactly the reviewed TCP
-connection configuration for the dedicated `fh_backup` account on the local
-host. Only
+connection configuration for the dedicated `fh_backup` account through the
+host-local `127.0.0.1:3306` TCP listener. A Unix-domain socket is not an
+accepted or fallback connection path. Only
 one bounded base64url password field varies; the group, key order, account,
 protocol, host and port are exact, so the file cannot add dump-shaping options.
 The account has only the read privileges needed for the fixed single-database
@@ -105,6 +106,7 @@ identifiers to Linear, chat or logs. Validate two independent restore
 attestations before any ROB-453 retention execute pass. A merge is not
 production authorization.
 
-Rollback is restoring the prior installed manual helper and wrapper; there is
-no timer or service to disable. Already published sets and attestations remain
+Rollback is a manual uninstall of the installed ROB-466 helper after stopping
+operator use of its wrapper. There is no producer unit or timer to stop,
+disable, restore or remove. Already published sets and attestations remain
 immutable evidence. Never delete or rename a published set as rollback.

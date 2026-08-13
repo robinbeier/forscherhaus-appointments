@@ -274,16 +274,26 @@ def assert_activity_gate(orchestrator):
         for name in names:
             if re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', name) is None:
                 reject()
-            run = open_child_directory(runs, name, 0o700)
             try:
-                state = read_stable_file(run, 'state.json', 4096)
-                events = read_stable_file(run, 'events.jsonl', 1_048_576)
-                evidence = read_stable_file(run, 'evidence.json', 65_536)
+                run = open_child_directory(runs, name, 0o700)
+            except FileNotFoundError:
+                reject(75)
+            try:
+                state = read_required_history_file(run, 'state.json', 4096)
+                events = read_required_history_file(run, 'events.jsonl', 1_048_576)
+                evidence = read_required_history_file(run, 'evidence.json', 65_536)
                 validate_terminal_history(name, state, events, evidence)
             finally:
                 os.close(run)
     finally:
         os.close(runs)
+
+
+def read_required_history_file(parent, leaf, maximum):
+    try:
+        return read_stable_file(parent, leaf, maximum)
+    except FileNotFoundError:
+        reject(75)
 
 
 def read_stable_file(parent, leaf, maximum):

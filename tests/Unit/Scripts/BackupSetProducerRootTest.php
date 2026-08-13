@@ -182,6 +182,35 @@ final class BackupSetProducerRootTest extends TestCase
         }
     }
 
+    public function testIncompleteRunnerHistoryIsRetryableAndDoesNotPublish(): void
+    {
+        $runs = $this->root . '/orchestrator/runs';
+        mkdir($runs, 0700);
+
+        foreach (['state.json', 'events.jsonl', 'evidence.json'] as $missing) {
+            $run = $runs . '/018f6f52-4c87-4d4e-8b19-6a66e6e1af25';
+            mkdir($run, 0700);
+            foreach (['state.json', 'events.jsonl', 'evidence.json'] as $leaf) {
+                if ($leaf === $missing) {
+                    continue;
+                }
+                file_put_contents($run . '/' . $leaf, "{}\n");
+                chmod($run . '/' . $leaf, 0600);
+            }
+
+            $result = $this->runProducer();
+
+            self::assertSame(75, $result['exit'], $missing . ': ' . $result['stderr']);
+            self::assertSame(
+                ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+                json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR),
+                $missing,
+            );
+            self::assertSame([], glob($this->root . '/backups/20*T*Z') ?: [], $missing);
+            $this->removeTree($run);
+        }
+    }
+
     public function testLegacySuccessMarkerWithoutHandoffMigratesOnFirstRun(): void
     {
         file_put_contents($this->root . '/backups/last_backup_success.utc', "2026-01-01T00:00:00Z\n");

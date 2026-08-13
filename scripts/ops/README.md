@@ -61,8 +61,8 @@ Script inventory:
   systemd activation path is documented in
   [`docs/ops/production-release-archive-dump-retention.md`](../../docs/ops/production-release-archive-dump-retention.md)
 - `prod_backup_set_producer.sh` executes one closed ROB-466 production backup
-  set only with its exact live confirmation. ROB-466 deliberately ships no
-  service or timer; every pass is manual. See
+  set only with its exact live confirmation. ROB-466 is manual-only: it ships
+  and installs no producer service or timer. See
   [`docs/ops/production-backup-set-producer.md`](../../docs/ops/production-backup-set-producer.md).
 - `prod_verify_latest_deployment_dump.sh` resolves that producer's protected
   handoff on the host and runs one ROB-461 restore-attestation pass only with
@@ -301,7 +301,10 @@ Closed production backup sets:
 - Provision the dedicated `fh_backup` database account with only `SELECT` and
   `SHOW VIEW` on `easyappointments.*`. Provide the exact six-line connection
   authority at `/etc/fh/backup-set-producer.cnf` as root-owned mode `0600`;
-  only its bounded base64url password varies. Never commit, print, or pass its
-  contents through argv or environment variables.
+  it selects only the host-local `127.0.0.1:3306` TCP listener and never a
+  Unix-domain socket. Only its bounded base64url password varies. Never commit,
+  print, or pass its contents through argv or environment variables.
+- Install no ROB-466 producer service or timer. Every run and any uninstall are
+  manual operator actions behind the exact live confirmation.
 - The production sequence, atomic set contract and ROB-461 two-set gate live
   in `docs/ops/production-backup-set-producer.md`.
