@@ -74,8 +74,9 @@ been continuously sleeping for at least 24 hours; this identifies the stable
 service supervisors observed on the production host. A new, running, stopped,
 disappearing, or otherwise unclassifiable `up` process remains fail-closed.
 Direct Docker builds, Compose `build`/`run`, Buildx/Buildctl, builder prune, and
-every `compose up --build`/`--build=...` or `compose up --watch`/`-w` form also
-remain blocking regardless of process age.
+every `compose up --build`/`--build=...` or `compose up --watch`/`-w` form,
+including combined short flags such as `-wV`, also remain blocking regardless
+of process age.
 Independently, every running or stopped container reference is checked before
 every candidate deletion.
 
