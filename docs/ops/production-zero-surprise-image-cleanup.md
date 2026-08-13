@@ -69,6 +69,20 @@ active deploy/replay/dump/backup/retention/build work, validates the candidate
 set twice, verifies that no container references any candidate, and returns
 aggregate evidence without removing anything.
 
+A `docker compose up` process is exempted only when its command line proves
+detached mode using the exact standalone token `--detach` or `-d`, and `/proc`
+proves it has been continuously sleeping for at least 24 hours. Assigned or
+clustered detach forms remain fail-closed so values of other short options and
+`--detach=false` cannot be mistaken for detached execution. An
+attached/menu-capable, new, running, stopped, disappearing, or otherwise
+unclassifiable `up` process remains fail-closed.
+Direct Docker builds, Compose `build`/`run`/`watch`, Buildx/Buildctl, builder
+prune, and every `compose up --build`/`--build=...` or
+`compose up --watch`/`-w` form, including combined or assigned short flags such
+as `-wV` and `-w=true`, also remain blocking regardless of process age.
+Independently, every running or stopped container reference is checked before
+every candidate deletion.
+
 `pass` exits `0`. Unsafe or malformed authority exits `70`. A busy lock, active
 production work, or exceeded bounded set exits `75` and is retryable only after
 the reported condition has cleared. Usage errors exit `64` in the remote

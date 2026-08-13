@@ -30,8 +30,19 @@ MAX_IMAGES = 64
 MAX_DISCOVERY_IMAGES = 4096
 MAX_CONTAINERS = 4096
 MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+MIN_STABLE_COMPOSE_UP_AGE_SECONDS = 86_400
 GLOBAL_LOCK = "/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock"
 DOCKER = "/usr/bin/docker"
+COMPOSE_EXECUTABLES = frozenset(
+    (
+        DOCKER,
+        "/usr/bin/docker-compose",
+        "/usr/lib/docker/cli-plugins/docker-compose",
+        "/usr/libexec/docker/cli-plugins/docker-compose",
+        "/usr/local/lib/docker/cli-plugins/docker-compose",
+        "/usr/local/libexec/docker/cli-plugins/docker-compose",
+    )
+)
 REPORT_KEYS = (
     "schema",
     "mode",
@@ -316,13 +327,63 @@ ACTIVITY_PATTERNS = (
     re.compile(r"(^|/)(deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(\s|$)"),
     re.compile(r"(^|/)(deployment_dump_attestation_v1\.py|verify_deployment_dump_v1\.php)(\s|$)"),
     re.compile(r"(^|/)(prod_(build_cache|release_archive_dump|session)_retention\.sh)(\s|$)"),
-    re.compile(
-        r"(^|/|\s)docker(-compose)?\s+"
-        r"(build|compose\b.*\s(build|run|up)|builder\s+prune|buildx\s+(build|bake|prune))(\s|$)"
-    ),
+    re.compile(r"(^|/|\s)docker\s+(build|builder\s+prune|buildx\s+(build|bake|prune))(\s|$)"),
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\s(build|run|watch)(\s|$)"),
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)--build(=\S+)?(\s|$)"),
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)(--watch|-[A-Za-z]*w[A-Za-z]*)(=\S+)?(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\s(build|run|watch)(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)--build(=\S+)?(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--watch|-[A-Za-z]*w[A-Za-z]*)(=\S+)?(\s|$)"),
     re.compile(r"(^|/)buildctl(\s|$)"),
     re.compile(r"(^|/)(mysqldump|mariadb-dump|backup_easyappointments\.sh)(\s|$)"),
 )
+COMPOSE_UP_PATTERNS = (
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup(\s|$)"),
+)
+COMPOSE_DETACHED_UP_PATTERNS = (
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)(--detach|-d)(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--detach|-d)(\s|$)"),
+)
+
+
+def _stable_compose_supervisor(proc_fd: int, entry: str) -> bool:
+    stat_fd: int | None = None
+    uptime_fd: int | None = None
+    try:
+        stat_fd = os.open(entry + "/stat", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=proc_fd)
+        raw_stat = os.read(stat_fd, 4097)
+        uptime_fd = os.open("uptime", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=proc_fd)
+        raw_uptime = os.read(uptime_fd, 129)
+    except OSError as error:
+        raise CleanupError("activity_state_unknown") from error
+    finally:
+        if stat_fd is not None:
+            os.close(stat_fd)
+        if uptime_fd is not None:
+            os.close(uptime_fd)
+    if len(raw_stat) > 4096 or len(raw_uptime) > 128:
+        raise CleanupError("activity_state_unknown")
+    try:
+        fields = raw_stat.decode("ascii", "strict").rsplit(")", 1)[1].split()
+        state = fields[0]
+        started_ticks = int(fields[19])
+        uptime_seconds = float(raw_uptime.decode("ascii", "strict").split()[0])
+        ticks_per_second = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+        age_seconds = uptime_seconds - (started_ticks / ticks_per_second)
+    except (UnicodeDecodeError, ValueError, IndexError, KeyError, OSError) as error:
+        raise CleanupError("activity_state_unknown") from error
+    return state == "S" and age_seconds >= MIN_STABLE_COMPOSE_UP_AGE_SECONDS
+
+
+def _actual_compose_executable(proc_fd: int, entry: str) -> bool:
+    try:
+        executable = os.readlink(entry + "/exe", dir_fd=proc_fd)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise CleanupError("activity_state_unknown") from error
+    return executable in COMPOSE_EXECUTABLES
 
 
 def assert_idle(proc_root: str = "/proc") -> None:
@@ -362,6 +423,13 @@ def assert_idle(proc_root: str = "/proc") -> None:
             command = raw.replace(b"\0", b" ").decode("utf-8", "replace").strip()
             if command and any(pattern.search(command) for pattern in ACTIVITY_PATTERNS):
                 raise CleanupError("active_production_work", 75)
+            if command and any(pattern.search(command) for pattern in COMPOSE_UP_PATTERNS):
+                if not _actual_compose_executable(proc_fd, entry.name):
+                    raise CleanupError("active_production_work", 75)
+                if not any(pattern.search(command) for pattern in COMPOSE_DETACHED_UP_PATTERNS):
+                    raise CleanupError("active_production_work", 75)
+                if not _stable_compose_supervisor(proc_fd, entry.name):
+                    raise CleanupError("active_production_work", 75)
     finally:
         os.close(proc_fd)
 

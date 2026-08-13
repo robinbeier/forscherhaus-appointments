@@ -197,14 +197,133 @@ class CleanupEngineTest(unittest.TestCase):
         self.assertEqual(1, len(fake.images))
 
     def test_activity_scan_blocks_buildkit_commands(self) -> None:
-        for command in (b"/usr/bin/docker\0buildx\0bake\0", b"/usr/bin/buildctl\0build\0"):
+        for command in (
+            b"/usr/bin/docker\0buildx\0bake\0",
+            b"/usr/bin/buildctl\0build\0",
+            b"/usr/bin/docker\0compose\0-f\0compose.yml\0build\0",
+            b"/usr/bin/docker-compose\0run\0--rm\0worker\0",
+            b"/usr/bin/docker\0compose\0watch\0",
+            b"/usr/bin/docker-compose\0watch\0",
+            b"/usr/bin/docker\0compose\0up\0--build\0--detach\0",
+            b"/usr/bin/docker-compose\0up\0-d\0--build\0",
+            b"/usr/bin/docker\0compose\0up\0--build=true\0",
+            b"/usr/bin/docker-compose\0up\0--build=1\0",
+            b"/usr/bin/docker\0compose\0up\0--watch\0",
+            b"/usr/bin/docker-compose\0up\0-w\0",
+            b"/usr/bin/docker\0compose\0up\0--watch=true\0",
+            b"/usr/bin/docker\0compose\0up\0-wV\0",
+            b"/usr/bin/docker-compose\0up\0-dw\0",
+            b"/usr/bin/docker\0compose\0up\0-Vwd\0",
+            b"/usr/bin/docker\0compose\0up\0-w=true\0",
+            b"/usr/bin/docker-compose\0up\0-Vw=true\0",
+        ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")
                 os.mkdir(process)
                 with open(os.path.join(process, "cmdline"), "wb") as handle:
                     handle.write(command)
+                self.write_process_executable(process, "/usr/bin/docker")
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
                 with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
                     module.assert_idle(proc_root)
+
+    def test_activity_scan_allows_long_running_compose_up_without_build(self) -> None:
+        for command in (
+            b"/usr/bin/docker\0compose\0-f\0compose.yml\0up\0-d\0",
+            b"/usr/bin/docker-compose\0up\0--detach\0",
+        ):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(command)
+                executable = "/usr/bin/docker-compose" if b"docker-compose" in command else "/usr/bin/docker"
+                self.write_process_executable(process, executable)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+                module.assert_idle(proc_root)
+
+    def test_activity_scan_blocks_wrappers_that_only_embed_detached_compose_up(self) -> None:
+        for executable, command in (
+            ("/usr/bin/watch", b"watch\0-n\0900\0/usr/bin/docker\0compose\0up\0-d\0"),
+            ("/usr/bin/bash", b"bash\0-c\0/usr/bin/docker compose up --detach\0"),
+            ("/opt/bin/docker-compose", b"/opt/bin/docker-compose\0up\0-d\0"),
+        ):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(command)
+                self.write_process_executable(process, executable)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+                with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                    module.assert_idle(proc_root)
+
+    def test_activity_scan_allows_supported_compose_v2_plugin_executables(self) -> None:
+        for executable in sorted(module.COMPOSE_EXECUTABLES - {module.DOCKER, "/usr/bin/docker-compose"}):
+            with self.subTest(executable=executable), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(executable.encode() + b"\0compose\0up\0-d\0")
+                self.write_process_executable(process, executable)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+                module.assert_idle(proc_root)
+
+    def test_activity_scan_blocks_new_nonsleeping_or_unclassifiable_compose_up(self) -> None:
+        for state, age in (("S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS - 1), ("R", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)):
+            with self.subTest(state=state, age=age), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(b"/usr/bin/docker\0compose\0up\0-d\0")
+                self.write_process_executable(process, "/usr/bin/docker")
+                self.write_process_state(proc_root, process, state, age)
+                with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                    module.assert_idle(proc_root)
+        with tempfile.TemporaryDirectory() as proc_root:
+            process = os.path.join(proc_root, "424242")
+            os.mkdir(process)
+            with open(os.path.join(process, "cmdline"), "wb") as handle:
+                handle.write(b"/usr/bin/docker\0compose\0up\0-d\0")
+            self.write_process_executable(process, "/usr/bin/docker")
+            with self.assertRaisesRegex(module.CleanupError, "activity_state_unknown"):
+                module.assert_idle(proc_root)
+
+    def test_activity_scan_blocks_attached_or_menu_capable_compose_up(self) -> None:
+        for command in (
+            b"/usr/bin/docker\0compose\0up\0",
+            b"/usr/bin/docker-compose\0up\0--menu=true\0",
+            b"/usr/bin/docker\0compose\0up\0--detach=false\0",
+            b"/usr/bin/docker-compose\0up\0-d=false\0",
+            b"/usr/bin/docker\0compose\0up\0--detach=true\0",
+            b"/usr/bin/docker\0compose\0up\0-Vd\0",
+            b"/usr/bin/docker-compose\0up\0-awebd\0",
+        ):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(command)
+                executable = "/usr/bin/docker-compose" if b"docker-compose" in command else "/usr/bin/docker"
+                self.write_process_executable(process, executable)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+                with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                    module.assert_idle(proc_root)
+
+    @staticmethod
+    def write_process_executable(process: str, executable: str) -> None:
+        os.symlink(executable, os.path.join(process, "exe"))
+
+    @staticmethod
+    def write_process_state(proc_root: str, process: str, state: str, age_seconds: int) -> None:
+        ticks = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+        uptime = module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS * 2
+        started_ticks = int((uptime - age_seconds) * ticks)
+        fields = [state, *("0" for _ in range(18)), str(started_ticks)]
+        with open(os.path.join(process, "stat"), "w", encoding="ascii") as handle:
+            handle.write(f"424242 (docker) {' '.join(fields)}\n")
+        with open(os.path.join(proc_root, "uptime"), "w", encoding="ascii") as handle:
+            handle.write(f"{uptime}.00 0.00\n")
 
     def test_prepare_lock_reports_partial_when_directory_fsync_fails_after_create(self) -> None:
         with tempfile.TemporaryDirectory() as parent:

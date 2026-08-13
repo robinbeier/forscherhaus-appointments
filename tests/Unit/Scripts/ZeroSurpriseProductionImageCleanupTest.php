@@ -23,7 +23,7 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         );
 
         self::assertSame(0, $result['exit'], $result['stderr']);
-        self::assertStringContainsString('Ran 11 tests', $result['stderr']);
+        self::assertStringContainsString('Ran 16 tests', $result['stderr']);
         self::assertStringContainsString('OK', $result['stderr']);
     }
 
@@ -85,16 +85,14 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
                     ['--prepare-global-lock'],
                     ['--prepare-global-lock', '--confirm-live-write', 'ROB-449'],
                     ['--execute', '--prepare-global-lock', '--confirm-live-write', 'ROB-458'],
-                ] as $arguments
+                ]
+                as $arguments
             ) {
                 self::assertSame(1, $this->runWrapper($arguments, $environment)['exit']);
             }
             self::assertFileDoesNotExist($environment['ROB458_SSH_LOG']);
 
-            $result = $this->runWrapper(
-                ['--prepare-global-lock', '--confirm-live-write', 'ROB-458'],
-                $environment,
-            );
+            $result = $this->runWrapper(['--prepare-global-lock', '--confirm-live-write', 'ROB-458'], $environment);
             self::assertSame(0, $result['exit'], $result['stderr']);
             self::assertStringContainsString('mode       : lock-bootstrap', $result['stdout']);
             self::assertStringContainsString(
@@ -180,6 +178,12 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         self::assertStringContainsString('--confirm-live-write ROB-458', $wrapper);
         self::assertStringContainsString('buildx\\s+(build|bake|prune)', $helper);
         self::assertStringContainsString('buildctl(\\s|$)', $helper);
+        self::assertStringContainsString('compose\\b.*\\s(build|run|watch)', $helper);
+        self::assertStringContainsString('compose\\b.*\\sup\\b.*(^|\\s)--build', $helper);
+        self::assertStringContainsString('(--watch|-[A-Za-z]*w[A-Za-z]*)(=\\S+)?', $helper);
+        self::assertStringContainsString('COMPOSE_DETACHED_UP_PATTERNS', $helper);
+        self::assertStringContainsString('(--detach|-d)(\\s|$)', $helper);
+        self::assertStringContainsString('MIN_STABLE_COMPOSE_UP_AGE_SECONDS = 86_400', $helper);
         $pythonResolution = strpos($wrapper, 'LOCAL_PYTHON="$(command -v python3 || true)"');
         $remoteExecution = strpos($wrapper, 'REMOTE_OUTPUT="$(ssh');
         self::assertNotFalse($pythonResolution);
