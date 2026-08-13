@@ -209,9 +209,14 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         /*!40101 SET CHARACTER_SET_CLIENT=utf8mb4 */;
         CREATE TABLE `ea_x` (`v` text) ENGINE=InnoDB;
         /*!40101 SET CHARACTER_SET_CLIENT=@saved_cs_client */;
-        LOCK TABLES `ea_x` WRITE; ALTER TABLE `ea_x` DISABLE KEYS;
+        SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
+        LOCK TABLES `ea_x` WRITE;
+        ALTER TABLE `ea_x` DISABLE KEYS;
         INSERT INTO `ea_x` VALUES ('PREPARE x','CREATE TRIGGER'),('quote\\'d','x');
-        ALTER TABLE `ea_x` ENABLE KEYS; UNLOCK TABLES;
+        ALTER TABLE `ea_x` ENABLE KEYS;
+        UNLOCK TABLES;
+        COMMIT;
+        SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
         /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
         /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
         /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;'''
@@ -226,6 +231,36 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
             for offset in range(0, len(candidate), 2):
                 official.feed(candidate[offset:offset + 2])
             assert official.finish() == 1
+        valid_autocommit_blocks = (
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' INSERT INTO `x` VALUES (1); ALTER TABLE `x` ENABLE KEYS;'
+            b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;'
+            b' SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `y` WRITE; ALTER TABLE `y` DISABLE KEYS;'
+            b' ALTER TABLE `y` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+        )
+        for block in valid_autocommit_blocks:
+            probe = module.DumpSqlInspector()
+            probe.feed(module.SANDBOX_PREAMBLES[0] + block)
+            assert probe.finish() == 0
+        bounded = module.DumpSqlInspector()
+        bounded.feed(
+            module.SANDBOX_PREAMBLES[0]
+            + b'CREATE TABLE `wide` ('
+            + b','.join(b'`c' + str(index).encode('ascii') + b'` int' for index in range(10_000))
+            + b') ENGINE=InnoDB'
+        )
+        assert bounded.statement_identifier_count == 10_001
+        assert bounded.statement_identifier is not None
+        assert not hasattr(bounded, 'statement_identifiers')
+        bounded.feed(b';')
+        assert bounded.finish() == 1
         invalid = (
             b'CREATE TABLE x(id int) ENGINE=CSV;',
             b'/*!50000 CREATE TRIGGER x BEFORE INSERT ON t FOR EACH ROW SET @x=1 */;',
@@ -248,6 +283,81 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
             b'SET @saved_cs_client=@@character_set_client; SET CHARACTER_SET_CLIENT=utf8mb4;'
             b' CREATE TABLE `x` (`id` int) ENGINE=InnoDB;',
             b'SET CHARACTER_SET_CLIENT=@saved_cs_client;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;',
+            b'SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0; COMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0; COMMIT; SELECT 1;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0, SQL_MODE=\'\';'
+            b' COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT, SQL_NOTES=0;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' ALTER TABLE `x` DISABLE KEYS; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' ALTER TABLE `x` DISABLE KEYS; INSERT INTO `x` VALUES (1);'
+            b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' ALTER TABLE `x` DISABLE KEYS; INSERT INTO `x` VALUES (1);'
+            b' COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' ALTER TABLE `x` DISABLE KEYS; ALTER TABLE `x` ENABLE KEYS;'
+            b' INSERT INTO `x` VALUES (1); COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET AUTOCOMMIT=0;',
+            b'SET @@AUTOCOMMIT=0;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' COMMIT; SET AUTOCOMMIT=1;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' ALTER TABLE `x` ENABLE KEYS; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'LOCK TABLES `x` WRITE; UNLOCK TABLES;',
+            b'ALTER TABLE `x` DISABLE KEYS;',
+            b'INSERT INTO `x` VALUES (1);',
+            b'ALTER TABLE `x` ENABLE KEYS;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' INSERT INTO `y` VALUES (1); ALTER TABLE `x` ENABLE KEYS;'
+            b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' INSERT INTO `x` VALUES (1); ALTER TABLE `y` ENABLE KEYS;'
+            b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `y` DISABLE KEYS;'
+            b' ALTER TABLE `y` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x\\a` WRITE; ALTER TABLE `x\\b` DISABLE KEYS;'
+            b' INSERT INTO `x\\c` VALUES (1); ALTER TABLE `x\\d` ENABLE KEYS;'
+            b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE, `y` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES EXTRA; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=~0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=(0);'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=!@OLD_AUTOCOMMIT;',
+            b"SET SQL_MODE=~'NO_AUTO_VALUE_ON_ZERO';",
+            b'SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=+0;',
             b'USE `mysql`; CREATE TABLE x(id int) ENGINE=InnoDB;',
             b'CREATE DATABASE `other`;',
             b'CREATE TABLE x(id int) ENGINE=InnoDB;',

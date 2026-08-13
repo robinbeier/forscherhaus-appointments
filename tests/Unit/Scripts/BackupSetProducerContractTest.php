@@ -44,6 +44,7 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString('backup_set_producer_v1', $activity);
         self::assertStringContainsString("'--single-transaction'", $this->helper);
         self::assertStringContainsString("'--quick'", $this->helper);
+        self::assertStringContainsString("'--no-autocommit'", $this->helper);
         self::assertStringContainsString("'--skip-triggers'", $this->helper);
         self::assertStringContainsString("'--skip-routines'", $this->helper);
         self::assertStringContainsString("'--skip-events'", $this->helper);
