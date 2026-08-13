@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Forscherhaus release archive and dump retention weekly
+Documentation=file:/var/www/html/easyappointments/docs/ops/production-release-archive-dump-retention.md
+
+[Timer]
+OnCalendar=Sun *-*-* 04:17:00 UTC
+RandomizedDelaySec=30m
+AccuracySec=1m
+Persistent=true
+Unit=fh-release-archive-dump-retention.service
+
+[Install]
+WantedBy=timers.target

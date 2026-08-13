@@ -16,12 +16,21 @@ LOAD_WARN_PER_CORE="${KUMA_HOST_RESOURCES_LOAD_WARN_PER_CORE:-4}"
 SESSION_RETENTION_MONITOR_ENABLED="${KUMA_SESSION_RETENTION_MONITOR_ENABLED:-0}"
 SESSION_RETENTION_MARKER_MAX_AGE_SECONDS="${KUMA_SESSION_RETENTION_MARKER_MAX_AGE_SECONDS:-129600}"
 SESSION_RETENTION_HELPER="${KUMA_SESSION_RETENTION_HELPER:-/usr/local/libexec/fh-session-retention-v1}"
+RELEASE_RETENTION_MONITOR_ENABLED="${KUMA_RELEASE_RETENTION_MONITOR_ENABLED:-0}"
+RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS="${KUMA_RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS:-691200}"
+RELEASE_RETENTION_HELPER="${KUMA_RELEASE_RETENTION_HELPER:-/usr/local/libexec/fh-release-archive-dump-retention-v1}"
 
 if [[ "$SESSION_RETENTION_MONITOR_ENABLED" != '0' && "$SESSION_RETENTION_MONITOR_ENABLED" != '1' ]]; then
   kuma_push_die 'KUMA_SESSION_RETENTION_MONITOR_ENABLED must be 0 or 1'
 fi
 if ! [[ "$SESSION_RETENTION_MARKER_MAX_AGE_SECONDS" =~ ^[1-9][0-9]{0,6}$ ]]; then
   kuma_push_die 'KUMA_SESSION_RETENTION_MARKER_MAX_AGE_SECONDS is invalid'
+fi
+if [[ "$RELEASE_RETENTION_MONITOR_ENABLED" != '0' && "$RELEASE_RETENTION_MONITOR_ENABLED" != '1' ]]; then
+  kuma_push_die 'KUMA_RELEASE_RETENTION_MONITOR_ENABLED must be 0 or 1'
+fi
+if ! [[ "$RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS" =~ ^[1-9][0-9]{0,6}$ ]]; then
+  kuma_push_die 'KUMA_RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS is invalid'
 fi
 
 disk_used_percent="$(
@@ -52,6 +61,29 @@ if (( disk_used_percent >= DISK_USED_WARN_PERCENT )); then
   status="down"
   ping="0"
   reasons+=("disk=${disk_used_percent}%")
+fi
+
+if [[ "$RELEASE_RETENTION_MONITOR_ENABLED" == '1' ]]; then
+  release_marker_json=''
+  release_marker_status='invalid'
+  if [[ -x "$RELEASE_RETENTION_HELPER" ]] \
+    && release_marker_json="$("$RELEASE_RETENTION_HELPER" marker-status "$RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS" 2>/dev/null)"; then
+    release_marker_status="$(printf '%s' "$release_marker_json" | sed -n 's/^.*"status":"\([a-z_]*\)".*$/\1/p')"
+  fi
+  case "$release_marker_status" in
+    pass)
+      ;;
+    missing|stale|invalid)
+      status="down"
+      ping="0"
+      reasons+=("release_retention=${release_marker_status}")
+      ;;
+    *)
+      status="down"
+      ping="0"
+      reasons+=("release_retention=invalid")
+      ;;
+  esac
 fi
 
 if (( mem_used_percent >= MEM_USED_WARN_PERCENT )); then
