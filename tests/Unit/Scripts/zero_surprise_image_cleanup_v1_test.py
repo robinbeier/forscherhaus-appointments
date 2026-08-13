@@ -269,6 +269,42 @@ class CleanupEngineTest(unittest.TestCase):
                 self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
                 module.assert_idle(proc_root)
 
+    def test_activity_scan_allows_old_sleeping_attached_compose_only_with_null_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as proc_root:
+            process = os.path.join(proc_root, "424242")
+            os.mkdir(process)
+            with open(os.path.join(process, "cmdline"), "wb") as handle:
+                handle.write(b"/usr/bin/docker\0compose\0up\0")
+            self.write_process_executable(process, "/usr/bin/docker")
+            self.write_process_stdin(process, "/dev/null")
+            self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+            module.assert_idle(proc_root)
+
+    def test_activity_scan_blocks_attached_compose_with_nonnull_stdin(self) -> None:
+        for stdin_target in ("/dev/zero", None):
+            with self.subTest(stdin_target=stdin_target), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(b"/usr/bin/docker\0compose\0up\0")
+                self.write_process_executable(process, "/usr/bin/docker")
+                if stdin_target is not None:
+                    self.write_process_stdin(process, stdin_target)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+                with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                    module.assert_idle(proc_root)
+
+        with tempfile.TemporaryDirectory() as proc_root:
+            process = os.path.join(proc_root, "424242")
+            os.mkdir(process)
+            with open(os.path.join(process, "cmdline"), "wb") as handle:
+                handle.write(b"/usr/bin/docker\0compose\0up\0")
+            self.write_process_executable(process, "/usr/bin/docker")
+            self.write_process_stdin(process, "/dev/null")
+            self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1, tty_number=34816)
+            with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                module.assert_idle(proc_root)
+
     def test_activity_scan_blocks_new_nonsleeping_or_unclassifiable_compose_up(self) -> None:
         for state, age in (("S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS - 1), ("R", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)):
             with self.subTest(state=state, age=age), tempfile.TemporaryDirectory() as proc_root:
@@ -315,11 +351,19 @@ class CleanupEngineTest(unittest.TestCase):
         os.symlink(executable, os.path.join(process, "exe"))
 
     @staticmethod
-    def write_process_state(proc_root: str, process: str, state: str, age_seconds: int) -> None:
+    def write_process_stdin(process: str, target: str) -> None:
+        descriptor_dir = os.path.join(process, "fd")
+        os.mkdir(descriptor_dir)
+        os.symlink(target, os.path.join(descriptor_dir, "0"))
+
+    @staticmethod
+    def write_process_state(proc_root: str, process: str, state: str, age_seconds: int, tty_number: int = 0) -> None:
         ticks = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
         uptime = module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS * 2
         started_ticks = int((uptime - age_seconds) * ticks)
-        fields = [state, *("0" for _ in range(18)), str(started_ticks)]
+        trailing = ["0" for _ in range(18)]
+        trailing[3] = str(tty_number)
+        fields = [state, *trailing, str(started_ticks)]
         with open(os.path.join(process, "stat"), "w", encoding="ascii") as handle:
             handle.write(f"424242 (docker) {' '.join(fields)}\n")
         with open(os.path.join(proc_root, "uptime"), "w", encoding="ascii") as handle:
