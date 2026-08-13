@@ -182,7 +182,7 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         self::assertStringContainsString('compose\\b.*\\sup\\b.*(^|\\s)--build', $helper);
         self::assertStringContainsString('(--watch|-[A-Za-z]*w[A-Za-z]*)(=\\S+)?', $helper);
         self::assertStringContainsString('COMPOSE_DETACHED_UP_PATTERNS', $helper);
-        self::assertStringContainsString('(--detach|-[A-Za-z]*d[A-Za-z]*)(=\\S+)?', $helper);
+        self::assertStringContainsString('(--detach|-[A-Za-z]*d[A-Za-z]*)(\\s|$)', $helper);
         self::assertStringContainsString('MIN_STABLE_COMPOSE_UP_AGE_SECONDS = 86_400', $helper);
         $pythonResolution = strpos($wrapper, 'LOCAL_PYTHON="$(command -v python3 || true)"');
         $remoteExecution = strpos($wrapper, 'REMOTE_OUTPUT="$(ssh');

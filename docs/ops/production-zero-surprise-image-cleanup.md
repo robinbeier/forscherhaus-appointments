@@ -70,10 +70,10 @@ set twice, verifies that no container references any candidate, and returns
 aggregate evidence without removing anything.
 
 A `docker compose up` process is exempted only when its command line proves
-detached mode (`--detach` or a short-option cluster containing `d`) and `/proc`
-proves it has been continuously sleeping for at least 24 hours; this identifies
-the stable service supervisors observed on the production host without relying
-on interactive menu state. An attached/menu-capable, new, running, stopped,
+detached mode using bare `--detach` or a bare short-option cluster containing
+`d`, and `/proc` proves it has been continuously sleeping for at least 24 hours.
+Assigned detach forms remain fail-closed so `--detach=false` cannot be mistaken
+for detached execution. An attached/menu-capable, new, running, stopped,
 disappearing, or otherwise unclassifiable `up` process remains fail-closed.
 Direct Docker builds, Compose `build`/`run`/`watch`, Buildx/Buildctl, builder
 prune, and every `compose up --build`/`--build=...` or
