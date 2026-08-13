@@ -23,7 +23,7 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         );
 
         self::assertSame(0, $result['exit'], $result['stderr']);
-        self::assertStringContainsString('Ran 10 tests', $result['stderr']);
+        self::assertStringContainsString('Ran 11 tests', $result['stderr']);
         self::assertStringContainsString('OK', $result['stderr']);
     }
 

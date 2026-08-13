@@ -206,6 +206,24 @@ class CleanupEngineTest(unittest.TestCase):
                 with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
                     module.assert_idle(proc_root)
 
+    def test_prepare_lock_reports_partial_when_directory_fsync_fails_after_create(self) -> None:
+        with tempfile.TemporaryDirectory() as parent:
+            state_root = os.path.join(parent, "state")
+            original_walk = module._walk_trusted_directory
+            original_fsync = module.os.fsync
+            module._walk_trusted_directory = lambda _path: os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+            module.os.fsync = lambda _fd: (_ for _ in ()).throw(OSError("injected fsync failure"))
+            try:
+                report, exit_code = module.prepare_global_lock(state_root)
+            finally:
+                module._walk_trusted_directory = original_walk
+                module.os.fsync = original_fsync
+            self.assertEqual(75, exit_code)
+            self.assertEqual("partial", report["status"])
+            self.assertEqual("global_lock_unsafe", report["reason"])
+            self.assertTrue(report["mutation_performed"])
+            self.assertTrue(os.path.isdir(state_root))
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

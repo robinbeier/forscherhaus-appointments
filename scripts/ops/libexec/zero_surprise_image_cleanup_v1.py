@@ -172,7 +172,7 @@ def acquire_global_lock(path: str = GLOBAL_LOCK) -> int:
         os.close(parent)
 
 
-def _ensure_private_directory(parent: int, leaf: str) -> tuple[int, bool]:
+def _ensure_private_directory(parent: int, leaf: str, created_callback: Callable[[], None]) -> tuple[int, bool]:
     created = False
     try:
         before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
@@ -180,6 +180,7 @@ def _ensure_private_directory(parent: int, leaf: str) -> tuple[int, bool]:
         try:
             os.mkdir(leaf, 0o700, dir_fd=parent)
             created = True
+            created_callback()
             os.fsync(parent)
         except FileExistsError:
             pass
@@ -232,11 +233,15 @@ def prepare_global_lock(state_root: str = os.path.dirname(os.path.dirname(GLOBAL
     root: int | None = None
     locks: int | None = None
     lock_fd: int | None = None
+    def record_mutation() -> None:
+        nonlocal mutation_performed
+        mutation_performed = True
+
     try:
         parent = _walk_trusted_directory(os.path.dirname(state_root))
-        root, created = _ensure_private_directory(parent, os.path.basename(state_root))
+        root, created = _ensure_private_directory(parent, os.path.basename(state_root), record_mutation)
         mutation_performed = mutation_performed or created
-        locks, created = _ensure_private_directory(root, "locks")
+        locks, created = _ensure_private_directory(root, "locks", record_mutation)
         mutation_performed = mutation_performed or created
         leaf = os.path.basename(GLOBAL_LOCK)
         try:
