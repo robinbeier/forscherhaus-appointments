@@ -42,7 +42,11 @@ table/data surface accepted by the ROB-465 parser. It never falls back to
 external directories or caller-selected options.
 The parser accepts only the reviewed MariaDB sandbox preamble spellings,
 including the official form with exactly one trailing space before the line
-ending. Additional whitespace and malformed control lines remain rejected.
+ending. It also accepts the exact standard saved-client-charset sequence that
+MariaDB emits around ordinary `CREATE TABLE` definitions: save, set `utf8mb4`,
+create, restore. Missing, reordered or detached steps, added assignments,
+alternate sources and session modifiers remain rejected.
+Additional whitespace and malformed control lines remain rejected.
 
 ## Publication and recovery
 

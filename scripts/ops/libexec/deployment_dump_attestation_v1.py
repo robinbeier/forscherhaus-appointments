@@ -105,6 +105,7 @@ class DumpSqlInspector:
         self.prefix = bytearray()
         self.prefix_checked = False
         self.sandbox_seen = False
+        self.table_charset_wrapper = None
 
     def feed(self, data):
         for value in data:
@@ -140,6 +141,8 @@ class DumpSqlInspector:
             reject()
         self._emit_word()
         self._finish_statement()
+        if self.table_charset_wrapper is not None:
+            reject()
         return self.create_tables
 
     def _consume(self, value):
@@ -319,6 +322,15 @@ class DumpSqlInspector:
         words = self.words
         first = words[0] if words else b''
         second = words[1] if len(words) > 1 else b''
+        save_charset = words == [b'SET', b'@SAVED_CS_CLIENT', b'@@CHARACTER_SET_CLIENT']
+        set_table_charset = words == [b'SET', b'CHARACTER_SET_CLIENT', b'UTF8MB4']
+        restore_charset = words == [b'SET', b'CHARACTER_SET_CLIENT', b'@SAVED_CS_CLIENT']
+        if (
+            (self.table_charset_wrapper == 'saved' and not set_table_charset) or
+            (self.table_charset_wrapper == 'charset' and not (first == b'CREATE' and second == b'TABLE')) or
+            (self.table_charset_wrapper == 'created' and not restore_charset)
+        ):
+            reject()
         allowed = False
         if first == b'SET':
             allowed_shapes = (
@@ -328,7 +340,6 @@ class DumpSqlInspector:
                 [b'SET', b'CHARACTER_SET_CLIENT', b'UTF8'],
                 [b'SET', b'CHARACTER_SET_CLIENT', b'UTF8MB3'],
                 [b'SET', b'CHARACTER_SET_CLIENT', b'UTF8MB4'],
-                [b'SET', b'CHARACTER_SET_CLIENT', b'@SAVED_CS_CLIENT'],
                 [b'SET', b'CHARACTER_SET_CLIENT', b'@OLD_CHARACTER_SET_CLIENT'],
                 [b'SET', b'CHARACTER_SET_RESULTS', b'@OLD_CHARACTER_SET_RESULTS'],
                 [b'SET', b'COLLATION_CONNECTION', b'@OLD_COLLATION_CONNECTION'],
@@ -348,7 +359,10 @@ class DumpSqlInspector:
                 [b'SET', b'@OLD_NOTE_VERBOSITY', b'@@NOTE_VERBOSITY', b'NOTE_VERBOSITY', b'0'],
                 [b'SET', b'NOTE_VERBOSITY', b'@OLD_NOTE_VERBOSITY'],
             )
-            allowed = words in allowed_shapes and self.word_count == len(words)
+            allowed = (
+                (words in allowed_shapes or save_charset or restore_charset) and
+                self.word_count == len(words)
+            )
         elif first == b'START':
             allowed = words == [b'START', b'TRANSACTION'] and self.word_count == 2
         elif first == b'COMMIT':
@@ -377,6 +391,18 @@ class DumpSqlInspector:
         if not allowed or ({b'DELIMITER', b'PREPARE', b'EXECUTE', b'CALL', b'LOAD', b'PLUGIN',
                             b'GRANT', b'REVOKE', b'REPLACE'} & self.flags):
             reject()
+        if save_charset:
+            if self.table_charset_wrapper is not None:
+                reject()
+            self.table_charset_wrapper = 'saved'
+        elif set_table_charset and self.table_charset_wrapper == 'saved':
+            self.table_charset_wrapper = 'charset'
+        elif first == b'CREATE' and second == b'TABLE' and self.table_charset_wrapper == 'charset':
+            self.table_charset_wrapper = 'created'
+        elif restore_charset:
+            if self.table_charset_wrapper != 'created':
+                reject()
+            self.table_charset_wrapper = None
         self.words = []
         self.word_count = 0
         self.last_words = []
