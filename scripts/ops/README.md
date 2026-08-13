@@ -54,6 +54,10 @@ Script inventory:
   restore-verified-dump policy; it is dry-run by default and its disabled
   systemd activation path is documented in
   [`docs/ops/production-release-archive-dump-retention.md`](../../docs/ops/production-release-archive-dump-retention.md)
+- `prod_journald_retention.sh` inspects the fixed 1 GiB / 30-day journald
+  contract by default. Configuration activation, one-time vacuum, and rollback
+  use distinct confirmation tokens and remain unexecuted by repository delivery;
+  see [`docs/ops/production-journald-retention.md`](../../docs/ops/production-journald-retention.md).
 - `kuma_push_ops_jobs.sh` monitors restore-verification marker freshness
 - `kuma_push_backup_creation.sh` monitors backup-creation marker freshness
 - `kuma_push_php_fpm_logs.sh` monitors recent PHP-FPM journal errors
