@@ -316,10 +316,11 @@ ACTIVITY_PATTERNS = (
     re.compile(r"(^|/)(deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(\s|$)"),
     re.compile(r"(^|/)(deployment_dump_attestation_v1\.py|verify_deployment_dump_v1\.php)(\s|$)"),
     re.compile(r"(^|/)(prod_(build_cache|release_archive_dump|session)_retention\.sh)(\s|$)"),
-    re.compile(
-        r"(^|/|\s)docker(-compose)?\s+"
-        r"(build|compose\b.*\s(build|run|up)|builder\s+prune|buildx\s+(build|bake|prune))(\s|$)"
-    ),
+    re.compile(r"(^|/|\s)docker\s+(build|builder\s+prune|buildx\s+(build|bake|prune))(\s|$)"),
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\s(build|run)(\s|$)"),
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)--build(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\s(build|run)(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)--build(\s|$)"),
     re.compile(r"(^|/)buildctl(\s|$)"),
     re.compile(r"(^|/)(mysqldump|mariadb-dump|backup_easyappointments\.sh)(\s|$)"),
 )

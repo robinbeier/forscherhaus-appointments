@@ -197,7 +197,14 @@ class CleanupEngineTest(unittest.TestCase):
         self.assertEqual(1, len(fake.images))
 
     def test_activity_scan_blocks_buildkit_commands(self) -> None:
-        for command in (b"/usr/bin/docker\0buildx\0bake\0", b"/usr/bin/buildctl\0build\0"):
+        for command in (
+            b"/usr/bin/docker\0buildx\0bake\0",
+            b"/usr/bin/buildctl\0build\0",
+            b"/usr/bin/docker\0compose\0-f\0compose.yml\0build\0",
+            b"/usr/bin/docker-compose\0run\0--rm\0worker\0",
+            b"/usr/bin/docker\0compose\0up\0--build\0--detach\0",
+            b"/usr/bin/docker-compose\0up\0-d\0--build\0",
+        ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")
                 os.mkdir(process)
@@ -205,6 +212,18 @@ class CleanupEngineTest(unittest.TestCase):
                     handle.write(command)
                 with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
                     module.assert_idle(proc_root)
+
+    def test_activity_scan_allows_long_running_compose_up_without_build(self) -> None:
+        for command in (
+            b"/usr/bin/docker\0compose\0-f\0compose.yml\0up\0",
+            b"/usr/bin/docker-compose\0up\0--detach\0",
+        ):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(command)
+                module.assert_idle(proc_root)
 
     def test_prepare_lock_reports_partial_when_directory_fsync_fails_after_create(self) -> None:
         with tempfile.TemporaryDirectory() as parent:
