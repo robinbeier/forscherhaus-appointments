@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Forscherhaus session retention daily
+Documentation=file:/var/www/html/easyappointments/docs/ops/production-session-retention.md
+
+[Timer]
+OnCalendar=*-*-* 03:37:00 UTC
+RandomizedDelaySec=15m
+AccuracySec=1m
+Persistent=true
+Unit=fh-session-retention.service
+
+[Install]
+WantedBy=timers.target

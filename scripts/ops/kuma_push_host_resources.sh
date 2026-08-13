@@ -13,6 +13,16 @@ DISK_PATH="${KUMA_HOST_RESOURCES_DISK_PATH:-/}"
 DISK_USED_WARN_PERCENT="${KUMA_HOST_RESOURCES_DISK_USED_WARN_PERCENT:-85}"
 MEM_USED_WARN_PERCENT="${KUMA_HOST_RESOURCES_MEM_USED_WARN_PERCENT:-90}"
 LOAD_WARN_PER_CORE="${KUMA_HOST_RESOURCES_LOAD_WARN_PER_CORE:-4}"
+SESSION_RETENTION_MONITOR_ENABLED="${KUMA_SESSION_RETENTION_MONITOR_ENABLED:-0}"
+SESSION_RETENTION_MARKER_MAX_AGE_SECONDS="${KUMA_SESSION_RETENTION_MARKER_MAX_AGE_SECONDS:-129600}"
+SESSION_RETENTION_HELPER="${KUMA_SESSION_RETENTION_HELPER:-/usr/local/libexec/fh-session-retention-v1}"
+
+if [[ "$SESSION_RETENTION_MONITOR_ENABLED" != '0' && "$SESSION_RETENTION_MONITOR_ENABLED" != '1' ]]; then
+  kuma_push_die 'KUMA_SESSION_RETENTION_MONITOR_ENABLED must be 0 or 1'
+fi
+if ! [[ "$SESSION_RETENTION_MARKER_MAX_AGE_SECONDS" =~ ^[1-9][0-9]{0,6}$ ]]; then
+  kuma_push_die 'KUMA_SESSION_RETENTION_MARKER_MAX_AGE_SECONDS is invalid'
+fi
 
 disk_used_percent="$(
   df -P "$DISK_PATH" | awk 'NR == 2 {gsub(/%/, "", $5); print $5}'
@@ -54,6 +64,29 @@ if awk -v load_value="$load_1m" -v limit="$load_limit" 'BEGIN {exit !(load_value
   status="down"
   ping="0"
   reasons+=("load=${load_1m}")
+fi
+
+if [[ "$SESSION_RETENTION_MONITOR_ENABLED" == '1' ]]; then
+  marker_json=''
+  marker_status='invalid'
+  if [[ -x "$SESSION_RETENTION_HELPER" ]] \
+    && marker_json="$("$SESSION_RETENTION_HELPER" marker-status "$SESSION_RETENTION_MARKER_MAX_AGE_SECONDS" 2>/dev/null)"; then
+    marker_status="$(printf '%s' "$marker_json" | sed -n 's/^.*"status":"\([a-z_]*\)".*$/\1/p')"
+  fi
+  case "$marker_status" in
+    pass)
+      ;;
+    missing|stale|invalid)
+      status="down"
+      ping="0"
+      reasons+=("session_retention=${marker_status}")
+      ;;
+    *)
+      status="down"
+      ping="0"
+      reasons+=("session_retention=invalid")
+      ;;
+  esac
 fi
 
 if [[ "$status" == "down" ]]; then

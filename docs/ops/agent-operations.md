@@ -207,6 +207,13 @@ Suspicious log spike:
 - Use raw logs only when the redacted summary is insufficient, and redact before
   pasting anything into chat, docs, or Linear.
 
+Session accumulation or a stale retention marker:
+
+- Read `docs/ops/production-session-retention.md` before doing anything.
+- Start with the default read-only `prod_session_retention.sh` and the cleanup
+  inventory. Installation, execute mode, monitoring activation, and timer
+  enablement are four separate production changes and require explicit scope.
+
 ## Stop Conditions
 
 Stop and ask for operator direction if:

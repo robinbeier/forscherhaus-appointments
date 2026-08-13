@@ -1,0 +1,39 @@
+[Unit]
+Description=Forscherhaus deterministic session retention
+Documentation=file:/var/www/html/easyappointments/docs/ops/production-session-retention.md
+After=local-fs.target
+ConditionPathIsDirectory=/var/www/html/easyappointments/storage/sessions
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 -I -B /usr/local/libexec/fh-session-retention-v1 execute
+StateDirectory=fh-session-retention
+StateDirectoryMode=0700
+Nice=10
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+CPUWeight=10
+IOWeight=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/var/www/html/easyappointments
+ReadOnlyPaths=/usr/local/libexec/fh-session-retention-v1
+ReadWritePaths=/var/www/html/easyappointments/storage/sessions /var/lib/fh-session-retention /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+AmbientCapabilities=

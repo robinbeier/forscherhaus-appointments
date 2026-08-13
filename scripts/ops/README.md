@@ -45,6 +45,10 @@ Script inventory:
 - `kuma_push_app_logs.sh` monitors newly appended application log errors
 - `kuma_push_host_services.sh` monitors critical systemd services
 - `kuma_push_host_resources.sh` monitors disk, memory, and load thresholds
+- `prod_session_retention.sh` inspects or explicitly applies the bounded ROB-440
+  24-hour file-session policy; its systemd units are shipped disabled and the
+  operational sequence lives in
+  [`docs/ops/production-session-retention.md`](../../docs/ops/production-session-retention.md)
 - `kuma_push_ops_jobs.sh` monitors restore-verification marker freshness
 - `kuma_push_backup_creation.sh` monitors backup-creation marker freshness
 - `kuma_push_php_fpm_logs.sh` monitors recent PHP-FPM journal errors
