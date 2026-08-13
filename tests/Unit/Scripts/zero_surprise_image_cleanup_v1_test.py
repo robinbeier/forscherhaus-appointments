@@ -230,7 +230,6 @@ class CleanupEngineTest(unittest.TestCase):
         for command in (
             b"/usr/bin/docker\0compose\0-f\0compose.yml\0up\0-d\0",
             b"/usr/bin/docker-compose\0up\0--detach\0",
-            b"/usr/bin/docker\0compose\0up\0-Vd\0",
         ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")
@@ -265,6 +264,8 @@ class CleanupEngineTest(unittest.TestCase):
             b"/usr/bin/docker\0compose\0up\0--detach=false\0",
             b"/usr/bin/docker-compose\0up\0-d=false\0",
             b"/usr/bin/docker\0compose\0up\0--detach=true\0",
+            b"/usr/bin/docker\0compose\0up\0-Vd\0",
+            b"/usr/bin/docker-compose\0up\0-awebd\0",
         ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")

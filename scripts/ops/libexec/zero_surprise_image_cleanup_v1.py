@@ -332,8 +332,8 @@ COMPOSE_UP_PATTERNS = (
     re.compile(r"(^|/|\s)docker-compose\b.*\sup(\s|$)"),
 )
 COMPOSE_DETACHED_UP_PATTERNS = (
-    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)(--detach|-[A-Za-z]*d[A-Za-z]*)(\s|$)"),
-    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--detach|-[A-Za-z]*d[A-Za-z]*)(\s|$)"),
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)(--detach|-d)(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--detach|-d)(\s|$)"),
 )
 
 
