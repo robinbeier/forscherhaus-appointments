@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Forscherhaus application-log retention daily
+Documentation=file:/var/www/html/easyappointments/docs/ops/production-app-log-retention.md
+
+[Timer]
+OnCalendar=*-*-* 04:07:00 UTC
+RandomizedDelaySec=15m
+AccuracySec=1m
+Persistent=true
+Unit=fh-app-log-retention.service
+
+[Install]
+WantedBy=timers.target
