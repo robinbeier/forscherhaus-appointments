@@ -204,6 +204,8 @@ class CleanupEngineTest(unittest.TestCase):
             b"/usr/bin/docker-compose\0run\0--rm\0worker\0",
             b"/usr/bin/docker\0compose\0up\0--build\0--detach\0",
             b"/usr/bin/docker-compose\0up\0-d\0--build\0",
+            b"/usr/bin/docker\0compose\0up\0--build=true\0",
+            b"/usr/bin/docker-compose\0up\0--build=1\0",
         ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")
@@ -223,7 +225,37 @@ class CleanupEngineTest(unittest.TestCase):
                 os.mkdir(process)
                 with open(os.path.join(process, "cmdline"), "wb") as handle:
                     handle.write(command)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
                 module.assert_idle(proc_root)
+
+    def test_activity_scan_blocks_new_nonsleeping_or_unclassifiable_compose_up(self) -> None:
+        for state, age in (("S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS - 1), ("R", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)):
+            with self.subTest(state=state, age=age), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(b"/usr/bin/docker\0compose\0up\0")
+                self.write_process_state(proc_root, process, state, age)
+                with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                    module.assert_idle(proc_root)
+        with tempfile.TemporaryDirectory() as proc_root:
+            process = os.path.join(proc_root, "424242")
+            os.mkdir(process)
+            with open(os.path.join(process, "cmdline"), "wb") as handle:
+                handle.write(b"/usr/bin/docker\0compose\0up\0")
+            with self.assertRaisesRegex(module.CleanupError, "activity_state_unknown"):
+                module.assert_idle(proc_root)
+
+    @staticmethod
+    def write_process_state(proc_root: str, process: str, state: str, age_seconds: int) -> None:
+        ticks = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+        uptime = module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS * 2
+        started_ticks = int((uptime - age_seconds) * ticks)
+        fields = [state, *("0" for _ in range(18)), str(started_ticks)]
+        with open(os.path.join(process, "stat"), "w", encoding="ascii") as handle:
+            handle.write(f"424242 (docker) {' '.join(fields)}\n")
+        with open(os.path.join(proc_root, "uptime"), "w", encoding="ascii") as handle:
+            handle.write(f"{uptime}.00 0.00\n")
 
     def test_prepare_lock_reports_partial_when_directory_fsync_fails_after_create(self) -> None:
         with tempfile.TemporaryDirectory() as parent:

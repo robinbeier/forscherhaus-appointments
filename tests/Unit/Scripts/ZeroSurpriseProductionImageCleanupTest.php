@@ -23,7 +23,7 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         );
 
         self::assertSame(0, $result['exit'], $result['stderr']);
-        self::assertStringContainsString('Ran 12 tests', $result['stderr']);
+        self::assertStringContainsString('Ran 13 tests', $result['stderr']);
         self::assertStringContainsString('OK', $result['stderr']);
     }
 
@@ -181,6 +181,7 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         self::assertStringContainsString('buildx\\s+(build|bake|prune)', $helper);
         self::assertStringContainsString('buildctl(\\s|$)', $helper);
         self::assertStringContainsString('compose\\b.*\\sup\\b.*(^|\\s)--build', $helper);
+        self::assertStringContainsString('MIN_STABLE_COMPOSE_UP_AGE_SECONDS = 86_400', $helper);
         $pythonResolution = strpos($wrapper, 'LOCAL_PYTHON="$(command -v python3 || true)"');
         $remoteExecution = strpos($wrapper, 'REMOTE_OUTPUT="$(ssh');
         self::assertNotFalse($pythonResolution);

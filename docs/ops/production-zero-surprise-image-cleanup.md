@@ -69,11 +69,14 @@ active deploy/replay/dump/backup/retention/build work, validates the candidate
 set twice, verifies that no container references any candidate, and returns
 aggregate evidence without removing anything.
 
-A long-running plain `docker compose up` process that only supervises already
-started production services is not build activity. Direct Docker builds,
-Compose `build`/`run`, Buildx/Buildctl, builder prune, and `compose up --build`
-remain blocking. Independently, every running or stopped container reference is
-checked before every candidate deletion.
+A plain `docker compose up` process is exempted only when `/proc` proves it has
+been continuously sleeping for at least 24 hours; this identifies the stable
+service supervisors observed on the production host. A new, running, stopped,
+disappearing, or otherwise unclassifiable `up` process remains fail-closed.
+Direct Docker builds, Compose `build`/`run`, Buildx/Buildctl, builder prune, and
+every `compose up --build` or `--build=...` form also remain blocking.
+Independently, every running or stopped container reference is checked before
+every candidate deletion.
 
 `pass` exits `0`. Unsafe or malformed authority exits `70`. A busy lock, active
 production work, or exceeded bounded set exits `75` and is retryable only after
