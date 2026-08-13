@@ -18,10 +18,25 @@ final class DeploymentDumpAttestationProducerV1
     public static function produce(string $backupSetId): array
     {
         $created = self::createdAt($backupSetId);
+        return self::produceSelected([$backupSetId], $created);
+    }
+
+    /** @return array{status:string,path:string,dump_sha256:string,attestation_sha256:string} */
+    public static function produceLatestHandoff(): array
+    {
+        return self::produceSelected(['--latest-handoff'], null);
+    }
+
+    /**
+     * @param list<string> $selector
+     * @return array{status:string,path:string,dump_sha256:string,attestation_sha256:string}
+     */
+    private static function produceSelected(array $selector, ?string $expectedCreated): array
+    {
         $helperBefore = self::trustedHelperMetadata(self::HELPER_PATH);
         $pipes = [];
         $process = proc_open(
-            [self::PYTHON_PATH, '-I', '-B', self::HELPER_PATH, $backupSetId],
+            array_merge([self::PYTHON_PATH, '-I', '-B', self::HELPER_PATH], $selector),
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             null,
@@ -76,13 +91,15 @@ final class DeploymentDumpAttestationProducerV1
             throw new RuntimeException('dump attestation helper response is contradictory');
         }
         $record = json_decode($bytes, true);
+        $recordCreated = is_array($record) ? ($record['dump']['created_at_utc'] ?? null) : null;
         if (
             !is_array($record) ||
             ($record['dump']['sha256'] ?? null) !== $response['dump_sha256'] ||
-            ($record['dump']['created_at_utc'] ?? null) !== $created
+            !is_string($recordCreated)
         ) {
             throw new RuntimeException('dump attestation helper authority is contradictory');
         }
+        $created = self::createdAtFromRecord($recordCreated, $expectedCreated);
         $canonical = DeploymentEvidenceAuthorityV1::validateProducedDumpAttestation(
             $bytes,
             $response['dump_sha256'],
@@ -101,13 +118,31 @@ final class DeploymentDumpAttestationProducerV1
         ];
     }
 
+    private static function createdAtFromRecord(string $createdAt, ?string $expectedCreated): string
+    {
+        if (preg_match('/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/D', $createdAt) !== 1) {
+            throw new RuntimeException('dump attestation created time is invalid');
+        }
+        $backupSetId = str_replace(['-', ':'], '', $createdAt);
+        $validated = self::createdAtWithoutFreshness($backupSetId);
+        if (
+            !hash_equals($createdAt, $validated) ||
+            ($expectedCreated !== null && !hash_equals($expectedCreated, $validated))
+        ) {
+            throw new RuntimeException('dump attestation created time is contradictory');
+        }
+        return $validated;
+    }
+
     private static function createdAt(string $backupSetId): string
     {
-        if (preg_match('/^20[0-9]{6}T[0-9]{6}Z$/D', $backupSetId) !== 1) {
-            throw new RuntimeException('backup-set ID is invalid');
-        }
-        $value = \DateTimeImmutable::createFromFormat('!Ymd\\THis\\Z', $backupSetId, new \DateTimeZone('UTC'));
-        if ($value === false || $value->format('Ymd\\THis\\Z') !== $backupSetId) {
+        $createdAt = self::createdAtWithoutFreshness($backupSetId);
+        $value = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d\\TH:i:s\\Z',
+            $createdAt,
+            new \DateTimeZone('UTC'),
+        );
+        if ($value === false) {
             throw new RuntimeException('backup-set ID is invalid');
         }
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
@@ -116,6 +151,18 @@ final class DeploymentDumpAttestationProducerV1
         }
         if ($now->getTimestamp() - $value->getTimestamp() >= 14_400) {
             throw new RuntimeException('backup-set ID is stale');
+        }
+        return $createdAt;
+    }
+
+    private static function createdAtWithoutFreshness(string $backupSetId): string
+    {
+        if (preg_match('/^20[0-9]{6}T[0-9]{6}Z$/D', $backupSetId) !== 1) {
+            throw new RuntimeException('backup-set ID is invalid');
+        }
+        $value = \DateTimeImmutable::createFromFormat('!Ymd\\THis\\Z', $backupSetId, new \DateTimeZone('UTC'));
+        if ($value === false || $value->format('Ymd\\THis\\Z') !== $backupSetId) {
+            throw new RuntimeException('backup-set ID is invalid');
         }
         return $value->format('Y-m-d\\TH:i:s\\Z');
     }

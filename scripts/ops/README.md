@@ -60,6 +60,13 @@ Script inventory:
   restore-verified-dump policy; it is dry-run by default and its disabled
   systemd activation path is documented in
   [`docs/ops/production-release-archive-dump-retention.md`](../../docs/ops/production-release-archive-dump-retention.md)
+- `prod_backup_set_producer.sh` executes one closed ROB-466 production backup
+  set only with its exact live confirmation. ROB-466 is manual-only: it ships
+  and installs no producer service or timer. See
+  [`docs/ops/production-backup-set-producer.md`](../../docs/ops/production-backup-set-producer.md).
+- `prod_verify_latest_deployment_dump.sh` resolves that producer's protected
+  handoff on the host and runs one ROB-461 restore-attestation pass only with
+  its separate exact live confirmation; no set ID crosses the wrapper.
 - `prod_journald_retention.sh` inspects the fixed 1 GiB / 30-day journald
   contract by default. Configuration activation, one-time vacuum, and rollback
   use distinct confirmation tokens and remain unexecuted by repository delivery;
@@ -278,7 +285,26 @@ Dump restore attestation:
   root-owned mode `0555` and `scripts/ops/lib/DeploymentContractV1.php` as
   root-owned mode `0444` in the same `/usr/local/libexec/fh` directory.
 - Run `php scripts/ops/verify_deployment_dump_v1.php 20YYMMDDTHHMMSSZ` as root
-  on the host. The ID is the only input; paths, credentials, SQL, digests,
-  images, timestamps, and environment overrides are not accepted.
+  on the host for an explicitly selected set. For the ROB-461 production wave,
+  use `prod_verify_latest_deployment_dump.sh`; its fixed
+  `--latest-handoff` path selects and cross-binds the protected producer
+  handoff without exposing the ID to the operator wrapper. Paths, credentials,
+  SQL, digests, images, timestamps, and environment overrides are not
+  accepted.
 - Code or installation approval is not approval to execute a production
   restore or publish production evidence.
+
+Closed production backup sets:
+
+- Install `scripts/ops/libexec/backup_set_producer_v1.py` as root-owned mode
+  `0555` at `/usr/local/libexec/fh-backup-set-producer-v1`.
+- Provision the dedicated `fh_backup` database account with only `SELECT` and
+  `SHOW VIEW` on `easyappointments.*`. Provide the exact six-line connection
+  authority at `/etc/fh/backup-set-producer.cnf` as root-owned mode `0600`;
+  it selects only the host-local `127.0.0.1:3306` TCP listener and never a
+  Unix-domain socket. Only its bounded base64url password varies. Never commit,
+  print, or pass its contents through argv or environment variables.
+- Install no ROB-466 producer service or timer. Every run and any uninstall are
+  manual operator actions behind the exact live confirmation.
+- The production sequence, atomic set contract and ROB-461 two-set gate live
+  in `docs/ops/production-backup-set-producer.md`.

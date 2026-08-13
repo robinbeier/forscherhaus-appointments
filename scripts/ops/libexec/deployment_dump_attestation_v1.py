@@ -36,6 +36,7 @@ IMPORT_TIMEOUT = 3600
 IBTMP_MAX_BYTES = 256 * 1024 * 1024
 REDO_MAX_BYTES = 128 * 1024 * 1024
 MAX_ATTESTATION = 4096
+MAX_HANDOFF = 4096
 MAX_CREATE_TABLES = 10_000
 SANDBOX_PREAMBLES = (
     b'/*M!999999\\- enable the sandbox mode */\n',
@@ -490,6 +491,72 @@ def open_dump(backup_id):
         os.close(root)
 
 
+def read_backup_handoff(backups):
+    before = os.stat('last_backup_set.json', dir_fd=backups, follow_symlinks=False)
+    descriptor = os.open('last_backup_set.json', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=backups)
+    try:
+        data = os.read(descriptor, MAX_HANDOFF + 1)
+        opened = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    after = os.stat('last_backup_set.json', dir_fd=backups, follow_symlinks=False)
+    if (identity(before) != identity(opened) or identity(opened) != identity(after) or
+            not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or opened.st_gid != 0 or
+            opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600 or
+            len(data) == 0 or len(data) > MAX_HANDOFF):
+        reject()
+    try:
+        value = json.loads(data)
+    except json.JSONDecodeError:
+        reject()
+    if (not isinstance(value, dict) or
+            set(value) != {'backup_set_id', 'compressed_size_bytes', 'dump_sha256', 'schema',
+                           'uncompressed_size_bytes'} or
+            value.get('schema') != 'production_backup_set_handoff.v1' or
+            not isinstance(value.get('backup_set_id'), str) or
+            ID_RE.fullmatch(value['backup_set_id']) is None or
+            not isinstance(value.get('dump_sha256'), str) or
+            re.fullmatch(r'[0-9a-f]{64}', value['dump_sha256']) is None or
+            isinstance(value.get('compressed_size_bytes'), bool) or
+            not isinstance(value.get('compressed_size_bytes'), int) or
+            value['compressed_size_bytes'] <= 0 or value['compressed_size_bytes'] > MAX_COMPRESSED or
+            isinstance(value.get('uncompressed_size_bytes'), bool) or
+            not isinstance(value.get('uncompressed_size_bytes'), int) or
+            value['uncompressed_size_bytes'] <= 0 or
+            value['uncompressed_size_bytes'] > MAX_UNCOMPRESSED or canonical(value) != data):
+        reject()
+    return value
+
+
+def assert_handoff_matches(handoff, digest, compressed, uncompressed):
+    if (handoff['dump_sha256'] != digest or handoff['compressed_size_bytes'] != compressed or
+            handoff['uncompressed_size_bytes'] != uncompressed):
+        reject()
+
+
+def read_backup_success_marker(backups):
+    before = os.stat('last_backup_success.utc', dir_fd=backups, follow_symlinks=False)
+    descriptor = os.open('last_backup_success.utc', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=backups)
+    try:
+        data = os.read(descriptor, 22)
+        opened = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    after = os.stat('last_backup_success.utc', dir_fd=backups, follow_symlinks=False)
+    if (identity(before) != identity(opened) or identity(opened) != identity(after) or
+            not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or opened.st_gid != 0 or
+            opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600 or len(data) != 21 or
+            not data.endswith(b'\n')):
+        reject()
+    try:
+        value = datetime.datetime.strptime(data.decode('ascii').strip(), '%Y-%m-%dT%H:%M:%SZ')
+    except (UnicodeDecodeError, ValueError):
+        reject()
+    return value.strftime('%Y%m%dT%H%M%SZ')
+
+
 def delete_tree_at(parent, leaf, expected_device, budget, depth=0, allow_database_tree=False):
     before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
     if (not stat.S_ISDIR(before.st_mode) or before.st_dev != expected_device or
@@ -600,7 +667,7 @@ def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|import_prod_backup\.sh)(?:\s|$)'),
+        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
     count = 0
@@ -1294,16 +1361,18 @@ def attach_existing(attestations, backups, digest, size, unpacked, created_at, n
 
 def main():
     bind_to_parent_death()
-    if len(sys.argv) != 2 or not ID_RE.fullmatch(sys.argv[1]):
+    if len(sys.argv) != 2:
         reject()
-    try:
-        created = datetime.datetime.strptime(sys.argv[1], '%Y%m%dT%H%M%SZ').replace(tzinfo=datetime.timezone.utc)
-    except ValueError:
+    latest_handoff = sys.argv[1] == '--latest-handoff'
+    if not latest_handoff and not ID_RE.fullmatch(sys.argv[1]):
         reject()
-    now = datetime.datetime.now(datetime.timezone.utc)
-    if created > now or (now - created).total_seconds() >= 14_400:
-        reject()
-    created_at = created.strftime('%Y-%m-%dT%H:%M:%SZ')
+    backup_id = None if latest_handoff else sys.argv[1]
+    handoff = None
+    if backup_id is not None:
+        try:
+            created = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            reject()
     orchestrator = open_absolute_directory(ORCHESTRATOR_ROOT, 0o700)
     locks = open_child(orchestrator, 'locks', 0o700)
     global_lock = os.open('fh-production-change.lock', os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=locks)
@@ -1321,6 +1390,19 @@ def main():
     assert_no_nonterminal_runs(orchestrator)
     evidence = open_absolute_directory(EVIDENCE_ROOT, 0o700)
     backups = open_absolute_directory(BACKUP_ROOT)
+    if latest_handoff:
+        handoff = read_backup_handoff(backups)
+        backup_id = handoff['backup_set_id']
+        if read_backup_success_marker(backups) != backup_id:
+            reject()
+        try:
+            created = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            reject()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if created > now or (now - created).total_seconds() >= 14_400:
+        reject()
+    created_at = created.strftime('%Y-%m-%dT%H:%M:%SZ')
     lock = os.open('.dump-attestation.lock', os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600,
                    dir_fd=evidence)
     try:
@@ -1350,9 +1432,11 @@ def main():
             source = None
             pinned = None
             try:
-                source, source_meta = open_dump(sys.argv[1])
+                source, source_meta = open_dump(backup_id)
                 require_capacity(EVIDENCE_ROOT, source_meta.st_size + FIXED_HEADROOM)
                 pinned, pinned_meta, digest, size, unpacked, create_tables = pin_dump(source, source_meta, run_path)
+                if handoff is not None:
+                    assert_handoff_matches(handoff, digest, size, unpacked)
                 leaf = digest + '.json'
                 try:
                     existing = os.open(leaf, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,

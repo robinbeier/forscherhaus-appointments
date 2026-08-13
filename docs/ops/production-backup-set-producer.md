@@ -1,0 +1,117 @@
+# Production Backup-Set Producer
+
+ROB-466 defines the only production authority that may create a fresh backup
+set for the restore-verification and retention contracts. Repository delivery
+does not install, start, or enable the unit and does not authorize a production
+database read or backup write.
+
+## Closed authority
+
+The root-only helper accepts no arguments and reads no environment overrides.
+It derives one UTC identifier in `YYYYMMDDTHHMMSSZ` form and publishes exactly:
+
+```text
+/root/backups/easyappointments/<id>/db/easyappointments.sql.gz
+/root/backups/easyappointments/<id>/meta/backup.env
+```
+
+The identifier and `created_at_utc` come from the same internally captured UTC
+second. The database name, output root, connection file, dump executable and
+dump arguments are fixed. The root-owned, mode `0600`, single-link
+`/etc/fh/backup-set-producer.cnf` must contain exactly the reviewed TCP
+connection configuration for the dedicated `fh_backup` account through the
+host-local `127.0.0.1:3306` TCP listener. A Unix-domain socket is not an
+accepted or fallback connection path. Only
+one bounded base64url password field varies; the group, key order, account,
+protocol, host and port are exact, so the file cannot add dump-shaping options.
+The account has only the read privileges needed for the fixed single-database
+dump and no write, FILE, routine, trigger, event or administrative grants. No
+connection material enters argv, environment variables, logs, metadata or
+operator output.
+
+The reviewed installation provisions only `SELECT, SHOW VIEW` on
+`easyappointments.*` for `fh_backup` at host `127.0.0.1`. The installed file is
+exactly six newline-terminated lines in this order: `[client]`,
+`user=fh_backup`, `password=<32..128 base64url characters>`, `protocol=tcp`,
+`host=127.0.0.1`, `port=3306`. Extra groups, duplicate keys, comments, blank
+lines, option includes and dump switches are rejected before the client starts.
+
+The producer uses only `/usr/bin/mariadb-dump` and the closed single-database
+table/data surface accepted by the ROB-465 parser. It never falls back to
+`mysqldump` and does not include routines, triggers, events, databases,
+external directories or caller-selected options.
+
+## Publication and recovery
+
+The helper first acquires the exact shared production-change lock and a private
+backup-producer lock. Active or unreconciled deployment, restore, replay,
+traffic, smoke, backup or retention work returns retryable exit `75`. Unknown
+identity or unsafe filesystem state returns `70`.
+
+Dump and metadata bytes are built under a private same-filesystem nonce
+directory. The helper validates the stable dump process, complete gzip stream,
+bounded size, SHA-256, canonical metadata and all file identities. The gzip
+header timestamp is derived exactly from the trusted backup-set UTC identifier;
+this gives independent sets of unchanged SQL distinct digest authorities while
+keeping immutable set replay byte-exact. This is an exact set-header binding,
+not a promise that separately recompressing SQL reproduces prior bytes. Attach
+rejects a gzip timestamp that does not match its set identifier. The helper
+fsyncs files and directories before an atomic no-replace rename makes the final
+set visible. Only a completely published set may advance
+`last_backup_success.utc`; marker updates are monotonic and durable.
+
+Producer-owned crash prefixes are reconciled under both locks. Foreign,
+unsafe, linked or ambiguous temporary objects block without mutation. A final
+set is never overwritten or relabelled with a newer timestamp. Output is one
+canonical aggregate JSON record and contains no set identifier, path, digest,
+database output, credentials or SQL.
+
+The matching restore verifier has one additional closed selector,
+`--latest-handoff`. It acquires the same production-change lock, reads
+`last_backup_set.json` through a stable no-follow file descriptor, validates
+its exact canonical schema, requires the independently durable backup-success
+marker to name the same completed set, and binds the selected ID, dump digest,
+compressed size and uncompressed size to the pinned dump before restore. Its
+operator result contains only schema and status; the protected set identifier
+never crosses SSH or enters the wrapper output.
+
+## Operator boundary
+
+The producer is manual-only. ROB-466 deliberately ships no service or timer,
+so a merged repository cannot start recurring database reads. The operator
+wrapper invokes exactly the installed helper:
+
+```bash
+bash scripts/ops/prod_backup_set_producer.sh \
+  --execute \
+  --confirm-live-write ROB-466
+```
+
+Without both live flags the wrapper only prints the fixed plan and performs no
+SSH call.
+
+Install `verify_deployment_dump_v1.php` and its reviewed PHP library
+dependencies beneath `/usr/local/libexec/fh`, alongside the already required
+ROB-465 helper. The separate handoff consumer is also plan-only by default and
+requires the independent ROB-461 live-restore confirmation:
+
+```bash
+bash scripts/ops/prod_verify_latest_deployment_dump.sh \
+  --execute \
+  --confirm-live-restore ROB-461
+```
+
+It invokes only the fixed installed verifier with `--latest-handoff`; it does
+not accept a set ID, path, digest or environment override.
+
+For the initial ROB-461 wave, install the reviewed helper without adding an
+autonomous schedule. Create exactly two fresh sets serially. After each
+producer pass, run the protected handoff consumer above; do not copy
+identifiers to Linear, chat or logs. Validate two independent restore
+attestations before any ROB-453 retention execute pass. A merge is not
+production authorization.
+
+Rollback is a manual uninstall of the installed ROB-466 helper after stopping
+operator use of its wrapper. There is no producer unit or timer to stop,
+disable, restore or remove. Already published sets and attestations remain
+immutable evidence. Never delete or rename a published set as rollback.

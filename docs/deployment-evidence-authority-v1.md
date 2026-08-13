@@ -54,11 +54,17 @@ Run-ID. The runner pins its exact SHA and creates a separate
 `deployment_run_dump_observation.v1` binding it to the deployment Run-ID and
 intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
 the expansion ratio at 100:1. Age must remain below 14,400 seconds.
-The root-only producer `scripts/ops/verify_deployment_dump_v1.php` accepts only
-the backup-set ID `20YYMMDDTHHMMSSZ`. It derives the fixed
+The root-only producer `scripts/ops/verify_deployment_dump_v1.php` accepts
+either the backup-set ID `20YYMMDDTHHMMSSZ` or the single literal selector
+`--latest-handoff`. The ID form derives the fixed
 `/root/backups/easyappointments/<id>/db/easyappointments.sql.gz` source and
-`created_at_utc` from that ID. Callers cannot supply a path, digest, image,
-environment override, SQL, or timestamp. The producer owns the pinned MariaDB
+`created_at_utc` from that ID. The handoff form stable-reads the protected,
+canonical `/root/backups/easyappointments/last_backup_set.json` under the
+shared production-change lock, requires the durable backup-success marker to
+name the same completed set, then cross-binds its ID, SHA-256, compressed size,
+and uncompressed size to the pinned dump before restore. Neither form accepts
+a caller path, digest, image, environment override, SQL, or timestamp. The
+producer owns the pinned MariaDB
 10.11 image identity, disables pulls and networking, and checks only the fixed
 `ea_appointments`, `ea_roles`, `ea_services`, `ea_settings`, and `ea_users`
 core tables. It runs no migration, HTTP probe, or zero-surprise gate.

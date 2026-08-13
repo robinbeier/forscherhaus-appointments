@@ -435,7 +435,7 @@ def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|import_prod_backup\.sh)(?:\s|$)'),
+        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
     count = 0
@@ -828,8 +828,32 @@ def scan_backup_sets(backups, attestations, now_ns, device):
         reject('dump_scan_limit')
     records = []
     foreign = 0
+    producer_handoff = None
     for name in names:
         if name in {'last_backup_success.utc', 'last_verify_success.utc'}:
+            continue
+        if name == '.backup-set-producer.lock':
+            stable_regular(backups, name, 0, 0, {0o600}, 0, empty_ok=True)
+            continue
+        if name == 'last_backup_set.json':
+            data = stable_regular(backups, name, 0, 0, {0o600}, 4096)[0]
+            producer_handoff = decode_canonical(data, 4096)
+            if (set(producer_handoff) != {'backup_set_id', 'compressed_size_bytes', 'dump_sha256',
+                                         'schema', 'uncompressed_size_bytes'} or
+                    producer_handoff.get('schema') != 'production_backup_set_handoff.v1' or
+                    not isinstance(producer_handoff.get('backup_set_id'), str) or
+                    BACKUP_SET.fullmatch(producer_handoff['backup_set_id']) is None or
+                    not isinstance(producer_handoff.get('dump_sha256'), str) or
+                    SHA256.fullmatch(producer_handoff['dump_sha256']) is None or
+                    isinstance(producer_handoff.get('compressed_size_bytes'), bool) or
+                    not isinstance(producer_handoff.get('compressed_size_bytes'), int) or
+                    producer_handoff['compressed_size_bytes'] <= 0 or
+                    producer_handoff['compressed_size_bytes'] > MAX_ARCHIVE_BYTES or
+                    isinstance(producer_handoff.get('uncompressed_size_bytes'), bool) or
+                    not isinstance(producer_handoff.get('uncompressed_size_bytes'), int) or
+                    producer_handoff['uncompressed_size_bytes'] <= 0 or
+                    producer_handoff['uncompressed_size_bytes'] > MAX_DUMP_UNCOMPRESSED_BYTES):
+                reject('invalid_backup_set_handoff')
             continue
         if name == 'install-snapshots':
             # ROB-405 installer snapshots are a separate explicitly preserved
@@ -873,14 +897,24 @@ def scan_backup_sets(backups, attestations, now_ns, device):
                 'attestation_leaf': dump_sha + '.json',
                 'attested_epoch': attested_epoch,
                 'dump_sha': dump_sha,
+                'dump_size': dump_size,
+                'dump_uncompressed_size': attestation['dump']['uncompressed_size_bytes'],
                 'identities': tree['identities'] | {(attestation_record[2].st_dev, attestation_record[2].st_ino)},
                 'leaf': name,
                 'tree': tree,
             })
         finally:
             os.close(backup)
+    if producer_handoff is not None:
+        matches = [record for record in records if record['leaf'] == producer_handoff['backup_set_id']]
+        if (len(matches) != 1 or matches[0]['dump_sha'] != producer_handoff['dump_sha256'] or
+                matches[0]['dump_size'] != producer_handoff['compressed_size_bytes'] or
+                matches[0]['dump_uncompressed_size'] != producer_handoff['uncompressed_size_bytes']):
+            reject('backup_set_handoff_mismatch')
     records.sort(key=lambda item: (item['attested_epoch'], item['dump_sha']), reverse=True)
     protected = {record['dump_sha'] for record in records[:KEEP_VERIFIED_DUMPS]}
+    if producer_handoff is not None:
+        protected.add(producer_handoff['dump_sha256'])
     for record in records:
         age = now_ns // 1_000_000_000 - record['attested_epoch']
         record['eligible'] = record['dump_sha'] not in protected and age >= DUMP_MIN_AGE

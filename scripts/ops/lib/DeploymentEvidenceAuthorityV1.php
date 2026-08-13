@@ -298,13 +298,13 @@ final class DeploymentEvidenceAuthorityV1
         string $createdAtUtc,
         string $observedAtUtc,
     ): array {
-        $record = self::decodeDumpAttestation(
+        $record = self::decodePinnedDumpAttestation(
             $bytes,
             hash('sha256', $bytes),
-            $dumpSha256,
-            $dumpSizeBytes,
             $observedAtUtc,
         );
+        self::assertSame($record['dump']['sha256'], $dumpSha256, 'dump attestation stable bytes');
+        self::assertSame($record['dump']['size_bytes'], $dumpSizeBytes, 'dump attestation stable size');
         self::assertSame($record['dump']['created_at_utc'], $createdAtUtc, 'dump created_at authority');
         return $record;
     }
