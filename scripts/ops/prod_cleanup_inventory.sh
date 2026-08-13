@@ -59,6 +59,8 @@ REBUILD_RESTORE_INPUTS_DIR="${CLEANUP_REBUILD_RESTORE_INPUTS_DIR:-/root/rebuild-
 NOW_EPOCH="$(date +%s)"
 SESSION_RETENTION_HELPER="${CLEANUP_SESSION_RETENTION_HELPER:-/usr/local/libexec/fh-session-retention-v1}"
 SESSION_RETENTION_TIMER="${CLEANUP_SESSION_RETENTION_TIMER:-fh-session-retention.timer}"
+RELEASE_RETENTION_HELPER="${CLEANUP_RELEASE_RETENTION_HELPER:-/usr/local/libexec/fh-release-archive-dump-retention-v1}"
+RELEASE_RETENTION_TIMER="${CLEANUP_RELEASE_RETENTION_TIMER:-fh-release-archive-dump-retention.timer}"
 
 section() {
     printf '\n[%s]\n' "$1"
@@ -383,6 +385,27 @@ if [[ -x "$SESSION_RETENTION_HELPER" ]]; then
 fi
 kv session_retention.marker_status "$marker_status"
 kv session_retention.marker_age_seconds "$marker_age_seconds"
+
+section release_archive_dump_retention
+if command -v systemctl >/dev/null 2>&1; then
+    kv release_retention.timer_enabled "$(systemctl is-enabled "$RELEASE_RETENTION_TIMER" 2>/dev/null || printf 'unknown')"
+    kv release_retention.timer_active "$(systemctl is-active "$RELEASE_RETENTION_TIMER" 2>/dev/null || printf 'unknown')"
+else
+    kv release_retention.timer_enabled unavailable
+    kv release_retention.timer_active unavailable
+fi
+release_marker_status=unavailable
+release_marker_age_seconds=unknown
+if [[ -x "$RELEASE_RETENTION_HELPER" ]]; then
+    release_marker_json="$($RELEASE_RETENTION_HELPER marker-status 691200 2>/dev/null || true)"
+    parsed_release_marker="$(printf '%s' "$release_marker_json" | sed -n 's/^.*"age_seconds":\([^,}]*\).*"status":"\([a-z_]*\)".*$/\2|\1/p')"
+    if [[ "$parsed_release_marker" == *'|'* ]]; then
+        release_marker_status="${parsed_release_marker%%|*}"
+        release_marker_age_seconds="${parsed_release_marker#*|}"
+    fi
+fi
+kv release_retention.marker_status "$release_marker_status"
+kv release_retention.marker_age_seconds "$release_marker_age_seconds"
 
 section cleanup_candidates
 kv cleanup_candidate.prev_release_dirs "$(candidate_for_prev_dirs "$prev_dirs")"

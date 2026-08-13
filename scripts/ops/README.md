@@ -49,6 +49,11 @@ Script inventory:
   24-hour file-session policy; its systemd units are shipped disabled and the
   operational sequence lives in
   [`docs/ops/production-session-retention.md`](../../docs/ops/production-session-retention.md)
+- `prod_release_archive_dump_retention.sh` inspects or explicitly applies the
+  separate conservative ROB-453 release-directory, archive-pair, and
+  restore-verified-dump policy; it is dry-run by default and its disabled
+  systemd activation path is documented in
+  [`docs/ops/production-release-archive-dump-retention.md`](../../docs/ops/production-release-archive-dump-retention.md)
 - `kuma_push_ops_jobs.sh` monitors restore-verification marker freshness
 - `kuma_push_backup_creation.sh` monitors backup-creation marker freshness
 - `kuma_push_php_fpm_logs.sh` monitors recent PHP-FPM journal errors

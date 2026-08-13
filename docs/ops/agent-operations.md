@@ -192,6 +192,11 @@ Disk, memory, or swap pressure:
   build-cache policy snapshot. Its execute path still requires an explicit
   ROB-450 live-write confirmation; see
   `docs/ops/production-build-cache-retention.md`.
+- Use `prod_release_archive_dump_retention.sh` only for the separate ROB-453
+  release-directory, archive-pair, and verified-dump snapshot. Its default is
+  read-only; helper installation, execute approval, monitoring activation, and
+  timer enablement remain separate production changes. See
+  `docs/ops/production-release-archive-dump-retention.md`.
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 

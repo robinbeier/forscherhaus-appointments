@@ -71,6 +71,12 @@ Docker build cache is a separate retention class. Use
 `docs/ops/production-build-cache-retention.md`; never infer permission for a
 builder, image, or system prune from this general inventory.
 
+Release directories, exact archive/provenance pairs, and independently
+restore-verified dump sets use the separate ROB-453 contract in
+[`production-release-archive-dump-retention.md`](production-release-archive-dump-retention.md).
+The default wrapper remains read-only; this inventory and a green dry-run do
+not authorize its execute mode or systemd activation.
+
 ## Stop Conditions
 
 Stop before any cleanup plan if:
