@@ -84,6 +84,91 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
         self::assertSame("trusted\n", $result['stdout']);
     }
 
+    public function testGlobalLockBootstrapCreatesExactAuthorityAndReplayAttachesWithoutRewrite(): void
+    {
+        $stateRoot = '/var/lib/fh-rob458-prepare-' . bin2hex(random_bytes(8));
+        try {
+            $first = $this->probe('prepare', $stateRoot);
+            self::assertSame(0, $first['exit'], $first['stderr']);
+            $firstReport = json_decode($first['stdout'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame('pass', $firstReport['status']);
+            self::assertTrue($firstReport['mutation_performed']);
+
+            $lock = $stateRoot . '/locks/fh-production-change.lock';
+            self::assertSame(0700, fileperms($stateRoot) & 0777);
+            self::assertSame(0700, fileperms($stateRoot . '/locks') & 0777);
+            self::assertSame(0600, fileperms($lock) & 0777);
+            self::assertSame(0, filesize($lock));
+            self::assertSame(1, lstat($lock)['nlink']);
+            $before = lstat($lock);
+
+            $replay = $this->probe('prepare', $stateRoot);
+            self::assertSame(0, $replay['exit'], $replay['stderr']);
+            $replayReport = json_decode($replay['stdout'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame('pass', $replayReport['status']);
+            self::assertFalse($replayReport['mutation_performed']);
+            clearstatcache(true, $lock);
+            $after = lstat($lock);
+            self::assertSame($before['ino'], $after['ino']);
+            self::assertSame($before['mtime'], $after['mtime']);
+        } finally {
+            $this->removePreparedRoot($stateRoot);
+        }
+    }
+
+    public function testGlobalLockBootstrapRejectsUnsafeExistingRootWithoutNormalizingIt(): void
+    {
+        $stateRoot = '/var/lib/fh-rob458-prepare-' . bin2hex(random_bytes(8));
+        try {
+            self::assertTrue(mkdir($stateRoot, 0755));
+            chmod($stateRoot, 0755);
+            $result = $this->probe('prepare', $stateRoot);
+            self::assertSame(70, $result['exit']);
+            $report = json_decode($result['stdout'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame('blocked', $report['status']);
+            self::assertSame('global_lock_unsafe', $report['reason']);
+            self::assertFalse($report['mutation_performed']);
+            self::assertSame(0755, fileperms($stateRoot) & 0777);
+        } finally {
+            $this->removePreparedRoot($stateRoot);
+        }
+    }
+
+    public function testGlobalLockBootstrapCompletesRootOnlyCrashPrefixAndRejectsSymlinkRoot(): void
+    {
+        $stateRoot = '/var/lib/fh-rob458-prepare-' . bin2hex(random_bytes(8));
+        $targetRoot = $stateRoot . '-target';
+        try {
+            self::assertTrue(mkdir($stateRoot, 0700));
+            chmod($stateRoot, 0700);
+            $completed = $this->probe('prepare', $stateRoot);
+            self::assertSame(0, $completed['exit'], $completed['stderr']);
+            $report = json_decode($completed['stdout'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame('pass', $report['status']);
+            self::assertTrue($report['mutation_performed']);
+            $this->removePreparedRoot($stateRoot);
+
+            self::assertTrue(mkdir($targetRoot, 0700));
+            chmod($targetRoot, 0700);
+            self::assertTrue(symlink($targetRoot, $stateRoot));
+            $blocked = $this->probe('prepare', $stateRoot);
+            self::assertSame(70, $blocked['exit']);
+            $blockedReport = json_decode($blocked['stdout'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame('global_lock_unsafe', $blockedReport['reason']);
+            self::assertFalse($blockedReport['mutation_performed']);
+            self::assertTrue(is_link($stateRoot));
+        } finally {
+            if (is_link($stateRoot)) {
+                unlink($stateRoot);
+            } else {
+                $this->removePreparedRoot($stateRoot);
+            }
+            if (is_dir($targetRoot)) {
+                rmdir($targetRoot);
+            }
+        }
+    }
+
     /** @return array{exit:int,stdout:string,stderr:string} */
     private function probe(string $operation, string $path): array
     {
@@ -102,6 +187,10 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
                 fd = module.acquire_global_lock(sys.argv[3])
                 os.close(fd)
                 print("acquired")
+            elif sys.argv[2] == "prepare":
+                report, exit_code = module.prepare_global_lock(sys.argv[3])
+                module.emit(report)
+                raise SystemExit(exit_code)
             else:
                 module.assert_trusted_docker(sys.argv[3])
                 print("trusted")
@@ -131,5 +220,19 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
         fclose($pipes[1]);
         fclose($pipes[2]);
         return ['exit' => proc_close($process), 'stdout' => $stdout ?: '', 'stderr' => $stderr ?: ''];
+    }
+
+    private function removePreparedRoot(string $root): void
+    {
+        $lock = $root . '/locks/fh-production-change.lock';
+        if (is_file($lock) || is_link($lock)) {
+            unlink($lock);
+        }
+        if (is_dir($root . '/locks')) {
+            rmdir($root . '/locks');
+        }
+        if (is_dir($root)) {
+            rmdir($root);
+        }
     }
 }

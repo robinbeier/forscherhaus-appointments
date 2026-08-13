@@ -130,7 +130,10 @@ def _walk_trusted_directory(path: str) -> int:
 
 
 def acquire_global_lock(path: str = GLOBAL_LOCK) -> int:
-    parent = _walk_trusted_directory(os.path.dirname(path))
+    try:
+        parent = _walk_trusted_directory(os.path.dirname(path))
+    except OSError as error:
+        raise CleanupError("global_lock_unsafe") from error
     try:
         leaf = os.path.basename(path)
         before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
@@ -167,6 +170,146 @@ def acquire_global_lock(path: str = GLOBAL_LOCK) -> int:
         raise CleanupError("global_lock_unsafe") from error
     finally:
         os.close(parent)
+
+
+def _ensure_private_directory(parent: int, leaf: str, created_callback: Callable[[], None]) -> tuple[int, bool]:
+    created = False
+    try:
+        before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        try:
+            os.mkdir(leaf, 0o700, dir_fd=parent)
+            created = True
+            created_callback()
+            os.fsync(parent)
+        except FileExistsError:
+            pass
+        before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    child = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent)
+    try:
+        opened = os.fstat(child)
+        after = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_uid,
+            value.st_gid,
+            value.st_nlink,
+        )
+        if identity(before) != identity(opened) or identity(opened) != identity(after):
+            raise CleanupError("global_lock_unsafe")
+        if not (
+            stat.S_ISDIR(opened.st_mode)
+            and stat.S_IMODE(opened.st_mode) == 0o700
+            and opened.st_uid == 0
+            and opened.st_gid == 0
+        ):
+            raise CleanupError("global_lock_unsafe")
+        return child, created
+    except Exception:
+        os.close(child)
+        raise
+
+
+def prepare_global_lock(state_root: str = os.path.dirname(os.path.dirname(GLOBAL_LOCK))) -> tuple[dict[str, object], int]:
+    report: dict[str, object] = {
+        "schema": SCHEMA,
+        "mode": "prepare-lock",
+        "status": "pass",
+        "reason": None,
+        "project_count": 0,
+        "candidate_count": 0,
+        "candidate_virtual_bytes": 0,
+        "deleted_count": 0,
+        "free_bytes_before": None,
+        "free_bytes_after": None,
+        "freed_bytes": None,
+        "cap_exceeded": False,
+        "mutation_performed": False,
+    }
+    mutation_performed = False
+    parent: int | None = None
+    root: int | None = None
+    locks: int | None = None
+    lock_fd: int | None = None
+    def record_mutation() -> None:
+        nonlocal mutation_performed
+        mutation_performed = True
+
+    try:
+        parent = _walk_trusted_directory(os.path.dirname(state_root))
+        root, created = _ensure_private_directory(parent, os.path.basename(state_root), record_mutation)
+        mutation_performed = mutation_performed or created
+        locks, created = _ensure_private_directory(root, "locks", record_mutation)
+        mutation_performed = mutation_performed or created
+        leaf = os.path.basename(GLOBAL_LOCK)
+        try:
+            before = os.stat(leaf, dir_fd=locks, follow_symlinks=False)
+        except FileNotFoundError:
+            try:
+                lock_fd = os.open(
+                    leaf,
+                    os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    0o600,
+                    dir_fd=locks,
+                )
+                mutation_performed = True
+                os.fchmod(lock_fd, 0o600)
+                os.fsync(lock_fd)
+                os.fsync(locks)
+            except FileExistsError:
+                lock_fd = None
+            before = os.stat(leaf, dir_fd=locks, follow_symlinks=False)
+        if lock_fd is None:
+            lock_fd = os.open(
+                leaf,
+                os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=locks,
+            )
+        opened = os.fstat(lock_fd)
+        after = os.stat(leaf, dir_fd=locks, follow_symlinks=False)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_uid,
+            value.st_gid,
+            value.st_nlink,
+        )
+        if identity(before) != identity(opened) or identity(opened) != identity(after):
+            raise CleanupError("global_lock_unsafe")
+        if not (
+            stat.S_ISREG(opened.st_mode)
+            and stat.S_IMODE(opened.st_mode) == 0o600
+            and opened.st_uid == 0
+            and opened.st_gid == 0
+            and opened.st_nlink == 1
+            and opened.st_size == 0
+        ):
+            raise CleanupError("global_lock_unsafe")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise CleanupError("global_lock_busy", 75) from error
+        os.fsync(lock_fd)
+        os.fsync(locks)
+        report["mutation_performed"] = mutation_performed
+        return report, 0
+    except CleanupError as error:
+        report["status"] = "partial" if mutation_performed else "blocked"
+        report["reason"] = error.reason
+        report["mutation_performed"] = mutation_performed
+        return report, 75 if mutation_performed else error.exit_code
+    except OSError:
+        report["status"] = "partial" if mutation_performed else "blocked"
+        report["reason"] = "global_lock_unsafe"
+        report["mutation_performed"] = mutation_performed
+        return report, 75 if mutation_performed else 70
+    finally:
+        for descriptor in (lock_fd, locks, root, parent):
+            if descriptor is not None:
+                os.close(descriptor)
 
 
 ACTIVITY_PATTERNS = (
@@ -550,12 +693,18 @@ def validate_report(raw: bytes, mode: str, remote_exit: int) -> bool:
         return False
     if record["deleted_count"] > 0 and not record["mutation_performed"]:
         return False
+    if mode == "prepare-lock" and (
+        any(record[key] != 0 for key in integers)
+        or any(record[key] is not None for key in nullable_integers)
+        or record["cap_exceeded"]
+    ):
+        return False
     status = record["status"]
     reason = record["reason"]
     if status == "pass":
         if remote_exit != 0 or reason is not None or record["cap_exceeded"]:
             return False
-        if any(type(record[key]) is not int for key in nullable_integers):
+        if mode != "prepare-lock" and any(type(record[key]) is not int for key in nullable_integers):
             return False
         if record["project_count"] > MAX_PROJECTS or record["candidate_count"] > MAX_IMAGES:
             return False
@@ -563,13 +712,13 @@ def validate_report(raw: bytes, mode: str, remote_exit: int) -> bool:
             return False
         if mode == "execute" and record["deleted_count"] != record["candidate_count"]:
             return False
-        if record["mutation_performed"] != (record["deleted_count"] > 0):
+        if mode != "prepare-lock" and record["mutation_performed"] != (record["deleted_count"] > 0):
             return False
     elif status == "blocked":
         if remote_exit not in (70, 75) or record["mutation_performed"] or reason not in REPORT_REASONS:
             return False
     elif status == "partial":
-        if mode != "execute" or remote_exit != 75 or not record["mutation_performed"] or reason not in REPORT_REASONS:
+        if mode not in ("execute", "prepare-lock") or remote_exit != 75 or not record["mutation_performed"] or reason not in REPORT_REASONS:
             return False
     else:
         return False
@@ -577,15 +726,19 @@ def validate_report(raw: bytes, mode: str, remote_exit: int) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) == 4 and argv[1] == "validate" and argv[2] in ("dry-run", "execute"):
+    if len(argv) == 4 and argv[1] == "validate" and argv[2] in ("dry-run", "execute", "prepare-lock"):
         if not re.fullmatch(r"0|64|70|75|255", argv[3]):
             return 1
         raw = sys.stdin.buffer.read(4097)
         return 0 if validate_report(raw, argv[2], int(argv[3])) else 1
-    if len(argv) != 2 or argv[1] not in ("dry-run", "execute"):
-        print("usage: zero_surprise_image_cleanup_v1.py dry-run|execute", file=sys.stderr)
+    if len(argv) != 2 or argv[1] not in ("dry-run", "execute", "prepare-lock"):
+        print("usage: zero_surprise_image_cleanup_v1.py dry-run|execute|prepare-lock", file=sys.stderr)
         return 64
     mode = argv[1]
+    if mode == "prepare-lock":
+        report, exit_code = prepare_global_lock()
+        emit(report)
+        return exit_code
     lock_fd: int | None = None
     try:
         lock_fd = acquire_global_lock()

@@ -38,6 +38,24 @@ bytes only.
 
 ## Read-only Preflight
 
+The canonical production-change lock is a prerequisite. On a host where the
+Host Runner has not yet been installed, create that single shared authority
+once with the reviewed helper before the first dry-run:
+
+```bash
+bash scripts/ops/prod_zero_surprise_image_cleanup.sh \
+  --prepare-global-lock \
+  --confirm-live-write ROB-458
+```
+
+This mode may create only root-owned `0700`
+`/var/lib/fh-deploy-orchestrator`, its `0700` `locks` directory, and the empty,
+single-link `0600` `fh-production-change.lock`. Existing unsafe objects are
+never normalized or replaced. Exact replay validates and attaches without a
+write. A crash prefix is safely completed by the same command. This is a
+separate live mutation and must precede the read-only preflight only when the
+fixed lock is absent.
+
 Start with the normal production checks:
 
 ```bash
