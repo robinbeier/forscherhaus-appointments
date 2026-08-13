@@ -69,13 +69,15 @@ active deploy/replay/dump/backup/retention/build work, validates the candidate
 set twice, verifies that no container references any candidate, and returns
 aggregate evidence without removing anything.
 
-A `docker compose up` process is exempted only when its command line proves
-detached mode using the exact standalone token `--detach` or `-d`, and `/proc`
-proves it has been continuously sleeping for at least 24 hours. Assigned or
-clustered detach forms remain fail-closed so values of other short options and
-`--detach=false` cannot be mistaken for detached execution. An
-attached/menu-capable, new, running, stopped, disappearing, or otherwise
-unclassifiable `up` process remains fail-closed.
+A `docker compose up` process is exempted only when `/proc` binds it to the
+actual Docker executable or a closed system Compose-plugin path and proves it
+has been continuously sleeping for at least 24 hours. It must additionally
+either use the exact standalone token `--detach` or `-d`, or prove a
+non-interactive supervisor with no controlling TTY and stdin bound exactly to
+`/dev/null`. Assigned or clustered detach forms remain fail-closed so values
+of other short options and `--detach=false` cannot be mistaken for detached
+execution. A wrapper, interactive/menu-capable, new, running, stopped,
+disappearing, or otherwise unclassifiable `up` process remains fail-closed.
 Direct Docker builds, Compose `build`/`run`/`watch`, Buildx/Buildctl, builder
 prune, and every `compose up --build`/`--build=...` or
 `compose up --watch`/`-w` form, including combined or assigned short flags such

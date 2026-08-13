@@ -347,7 +347,7 @@ COMPOSE_DETACHED_UP_PATTERNS = (
 )
 
 
-def _stable_compose_supervisor(proc_fd: int, entry: str) -> bool:
+def _compose_supervisor_state(proc_fd: int, entry: str) -> tuple[bool, bool]:
     stat_fd: int | None = None
     uptime_fd: int | None = None
     try:
@@ -367,13 +367,14 @@ def _stable_compose_supervisor(proc_fd: int, entry: str) -> bool:
     try:
         fields = raw_stat.decode("ascii", "strict").rsplit(")", 1)[1].split()
         state = fields[0]
+        tty_number = int(fields[4])
         started_ticks = int(fields[19])
         uptime_seconds = float(raw_uptime.decode("ascii", "strict").split()[0])
         ticks_per_second = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
         age_seconds = uptime_seconds - (started_ticks / ticks_per_second)
     except (UnicodeDecodeError, ValueError, IndexError, KeyError, OSError) as error:
         raise CleanupError("activity_state_unknown") from error
-    return state == "S" and age_seconds >= MIN_STABLE_COMPOSE_UP_AGE_SECONDS
+    return state == "S" and age_seconds >= MIN_STABLE_COMPOSE_UP_AGE_SECONDS, tty_number == 0
 
 
 def _actual_compose_executable(proc_fd: int, entry: str) -> bool:
@@ -384,6 +385,28 @@ def _actual_compose_executable(proc_fd: int, entry: str) -> bool:
     except OSError as error:
         raise CleanupError("activity_state_unknown") from error
     return executable in COMPOSE_EXECUTABLES
+
+
+def _stdin_is_dev_null(proc_fd: int, entry: str) -> bool:
+    stdin_fd: int | None = None
+    null_fd: int | None = None
+    try:
+        stdin_fd = os.open(entry + "/fd/0", os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=proc_fd)
+        null_fd = os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        opened = os.fstat(stdin_fd)
+        after = os.stat(entry + "/fd/0", dir_fd=proc_fd, follow_symlinks=True)
+        expected = os.fstat(null_fd)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise CleanupError("activity_state_unknown") from error
+    finally:
+        if stdin_fd is not None:
+            os.close(stdin_fd)
+        if null_fd is not None:
+            os.close(null_fd)
+    identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_rdev)
+    return identity(opened) == identity(after) == identity(expected)
 
 
 def assert_idle(proc_root: str = "/proc") -> None:
@@ -426,9 +449,11 @@ def assert_idle(proc_root: str = "/proc") -> None:
             if command and any(pattern.search(command) for pattern in COMPOSE_UP_PATTERNS):
                 if not _actual_compose_executable(proc_fd, entry.name):
                     raise CleanupError("active_production_work", 75)
-                if not any(pattern.search(command) for pattern in COMPOSE_DETACHED_UP_PATTERNS):
+                stable, no_tty = _compose_supervisor_state(proc_fd, entry.name)
+                if not stable:
                     raise CleanupError("active_production_work", 75)
-                if not _stable_compose_supervisor(proc_fd, entry.name):
+                detached = any(pattern.search(command) for pattern in COMPOSE_DETACHED_UP_PATTERNS)
+                if not detached and (not no_tty or not _stdin_is_dev_null(proc_fd, entry.name)):
                     raise CleanupError("active_production_work", 75)
     finally:
         os.close(proc_fd)
