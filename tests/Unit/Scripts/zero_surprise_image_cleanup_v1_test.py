@@ -228,8 +228,9 @@ class CleanupEngineTest(unittest.TestCase):
 
     def test_activity_scan_allows_long_running_compose_up_without_build(self) -> None:
         for command in (
-            b"/usr/bin/docker\0compose\0-f\0compose.yml\0up\0",
+            b"/usr/bin/docker\0compose\0-f\0compose.yml\0up\0-d\0",
             b"/usr/bin/docker-compose\0up\0--detach\0",
+            b"/usr/bin/docker\0compose\0up\0-Vd\0",
         ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")
@@ -245,7 +246,7 @@ class CleanupEngineTest(unittest.TestCase):
                 process = os.path.join(proc_root, "424242")
                 os.mkdir(process)
                 with open(os.path.join(process, "cmdline"), "wb") as handle:
-                    handle.write(b"/usr/bin/docker\0compose\0up\0")
+                    handle.write(b"/usr/bin/docker\0compose\0up\0-d\0")
                 self.write_process_state(proc_root, process, state, age)
                 with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
                     module.assert_idle(proc_root)
@@ -253,9 +254,23 @@ class CleanupEngineTest(unittest.TestCase):
             process = os.path.join(proc_root, "424242")
             os.mkdir(process)
             with open(os.path.join(process, "cmdline"), "wb") as handle:
-                handle.write(b"/usr/bin/docker\0compose\0up\0")
+                handle.write(b"/usr/bin/docker\0compose\0up\0-d\0")
             with self.assertRaisesRegex(module.CleanupError, "activity_state_unknown"):
                 module.assert_idle(proc_root)
+
+    def test_activity_scan_blocks_attached_or_menu_capable_compose_up(self) -> None:
+        for command in (
+            b"/usr/bin/docker\0compose\0up\0",
+            b"/usr/bin/docker-compose\0up\0--menu=true\0",
+        ):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(command)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
+                with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                    module.assert_idle(proc_root)
 
     @staticmethod
     def write_process_state(proc_root: str, process: str, state: str, age_seconds: int) -> None:

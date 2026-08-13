@@ -331,6 +331,10 @@ COMPOSE_UP_PATTERNS = (
     re.compile(r"(^|/|\s)docker\s+compose\b.*\sup(\s|$)"),
     re.compile(r"(^|/|\s)docker-compose\b.*\sup(\s|$)"),
 )
+COMPOSE_DETACHED_UP_PATTERNS = (
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)(--detach|-[A-Za-z]*d[A-Za-z]*)(=\S+)?(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--detach|-[A-Za-z]*d[A-Za-z]*)(=\S+)?(\s|$)"),
+)
 
 
 def _stable_compose_supervisor(proc_fd: int, entry: str) -> bool:
@@ -400,6 +404,8 @@ def assert_idle(proc_root: str = "/proc") -> None:
             if command and any(pattern.search(command) for pattern in ACTIVITY_PATTERNS):
                 raise CleanupError("active_production_work", 75)
             if command and any(pattern.search(command) for pattern in COMPOSE_UP_PATTERNS):
+                if not any(pattern.search(command) for pattern in COMPOSE_DETACHED_UP_PATTERNS):
+                    raise CleanupError("active_production_work", 75)
                 if not _stable_compose_supervisor(proc_fd, entry.name):
                     raise CleanupError("active_production_work", 75)
     finally:
