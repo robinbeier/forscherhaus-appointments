@@ -206,12 +206,16 @@ class CleanupEngineTest(unittest.TestCase):
             b"/usr/bin/docker-compose\0up\0-d\0--build\0",
             b"/usr/bin/docker\0compose\0up\0--build=true\0",
             b"/usr/bin/docker-compose\0up\0--build=1\0",
+            b"/usr/bin/docker\0compose\0up\0--watch\0",
+            b"/usr/bin/docker-compose\0up\0-w\0",
+            b"/usr/bin/docker\0compose\0up\0--watch=true\0",
         ):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
                 process = os.path.join(proc_root, "424242")
                 os.mkdir(process)
                 with open(os.path.join(process, "cmdline"), "wb") as handle:
                     handle.write(command)
+                self.write_process_state(proc_root, process, "S", module.MIN_STABLE_COMPOSE_UP_AGE_SECONDS + 1)
                 with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
                     module.assert_idle(proc_root)
 
