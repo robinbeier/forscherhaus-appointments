@@ -50,9 +50,14 @@ identity or unsafe filesystem state returns `70`.
 
 Dump and metadata bytes are built under a private same-filesystem nonce
 directory. The helper validates the stable dump process, complete gzip stream,
-bounded size, SHA-256, canonical metadata and all file identities. It fsyncs
-files and directories before an atomic no-replace rename makes the final set
-visible. Only a completely published set may advance
+bounded size, SHA-256, canonical metadata and all file identities. The gzip
+header timestamp is derived exactly from the trusted backup-set UTC identifier;
+this gives independent sets of unchanged SQL distinct digest authorities while
+keeping immutable set replay byte-exact. This is an exact set-header binding,
+not a promise that separately recompressing SQL reproduces prior bytes. Attach
+rejects a gzip timestamp that does not match its set identifier. The helper
+fsyncs files and directories before an atomic no-replace rename makes the final
+set visible. Only a completely published set may advance
 `last_backup_success.utc`; marker updates are monotonic and durable.
 
 Producer-owned crash prefixes are reconciled under both locks. Foreign,

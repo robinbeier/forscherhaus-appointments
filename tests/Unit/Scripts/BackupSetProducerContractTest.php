@@ -116,6 +116,8 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertSame(1, substr_count($main, 'observed_at = utc_now()'));
         self::assertSame(1, substr_count($attach, 'observed_at = utc_now()'));
         self::assertStringContainsString("backup_id = observed_at.strftime('%Y%m%dT%H%M%SZ')", $main);
+        self::assertStringContainsString('mtime=gzip_mtime', $this->helper);
+        self::assertStringContainsString('observed_gzip_mtime != expected_gzip_mtime', $this->helper);
     }
 
     public function testDocumentationFreezesManualTcpOnlyOperation(): void

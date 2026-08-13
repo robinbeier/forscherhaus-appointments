@@ -419,7 +419,7 @@ def publish_marker(backups, marker_value, nonce, expected_marker):
     os.fsync(backups)
 
 
-def stream_dump(target, dump_descriptor, dump_identity, config_descriptor, config_identity):
+def stream_dump(target, gzip_mtime, dump_descriptor, dump_identity, config_descriptor, config_identity):
     executable = '/proc/self/fd/' + str(dump_descriptor)
     config = '/proc/self/fd/' + str(config_descriptor)
     arguments = [
@@ -452,7 +452,8 @@ def stream_dump(target, dump_descriptor, dump_identity, config_descriptor, confi
         )
         os.set_blocking(process.stdout.fileno(), False)
         with os.fdopen(os.dup(target), 'wb', closefd=True) as raw_target:
-            with gzip.GzipFile(filename='', mode='wb', compresslevel=9, fileobj=raw_target, mtime=0) as compressed:
+            with gzip.GzipFile(
+                    filename='', mode='wb', compresslevel=9, fileobj=raw_target, mtime=gzip_mtime) as compressed:
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -507,7 +508,7 @@ def stream_dump(target, dump_descriptor, dump_identity, config_descriptor, confi
     return raw_bytes
 
 
-def validate_dump(descriptor, expected_uncompressed):
+def validate_dump(descriptor, expected_uncompressed, expected_gzip_mtime):
     opened = os.fstat(descriptor)
     if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or opened.st_gid != 0 or
             opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_size <= 0 or
@@ -525,17 +526,20 @@ def validate_dump(descriptor, expected_uncompressed):
     try:
         with os.fdopen(os.dup(descriptor), 'rb', closefd=True) as raw:
             with gzip.GzipFile(fileobj=raw, mode='rb') as stream:
+                observed_gzip_mtime = None
                 while True:
                     chunk = stream.read(READ_CHUNK)
                     if not chunk:
                         break
+                    if observed_gzip_mtime is None:
+                        observed_gzip_mtime = stream.mtime
                     unpacked += len(chunk)
                     if (unpacked > MAX_UNCOMPRESSED_BYTES or
                             unpacked > opened.st_size * MAX_COMPRESSION_RATIO):
                         reject()
     except (OSError, EOFError, gzip.BadGzipFile):
         reject()
-    if unpacked != expected_uncompressed:
+    if unpacked != expected_uncompressed or observed_gzip_mtime != expected_gzip_mtime:
         reject()
     return digest.hexdigest(), opened.st_size
 
@@ -597,6 +601,8 @@ def cleanup_current_staging(backups, staging, marker_temporary):
 
 
 def create_backup(backups, backup_id, nonce, dump_descriptor, dump_identity, config_descriptor, config_identity):
+    gzip_mtime = int(datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(
+        tzinfo=datetime.timezone.utc).timestamp())
     staging = '.backup-set-producer-' + nonce + '.tmp'
     if STAGING_LEAF.fullmatch(staging) is None:
         reject()
@@ -609,9 +615,10 @@ def create_backup(backups, backup_id, nonce, dump_descriptor, dump_identity, con
             target = os.open('easyappointments.sql.gz', os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
                              0o600, dir_fd=database)
             try:
-                unpacked = stream_dump(target, dump_descriptor, dump_identity, config_descriptor, config_identity)
+                unpacked = stream_dump(
+                    target, gzip_mtime, dump_descriptor, dump_identity, config_descriptor, config_identity)
                 os.fsync(target)
-                digest, compressed = validate_dump(target, unpacked)
+                digest, compressed = validate_dump(target, unpacked, gzip_mtime)
                 if file_identity(os.fstat(target)) != file_identity(
                         os.stat('easyappointments.sql.gz', dir_fd=database, follow_symlinks=False)):
                     reject()
@@ -740,6 +747,8 @@ def reconcile_temporary_files(backups):
 
 
 def validate_backup_set(backups, backup_id):
+    gzip_mtime = int(datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(
+        tzinfo=datetime.timezone.utc).timestamp())
     backup = open_child_directory(backups, backup_id, 0o700)
     try:
         if set(os.listdir(backup)) != {'db', 'meta'}:
@@ -762,7 +771,7 @@ def validate_backup_set(backups, backup_id):
                                  dir_fd=database)
             try:
                 unpacked_expected = int(values['uncompressed_size_bytes'])
-                digest, compressed = validate_dump(descriptor, unpacked_expected)
+                digest, compressed = validate_dump(descriptor, unpacked_expected, gzip_mtime)
             finally:
                 os.close(descriptor)
             created = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').strftime('%Y-%m-%dT%H:%M:%SZ')

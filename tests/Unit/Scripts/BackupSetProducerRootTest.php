@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use Ops\DeploymentEvidenceAuthorityV1;
 use PHPUnit\Framework\TestCase;
+
+require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentEvidenceAuthorityV1.php';
 
 final class BackupSetProducerRootTest extends TestCase
 {
@@ -120,6 +123,9 @@ final class BackupSetProducerRootTest extends TestCase
         );
         self::assertCount(2, $sets);
         self::assertNotSame($sets[0], $sets[1]);
+        $dumpDigests = [];
+        $decompressedSql = [];
+        $attestationPaths = [];
         foreach ($sets as $set) {
             $dump = $this->root . '/backups/' . $set . '/db/easyappointments.sql.gz';
             $metadata = $this->root . '/backups/' . $set . '/meta/backup.env';
@@ -132,6 +138,25 @@ final class BackupSetProducerRootTest extends TestCase
             self::assertStringContainsString('schema=production_backup_set.v1', $bytes);
             self::assertStringContainsString('backup_set_id=' . $set, $bytes);
             self::assertStringContainsString('dump_sha256=' . hash_file('sha256', $dump), $bytes);
+            $dumpDigest = hash_file('sha256', $dump);
+            self::assertIsString($dumpDigest);
+            $dumpDigests[] = $dumpDigest;
+            $decoded = gzdecode((string) file_get_contents($dump));
+            self::assertIsString($decoded);
+            $decompressedSql[] = $decoded;
+            $attestationPaths[] = DeploymentEvidenceAuthorityV1::dumpAttestationPath($dumpDigest);
+            $gzipHeader = file_get_contents($dump, false, null, 0, 10);
+            self::assertIsString($gzipHeader);
+            self::assertSame("\x1f\x8b\x08", substr($gzipHeader, 0, 3));
+            $mtime = unpack('Vmtime', substr($gzipHeader, 4, 4));
+            self::assertIsArray($mtime);
+            $expectedMtime = \DateTimeImmutable::createFromFormat(
+                '!Ymd\\THis\\Z',
+                $set,
+                new \DateTimeZone('UTC'),
+            );
+            self::assertInstanceOf(\DateTimeImmutable::class, $expectedMtime);
+            self::assertSame($expectedMtime->getTimestamp(), $mtime['mtime']);
             $gzip = proc_open(['gzip', '-t', $dump], [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
             self::assertIsResource($gzip);
             fclose($pipes[0]);
@@ -139,6 +164,13 @@ final class BackupSetProducerRootTest extends TestCase
             fclose($pipes[2]);
             self::assertSame(0, proc_close($gzip));
         }
+        self::assertCount(2, array_unique($dumpDigests), 'Identical SQL sets must have distinct digest authorities.');
+        self::assertCount(1, array_unique($decompressedSql), 'The fixture must prove identical decompressed SQL.');
+        self::assertCount(
+            2,
+            array_unique($attestationPaths),
+            'Distinct set digests must select independent attestation leaves.',
+        );
 
         $handoff = $this->root . '/backups/last_backup_set.json';
         self::assertFileExists($handoff);
@@ -303,6 +335,61 @@ final class BackupSetProducerRootTest extends TestCase
         self::assertIsArray($setAfter);
         self::assertSame($setIdentity['ino'], $setAfter['ino']);
         self::assertSame($dumpHash, hash_file('sha256', $dump));
+    }
+
+    public function testCrashFinalRecoveryRejectsCopiedGzipTimestampBeforePointerMutation(): void
+    {
+        $created = '2026-08-13T00:00:00Z';
+        $first = $this->runProducer($created);
+        self::assertSame(0, $first['exit'], $first['stderr']);
+        $sets = glob($this->root . '/backups/20*T*Z') ?: [];
+        self::assertCount(1, $sets);
+        $set = $sets[0];
+        $dump = $set . '/db/easyappointments.sql.gz';
+        $metadata = $set . '/meta/backup.env';
+        $sqlBefore = gzdecode((string) file_get_contents($dump));
+        self::assertIsString($sqlBefore);
+        unlink($this->root . '/backups/last_backup_success.utc');
+        unlink($this->root . '/backups/last_backup_set.json');
+
+        $gzipBytes = file_get_contents($dump);
+        self::assertIsString($gzipBytes);
+        $header = unpack('Vmtime', substr($gzipBytes, 4, 4));
+        self::assertIsArray($header);
+        $copiedMtime = $header['mtime'] + 1;
+        $gzipBytes = substr($gzipBytes, 0, 4) . pack('V', $copiedMtime) . substr($gzipBytes, 8);
+        file_put_contents($dump, $gzipBytes);
+        chmod($dump, 0600);
+        $mutatedDigest = hash('sha256', $gzipBytes);
+        $metadataBytes = file_get_contents($metadata);
+        self::assertIsString($metadataBytes);
+        $metadataBytes = preg_replace('/^dump_sha256=[0-9a-f]{64}$/m', 'dump_sha256=' . $mutatedDigest, $metadataBytes);
+        self::assertIsString($metadataBytes);
+        file_put_contents($metadata, $metadataBytes);
+        chmod($metadata, 0600);
+        self::assertSame($sqlBefore, gzdecode($gzipBytes), 'Changing gzip mtime must leave SQL and CRC valid.');
+        $setBefore = lstat($set);
+        $dumpBefore = lstat($dump);
+        self::assertIsArray($setBefore);
+        self::assertIsArray($dumpBefore);
+
+        $replay = $this->runProducer('2026-08-13T00:00:01Z');
+
+        self::assertSame(70, $replay['exit'], $replay['stderr']);
+        self::assertSame(
+            ['schema' => 'production_backup_set_result.v1', 'status' => 'rejected'],
+            json_decode($replay['stdout'], true, 512, JSON_THROW_ON_ERROR),
+        );
+        self::assertFileDoesNotExist($this->root . '/backups/last_backup_success.utc');
+        self::assertFileDoesNotExist($this->root . '/backups/last_backup_set.json');
+        self::assertCount(1, glob($this->root . '/backups/20*T*Z') ?: []);
+        $setAfter = lstat($set);
+        $dumpAfter = lstat($dump);
+        self::assertIsArray($setAfter);
+        self::assertIsArray($dumpAfter);
+        self::assertSame($setBefore['ino'], $setAfter['ino']);
+        self::assertSame($dumpBefore['ino'], $dumpAfter['ino']);
+        self::assertSame($mutatedDigest, hash_file('sha256', $dump));
     }
 
     public function testUnsafeCredentialAndTempObjectsRejectWithoutPublication(): void
