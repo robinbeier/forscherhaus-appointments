@@ -265,3 +265,16 @@ Security posture reporting:
 - Missing headers, `PasswordAuthentication=yes`, forwarding enabled, or
   `UFW inactive` are hardening hints for follow-up gates. They are not
   `prod_doctor.sh` failures by themselves.
+
+Dump restore attestation:
+
+- Install `scripts/ops/libexec/deployment_dump_attestation_v1.py` as root-owned
+  mode `0555` at `/usr/local/libexec/fh/deployment_dump_attestation_v1.py`.
+- Install `scripts/ops/libexec/validate_deployment_terminal_bundle_v1.php` as
+  root-owned mode `0555` and `scripts/ops/lib/DeploymentContractV1.php` as
+  root-owned mode `0444` in the same `/usr/local/libexec/fh` directory.
+- Run `php scripts/ops/verify_deployment_dump_v1.php 20YYMMDDTHHMMSSZ` as root
+  on the host. The ID is the only input; paths, credentials, SQL, digests,
+  images, timestamps, and environment overrides are not accepted.
+- Code or installation approval is not approval to execute a production
+  restore or publish production evidence.

@@ -21,8 +21,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
         );
 
-        self::assertSame(8, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-13T06:34:50Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(9, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-13T10:45:00Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),
@@ -174,7 +174,15 @@ class CiPerformanceWorkflowContractTest extends TestCase
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeployment);
         self::assertStringContainsString('sudo php vendor/bin/phpunit', $rootDeployment);
+        self::assertStringContainsString(
+            'docker pull mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590',
+            $rootDeployment,
+        );
         self::assertStringContainsString('tests/Unit/Scripts/DeploymentHostRunnerV1RootTest.php', $rootDeployment);
+        self::assertStringContainsString(
+            'tests/Unit/Scripts/DeploymentDumpAttestationProducerV1RootTest.php',
+            $rootDeployment,
+        );
         self::assertStringContainsString('tests/Unit/Scripts/AppLogRetentionRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PinDeployTimingRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeployment);

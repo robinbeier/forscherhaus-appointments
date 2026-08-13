@@ -21,6 +21,7 @@ APP_ROOT = '/var/www/html/easyappointments'
 RELEASES_ROOT = '/root/releases'
 BACKUP_ROOT = '/root/backups/easyappointments'
 ATTESTATION_ROOT = '/var/lib/fh-deploy-evidence/dump-attestations'
+RESTORE_IMAGE = 'mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590'
 STATE_ROOT = '/var/lib/fh-release-retention'
 ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator'
 GLOBAL_LOCK_LEAF = 'fh-production-change.lock'
@@ -321,13 +322,14 @@ def validate_attestation(data, expected_sha, expected_size):
         or dump.get('uncompressed_size_bytes') > MAX_DUMP_UNCOMPRESSED_BYTES
         or not isinstance(verification, dict)
         or set(verification) != {
-            'gzip_verified', 'method', 'restore_verified', 'restored_at_utc',
+            'gzip_verified', 'image', 'method', 'restore_verified', 'restored_at_utc',
             'restored_datadir_allocated_bytes', 'restored_datadir_inode_count', 'sha256_verified',
         }
         or verification.get('method') != 'mariadb_10_11_isolated_restore_v1'
         or verification.get('sha256_verified') is not True
         or verification.get('gzip_verified') is not True
         or verification.get('restore_verified') is not True
+        or verification.get('image') != RESTORE_IMAGE
     ):
         reject('invalid_dump_attestation')
     for field in ('restored_datadir_allocated_bytes', 'restored_datadir_inode_count'):

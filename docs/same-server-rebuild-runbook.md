@@ -105,7 +105,9 @@ bash ./scripts/ops/prepare_same_server_rebuild_backup.sh --execute
 Default mode is dry-run. Only pass `--execute` after the provider snapshot has
 completed. The helper writes to secure local storage outside Git, verifies the
 dump and archive checksums locally, and removes the temporary remote staging
-directory unless `--keep-remote` is passed.
+directory unless `--keep-remote` is passed. For ROB-465 compatibility, the
+database dump stays in the standard single-database table/data subset: no
+routines and no triggers.
 
 Required backup set:
 

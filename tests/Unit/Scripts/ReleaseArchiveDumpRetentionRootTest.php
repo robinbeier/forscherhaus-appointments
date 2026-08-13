@@ -365,6 +365,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
                 'verification' => [
                     'gzip_verified' => true,
                     'method' => 'mariadb_10_11_isolated_restore_v1',
+                    'image' => 'mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590',
                     'restore_verified' => true,
                     'restored_at_utc' => $when,
                     'restored_datadir_allocated_bytes' => 4096,

@@ -16,15 +16,16 @@ enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
-- Workload contract v8 starts at cohort epoch `2026-08-13T06:34:50Z`, when the
-  blocking Linux-root list added the protected ROB-452 application-log
-  retention filesystem, locking, capacity, deletion-cap, and marker suite.
+- Workload contract v9 starts at cohort epoch `2026-08-13T10:45:00Z`, when the
+  blocking Linux-root matrix added the ROB-465 dump-attestation filesystem and
+  pinned-image restore contract alongside the existing retention suites.
   Runs before this instant are excluded as
   `workload_contract_mismatch` even when their deep-runtime flags happen to
   match.
 - Selection is fail-closed: a run is comparable only when its complete profile
   fingerprint equals the policy fingerprint and it is on or after the workload
-  epoch. Missing jobs, job-log fields, or later API pages therefore cannot
+  cohort epoch.
+  Missing jobs, job-log fields, or later API pages therefore cannot
   silently produce a match.
 - The terminal job is recorded per sample but is not an eligibility condition.
   Normal timing variance may make a different successful job end last without
@@ -39,9 +40,9 @@ and fully observed phase rankings in
 
 ## Versioned Workload Contract
 
-Workload contract v8 pins the canonicalized definitions of every job in
+Workload contract v9 pins the canonicalized definitions of every job in
 `.github/workflows/ci.yml` to
-`sha256:3579669547c65a6234e711edd763880b3761800a80bfadabcf3d844042a32853`.
+`sha256:ec995c2544211ad01f8331f0b149552ce7f6d51788f6de3cf6325af1dc14a62b`.
 The workflow contract test also requires every job to have an explicit expected
 `success` or `skipped` conclusion in the comparison profile. This covers the
 always-active `build-test`, JavaScript lint, PHPStan, typed request DTO, and both

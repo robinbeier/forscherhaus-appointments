@@ -472,6 +472,7 @@ jobs:
           grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-rob444.log
       - name: ROB-442 root deployment regression tests
         run: |
+          docker pull mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590
           systemd-analyze verify \
             scripts/ops/systemd/fh-app-log-retention.service \
             scripts/ops/systemd/fh-app-log-retention.timer \
@@ -485,6 +486,7 @@ jobs:
             tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
             tests/Unit/Scripts/GateCliSupportTest.php \
             tests/Unit/Scripts/DeploymentHostRunnerV1RootTest.php \
+            tests/Unit/Scripts/DeploymentDumpAttestationProducerV1RootTest.php \
             tests/Unit/Scripts/AppLogRetentionRootTest.php \
             tests/Unit/Scripts/PinDeployTimingRootTest.php \
             tests/Unit/Scripts/PublishReleasePairRootTest.php \
