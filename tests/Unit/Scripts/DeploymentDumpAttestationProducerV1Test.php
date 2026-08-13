@@ -25,6 +25,7 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
 
     private string $helper;
     private string $cli;
+    private string $authorityDocs;
     private string $helperPath;
     private string $sameServerBackup;
 
@@ -34,6 +35,7 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         $this->helperPath = $root . '/scripts/ops/libexec/deployment_dump_attestation_v1.py';
         $this->helper = file_get_contents($this->helperPath) ?: '';
         $this->cli = file_get_contents($root . '/scripts/ops/verify_deployment_dump_v1.php') ?: '';
+        $this->authorityDocs = file_get_contents($root . '/docs/deployment-evidence-authority-v1.md') ?: '';
         $this->sameServerBackup = file_get_contents($root . '/scripts/ops/prepare_same_server_rebuild_backup.sh') ?: '';
     }
 
@@ -62,6 +64,9 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         self::assertStringContainsString('handoff = read_backup_handoff(backups)', $this->helper);
         self::assertStringContainsString('read_backup_success_marker(backups) != backup_id', $this->helper);
         self::assertStringContainsString('assert_handoff_matches(handoff, digest, size, unpacked)', $this->helper);
+        self::assertStringContainsString('single literal selector', $this->authorityDocs);
+        self::assertStringContainsString('`--latest-handoff`', $this->authorityDocs);
+        self::assertStringContainsString('cross-binds its ID, SHA-256, compressed size,', $this->authorityDocs);
     }
 
     public function testBackupSetGrammarRejectsPathsAndInvalidOrFutureDatesBeforeHelperLaunch(): void
