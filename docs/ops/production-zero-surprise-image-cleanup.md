@@ -27,8 +27,9 @@ The helper derives candidates only from Docker image metadata:
 Foreign Compose projects are ignored. A malformed `zs...` identity, unexpected
 service/tag/digest, container reference, inventory race, concurrent production
 activity, or exceeded cap blocks the whole preflight before its first write.
-After a deletion has happened, any later ambiguity stops with `partial`; it is
-never widened into a prune.
+Once a deletion has been requested, any timeout or later ambiguity stops with
+`partial` and `mutation_performed: true`, even when deletion could not be
+confirmed and `deleted_count` is still zero. It is never widened into a prune.
 
 The helper never runs image, container, volume, builder, or system prune. It
 never prints image IDs, project names, tags, paths, container identities, raw

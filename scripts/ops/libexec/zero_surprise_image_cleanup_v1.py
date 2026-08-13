@@ -454,6 +454,7 @@ class CleanupEngine:
             "mutation_performed": False,
         }
         deleted = 0
+        mutation_attempted = False
         try:
             self.idle()
             docker_root, before_free = self.storage()
@@ -487,6 +488,8 @@ class CleanupEngine:
                 if fresh != remaining:
                     raise CleanupError("image_snapshot_changed", 75)
                 self.assert_no_references(set(remaining))
+                mutation_attempted = True
+                report["mutation_performed"] = True
                 self.docker(["image", "rm", image_id], 120)
                 verify = self.docker(["image", "inspect", image_id], 30, frozenset((0, 1)))
                 if verify.exit_code != 1:
@@ -505,17 +508,17 @@ class CleanupEngine:
             report["freed_bytes"] = max(0, after_free - before_free)
             return report, 0
         except CleanupError as error:
-            report["status"] = "partial" if deleted else "blocked"
+            report["status"] = "partial" if mutation_attempted else "blocked"
             report["reason"] = error.reason
             report["deleted_count"] = deleted
-            report["mutation_performed"] = bool(deleted)
-            return report, 75 if deleted else error.exit_code
+            report["mutation_performed"] = mutation_attempted
+            return report, 75 if mutation_attempted else error.exit_code
         except Exception:
-            report["status"] = "partial" if deleted else "blocked"
+            report["status"] = "partial" if mutation_attempted else "blocked"
             report["reason"] = "cleanup_internal_error"
             report["deleted_count"] = deleted
-            report["mutation_performed"] = bool(deleted)
-            return report, 75 if deleted else 70
+            report["mutation_performed"] = mutation_attempted
+            return report, 75 if mutation_attempted else 70
 
 
 def emit(report: dict[str, object]) -> None:
@@ -545,7 +548,7 @@ def validate_report(raw: bytes, mode: str, remote_exit: int) -> bool:
         return False
     if record["deleted_count"] > record["candidate_count"]:
         return False
-    if record["mutation_performed"] != (record["deleted_count"] > 0):
+    if record["deleted_count"] > 0 and not record["mutation_performed"]:
         return False
     status = record["status"]
     reason = record["reason"]
@@ -559,6 +562,8 @@ def validate_report(raw: bytes, mode: str, remote_exit: int) -> bool:
         if mode == "dry-run" and (record["deleted_count"] != 0 or record["freed_bytes"] != 0):
             return False
         if mode == "execute" and record["deleted_count"] != record["candidate_count"]:
+            return False
+        if record["mutation_performed"] != (record["deleted_count"] > 0):
             return False
     elif status == "blocked":
         if remote_exit not in (70, 75) or record["mutation_performed"] or reason not in REPORT_REASONS:

@@ -33,6 +33,7 @@ class FakeDocker:
         self.references = references or {}
         self.commands: list[list[str]] = []
         self.mutate_after_delete = False
+        self.fail_after_delete = False
 
     def __call__(
         self,
@@ -59,6 +60,8 @@ class FakeDocker:
         if args[:2] == ["image", "rm"]:
             removed = args[2]
             del self.images[removed]
+            if self.fail_after_delete:
+                raise module.CleanupError("docker_command_timeout", 70)
             if self.mutate_after_delete and len(self.images) == 1:
                 remaining = next(iter(self.images.values()))
                 remaining["Size"] = int(remaining["Size"]) + 1
@@ -180,6 +183,17 @@ class CleanupEngineTest(unittest.TestCase):
         self.assertEqual("partial", report["status"])
         self.assertEqual("image_snapshot_changed", report["reason"])
         self.assertEqual(1, report["deleted_count"])
+        self.assertEqual(1, len(fake.images))
+
+    def test_timeout_after_delete_reports_uncertain_partial_mutation(self) -> None:
+        fake = FakeDocker(self.candidates())
+        fake.fail_after_delete = True
+        report, exit_code = engine(fake).run("execute")
+        self.assertEqual(75, exit_code)
+        self.assertEqual("partial", report["status"])
+        self.assertEqual("docker_command_timeout", report["reason"])
+        self.assertEqual(0, report["deleted_count"])
+        self.assertTrue(report["mutation_performed"])
         self.assertEqual(1, len(fake.images))
 
     def test_activity_scan_blocks_buildkit_commands(self) -> None:
