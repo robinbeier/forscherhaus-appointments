@@ -11,12 +11,16 @@ final class BackupSetProducerContractTest extends TestCase
     private string $root;
     private string $helper;
     private string $wrapper;
+    private string $attestationWrapper;
 
     protected function setUp(): void
     {
         $this->root = dirname(__DIR__, 3);
         $this->helper = (string) file_get_contents($this->root . '/scripts/ops/libexec/backup_set_producer_v1.py');
         $this->wrapper = (string) file_get_contents($this->root . '/scripts/ops/prod_backup_set_producer.sh');
+        $this->attestationWrapper = (string) file_get_contents(
+            $this->root . '/scripts/ops/prod_verify_latest_deployment_dump.sh',
+        );
     }
 
     public function testHelperHasNoCallerAuthorityAndFreezesDumpInputs(): void
@@ -127,6 +131,49 @@ final class BackupSetProducerContractTest extends TestCase
         }
     }
 
+    public function testProtectedHandoffAttestationWrapperHasIndependentLiveConfirmation(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob466-attestation-wrapper-' . bin2hex(random_bytes(8));
+        mkdir($workspace . '/bin', 0777, true);
+        $log = $workspace . '/ssh.log';
+        file_put_contents(
+            $workspace . '/bin/ssh',
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"\$*\" >> " . escapeshellarg($log) . "\n",
+        );
+        chmod($workspace . '/bin/ssh', 0755);
+        try {
+            $default = $this->runAttestationWrapper([], $workspace . '/bin');
+            self::assertSame(0, $default['exit'], $default['stderr']);
+            self::assertStringContainsString('mode       : plan-only', $default['stdout']);
+            self::assertFileDoesNotExist($log);
+
+            foreach (
+                [
+                    ['--execute'],
+                    ['--execute', '--confirm-live-restore', 'ROB-466'],
+                    ['--confirm-live-restore', 'ROB-461'],
+                ] as $arguments
+            ) {
+                self::assertSame(1, $this->runAttestationWrapper($arguments, $workspace . '/bin')['exit']);
+                self::assertFileDoesNotExist($log);
+            }
+
+            $execute = $this->runAttestationWrapper(
+                ['--execute', '--confirm-live-restore', 'ROB-461'],
+                $workspace . '/bin',
+            );
+            self::assertSame(0, $execute['exit'], $execute['stderr']);
+            self::assertSame(
+                '-o StrictHostKeyChecking=accept-new prod.example ' .
+                '/usr/bin/php -n /usr/local/libexec/fh/verify_deployment_dump_v1.php --latest-handoff' . "\n",
+                (string) file_get_contents($log),
+            );
+            self::assertStringNotContainsString('backup_set_id', $execute['stdout'] . $execute['stderr']);
+        } finally {
+            $this->removeTree($workspace);
+        }
+    }
+
     public function testRepositoryShipsNoAutonomousActivationPath(): void
     {
         $docs = (string) file_get_contents($this->root . '/docs/ops/production-backup-set-producer.md');
@@ -134,6 +181,8 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertFileDoesNotExist($this->root . '/scripts/ops/systemd/fh-backup-set-producer.timer');
         self::assertStringNotContainsString('systemctl enable', $this->wrapper . $docs);
         self::assertStringNotContainsString('systemctl start', $this->wrapper . $docs);
+        self::assertStringNotContainsString('systemctl enable', $this->attestationWrapper);
+        self::assertStringNotContainsString('systemctl start', $this->attestationWrapper);
         self::assertStringContainsString('manual-only', $docs);
     }
 
@@ -143,6 +192,28 @@ final class BackupSetProducerContractTest extends TestCase
         $process = proc_open(
             array_merge(
                 ['bash', 'scripts/ops/prod_backup_set_producer.sh', '--prod-ssh-target', 'prod.example'],
+                $arguments,
+            ),
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $this->root,
+            array_merge($_ENV, ['PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: '')]),
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        return ['exit' => proc_close($process), 'stdout' => $stdout ?: '', 'stderr' => $stderr ?: ''];
+    }
+
+    /** @param list<string> $arguments @return array{exit:int,stdout:string,stderr:string} */
+    private function runAttestationWrapper(array $arguments, string $stubBin): array
+    {
+        $process = proc_open(
+            array_merge(
+                ['bash', 'scripts/ops/prod_verify_latest_deployment_dump.sh', '--prod-ssh-target', 'prod.example'],
                 $arguments,
             ),
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],

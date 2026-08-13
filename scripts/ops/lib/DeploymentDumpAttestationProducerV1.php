@@ -18,10 +18,25 @@ final class DeploymentDumpAttestationProducerV1
     public static function produce(string $backupSetId): array
     {
         $created = self::createdAt($backupSetId);
+        return self::produceSelected([$backupSetId], $created);
+    }
+
+    /** @return array{status:string,path:string,dump_sha256:string,attestation_sha256:string} */
+    public static function produceLatestHandoff(): array
+    {
+        return self::produceSelected(['--latest-handoff'], null);
+    }
+
+    /**
+     * @param list<string> $selector
+     * @return array{status:string,path:string,dump_sha256:string,attestation_sha256:string}
+     */
+    private static function produceSelected(array $selector, ?string $expectedCreated): array
+    {
         $helperBefore = self::trustedHelperMetadata(self::HELPER_PATH);
         $pipes = [];
         $process = proc_open(
-            [self::PYTHON_PATH, '-I', '-B', self::HELPER_PATH, $backupSetId],
+            array_merge([self::PYTHON_PATH, '-I', '-B', self::HELPER_PATH], $selector),
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             null,
@@ -76,13 +91,16 @@ final class DeploymentDumpAttestationProducerV1
             throw new RuntimeException('dump attestation helper response is contradictory');
         }
         $record = json_decode($bytes, true);
+        $recordCreated = is_array($record) ? ($record['dump']['created_at_utc'] ?? null) : null;
         if (
             !is_array($record) ||
             ($record['dump']['sha256'] ?? null) !== $response['dump_sha256'] ||
-            ($record['dump']['created_at_utc'] ?? null) !== $created
+            !is_string($recordCreated) ||
+            ($expectedCreated !== null && $recordCreated !== $expectedCreated)
         ) {
             throw new RuntimeException('dump attestation helper authority is contradictory');
         }
+        $created = self::createdAtFromRecord($recordCreated);
         $canonical = DeploymentEvidenceAuthorityV1::validateProducedDumpAttestation(
             $bytes,
             $response['dump_sha256'],
@@ -99,6 +117,19 @@ final class DeploymentDumpAttestationProducerV1
             'dump_sha256' => $response['dump_sha256'],
             'attestation_sha256' => $response['attestation_sha256'],
         ];
+    }
+
+    private static function createdAtFromRecord(string $createdAt): string
+    {
+        if (preg_match('/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/D', $createdAt) !== 1) {
+            throw new RuntimeException('dump attestation created time is invalid');
+        }
+        $backupSetId = str_replace(['-', ':'], '', $createdAt);
+        $validated = self::createdAt($backupSetId);
+        if (!hash_equals($createdAt, $validated)) {
+            throw new RuntimeException('dump attestation created time is contradictory');
+        }
+        return $validated;
     }
 
     private static function createdAt(string $backupSetId): string

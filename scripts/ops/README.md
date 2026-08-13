@@ -64,6 +64,9 @@ Script inventory:
   set only with its exact live confirmation. ROB-466 deliberately ships no
   service or timer; every pass is manual. See
   [`docs/ops/production-backup-set-producer.md`](../../docs/ops/production-backup-set-producer.md).
+- `prod_verify_latest_deployment_dump.sh` resolves that producer's protected
+  handoff on the host and runs one ROB-461 restore-attestation pass only with
+  its separate exact live confirmation; no set ID crosses the wrapper.
 - `prod_journald_retention.sh` inspects the fixed 1 GiB / 30-day journald
   contract by default. Configuration activation, one-time vacuum, and rollback
   use distinct confirmation tokens and remain unexecuted by repository delivery;
@@ -282,8 +285,12 @@ Dump restore attestation:
   root-owned mode `0555` and `scripts/ops/lib/DeploymentContractV1.php` as
   root-owned mode `0444` in the same `/usr/local/libexec/fh` directory.
 - Run `php scripts/ops/verify_deployment_dump_v1.php 20YYMMDDTHHMMSSZ` as root
-  on the host. The ID is the only input; paths, credentials, SQL, digests,
-  images, timestamps, and environment overrides are not accepted.
+  on the host for an explicitly selected set. For the ROB-461 production wave,
+  use `prod_verify_latest_deployment_dump.sh`; its fixed
+  `--latest-handoff` path selects and cross-binds the protected producer
+  handoff without exposing the ID to the operator wrapper. Paths, credentials,
+  SQL, digests, images, timestamps, and environment overrides are not
+  accepted.
 - Code or installation approval is not approval to execute a production
   restore or publish production evidence.
 

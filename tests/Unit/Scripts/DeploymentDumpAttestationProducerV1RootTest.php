@@ -28,6 +28,90 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         }
     }
 
+    public function testProtectedBackupHandoffIsStableCanonicalAndClosed(): void
+    {
+        $record = [
+            'backup_set_id' => gmdate('Ymd\\THis\\Z', time() - 60),
+            'compressed_size_bytes' => 100,
+            'dump_sha256' => str_repeat('a', 64),
+            'schema' => 'production_backup_set_handoff.v1',
+            'uncompressed_size_bytes' => 200,
+        ];
+        file_put_contents(
+            $this->root . '/last_backup_set.json',
+            json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+        );
+        chmod($this->root . '/last_backup_set.json', 0600);
+        $marker =
+            substr($record['backup_set_id'], 0, 4) . '-' . substr($record['backup_set_id'], 4, 2) . '-' .
+            substr($record['backup_set_id'], 6, 2) . 'T' . substr($record['backup_set_id'], 9, 2) . ':' .
+            substr($record['backup_set_id'], 11, 2) . ':' . substr($record['backup_set_id'], 13, 2) . "Z\n";
+        file_put_contents($this->root . '/last_backup_success.utc', $marker);
+        chmod($this->root . '/last_backup_success.utc', 0600);
+
+        $accepted = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            fd = os.open(os.environ['ROB465_TEST_ROOT'], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            value = module.read_backup_handoff(fd)
+            assert module.read_backup_success_marker(fd) == value['backup_set_id']
+            module.assert_handoff_matches(value, 'a' * 64, 100, 200)
+            print(value['schema'])
+            os.close(fd)
+            PY
+            ,
+        );
+        self::assertSame(0, $accepted['exit'], $accepted['stderr']);
+        self::assertSame("production_backup_set_handoff.v1\n", $accepted['stdout']);
+
+        $mismatch = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            fd = os.open(os.environ['ROB465_TEST_ROOT'], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            value = module.read_backup_handoff(fd)
+            module.assert_handoff_matches(value, 'b' * 64, 100, 200)
+            PY
+            ,
+        );
+        self::assertSame(70, $mismatch['exit']);
+
+        file_put_contents($this->root . '/last_backup_success.utc', "2026-01-01T00:00:00Z\n");
+        chmod($this->root . '/last_backup_success.utc', 0600);
+        $markerMismatch = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            fd = os.open(os.environ['ROB465_TEST_ROOT'], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            value = module.read_backup_handoff(fd)
+            if module.read_backup_success_marker(fd) != value['backup_set_id']:
+                module.reject()
+            PY
+            ,
+        );
+        self::assertSame(70, $markerMismatch['exit']);
+        file_put_contents($this->root . '/last_backup_success.utc', $marker);
+        chmod($this->root . '/last_backup_success.utc', 0600);
+
+        $record['future_field'] = true;
+        file_put_contents(
+            $this->root . '/last_backup_set.json',
+            json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+        );
+        chmod($this->root . '/last_backup_set.json', 0600);
+        $rejected = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            fd = os.open(os.environ['ROB465_TEST_ROOT'], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            module.read_backup_handoff(fd)
+            PY
+            ,
+        );
+        self::assertSame(70, $rejected['exit']);
+    }
+
     public function testPublishIsAtomicNoReplaceAndExactReplayOnly(): void
     {
         $sha = str_repeat('b', 64);

@@ -45,6 +45,9 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         );
         self::assertStringContainsString("if (\$argc !== 2", $this->cli);
         self::assertStringNotContainsString('getopt(', $this->cli);
+        self::assertStringContainsString("\$argv[1] === '--latest-handoff'", $this->cli);
+        self::assertStringContainsString('produceLatestHandoff()', $this->cli);
+        self::assertStringContainsString('deployment_dump_handoff_attestation_result.v1', $this->cli);
         self::assertStringContainsString("BACKUP_ROOT = '/root/backups/easyappointments'", $this->helper);
         self::assertStringContainsString(
             "IMAGE = '" . DeploymentEvidenceAuthorityV1::DUMP_RESTORE_IMAGE . "'",
@@ -55,6 +58,10 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         self::assertStringNotContainsString('os.environ.get', $this->helper);
         self::assertStringContainsString('process, docker_before = docker_popen(', $this->helper);
         self::assertStringContainsString('verify_docker_after(docker_before)', $this->helper);
+        self::assertStringContainsString("latest_handoff = sys.argv[1] == '--latest-handoff'", $this->helper);
+        self::assertStringContainsString('handoff = read_backup_handoff(backups)', $this->helper);
+        self::assertStringContainsString('read_backup_success_marker(backups) != backup_id', $this->helper);
+        self::assertStringContainsString('assert_handoff_matches(handoff, digest, size, unpacked)', $this->helper);
     }
 
     public function testBackupSetGrammarRejectsPathsAndInvalidOrFutureDatesBeforeHelperLaunch(): void

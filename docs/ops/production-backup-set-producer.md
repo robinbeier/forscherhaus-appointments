@@ -60,6 +60,15 @@ set is never overwritten or relabelled with a newer timestamp. Output is one
 canonical aggregate JSON record and contains no set identifier, path, digest,
 database output, credentials or SQL.
 
+The matching restore verifier has one additional closed selector,
+`--latest-handoff`. It acquires the same production-change lock, reads
+`last_backup_set.json` through a stable no-follow file descriptor, validates
+its exact canonical schema, requires the independently durable backup-success
+marker to name the same completed set, and binds the selected ID, dump digest,
+compressed size and uncompressed size to the pinned dump before restore. Its
+operator result contains only schema and status; the protected set identifier
+never crosses SSH or enters the wrapper output.
+
 ## Operator boundary
 
 The producer is manual-only. ROB-466 deliberately ships no service or timer,
@@ -75,12 +84,26 @@ bash scripts/ops/prod_backup_set_producer.sh \
 Without both live flags the wrapper only prints the fixed plan and performs no
 SSH call.
 
+Install `verify_deployment_dump_v1.php` and its reviewed PHP library
+dependencies beneath `/usr/local/libexec/fh`, alongside the already required
+ROB-465 helper. The separate handoff consumer is also plan-only by default and
+requires the independent ROB-461 live-restore confirmation:
+
+```bash
+bash scripts/ops/prod_verify_latest_deployment_dump.sh \
+  --execute \
+  --confirm-live-restore ROB-461
+```
+
+It invokes only the fixed installed verifier with `--latest-handoff`; it does
+not accept a set ID, path, digest or environment override.
+
 For the initial ROB-461 wave, install the reviewed helper without adding an
-autonomous schedule. Create exactly two fresh sets serially. After
-each producer pass, run the ROB-465 verifier for the internally returned set
-identifier through a protected host-local handoff; do not copy identifiers to
-Linear, chat or logs. Validate two independent restore attestations before any
-ROB-453 retention execute pass. A merge is not production authorization.
+autonomous schedule. Create exactly two fresh sets serially. After each
+producer pass, run the protected handoff consumer above; do not copy
+identifiers to Linear, chat or logs. Validate two independent restore
+attestations before any ROB-453 retention execute pass. A merge is not
+production authorization.
 
 Rollback is restoring the prior installed manual helper and wrapper; there is
 no timer or service to disable. Already published sets and attestations remain
