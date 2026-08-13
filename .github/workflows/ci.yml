@@ -473,6 +473,8 @@ jobs:
       - name: ROB-442 root deployment regression tests
         run: |
           systemd-analyze verify \
+            scripts/ops/systemd/fh-app-log-retention.service \
+            scripts/ops/systemd/fh-app-log-retention.timer \
             scripts/ops/systemd/fh-session-retention.service \
             scripts/ops/systemd/fh-session-retention.timer \
             scripts/ops/systemd/fh-release-archive-dump-retention.service \
@@ -483,6 +485,7 @@ jobs:
             tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
             tests/Unit/Scripts/GateCliSupportTest.php \
             tests/Unit/Scripts/DeploymentHostRunnerV1RootTest.php \
+            tests/Unit/Scripts/AppLogRetentionRootTest.php \
             tests/Unit/Scripts/PinDeployTimingRootTest.php \
             tests/Unit/Scripts/PublishReleasePairRootTest.php \
             tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php \

@@ -201,6 +201,10 @@ Disk, memory, or swap pressure:
   journald contract. Its default is read-only. Configuration activation,
   one-time vacuum, rollback, and monitoring activation are four distinct
   production changes; see `docs/ops/production-journald-retention.md`.
+- Use `prod_app_log_retention.sh` for the separate ROB-452 60-day daily
+  CodeIgniter log class. The default is aggregate read-only inspection; it does
+  not touch release-gate, CI, ops, or diagnostic evidence. See
+  `docs/ops/production-app-log-retention.md`.
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 

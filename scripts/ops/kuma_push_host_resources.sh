@@ -21,6 +21,9 @@ RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS="${KUMA_RELEASE_RETENTION_MARKER_MAX_AG
 RELEASE_RETENTION_HELPER="${KUMA_RELEASE_RETENTION_HELPER:-/usr/local/libexec/fh-release-archive-dump-retention-v1}"
 JOURNALD_RETENTION_MONITOR_ENABLED="${KUMA_JOURNALD_RETENTION_MONITOR_ENABLED:-0}"
 JOURNALD_RETENTION_HELPER="${KUMA_JOURNALD_RETENTION_HELPER:-/usr/local/libexec/fh-journald-retention-v1}"
+APP_LOG_RETENTION_MONITOR_ENABLED="${KUMA_APP_LOG_RETENTION_MONITOR_ENABLED:-0}"
+APP_LOG_RETENTION_MARKER_MAX_AGE_SECONDS="${KUMA_APP_LOG_RETENTION_MARKER_MAX_AGE_SECONDS:-129600}"
+APP_LOG_RETENTION_HELPER="${KUMA_APP_LOG_RETENTION_HELPER:-/usr/local/libexec/fh-app-log-retention-v1}"
 
 if [[ "$SESSION_RETENTION_MONITOR_ENABLED" != '0' && "$SESSION_RETENTION_MONITOR_ENABLED" != '1' ]]; then
   kuma_push_die 'KUMA_SESSION_RETENTION_MONITOR_ENABLED must be 0 or 1'
@@ -36,6 +39,12 @@ if ! [[ "$RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS" =~ ^[1-9][0-9]{0,6}$ ]]; the
 fi
 if [[ "$JOURNALD_RETENTION_MONITOR_ENABLED" != '0' && "$JOURNALD_RETENTION_MONITOR_ENABLED" != '1' ]]; then
   kuma_push_die 'KUMA_JOURNALD_RETENTION_MONITOR_ENABLED must be 0 or 1'
+fi
+if [[ "$APP_LOG_RETENTION_MONITOR_ENABLED" != '0' && "$APP_LOG_RETENTION_MONITOR_ENABLED" != '1' ]]; then
+  kuma_push_die 'KUMA_APP_LOG_RETENTION_MONITOR_ENABLED must be 0 or 1'
+fi
+if ! [[ "$APP_LOG_RETENTION_MARKER_MAX_AGE_SECONDS" =~ ^[1-9][0-9]{0,6}$ ]]; then
+  kuma_push_die 'KUMA_APP_LOG_RETENTION_MARKER_MAX_AGE_SECONDS is invalid'
 fi
 
 disk_used_percent="$(
@@ -110,6 +119,29 @@ if [[ "$JOURNALD_RETENTION_MONITOR_ENABLED" == '1' ]]; then
       status="down"
       ping="0"
       reasons+=("journald_retention=invalid")
+      ;;
+  esac
+fi
+
+if [[ "$APP_LOG_RETENTION_MONITOR_ENABLED" == '1' ]]; then
+  app_log_marker_json=''
+  app_log_marker_status='invalid'
+  if [[ -x "$APP_LOG_RETENTION_HELPER" ]] \
+    && app_log_marker_json="$("$APP_LOG_RETENTION_HELPER" marker-status "$APP_LOG_RETENTION_MARKER_MAX_AGE_SECONDS" 2>/dev/null)"; then
+    app_log_marker_status="$(printf '%s' "$app_log_marker_json" | sed -n 's/^.*"status":"\([a-z_]*\)".*$/\1/p')"
+  fi
+  case "$app_log_marker_status" in
+    pass)
+      ;;
+    missing|stale|invalid)
+      status="down"
+      ping="0"
+      reasons+=("app_log_retention=${app_log_marker_status}")
+      ;;
+    *)
+      status="down"
+      ping="0"
+      reasons+=("app_log_retention=invalid")
       ;;
   esac
 fi
