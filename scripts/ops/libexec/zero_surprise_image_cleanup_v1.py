@@ -320,10 +320,10 @@ ACTIVITY_PATTERNS = (
     re.compile(r"(^|/|\s)docker\s+(build|builder\s+prune|buildx\s+(build|bake|prune))(\s|$)"),
     re.compile(r"(^|/|\s)docker\s+compose\b.*\s(build|run|watch)(\s|$)"),
     re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)--build(=\S+)?(\s|$)"),
-    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)(--watch(=\S+)?|-[A-Za-z]*w[A-Za-z]*)(\s|$)"),
+    re.compile(r"(^|/|\s)docker\s+compose\b.*\sup\b.*(^|\s)(--watch|-[A-Za-z]*w[A-Za-z]*)(=\S+)?(\s|$)"),
     re.compile(r"(^|/|\s)docker-compose\b.*\s(build|run|watch)(\s|$)"),
     re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)--build(=\S+)?(\s|$)"),
-    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--watch(=\S+)?|-[A-Za-z]*w[A-Za-z]*)(\s|$)"),
+    re.compile(r"(^|/|\s)docker-compose\b.*\sup\b.*(^|\s)(--watch|-[A-Za-z]*w[A-Za-z]*)(=\S+)?(\s|$)"),
     re.compile(r"(^|/)buildctl(\s|$)"),
     re.compile(r"(^|/)(mysqldump|mariadb-dump|backup_easyappointments\.sh)(\s|$)"),
 )
