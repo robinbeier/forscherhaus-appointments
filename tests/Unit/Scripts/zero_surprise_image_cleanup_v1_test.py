@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -180,6 +181,16 @@ class CleanupEngineTest(unittest.TestCase):
         self.assertEqual("image_snapshot_changed", report["reason"])
         self.assertEqual(1, report["deleted_count"])
         self.assertEqual(1, len(fake.images))
+
+    def test_activity_scan_blocks_buildkit_commands(self) -> None:
+        for command in (b"/usr/bin/docker\0buildx\0bake\0", b"/usr/bin/buildctl\0build\0"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as proc_root:
+                process = os.path.join(proc_root, "424242")
+                os.mkdir(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(command)
+                with self.assertRaisesRegex(module.CleanupError, "active_production_work"):
+                    module.assert_idle(proc_root)
 
 
 if __name__ == "__main__":

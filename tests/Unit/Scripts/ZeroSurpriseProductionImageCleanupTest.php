@@ -23,7 +23,7 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         );
 
         self::assertSame(0, $result['exit'], $result['stderr']);
-        self::assertStringContainsString('Ran 8 tests', $result['stderr']);
+        self::assertStringContainsString('Ran 9 tests', $result['stderr']);
         self::assertStringContainsString('OK', $result['stderr']);
     }
 
@@ -120,6 +120,14 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         self::assertStringContainsString('MAX_PROJECTS = 32', $helper);
         self::assertStringContainsString('MAX_IMAGES = 64', $helper);
         self::assertStringContainsString('--confirm-live-write ROB-458', $wrapper);
+        self::assertStringContainsString('buildx\\s+(build|bake|prune)', $helper);
+        self::assertStringContainsString('buildctl(\\s|$)', $helper);
+        $pythonResolution = strpos($wrapper, 'LOCAL_PYTHON="$(command -v python3 || true)"');
+        $remoteExecution = strpos($wrapper, 'REMOTE_OUTPUT="$(ssh');
+        self::assertNotFalse($pythonResolution);
+        self::assertNotFalse($remoteExecution);
+        self::assertLessThan($remoteExecution, $pythonResolution);
+        self::assertStringContainsString('| "$LOCAL_PYTHON" -I -B "$HELPER" validate', $wrapper);
         self::assertStringContainsString('tuple(record) != REPORT_KEYS', $helper);
         self::assertNotFalse(strpos($helper, 'def validate_report('));
     }

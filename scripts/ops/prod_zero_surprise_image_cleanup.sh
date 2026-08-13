@@ -81,6 +81,12 @@ fi
     printf 'ERROR: ROB-458 runtime is incomplete.\n' >&2
     exit 1
 }
+LOCAL_PYTHON="$(command -v python3 || true)"
+[[ "$LOCAL_PYTHON" == /* && -x "$LOCAL_PYTHON" ]] || {
+    printf 'ERROR: local Python 3 validator is unavailable.\n' >&2
+    exit 1
+}
+readonly LOCAL_PYTHON
 
 printf 'ROB-458 zero-surprise image cleanup\n'
 printf 'target     : %s\n' "$PROD_SSH_TARGET"
@@ -96,7 +102,7 @@ if (( ${#REMOTE_OUTPUT} > 4096 )); then
     exit 2
 fi
 
-if ! printf '%s\n' "$REMOTE_OUTPUT" | /usr/bin/python3 -I -B "$HELPER" validate "$MODE" "$REMOTE_EXIT"; then
+if ! printf '%s\n' "$REMOTE_OUTPUT" | "$LOCAL_PYTHON" -I -B "$HELPER" validate "$MODE" "$REMOTE_EXIT"; then
     printf 'ERROR: ROB-458 response validation failed.\n' >&2
     exit 2
 fi
