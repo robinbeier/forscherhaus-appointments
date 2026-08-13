@@ -14,6 +14,7 @@ SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
 MODE='dry-run'
 CONFIRM_LIVE_WRITE=''
+PREPARE_GLOBAL_LOCK=0
 
 usage() {
     cat <<'USAGE'
@@ -25,7 +26,8 @@ Default mode is read-only and never removes an image.
 
 Options:
   --execute                    Remove only the closed, validated candidate set.
-  --confirm-live-write VALUE   Required with --execute; VALUE must be ROB-458.
+  --prepare-global-lock        Create or attach the exact shared production-change lock.
+  --confirm-live-write VALUE   Required with either live mode; VALUE must be ROB-458.
 
 Limits:
   - at most 32 exact Zero-Surprise projects and 64 exact images per run;
@@ -47,7 +49,20 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --execute)
+            [[ "$PREPARE_GLOBAL_LOCK" == '0' ]] || {
+                printf 'ERROR: --execute and --prepare-global-lock are mutually exclusive.\n' >&2
+                exit 1
+            }
             MODE='execute'
+            shift
+            ;;
+        --prepare-global-lock)
+            [[ "$MODE" == 'dry-run' ]] || {
+                printf 'ERROR: --execute and --prepare-global-lock are mutually exclusive.\n' >&2
+                exit 1
+            }
+            PREPARE_GLOBAL_LOCK=1
+            MODE='prepare-lock'
             shift
             ;;
         --confirm-live-write)
@@ -69,8 +84,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$MODE" == 'execute' && "$CONFIRM_LIVE_WRITE" != 'ROB-458' ]]; then
-    printf 'ERROR: --execute requires --confirm-live-write ROB-458.\n' >&2
+if [[ "$MODE" != 'dry-run' && "$CONFIRM_LIVE_WRITE" != 'ROB-458' ]]; then
+    printf 'ERROR: live modes require --confirm-live-write ROB-458.\n' >&2
     exit 1
 fi
 if [[ "$MODE" == 'dry-run' && -n "$CONFIRM_LIVE_WRITE" ]]; then
@@ -90,7 +105,12 @@ readonly LOCAL_PYTHON
 
 printf 'ROB-458 zero-surprise image cleanup\n'
 printf 'target     : %s\n' "$PROD_SSH_TARGET"
-printf 'mode       : %s\n' "$([[ "$MODE" == 'execute' ]] && printf 'live-write' || printf 'read-only')"
+case "$MODE" in
+    execute) DISPLAY_MODE='live-write' ;;
+    prepare-lock) DISPLAY_MODE='lock-bootstrap' ;;
+    *) DISPLAY_MODE='read-only' ;;
+esac
+printf 'mode       : %s\n' "$DISPLAY_MODE"
 
 set +e
 REMOTE_OUTPUT="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" "/usr/bin/python3 -I -B - '${MODE}'" < "$HELPER")"

@@ -75,6 +75,37 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         }
     }
 
+    public function testGlobalLockBootstrapRequiresExactConfirmationAndUsesDedicatedMode(): void
+    {
+        $workspace = $this->workspace();
+        try {
+            $environment = $this->stubSsh($workspace);
+            foreach (
+                [
+                    ['--prepare-global-lock'],
+                    ['--prepare-global-lock', '--confirm-live-write', 'ROB-449'],
+                    ['--execute', '--prepare-global-lock', '--confirm-live-write', 'ROB-458'],
+                ] as $arguments
+            ) {
+                self::assertSame(1, $this->runWrapper($arguments, $environment)['exit']);
+            }
+            self::assertFileDoesNotExist($environment['ROB458_SSH_LOG']);
+
+            $result = $this->runWrapper(
+                ['--prepare-global-lock', '--confirm-live-write', 'ROB-458'],
+                $environment,
+            );
+            self::assertSame(0, $result['exit'], $result['stderr']);
+            self::assertStringContainsString('mode       : lock-bootstrap', $result['stdout']);
+            self::assertStringContainsString(
+                "/usr/bin/python3 -I -B - 'prepare-lock'",
+                (string) file_get_contents($environment['ROB458_SSH_LOG']),
+            );
+        } finally {
+            $this->removeTree($workspace);
+        }
+    }
+
     public function testWrapperPreservesValidatedRetryableBlock(): void
     {
         $workspace = $this->workspace();
@@ -105,6 +136,33 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
 
         $noncanonical = json_encode($valid, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . "\n";
         self::assertSame(1, $this->validateBytes($noncanonical, 'dry-run', 0)['exit']);
+    }
+
+    public function testValidatorKeepsGlobalLockBootstrapAggregateAndClosed(): void
+    {
+        $prepare = [
+            'schema' => 'zero_surprise_image_cleanup.v1',
+            'mode' => 'prepare-lock',
+            'status' => 'pass',
+            'reason' => null,
+            'project_count' => 0,
+            'candidate_count' => 0,
+            'candidate_virtual_bytes' => 0,
+            'deleted_count' => 0,
+            'free_bytes_before' => null,
+            'free_bytes_after' => null,
+            'freed_bytes' => null,
+            'cap_exceeded' => false,
+            'mutation_performed' => true,
+        ];
+        self::assertSame(0, $this->validate($prepare, 'prepare-lock', 0)['exit']);
+
+        $contradictory = $prepare;
+        $contradictory['project_count'] = 1;
+        self::assertSame(1, $this->validate($contradictory, 'prepare-lock', 0)['exit']);
+        $contradictory = $prepare;
+        $contradictory['free_bytes_before'] = 1;
+        self::assertSame(1, $this->validate($contradictory, 'prepare-lock', 0)['exit']);
     }
 
     public function testContractNeverUsesBroadOrForcedPruneAndKeepsAggregateOutput(): void
@@ -194,12 +252,22 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         bytes="$(wc -c | tr -d ' ')"
         printf '%s\n' "$*" > "${ROB458_SSH_LOG}"
         printf '%s\n' "$bytes" > "${ROB458_STDIN_LOG}"
-        if [[ "$*" == *"'execute'"* ]]; then mode=execute; else mode=dry-run; fi
+        if [[ "$*" == *"'execute'"* ]]; then
+            mode=execute
+        elif [[ "$*" == *"'prepare-lock'"* ]]; then
+            mode=prepare-lock
+        else
+            mode=dry-run
+        fi
         if [[ "${ROB458_SCENARIO}" == blocked ]]; then
             printf '{"schema":"zero_surprise_image_cleanup.v1","mode":"%s","status":"blocked","reason":"global_lock_busy","project_count":0,"candidate_count":0,"candidate_virtual_bytes":0,"deleted_count":0,"free_bytes_before":null,"free_bytes_after":null,"freed_bytes":null,"cap_exceeded":false,"mutation_performed":false}\n' "$mode"
             exit 75
         fi
-        printf '{"schema":"zero_surprise_image_cleanup.v1","mode":"%s","status":"pass","reason":null,"project_count":0,"candidate_count":0,"candidate_virtual_bytes":0,"deleted_count":0,"free_bytes_before":1000,"free_bytes_after":1000,"freed_bytes":0,"cap_exceeded":false,"mutation_performed":false}\n' "$mode"
+        if [[ "$mode" == prepare-lock ]]; then
+            printf '{"schema":"zero_surprise_image_cleanup.v1","mode":"prepare-lock","status":"pass","reason":null,"project_count":0,"candidate_count":0,"candidate_virtual_bytes":0,"deleted_count":0,"free_bytes_before":null,"free_bytes_after":null,"freed_bytes":null,"cap_exceeded":false,"mutation_performed":true}\n'
+        else
+            printf '{"schema":"zero_surprise_image_cleanup.v1","mode":"%s","status":"pass","reason":null,"project_count":0,"candidate_count":0,"candidate_virtual_bytes":0,"deleted_count":0,"free_bytes_before":1000,"free_bytes_after":1000,"freed_bytes":0,"cap_exceeded":false,"mutation_performed":false}\n' "$mode"
+        fi
         BASH;
         file_put_contents($bin . '/ssh', $script . "\n");
         chmod($bin . '/ssh', 0755);
