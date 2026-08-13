@@ -89,7 +89,10 @@ files, and has fixed memory, swap, CPU, and PID limits. Before restore, a
 streaming source-authority parser accepts only the standard table/data subset
 of MariaDB 10.11 single-database dump output: the exact sandbox preamble,
 closed standard session `SET` forms (including the exact save-set-create-restore
-charset sequence around ordinary table definitions), table drop/create, table locks, key
+charset sequence around ordinary table definitions and the exact paired
+save-disable, lock, disable-keys, zero-or-more same-table inserts, enable-keys,
+unlock, commit and restore autocommit sequence),
+table drop/create, table locks, key
 disable/enable, and `INSERT ... VALUES`. Database-selection and database-DDL
 statements are not part of this subset.
 Triggers, routines, events, views, dynamic SQL, alternate engines, partitions,

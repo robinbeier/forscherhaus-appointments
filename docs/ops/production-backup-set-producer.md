@@ -40,12 +40,19 @@ The producer uses only `/usr/bin/mariadb-dump` and the closed single-database
 table/data surface accepted by the ROB-465 parser. It never falls back to
 `mysqldump` and does not include routines, triggers, events, databases,
 external directories or caller-selected options.
+Its fixed `--no-autocommit` option makes the per-table transaction wrapper
+explicit rather than relying on a client-version default.
 The parser accepts only the reviewed MariaDB sandbox preamble spellings,
 including the official form with exactly one trailing space before the line
 ending. It also accepts the exact standard saved-client-charset sequence that
 MariaDB emits around ordinary `CREATE TABLE` definitions: save, set `utf8mb4`,
 create, restore. Missing, reordered or detached steps, added assignments,
 alternate sources and session modifiers remain rejected.
+For table-data blocks it also accepts only MariaDB's exact paired autocommit
+sequence: save and disable autocommit, lock one table, disable its keys, zero
+or more inserts into that same table, enable its keys, unlock, `COMMIT`, then immediate
+restore. A missing, duplicated, reordered, detached or augmented control
+statement remains rejected.
 Additional whitespace and malformed control lines remain rejected.
 
 ## Publication and recovery

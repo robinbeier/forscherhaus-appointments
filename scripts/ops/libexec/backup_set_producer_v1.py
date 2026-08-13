@@ -428,6 +428,7 @@ def stream_dump(target, gzip_mtime, dump_descriptor, dump_identity, config_descr
         '--single-transaction',
         '--quick',
         '--skip-lock-tables',
+        '--no-autocommit',
         '--skip-triggers',
         '--skip-routines',
         '--skip-events',

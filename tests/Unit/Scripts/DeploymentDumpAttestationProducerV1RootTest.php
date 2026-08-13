@@ -43,9 +43,18 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         );
         chmod($this->root . '/last_backup_set.json', 0600);
         $marker =
-            substr($record['backup_set_id'], 0, 4) . '-' . substr($record['backup_set_id'], 4, 2) . '-' .
-            substr($record['backup_set_id'], 6, 2) . 'T' . substr($record['backup_set_id'], 9, 2) . ':' .
-            substr($record['backup_set_id'], 11, 2) . ':' . substr($record['backup_set_id'], 13, 2) . "Z\n";
+            substr($record['backup_set_id'], 0, 4) .
+            '-' .
+            substr($record['backup_set_id'], 4, 2) .
+            '-' .
+            substr($record['backup_set_id'], 6, 2) .
+            'T' .
+            substr($record['backup_set_id'], 9, 2) .
+            ':' .
+            substr($record['backup_set_id'], 11, 2) .
+            ':' .
+            substr($record['backup_set_id'], 13, 2) .
+            "Z\n";
         file_put_contents($this->root . '/last_backup_success.utc', $marker);
         chmod($this->root . '/last_backup_success.utc', 0600);
 
@@ -362,9 +371,12 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
             DROP TABLE IF EXISTS `ea_x`;
             /*!40101 SET CHARACTER_SET_CLIENT=utf8mb4 */;
             CREATE TABLE `ea_x` (`v` text) ENGINE=InnoDB;
+            SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
             LOCK TABLES `ea_x` WRITE; ALTER TABLE `ea_x` DISABLE KEYS;
             INSERT INTO `ea_x` VALUES ('PREPARE x','CREATE TRIGGER'),('quote\\'d','x');
-            ALTER TABLE `ea_x` ENABLE KEYS; UNLOCK TABLES;'''
+            ALTER TABLE `ea_x` ENABLE KEYS; UNLOCK TABLES;
+            COMMIT;
+            SET AUTOCOMMIT=@OLD_AUTOCOMMIT;'''
             inspector = module.DumpSqlInspector()
             for offset in range(0, len(valid), 3):
                 inspector.feed(valid[offset:offset + 3])

@@ -106,6 +106,12 @@ class DumpSqlInspector:
         self.prefix_checked = False
         self.sandbox_seen = False
         self.table_charset_wrapper = None
+        self.autocommit_wrapper = None
+        self.autocommit_table = None
+        self.statement_identifier = None
+        self.statement_identifier_count = 0
+        self.statement_symbols = bytearray()
+        self.statement_symbol_count = 0
 
     def feed(self, data):
         for value in data:
@@ -141,7 +147,7 @@ class DumpSqlInspector:
             reject()
         self._emit_word()
         self._finish_statement()
-        if self.table_charset_wrapper is not None:
+        if self.table_charset_wrapper is not None or self.autocommit_wrapper is not None:
             reject()
         return self.create_tables
 
@@ -190,6 +196,8 @@ class DumpSqlInspector:
                 continue
             if self.state in ('single', 'double', 'backtick'):
                 delimiter = {'single': 39, 'double': 34, 'backtick': 96}[self.state]
+                if self.state == 'backtick' and value == 92:
+                    reject()
                 if self.escaped:
                     self.escaped = False
                     self.quote_other = True
@@ -199,6 +207,10 @@ class DumpSqlInspector:
                     return
                 if value == delimiter:
                     self.state = self.state + '_end'
+                elif self.state == 'backtick':
+                    if len(self.quote_value) >= 1024:
+                        reject()
+                    self.quote_value.append(value)
                 elif self.state != 'backtick':
                     if value > 126 or value < 32 or len(self.quote_value) >= 64:
                         self.quote_other = True
@@ -211,8 +223,15 @@ class DumpSqlInspector:
                 if value == delimiter:
                     self.state = base
                     self.quote_other = True
+                    if base == 'backtick':
+                        if len(self.quote_value) >= 1024:
+                            reject()
+                        self.quote_value.append(value)
                     return
                 if base == 'backtick':
+                    self.statement_identifier_count += 1
+                    if self.statement_identifier_count == 1:
+                        self.statement_identifier = hashlib.sha256(bytes(self.quote_value)).digest()
                     self._record_word(b'IDENT')
                 else:
                     self._record_word(b'STR:OTHER' if self.quote_other else b'STR:' + bytes(self.quote_value).upper())
@@ -222,18 +241,22 @@ class DumpSqlInspector:
                 if value == 45:
                     self.state = 'dash2'
                     return
+                self._record_symbol(45)
                 self.state = 'normal'
                 continue
             if self.state == 'dash2':
                 if value <= 32:
                     self.state = 'line_comment'
                     return
+                self._record_symbol(45)
+                self._record_symbol(45)
                 self.state = 'normal'
                 continue
             if self.state == 'slash1':
                 if value == 42:
                     self.state = 'comment_probe'
                     return
+                self._record_symbol(47)
                 self.state = 'normal'
                 continue
 
@@ -259,6 +282,7 @@ class DumpSqlInspector:
                 return
             if value == 96:
                 self._emit_word()
+                self.quote_value.clear()
                 self.state = 'backtick'
                 return
             if value == 35:
@@ -286,6 +310,8 @@ class DumpSqlInspector:
             self._emit_word()
             if value == 92 or value > 126 or (value < 32 and value not in (9, 10, 13)):
                 reject()
+            if value not in (9, 10, 13, 32):
+                self._record_symbol(value)
             return
 
     def _emit_word(self):
@@ -313,6 +339,11 @@ class DumpSqlInspector:
         elif word == b'ENGINE':
             self.expect_engine = True
 
+    def _record_symbol(self, value):
+        self.statement_symbol_count += 1
+        if len(self.statement_symbols) < 8:
+            self.statement_symbols.append(value)
+
     def _finish_statement(self):
         if not self.words and self.word_count == 0:
             return
@@ -325,11 +356,25 @@ class DumpSqlInspector:
         save_charset = words == [b'SET', b'@SAVED_CS_CLIENT', b'@@CHARACTER_SET_CLIENT']
         set_table_charset = words == [b'SET', b'CHARACTER_SET_CLIENT', b'UTF8MB4']
         restore_charset = words == [b'SET', b'CHARACTER_SET_CLIENT', b'@SAVED_CS_CLIENT']
+        save_autocommit = words == [
+            b'SET', b'@OLD_AUTOCOMMIT', b'@@AUTOCOMMIT', b'@@AUTOCOMMIT', b'0',
+        ]
+        restore_autocommit = words == [b'SET', b'AUTOCOMMIT', b'@OLD_AUTOCOMMIT']
+        data_alter = first == b'ALTER' and second == b'TABLE' and words[3:] in (
+            [b'DISABLE', b'KEYS'], [b'ENABLE', b'KEYS'],
+        )
+        data_insert = first == b'INSERT' and second == b'INTO'
+        data_lock = first == b'LOCK' and second == b'TABLES'
+        data_unlock = first == b'UNLOCK' and second == b'TABLES'
+        if self.autocommit_wrapper is None and (data_lock or data_unlock or data_alter or data_insert):
+            reject()
         if (
             (self.table_charset_wrapper == 'saved' and not set_table_charset) or
             (self.table_charset_wrapper == 'charset' and not (first == b'CREATE' and second == b'TABLE')) or
             (self.table_charset_wrapper == 'created' and not restore_charset)
         ):
+            reject()
+        if self.autocommit_wrapper == 'committed' and not restore_autocommit:
             reject()
         allowed = False
         if first == b'SET':
@@ -360,9 +405,24 @@ class DumpSqlInspector:
                 [b'SET', b'NOTE_VERBOSITY', b'@OLD_NOTE_VERBOSITY'],
             )
             allowed = (
-                (words in allowed_shapes or save_charset or restore_charset) and
+                (words in allowed_shapes or save_charset or restore_charset or
+                 save_autocommit or restore_autocommit) and
                 self.word_count == len(words)
             )
+            if words[:2] == [b'SET', b'NAMES']:
+                expected_symbols = b''
+            elif save_autocommit or words in (
+                [b'SET', b'@OLD_UNIQUE_CHECKS', b'@@UNIQUE_CHECKS', b'UNIQUE_CHECKS', b'0'],
+                [b'SET', b'@OLD_FOREIGN_KEY_CHECKS', b'@@FOREIGN_KEY_CHECKS', b'FOREIGN_KEY_CHECKS', b'0'],
+                [b'SET', b'@OLD_SQL_MODE', b'@@SQL_MODE', b'SQL_MODE', b'STR:NO_AUTO_VALUE_ON_ZERO'],
+                [b'SET', b'@OLD_SQL_NOTES', b'@@SQL_NOTES', b'SQL_NOTES', b'0'],
+                [b'SET', b'@OLD_NOTE_VERBOSITY', b'@@NOTE_VERBOSITY', b'NOTE_VERBOSITY', b'0'],
+            ):
+                expected_symbols = b'=,='
+            else:
+                expected_symbols = b'='
+            allowed = allowed and self.statement_symbol_count == len(expected_symbols)
+            allowed = allowed and bytes(self.statement_symbols) == expected_symbols
         elif first == b'START':
             allowed = words == [b'START', b'TRANSACTION'] and self.word_count == 2
         elif first == b'COMMIT':
@@ -379,9 +439,9 @@ class DumpSqlInspector:
                 if self.create_tables > MAX_CREATE_TABLES:
                     reject()
         elif first == b'LOCK' and second == b'TABLES':
-            allowed = b'WRITE' in self.flags
+            allowed = words == [b'LOCK', b'TABLES', b'IDENT', b'WRITE'] and self.word_count == 4
         elif first == b'UNLOCK' and second == b'TABLES':
-            allowed = True
+            allowed = words == [b'UNLOCK', b'TABLES'] and self.word_count == 2
         elif first == b'ALTER' and second == b'TABLE':
             allowed = self.word_count == 5 and words[2] == b'IDENT' and words[3:] in (
                 [b'DISABLE', b'KEYS'], [b'ENABLE', b'KEYS'],
@@ -403,12 +463,55 @@ class DumpSqlInspector:
             if self.table_charset_wrapper != 'created':
                 reject()
             self.table_charset_wrapper = None
+        if self.autocommit_wrapper == 'open':
+            if not (first == b'LOCK' and second == b'TABLES' and
+                    self.statement_identifier_count == 1):
+                reject()
+            self.autocommit_table = self.statement_identifier
+            self.autocommit_wrapper = 'locked'
+        elif self.autocommit_wrapper == 'locked':
+            if not (first == b'ALTER' and second == b'TABLE' and
+                    words[3:] == [b'DISABLE', b'KEYS'] and self.statement_identifier_count == 1 and
+                    self.statement_identifier == self.autocommit_table):
+                reject()
+            self.autocommit_wrapper = 'keys_disabled'
+        elif self.autocommit_wrapper == 'keys_disabled':
+            if first == b'INSERT' and second == b'INTO':
+                if (self.statement_identifier_count != 1 or
+                        self.statement_identifier != self.autocommit_table):
+                    reject()
+            elif (first == b'ALTER' and second == b'TABLE' and
+                  words[3:] == [b'ENABLE', b'KEYS'] and self.statement_identifier_count == 1 and
+                  self.statement_identifier == self.autocommit_table):
+                self.autocommit_wrapper = 'keys_enabled'
+            else:
+                reject()
+        elif self.autocommit_wrapper == 'keys_enabled':
+            if not data_unlock:
+                reject()
+            self.autocommit_wrapper = 'unlocked'
+        elif self.autocommit_wrapper == 'unlocked':
+            if first != b'COMMIT':
+                reject()
+            self.autocommit_wrapper = 'committed'
+        elif save_autocommit:
+            self.autocommit_wrapper = 'open'
+            self.autocommit_table = None
+        elif restore_autocommit:
+            if self.autocommit_wrapper != 'committed':
+                reject()
+            self.autocommit_wrapper = None
+            self.autocommit_table = None
         self.words = []
         self.word_count = 0
         self.last_words = []
         self.flags = set()
         self.engine_values = []
         self.expect_engine = False
+        self.statement_identifier = None
+        self.statement_identifier_count = 0
+        self.statement_symbols.clear()
+        self.statement_symbol_count = 0
 
 
 def reject(code=70):
