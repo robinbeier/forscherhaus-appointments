@@ -366,6 +366,16 @@ def _stable_compose_supervisor(proc_fd: int, entry: str) -> bool:
     return state == "S" and age_seconds >= MIN_STABLE_COMPOSE_UP_AGE_SECONDS
 
 
+def _actual_compose_executable(proc_fd: int, entry: str) -> bool:
+    try:
+        executable = os.readlink(entry + "/exe", dir_fd=proc_fd)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise CleanupError("activity_state_unknown") from error
+    return executable in (DOCKER, "/usr/bin/docker-compose")
+
+
 def assert_idle(proc_root: str = "/proc") -> None:
     try:
         proc_fd = os.open(proc_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
@@ -404,6 +414,8 @@ def assert_idle(proc_root: str = "/proc") -> None:
             if command and any(pattern.search(command) for pattern in ACTIVITY_PATTERNS):
                 raise CleanupError("active_production_work", 75)
             if command and any(pattern.search(command) for pattern in COMPOSE_UP_PATTERNS):
+                if not _actual_compose_executable(proc_fd, entry.name):
+                    raise CleanupError("active_production_work", 75)
                 if not any(pattern.search(command) for pattern in COMPOSE_DETACHED_UP_PATTERNS):
                     raise CleanupError("active_production_work", 75)
                 if not _stable_compose_supervisor(proc_fd, entry.name):
