@@ -16,9 +16,10 @@ enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
-- Workload contract v9 starts at cohort epoch `2026-08-13T10:45:00Z`, when the
-  blocking Linux-root matrix added the ROB-465 dump-attestation filesystem and
-  pinned-image restore contract alongside the existing retention suites.
+- Workload contract v10 starts at cohort epoch `2026-08-13T12:47:00Z`, when the
+  blocking Linux-root matrix added the ROB-458 production image-cleanup lock
+  and trusted-Docker-executable contract alongside the existing retention and
+  dump-attestation suites.
   Runs before this instant are excluded as
   `workload_contract_mismatch` even when their deep-runtime flags happen to
   match.
@@ -40,9 +41,9 @@ and fully observed phase rankings in
 
 ## Versioned Workload Contract
 
-Workload contract v9 pins the canonicalized definitions of every job in
+Workload contract v10 pins the canonicalized definitions of every job in
 `.github/workflows/ci.yml` to
-`sha256:ec995c2544211ad01f8331f0b149552ce7f6d51788f6de3cf6325af1dc14a62b`.
+`sha256:193c3acb195118f109c50f21fad8dd97552f223607416e2acaa17e615cf361af`.
 The workflow contract test also requires every job to have an explicit expected
 `success` or `skipped` conclusion in the comparison profile. This covers the
 always-active `build-test`, JavaScript lint, PHPStan, typed request DTO, and both

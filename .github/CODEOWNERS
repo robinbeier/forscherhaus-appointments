@@ -155,9 +155,11 @@
 /scripts/ops/lib/DeploymentContractV1.php @robinbeier
 /scripts/ops/lib/DeploymentHostRunnerContractV1.php @robinbeier
 /scripts/ops/lib/TrafficGateV1.php @robinbeier
+/scripts/ops/libexec/zero_surprise_image_cleanup_v1.py @robinbeier
 /scripts/ops/prod_customers_ui_smoke.sh @robinbeier
 /scripts/ops/prod_provider_ui_smoke.sh @robinbeier
 /scripts/ops/prod_traffic_gate.sh @robinbeier
+/scripts/ops/prod_zero_surprise_image_cleanup.sh @robinbeier
 /scripts/ops/provider_ui_smoke_principal.sh @robinbeier
 /scripts/ops/traffic_gate_v1.php @robinbeier
 /scripts/ops/validate_deployment_contract_v1.php @robinbeier

@@ -140,6 +140,12 @@ Repository delivery does not activate or run a production cleanup. Any first
 production execution remains a separate live-write gate with the normal
 read-only inventory and post-change validation.
 
+Legacy images created before this teardown contract are handled only through
+the separate bounded ROB-458 operator path in
+[`docs/ops/production-zero-surprise-image-cleanup.md`](ops/production-zero-surprise-image-cleanup.md).
+That path is read-only by default, never patches the active release, and does
+not weaken the per-replay cleanup above.
+
 ## Deploy flow
 
 Before a deploy even reaches the zero-surprise replay, the release process now

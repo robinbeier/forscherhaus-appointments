@@ -113,6 +113,10 @@ Script inventory:
   read-only mode by default and exposes a separately confirmed, age- and
   storage-bounded builder-cache-only execute gate; see
   `docs/ops/production-build-cache-retention.md`
+- `prod_zero_surprise_image_cleanup.sh` provides the ROB-458 read-only/default
+  and separately confirmed bounded compatibility cleanup for legacy replay
+  images without patching the active release; see
+  `docs/ops/production-zero-surprise-image-cleanup.md`
 - `install_prod_agent_readme.sh` installs the server-local agent orientation file in explicit execute mode
 - `lib/prod_sensitive_paths.sh` checks fixed sensitive web path classes without
   printing URLs, file contents, tokens, session data, or discovered filenames
