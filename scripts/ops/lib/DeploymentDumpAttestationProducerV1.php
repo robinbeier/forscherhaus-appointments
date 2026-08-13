@@ -95,12 +95,11 @@ final class DeploymentDumpAttestationProducerV1
         if (
             !is_array($record) ||
             ($record['dump']['sha256'] ?? null) !== $response['dump_sha256'] ||
-            !is_string($recordCreated) ||
-            ($expectedCreated !== null && $recordCreated !== $expectedCreated)
+            !is_string($recordCreated)
         ) {
             throw new RuntimeException('dump attestation helper authority is contradictory');
         }
-        $created = self::createdAtFromRecord($recordCreated);
+        $created = self::createdAtFromRecord($recordCreated, $expectedCreated);
         $canonical = DeploymentEvidenceAuthorityV1::validateProducedDumpAttestation(
             $bytes,
             $response['dump_sha256'],
@@ -119,14 +118,17 @@ final class DeploymentDumpAttestationProducerV1
         ];
     }
 
-    private static function createdAtFromRecord(string $createdAt): string
+    private static function createdAtFromRecord(string $createdAt, ?string $expectedCreated): string
     {
         if (preg_match('/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/D', $createdAt) !== 1) {
             throw new RuntimeException('dump attestation created time is invalid');
         }
         $backupSetId = str_replace(['-', ':'], '', $createdAt);
-        $validated = self::createdAt($backupSetId);
-        if (!hash_equals($createdAt, $validated)) {
+        $validated = self::createdAtWithoutFreshness($backupSetId);
+        if (
+            !hash_equals($createdAt, $validated) ||
+            ($expectedCreated !== null && !hash_equals($expectedCreated, $validated))
+        ) {
             throw new RuntimeException('dump attestation created time is contradictory');
         }
         return $validated;
@@ -134,11 +136,13 @@ final class DeploymentDumpAttestationProducerV1
 
     private static function createdAt(string $backupSetId): string
     {
-        if (preg_match('/^20[0-9]{6}T[0-9]{6}Z$/D', $backupSetId) !== 1) {
-            throw new RuntimeException('backup-set ID is invalid');
-        }
-        $value = \DateTimeImmutable::createFromFormat('!Ymd\\THis\\Z', $backupSetId, new \DateTimeZone('UTC'));
-        if ($value === false || $value->format('Ymd\\THis\\Z') !== $backupSetId) {
+        $createdAt = self::createdAtWithoutFreshness($backupSetId);
+        $value = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d\\TH:i:s\\Z',
+            $createdAt,
+            new \DateTimeZone('UTC'),
+        );
+        if ($value === false) {
             throw new RuntimeException('backup-set ID is invalid');
         }
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
@@ -147,6 +151,18 @@ final class DeploymentDumpAttestationProducerV1
         }
         if ($now->getTimestamp() - $value->getTimestamp() >= 14_400) {
             throw new RuntimeException('backup-set ID is stale');
+        }
+        return $createdAt;
+    }
+
+    private static function createdAtWithoutFreshness(string $backupSetId): string
+    {
+        if (preg_match('/^20[0-9]{6}T[0-9]{6}Z$/D', $backupSetId) !== 1) {
+            throw new RuntimeException('backup-set ID is invalid');
+        }
+        $value = \DateTimeImmutable::createFromFormat('!Ymd\\THis\\Z', $backupSetId, new \DateTimeZone('UTC'));
+        if ($value === false || $value->format('Ymd\\THis\\Z') !== $backupSetId) {
+            throw new RuntimeException('backup-set ID is invalid');
         }
         return $value->format('Y-m-d\\TH:i:s\\Z');
     }

@@ -83,6 +83,72 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         }
     }
 
+    public function testPostHelperValidationAcceptsAgedCompletionOnlyForTheAdmittedIdentity(): void
+    {
+        $createdAt = '2020-01-01T00:00:00Z';
+        $backupSetId = '20200101T000000Z';
+        $recordIdentity = new \ReflectionMethod(DeploymentDumpAttestationProducerV1::class, 'createdAtFromRecord');
+        self::assertSame($createdAt, $recordIdentity->invoke(null, $createdAt, $createdAt));
+
+        try {
+            $recordIdentity->invoke(null, $createdAt, '2020-01-01T00:00:01Z');
+            self::fail('Post-helper created_at accepted a different admitted backup-set identity.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $attestation = [
+            'schema' => DeploymentEvidenceAuthorityV1::DUMP_ATTESTATION_SCHEMA,
+            'dump' => [
+                'sha256' => str_repeat('a', 64),
+                'size_bytes' => 1_000_000,
+                'uncompressed_size_bytes' => 4_000_000,
+                'created_at_utc' => $createdAt,
+            ],
+            'verification' => [
+                'method' => 'mariadb_10_11_isolated_restore_v1',
+                'image' => DeploymentEvidenceAuthorityV1::DUMP_RESTORE_IMAGE,
+                'sha256_verified' => true,
+                'gzip_verified' => true,
+                'restore_verified' => true,
+                'restored_datadir_allocated_bytes' => 8_000_000,
+                'restored_datadir_inode_count' => 256,
+                'restored_at_utc' => '2020-01-01T04:00:01Z',
+            ],
+            'attested_at_utc' => '2020-01-01T04:00:02Z',
+        ];
+        $bytes = DeploymentEvidenceAuthorityV1::encodeFile($attestation);
+        $validated = DeploymentEvidenceAuthorityV1::validateProducedDumpAttestation(
+            $bytes,
+            str_repeat('a', 64),
+            1_000_000,
+            $createdAt,
+            '2020-01-01T04:00:03Z',
+        );
+        self::assertSame($createdAt, $validated['dump']['created_at_utc']);
+
+        try {
+            DeploymentEvidenceAuthorityV1::validateProducedDumpAttestation(
+                $bytes,
+                str_repeat('a', 64),
+                1_000_000,
+                '2020-01-01T00:00:01Z',
+                '2020-01-01T04:00:03Z',
+            );
+            self::fail('Protected producer validation accepted a different created_at identity.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+
+        $admission = new \ReflectionMethod(DeploymentDumpAttestationProducerV1::class, 'createdAt');
+        try {
+            $admission->invoke(null, $backupSetId);
+            self::fail('Initial explicit-ID admission accepted a stale backup set.');
+        } catch (RuntimeException) {
+            self::addToAssertionCount(1);
+        }
+    }
+
     public function testBusyHelperHasDedicatedRetryableExceptionType(): void
     {
         self::assertTrue(is_subclass_of(DeploymentDumpAttestationBusyV1::class, RuntimeException::class));
