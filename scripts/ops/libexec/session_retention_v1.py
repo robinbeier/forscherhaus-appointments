@@ -11,6 +11,7 @@ import sys
 
 
 SCHEMA = 'prod_session_retention.v1'
+NORMALIZATION_SCHEMA = 'prod_session_mode_normalization.v1'
 MARKER_SCHEMA = 'prod_session_retention_marker.v1'
 MARKER_STATUS_SCHEMA = 'prod_session_retention_marker_status.v1'
 SESSION_ROOT = '/var/www/html/easyappointments/storage/sessions'
@@ -21,6 +22,7 @@ MARKER_LEAF = 'last-success.json'
 MARKER_MAX_BYTES = 4096
 MIN_AGE_SECONDS = 86_400
 MAX_DELETE = 10_000
+MAX_NORMALIZE = 10_000
 MAX_SCAN = 1_000_000
 MAX_SESSION_ID_BYTES = 256
 
@@ -35,6 +37,12 @@ class RetentionError(Exception):
 def emit(payload):
     sys.stdout.write(json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n')
     sys.stdout.flush()
+
+
+def invocation_schema():
+    if len(sys.argv) >= 2 and sys.argv[1] == 'normalize-modes':
+        return NORMALIZATION_SCHEMA
+    return SCHEMA
 
 
 def reject(reason='rejected', code=70):
@@ -63,6 +71,19 @@ def file_identity(value):
         value.st_size,
         value.st_mtime_ns,
         value.st_ctime_ns,
+    )
+
+
+def mode_change_identity(value):
+    return (
+        value.st_dev,
+        value.st_ino,
+        stat.S_IFMT(value.st_mode),
+        value.st_uid,
+        value.st_gid,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
     )
 
 
@@ -188,6 +209,17 @@ def assert_session_file(metadata, web_uid, web_gid):
         reject('unsafe_session_entry')
 
 
+def assert_normalizable_session_file(metadata, web_uid, web_gid):
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != web_uid
+        or metadata.st_gid != web_gid
+        or stat.S_IMODE(metadata.st_mode) not in {0o600, 0o644}
+        or metadata.st_nlink != 1
+    ):
+        reject('unsafe_session_entry')
+
+
 def scan_sessions(directory, web_uid, web_gid, cutoff_ns):
     names = os.listdir(directory)
     if len(names) > MAX_SCAN:
@@ -223,6 +255,39 @@ def scan_sessions(directory, web_uid, web_gid, cutoff_ns):
         'newer_count': newer_count,
         'scanned_count': len(names),
         'valid_count': valid_count,
+    }
+
+
+def scan_session_modes(directory, web_uid, web_gid):
+    names = os.listdir(directory)
+    if len(names) > MAX_SCAN:
+        reject('scan_limit_exceeded')
+
+    foreign_count = 0
+    already_secure_count = 0
+    candidates = []
+    for name in names:
+        if not valid_session_name(name):
+            foreign_count += 1
+            continue
+        try:
+            metadata = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        assert_normalizable_session_file(metadata, web_uid, web_gid)
+        if stat.S_IMODE(metadata.st_mode) == 0o600:
+            already_secure_count += 1
+        else:
+            candidates.append((name, file_identity(metadata)))
+
+    candidates.sort(key=lambda value: value[0])
+    return {
+        'already_secure_count': already_secure_count,
+        'candidate_records': candidates,
+        'foreign_count': foreign_count,
+        'legacy_count': len(candidates),
+        'scanned_count': len(names),
+        'valid_count': already_secure_count + len(candidates),
     }
 
 
@@ -462,6 +527,153 @@ def inspect_candidate(directory, record, web_uid, web_gid, cutoff_ns, delete):
         os.close(descriptor)
 
 
+def inspect_mode_candidate(directory, record, web_uid, web_gid, normalize):
+    name, expected = record
+    try:
+        before = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        descriptor = os.open(
+            name,
+            (os.O_RDWR if normalize else os.O_RDONLY) | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=directory,
+        )
+    except FileNotFoundError:
+        return 'changed'
+    try:
+        opened = os.fstat(descriptor)
+        assert_normalizable_session_file(opened, web_uid, web_gid)
+        if file_identity(before) != file_identity(opened) or file_identity(opened) != expected:
+            return 'changed'
+        if stat.S_IMODE(opened.st_mode) != 0o644:
+            return 'changed'
+        if not lock_nonblocking(descriptor):
+            return 'locked'
+        locked = os.fstat(descriptor)
+        try:
+            current = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            return 'changed'
+        if file_identity(locked) != file_identity(current) or file_identity(locked) != expected:
+            return 'changed'
+        if not normalize:
+            return 'eligible'
+
+        unchanged = mode_change_identity(locked)
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+        after = os.fstat(descriptor)
+        try:
+            post = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            reject('session_entry_changed', 75)
+        if (
+            mode_change_identity(after) != unchanged
+            or mode_change_identity(post) != unchanged
+            or file_identity(after) != file_identity(post)
+            or stat.S_IMODE(after.st_mode) != 0o600
+        ):
+            reject('session_entry_changed', 75)
+        return 'normalized'
+    finally:
+        os.close(descriptor)
+
+
+def normalization_payload(mode, snapshot, locked, changed, normalized, remaining):
+    legacy_before = snapshot['legacy_count']
+    if mode == 'dry-run':
+        status = 'pass' if legacy_before == 0 else 'required'
+    else:
+        status = 'pass' if remaining == 0 else 'partial'
+    return {
+        'already_secure_count': snapshot['already_secure_count'],
+        'cap_exceeded': legacy_before > MAX_NORMALIZE,
+        'changed_count': changed,
+        'foreign_count': snapshot['foreign_count'],
+        'legacy_before_count': legacy_before,
+        'locked_count': locked,
+        'max_normalize': MAX_NORMALIZE,
+        'mode': mode,
+        'mutation_performed': normalized > 0,
+        'normalized_count': normalized,
+        'remaining_legacy_count': remaining,
+        'scanned_count': snapshot['scanned_count'],
+        'schema': NORMALIZATION_SCHEMA,
+        'status': status,
+        'valid_count': snapshot['valid_count'],
+        'would_normalize_count': min(max(legacy_before - locked - changed, 0), MAX_NORMALIZE),
+    }
+
+
+def normalize_modes_dry_run():
+    directory, web_uid, web_gid = open_session_directory()
+    try:
+        snapshot = scan_session_modes(directory, web_uid, web_gid)
+        locked = 0
+        changed = 0
+        for record in snapshot['candidate_records']:
+            disposition = inspect_mode_candidate(directory, record, web_uid, web_gid, False)
+            if disposition == 'locked':
+                locked += 1
+            elif disposition == 'changed':
+                changed += 1
+        emit(normalization_payload('dry-run', snapshot, locked, changed, 0, snapshot['legacy_count']))
+    finally:
+        os.close(directory)
+
+
+def normalize_modes_execute():
+    state = None
+    global_lock = None
+    directory = None
+    try:
+        global_lock = open_global_lock()
+        if activity_count() != 0:
+            reject('active_production_work', 75)
+        state = prepare_state_directory()
+        try:
+            fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            reject('cleanup_lock_busy', 75)
+
+        directory, web_uid, web_gid = open_session_directory()
+        snapshot = scan_session_modes(directory, web_uid, web_gid)
+        if activity_count() != 0:
+            reject('active_production_work', 75)
+
+        normalized = 0
+        locked = 0
+        changed = 0
+        for index, record in enumerate(snapshot['candidate_records'][:MAX_NORMALIZE]):
+            if index > 0 and index % 1000 == 0 and activity_count() != 0:
+                reject('active_production_work', 75)
+            disposition = inspect_mode_candidate(directory, record, web_uid, web_gid, True)
+            if disposition == 'normalized':
+                normalized += 1
+            elif disposition == 'locked':
+                locked += 1
+            else:
+                changed += 1
+
+        final_snapshot = scan_session_modes(directory, web_uid, web_gid)
+        result = normalization_payload(
+            'execute',
+            snapshot,
+            locked,
+            changed,
+            normalized,
+            final_snapshot['legacy_count'],
+        )
+        emit(result)
+        if final_snapshot['legacy_count'] != 0:
+            raise SystemExit(75)
+    finally:
+        if directory is not None:
+            os.close(directory)
+        if global_lock is not None:
+            os.close(global_lock)
+        if state is not None:
+            os.close(state)
+
+
 def dry_run():
     directory, web_uid, web_gid = open_session_directory()
     try:
@@ -646,6 +858,14 @@ def marker_status(max_age_seconds):
 def main():
     if os.name != 'posix' or os.geteuid() != 0:
         reject('root_required')
+    if len(sys.argv) >= 2 and sys.argv[1] == 'normalize-modes':
+        if len(sys.argv) == 3 and sys.argv[2] == 'dry-run':
+            normalize_modes_dry_run()
+            return
+        if len(sys.argv) == 3 and sys.argv[2] == 'execute':
+            normalize_modes_execute()
+            return
+        reject('usage', 64)
     if len(sys.argv) == 2 and sys.argv[1] == 'dry-run':
         dry_run()
         return
@@ -663,8 +883,8 @@ try:
 except SystemExit:
     raise
 except RetentionError as error:
-    emit({'reason': error.reason, 'schema': SCHEMA, 'status': 'blocked'})
+    emit({'reason': error.reason, 'schema': invocation_schema(), 'status': 'blocked'})
     raise SystemExit(error.code)
 except (OSError, TypeError, ValueError):
-    emit({'reason': 'internal_rejection', 'schema': SCHEMA, 'status': 'blocked'})
+    emit({'reason': 'internal_rejection', 'schema': invocation_schema(), 'status': 'blocked'})
     raise SystemExit(70)
