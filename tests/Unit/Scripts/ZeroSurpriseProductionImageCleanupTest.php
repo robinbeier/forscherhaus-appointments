@@ -178,6 +178,7 @@ final class ZeroSurpriseProductionImageCleanupTest extends TestCase
         self::assertStringContainsString('--confirm-live-write ROB-458', $wrapper);
         self::assertStringContainsString('buildx\\s+(build|bake|prune)', $helper);
         self::assertStringContainsString('buildctl(\\s|$)', $helper);
+        self::assertStringContainsString('compose\\b.*\\s(build|run|watch)', $helper);
         self::assertStringContainsString('compose\\b.*\\sup\\b.*(^|\\s)--build', $helper);
         self::assertStringContainsString('--watch(=\\S+)?|-[A-Za-z]*w[A-Za-z]*', $helper);
         self::assertStringContainsString('MIN_STABLE_COMPOSE_UP_AGE_SECONDS = 86_400', $helper);

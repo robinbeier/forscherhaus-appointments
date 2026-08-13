@@ -202,6 +202,8 @@ class CleanupEngineTest(unittest.TestCase):
             b"/usr/bin/buildctl\0build\0",
             b"/usr/bin/docker\0compose\0-f\0compose.yml\0build\0",
             b"/usr/bin/docker-compose\0run\0--rm\0worker\0",
+            b"/usr/bin/docker\0compose\0watch\0",
+            b"/usr/bin/docker-compose\0watch\0",
             b"/usr/bin/docker\0compose\0up\0--build\0--detach\0",
             b"/usr/bin/docker-compose\0up\0-d\0--build\0",
             b"/usr/bin/docker\0compose\0up\0--build=true\0",
