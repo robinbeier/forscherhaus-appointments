@@ -78,6 +78,46 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString("'sha256':", $this->helper);
     }
 
+    public function testEachPathCapturesItsClockOnlyAfterPotentiallyBlockingValidation(): void
+    {
+        $main = substr($this->helper, (int) strpos($this->helper, "def main():"));
+        $attach = substr(
+            $this->helper,
+            (int) strpos($this->helper, 'def attach_unmarked_set'),
+            (int) strpos($this->helper, "def main():") -
+                (int) strpos($this->helper, 'def attach_unmarked_set'),
+        );
+        $privateLock = strpos($main, 'private_lock = open_lock');
+        $activityGate = strpos($main, 'assert_activity_gate(orchestrator)');
+        $reconcile = strpos($main, 'reconcile_temporary_files(backups)');
+        $marker = strpos($main, 'expected_marker = stable_marker(backups)');
+        $attachCall = strpos($main, 'attach_unmarked_set(backups, expected_marker, nonce)');
+        $freshClock = strpos($main, 'observed_at = utc_now()');
+        $validated = strpos($attach, 'validate_backup_set(backups, backup_id)');
+        $recoveryClock = strpos($attach, 'observed_at = utc_now()');
+        $freshness = strpos($attach, 'require_recoverable_candidate_fresh(backup_id, observed_at)');
+        $handoff = strpos($attach, 'publish_handoff(backups, backup_id');
+
+        foreach (
+            [$privateLock, $activityGate, $reconcile, $marker, $attachCall, $freshClock,
+                $validated, $recoveryClock, $freshness, $handoff]
+            as $position
+        ) {
+            self::assertIsInt($position);
+        }
+        self::assertLessThan($activityGate, $privateLock);
+        self::assertLessThan($reconcile, $activityGate);
+        self::assertLessThan($marker, $reconcile);
+        self::assertLessThan($attachCall, $marker);
+        self::assertLessThan($freshClock, $attachCall);
+        self::assertLessThan($recoveryClock, $validated);
+        self::assertLessThan($freshness, $recoveryClock);
+        self::assertLessThan($handoff, $freshness);
+        self::assertSame(1, substr_count($main, 'observed_at = utc_now()'));
+        self::assertSame(1, substr_count($attach, 'observed_at = utc_now()'));
+        self::assertStringContainsString("backup_id = observed_at.strftime('%Y%m%dT%H%M%SZ')", $main);
+    }
+
     public function testDocumentationFreezesManualTcpOnlyOperation(): void
     {
         $docs = (string) file_get_contents($this->root . '/docs/ops/production-backup-set-producer.md');

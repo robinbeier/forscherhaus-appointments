@@ -73,6 +73,11 @@ final class BackupSetProducerRootTest extends TestCase
             module.MARIADB_DUMP = sys.argv[2] + '/mariadb-dump'
             module.DUMP_PATH = module.MARIADB_DUMP
             module.TERMINAL_VALIDATOR = sys.argv[2] + '/unused-validator'
+            if len(sys.argv) == 4:
+                import datetime
+                fixed = datetime.datetime.strptime(sys.argv[3], '%Y-%m-%dT%H:%M:%SZ').replace(
+                    tzinfo=datetime.timezone.utc)
+                module.utc_now = lambda: fixed
             # The containerized PHPUnit process can be reparented by its runtime shim.
             # Parent-death semantics are covered by the shared ROB-465 primitive; this
             # filesystem suite exercises the producer after that entry guard.
@@ -261,6 +266,45 @@ final class BackupSetProducerRootTest extends TestCase
         self::assertFileExists($this->root . '/backups/last_backup_success.utc');
     }
 
+    public function testCrashFinalRecoveryAccepts14399SecondsAndRejects14400WithoutPointerMutation(): void
+    {
+        $created = '2026-08-13T00:00:00Z';
+        $first = $this->runProducer($created);
+        self::assertSame(0, $first['exit'], $first['stderr']);
+        $sets = glob($this->root . '/backups/20*T*Z') ?: [];
+        self::assertCount(1, $sets);
+        $set = $sets[0];
+        $dump = $set . '/db/easyappointments.sql.gz';
+        $setIdentity = lstat($set);
+        self::assertIsArray($setIdentity);
+        $dumpHash = hash_file('sha256', $dump);
+        unlink($this->root . '/backups/last_backup_success.utc');
+        unlink($this->root . '/backups/last_backup_set.json');
+
+        $freshReplay = $this->runProducer('2026-08-13T03:59:59Z');
+        self::assertSame(0, $freshReplay['exit'], $freshReplay['stderr']);
+        self::assertSame('attached', json_decode($freshReplay['stdout'], true, 512, JSON_THROW_ON_ERROR)['status']);
+        self::assertFileExists($this->root . '/backups/last_backup_success.utc');
+        self::assertFileExists($this->root . '/backups/last_backup_set.json');
+        unlink($this->root . '/backups/last_backup_success.utc');
+        unlink($this->root . '/backups/last_backup_set.json');
+
+        $staleReplay = $this->runProducer('2026-08-13T04:00:00Z');
+
+        self::assertSame(70, $staleReplay['exit'], $staleReplay['stderr']);
+        self::assertSame(
+            ['schema' => 'production_backup_set_result.v1', 'status' => 'rejected'],
+            json_decode($staleReplay['stdout'], true, 512, JSON_THROW_ON_ERROR),
+        );
+        self::assertFileDoesNotExist($this->root . '/backups/last_backup_success.utc');
+        self::assertFileDoesNotExist($this->root . '/backups/last_backup_set.json');
+        self::assertCount(1, glob($this->root . '/backups/20*T*Z') ?: []);
+        $setAfter = lstat($set);
+        self::assertIsArray($setAfter);
+        self::assertSame($setIdentity['ino'], $setAfter['ino']);
+        self::assertSame($dumpHash, hash_file('sha256', $dump));
+    }
+
     public function testUnsafeCredentialAndTempObjectsRejectWithoutPublication(): void
     {
         chmod($this->root . '/credentials.cnf', 0640);
@@ -296,10 +340,14 @@ final class BackupSetProducerRootTest extends TestCase
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */
-    private function runProducer(): array
+    private function runProducer(?string $observedAtUtc = null): array
     {
+        $command = ['/usr/bin/python3', '-I', '-B', $this->runner, $this->helper, $this->root];
+        if ($observedAtUtc !== null) {
+            $command[] = $observedAtUtc;
+        }
         $process = proc_open(
-            ['/usr/bin/python3', '-I', '-B', $this->runner, $this->helper, $this->root],
+            $command,
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             null,

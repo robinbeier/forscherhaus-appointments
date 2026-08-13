@@ -40,6 +40,7 @@ MAX_COMPRESSED_BYTES = MAX_COMPRESSED
 MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 100
 MIN_FREE_BYTES = 512 * 1024 * 1024
+MAX_RECOVERY_AGE_SECONDS = 14_400
 DUMP_TIMEOUT_SECONDS = 3600
 READ_CHUNK = 1024 * 1024
 BACKUP_ID = re.compile(r'20[0-9]{6}T[0-9]{6}Z\Z')
@@ -66,6 +67,21 @@ class ProducerError(Exception):
 
 def reject(code=70):
     raise ProducerError(code)
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def require_recoverable_candidate_fresh(backup_id, observed_at):
+    try:
+        created = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(
+            tzinfo=datetime.timezone.utc)
+    except ValueError:
+        reject()
+    age = (observed_at - created).total_seconds()
+    if age < 0 or age >= MAX_RECOVERY_AGE_SECONDS:
+        reject()
 
 
 def emit(status, **values):
@@ -786,6 +802,8 @@ def attach_unmarked_set(backups, current_marker, nonce):
     digest, compressed, unpacked_expected, created = validate_backup_set(backups, backup_id)
     if current_handoff is not None and current_handoff[0]['backup_set_id'] not in {marker_id, backup_id}:
         reject()
+    observed_at = utc_now()
+    require_recoverable_candidate_fresh(backup_id, observed_at)
     publish_handoff(backups, backup_id, digest, compressed, unpacked_expected, nonce, current_handoff)
     publish_marker(backups, created, nonce, current_marker)
     return compressed, unpacked_expected
@@ -797,8 +815,6 @@ def main():
         reject()
     os.umask(0o077)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    backup_id = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    marker_value = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').strftime('%Y-%m-%dT%H:%M:%SZ')
     nonce = os.urandom(16).hex()
     orchestrator = open_absolute_directory(ORCHESTRATOR_ROOT, 0o700)
     backups = None
@@ -824,6 +840,9 @@ def main():
             emit('attached', backup_sets_published=0, compressed_size_bytes=attached[0],
                  uncompressed_size_bytes=attached[1])
             return
+        observed_at = utc_now()
+        backup_id = observed_at.strftime('%Y%m%dT%H%M%SZ')
+        marker_value = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').strftime('%Y-%m-%dT%H:%M:%SZ')
         expected_handoff = stable_handoff(backups, missing_ok=True)
         candidate_marker = datetime.datetime.strptime(marker_value, '%Y-%m-%dT%H:%M:%SZ')
         if expected_marker is not None and expected_marker[0] > candidate_marker:
