@@ -224,6 +224,173 @@ final class SessionRetentionRootTest extends TestCase
         self::assertSame('invalid', $this->decode($this->runHelper('marker-status', '129600'))['status']);
     }
 
+    public function testLegacyModeNormalizationPreservesFileAndDoesNotTouchRetentionMarker(): void
+    {
+        $legacy = $this->session('4', 100, 'sensitive legacy payload');
+        chmod($legacy, 0644);
+        $secure = $this->session('9', 100, 'already secure payload');
+        $before = lstat($legacy);
+        $secureBefore = lstat($secure);
+        self::assertIsArray($before);
+        self::assertIsArray($secureBefore);
+        $sha = hash_file('sha256', $legacy);
+        $this->writeMarker('2026-08-13T08:00:00Z');
+        $marker = self::STATE_ROOT . '/last-success.json';
+        $markerBytes = (string) file_get_contents($marker);
+        $markerBefore = lstat($marker);
+
+        $blockedRetention = $this->runHelper('dry-run');
+        self::assertSame(70, $blockedRetention['exit']);
+        self::assertSame(0644, fileperms($legacy) & 0777);
+
+        $dryRun = $this->runHelper('normalize-modes', 'dry-run');
+        self::assertSame(0, $dryRun['exit'], $dryRun['stderr']);
+        $dryPayload = $this->decode($dryRun);
+        self::assertSame('required', $dryPayload['status']);
+        self::assertSame(1, $dryPayload['legacy_before_count']);
+        self::assertSame(1, $dryPayload['already_secure_count']);
+        self::assertSame(1, $dryPayload['would_normalize_count']);
+        self::assertFalse($dryPayload['mutation_performed']);
+        self::assertSame(0644, fileperms($legacy) & 0777);
+
+        $execute = $this->runHelperWithCaps('-all,+dac_override,+fowner', 'normalize-modes', 'execute');
+        self::assertSame(0, $execute['exit'], $execute['stdout'] . $execute['stderr']);
+        $payload = $this->decode($execute);
+        self::assertSame('pass', $payload['status']);
+        self::assertSame(1, $payload['normalized_count']);
+        self::assertSame(1, $payload['already_secure_count']);
+        self::assertSame(0, $payload['remaining_legacy_count']);
+        self::assertTrue($payload['mutation_performed']);
+
+        clearstatcache(true, $legacy);
+        $after = lstat($legacy);
+        self::assertIsArray($after);
+        self::assertSame(0600, $after['mode'] & 0777);
+        foreach (['dev', 'ino', 'uid', 'gid', 'nlink', 'size', 'mtime'] as $field) {
+            self::assertSame($before[$field], $after[$field], $field);
+        }
+        self::assertSame($sha, hash_file('sha256', $legacy));
+        self::assertSame('sensitive legacy payload', file_get_contents($legacy));
+        self::assertSame($secureBefore, lstat($secure));
+        self::assertSame('already secure payload', file_get_contents($secure));
+        self::assertSame($markerBytes, file_get_contents($marker));
+        $markerAfter = lstat($marker);
+        self::assertIsArray($markerAfter);
+        foreach (['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtime', 'ctime'] as $field) {
+            self::assertSame($markerBefore[$field], $markerAfter[$field], 'marker.' . $field);
+        }
+        self::assertStringNotContainsString(basename($legacy), $execute['stdout'] . $execute['stderr']);
+        self::assertStringNotContainsString('sensitive', $execute['stdout'] . $execute['stderr']);
+
+        self::assertSame(0, $this->runHelper('dry-run')['exit']);
+        $replay = $this->runHelper('normalize-modes', 'execute');
+        self::assertSame(0, $replay['exit']);
+        self::assertSame(0, $this->decode($replay)['normalized_count']);
+    }
+
+    public function testNormalizationFailsClosedBeforeMutationForUnsafeValidEntry(): void
+    {
+        $legacy = $this->session('5', 100, 'legacy');
+        chmod($legacy, 0644);
+        $unsafe = $this->session('6', 100, 'unsafe');
+        chmod($unsafe, 0660);
+
+        $result = $this->runHelperWithCaps('-all,+dac_override,+fowner', 'normalize-modes', 'execute');
+
+        self::assertSame(70, $result['exit']);
+        self::assertSame('unsafe_session_entry', $this->decode($result)['reason']);
+        self::assertSame('prod_session_mode_normalization.v1', $this->decode($result)['schema']);
+        self::assertSame(0644, fileperms($legacy) & 0777);
+        self::assertSame(0660, fileperms($unsafe) & 0777);
+        self::assertFileDoesNotExist(self::STATE_ROOT . '/last-success.json');
+    }
+
+    public function testNormalizationUsageFailureUsesItsOwnSchema(): void
+    {
+        $result = $this->runHelper('normalize-modes');
+
+        self::assertSame(64, $result['exit']);
+        $payload = $this->decode($result);
+        self::assertSame('usage', $payload['reason']);
+        self::assertSame('prod_session_mode_normalization.v1', $payload['schema']);
+        self::assertSame('blocked', $payload['status']);
+    }
+
+    public function testLockedLegacySessionIsPartialAndRetryConverges(): void
+    {
+        $legacy = $this->session('7', 100, 'locked');
+        chmod($legacy, 0644);
+        $handle = fopen($legacy, 'rb');
+        self::assertIsResource($handle);
+        self::assertTrue(flock($handle, LOCK_EX | LOCK_NB));
+
+        $partial = $this->runHelper('normalize-modes', 'execute');
+        self::assertSame(75, $partial['exit']);
+        self::assertSame('partial', $this->decode($partial)['status']);
+        self::assertSame(0644, fileperms($legacy) & 0777);
+
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        $success = $this->runHelperWithCaps('-all,+dac_override,+fowner', 'normalize-modes', 'execute');
+        self::assertSame(0, $success['exit'], $success['stderr']);
+        self::assertSame(0600, fileperms($legacy) & 0777);
+    }
+
+    public function testNormalizationRequiresFownerInAdditionToDacOverride(): void
+    {
+        $legacy = $this->session('8', 100, 'capability');
+        chmod($legacy, 0644);
+
+        $withoutFowner = $this->runHelperWithCaps('-all,+dac_override', 'normalize-modes', 'execute');
+        self::assertSame(70, $withoutFowner['exit']);
+        self::assertSame(0644, fileperms($legacy) & 0777);
+
+        $withFowner = $this->runHelperWithCaps('-all,+dac_override,+fowner', 'normalize-modes', 'execute');
+        self::assertSame(0, $withFowner['exit'], $withFowner['stdout'] . $withFowner['stderr']);
+        self::assertSame(0600, fileperms($legacy) & 0777);
+    }
+
+    public function testNormalizationCapRequiresASecondPass(): void
+    {
+        for ($index = 0; $index < 10_001; $index++) {
+            $path = $this->session(sprintf('%032x', $index + 20_000), 100, 'x');
+            chmod($path, 0644);
+        }
+
+        $first = $this->runHelperWithCaps('-all,+dac_override,+fowner', 'normalize-modes', 'execute');
+        $firstPayload = $this->decode($first);
+        self::assertSame(75, $first['exit'], $first['stdout'] . $first['stderr']);
+        self::assertSame('partial', $firstPayload['status']);
+        self::assertSame(10_000, $firstPayload['normalized_count']);
+        self::assertSame(1, $firstPayload['remaining_legacy_count']);
+        self::assertTrue($firstPayload['cap_exceeded']);
+
+        $second = $this->runHelperWithCaps('-all,+dac_override,+fowner', 'normalize-modes', 'execute');
+        $secondPayload = $this->decode($second);
+        self::assertSame(0, $second['exit'], $second['stderr']);
+        self::assertSame(1, $secondPayload['normalized_count']);
+        self::assertSame(0, $secondPayload['remaining_legacy_count']);
+    }
+
+    public function testBlockedGlobalLockCannotCreateMissingPrivateState(): void
+    {
+        $legacy = $this->session('a0', 100, 'global lock');
+        chmod($legacy, 0644);
+        rmdir(self::STATE_ROOT);
+        $global = fopen(self::ORCHESTRATOR_ROOT . '/locks/fh-production-change.lock', 'c+');
+        self::assertIsResource($global);
+        self::assertTrue(flock($global, LOCK_EX | LOCK_NB));
+
+        $blocked = $this->runHelperWithCaps('-all,+dac_override,+fowner', 'normalize-modes', 'execute');
+
+        self::assertSame(75, $blocked['exit']);
+        self::assertSame('active_production_work', $this->decode($blocked)['reason']);
+        self::assertDirectoryDoesNotExist(self::STATE_ROOT);
+        self::assertSame(0644, fileperms($legacy) & 0777);
+        flock($global, LOCK_UN);
+        fclose($global);
+    }
+
     private function session(string $suffix, int $ageSeconds, string $bytes): string
     {
         $path = $this->sessionPath($suffix);
@@ -266,11 +433,17 @@ final class SessionRetentionRootTest extends TestCase
     /** @return array{exit:int,stdout:string,stderr:string} */
     private function runHelper(string ...$arguments): array
     {
+        return $this->runHelperWithCaps('-all,+dac_override', ...$arguments);
+    }
+
+    /** @return array{exit:int,stdout:string,stderr:string} */
+    private function runHelperWithCaps(string $boundingSet, string ...$arguments): array
+    {
         return $this->runCommand(
             array_merge(
                 [
                     '/usr/bin/setpriv',
-                    '--bounding-set=-all,+dac_override',
+                    '--bounding-set=' . $boundingSet,
                     '--inh-caps=-all',
                     '--ambient-caps=-all',
                     '/usr/bin/python3',
