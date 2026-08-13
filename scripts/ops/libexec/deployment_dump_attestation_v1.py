@@ -1080,8 +1080,7 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
                 '--innodb-log-file-size=64M --innodb-undo-tablespaces=0 --tmp-table-size=64M '
                 '--innodb-temp-data-file-path=ibtmp1:12M:autoextend:max:256M --tmpdir=/run/mysqld '
                 '--max-heap-table-size=64M --default-storage-engine=InnoDB '
-                '--enforce-storage-engine=InnoDB --sql-mode=NO_ENGINE_SUBSTITUTION '
-                '--disabled-storage-engines=MyISAM,Aria & '
+                '--enforce-storage-engine=InnoDB --sql-mode=NO_ENGINE_SUBSTITUTION & '
                 'child=$!; (flock -s /run/fh-lease -c true; kill -TERM "$child" 2>/dev/null; sleep 10; '
                 'kill -KILL "$child" 2>/dev/null) & watcher=$!; '
                 'wait "$child"; status=$?; kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; exit "$status"'], 120)

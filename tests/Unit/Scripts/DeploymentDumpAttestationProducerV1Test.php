@@ -14,6 +14,15 @@ require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentDumpAttestationProdu
 
 final class DeploymentDumpAttestationProducerV1Test extends TestCase
 {
+    public function testRestoreKeepsMariaDbSystemEngineAvailableWhileForcingApplicationInnoDb(): void
+    {
+        $helper = file_get_contents(dirname(__DIR__, 3) . '/scripts/ops/libexec/deployment_dump_attestation_v1.py');
+        self::assertIsString($helper);
+        self::assertStringContainsString('--enforce-storage-engine=InnoDB', $helper);
+        self::assertStringContainsString('--sql-mode=NO_ENGINE_SUBSTITUTION', $helper);
+        self::assertStringNotContainsString('--disabled-storage-engines=', $helper);
+    }
+
     private string $helper;
     private string $cli;
     private string $helperPath;
