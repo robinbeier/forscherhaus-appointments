@@ -16,7 +16,7 @@ enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
-- Workload contract v11 starts at cohort epoch `2026-08-13T18:57:35Z`, when the
+- Workload contract v11 starts at cohort epoch `2026-08-13T19:26:20Z`, when the
   blocking Linux-root matrix added the ROB-466 closed manual backup-set
   producer alongside the existing retention and dump-attestation suites.
   Runs before this instant are excluded as

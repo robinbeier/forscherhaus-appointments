@@ -22,7 +22,7 @@ class CiPerformanceWorkflowContractTest extends TestCase
         );
 
         self::assertSame(11, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-13T18:57:35Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame('2026-08-13T19:26:20Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),
