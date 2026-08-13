@@ -19,6 +19,8 @@ SESSION_RETENTION_HELPER="${KUMA_SESSION_RETENTION_HELPER:-/usr/local/libexec/fh
 RELEASE_RETENTION_MONITOR_ENABLED="${KUMA_RELEASE_RETENTION_MONITOR_ENABLED:-0}"
 RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS="${KUMA_RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS:-691200}"
 RELEASE_RETENTION_HELPER="${KUMA_RELEASE_RETENTION_HELPER:-/usr/local/libexec/fh-release-archive-dump-retention-v1}"
+JOURNALD_RETENTION_MONITOR_ENABLED="${KUMA_JOURNALD_RETENTION_MONITOR_ENABLED:-0}"
+JOURNALD_RETENTION_HELPER="${KUMA_JOURNALD_RETENTION_HELPER:-/usr/local/libexec/fh-journald-retention-v1}"
 
 if [[ "$SESSION_RETENTION_MONITOR_ENABLED" != '0' && "$SESSION_RETENTION_MONITOR_ENABLED" != '1' ]]; then
   kuma_push_die 'KUMA_SESSION_RETENTION_MONITOR_ENABLED must be 0 or 1'
@@ -31,6 +33,9 @@ if [[ "$RELEASE_RETENTION_MONITOR_ENABLED" != '0' && "$RELEASE_RETENTION_MONITOR
 fi
 if ! [[ "$RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS" =~ ^[1-9][0-9]{0,6}$ ]]; then
   kuma_push_die 'KUMA_RELEASE_RETENTION_MARKER_MAX_AGE_SECONDS is invalid'
+fi
+if [[ "$JOURNALD_RETENTION_MONITOR_ENABLED" != '0' && "$JOURNALD_RETENTION_MONITOR_ENABLED" != '1' ]]; then
+  kuma_push_die 'KUMA_JOURNALD_RETENTION_MONITOR_ENABLED must be 0 or 1'
 fi
 
 disk_used_percent="$(
@@ -82,6 +87,29 @@ if [[ "$RELEASE_RETENTION_MONITOR_ENABLED" == '1' ]]; then
       status="down"
       ping="0"
       reasons+=("release_retention=invalid")
+      ;;
+  esac
+fi
+
+if [[ "$JOURNALD_RETENTION_MONITOR_ENABLED" == '1' ]]; then
+  journald_retention_json=''
+  journald_retention_status='invalid'
+  if [[ -x "$JOURNALD_RETENTION_HELPER" ]] \
+    && journald_retention_json="$("$JOURNALD_RETENTION_HELPER" inspect 2>/dev/null)"; then
+    journald_retention_status="$(printf '%s' "$journald_retention_json" | sed -n 's/^.*"status":"\([a-z_]*\)".*$/\1/p')"
+  fi
+  case "$journald_retention_status" in
+    pass)
+      ;;
+    drift|invalid)
+      status="down"
+      ping="0"
+      reasons+=("journald_retention=${journald_retention_status}")
+      ;;
+    *)
+      status="down"
+      ping="0"
+      reasons+=("journald_retention=invalid")
       ;;
   esac
 fi

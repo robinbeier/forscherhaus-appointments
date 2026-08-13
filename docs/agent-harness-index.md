@@ -28,6 +28,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
 | Production Docker build-cache retention | `docs/ops/production-build-cache-retention.md` | Fixed dry-run/execute boundary, cache policy, stop conditions, and validation. |
 | Production session retention | `docs/ops/production-session-retention.md` | Fixed 24-hour policy, protected cleanup contract, disabled timer, monitoring, and rollout/rollback boundary. |
+| Production journald retention | `docs/ops/production-journald-retention.md` | Fixed 1 GiB / 30-day drop-in, aggregate drift monitoring, and separately approved activation/vacuum/rollback. |
 | Production traffic gate | `docs/traffic-gate-v1.md` | Shared versioned passive traffic contract for deploy and Customers smoke. |
 | Canonical deploy state/result/evidence contract | `docs/deployment-run-v1.md` | Closed ROB-455 intent, lifecycle, child receipt, evidence, and future host-state boundary. |
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |

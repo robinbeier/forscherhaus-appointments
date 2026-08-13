@@ -197,6 +197,10 @@ Disk, memory, or swap pressure:
   read-only; helper installation, execute approval, monitoring activation, and
   timer enablement remain separate production changes. See
   `docs/ops/production-release-archive-dump-retention.md`.
+- Use `prod_journald_retention.sh` for the separate ROB-451 1 GiB / 30-day
+  journald contract. Its default is read-only. Configuration activation,
+  one-time vacuum, rollback, and monitoring activation are four distinct
+  production changes; see `docs/ops/production-journald-retention.md`.
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 
