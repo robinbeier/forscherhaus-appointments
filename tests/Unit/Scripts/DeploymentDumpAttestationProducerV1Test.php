@@ -414,11 +414,14 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
 
     public function testShutdownAuthorityIsStableDatabaseExitRecordNotClientStatus(): void
     {
-        self::assertStringContainsString('--log-error=/var/lib/mysql/fh-restore.log', $this->helper);
+        self::assertStringNotContainsString('--log-error=', $this->helper);
+        self::assertStringContainsString('umask 077;', $this->helper);
+        self::assertStringContainsString('> /run/fh-exit/.server.log 2>&1 &', $this->helper);
         self::assertStringContainsString('): Normal shutdown', $this->helper);
         self::assertStringContainsString('InnoDB: Shutdown completed;', $this->helper);
         self::assertStringContainsString('mariadbd: Shutdown complete', $this->helper);
         self::assertStringContainsString('&& authority=0', $this->helper);
+        self::assertStringContainsString('rm -f /run/fh-exit/.server.log;', $this->helper);
         $program = <<<'PY'
         import importlib.util
         import sys
