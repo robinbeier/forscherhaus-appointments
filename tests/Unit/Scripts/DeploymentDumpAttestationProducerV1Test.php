@@ -501,6 +501,65 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         self::assertSame(0, proc_close($process), $stdout . $stderr);
     }
 
+    public function testRestoreWaitsForFinalServerInsteadOfEntrypointInitializationServer(): void
+    {
+        self::assertStringContainsString('SELECT IF(@@GLOBAL.skip_networking = 0, 1, 0);', $this->helper);
+        $program = <<<'PY'
+        import importlib.util
+        import subprocess
+        import sys
+
+        spec = importlib.util.spec_from_file_location('rob465_helper', sys.argv[1])
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class Result:
+            def __init__(self, returncode, stdout):
+                self.returncode = returncode
+                self.stdout = stdout
+
+        calls = []
+        results = iter((
+            Result(0, '0\n'),
+            Result(0, '1\n'),
+            Result(1, '1\n'),
+            Result(0, '1\nextra\n'),
+        ))
+        module.docker_run = lambda arguments, **kwargs: calls.append(
+            (arguments, kwargs)
+        ) or next(results)
+
+        assert module.final_server_ready('fixed-name') is False
+        assert module.final_server_ready('fixed-name') is True
+        assert module.final_server_ready('fixed-name') is False
+        assert module.final_server_ready('fixed-name') is False
+        expected = [
+            'exec', 'fixed-name', 'mariadb', '-uroot', '--batch', '--skip-column-names',
+            '-e', 'SELECT IF(@@GLOBAL.skip_networking = 0, 1, 0);',
+        ]
+        assert all(arguments == expected for arguments, _ in calls)
+        assert all(kwargs == {
+            'stdout': subprocess.PIPE,
+            'stderr': subprocess.DEVNULL,
+            'text': True,
+            'timeout': 5,
+            'check': False,
+        } for _, kwargs in calls)
+        PY;
+        $process = proc_open(
+            ['/usr/bin/python3', '-I', '-B', '-c', $program, $this->helperPath],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]) ?: '';
+        $stderr = stream_get_contents($pipes[2]) ?: '';
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), $stdout . $stderr);
+    }
+
     public function testHistoricalTerminalRunRequiresCanonicalJournalBinding(): void
     {
         $program = <<<'PY'
