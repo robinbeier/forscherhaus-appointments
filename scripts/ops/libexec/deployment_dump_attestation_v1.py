@@ -768,6 +768,64 @@ def docker_popen(arguments, **kwargs):
     return process, before
 
 
+def observe_container_exit(run_path):
+    run = os.open(run_path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        run_meta = os.fstat(run)
+        if (not stat.S_ISDIR(run_meta.st_mode) or run_meta.st_uid != 0 or run_meta.st_gid != 0 or
+                stat.S_IMODE(run_meta.st_mode) != 0o700):
+            reject()
+        directory = open_child(run, 'container-exit', 0o700)
+        directory_meta = os.fstat(directory)
+        if directory_meta.st_gid != 0:
+            os.close(directory)
+            reject()
+    except BaseException:
+        os.close(run)
+        raise
+    try:
+        if os.listdir(directory) != ['exit']:
+            reject()
+        before = os.stat('exit', dir_fd=directory, follow_symlinks=False)
+        descriptor = os.open('exit', os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
+        try:
+            opened = os.fstat(descriptor)
+            data = os.read(descriptor, 4)
+            os.fsync(descriptor)
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        final = os.stat('exit', dir_fd=directory, follow_symlinks=False)
+        if (identity(before) != identity(opened) or identity(opened) != identity(after) or
+                identity(after) != identity(final) or not stat.S_ISREG(opened.st_mode) or
+                opened.st_uid != 0 or opened.st_gid != 0 or opened.st_nlink != 1 or
+                stat.S_IMODE(opened.st_mode) != 0o600 or data != b'0\n'):
+            reject()
+        os.fsync(directory)
+        if (identity(run_meta) != identity(os.fstat(run)) or
+                identity(directory_meta) != identity(os.stat('container-exit', dir_fd=run,
+                                                              follow_symlinks=False))):
+            reject()
+    finally:
+        os.close(directory)
+        os.close(run)
+
+
+def shutdown_and_observe(name, run_path):
+    try:
+        docker_run(['exec', name, 'mariadb-admin', '-uroot', 'shutdown'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=False)
+    except subprocess.TimeoutExpired:
+        pass
+    for attempt in range(60):
+        if not docker(['ps', '-aq', '--filter', 'name=^/' + name + '$'], 10).strip():
+            observe_container_exit(run_path)
+            return
+        time.sleep(1)
+    reject()
+
+
 def verify_docker_after(before):
     if before != trusted_executable(DOCKER):
         reject()
@@ -1255,6 +1313,8 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
     max_mib = restore_bytes // (1024 * 1024)
     datadir = run_path + '/datadir'
     os.mkdir(datadir, 0o700)
+    exit_directory = run_path + '/container-exit'
+    os.mkdir(exit_directory, 0o700)
     lease_path = run_path + '/.container-lease'
     lease_create = os.open(lease_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
     os.close(lease_create)
@@ -1268,12 +1328,14 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
                 '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m',
                 '--mount', 'type=bind,source=' + datadir + ',target=/var/lib/mysql',
                 '--mount', 'type=bind,source=' + lease_path + ',target=/run/fh-lease,readonly',
+                '--mount', 'type=bind,source=' + exit_directory + ',target=/run/fh-exit',
                 '--memory', str(2 * 1024 * 1024 * 1024), '--memory-swap', str(2 * 1024 * 1024 * 1024),
                 '--pids-limit', '256', '--cpus', '2',
                 '-e', 'MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1', IMAGE,
                 '/bin/sh', '-c',
                 'command -v flock >/dev/null || exit 70; '
                 '/usr/local/bin/docker-entrypoint.sh mariadbd --skip-log-bin --skip-name-resolve '
+                '--log-error=/var/lib/mysql/fh-restore.log '
                 '--innodb-file-per-table=OFF --innodb-data-file-path=ibdata1:12M:autoextend:max:' + str(max_mib) + 'M '
                 '--innodb-log-file-size=64M --innodb-undo-tablespaces=0 --tmp-table-size=64M '
                 '--innodb-temp-data-file-path=ibtmp1:12M:autoextend:max:256M --tmpdir=/run/mysqld '
@@ -1281,7 +1343,14 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
                 '--enforce-storage-engine=InnoDB --sql-mode=NO_ENGINE_SUBSTITUTION & '
                 'child=$!; (flock -s /run/fh-lease -c true; kill -TERM "$child" 2>/dev/null; sleep 10; '
                 'kill -KILL "$child" 2>/dev/null) & watcher=$!; '
-                'wait "$child"; status=$?; kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; exit "$status"'], 120)
+                'wait "$child"; status=$?; authority=70; '
+                'grep -Fq "): Normal shutdown" /var/lib/mysql/fh-restore.log 2>/dev/null && '
+                'grep -Fq "InnoDB: Shutdown completed;" /var/lib/mysql/fh-restore.log 2>/dev/null && '
+                'grep -Fq "mariadbd: Shutdown complete" /var/lib/mysql/fh-restore.log 2>/dev/null && authority=0; '
+                'umask 077; printf "%s\\n" "$authority" > /run/fh-exit/.exit.tmp; '
+                'chmod 0600 /run/fh-exit/.exit.tmp; mv /run/fh-exit/.exit.tmp /run/fh-exit/exit; '
+                'rm -f /var/lib/mysql/fh-restore.log; '
+                'kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; exit "$status"'], 120)
         started = True
         for attempt in range(90):
             probe = docker_run(['exec', name, 'mariadb-admin', '-uroot', 'ping'],
@@ -1349,13 +1418,7 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
         rows = [row.split('\t') for row in check.strip().splitlines()]
         if len(rows) != 5 or any(len(row) != 4 or row[2:] != ['status', 'OK'] for row in rows):
             reject()
-        docker(['exec', name, 'mariadb-admin', '-uroot', 'shutdown'], 60)
-        for attempt in range(60):
-            if not docker(['ps', '-q', '--filter', 'name=^/' + name + '$'], 10).strip():
-                break
-            time.sleep(1)
-        else:
-            reject()
+        shutdown_and_observe(name, run_path)
         values = tree_usage(datadir)
         admitted = restore_bytes + IBTMP_MAX_BYTES + REDO_MAX_BYTES
         if values[0] > admitted or values[1] > max(4096, create_tables * 8 + 4096):
