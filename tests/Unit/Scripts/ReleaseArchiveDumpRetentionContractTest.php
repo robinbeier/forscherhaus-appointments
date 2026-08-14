@@ -70,8 +70,14 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringContainsString('AmbientCapabilities=', $service);
         self::assertStringContainsString('/usr/local/libexec/fh-release-archive-dump-retention-v1 execute', $service);
         self::assertStringNotContainsString('/var/www/html/easyappointments/scripts/ops/libexec', $service);
-        self::assertStringNotContainsString('systemctl enable', $timer . $wrapper . $docs);
-        self::assertStringNotContainsString('systemctl start', $timer . $wrapper . $docs);
+        self::assertStringNotContainsString('systemctl enable', $timer . $wrapper);
+        self::assertStringNotContainsString('systemctl start', $timer . $wrapper);
+        self::assertStringContainsString(
+            '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer',
+            $docs,
+        );
+        self::assertStringContainsString('/usr/bin/systemctl start fh-release-archive-dump-retention.timer', $docs);
+        self::assertStringNotContainsString('enable --now fh-release-archive-dump-retention.timer', $docs);
         self::assertStringContainsString('does not activate the timer', $docs);
     }
 
@@ -104,6 +110,97 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringContainsString("max(storage['allocated'], storage['logical'])", $helper);
         self::assertStringNotContainsString("'release_id': current_release", $helper);
         self::assertStringNotContainsString("'dump_sha':", substr($helper, strpos($helper, 'def result_payload')));
+    }
+
+    public function testMutationOutcomeCannotClaimNoDeletionAfterAnIrreversibleBoundary(): void
+    {
+        $helper = (string) file_get_contents(
+            dirname(__DIR__, 3) . '/scripts/ops/libexec/release_archive_dump_retention_v1.py',
+        );
+        self::assertStringContainsString("SCHEMA = 'prod_release_archive_dump_retention.v2'", $helper);
+        self::assertStringNotContainsString("SCHEMA = 'prod_release_archive_dump_retention.v1'", $helper);
+        self::assertStringContainsString("'mutation_outcome': 'unknown'", $helper);
+        self::assertStringContainsString("'deletion_performed': None", $helper);
+        self::assertStringContainsString("'mutation_outcome': 'known' if known else 'none'", $helper);
+        self::assertStringContainsString("mutations.begin()\n    os.rename", $helper);
+        self::assertStringContainsString("mutations.confirm('archive_files')", $helper);
+        self::assertStringContainsString("mutations.confirm('pending_archive_files')", $helper);
+        self::assertStringContainsString("mutations.confirm('marker_temp_files')", $helper);
+        self::assertStringContainsString("payload.update(MUTATIONS.fields())", $helper);
+        self::assertStringNotContainsString(
+            "emit({'deletion_performed': False, 'reason': error.reason",
+            $helper,
+        );
+    }
+
+    public function testRunbookFreezesInstallPostflightAndTimerOrderAndNoOutputRecovery(): void
+    {
+        $docs = (string) file_get_contents(
+            dirname(__DIR__, 3) . '/docs/ops/production-release-archive-dump-retention.md',
+        );
+        $install = strpos($docs, 'From that exact checkout, install the helper');
+        $dryRun = strpos($docs, 'Run the exact default dry-run');
+        $execute = strpos($docs, 'production write approval for exactly one bounded manual pass');
+        $postflight = strpos($docs, 'run the exact postflight and marker checks');
+        $timer = strpos($docs, 'Enabling and starting are separate gates');
+        foreach ([$install, $dryRun, $execute, $postflight, $timer] as $position) {
+            self::assertNotFalse($position);
+        }
+        self::assertTrue($install < $dryRun && $dryRun < $execute && $execute < $postflight && $postflight < $timer);
+        self::assertStringContainsString('that yields no single canonical helper result', $docs);
+        self::assertStringContainsString('operator-side mutation', $docs);
+        self::assertStringContainsString('Never infer `deletion_performed:false`', $docs);
+        foreach (
+            [
+                '/usr/bin/install -o root -g root -m 0555',
+                '/usr/bin/systemd-analyze verify',
+                '/usr/bin/systemctl daemon-reload',
+                '/usr/bin/systemctl is-enabled fh-release-archive-dump-retention.timer',
+                '/usr/bin/systemctl is-active fh-release-archive-dump-retention.timer',
+                'bash scripts/ops/prod_release_archive_dump_retention.sh',
+                '--confirm-live-write ROB-453',
+                'bash scripts/ops/prod_doctor.sh',
+                'bash scripts/ops/prod_cleanup_inventory.sh',
+                'marker-status 691200',
+                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1',
+                '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer',
+                'approval must explicitly',
+                '/usr/bin/systemctl start fh-release-archive-dump-retention.timer',
+                '/usr/bin/systemctl show fh-release-archive-dump-retention.service',
+            ]
+            as $command
+        ) {
+            self::assertStringContainsString($command, $docs);
+        }
+        $runbook = substr($docs, (int) strpos($docs, 'rollout has this exact order:'));
+        $cursor = -1;
+        foreach (
+            [
+                '/usr/bin/install -o root -g root -m 0555',
+                '/usr/bin/systemd-analyze verify',
+                '/usr/bin/systemctl daemon-reload',
+                '/usr/bin/systemctl is-enabled fh-release-archive-dump-retention.timer',
+                '/usr/bin/systemctl is-active fh-release-archive-dump-retention.timer',
+                'bash scripts/ops/prod_release_archive_dump_retention.sh',
+                '--confirm-live-write ROB-453',
+                'bash scripts/ops/prod_doctor.sh',
+                'bash scripts/ops/prod_cleanup_inventory.sh',
+                'marker-status 691200',
+                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1',
+                '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer',
+                'approval must explicitly',
+                '/usr/bin/systemctl start fh-release-archive-dump-retention.timer',
+                '/usr/bin/systemctl show fh-release-archive-dump-retention.service',
+            ]
+            as $command
+        ) {
+            $position = strpos($runbook, $command);
+            self::assertNotFalse($position);
+            self::assertGreaterThan($cursor, $position);
+            $cursor = $position;
+        }
+        self::assertStringNotContainsString('enable --now fh-release-archive-dump-retention.timer', $docs);
+        self::assertStringNotContainsString('capped', $docs);
     }
 
     /** @param list<string> $arguments @return array{exit:int,stdout:string,stderr:string} */

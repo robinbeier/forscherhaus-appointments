@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ReleaseArchiveDumpRetentionRootTest extends TestCase
@@ -106,8 +107,11 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
         self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
         $value = $this->decode($result);
+        self::assertSame('prod_release_archive_dump_retention.v2', $value['schema']);
         self::assertSame('dry-run', $value['mode']);
         self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
         self::assertTrue($value['execution_ready']);
         self::assertGreaterThanOrEqual(128 * 1024 * 1024, $value['capacity']['projected_required_bytes']);
         self::assertSame(1, $value['would_delete']['archive_pairs']);
@@ -127,7 +131,13 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
         self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
         $value = $this->decode($result);
+        self::assertSame('prod_release_archive_dump_retention.v2', $value['schema']);
         self::assertSame('pass', $value['status']);
+        self::assertTrue($value['deletion_performed']);
+        self::assertSame('known', $value['mutation_outcome']);
+        self::assertSame(2, $value['mutation_counts']['archive_files']);
+        self::assertSame(1, $value['mutation_counts']['dump_sets']);
+        self::assertSame(3, $value['mutation_counts']['release_dirs']);
         self::assertSame(1, $value['deleted']['archive_pairs']);
         self::assertSame(1, $value['deleted']['dump_sets']);
         self::assertFileDoesNotExist(self::RELEASES . '/old.tar.gz');
@@ -216,6 +226,33 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         fclose($open);
     }
 
+    public function testMarkerTempCleanupBeforeBusyLockReportsKnownMutation(): void
+    {
+        mkdir(self::STATE, 0700, true);
+        $temp = self::STATE . '/.last-success.json.tmp-' . str_repeat('c', 32);
+        file_put_contents($temp, "temporary marker\n");
+        chmod($temp, 0600);
+        $lock = fopen(self::ORCHESTRATOR . '/locks/fh-production-change.lock', 'r+b');
+        self::assertIsResource($lock);
+        self::assertTrue(flock($lock, LOCK_EX | LOCK_NB));
+        try {
+            $result = $this->runHelper('execute');
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('active_production_work', $value['reason']);
+        self::assertTrue($value['deletion_performed']);
+        self::assertSame('known', $value['mutation_outcome']);
+        self::assertSame(1, $value['mutation_counts']['marker_temp_files']);
+        self::assertSame(1, array_sum($value['mutation_counts']));
+        self::assertFileDoesNotExist($temp);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
     public function testArchiveOnlyCrashPrefixIsUndeployableAndResumableButSidecarOnlyRejects(): void
     {
         unlink(self::RELEASES . '/old.build-provenance.json');
@@ -293,9 +330,167 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame(4, $value['deleted']['failed_dirs']);
         self::assertSame(8, $value['deleted']['archive_pairs']);
         self::assertSame(4, $value['deleted']['dump_sets']);
+        self::assertSame(16, $value['mutation_counts']['archive_files']);
+        self::assertSame(4, $value['mutation_counts']['dump_sets']);
+        self::assertSame(12, $value['mutation_counts']['release_dirs']);
+        self::assertSame(0, $value['mutation_counts']['pending_archive_files']);
+        self::assertSame(0, $value['mutation_counts']['pending_dump_sets']);
+        self::assertSame(0, $value['mutation_counts']['pending_release_dirs']);
+        self::assertSame(0, $value['mutation_counts']['marker_temp_files']);
+        self::assertSame(32, array_sum($value['mutation_counts']));
         self::assertGreaterThan(0, $value['remaining']['previous_dirs']);
         self::assertGreaterThan(0, $value['remaining']['archive_pairs']);
         self::assertGreaterThan(0, $value['remaining']['dump_sets']);
+        self::assertFileDoesNotExist(self::STATE . '/last-success.json');
+    }
+
+    #[DataProvider('postDeletionFailureProvider')]
+    public function testPostDeletionFailuresReportKnownMutation(
+        string $search,
+        string $replacement,
+        string $reason,
+        int $exit,
+    ): void {
+        $result = $this->runPatchedHelper($search, $replacement, 'execute');
+
+        self::assertSame($exit, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame($reason, $value['reason']);
+        self::assertTrue($value['deletion_performed']);
+        self::assertSame('known', $value['mutation_outcome']);
+        self::assertGreaterThan(0, array_sum($value['mutation_counts']));
+        self::assertDirectoryDoesNotExist('/var/www/html/easyappointments_prev_legacy');
+        self::assertFileDoesNotExist(self::STATE . '/last-success.json');
+    }
+
+    /** @return iterable<string,array{string,string,string,int}> */
+    public static function postDeletionFailureProvider(): iterable
+    {
+        yield 'post-delete activity check' => [
+            "        if activity_count() != 0:\n            reject('active_production_work', 75)\n        assert_no_nonterminal_runs()\n        second = gather()",
+            "        reject('active_production_work', 75)\n        assert_no_nonterminal_runs()\n        second = gather()",
+            'active_production_work',
+            75,
+        ];
+        yield 'second gather' => [
+            '        second = gather()',
+            "        reject('second_gather_failed')",
+            'second_gather_failed',
+            70,
+        ];
+    }
+
+    public function testMarkerFailureAfterDeletionReportsKnownMutation(): void
+    {
+        mkdir(self::STATE, 0700, true);
+        mkdir(self::STATE . '/last-success.json', 0700);
+
+        $result = $this->runHelper('execute');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('unsafe_file', $value['reason']);
+        self::assertTrue($value['deletion_performed']);
+        self::assertSame('known', $value['mutation_outcome']);
+        self::assertGreaterThan(0, array_sum($value['mutation_counts']));
+        self::assertDirectoryExists(self::STATE . '/last-success.json');
+        self::assertDirectoryDoesNotExist('/var/www/html/easyappointments_prev_legacy');
+    }
+
+    public function testPendingCleanupThenLaterFailureReportsKnownMutation(): void
+    {
+        mkdir(self::STATE, 0700, true);
+        $pending = self::STATE . '/.pending-archive-archive-' . str_repeat('a', 32);
+        file_put_contents($pending, 'detached archive');
+        chmod($pending, 0600);
+
+        $result = $this->runPatchedHelper(
+            '        clean_pending_entries(state, web_uid, MUTATIONS)',
+            "        clean_pending_entries(state, web_uid, MUTATIONS)\n        reject('after_pending_cleanup')",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('after_pending_cleanup', $value['reason']);
+        self::assertTrue($value['deletion_performed']);
+        self::assertSame('known', $value['mutation_outcome']);
+        self::assertSame(1, $value['mutation_counts']['pending_archive_files']);
+        self::assertFileDoesNotExist($pending);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testInterruptedPendingCleanupReportsUnknownMutation(): void
+    {
+        mkdir(self::STATE, 0700, true);
+        $pending = self::STATE . '/.pending-archive-archive-' . str_repeat('b', 32);
+        file_put_contents($pending, 'detached archive');
+        chmod($pending, 0600);
+
+        $result = $this->runPatchedHelper(
+            "            os.unlink(name, dir_fd=state)\n            mutations.confirm('pending_archive_files')",
+            "            os.unlink(name, dir_fd=state)\n            reject('pending_cleanup_interrupted')",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('pending_cleanup_interrupted', $value['reason']);
+        self::assertNull($value['deletion_performed']);
+        self::assertSame('unknown', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertFileDoesNotExist($pending);
+    }
+
+    public function testCandidateRenameInterruptionReportsUnknownMutation(): void
+    {
+        $result = $this->runPatchedHelper(
+            "    mutations.begin()\n    os.rename(record['leaf'], pending, src_dir_fd=source, dst_dir_fd=state)\n    mutations.confirm('release_dirs' if kind == 'release' else 'dump_sets')",
+            "    mutations.begin()\n    os.rename(record['leaf'], pending, src_dir_fd=source, dst_dir_fd=state)\n    reject('candidate_rename_interrupted')",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('candidate_rename_interrupted', $value['reason']);
+        self::assertNull($value['deletion_performed']);
+        self::assertSame('unknown', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertDirectoryDoesNotExist('/var/www/html/easyappointments_prev_legacy');
+        self::assertCount(1, glob(self::STATE . '/.pending-release-*') ?: []);
+    }
+
+    public function testCandidatePhysicalCleanupInterruptionRetainsKnownRenameCountAndReportsUnknown(): void
+    {
+        $result = $this->runPatchedHelper(
+            "    mutations.begin()\n    remove_tree(state, pending, record['identity'], allowed_uids, os.fstat(state).st_dev)\n    mutations.finish()",
+            "    mutations.begin()\n    reject('candidate_cleanup_interrupted')",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('candidate_cleanup_interrupted', $value['reason']);
+        self::assertNull($value['deletion_performed']);
+        self::assertSame('unknown', $value['mutation_outcome']);
+        self::assertSame(1, $value['mutation_counts']['release_dirs']);
+        self::assertSame(1, array_sum($value['mutation_counts']));
+        self::assertDirectoryDoesNotExist('/var/www/html/easyappointments_prev_legacy');
+        self::assertCount(1, glob(self::STATE . '/.pending-release-*') ?: []);
+    }
+
+    public function testSignalAfterDeletionProducesNoFalseOutcomeAndRequiresOperatorRescan(): void
+    {
+        $result = $this->runPatchedHelper(
+            "                deleted[kind + '_dirs'] += 1",
+            "                os.kill(os.getpid(), 9)",
+            'execute',
+        );
+
+        self::assertNotSame(0, $result['exit']);
+        self::assertSame('', $result['stdout']);
+        self::assertSame('', $result['stderr']);
+        self::assertDirectoryDoesNotExist('/var/www/html/easyappointments_prev_legacy');
         self::assertFileDoesNotExist(self::STATE . '/last-success.json');
     }
 
@@ -442,6 +637,24 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         fclose($pipes[1]);
         fclose($pipes[2]);
         return ['exit' => proc_close($process), 'stdout' => $stdout ?: '', 'stderr' => $stderr ?: ''];
+    }
+
+    /** @return array{exit:int,stdout:string,stderr:string} */
+    private function runPatchedHelper(string $search, string $replacement, string ...$arguments): array
+    {
+        $source = (string) file_get_contents($this->helper);
+        self::assertSame(1, substr_count($source, $search), 'Fault boundary must remain unique.');
+        $path = sys_get_temp_dir() . '/rob461-retention-' . bin2hex(random_bytes(8)) . '.py';
+        file_put_contents($path, str_replace($search, $replacement, $source));
+        chmod($path, 0700);
+        $original = $this->helper;
+        $this->helper = $path;
+        try {
+            return $this->runHelper(...$arguments);
+        } finally {
+            $this->helper = $original;
+            unlink($path);
+        }
     }
 
     /** @param array{stdout:string} $result @return array<string,mixed> */

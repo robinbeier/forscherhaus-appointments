@@ -13,7 +13,7 @@ import stat
 import sys
 
 
-SCHEMA = 'prod_release_archive_dump_retention.v1'
+SCHEMA = 'prod_release_archive_dump_retention.v2'
 MARKER_SCHEMA = 'prod_release_archive_dump_retention_marker.v1'
 MARKER_STATUS_SCHEMA = 'prod_release_archive_dump_retention_marker_status.v1'
 WEB_ROOT = '/var/www/html'
@@ -57,6 +57,15 @@ TERMINAL_STATES = {
     'failed_post_switch_rollback_failed',
     'manual_recovery_required',
 }
+MUTATION_COUNT_KEYS = (
+    'archive_files',
+    'dump_sets',
+    'release_dirs',
+    'pending_archive_files',
+    'pending_dump_sets',
+    'pending_release_dirs',
+    'marker_temp_files',
+)
 
 
 class RetentionError(Exception):
@@ -64,6 +73,45 @@ class RetentionError(Exception):
         super().__init__(reason)
         self.reason = reason
         self.code = code
+
+
+class MutationLedger:
+    """Aggregate irreversible namespace removals without exposing artifact names."""
+
+    def __init__(self):
+        self.counts = {key: 0 for key in MUTATION_COUNT_KEYS}
+        self.in_flight = 0
+
+    def begin(self):
+        self.in_flight += 1
+
+    def confirm(self, key):
+        if key not in self.counts or self.in_flight < 1:
+            reject('mutation_ledger_invalid')
+        self.finish()
+        self.counts[key] += 1
+
+    def finish(self):
+        if self.in_flight < 1:
+            reject('mutation_ledger_invalid')
+        self.in_flight -= 1
+
+    def fields(self):
+        if self.in_flight:
+            return {
+                'deletion_performed': None,
+                'mutation_counts': self.counts.copy(),
+                'mutation_outcome': 'unknown',
+            }
+        known = sum(self.counts.values()) > 0
+        return {
+            'deletion_performed': known,
+            'mutation_counts': self.counts.copy(),
+            'mutation_outcome': 'known' if known else 'none',
+        }
+
+
+MUTATIONS = MutationLedger()
 
 
 def reject(reason='rejected', code=70):
@@ -1014,14 +1062,13 @@ def close_gathered(value):
                 pass
 
 
-def result_payload(mode, gathered, deleted=None, remaining=None):
+def result_payload(mode, gathered, mutations, deleted=None, remaining=None):
     candidates = candidate_counts(gathered['release_classes'], gathered['archives'], gathered['dumps'])
     payload = {
         'archive_foreign_count': gathered['archive_foreign'],
         'archive_pair_count': len(gathered['archives']),
         'capacity': gathered['capacity'],
         'candidates': candidates,
-        'deletion_performed': bool(deleted and sum(deleted.values()) > 0),
         'dump_foreign_count': gathered['dump_foreign'],
         'execution_ready': (
             gathered['archive_foreign'] == 0
@@ -1036,6 +1083,7 @@ def result_payload(mode, gathered, deleted=None, remaining=None):
         'status': 'pass',
         'verified_dump_count': len(gathered['dumps']),
     }
+    payload.update(mutations.fields())
     if deleted is None:
         payload['would_delete'] = {
             'archive_pairs': min(candidates['archive_pairs'], MAX_ARCHIVE_PAIR_DELETE),
@@ -1051,7 +1099,7 @@ def result_payload(mode, gathered, deleted=None, remaining=None):
     return payload
 
 
-def clean_marker_temps(state):
+def clean_marker_temps(state, mutations):
     for name in os.listdir(state):
         if re.fullmatch(r'\.last-success\.json\.tmp-[0-9a-f]{32}', name) is None:
             continue
@@ -1065,11 +1113,13 @@ def clean_marker_temps(state):
             or metadata.st_size > MARKER_MAX_BYTES
         ):
             reject('unsafe_marker_temp')
+        mutations.begin()
         os.unlink(name, dir_fd=state)
+        mutations.confirm('marker_temp_files')
         os.fsync(state)
 
 
-def clean_pending_entries(state, web_uid):
+def clean_pending_entries(state, web_uid, mutations):
     names = [name for name in os.listdir(state) if name.startswith('.pending-')]
     if len(names) > MAX_PENDING_ENTRIES:
         reject('pending_cleanup_limit')
@@ -1081,7 +1131,10 @@ def clean_pending_entries(state, web_uid):
             metadata = os.stat(name, dir_fd=state, follow_symlinks=False)
             allowed = {0, web_uid} if directory_match.group(1) == 'release' else {0}
             tree = validate_candidate_tree(state, name, allowed, device)
+            mutations.begin()
             remove_tree(state, name, tree['identity'], allowed, device)
+            mutation_key = 'pending_release_dirs' if directory_match.group(1) == 'release' else 'pending_dump_sets'
+            mutations.confirm(mutation_key)
             os.fsync(state)
             continue
         if file_match is not None:
@@ -1090,34 +1143,44 @@ def clean_pending_entries(state, web_uid):
             current = os.stat(name, dir_fd=state, follow_symlinks=False)
             if file_identity(current) != record[1]:
                 reject('candidate_changed', 75)
+            mutations.begin()
             os.unlink(name, dir_fd=state)
+            mutations.confirm('pending_archive_files')
             os.fsync(state)
             continue
         reject('unsafe_pending_entry')
 
 
-def detach_tree(source, state, record, kind, allowed_uids):
+def detach_tree(source, state, record, kind, allowed_uids, mutations):
     if os.fstat(source).st_dev != os.fstat(state).st_dev:
         reject('filesystem_mismatch')
     pending = '.pending-' + kind + '-' + secrets.token_hex(16)
+    mutations.begin()
     os.rename(record['leaf'], pending, src_dir_fd=source, dst_dir_fd=state)
+    mutations.confirm('release_dirs' if kind == 'release' else 'dump_sets')
     os.fsync(source)
     os.fsync(state)
+    mutations.begin()
     remove_tree(state, pending, record['identity'], allowed_uids, os.fstat(state).st_dev)
+    mutations.finish()
     os.fsync(state)
 
 
-def detach_file(source, state, leaf, expected_identity, kind):
+def detach_file(source, state, leaf, expected_identity, kind, mutations):
     if os.fstat(source).st_dev != os.fstat(state).st_dev:
         reject('filesystem_mismatch')
     current = os.stat(leaf, dir_fd=source, follow_symlinks=False)
     if file_identity(current) != expected_identity:
         reject('candidate_changed', 75)
     pending = '.pending-archive-' + kind + '-' + secrets.token_hex(16)
+    mutations.begin()
     os.rename(leaf, pending, src_dir_fd=source, dst_dir_fd=state)
+    mutations.confirm('archive_files')
     os.fsync(source)
     os.fsync(state)
+    mutations.begin()
     os.unlink(pending, dir_fd=state)
+    mutations.finish()
     os.fsync(state)
 
 
@@ -1159,28 +1222,34 @@ def write_marker(state, deleted, capacity):
 def dry_run():
     gathered = gather()
     try:
-        payload = result_payload('dry-run', gathered)
-        payload['deletion_performed'] = False
+        payload = result_payload('dry-run', gathered, MUTATIONS)
         emit(payload)
     finally:
         close_gathered(gathered)
 
 
-def unlink_pair(directory, state, record):
+def unlink_pair(directory, state, record, mutations):
     if record['sidecar_leaf'] is None:
-        detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive')
+        detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)
         return
     # The sidecar is the publication/availability marker. Removing it first
     # makes a crash leave an explicitly undeployable archive-only prefix that
     # the next bounded pass can safely resume after the same age/protection checks.
-    detach_file(directory, state, record['sidecar_leaf'], record['sidecar_identity'], 'sidecar')
-    detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive')
+    detach_file(directory, state, record['sidecar_leaf'], record['sidecar_identity'], 'sidecar', mutations)
+    detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)
 
 
-def unlink_dump(backups, state, record):
+def unlink_dump(backups, state, record, mutations):
     # The root-protected attestation is retained as small audit evidence after
     # the bulky verified dump set is removed.
-    detach_tree(backups, state, {'identity': record['tree']['identity'], 'leaf': record['leaf']}, 'dump', {0})
+    detach_tree(
+        backups,
+        state,
+        {'identity': record['tree']['identity'], 'leaf': record['leaf']},
+        'dump',
+        {0},
+        mutations,
+    )
 
 
 def execute():
@@ -1193,7 +1262,7 @@ def execute():
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             reject('cleanup_lock_busy', 75)
-        clean_marker_temps(state)
+        clean_marker_temps(state, MUTATIONS)
         global_lock = open_global_lock()
         if activity_count() != 0:
             reject('active_production_work', 75)
@@ -1204,7 +1273,7 @@ def execute():
         if first['archive_foreign'] or first['dump_foreign'] or first['release_foreign']:
             reject('unclassified_retention_entry')
         web_uid = pwd.getpwnam('www-data').pw_uid
-        clean_pending_entries(state, web_uid)
+        clean_pending_entries(state, web_uid, MUTATIONS)
         candidates_for_open_check = []
         for records in first['release_classes'].values():
             candidates_for_open_check.extend(record for record in records if record['eligible'])
@@ -1218,13 +1287,13 @@ def execute():
         deleted = {'archive_pairs': 0, 'dump_sets': 0, 'failed_dirs': 0, 'previous_dirs': 0, 'stage_dirs': 0}
         for kind in ('previous', 'stage', 'failed'):
             for record in [item for item in first['release_classes'][kind] if item['eligible']][:MAX_RELEASE_DIR_DELETE]:
-                detach_tree(first['web'], state, record, 'release', {0, web_uid})
+                detach_tree(first['web'], state, record, 'release', {0, web_uid}, MUTATIONS)
                 deleted[kind + '_dirs'] += 1
         for record in [item for item in first['archives'] if item['eligible']][:MAX_ARCHIVE_PAIR_DELETE]:
-            unlink_pair(first['releases'], state, record)
+            unlink_pair(first['releases'], state, record, MUTATIONS)
             deleted['archive_pairs'] += 1
         for record in [item for item in first['dumps'] if item['eligible']][:MAX_DUMP_SET_DELETE]:
-            unlink_dump(first['backups'], state, record)
+            unlink_dump(first['backups'], state, record, MUTATIONS)
             deleted['dump_sets'] += 1
         for descriptor in (first['web'], first['releases'], first['backups'], first['attestations']):
             os.fsync(descriptor)
@@ -1236,7 +1305,7 @@ def execute():
         assert_no_nonterminal_runs()
         second = gather()
         remaining = candidate_counts(second['release_classes'], second['archives'], second['dumps'])
-        payload = result_payload('execute', second, deleted, remaining)
+        payload = result_payload('execute', second, MUTATIONS, deleted, remaining)
         if payload['status'] == 'pass':
             write_marker(state, deleted, second['capacity'])
             emit(payload)
@@ -1302,7 +1371,9 @@ def main():
         else:
             reject('invalid_arguments')
     except RetentionError as error:
-        emit({'deletion_performed': False, 'reason': error.reason, 'schema': SCHEMA, 'status': 'blocked'})
+        payload = {'reason': error.reason, 'schema': SCHEMA, 'status': 'blocked'}
+        payload.update(MUTATIONS.fields())
+        emit(payload)
         raise SystemExit(error.code)
 
 
@@ -1312,8 +1383,12 @@ if __name__ == '__main__':
     except SystemExit:
         raise
     except RetentionError as error:
-        emit({'deletion_performed': False, 'reason': error.reason, 'schema': SCHEMA, 'status': 'blocked'})
+        payload = {'reason': error.reason, 'schema': SCHEMA, 'status': 'blocked'}
+        payload.update(MUTATIONS.fields())
+        emit(payload)
         raise SystemExit(error.code)
     except (OSError, TypeError, ValueError):
-        emit({'deletion_performed': False, 'reason': 'internal_rejection', 'schema': SCHEMA, 'status': 'blocked'})
+        payload = {'reason': 'internal_rejection', 'schema': SCHEMA, 'status': 'blocked'}
+        payload.update(MUTATIONS.fields())
+        emit(payload)
         raise SystemExit(70)
