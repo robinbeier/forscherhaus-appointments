@@ -110,9 +110,10 @@ exclusive advisory lock; the in-container watchdog waits for a shared lock.
 Loss of the helper releases the lock, causing the watchdog to terminate MariaDB
 and Docker to auto-remove the ROB-465-labeled temporary container. No named
 volume is used. The fixed container wrapper writes a canonical clean-shutdown
-record to a dedicated run-local bind only after MariaDB has exited and its fixed
-private error log contains the normal server, InnoDB, and final shutdown
-confirmations. After requesting a clean shutdown, the verifier requires
+record to a dedicated run-local bind only after MariaDB has exited and its
+root-created mode-`0600` run-local output capture contains the normal server,
+InnoDB, and final shutdown confirmations. The capture is never emitted and is
+removed before host observation. After requesting a clean shutdown, the verifier requires
 disappearance of the exact container in every container state, then stable-reads
 and durably pins that exact root-owned record. The shutdown client's and wrapper
 child's exit statuses are diagnostic only: neither can override a missing

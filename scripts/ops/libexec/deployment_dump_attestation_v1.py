@@ -1333,23 +1333,23 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
                 '--pids-limit', '256', '--cpus', '2',
                 '-e', 'MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1', IMAGE,
                 '/bin/sh', '-c',
-                'command -v flock >/dev/null || exit 70; '
+                'command -v flock >/dev/null || exit 70; umask 077; '
                 '/usr/local/bin/docker-entrypoint.sh mariadbd --skip-log-bin --skip-name-resolve '
-                '--log-error=/var/lib/mysql/fh-restore.log '
                 '--innodb-file-per-table=OFF --innodb-data-file-path=ibdata1:12M:autoextend:max:' + str(max_mib) + 'M '
                 '--innodb-log-file-size=64M --innodb-undo-tablespaces=0 --tmp-table-size=64M '
                 '--innodb-temp-data-file-path=ibtmp1:12M:autoextend:max:256M --tmpdir=/run/mysqld '
                 '--max-heap-table-size=64M --default-storage-engine=InnoDB '
-                '--enforce-storage-engine=InnoDB --sql-mode=NO_ENGINE_SUBSTITUTION & '
+                '--enforce-storage-engine=InnoDB --sql-mode=NO_ENGINE_SUBSTITUTION '
+                '> /run/fh-exit/.server.log 2>&1 & '
                 'child=$!; (flock -s /run/fh-lease -c true; kill -TERM "$child" 2>/dev/null; sleep 10; '
                 'kill -KILL "$child" 2>/dev/null) & watcher=$!; '
                 'wait "$child"; status=$?; authority=70; '
-                'grep -Fq "): Normal shutdown" /var/lib/mysql/fh-restore.log 2>/dev/null && '
-                'grep -Fq "InnoDB: Shutdown completed;" /var/lib/mysql/fh-restore.log 2>/dev/null && '
-                'grep -Fq "mariadbd: Shutdown complete" /var/lib/mysql/fh-restore.log 2>/dev/null && authority=0; '
-                'umask 077; printf "%s\\n" "$authority" > /run/fh-exit/.exit.tmp; '
+                'grep -Fq "): Normal shutdown" /run/fh-exit/.server.log 2>/dev/null && '
+                'grep -Fq "InnoDB: Shutdown completed;" /run/fh-exit/.server.log 2>/dev/null && '
+                'grep -Fq "mariadbd: Shutdown complete" /run/fh-exit/.server.log 2>/dev/null && authority=0; '
+                'printf "%s\\n" "$authority" > /run/fh-exit/.exit.tmp; '
                 'chmod 0600 /run/fh-exit/.exit.tmp; mv /run/fh-exit/.exit.tmp /run/fh-exit/exit; '
-                'rm -f /var/lib/mysql/fh-restore.log; '
+                'rm -f /run/fh-exit/.server.log; '
                 'kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; exit "$status"'], 120)
         started = True
         for attempt in range(90):
