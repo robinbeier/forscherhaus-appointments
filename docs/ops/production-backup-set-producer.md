@@ -118,6 +118,11 @@ bash scripts/ops/prod_verify_latest_deployment_dump.sh \
 It invokes only the fixed installed verifier with `--latest-handoff`; it does
 not accept a set ID, path, digest or environment override.
 
+The restore helper waits for the final MariaDB server with networking enabled;
+it never treats the image entrypoint's temporary initialization server as
+restore-ready. Clean shutdown evidence is published only after that final
+server has completed the fixed import and verification sequence.
+
 For the initial ROB-461 wave, install the reviewed helper without adding an
 autonomous schedule. Create exactly two fresh sets serially. After each
 producer pass, run the protected handoff consumer above; do not copy

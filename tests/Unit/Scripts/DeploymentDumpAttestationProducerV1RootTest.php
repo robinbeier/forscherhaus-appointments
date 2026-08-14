@@ -676,7 +676,18 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
     {
         $deadline = microtime(true) + $seconds;
         do {
-            if ($this->command(['/usr/bin/docker', 'exec', $name, 'mariadb-admin', '-uroot', 'ping'])['exit'] === 0) {
+            $result = $this->command([
+                '/usr/bin/docker',
+                'exec',
+                $name,
+                'mariadb',
+                '-uroot',
+                '--batch',
+                '--skip-column-names',
+                '-e',
+                'SELECT IF(@@GLOBAL.skip_networking = 0, 1, 0);',
+            ]);
+            if ($result['exit'] === 0 && $result['stdout'] === "1\n") {
                 return true;
             }
             usleep(500_000);

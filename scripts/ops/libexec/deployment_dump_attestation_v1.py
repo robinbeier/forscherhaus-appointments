@@ -768,6 +768,17 @@ def docker_popen(arguments, **kwargs):
     return process, before
 
 
+def final_server_ready(name):
+    # The pinned image's initialization server is socket-reachable but always
+    # runs with --skip-networking. Only the final exec'd server may return 1.
+    probe = docker_run(
+        ['exec', name, 'mariadb', '-uroot', '--batch', '--skip-column-names',
+         '-e', 'SELECT IF(@@GLOBAL.skip_networking = 0, 1, 0);'],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5, check=False,
+    )
+    return probe.returncode == 0 and probe.stdout == '1\n'
+
+
 def observe_container_exit(run_path):
     run = os.open(run_path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
@@ -1353,9 +1364,7 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
                 'kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; exit "$status"'], 120)
         started = True
         for attempt in range(90):
-            probe = docker_run(['exec', name, 'mariadb-admin', '-uroot', 'ping'],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
-            if probe.returncode == 0:
+            if final_server_ready(name):
                 break
             time.sleep(1)
         else:
