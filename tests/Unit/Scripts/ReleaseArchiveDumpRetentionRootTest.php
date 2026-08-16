@@ -270,6 +270,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame(70, $dry['exit']);
         self::assertSame('unheld_archive_only', $this->decode($dry)['reason']);
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        unlink(self::RELEASES . '/old.tar.gz');
 
         $this->archivePair('orphan', 40 * 86400);
         unlink(self::RELEASES . '/orphan.tar.gz');
@@ -322,6 +323,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         $this->writeLegacyTarArchive('held-current');
         $this->writeProvenance('held-current');
         $this->writeLegacyTarArchive('held-rollback');
+        $this->writeProvenance('held-rollback');
         mkdir('/etc/fh', 0700, true);
         $this->legacyHoldFixtureCreated = true;
         $current = $this->legacyHoldTarget('current', 'held-current');
