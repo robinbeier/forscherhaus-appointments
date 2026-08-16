@@ -27,6 +27,73 @@ conflict, follow `AGENTS.md`.
   `single-owner` or `manual_approval_required`, keep changes narrow and
   conservative.
 
+## Model-Aware Delegation
+
+The primary agent owns the end-to-end goal, authority boundary, sequencing,
+file ownership, integration, validation, issue and PR state, merge decision,
+and every production action. Delegation does not transfer those
+responsibilities.
+
+Use the repo-defined `implementation_worker` as the default subordinate for a
+concrete implementation, regression-test, or documentation slice when that
+slice is independently verifiable and has non-overlapping ownership. The role
+is registered as `[agents.implementation_worker]` in `.codex/config.toml` and
+its resolved config layer pins `gpt-5.6-luna` with medium reasoning in
+`.codex/agents/implementation-worker.toml`. The project-wide
+`agents.default_subagent_model` and
+`agents.default_subagent_reasoning_effort` values carry the same Luna/medium
+defaults for v2 spawn interfaces that do not expose custom agent types.
+
+The primary agent must provide each implementation worker with:
+
+- one bounded outcome and explicit file or module ownership
+- relevant constraints and acceptance criteria
+- the narrow validation expected from the worker
+- notice that other agents may be editing the repository and that their work
+  must not be reverted
+
+Keep work local to the primary agent when it is trivial, tightly sequential,
+ambiguous, cross-cutting, or likely to overlap another writer. Architecture,
+hard debugging, conflict resolution, security-sensitive authority decisions,
+final integration, and production planning stay with the primary agent or an
+explicitly stronger specialist. Do not create delegation merely to fill the
+available thread limit.
+
+The implementation worker is a pure subordinate: it must not spawn or
+coordinate other agents, merge, push, publish PRs, change issue state, or
+perform production actions. Production and other irreversible external
+actions always require the primary agent and the applicable explicit approval.
+
+Before the first delegation in a session, inspect the active spawn interface:
+
+- When it exposes custom agent types, select
+  `agent_type="implementation_worker"`. This applies the registered role's
+  model, sandbox, and subordinate instructions.
+- When it exposes only `task_name`, `message`, and `fork_turns`, use that
+  generic spawn path without a model override. The project-wide subagent
+  defaults apply Luna/medium. Because this legacy path cannot apply the role's
+  dedicated instructions, the task message must repeat the bounded ownership,
+  no-delegation, no-push/merge/PR/issue-state, and no-production boundaries.
+
+`task_name` always names the delegated task path; it never selects an agent
+role or model. If the active runtime cannot honor either registered roles or
+the project-wide subagent defaults, fail closed: do not claim that a Luna
+worker ran, and either keep the task with the primary agent or disclose an
+explicit supported fallback.
+
+Choose `fork_turns` only for the context the task needs; do not rely on it as a
+model selector. Prefer a self-contained task with `fork_turns="none"` or a
+small positive turn window to avoid irrelevant history. Use
+`fork_turns="all"` only when the worker genuinely needs the full conversation.
+The registered role remains the model authority. If Luna is unavailable,
+disclose the fallback and prefer `gpt-5.6-terra` or keep the task with the
+primary agent instead of silently changing the execution model.
+
+After a worker returns, the primary agent inspects the diff, reconciles it with
+concurrent work, runs integration-level validation, and obtains independent
+review. A worker's completion report is implementation evidence, not review,
+merge, or production authority.
+
 ## Linear States
 
 Expected statuses:

@@ -20,6 +20,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | --- | --- | --- |
 | Local onboarding and quickstart | `README.md` | Operator-first entry point. |
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
+| Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
 | Extended local command matrix + compact guardrails | `AGENTS.md` | Cross-topic command hub without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
@@ -75,7 +76,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 - Change `README.md` when operator onboarding, quickstart, or local service
   usage changes.
 - Change `WORKFLOW.md` when the agent state machine, workpad policy, or
-  ticket-to-merge behavior changes.
+  ticket-to-merge or model-aware delegation behavior changes.
 - Change `AGENTS.md` when the compact repo guardrails, command entry points, or
   extended local/CI command matrix change.
 - Change `.github/workflows/ci.yml` when CI truth changes; then update
