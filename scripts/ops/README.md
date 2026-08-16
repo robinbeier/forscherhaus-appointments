@@ -72,6 +72,11 @@ Script inventory:
   ROB-468 root helper. Its separately confirmed execute mode can publish only
   canonical no-replace provenance sidecars and helper-owned temps; see
   [`docs/ops/production-legacy-release-provenance.md`](../../docs/ops/production-legacy-release-provenance.md).
+  `--inspect-authorization` is read-only; the separately confirmed
+  `--provision-authorization` gate may create only the missing fixed
+  host-local authorization from validated marker/archive/deployment-run
+  authority, or clean only exact helper-owned stale authorization temps, and
+  is not sidecar execute approval.
 - `prod_journald_retention.sh` inspects the fixed 1 GiB / 30-day journald
   contract by default. Configuration activation, one-time vacuum, and rollback
   use distinct confirmation tokens and remain unexecuted by repository delivery;

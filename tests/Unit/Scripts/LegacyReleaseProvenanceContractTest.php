@@ -171,6 +171,35 @@ final class LegacyReleaseProvenanceContractTest extends TestCase
         self::assertStringNotContainsString('ROB-469', $wrapper);
     }
 
+    public function testAuthorizationProvisioningHasSeparateClosedAuthorityAndResultContract(): void
+    {
+        $helper = $this->helper();
+        $wrapper = $this->wrapper();
+        foreach (
+            [
+                'inspect-authorization',
+                'provision-authorization',
+                'ROB-468-AUTHORIZATION',
+                '/var/lib/fh-deploy-orchestrator/runs',
+                '/usr/local/libexec/fh/validate_deployment_terminal_bundle_v1.php',
+                '/usr/local/libexec/fh/DeploymentContractV1.php',
+                'authorization_published',
+                'AUTH_RESULT_SCHEMA',
+                'observe_archive',
+                'renameat2',
+                'fsync',
+                'mutation_outcome',
+            ]
+            as $term
+        ) {
+            self::assertStringContainsString($term, $helper . $wrapper);
+        }
+        self::assertStringContainsString('legacy_release_provenance_authorization_result.v1', $helper . $wrapper);
+        self::assertStringNotContainsString('--release-id', $wrapper);
+        self::assertStringNotContainsString('--commit', $wrapper);
+        self::assertStringNotContainsString('--member', $wrapper);
+    }
+
     public function testRunbookDefinesFullMatrixAndProductionBoundary(): void
     {
         $root = dirname(__DIR__, 3);

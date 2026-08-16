@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import base64
 import fcntl
 import hashlib
 import importlib.util
@@ -161,6 +162,21 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
             legacy.TRUSTED_UID = expected_uid
             legacy.close_context(context)
 
+    def test_missing_authorization_is_invalid_and_publicly_classified(self):
+        fixture = self.fixture()
+        authorization = fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        authorization.unlink()
+        context = self.context(fixture)
+        try:
+            with self.assertRaisesRegex(legacy.LegacyProvenanceError, 'invalid_authorization'):
+                legacy.preflight_targets(context)
+        finally:
+            legacy.close_context(context)
+        payload = legacy.result_payload(
+            'inspect', 'blocked', 'invalid_authorization', 0, 0, 0, 0, legacy.MutationLedger(),
+        )
+        self.assertEqual('authorization_invalid', payload['reason'])
+
     def test_authorization_marker_and_installed_deploy_bindings_fail_closed(self):
         for mutation in ('marker', 'commit', 'deploy'):
             with self.subTest(mutation=mutation):
@@ -252,6 +268,305 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
             finally:
                 legacy.MAX_UNPACKED_BYTES = original_limit
                 legacy.close_context(context)
+
+    def test_authorization_observer_is_separate_and_authorized_inspection_rejects_empty_hashes(self):
+        fixture = self.fixture()
+        context = self.context(fixture)
+        try:
+            archive = legacy.open_stable_regular(
+                context['releases'], 'current.tar.gz', {0o600}, legacy.MAX_ARCHIVE_BYTES,
+            )
+            context['records'].append(archive)
+            observed = legacy.observe_archive(archive)
+            self.assertEqual(set(legacy.REQUIRED_MEMBERS), set(observed['required_members']))
+            with self.assertRaisesRegex(legacy.LegacyProvenanceError, 'required_member_invalid'):
+                legacy.inspect_archive(archive, {member: '' for member in legacy.REQUIRED_MEMBERS})
+        finally:
+            legacy.close_context(context)
+
+    def test_deploy_digest_uses_stable_file_descriptor(self):
+        fixture = self.fixture()
+        context = self.context(fixture)
+        try:
+            record = legacy.open_stable_regular(
+                context['root'], 'deploy_ea.sh', {0o755}, legacy.MAX_REQUIRED_MEMBER_BYTES,
+            )
+            self.assertEqual(hashlib.sha256(self.member_bytes['deploy_ea.sh']).hexdigest(), legacy.digest_fd(record['fd']))
+            legacy.close_record(record)
+        finally:
+            legacy.close_context(context)
+
+    def test_authorization_result_schema_distinguishes_pending_publish_and_attach(self):
+        ledger = legacy.MutationLedger(legacy.AUTH_MUTATION_KEYS)
+        payload = legacy.authorization_result_payload(
+            'inspect-authorization', 'blocked', 'authorization_authority_missing',
+            {'attached': 0, 'pending': 1, 'preflighted': 2, 'published': 0}, ledger,
+        )
+        self.assertEqual('legacy_release_provenance_authorization_result.v1', payload['schema'])
+        self.assertEqual({'attached': 0, 'pending': 1, 'published': 0}, payload['authorization'])
+        ledger.begin(); ledger.confirm('authorization_published')
+        payload = legacy.authorization_result_payload(
+            'provision-authorization', 'pass', None,
+            {'attached': 0, 'pending': 0, 'preflighted': 2, 'published': 1}, ledger,
+        )
+        self.assertEqual('known', payload['mutation_outcome'])
+        self.assertEqual(1, payload['mutation_counts']['authorization_published'])
+
+    def test_authorization_mutation_ledger_unknown_boundary_is_not_none(self):
+        ledger = legacy.MutationLedger(legacy.AUTH_MUTATION_KEYS)
+        ledger.begin()
+        payload = legacy.authorization_result_payload(
+            'provision-authorization', 'blocked', 'internal_error',
+            {'attached': 0, 'pending': 1, 'preflighted': 2, 'published': 0}, ledger,
+        )
+        self.assertEqual('unknown', payload['mutation_outcome'])
+
+    def test_authorization_main_errors_emit_only_the_authorization_schema(self):
+        for failure, expected_reason in (
+            (legacy.LegacyProvenanceError('authorization_authority_missing'), 'authorization_invalid'),
+            (RuntimeError('sensitive internal detail'), 'internal_error'),
+        ):
+            output = io.StringIO()
+            with self.subTest(expected_reason=expected_reason), mock.patch.object(
+                sys, 'argv', ['helper', 'inspect-authorization'],
+            ), mock.patch.object(sys, 'stdout', output), mock.patch.object(
+                legacy, 'run', side_effect=failure,
+            ), self.assertRaises(SystemExit) as raised:
+                legacy.main()
+            self.assertEqual(70, raised.exception.code)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(legacy.AUTH_RESULT_SCHEMA, payload['schema'])
+            self.assertEqual(expected_reason, payload['reason'])
+            self.assertNotIn('sensitive internal detail', output.getvalue())
+
+    def test_authorized_archive_hashes_cannot_be_empty_or_partial(self):
+        fixture = self.fixture()
+        context = self.context(fixture)
+        try:
+            record = legacy.open_stable_regular(context['releases'], 'current.tar.gz', {0o600}, legacy.MAX_ARCHIVE_BYTES)
+            context['records'].append(record)
+            with self.assertRaisesRegex(legacy.LegacyProvenanceError, 'required_member_invalid'):
+                legacy.inspect_archive(record, {member: '0' * 64 for member in legacy.REQUIRED_MEMBERS[:-1]})
+        finally:
+            legacy.close_context(context)
+
+    def test_invalid_authorization_arguments_remain_closed(self):
+        for arguments in (['provision-authorization'], ['provision-authorization', 'ROB-468'], ['inspect-authorization', 'extra']):
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), *arguments], capture_output=True, text=True)
+            self.assertEqual(64, result.returncode)
+            self.assertEqual('invalid_arguments', json.loads(result.stdout)['reason'])
+
+    def test_terminal_authority_ignores_valid_failures_and_requires_one_successful_commit(self):
+        authority = self.authority_fixture()
+        failed = self.write_terminal_bundle(authority, 1, 'current', '9' * 40)
+        succeeded = self.write_terminal_bundle(authority, 2, 'current', '1' * 40)
+        states = {failed['run_id']: 'failed_before_write', succeeded['run_id']: 'succeeded'}
+        with self.patch_authority_paths(authority), mock.patch.object(
+            legacy.subprocess, 'run', side_effect=lambda *args, **kwargs: self.validator_result(kwargs['input'], states),
+        ):
+            self.assertEqual('1' * 40, legacy._terminal_commit_authority({}, 'current'))
+
+        only_failed = self.authority_fixture()
+        failed = self.write_terminal_bundle(only_failed, 3, 'current', '9' * 40)
+        with self.patch_authority_paths(only_failed), mock.patch.object(
+            legacy.subprocess, 'run', side_effect=lambda *args, **kwargs: self.validator_result(
+                kwargs['input'], {failed['run_id']: 'failed_pre_switch'},
+            ),
+        ), self.assertRaisesRegex(legacy.LegacyProvenanceError, 'authorization_authority_missing'):
+            legacy._terminal_commit_authority({}, 'current')
+
+    def test_terminal_authority_rejects_conflict_and_validator_binding_mismatch(self):
+        authority = self.authority_fixture()
+        first = self.write_terminal_bundle(authority, 4, 'current', '1' * 40)
+        second = self.write_terminal_bundle(authority, 5, 'current', '2' * 40)
+        states = {first['run_id']: 'succeeded', second['run_id']: 'succeeded'}
+        with self.patch_authority_paths(authority), mock.patch.object(
+            legacy.subprocess, 'run', side_effect=lambda *args, **kwargs: self.validator_result(kwargs['input'], states),
+        ), self.assertRaisesRegex(legacy.LegacyProvenanceError, 'authorization_authority_ambiguous'):
+            legacy._terminal_commit_authority({}, 'current')
+
+        mismatch = self.authority_fixture()
+        run = self.write_terminal_bundle(mismatch, 6, 'current', '1' * 40)
+        with self.patch_authority_paths(mismatch), mock.patch.object(
+            legacy.subprocess,
+            'run',
+            return_value=mock.Mock(returncode=0, stdout=legacy.canonical_json({
+                'intent_sha256': 'f' * 64,
+                'records': 1,
+                'run_id': run['run_id'],
+                'schema': 'deployment_terminal_bundle_validation.v1',
+                'state': 'succeeded',
+            })),
+        ), self.assertRaisesRegex(legacy.LegacyProvenanceError, 'terminal_bundle_invalid'):
+            legacy._terminal_commit_authority({}, 'current')
+
+    def test_terminal_authority_evidence_limit_fits_the_installed_validator_envelope(self):
+        maximum_encoded = (
+            4 * ((legacy.MAX_TERMINAL_EVENTS_BYTES + 2) // 3)
+            + 4 * ((legacy.MAX_TERMINAL_EVIDENCE_BYTES + 2) // 3)
+            + len(legacy.canonical_json({'events': '', 'evidence': ''}))
+        )
+        self.assertLessEqual(maximum_encoded, legacy.MAX_TERMINAL_ENVELOPE_BYTES)
+
+        authority = self.authority_fixture()
+        run = self.write_terminal_bundle(authority, 7, 'current', '1' * 40)
+        evidence = authority['runs'] / run['run_id'] / 'evidence.json'
+        evidence.write_bytes(b'x' * (legacy.MAX_TERMINAL_EVIDENCE_BYTES + 1))
+        os.chmod(evidence, 0o600)
+        with self.patch_authority_paths(authority), mock.patch.object(legacy.subprocess, 'run') as validator, self.assertRaisesRegex(
+            legacy.LegacyProvenanceError, 'unsafe_file',
+        ):
+            legacy._terminal_commit_authority({}, 'current')
+        validator.assert_not_called()
+
+    def test_derive_authorization_preflights_both_archives_and_installed_deploy(self):
+        fixture = self.fixture()
+        expected = json.loads((fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name).read_text())
+        context = self.context(fixture)
+        try:
+            with mock.patch.object(
+                legacy, '_terminal_commit_authority', side_effect=lambda _context, release: {
+                    'current': '1' * 40, 'rollback': '2' * 40,
+                }[release],
+            ) as authority:
+                self.assertEqual(expected, legacy.derive_authorization(context))
+            self.assertEqual([mock.call(context, 'current'), mock.call(context, 'rollback')], authority.call_args_list)
+        finally:
+            legacy.close_context(context)
+
+    def test_authorization_provision_publish_replay_and_exact_race_attach(self):
+        fixture = self.fixture()
+        path = fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        value = json.loads(path.read_text())
+        path.unlink()
+        context = self.context(fixture)
+        ledger = legacy.MutationLedger(legacy.AUTH_MUTATION_KEYS)
+        try:
+            with mock.patch.object(legacy, 'derive_authorization', return_value=value):
+                encoded, existing = legacy.preflight_authorization(context)
+                self.assertFalse(existing)
+                self.assertTrue(legacy.provision_authorization(context, encoded, existing, ledger))
+            self.assertEqual(encoded, path.read_bytes())
+            self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+            self.assertEqual(1, ledger.fields()['mutation_counts']['authorization_published'])
+            self.assertEqual('known', ledger.fields()['mutation_outcome'])
+        finally:
+            legacy.close_context(context)
+
+        replay = self.context(fixture)
+        replay_ledger = legacy.MutationLedger(legacy.AUTH_MUTATION_KEYS)
+        try:
+            with mock.patch.object(legacy, 'derive_authorization', return_value=value):
+                encoded, existing = legacy.preflight_authorization(replay)
+                self.assertTrue(existing)
+                self.assertFalse(legacy.provision_authorization(replay, encoded, existing, replay_ledger))
+            self.assertEqual('none', replay_ledger.fields()['mutation_outcome'])
+        finally:
+            legacy.close_context(replay)
+
+        race_fixture = self.fixture()
+        race_path = race_fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        race_value = json.loads(race_path.read_text())
+        race_bytes = race_path.read_bytes()
+        race_path.unlink()
+        race = self.context(race_fixture)
+        race_ledger = legacy.MutationLedger(legacy.AUTH_MUTATION_KEYS)
+        try:
+            with mock.patch.object(legacy, 'derive_authorization', return_value=race_value):
+                encoded, existing = legacy.preflight_authorization(race)
+            race_path.write_bytes(race_bytes)
+            os.chmod(race_path, 0o600)
+            self.assertFalse(legacy.provision_authorization(race, encoded, existing, race_ledger))
+            self.assertEqual(0, race_ledger.fields()['mutation_counts']['authorization_published'])
+            self.assertEqual(1, race_ledger.fields()['mutation_counts']['temp_files_removed'])
+            self.assertEqual([], list(race_fixture['etc'].glob('*.tmp')))
+        finally:
+            legacy.close_context(race)
+
+    def test_authorization_provision_cleans_exact_owned_temps_when_existing_is_already_attached(self):
+        fixture = self.fixture()
+        path = fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        value = json.loads(path.read_text())
+        temp = fixture['etc'] / ('.' + path.name + '.rob468-' + 'd' * 32 + '.tmp')
+        temp.write_bytes(path.read_bytes())
+        os.chmod(temp, 0o600)
+
+        context = self.context(fixture)
+        ledger = legacy.MutationLedger(legacy.AUTH_MUTATION_KEYS)
+        try:
+            with mock.patch.object(legacy, 'derive_authorization', return_value=value):
+                encoded, existing = legacy.preflight_authorization(context)
+                self.assertTrue(existing)
+                self.assertFalse(legacy.provision_authorization(context, encoded, existing, ledger))
+            self.assertFalse(temp.exists())
+            self.assertEqual(1, ledger.fields()['mutation_counts']['temp_files_removed'])
+            self.assertEqual('known', ledger.fields()['mutation_outcome'])
+        finally:
+            legacy.close_context(context)
+
+    def test_run_rechecks_authority_stability_before_authorization_mutation(self):
+        fixture = self.fixture()
+        path = fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        path.unlink()
+        context = self.context(fixture)
+        encoded = legacy.canonical_json({'schema': legacy.AUTHORIZATION_SCHEMA, 'targets': []})
+
+        def fake_preflight(passed_context):
+            record = legacy.open_stable_regular(
+                passed_context['current'], '_RELEASE', {0o600}, 512,
+            )
+            passed_context['records'].append(record)
+            (fixture['current'] / '_RELEASE').write_text('drifted\n')
+            os.chmod(fixture['current'] / '_RELEASE', 0o600)
+            return encoded, False
+
+        with mock.patch.object(legacy.os, 'geteuid', return_value=legacy.TRUSTED_UID), mock.patch.object(
+            legacy.os.path, 'realpath', side_effect=lambda value: value,
+        ), mock.patch.multiple(
+            legacy,
+            AUTHORIZATION=str(path),
+            INSTALLED_DEPLOY_EA=str(fixture['root'] / 'deploy_ea.sh'),
+            open_context=mock.Mock(return_value=context),
+            preflight_authorization=mock.Mock(side_effect=fake_preflight),
+            provision_authorization=mock.Mock(side_effect=AssertionError('mutation must not start')),
+        ):
+            with self.assertRaisesRegex(legacy.LegacyProvenanceError, 'file_changed'):
+                legacy.run('provision-authorization')
+
+    def test_authorization_temp_conflict_and_uncertain_rename_fail_closed(self):
+        fixture = self.fixture()
+        path = fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        value = json.loads(path.read_text())
+        path.unlink()
+        conflict = fixture['etc'] / ('.' + path.name + '.rob468-' + 'a' * 32 + '.tmp')
+        conflict.write_bytes(b'not the authorization\n')
+        os.chmod(conflict, 0o600)
+        context = self.context(fixture)
+        try:
+            with mock.patch.object(legacy, 'derive_authorization', return_value=value), self.assertRaisesRegex(
+                legacy.LegacyProvenanceError, 'unsafe_helper_temp',
+            ):
+                legacy.preflight_authorization(context)
+            self.assertEqual(b'not the authorization\n', conflict.read_bytes())
+        finally:
+            legacy.close_context(context)
+
+        uncertain_fixture = self.fixture()
+        uncertain_path = uncertain_fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        uncertain_value = json.loads(uncertain_path.read_text())
+        uncertain_path.unlink()
+        uncertain = self.context(uncertain_fixture)
+        ledger = legacy.MutationLedger(legacy.AUTH_MUTATION_KEYS)
+        try:
+            with mock.patch.object(legacy, 'derive_authorization', return_value=uncertain_value):
+                encoded, existing = legacy.preflight_authorization(uncertain)
+            with mock.patch.object(legacy, 'renameat2_noreplace', side_effect=OSError(5, 'injected')):
+                with self.assertRaises(OSError):
+                    legacy.provision_authorization(uncertain, encoded, existing, ledger)
+            self.assertEqual('unknown', ledger.fields()['mutation_outcome'])
+            self.assertEqual(0, ledger.fields()['mutation_counts']['authorization_published'])
+        finally:
+            legacy.close_context(uncertain)
 
     def test_tar_member_name_safety_rejects_backslash_control_and_nul(self):
         for name in ('bad\\name', 'bad\x01name', 'bad\x00name'):
@@ -547,6 +862,87 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
         auth_path.write_bytes(legacy.canonical_json(authorization))
         os.chmod(auth_path, 0o600)
         return paths
+
+    def authority_fixture(self):
+        self.fixture_index += 1
+        root = self.workspace / ('authority-' + str(self.fixture_index))
+        runs = root / 'runs'
+        validator = root / 'validator'
+        runs.mkdir(parents=True, mode=0o700)
+        validator.mkdir(mode=0o755)
+        validator_path = validator / 'validate_deployment_terminal_bundle_v1.php'
+        contract_path = validator / 'DeploymentContractV1.php'
+        validator_path.write_text('<?php\n')
+        contract_path.write_text('<?php\n')
+        os.chmod(validator_path, 0o555)
+        os.chmod(contract_path, 0o444)
+        return {'runs': runs, 'validator': validator_path, 'contract': contract_path}
+
+    def write_terminal_bundle(self, authority, number, release_id, commit):
+        run_id = f'0000000{number}-0000-4000-8000-{number:012d}'
+        run = authority['runs'] / run_id
+        run.mkdir(mode=0o700)
+        fields = {
+            'artifact_expectation': 'build_from_expected_commit',
+            'dump_policy': 'fresh_verified_under_240m',
+            'expected_commit': commit,
+            'release_id': release_id,
+            'traffic_mode': 'normal',
+        }
+        intent = {
+            **fields,
+            'deploy_invocation_count': 0,
+            'exit_code': 0,
+            'intent_sha256': hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+            'reason': 'ok',
+            'record_type': 'intent',
+            'recorded_at_utc': '2026-08-16T00:00:00Z',
+            'run_id': run_id,
+            'schema': 'deployment_run.v1',
+            'sequence': 1,
+            'state': 'planned',
+        }
+        for leaf, data in (
+            ('intent.json', legacy.canonical_json(intent)),
+            ('events.jsonl', legacy.canonical_json(intent)),
+            ('evidence.json', legacy.canonical_json({})),
+        ):
+            (run / leaf).write_bytes(data)
+            os.chmod(run / leaf, 0o600)
+        return intent
+
+    def patch_authority_paths(self, authority):
+        return mock.patch.multiple(
+            legacy,
+            RUNS_ROOT=str(authority['runs']),
+            TERMINAL_VALIDATOR=str(authority['validator']),
+            TERMINAL_CONTRACT=str(authority['contract']),
+            open_absolute_directory=self.open_test_absolute_directory,
+        )
+
+    def open_test_absolute_directory(self, path, exact_mode=None):
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        opened = os.fstat(descriptor)
+        if exact_mode is not None and stat.S_IMODE(opened.st_mode) != exact_mode:
+            os.close(descriptor)
+            raise legacy.LegacyProvenanceError('unsafe_directory')
+        return descriptor, {
+            'fd': descriptor,
+            'path': path,
+            'identity': legacy.directory_identity(opened),
+        }
+
+    def validator_result(self, envelope, states):
+        value = json.loads(envelope)
+        events = base64.b64decode(value['events'])
+        intent = json.loads(events.splitlines()[0])
+        return mock.Mock(returncode=0, stdout=legacy.canonical_json({
+            'intent_sha256': intent['intent_sha256'],
+            'records': len(events.rstrip(b'\n').split(b'\n')),
+            'run_id': intent['run_id'],
+            'schema': 'deployment_terminal_bundle_validation.v1',
+            'state': states[intent['run_id']],
+        }))
 
     def write_archive(self, path, case):
         with tarfile.open(path, 'w:gz') as archive:
