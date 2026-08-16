@@ -33,7 +33,7 @@ hash, commit, member name, or temp path.
 The exact canonical JSON shape is:
 
 ```json
-{"schema":"legacy_release_provenance_authorization.v1","targets":[{"expected_commit":"<40 lowercase hex>","release_id":"<host-local current ID>","required_members":{"build_release.sh":"<sha256>","composer.lock":"<sha256>","deploy_ea.sh":"<sha256>","package-lock.json":"<sha256>"},"role":"current"},{"expected_commit":"<40 lowercase hex>","release_id":"<host-local rollback ID>","required_members":{"build_release.sh":"<sha256>","composer.lock":"<sha256>","deploy_ea.sh":"<sha256>","package-lock.json":"<sha256>"},"role":"rollback"}]}
+{"schema":"legacy_release_provenance_authorization.v1","targets":[{"archive_sha256":"<64 lowercase hex of complete archive>","expected_commit":"<40 lowercase hex>","release_id":"<host-local current ID>","required_members":{"build_release.sh":"<sha256>","composer.lock":"<sha256>","deploy_ea.sh":"<sha256>","package-lock.json":"<sha256>"},"role":"current"},{"archive_sha256":"<64 lowercase hex of complete archive>","expected_commit":"<40 lowercase hex>","release_id":"<host-local rollback ID>","required_members":{"build_release.sh":"<sha256>","composer.lock":"<sha256>","deploy_ea.sh":"<sha256>","package-lock.json":"<sha256>"},"role":"rollback"}]}
 ```
 
 The actual file must be canonical compact JSON with exactly those keys, a
@@ -81,9 +81,11 @@ The tar contract is closed: stable marker and path identity checks use
 `O_NOFOLLOW`, directory/file-descriptor checks, and canonical paths. Tar
 entries are streamed under fixed count and unpacked-size ceilings; duplicate,
 absolute, traversal, control-character, backslash, link, device, FIFO, socket,
-and other non-file/non-directory entries are rejected. The four required root
-members named in the authorization must be regular files and must match their
-exact SHA-256 values. The provenance sidecar is canonical
+and other non-file/non-directory entries are rejected. The complete byte-level
+SHA-256 of each authorized archive is also required in the authorization and
+is compared with the digest computed from the stable archive descriptor before
+publication. The four required root members named in the authorization must be
+regular files and must match their exact SHA-256 values. The provenance sidecar is canonical
 `release_build_provenance.v1`, binding the authorized release and commit, the
 observed archive digest and size, exact source hashes, and conservative stage
 capacity bounds.

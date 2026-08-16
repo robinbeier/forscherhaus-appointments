@@ -45,6 +45,7 @@ NONCE = re.compile(r'[0-9a-f]{32}\Z')
 REQUIRED_MEMBERS = ('build_release.sh', 'composer.lock', 'deploy_ea.sh', 'package-lock.json')
 MUTATION_KEYS = ('sidecars_published', 'temp_files_created', 'temp_files_removed')
 PUBLIC_REASONS = {
+    'archive_digest_mismatch': 'authorization_invalid',
     'authorization_marker_mismatch': 'authorization_invalid',
     'directory_changed': 'host_contract_invalid',
     'file_changed': 'host_contract_invalid',
@@ -328,10 +329,11 @@ def decode_authorization(data):
         role = 'current' if index == 0 else 'rollback'
         if (
             not isinstance(target, dict)
-            or set(target) != {'expected_commit', 'release_id', 'required_members', 'role'}
+            or set(target) != {'archive_sha256', 'expected_commit', 'release_id', 'required_members', 'role'}
             or target.get('role') != role
             or RELEASE_ID.fullmatch(str(target.get('release_id'))) is None
             or COMMIT.fullmatch(str(target.get('expected_commit'))) is None
+            or SHA256.fullmatch(str(target.get('archive_sha256'))) is None
         ):
             reject('invalid_authorization')
         required_members = target.get('required_members')
@@ -369,7 +371,8 @@ def normalize_member_name(name):
 def inspect_archive(record, member_hashes):
     archive_sha256 = digest_fd(record['fd'])
     os.lseek(record['fd'], 0, os.SEEK_SET)
-    names = set()
+    member_names = set()
+    stage_types = {}
     file_count = 0
     unpacked_bytes = BLOCK_BYTES
     observed_required = {}
@@ -386,12 +389,26 @@ def inspect_archive(record, member_hashes):
                     if member.name in ('.', './') and member.isdir():
                         continue
                     name = normalize_member_name(member.name)
-                    if name in names or not (member.isfile() or member.isdir()):
+                    if name in member_names or not (member.isfile() or member.isdir()):
                         reject('unsafe_tar')
-                    names.add(name)
-                    if member.isdir():
+                    member_names.add(name)
+                    parts = name.split('/')
+                    for index in range(1, len(parts)):
+                        parent = '/'.join(parts[:index])
+                        if parent in stage_types and stage_types[parent] == 'file':
+                            reject('unsafe_tar')
+                        if parent not in stage_types:
+                            stage_types[parent] = 'directory'
+                            unpacked_bytes += BLOCK_BYTES
+                    member_type = 'directory' if member.isdir() else 'file'
+                    previous_type = stage_types.get(name)
+                    if previous_type is not None and previous_type != member_type:
+                        reject('unsafe_tar')
+                    if previous_type is None:
+                        stage_types[name] = member_type
+                    if member.isdir() and previous_type is None:
                         unpacked_bytes += BLOCK_BYTES
-                    else:
+                    elif member.isfile():
                         if member.size < 0:
                             reject('unsafe_tar')
                         file_count += 1
@@ -429,7 +446,7 @@ def inspect_archive(record, member_hashes):
     return {
         'archive_sha256': archive_sha256,
         'entry_count': file_count,
-        'stage_inode_count': len(names) + 1,
+        'stage_inode_count': len(stage_types) + 1,
         'stage_unpacked_bytes': unpacked_bytes,
     }
 
@@ -561,6 +578,8 @@ def _preflight_targets(context):
         archive_record = open_stable_regular(context['releases'], archive_leaf, {0o600}, MAX_ARCHIVE_BYTES)
         context['records'].append(archive_record)
         archive_observation = inspect_archive(archive_record, target['required_members'])
+        if not secrets.compare_digest(archive_observation['archive_sha256'], target['archive_sha256']):
+            reject('archive_digest_mismatch')
         sidecar_data = build_sidecar(target, archive_record, archive_observation)
         sidecar_leaf = target['release_id'] + '.build-provenance.json'
         sidecar_record = open_existing_sidecar(context['releases'], sidecar_leaf, sidecar_data)
@@ -644,6 +663,15 @@ def create_temp(releases, plan, mutations):
     except BaseException:
         raise
     mutations.confirm('temp_files_created')
+    created_stat = os.fstat(descriptor)
+    created_identity = (
+        created_stat.st_dev,
+        created_stat.st_ino,
+        created_stat.st_mode,
+        created_stat.st_uid,
+        created_stat.st_gid,
+        created_stat.st_nlink,
+    )
     try:
         offset = 0
         while offset < len(plan['data']):
@@ -652,9 +680,24 @@ def create_temp(releases, plan, mutations):
                 reject('temp_write_failed')
             offset += written
         os.fsync(descriptor)
-    finally:
+        os.fsync(releases)
         os.close(descriptor)
-    os.fsync(releases)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        try:
+            record = open_stable_regular(releases, leaf, {0o600}, MAX_SIDECAR_BYTES, minimum=0)
+            try:
+                if record['identity'][:6] != created_identity:
+                    reject('temp_verify_failed')
+                remove_temp(releases, record, mutations)
+            finally:
+                close_record(record)
+        except FileNotFoundError:
+            pass
+        raise
     record = open_stable_regular(releases, leaf, {0o600}, MAX_SIDECAR_BYTES)
     if not secrets.compare_digest(read_all(record['fd'], MAX_SIDECAR_BYTES), plan['data']):
         close_record(record)

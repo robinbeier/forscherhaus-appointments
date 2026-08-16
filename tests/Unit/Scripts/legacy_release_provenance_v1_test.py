@@ -181,9 +181,19 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
                     legacy.preflight_targets(context)
                 legacy.close_context(context)
 
+    def test_authorization_binds_complete_archive_digest(self):
+        fixture = self.fixture()
+        archive = fixture['releases'] / 'current.tar.gz'
+        archive.write_bytes(archive.read_bytes() + b'drift')
+        os.chmod(archive, 0o600)
+        context = self.context(fixture)
+        with self.assertRaisesRegex(legacy.LegacyProvenanceError, 'archive_digest_mismatch'):
+            legacy.preflight_targets(context)
+        legacy.close_context(context)
+
     def test_tar_traversal_links_devices_duplicates_metadata_and_hash_drift_reject(self):
         cases = (
-            'traversal', 'symlink', 'device', 'duplicate', 'missing', 'hash', 'appledouble', 'long_component',
+            'traversal', 'symlink', 'device', 'duplicate', 'missing', 'hash', 'appledouble', 'long_component', 'collision',
         )
         for case in cases:
             with self.subTest(case=case):
@@ -193,6 +203,15 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
                     legacy.preflight_targets(context)
                 legacy.close_context(context)
                 self.assertEqual([], list(fixture['releases'].glob('*.build-provenance.json')))
+
+    def test_nested_member_paths_count_implicit_parent_directories_once(self):
+        fixture = self.fixture(current_tar_case='nested')
+        context = self.context(fixture)
+        plans = legacy.preflight_targets(context)
+        archive_value = json.loads(plans[0]['data'])['capacity_bounds']
+        self.assertEqual(8, archive_value['stage_inode_count'])
+        self.assertEqual(8 * legacy.BLOCK_BYTES, archive_value['stage_unpacked_bytes'])
+        legacy.close_context(context)
 
     def test_conflicting_sidecar_and_unsafe_or_foreign_temps_block_without_archive_change(self):
         for case in ('sidecar', 'unsafe_temp', 'foreign_temp'):
@@ -293,6 +312,62 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
                 legacy.exact_attach(context['releases'], plans[0], temp, ledger)
         self.assertEqual('unknown', ledger.fields()['mutation_outcome'])
         self.assertEqual(0, ledger.fields()['mutation_counts']['sidecars_published'])
+        legacy.close_context(context)
+
+    def test_failed_new_temp_is_removed_when_write_fails(self):
+        fixture = self.fixture()
+        context = self.context(fixture)
+        plans = legacy.preflight_targets(context)
+        ledger = legacy.MutationLedger()
+        with mock.patch.object(legacy.os, 'write', side_effect=OSError('injected temp write failure')):
+            with self.assertRaises(OSError):
+                legacy.create_temp(context['releases'], plans[0], ledger)
+        self.assertEqual([], list(fixture['releases'].glob('*.rob468-*.tmp')))
+        self.assertEqual('known', ledger.fields()['mutation_outcome'])
+        self.assertEqual(1, ledger.fields()['mutation_counts']['temp_files_created'])
+        self.assertEqual(1, ledger.fields()['mutation_counts']['temp_files_removed'])
+        legacy.close_context(context)
+
+    def test_failed_new_temp_close_is_cleaned_by_exact_created_identity(self):
+        fixture = self.fixture()
+        context = self.context(fixture)
+        plans = legacy.preflight_targets(context)
+        ledger = legacy.MutationLedger()
+        real_close = legacy.os.close
+        close_calls = 0
+
+        def fail_first_close(descriptor):
+            nonlocal close_calls
+            close_calls += 1
+            if close_calls == 1:
+                raise OSError('injected temp close failure')
+            return real_close(descriptor)
+
+        with mock.patch.object(legacy.os, 'close', side_effect=fail_first_close):
+            with self.assertRaises(OSError):
+                legacy.create_temp(context['releases'], plans[0], ledger)
+        self.assertEqual([], list(fixture['releases'].glob('*.rob468-*.tmp')))
+        self.assertEqual('known', ledger.fields()['mutation_outcome'])
+        self.assertEqual(1, ledger.fields()['mutation_counts']['temp_files_removed'])
+        legacy.close_context(context)
+
+    def test_new_temp_directory_fsync_failure_keeps_unknown_outcome(self):
+        fixture = self.fixture()
+        context = self.context(fixture)
+        plans = legacy.preflight_targets(context)
+        ledger = legacy.MutationLedger()
+        real_fsync = legacy.os.fsync
+
+        def fail_directory_fsync(descriptor):
+            if descriptor == context['releases']:
+                raise OSError('injected temp directory fsync failure')
+            return real_fsync(descriptor)
+
+        with mock.patch.object(legacy.os, 'fsync', side_effect=fail_directory_fsync):
+            with self.assertRaises(OSError):
+                legacy.create_temp(context['releases'], plans[0], ledger)
+        self.assertEqual([], list(fixture['releases'].glob('*.rob468-*.tmp')))
+        self.assertEqual('unknown', ledger.fields()['mutation_outcome'])
         legacy.close_context(context)
 
     def test_fd_path_swap_and_exact_attach_race_fail_or_attach_without_clobber(self):
@@ -412,6 +487,7 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
             if case == 'hash':
                 required['composer.lock'] = 'f' * 64
             target_values.append({
+                'archive_sha256': hashlib.sha256((paths['releases'] / (release + '.tar.gz')).read_bytes()).hexdigest(),
                 'expected_commit': commit,
                 'release_id': release,
                 'required_members': required,
@@ -461,6 +537,17 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
                 archive.addfile(info, io.BytesIO(b'x'))
             elif case == 'long_component':
                 info = tarfile.TarInfo('./' + 'x' * 256)
+                info.size = 1
+                archive.addfile(info, io.BytesIO(b'x'))
+            elif case == 'nested':
+                info = tarfile.TarInfo('./application/nested/file')
+                info.size = 1
+                archive.addfile(info, io.BytesIO(b'x'))
+            elif case == 'collision':
+                info = tarfile.TarInfo('./collision')
+                info.size = 1
+                archive.addfile(info, io.BytesIO(b'x'))
+                info = tarfile.TarInfo('./collision/child')
                 info.size = 1
                 archive.addfile(info, io.BytesIO(b'x'))
         os.chmod(path, 0o600)
