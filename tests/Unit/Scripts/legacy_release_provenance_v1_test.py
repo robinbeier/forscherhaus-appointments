@@ -19,6 +19,13 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
+def resolve_python_executable():
+    executable = sys.executable or shutil.which('python3')
+    if not executable:
+        raise RuntimeError('python3 executable is unavailable')
+    return executable
+
+
 def load_module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -328,6 +335,12 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
         self.assertEqual(1, payload['targets']['published'])
 
     def test_output_and_invalid_cli_are_aggregate_only(self):
+        with mock.patch.object(sys, 'executable', ''), mock.patch.object(
+            shutil, 'which', return_value='/usr/bin/python3',
+        ):
+            self.assertEqual('/usr/bin/python3', resolve_python_executable())
+
+        python = resolve_python_executable()
         payload = legacy.result_payload(
             'execute', 'blocked', 'installed_deploy_ea_mismatch', 0, 0, 0, 0, legacy.MutationLedger(),
         )
@@ -351,7 +364,7 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
         )
 
         result = subprocess.run(
-            [sys.executable, str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), '--path', '/tmp/secret'],
+            [python, str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), '--path', '/tmp/secret'],
             check=False,
             capture_output=True,
             text=True,
@@ -362,7 +375,7 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
 
         for arguments in (['execute'], ['execute', 'ROB-467'], ['execute', 'ROB-468', 'extra']):
             result = subprocess.run(
-                [sys.executable, str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), *arguments],
+                [python, str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), *arguments],
                 check=False,
                 capture_output=True,
                 text=True,

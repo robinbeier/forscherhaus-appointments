@@ -744,7 +744,7 @@ def open_context():
         context['web'] = web
         context['opened'].append(web)
         context['directories'].append(web_record)
-        current, current_record = open_child_directory(web, 'easyappointments')
+        current, current_record = open_child_directory(web, os.path.basename(APP_ROOT))
         context['current'] = current
         context['opened'].append(current)
         context['directories'].append(current_record)
