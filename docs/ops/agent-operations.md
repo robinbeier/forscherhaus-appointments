@@ -208,6 +208,15 @@ Disk, memory, or swap pressure:
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 
+Legacy current/rollback archives lack canonical provenance:
+
+- Read `docs/ops/production-legacy-release-provenance.md` before any action.
+- Use `prod_legacy_release_provenance.sh` only for the fixed, host-authorized
+  two-target aggregate inspection. Its separately confirmed execute mode may
+  publish only the two canonical no-replace sidecars and helper-owned temps.
+- Repository delivery, helper installation, authorization provisioning,
+  read-only inspection, execute, and rollback are separate authority gates.
+
 Certbot or TLS issue:
 
 - Check certificate expiry and timers through `prod_validate_after_change.sh`.
