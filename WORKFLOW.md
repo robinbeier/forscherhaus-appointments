@@ -60,12 +60,13 @@ coordinate other agents, merge, push, publish PRs, change issue state, or
 perform production actions. Production and other irreversible external
 actions always require the primary agent and the applicable explicit approval.
 
-For model-routed delegation, pass a self-contained task with
-`fork_turns="none"` or a small positive turn window. Do not use
-`fork_turns="all"`: a full-history fork inherits the parent model and defeats
-the explicit Luna route. If Luna is unavailable, disclose the fallback and
-prefer `gpt-5.6-terra` or keep the task with the primary agent instead of
-silently changing the execution model.
+For model-routed delegation, choose `fork_turns` only for the context the task
+needs; do not rely on it as a model selector. Prefer a self-contained task with
+`fork_turns="none"` or a small positive turn window to avoid irrelevant
+history. Use `fork_turns="all"` only when the worker genuinely needs the full
+conversation. The repo-defined role remains the model authority. If Luna is
+unavailable, disclose the fallback and prefer `gpt-5.6-terra` or keep the task
+with the primary agent instead of silently changing the execution model.
 
 After a worker returns, the primary agent inspects the diff, reconciles it with
 concurrent work, runs integration-level validation, and obtains independent

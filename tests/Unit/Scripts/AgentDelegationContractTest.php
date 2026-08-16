@@ -42,8 +42,9 @@ class AgentDelegationContractTest extends TestCase
         self::assertStringContainsString('## Model-Aware Delegation', $workflow);
         self::assertStringContainsString('gpt-5.6-luna', $workflow);
         self::assertStringContainsString('fork_turns="none"', $workflow);
-        self::assertStringContainsString('Do not use', $workflow);
         self::assertStringContainsString('fork_turns="all"', $workflow);
+        self::assertStringContainsString('do not rely on it as a model selector', $workflow);
+        self::assertStringContainsString('role remains the model authority', $workflow);
         self::assertStringContainsString('primary agent inspects the diff', $workflow);
         self::assertStringContainsString('.codex/agents/implementation-worker.toml', $index);
     }
