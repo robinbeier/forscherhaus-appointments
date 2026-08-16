@@ -360,6 +360,16 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
         self.assertNotIn('/tmp/secret', result.stdout + result.stderr)
         self.assertEqual('invalid_arguments', json.loads(result.stdout)['reason'])
 
+        for arguments in (['execute'], ['execute', 'ROB-467'], ['execute', 'ROB-468', 'extra']):
+            result = subprocess.run(
+                [sys.executable, str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), *arguments],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(64, result.returncode)
+            self.assertEqual('invalid_arguments', json.loads(result.stdout)['reason'])
+
     def fixture(self, current_tar_case='valid'):
         self.fixture_index += 1
         fixture_root = self.workspace / ('fixture-' + str(self.fixture_index))

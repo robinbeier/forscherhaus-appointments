@@ -17,7 +17,8 @@ The production copy of the helper must be installed separately, root-owned and
 mode `0555`, as `/usr/local/libexec/fh-legacy-release-provenance-v1`. The
 wrapper may expose only aggregate status and may invoke only
 `/usr/bin/python3 -I -B /usr/local/libexec/fh-legacy-release-provenance-v1`
-through the normal operator SSH boundary. It must
+with fixed `inspect`, or fixed `execute ROB-468`, through the normal operator
+SSH boundary. It must
 derive the two target paths, release identities, archive hashes, tar member
 names, commit values, and temporary paths from the host-local authorization and
 installed `deploy_ea`; callers may not supply any of them.
@@ -119,9 +120,9 @@ appear.
 ## Operator modes
 
 Inspection is read-only by default and must not create, replace, or remove any
-file. Execute mode requires the exact token `ROB-468` in addition to the
-explicit execute switch; near-miss issue tokens and caller-supplied target
-arguments are rejected.
+file. Both wrapper and installed helper require the exact token `ROB-468` for
+execute mode in addition to the explicit execute switch; near-miss issue tokens
+and caller-supplied target arguments are rejected.
 
 The intended local inspection shape is:
 
