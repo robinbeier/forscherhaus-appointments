@@ -91,6 +91,7 @@ Use the reviewer roles with this split:
 
 - `reviewer_correctness` is the deep reviewer for correctness, regressions, and security-sensitive risk.
 - `pr_explorer`, `reviewer_tests`, and `reviewer_design` are bounded support reviewers that should return distilled evidence for the parent reviewer to synthesize.
+- An `implementation_worker` must never be the sole reviewer of its own diff; preserve an independent reviewer role and primary-agent synthesis.
 
 Default reviewer depth should match the change:
 

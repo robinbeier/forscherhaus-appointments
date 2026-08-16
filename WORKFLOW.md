@@ -27,6 +27,51 @@ conflict, follow `AGENTS.md`.
   `single-owner` or `manual_approval_required`, keep changes narrow and
   conservative.
 
+## Model-Aware Delegation
+
+The primary agent owns the end-to-end goal, authority boundary, sequencing,
+file ownership, integration, validation, issue and PR state, merge decision,
+and every production action. Delegation does not transfer those
+responsibilities.
+
+Use the repo-defined `implementation_worker` as the default subordinate for a
+concrete implementation, regression-test, or documentation slice when that
+slice is independently verifiable and has non-overlapping ownership. The role
+is pinned to `gpt-5.6-luna` with medium reasoning in
+`.codex/agents/implementation-worker.toml`.
+
+The primary agent must provide each implementation worker with:
+
+- one bounded outcome and explicit file or module ownership
+- relevant constraints and acceptance criteria
+- the narrow validation expected from the worker
+- notice that other agents may be editing the repository and that their work
+  must not be reverted
+
+Keep work local to the primary agent when it is trivial, tightly sequential,
+ambiguous, cross-cutting, or likely to overlap another writer. Architecture,
+hard debugging, conflict resolution, security-sensitive authority decisions,
+final integration, and production planning stay with the primary agent or an
+explicitly stronger specialist. Do not create delegation merely to fill the
+available thread limit.
+
+The implementation worker is a pure subordinate: it must not spawn or
+coordinate other agents, merge, push, publish PRs, change issue state, or
+perform production actions. Production and other irreversible external
+actions always require the primary agent and the applicable explicit approval.
+
+For model-routed delegation, pass a self-contained task with
+`fork_turns="none"` or a small positive turn window. Do not use
+`fork_turns="all"`: a full-history fork inherits the parent model and defeats
+the explicit Luna route. If Luna is unavailable, disclose the fallback and
+prefer `gpt-5.6-terra` or keep the task with the primary agent instead of
+silently changing the execution model.
+
+After a worker returns, the primary agent inspects the diff, reconciles it with
+concurrent work, runs integration-level validation, and obtains independent
+review. A worker's completion report is implementation evidence, not review,
+merge, or production authority.
+
 ## Linear States
 
 Expected statuses:
