@@ -37,7 +37,8 @@ responsibilities.
 Use the repo-defined `implementation_worker` as the default subordinate for a
 concrete implementation, regression-test, or documentation slice when that
 slice is independently verifiable and has non-overlapping ownership. The role
-is pinned to `gpt-5.6-luna` with medium reasoning in
+is registered as `[agents.implementation_worker]` in `.codex/config.toml` and
+its resolved config layer pins `gpt-5.6-luna` with medium reasoning in
 `.codex/agents/implementation-worker.toml`.
 
 The primary agent must provide each implementation worker with:
@@ -60,13 +61,21 @@ coordinate other agents, merge, push, publish PRs, change issue state, or
 perform production actions. Production and other irreversible external
 actions always require the primary agent and the applicable explicit approval.
 
-For model-routed delegation, choose `fork_turns` only for the context the task
-needs; do not rely on it as a model selector. Prefer a self-contained task with
-`fork_turns="none"` or a small positive turn window to avoid irrelevant
-history. Use `fork_turns="all"` only when the worker genuinely needs the full
-conversation. The repo-defined role remains the model authority. If Luna is
-unavailable, disclose the fallback and prefer `gpt-5.6-terra` or keep the task
-with the primary agent instead of silently changing the execution model.
+Select the registered role through `agent_type="implementation_worker"` when
+spawning it. `task_name` names the delegated task path; it does not select an
+agent role or model. Before the first delegation in a session, confirm that the
+active spawn interface exposes `implementation_worker` as an available agent
+type. If it does not, fail closed: do not claim that a Luna worker ran, and
+either keep the task with the primary agent or disclose an explicit supported
+fallback.
+
+Choose `fork_turns` only for the context the task needs; do not rely on it as a
+model selector. Prefer a self-contained task with `fork_turns="none"` or a
+small positive turn window to avoid irrelevant history. Use
+`fork_turns="all"` only when the worker genuinely needs the full conversation.
+The registered role remains the model authority. If Luna is unavailable,
+disclose the fallback and prefer `gpt-5.6-terra` or keep the task with the
+primary agent instead of silently changing the execution model.
 
 After a worker returns, the primary agent inspects the diff, reconciles it with
 concurrent work, runs integration-level validation, and obtains independent
