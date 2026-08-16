@@ -122,15 +122,59 @@ appear.
 ## Operator modes
 
 Inspection is read-only by default and must not create, replace, or remove any
-file. Both wrapper and installed helper require the exact token `ROB-468` for
-execute mode in addition to the explicit execute switch; near-miss issue tokens
-and caller-supplied target arguments are rejected.
+file. The helper also provides `inspect-authorization` (read-only) and
+`provision-authorization ROB-468-AUTHORIZATION`; the latter may create only the
+missing fixed authorization and its own nonce temporary under `/etc/fh`, or
+remove only its own exact stale nonce temporaries when the fixed authorization
+is already attached.
+Authorization values come exclusively from fixed release markers, archives,
+installed `deploy_ea`, and root-owned successful terminal bundles validated by
+the installed terminal-bundle validator. Missing or ambiguous authority blocks
+before mutation. Existing differing authorization is never replaced. Both
+wrapper and installed helper require exact tokens for write modes; caller-
+supplied target arguments are rejected.
 
 The intended local inspection shape is:
 
 ```bash
 bash scripts/ops/prod_legacy_release_provenance.sh
 ```
+
+The authorization preflight is also read-only:
+
+```bash
+bash scripts/ops/prod_legacy_release_provenance.sh --inspect-authorization
+```
+
+Provisioning is a separate, narrowly scoped write gate:
+
+```bash
+bash scripts/ops/prod_legacy_release_provenance.sh \
+  --provision-authorization \
+  --confirm-authorization ROB-468-AUTHORIZATION
+```
+
+It must complete and be checked before any later `execute ROB-468` approval.
+This authorization approval does not authorize sidecar publication, retention,
+timers, services, or monitoring.
+
+The authority chain is closed: each target's release ID is read from its stable
+host marker; its archive and four required member digests are observed through
+the same FD/tar safety contract as publication; `deploy_ea.sh` is bound to the
+fixed installed root file; and the expected commit comes only from the first,
+canonical intent event of a terminal `events.jsonl` bundle whose complete bytes
+are accepted by the installed validator and whose final state is `succeeded`.
+The validator result, first event, evidence, run ID, release ID, commit, and
+intent digest must agree. Missing, failed, malformed, or ambiguous bundles
+block both targets. Both targets are fully preflighted and then revalidated for
+stability immediately before the first authorization mutation. Provisioning has
+its own aggregate result schema and mutation ledger;
+uncertain rename, unlink, fsync, or connection boundaries report `unknown`.
+Only exact nonce temporary candidates under `/etc/fh` may be reused or removed;
+foreign, malformed, or byte-mismatched candidates block and are never touched.
+The current approval ends after helper replacement, authorization provisioning,
+read-only inspect, and postflight. Merge is not production approval and never
+includes `execute ROB-468`.
 
 The execute shape is:
 

@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """Attach canonical provenance to the two authorized legacy release archives."""
 
+import base64
 import ctypes
 import errno
 import fcntl
@@ -10,14 +11,17 @@ import os
 import re
 import secrets
 import stat
+import subprocess
 import sys
 import tarfile
 
 
 RESULT_SCHEMA = 'legacy_release_provenance_result.v1'
+AUTH_RESULT_SCHEMA = 'legacy_release_provenance_authorization_result.v1'
 AUTHORIZATION_SCHEMA = 'legacy_release_provenance_authorization.v1'
 SIDECAR_SCHEMA = 'release_build_provenance.v1'
 EXECUTE_TOKEN = 'ROB-468'
+AUTHORIZATION_TOKEN = 'ROB-468-AUTHORIZATION'
 AUTHORIZATION = '/etc/fh/legacy-release-provenance-authorization.v1.json'
 # The fixed authorization, sidecars, locks, and helper-owned temps are canonical 0600 files.
 WEB_ROOT = '/var/www/html'
@@ -25,6 +29,10 @@ APP_ROOT = '/var/www/html/easyappointments'
 RELEASES_ROOT = '/root/releases'
 INSTALLED_DEPLOY_EA = '/root/deploy_ea.sh'
 ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator'
+RUNS_ROOT = '/var/lib/fh-deploy-orchestrator/runs'
+TERMINAL_VALIDATOR = '/usr/local/libexec/fh/validate_deployment_terminal_bundle_v1.php'
+TERMINAL_CONTRACT = '/usr/local/libexec/fh/DeploymentContractV1.php'
+PHP = '/usr/bin/php'
 GLOBAL_PRODUCTION_LOCK = 'fh-production-change.lock'
 PUBLICATION_LOCK = '.release-pair.lock'
 RENAME_NOREPLACE = 1
@@ -35,6 +43,9 @@ TEMP_SCRATCH_BYTES = 67_108_864
 MAX_AUTHORIZATION_BYTES = 16 * 1024
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024 * 1024
 MAX_SIDECAR_BYTES = 4096
+MAX_TERMINAL_ENVELOPE_BYTES = 1_500_000
+MAX_TERMINAL_EVENTS_BYTES = 1_048_576
+MAX_TERMINAL_EVIDENCE_BYTES = 65_536
 MAX_REQUIRED_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 1_000_000
 MAX_UNPACKED_BYTES = 68_719_476_736
@@ -44,6 +55,7 @@ SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 NONCE = re.compile(r'[0-9a-f]{32}\Z')
 REQUIRED_MEMBERS = ('build_release.sh', 'composer.lock', 'deploy_ea.sh', 'package-lock.json')
 MUTATION_KEYS = ('sidecars_published', 'temp_files_created', 'temp_files_removed')
+AUTH_MUTATION_KEYS = ('authorization_published', 'temp_files_created', 'temp_files_removed')
 PUBLIC_REASONS = {
     'archive_digest_mismatch': 'authorization_invalid',
     'authorization_marker_mismatch': 'authorization_invalid',
@@ -77,6 +89,12 @@ PUBLIC_REASONS = {
     'unsafe_helper_temp': 'publication_blocked',
     'unsafe_lock': 'host_contract_invalid',
     'unsafe_tar': 'archive_invalid',
+    'authorization_authority_missing': 'authorization_invalid',
+    'authorization_authority_ambiguous': 'authorization_invalid',
+    'authorization_conflict': 'authorization_invalid',
+    'terminal_bundle_invalid': 'authorization_invalid',
+    'terminal_bundle_not_succeeded': 'authorization_invalid',
+    'validator_unavailable': 'host_contract_invalid',
 }
 
 
@@ -90,8 +108,9 @@ class LegacyProvenanceError(Exception):
 class MutationLedger:
     """Track only aggregate namespace mutations and uncertain boundaries."""
 
-    def __init__(self):
-        self.counts = {key: 0 for key in MUTATION_KEYS}
+    def __init__(self, keys=MUTATION_KEYS):
+        self.keys = tuple(keys)
+        self.counts = {key: 0 for key in self.keys}
         self.in_flight = 0
 
     def begin(self):
@@ -120,6 +139,7 @@ class MutationLedger:
 
 MUTATIONS = MutationLedger()
 RUN_STATE = {'attached': 0, 'pending': 0, 'preflighted': 0, 'published': 0}
+AUTH_RUN_STATE = {'attached': 0, 'pending': 0, 'preflighted': 0, 'published': 0}
 
 
 def reject(reason='rejected', code=70):
@@ -376,6 +396,19 @@ def normalize_member_name(name):
 
 
 def inspect_archive(record, member_hashes):
+    if not isinstance(member_hashes, dict) or tuple(sorted(member_hashes)) != REQUIRED_MEMBERS or any(
+        not isinstance(value, str) or SHA256.fullmatch(value) is None for value in member_hashes.values()
+    ):
+        reject('required_member_invalid')
+    return _inspect_archive(record, member_hashes)
+
+
+def observe_archive(record):
+    """Observe a stable archive without weakening authorized hash checks."""
+    return _inspect_archive(record, {member: '0' * 64 for member in REQUIRED_MEMBERS}, observe_only=True)
+
+
+def _inspect_archive(record, member_hashes, observe_only=False):
     archive_sha256 = digest_fd(record['fd'])
     os.lseek(record['fd'], 0, os.SEEK_SET)
     member_names = set()
@@ -455,7 +488,7 @@ def inspect_archive(record, member_hashes):
         reject('unsafe_tar')
     if set(observed_required) != set(member_hashes):
         reject('required_member_missing')
-    if any(not secrets.compare_digest(observed_required[name], member_hashes[name]) for name in member_hashes):
+    if not observe_only and any(not secrets.compare_digest(observed_required[name], member_hashes[name]) for name in member_hashes):
         reject('required_member_mismatch')
     ensure_file_stable(record)
     return {
@@ -463,6 +496,7 @@ def inspect_archive(record, member_hashes):
         'entry_count': file_count,
         'stage_inode_count': len(stage_types) + 1,
         'stage_unpacked_bytes': unpacked_bytes,
+        'required_members': observed_required,
     }
 
 
@@ -559,7 +593,12 @@ def open_owned_temps(releases, expected_by_release):
 
 
 def _preflight_targets(context):
-    authorization_record = open_stable_regular(context['etc_fh'], os.path.basename(AUTHORIZATION), {0o600}, MAX_AUTHORIZATION_BYTES)
+    try:
+        authorization_record = open_stable_regular(
+            context['etc_fh'], os.path.basename(AUTHORIZATION), {0o600}, MAX_AUTHORIZATION_BYTES,
+        )
+    except FileNotFoundError:
+        reject('invalid_authorization')
     context['records'].append(authorization_record)
     authorization = decode_authorization(read_all(authorization_record['fd'], MAX_AUTHORIZATION_BYTES))
     ensure_file_stable(authorization_record)
@@ -619,6 +658,263 @@ def _preflight_targets(context):
     return plans
 
 
+def _read_json_record(parent, leaf, maximum):
+    record = open_stable_regular(parent, leaf, {0o600}, maximum)
+    try:
+        data = read_all(record['fd'], maximum)
+        ensure_file_stable(record)
+        return data, record
+    except BaseException:
+        close_record(record)
+        raise
+
+
+def _terminal_commit_authority(context, release_id):
+    """Derive one commit only from a validated, successful host run bundle."""
+    try:
+        runs, runs_record = open_absolute_directory(RUNS_ROOT, exact_mode=0o700)
+    except FileNotFoundError:
+        reject('authorization_authority_missing')
+    candidates = []
+    try:
+        names = os.listdir(runs)
+        if len(names) > 10000:
+            reject('authorization_authority_ambiguous')
+        for run_id in names:
+            if re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', run_id) is None:
+                reject('terminal_bundle_invalid')
+            try:
+                run_fd, run_record = open_child_directory(runs, run_id, exact_mode=0o700)
+            except FileNotFoundError:
+                reject('terminal_bundle_invalid')
+            intent = events_record = evidence_record = None
+            try:
+                intent_bytes, intent = _read_json_record(run_fd, 'intent.json', 65536)
+                events, events_record = _read_json_record(run_fd, 'events.jsonl', MAX_TERMINAL_EVENTS_BYTES)
+                evidence, evidence_record = _read_json_record(
+                    run_fd, 'evidence.json', MAX_TERMINAL_EVIDENCE_BYTES,
+                )
+                try:
+                    first_line = events.split(b'\n', 1)[0]
+                    intent_value = decode_canonical(first_line + b'\n', 65536, 'terminal_bundle_invalid')
+                    intent_cache = decode_canonical(intent_bytes, 65536, 'terminal_bundle_invalid')
+                except LegacyProvenanceError:
+                    raise
+                if (
+                    not isinstance(intent_value, dict)
+                    or not isinstance(intent_cache, dict)
+                    or intent_cache != intent_value
+                    or intent_value.get('record_type') != 'intent'
+                    or intent_value.get('sequence') != 1
+                ):
+                    reject('terminal_bundle_invalid')
+                if intent_value.get('release_id') != release_id:
+                    ensure_file_stable(intent)
+                    ensure_file_stable(events_record)
+                    ensure_file_stable(evidence_record)
+                    ensure_directory_stable(run_record)
+                    continue
+                commit = intent_value.get('expected_commit')
+                if not isinstance(commit, str) or COMMIT.fullmatch(commit) is None:
+                    reject('terminal_bundle_invalid')
+                envelope = canonical_json({
+                    'events': base64.b64encode(events).decode('ascii'),
+                    'evidence': base64.b64encode(evidence).decode('ascii'),
+                })
+                if len(envelope) > MAX_TERMINAL_ENVELOPE_BYTES:
+                    reject('terminal_bundle_invalid')
+                validator = os.path.dirname(TERMINAL_VALIDATOR)
+                validator_fd, validator_record = open_absolute_directory(validator, exact_mode=0o755)
+                validator_file = None
+                contract_file = None
+                try:
+                    validator_leaf = os.path.basename(TERMINAL_VALIDATOR)
+                    validator_file = open_stable_regular(validator_fd, validator_leaf, {0o555}, 1048576)
+                    contract_file = open_stable_regular(
+                        validator_fd, os.path.basename(TERMINAL_CONTRACT), {0o444}, 1048576,
+                    )
+                    validator_identity = validator_file['identity']
+                    contract_identity = contract_file['identity']
+                    result = subprocess.run(
+                        [PHP, '-n', TERMINAL_VALIDATOR], input=envelope,
+                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                        timeout=30, check=False,
+                        env={'PATH': '/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C'},
+                    )
+                    ensure_file_stable(validator_file)
+                    if validator_file['identity'] != validator_identity:
+                        reject('validator_unavailable')
+                    ensure_file_stable(contract_file)
+                    if contract_file['identity'] != contract_identity:
+                        reject('validator_unavailable')
+                    ensure_directory_stable(validator_record)
+                except (OSError, subprocess.SubprocessError):
+                    reject('validator_unavailable')
+                finally:
+                    close_record(validator_file)
+                    close_record(contract_file)
+                    os.close(validator_fd)
+                if result.returncode != 0:
+                    reject('terminal_bundle_invalid')
+                validated = decode_canonical(result.stdout, 4096, 'terminal_bundle_invalid')
+                if (
+                    not isinstance(validated, dict)
+                    or set(validated) != {'intent_sha256', 'records', 'run_id', 'schema', 'state'}
+                    or validated.get('schema') != 'deployment_terminal_bundle_validation.v1'
+                    or validated.get('run_id') != run_id
+                    or validated.get('intent_sha256') != intent_value.get('intent_sha256')
+                    or validated.get('records') != len(events.rstrip(b'\n').split(b'\n'))
+                ):
+                    reject('terminal_bundle_invalid')
+                ensure_file_stable(intent)
+                ensure_file_stable(events_record)
+                ensure_file_stable(evidence_record)
+                ensure_directory_stable(run_record)
+                if validated.get('state') != 'succeeded':
+                    continue
+                candidates.append(commit)
+            finally:
+                for record in (intent, events_record, evidence_record):
+                    close_record(record)
+                os.close(run_fd)
+        ensure_directory_stable(runs_record)
+        unique = sorted(set(candidates))
+        if len(unique) != 1:
+            reject('authorization_authority_missing' if not unique else 'authorization_authority_ambiguous')
+        return unique[0]
+    finally:
+        os.close(runs)
+
+
+def derive_authorization(context):
+    """Build canonical authorization solely from fixed host-local facts."""
+    current_release, current_marker = read_release_marker(context['current'])
+    rollback_leaf = 'easyappointments_prev_' + current_release
+    try:
+        rollback, rollback_directory_record = open_child_directory(context['web'], rollback_leaf)
+    except FileNotFoundError:
+        reject('missing_exact_rollback')
+    context['directories'].append(rollback_directory_record)
+    context['opened'].append(rollback)
+    rollback_release, rollback_marker = read_release_marker(rollback)
+    context['records'].extend((current_marker, rollback_marker))
+    if current_release == rollback_release:
+        reject('invalid_release_marker')
+    deploy_record = open_stable_regular(context['root'], os.path.basename(INSTALLED_DEPLOY_EA), {0o555, 0o755}, MAX_REQUIRED_MEMBER_BYTES)
+    context['records'].append(deploy_record)
+    deploy_digest = digest_fd(deploy_record['fd'])
+    ensure_file_stable(deploy_record)
+    targets = []
+    for role, release_id in (('current', current_release), ('rollback', rollback_release)):
+        archive_record = open_stable_regular(context['releases'], release_id + '.tar.gz', {0o600}, MAX_ARCHIVE_BYTES)
+        context['records'].append(archive_record)
+        observed = observe_archive(archive_record)
+        members = observed['required_members']
+        if not secrets.compare_digest(members['deploy_ea.sh'], deploy_digest):
+            reject('installed_deploy_ea_mismatch')
+        targets.append({
+            'archive_sha256': observed['archive_sha256'],
+            'expected_commit': _terminal_commit_authority(context, release_id),
+            'release_id': release_id,
+            'required_members': {member: members[member] for member in REQUIRED_MEMBERS},
+            'role': role,
+        })
+    return {'schema': AUTHORIZATION_SCHEMA, 'targets': targets}
+
+
+def preflight_authorization(context):
+    value = derive_authorization(context)
+    encoded = canonical_json(value)
+    if len(encoded) > MAX_AUTHORIZATION_BYTES:
+        reject('invalid_authorization')
+    try:
+        existing = open_stable_regular(context['etc_fh'], os.path.basename(AUTHORIZATION), {0o600}, MAX_AUTHORIZATION_BYTES, missing_ok=True)
+    except OSError:
+        reject('authorization_conflict')
+    if existing is not None:
+        try:
+            data = read_all(existing['fd'], MAX_AUTHORIZATION_BYTES)
+            ensure_file_stable(existing)
+            if not secrets.compare_digest(data, encoded):
+                reject('authorization_conflict')
+        finally:
+            close_record(existing)
+    prefix = '.' + os.path.basename(AUTHORIZATION) + '.rob468-'
+    pattern = re.compile(re.escape(prefix) + r'([0-9a-f]{32})\.tmp\Z')
+    context['authorization_temps'] = []
+    for leaf in os.listdir(context['etc_fh']):
+        if not leaf.startswith(prefix):
+            continue
+        match = pattern.fullmatch(leaf)
+        if match is None:
+            reject('foreign_helper_temp')
+        record = open_stable_regular(context['etc_fh'], leaf, {0o600}, MAX_AUTHORIZATION_BYTES)
+        try:
+            if not secrets.compare_digest(read_all(record['fd'], MAX_AUTHORIZATION_BYTES), encoded):
+                reject('unsafe_helper_temp')
+            ensure_file_stable(record)
+            context['authorization_temps'].append(record)
+            context['records'].append(record)
+        except BaseException:
+            close_record(record)
+            raise
+    ensure_context_stable(context)
+    return encoded, existing is not None
+
+
+def provision_authorization(context, encoded, existing, mutations):
+    stale = context.get('authorization_temps', [])
+    for record in stale:
+        ensure_file_stable(record)
+        mutations.begin()
+        try:
+            os.unlink(record['leaf'], dir_fd=context['etc_fh'])
+            os.fsync(context['etc_fh'])
+            mutations.confirm('temp_files_removed')
+        except FileNotFoundError:
+            mutations.cancel()
+    if existing:
+        return False
+    plan = {'data': encoded, 'leaf': os.path.basename(AUTHORIZATION)}
+    temp = create_temp(context['etc_fh'], plan, mutations, MAX_AUTHORIZATION_BYTES)
+    try:
+        ensure_file_stable(temp)
+        os.fsync(temp['fd'])
+        mutations.begin()
+        try:
+            renameat2_noreplace(context['etc_fh'], temp['leaf'], os.path.basename(AUTHORIZATION))
+        except OSError as error:
+            if error.errno != errno.EEXIST:
+                raise
+            mutations.cancel()
+            existing_record = open_stable_regular(
+                context['etc_fh'], os.path.basename(AUTHORIZATION), {0o600}, MAX_AUTHORIZATION_BYTES,
+            )
+            try:
+                exact = secrets.compare_digest(read_all(existing_record['fd'], MAX_AUTHORIZATION_BYTES), encoded)
+                ensure_file_stable(existing_record)
+            finally:
+                close_record(existing_record)
+            remove_temp(context['etc_fh'], temp, mutations)
+            if not exact:
+                reject('authorization_conflict')
+            return False
+        os.fsync(context['etc_fh'])
+        attached = open_stable_regular(
+            context['etc_fh'], os.path.basename(AUTHORIZATION), {0o600}, MAX_AUTHORIZATION_BYTES,
+        )
+        try:
+            if not secrets.compare_digest(read_all(attached['fd'], MAX_AUTHORIZATION_BYTES), encoded):
+                reject('authorization_conflict')
+            ensure_file_stable(attached)
+        finally:
+            close_record(attached)
+        mutations.confirm('authorization_published')
+        return True
+    finally:
+        close_record(temp)
+
+
 def ensure_context_stable(context):
     for directory in context['directories']:
         ensure_directory_stable(directory)
@@ -661,11 +957,14 @@ def remove_temp(releases, record, mutations):
     except FileNotFoundError:
         mutations.cancel()
         return
-    os.fsync(releases)
+    try:
+        os.fsync(releases)
+    except BaseException:
+        raise
     mutations.confirm('temp_files_removed')
 
 
-def create_temp(releases, plan, mutations):
+def create_temp(releases, plan, mutations, maximum=MAX_SIDECAR_BYTES):
     leaf = '.' + plan['leaf'] + '.rob468-' + secrets.token_hex(16) + '.tmp'
     mutations.begin()
     try:
@@ -676,6 +975,7 @@ def create_temp(releases, plan, mutations):
             dir_fd=releases,
         )
     except BaseException:
+        mutations.cancel()
         raise
     mutations.confirm('temp_files_created')
     created_stat = os.fstat(descriptor)
@@ -703,7 +1003,7 @@ def create_temp(releases, plan, mutations):
         except OSError:
             pass
         try:
-            record = open_stable_regular(releases, leaf, {0o600}, MAX_SIDECAR_BYTES, minimum=0)
+            record = open_stable_regular(releases, leaf, {0o600}, maximum, minimum=0)
             try:
                 if record['identity'][:6] != created_identity:
                     reject('temp_verify_failed')
@@ -713,8 +1013,8 @@ def create_temp(releases, plan, mutations):
         except FileNotFoundError:
             pass
         raise
-    record = open_stable_regular(releases, leaf, {0o600}, MAX_SIDECAR_BYTES)
-    if not secrets.compare_digest(read_all(record['fd'], MAX_SIDECAR_BYTES), plan['data']):
+    record = open_stable_regular(releases, leaf, {0o600}, maximum)
+    if not secrets.compare_digest(read_all(record['fd'], maximum), plan['data']):
         close_record(record)
         reject('temp_verify_failed')
     ensure_file_stable(record)
@@ -849,19 +1149,50 @@ def result_payload(mode, status_value, reason, preflighted, pending, published, 
     return payload
 
 
+def authorization_result_payload(mode, status_value, reason, state, mutations):
+    fields = mutations.fields()
+    payload = {
+        'mode': mode,
+        'mutation_counts': fields['mutation_counts'],
+        'mutation_outcome': fields['mutation_outcome'],
+        'schema': AUTH_RESULT_SCHEMA,
+        'status': status_value,
+        'authorization': {
+            'attached': state['attached'], 'pending': state['pending'], 'published': state['published'],
+        },
+        'targets': {'preflighted': state['preflighted']},
+    }
+    if reason is not None:
+        payload['reason'] = PUBLIC_REASONS.get(reason, 'internal_error')
+    return payload
+
+
 def emit(payload):
     sys.stdout.write(canonical_json(payload).decode('utf-8'))
     sys.stdout.flush()
 
 
 def run(mode):
-    global RUN_STATE
+    global RUN_STATE, AUTH_RUN_STATE, MUTATIONS
     if os.geteuid() != TRUSTED_UID:
         reject('root_required')
     if os.path.realpath(AUTHORIZATION) != AUTHORIZATION or os.path.realpath(INSTALLED_DEPLOY_EA) != INSTALLED_DEPLOY_EA:
         reject('noncanonical_fixed_path')
     context = open_context()
     try:
+        if mode in ('inspect-authorization', 'provision-authorization'):
+            auth_mutations = MutationLedger(AUTH_MUTATION_KEYS)
+            MUTATIONS = auth_mutations
+            encoded, existing = preflight_authorization(context)
+            AUTH_RUN_STATE = {'attached': 1 if existing else 0, 'pending': 0 if existing else 1, 'preflighted': 2, 'published': 0}
+            if mode == 'provision-authorization':
+                ensure_context_stable(context)
+                was_published = provision_authorization(context, encoded, existing, auth_mutations)
+                if was_published:
+                    AUTH_RUN_STATE.update({'attached': 0, 'pending': 0, 'published': 1})
+                else:
+                    AUTH_RUN_STATE.update({'attached': 1, 'pending': 0, 'published': 0})
+            return authorization_result_payload(mode, 'pass', None, AUTH_RUN_STATE, auth_mutations)
         plans = preflight_targets(context)
         pending = sum(1 for plan in plans if plan['existing'] is None)
         attached = len(plans) - pending
@@ -876,42 +1207,35 @@ def run(mode):
 
 
 def main():
-    global MUTATIONS, RUN_STATE
+    global MUTATIONS, RUN_STATE, AUTH_RUN_STATE
     MUTATIONS = MutationLedger()
     RUN_STATE = {'attached': 0, 'pending': 0, 'preflighted': 0, 'published': 0}
+    AUTH_RUN_STATE = {'attached': 0, 'pending': 0, 'preflighted': 0, 'published': 0}
     arguments = sys.argv[1:]
     if arguments == [] or arguments == ['inspect']:
         mode = 'inspect'
     elif arguments == ['execute', EXECUTE_TOKEN]:
         mode = 'execute'
+    elif arguments == ['inspect-authorization']:
+        mode = 'inspect-authorization'
+    elif arguments == ['provision-authorization', AUTHORIZATION_TOKEN]:
+        mode = 'provision-authorization'
     else:
         emit(result_payload('invalid', 'blocked', 'invalid_arguments', 0, 0, 0, 0, MUTATIONS))
         raise SystemExit(64)
     try:
         emit(run(mode))
     except LegacyProvenanceError as error:
-        emit(result_payload(
-            mode,
-            'busy' if error.code == 75 else 'blocked',
-            error.reason,
-            RUN_STATE['preflighted'],
-            RUN_STATE['pending'],
-            RUN_STATE['published'],
-            RUN_STATE['attached'],
-            MUTATIONS,
-        ))
+        if mode in ('inspect-authorization', 'provision-authorization'):
+            emit(authorization_result_payload(mode, 'busy' if error.code == 75 else 'blocked', error.reason, AUTH_RUN_STATE, MUTATIONS))
+        else:
+            emit(result_payload(mode, 'busy' if error.code == 75 else 'blocked', error.reason, RUN_STATE['preflighted'], RUN_STATE['pending'], RUN_STATE['published'], RUN_STATE['attached'], MUTATIONS))
         raise SystemExit(error.code)
     except BaseException:
-        emit(result_payload(
-            mode,
-            'blocked',
-            'internal_error',
-            RUN_STATE['preflighted'],
-            RUN_STATE['pending'],
-            RUN_STATE['published'],
-            RUN_STATE['attached'],
-            MUTATIONS,
-        ))
+        if mode in ('inspect-authorization', 'provision-authorization'):
+            emit(authorization_result_payload(mode, 'blocked', 'internal_error', AUTH_RUN_STATE, MUTATIONS))
+        else:
+            emit(result_payload(mode, 'blocked', 'internal_error', RUN_STATE['preflighted'], RUN_STATE['pending'], RUN_STATE['published'], RUN_STATE['attached'], MUTATIONS))
         raise SystemExit(70)
 
 

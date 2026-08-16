@@ -71,6 +71,50 @@ final class LegacyReleaseProvenanceWrapperTest extends TestCase
         );
     }
 
+    public function testAuthorizationModesAreSeparateAndUseExactToken(): void
+    {
+        $inspect = $this->runWrapper(['--prod-ssh-target', 'operator.example', '--inspect-authorization']);
+        self::assertSame(0, $inspect['exit_code'], $inspect['stderr']);
+        self::assertStringContainsString(
+            'operator.example /usr/bin/python3 -I -B /usr/local/libexec/fh-legacy-release-provenance-v1 inspect-authorization',
+            trim((string) file_get_contents($this->sshLog)),
+        );
+
+        foreach (
+            [
+                ['--provision-authorization'],
+                ['--provision-authorization', '--confirm-authorization', 'ROB-468'],
+                ['--provision-authorization', '--confirm-authorization', 'ROB-468-AUTHORIZATION', '--execute'],
+                [
+                    '--confirm-live-write',
+                    'ROB-468',
+                    '--provision-authorization',
+                    '--confirm-authorization',
+                    'ROB-468-AUTHORIZATION',
+                ],
+                ['--confirm-authorization', 'ROB-468-AUTHORIZATION', '--execute', '--confirm-live-write', 'ROB-468'],
+            ]
+            as $arguments
+        ) {
+            $result = $this->runWrapper($arguments);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame('', (string) file_get_contents($this->sshLog));
+        }
+
+        $provision = $this->runWrapper([
+            '--prod-ssh-target',
+            'operator.example',
+            '--provision-authorization',
+            '--confirm-authorization',
+            'ROB-468-AUTHORIZATION',
+        ]);
+        self::assertSame(0, $provision['exit_code'], $provision['stderr']);
+        self::assertStringContainsString(
+            'operator.example /usr/bin/python3 -I -B /usr/local/libexec/fh-legacy-release-provenance-v1 provision-authorization ROB-468-AUTHORIZATION',
+            trim((string) file_get_contents($this->sshLog)),
+        );
+    }
+
     public function testUnknownAndCallerSuppliedSensitiveOptionsAreRejectedWithoutSsh(): void
     {
         foreach (
@@ -117,6 +161,24 @@ final class LegacyReleaseProvenanceWrapperTest extends TestCase
             ['sidecars_published' => 0, 'temp_files_created' => 0, 'temp_files_removed' => 0],
             $executeResult['mutation_counts'],
         );
+
+        $authInspect = $this->runWrapper(['--prod-ssh-target', 'transport.example', '--inspect-authorization']);
+        self::assertSame(70, $authInspect['exit_code']);
+        $authInspectResult = $this->lastJsonLine($authInspect['stdout']);
+        self::assertSame('none', $authInspectResult['mutation_outcome']);
+        self::assertSame('inspect-authorization', $authInspectResult['mode']);
+
+        $authProvision = $this->runWrapper([
+            '--prod-ssh-target',
+            'transport.example',
+            '--provision-authorization',
+            '--confirm-authorization',
+            'ROB-468-AUTHORIZATION',
+        ]);
+        self::assertSame(70, $authProvision['exit_code']);
+        $authProvisionResult = $this->lastJsonLine($authProvision['stdout']);
+        self::assertSame('unknown', $authProvisionResult['mutation_outcome']);
+        self::assertSame('provision-authorization', $authProvisionResult['mode']);
     }
 
     /** @return array{exit_code:int,stdout:string,stderr:string} */
@@ -173,7 +235,11 @@ final class LegacyReleaseProvenanceWrapperTest extends TestCase
                 printf 'unexpected ssh target\n' >&2
                 exit 1
             fi
-            printf '{"mode":"%s","mutation_counts":{"sidecars_published":0,"temp_files_created":0,"temp_files_removed":0},"mutation_outcome":"none","schema":"legacy_release_provenance_result.v1","status":"pass","targets":{"attached":0,"pending":2,"preflighted":2,"published":0}}\n' "${args[5]:-missing}"
+            if [[ "${args[5]:-}" == "inspect-authorization" || "${args[5]:-}" == "provision-authorization" ]]; then
+                printf '{"authorization":{"attached":0,"pending":1,"published":0},"mode":"%s","mutation_counts":{"authorization_published":0,"temp_files_created":0,"temp_files_removed":0},"mutation_outcome":"none","schema":"legacy_release_provenance_authorization_result.v1","status":"pass","targets":{"preflighted":2}}\n' "${args[5]}"
+            else
+                printf '{"mode":"%s","mutation_counts":{"sidecars_published":0,"temp_files_created":0,"temp_files_removed":0},"mutation_outcome":"none","schema":"legacy_release_provenance_result.v1","status":"pass","targets":{"attached":0,"pending":2,"preflighted":2,"published":0}}\n' "${args[5]:-missing}"
+            fi
             BASH
             ,
         );
