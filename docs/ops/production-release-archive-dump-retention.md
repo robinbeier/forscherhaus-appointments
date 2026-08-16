@@ -15,6 +15,8 @@ The helper recognizes only these protected roots and identities:
 - exact archive pairs `/root/releases/<release>.tar.gz` and
   `<release>.build-provenance.json` validated against canonical
   `release_build_provenance.v1` bytes;
+- the fixed `/etc/fh/legacy-release-hold.v1.json` for the two explicitly held
+  legacy archives; see `production-legacy-release-hold.md`.
 - root-owned backup sets below `/root/backups/easyappointments` whose
   `db/easyappointments.sql.gz` has an exact canonical, independently
   restore-verified attestation below
@@ -27,7 +29,7 @@ open deletion candidate blocks execute mode. Output is aggregate-only: no
 release, archive, backup, dump, or application-storage names or bytes are
 printed.
 
-Every `prod_release_archive_dump_retention.v2` result also carries
+Every `prod_release_archive_dump_retention.v3` result also carries
 `mutation_outcome` and fixed aggregate `mutation_counts`. `none` means no
 marker-temp cleanup, pending cleanup, or candidate was removed and
 `deletion_performed` is `false`. `known` means at least one removal is counted
@@ -37,7 +39,7 @@ second inventory, capacity result, or marker publication blocks the pass.
 start and confirmation; `deletion_performed` is then JSON `null`, never
 `false`. The counts distinguish release directories, dump sets, archive files,
 the same three pending-cleanup classes, and marker temp files without exposing
-identities. These mandatory keys and nullable unknown semantics are v2; a v1
+identities. These mandatory keys and nullable unknown semantics are v3; older
 result must not be interpreted as this contract. The separate durable success
 marker remains `prod_release_archive_dump_retention_marker.v1`.
 
@@ -49,8 +51,10 @@ marker remains `prod_release_archive_dump_retention_marker.v1`.
 | complete archive/provenance pairs | 30 days | current, rollback, then newest complete pairs until 4 release IDs are protected | 8 pairs |
 | verified backup sets | 30 days from attestation | newest 2 independently restore-verified dump SHA-256 values | 4 sets |
 
-An archive-only prefix is undeployable and may be resumed after the same age
-and protection checks; a sidecar without its archive is corruption and blocks.
+An archive-only prefix must exactly match a valid permanent legacy hold by
+release ID, archive name, full hash, and size; otherwise it is corruption and
+blocks. Held archives are never deletion candidates, including after marker
+rotation. A sidecar without its archive is corruption and blocks.
 When a verified backup set is removed, its small root-protected attestation is
 retained as audit evidence.
 

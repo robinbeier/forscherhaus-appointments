@@ -15,7 +15,9 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
     private const ATTESTATIONS = '/var/lib/fh-deploy-evidence/dump-attestations';
     private const STATE = '/var/lib/fh-release-retention';
     private const ORCHESTRATOR = '/var/lib/fh-deploy-orchestrator';
+    private const LEGACY_HOLD = '/etc/fh/legacy-release-hold.v1.json';
     private string $helper;
+    private bool $legacyHoldFixtureCreated = false;
 
     protected function setUp(): void
     {
@@ -39,6 +41,9 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         if (!is_array(posix_getpwnam('www-data'))) {
             $this->markTestSkipped('The production www-data account is required.');
         }
+        if (file_exists(self::LEGACY_HOLD) || is_link(self::LEGACY_HOLD) || is_dir('/etc/fh')) {
+            $this->markTestSkipped('A protected /etc/fh root already exists; ROB-470 will not mutate it.');
+        }
         foreach (['/', '/var', '/var/www', '/var/www/html', '/var/lib', '/root'] as $ancestor) {
             $metadata = lstat($ancestor);
             if (
@@ -57,6 +62,11 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
     protected function tearDown(): void
     {
         if (isset($this->helper)) {
+            if ($this->legacyHoldFixtureCreated) {
+                @unlink(self::LEGACY_HOLD);
+                @rmdir('/etc/fh');
+                $this->legacyHoldFixtureCreated = false;
+            }
             foreach (
                 [
                     self::APP,
@@ -107,7 +117,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
         self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
         $value = $this->decode($result);
-        self::assertSame('prod_release_archive_dump_retention.v2', $value['schema']);
+        self::assertSame('prod_release_archive_dump_retention.v3', $value['schema']);
         self::assertSame('dry-run', $value['mode']);
         self::assertFalse($value['deletion_performed']);
         self::assertSame('none', $value['mutation_outcome']);
@@ -131,7 +141,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
         self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
         $value = $this->decode($result);
-        self::assertSame('prod_release_archive_dump_retention.v2', $value['schema']);
+        self::assertSame('prod_release_archive_dump_retention.v3', $value['schema']);
         self::assertSame('pass', $value['status']);
         self::assertTrue($value['deletion_performed']);
         self::assertSame('known', $value['mutation_outcome']);
@@ -253,19 +263,83 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 
-    public function testArchiveOnlyCrashPrefixIsUndeployableAndResumableButSidecarOnlyRejects(): void
+    public function testArchiveOnlyCrashPrefixWithoutPermanentHoldFailsClosedAndSidecarOnlyRejects(): void
     {
         unlink(self::RELEASES . '/old.build-provenance.json');
-        $dry = $this->decode($this->runHelper('dry-run'));
-        self::assertSame(1, $dry['would_delete']['archive_pairs']);
-        self::assertSame(0, $this->runHelper('execute')['exit']);
-        self::assertFileDoesNotExist(self::RELEASES . '/old.tar.gz');
+        $dry = $this->runHelper('dry-run');
+        self::assertSame(70, $dry['exit']);
+        self::assertSame('unheld_archive_only', $this->decode($dry)['reason']);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
 
         $this->archivePair('orphan', 40 * 86400);
         unlink(self::RELEASES . '/orphan.tar.gz');
         $rejected = $this->runHelper('dry-run');
         self::assertSame(70, $rejected['exit']);
         self::assertSame('unsafe_incomplete_archive_pair', $this->decode($rejected)['reason']);
+    }
+
+    public function testHeldLegacyArchivesStayProtectedAfterMarkerRotation(): void
+    {
+        $this->archivePair('held-current', 80 * 86400);
+        $this->archivePair('held-rollback', 81 * 86400);
+        $this->writeLegacyTarArchive('held-current');
+        $this->writeProvenance('held-current');
+        $this->writeLegacyTarArchive('held-rollback');
+        unlink(self::RELEASES . '/held-rollback.build-provenance.json');
+        mkdir('/etc/fh', 0700, true);
+        $this->legacyHoldFixtureCreated = true;
+        file_put_contents(
+            self::LEGACY_HOLD,
+            $this->canonical([
+                'schema' => 'legacy_release_hold.v1',
+                'targets' => [
+                    $this->legacyHoldTarget('current', 'held-current'),
+                    $this->legacyHoldTarget('rollback', 'held-rollback'),
+                ],
+            ]),
+        );
+        chmod(self::LEGACY_HOLD, 0600);
+
+        $dry = $this->runHelper('dry-run');
+        self::assertSame(0, $dry['exit'], $dry['stdout'] . $dry['stderr']);
+        $value = $this->decode($dry);
+        self::assertSame(2, $value['legacy_hold_count']);
+        self::assertSame(1, $value['would_delete']['archive_pairs']);
+        self::assertFileExists(self::RELEASES . '/held-current.tar.gz');
+        self::assertFileExists(self::RELEASES . '/held-rollback.tar.gz');
+
+        $execute = $this->runHelper('execute');
+        self::assertSame(0, $execute['exit'], $execute['stdout'] . $execute['stderr']);
+        self::assertFileExists(self::RELEASES . '/held-current.tar.gz');
+        self::assertFileExists(self::RELEASES . '/held-rollback.tar.gz');
+        self::assertFileDoesNotExist(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testLegacyHoldRejectsCapacityBoundsThatDoNotMatchArchive(): void
+    {
+        $this->archivePair('held-current', 80 * 86400);
+        $this->archivePair('held-rollback', 81 * 86400);
+        $this->writeLegacyTarArchive('held-current');
+        $this->writeProvenance('held-current');
+        $this->writeLegacyTarArchive('held-rollback');
+        mkdir('/etc/fh', 0700, true);
+        $this->legacyHoldFixtureCreated = true;
+        $current = $this->legacyHoldTarget('current', 'held-current');
+        $rollback = $this->legacyHoldTarget('rollback', 'held-rollback');
+        $current['capacity_bounds']['stage_unpacked_bytes'] -= 4096;
+        file_put_contents(
+            self::LEGACY_HOLD,
+            $this->canonical([
+                'schema' => 'legacy_release_hold.v1',
+                'targets' => [$current, $rollback],
+            ]),
+        );
+        chmod(self::LEGACY_HOLD, 0600);
+
+        $result = $this->runHelper('dry-run');
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('legacy_hold_bounds_drift', $this->decode($result)['reason']);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 
     public function testUnsafeSymlinkHardlinkAndNonterminalRunnerRejectWithoutMutation(): void
@@ -483,7 +557,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
     {
         $result = $this->runPatchedHelper(
             "                deleted[kind + '_dirs'] += 1",
-            "                os.kill(os.getpid(), 9)",
+            '                os.kill(os.getpid(), 9)',
             'execute',
         );
 
@@ -609,6 +683,52 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
             ]),
         );
         chmod(self::ATTESTATIONS . '/' . $sha . '.json', 0600);
+    }
+
+    /** @return array<string,mixed> */
+    private function legacyHoldTarget(string $role, string $release): array
+    {
+        $archive = self::RELEASES . '/' . $release . '.tar.gz';
+        return [
+            'archive' => [
+                'name' => $release . '.tar.gz',
+                'sha256' => hash_file('sha256', $archive),
+                'size_bytes' => filesize($archive),
+            ],
+            'capacity_bounds' => [
+                'stage_file_count' => 1,
+                'stage_inode_count' => 3,
+                'stage_unpacked_bytes' => 12288,
+                'temp_scratch_bytes' => 64 * 1024 * 1024,
+            ],
+            'release_id' => $release,
+            'role_at_provisioning' => $role,
+        ];
+    }
+
+    private function writeLegacyTarArchive(string $release): void
+    {
+        $script = <<<'PY'
+        import io, sys, tarfile
+        with tarfile.open(sys.argv[1], mode='w:gz') as archive:
+            data = b'x'
+            info = tarfile.TarInfo('app/file.txt')
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+        PY;
+        $process = proc_open(
+            ['/usr/bin/python3', '-c', $script, self::RELEASES . '/' . $release . '.tar.gz'],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), (string) $stdout . (string) $stderr);
+        chmod(self::RELEASES . '/' . $release . '.tar.gz', 0600);
     }
 
     private function dumpSha(string $name): string

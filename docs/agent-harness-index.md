@@ -30,6 +30,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Production Docker build-cache retention | `docs/ops/production-build-cache-retention.md` | Fixed dry-run/execute boundary, cache policy, stop conditions, and validation. |
 | Production backup-set producer | `docs/ops/production-backup-set-producer.md` | Closed connection/dump authority, atomic set publication, protected handoff-to-attestation selection, manual-only execution, and ROB-461 two-set rollout. |
 | Production legacy release provenance | `docs/ops/production-legacy-release-provenance.md` | Fixed two-target authorization, read-only inspection, aggregate output, and separately approved no-replace sidecar publication. |
+| Production legacy release hold | `docs/ops/production-legacy-release-hold.md` | Permanent host-local hold for unverifiable legacy Current/Rollback archives; read-only inspect, separately approved provisioning, and retention protection. |
 | Production legacy session-mode normalization | `docs/ops/production-session-mode-normalization.md` | One-time dry-run/live-write boundary, fail-closed mode-change class, and required ROB-440 follow-up dry-run. |
 | Production session retention | `docs/ops/production-session-retention.md` | Fixed 24-hour policy, protected cleanup contract, disabled timer, monitoring, and rollout/rollback boundary. |
 | Production journald retention | `docs/ops/production-journald-retention.md` | Fixed 1 GiB / 30-day drop-in, aggregate drift monitoring, and separately approved activation/vacuum/rollback. |
