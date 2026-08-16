@@ -316,8 +316,25 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertFileDoesNotExist(self::RELEASES . '/old.tar.gz');
     }
 
-    public function testLegacyHoldRejectsCapacityBoundsThatDoNotMatchArchive(): void
+    /**
+     * @return iterable<string, array{string, string, int}>
+     */
+    public static function legacyHoldCapacityBoundsProvider(): iterable
     {
+        foreach (['current', 'rollback'] as $role) {
+            yield $role . '_stage_unpacked_bytes' => [$role, 'stage_unpacked_bytes', -4096];
+            yield $role . '_stage_file_count' => [$role, 'stage_file_count', 1];
+            yield $role . '_stage_inode_count' => [$role, 'stage_inode_count', -1];
+            yield $role . '_temp_scratch_bytes' => [$role, 'temp_scratch_bytes', -4096];
+        }
+    }
+
+    #[DataProvider('legacyHoldCapacityBoundsProvider')]
+    public function testLegacyHoldRejectsEachCapacityBoundThatDoesNotMatchArchive(
+        string $role,
+        string $field,
+        int $delta,
+    ): void {
         $this->archivePair('held-current', 80 * 86400);
         $this->archivePair('held-rollback', 81 * 86400);
         $this->writeLegacyTarArchive('held-current');
@@ -328,7 +345,11 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         $this->legacyHoldFixtureCreated = true;
         $current = $this->legacyHoldTarget('current', 'held-current');
         $rollback = $this->legacyHoldTarget('rollback', 'held-rollback');
-        $current['capacity_bounds']['stage_unpacked_bytes'] -= 4096;
+        if ($role === 'current') {
+            $current['capacity_bounds'][$field] += $delta;
+        } else {
+            $rollback['capacity_bounds'][$field] += $delta;
+        }
         file_put_contents(
             self::LEGACY_HOLD,
             $this->canonical([
@@ -342,6 +363,81 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
         self::assertSame('legacy_hold_bounds_drift', $this->decode($result)['reason']);
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function heldArchiveProvenanceBoundsProvider(): iterable
+    {
+        yield 'current' => ['held-current'];
+        yield 'rollback' => ['held-rollback'];
+    }
+
+    #[DataProvider('heldArchiveProvenanceBoundsProvider')]
+    public function testHeldArchiveRejectsUnderstatedProvenanceCapacityBounds(string $release): void
+    {
+        $this->archivePair('held-current', 80 * 86400);
+        $this->archivePair('held-rollback', 81 * 86400);
+        $this->writeLegacyTarArchive('held-current');
+        $this->writeProvenance('held-current');
+        $this->writeLegacyTarArchive('held-rollback');
+        $this->writeProvenance('held-rollback');
+        $provenancePath = self::RELEASES . '/' . $release . '.build-provenance.json';
+        $provenance = json_decode((string) file_get_contents($provenancePath), true, 32, JSON_THROW_ON_ERROR);
+        $provenance['capacity_bounds']['stage_unpacked_bytes'] = 8192;
+        file_put_contents($provenancePath, $this->canonical($provenance));
+        chmod($provenancePath, 0600);
+        mkdir('/etc/fh', 0700, true);
+        $this->legacyHoldFixtureCreated = true;
+        file_put_contents(
+            self::LEGACY_HOLD,
+            $this->canonical([
+                'schema' => 'legacy_release_hold.v1',
+                'targets' => [
+                    $this->legacyHoldTarget('current', 'held-current'),
+                    $this->legacyHoldTarget('rollback', 'held-rollback'),
+                ],
+            ]),
+        );
+        chmod(self::LEGACY_HOLD, 0600);
+
+        $result = $this->runHelper('dry-run');
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('legacy_hold_bounds_drift', $this->decode($result)['reason']);
+    }
+
+    public function testLegacyHoldStageInodeBoundaryIncludesStagingRootButRejectsBeyondIt(): void
+    {
+        mkdir('/etc/fh', 0700, true);
+        $this->legacyHoldFixtureCreated = true;
+        $current = $this->legacyHoldTarget('current', 'current');
+        $rollback = $this->legacyHoldTarget('rollback', 'rollback');
+        $current['capacity_bounds']['stage_inode_count'] = 1_000_001;
+        $rollback['capacity_bounds']['stage_inode_count'] = 1_000_001;
+        file_put_contents(
+            self::LEGACY_HOLD,
+            $this->canonical([
+                'schema' => 'legacy_release_hold.v1',
+                'targets' => [$current, $rollback],
+            ]),
+        );
+        chmod(self::LEGACY_HOLD, 0600);
+        $boundary = $this->runHelper('dry-run');
+        self::assertSame(70, $boundary['exit'], $boundary['stdout'] . $boundary['stderr']);
+        self::assertNotSame('unsafe_legacy_hold', $this->decode($boundary)['reason']);
+
+        $current['capacity_bounds']['stage_inode_count'] = 1_000_002;
+        file_put_contents(
+            self::LEGACY_HOLD,
+            $this->canonical([
+                'schema' => 'legacy_release_hold.v1',
+                'targets' => [$current, $rollback],
+            ]),
+        );
+        $over = $this->runHelper('dry-run');
+        self::assertSame(70, $over['exit'], $over['stdout'] . $over['stderr']);
+        self::assertSame('unsafe_legacy_hold', $this->decode($over)['reason']);
     }
 
     public function testUnsafeSymlinkHardlinkAndNonterminalRunnerRejectWithoutMutation(): void

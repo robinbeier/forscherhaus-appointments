@@ -21,8 +21,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
         );
 
-        self::assertSame(11, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-13T19:26:20Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(12, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-16T19:14:40Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),
@@ -187,12 +187,17 @@ class CiPerformanceWorkflowContractTest extends TestCase
         self::assertStringContainsString('tests/Unit/Scripts/AppLogRetentionRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PinDeployTimingRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeployment);
+        self::assertStringContainsString('tests/Unit/Scripts/LegacyReleaseHoldRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/SessionRetentionRootTest.php', $rootDeployment);
         self::assertStringContainsString(
             'tests/Unit/Scripts/ZeroSurpriseProductionImageCleanupRootTest.php',
             $rootDeployment,
         );
         self::assertStringContainsString('tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php', $rootDeployment);
+        self::assertStringContainsString(
+            'sudo python3 -m unittest tests.Unit.Scripts.legacy_release_hold_v1_test',
+            $rootDeployment,
+        );
 
         $diagnostics = $steps['Diagnostics (build-test database)'];
         self::assertSame('failure()', $diagnostics['if'] ?? null);

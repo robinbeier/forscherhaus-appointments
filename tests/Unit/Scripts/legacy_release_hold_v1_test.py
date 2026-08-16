@@ -5,6 +5,7 @@ import os
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) )
 SPEC = importlib.util.spec_from_file_location('hold', os.path.join(ROOT, 'scripts/ops/libexec/legacy_release_hold_v1.py'))
@@ -71,6 +72,105 @@ class LegacyReleaseHoldTest(unittest.TestCase):
         self.assertEqual(5, bounds['stage_inode_count'])
         self.assertEqual(5 * HOLD.BLOCK_BYTES, bounds['stage_unpacked_bytes'])
         self.assertEqual(HOLD.TEMP_SCRATCH_BYTES, bounds['temp_scratch_bytes'])
+
+    def test_archive_scan_rewinds_descriptor_after_digest(self):
+        if os.geteuid() != 0:
+            self.skipTest('stable root-owned archive fixture requires root')
+        with tempfile.NamedTemporaryFile(suffix='.tar.gz') as handle:
+            with tarfile.open(fileobj=handle, mode='w:gz') as archive:
+                info = tarfile.TarInfo('app/config/settings.json')
+                info.size = 1
+                archive.addfile(info, io.BytesIO(b'x'))
+            os.chmod(handle.name, 0o600)
+            record = HOLD.open_stable_regular(handle.name, HOLD.MAX_ARCHIVE_BYTES)
+            try:
+                self.assertTrue(HOLD.digest_fd(record['fd']))
+                bounds = HOLD.tar_bounds(record)
+            finally:
+                HOLD.close_record(record)
+        self.assertEqual(1, bounds['stage_file_count'])
+
+    def test_write_failure_cleans_only_the_bound_new_temp(self):
+        if os.geteuid() != 0:
+            self.skipTest('root-owned fixture requires root')
+        with tempfile.TemporaryDirectory() as directory:
+            web_root = os.path.join(directory, 'web')
+            rollback_prefix = os.path.join(directory, 'rollback-')
+            rollback_root = rollback_prefix + 'current'
+            releases_root = os.path.join(directory, 'releases')
+            lock_root = os.path.join(directory, 'locks')
+            hold_parent = os.path.join(directory, 'etc-fh')
+            os.makedirs(web_root, mode=0o755)
+            os.makedirs(rollback_root, mode=0o755)
+            os.makedirs(releases_root, mode=0o700)
+            os.makedirs(lock_root, mode=0o700)
+            os.makedirs(hold_parent, mode=0o700)
+            for path, value in (
+                (os.path.join(web_root, HOLD.CURRENT_MARKER), 'current'),
+                (os.path.join(rollback_root, HOLD.CURRENT_MARKER), 'rollback'),
+            ):
+                with open(path, 'wb') as marker:
+                    marker.write((value + '\n').encode())
+                os.chmod(path, 0o600)
+            for path, member_name in (
+                (os.path.join(releases_root, 'current.tar.gz'), 'current.txt'),
+                (os.path.join(releases_root, 'rollback.tar.gz'), 'rollback.txt'),
+            ):
+                with tarfile.open(path, mode='w:gz') as archive:
+                    info = tarfile.TarInfo(member_name)
+                    info.size = 1
+                    archive.addfile(info, io.BytesIO(b'x'))
+                os.chmod(path, 0o600)
+            global_lock = os.path.join(lock_root, 'global.lock')
+            publication_lock = os.path.join(releases_root, '.publication.lock')
+            for path in (global_lock, publication_lock):
+                open(path, 'wb').close()
+                os.chmod(path, 0o600)
+
+            names = ('WEB_ROOT', 'ROLLBACK_PREFIX', 'RELEASES_ROOT', 'GLOBAL_LOCK', 'PUBLICATION_LOCK', 'HOLD_PATH')
+            values = (HOLD.WEB_ROOT, HOLD.ROLLBACK_PREFIX, HOLD.RELEASES_ROOT, HOLD.GLOBAL_LOCK, HOLD.PUBLICATION_LOCK, HOLD.HOLD_PATH)
+            HOLD.WEB_ROOT = web_root
+            HOLD.ROLLBACK_PREFIX = rollback_prefix
+            HOLD.RELEASES_ROOT = releases_root
+            HOLD.GLOBAL_LOCK = global_lock
+            HOLD.PUBLICATION_LOCK = publication_lock
+            HOLD.HOLD_PATH = os.path.join(hold_parent, 'legacy-release-hold.v1.json')
+            try:
+                targets = HOLD.preflight()
+                for failure in ('write_failed', 'fsync_failed'):
+                    HOLD.LEDGER = HOLD.MutationLedger()
+                    if failure == 'write_failed':
+                        def partial_write_then_fail(fd, data):
+                            os.write(fd, data[:1])
+                            raise HOLD.HoldError(failure)
+
+                        patcher = mock.patch.object(HOLD, 'write_all', side_effect=partial_write_then_fail)
+                    else:
+                        original_fsync = HOLD.os.fsync
+                        calls = 0
+
+                        def fail_first_fsync(fd):
+                            nonlocal calls
+                            calls += 1
+                            if calls == 1:
+                                raise HOLD.HoldError(failure)
+                            return original_fsync(fd)
+
+                        patcher = mock.patch.object(HOLD.os, 'fsync', side_effect=fail_first_fsync)
+                    with patcher:
+                        with self.assertRaisesRegex(HOLD.HoldError, failure):
+                            HOLD.provision(targets)
+                    self.assertEqual([], list(os.listdir(hold_parent)))
+                    counts, outcome = HOLD.LEDGER.fields()
+                    self.assertEqual(1, counts['temp_files_created'])
+                    self.assertEqual(1, counts['temp_files_removed'])
+                    self.assertEqual('known', outcome)
+            finally:
+                for name, value in zip(names, values):
+                    setattr(HOLD, name, value)
+
+    def test_stage_inode_limit_includes_staging_root(self):
+        self.assertEqual(HOLD.MAX_ENTRIES + 1, HOLD.MAX_STAGE_INODE_COUNT)
 
     def test_archive_rejects_path_replacement_between_hash_and_tar_scan(self):
         if os.geteuid() != 0:

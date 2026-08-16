@@ -499,7 +499,7 @@ def read_legacy_hold():
                 or not isinstance(bounds, dict) or set(bounds) != {'stage_file_count', 'stage_inode_count', 'stage_unpacked_bytes', 'temp_scratch_bytes'}
                 or any(isinstance(bounds[field], bool) or not isinstance(bounds[field], int) or bounds[field] <= 0 for field in bounds)
                 or bounds['stage_file_count'] > MAX_LEGACY_HOLD_STAGE_ENTRIES
-                or bounds['stage_inode_count'] > MAX_LEGACY_HOLD_STAGE_ENTRIES
+                or bounds['stage_inode_count'] > MAX_LEGACY_HOLD_STAGE_ENTRIES + 1
                 or bounds['stage_unpacked_bytes'] > MAX_LEGACY_HOLD_STAGE_UNPACKED_BYTES
                 or bounds['temp_scratch_bytes'] != LEGACY_HOLD_TEMP_SCRATCH_BYTES):
             reject('unsafe_legacy_hold')
@@ -1011,6 +1011,8 @@ def scan_archive_pairs(releases, current_release, rollback_release, now_ns, lega
             continue
         sidecar = stable_regular(releases, sidecar_leaf, 0, 0, {0o600}, MAX_SIDECAR_BYTES)
         provenance = validate_provenance(sidecar[0], release_id, archive_sha, archive_size)
+        if held is not None and provenance['capacity_bounds'] != observed_hold_bounds:
+            reject('legacy_hold_bounds_drift')
         if held is not None and (held['sha256'] != archive_sha or held['size_bytes'] != archive_size):
             reject('legacy_hold_drift')
         mtime_ns = max(archive_meta.st_mtime_ns, sidecar[2].st_mtime_ns)
@@ -1022,7 +1024,7 @@ def scan_archive_pairs(releases, current_release, rollback_release, now_ns, lega
             'identities': {(archive_meta.st_dev, archive_meta.st_ino), (sidecar[2].st_dev, sidecar[2].st_ino)},
             'incomplete': False,
             'mtime_ns': mtime_ns,
-            'projected': provenance['capacity_bounds'],
+            'projected': observed_hold_bounds if held is not None else provenance['capacity_bounds'],
             'protected': held is not None,
             'release_id': release_id,
             'sidecar_identity': sidecar[1],

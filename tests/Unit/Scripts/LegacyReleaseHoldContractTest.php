@@ -78,6 +78,62 @@ final class LegacyReleaseHoldContractTest extends TestCase
             $invalid = $this->runWrapper(['--provision'], $workspace . '/bin', $root);
             self::assertSame(1, $invalid['exit']);
             self::assertSame('', (string) file_get_contents($log));
+
+            file_put_contents(
+                $workspace . '/bin/ssh',
+                "#!/usr/bin/env bash\nprintf '%s\\n' '{\"mode\":\"provision\",\"mutation_counts\":{\"hold_published\":1,\"temp_files_created\":1,\"temp_files_removed\":1},\"mutation_outcome\":\"known\",\"reason\":\"write_failed\",\"schema\":\"legacy_release_hold_result.v1\",\"status\":\"blocked\"}'\nexit 42\n",
+            );
+            chmod($workspace . '/bin/ssh', 0755);
+            $nonzero = $this->runWrapper(
+                ['--provision', '--confirm-live-write', 'ROB-470-HOLD'],
+                $workspace . '/bin',
+                $root,
+            );
+            self::assertSame(42, $nonzero['exit']);
+            self::assertStringContainsString(
+                '"mutation_counts":{"hold_published":1,"temp_files_created":1,"temp_files_removed":1}',
+                $nonzero['stdout'],
+            );
+            self::assertStringContainsString('"mutation_outcome":"known"', $nonzero['stdout']);
+            self::assertStringContainsString('"reason":"write_failed"', $nonzero['stdout']);
+
+            file_put_contents(
+                $workspace . '/bin/ssh',
+                "#!/usr/bin/env bash\nprintf '%s\\n' '{\"attached\":false,\"mode\":\"inspect\",\"mutation_counts\":{\"hold_published\":0,\"temp_files_created\":0,\"temp_files_removed\":0},\"mutation_outcome\":\"none\",\"pending\":true,\"schema\":\"legacy_release_hold_result.v1\",\"status\":\"pass\",\"targets_preflighted\":2}'\nexit 42\n",
+            );
+            chmod($workspace . '/bin/ssh', 0755);
+            $passWithFailure = $this->runWrapper([], $workspace . '/bin', $root);
+            self::assertSame(75, $passWithFailure['exit']);
+            self::assertStringContainsString('transport_result_invalid', $passWithFailure['stdout']);
+
+            file_put_contents(
+                $workspace . '/bin/ssh',
+                "#!/usr/bin/env bash\nprintf '%s\\n' '{\"mode\":\"provision\",\"mutation_counts\":{\"hold_published\":0,\"temp_files_created\":0,\"temp_files_removed\":0},\"mutation_outcome\":\"none\",\"schema\":\"legacy_release_hold_result.v1\",\"status\":\"blocked\",\"reason\":\"internal_error\"}'\nexit 0\n",
+            );
+            chmod($workspace . '/bin/ssh', 0755);
+            $blockedWithSuccess = $this->runWrapper(
+                ['--provision', '--confirm-live-write', 'ROB-470-HOLD'],
+                $workspace . '/bin',
+                $root,
+            );
+            self::assertSame(75, $blockedWithSuccess['exit']);
+            self::assertStringContainsString('transport_result_invalid', $blockedWithSuccess['stdout']);
+
+            file_put_contents($workspace . '/bin/ssh', "#!/usr/bin/env bash\nexit 255\n");
+            chmod($workspace . '/bin/ssh', 0755);
+            $transport = $this->runWrapper([], $workspace . '/bin', $root);
+            self::assertSame(75, $transport['exit']);
+            self::assertStringContainsString('transport_result_unavailable', $transport['stdout']);
+
+            file_put_contents(
+                $workspace . '/bin/ssh',
+                "#!/usr/bin/env bash\n/usr/bin/python3 -c 'print(\"x\" * 4097)'\n",
+            );
+            chmod($workspace . '/bin/ssh', 0755);
+            $oversized = $this->runWrapper([], $workspace . '/bin', $root);
+            self::assertSame(75, $oversized['exit']);
+            self::assertStringContainsString('transport_result_invalid', $oversized['stdout']);
+            self::assertStringNotContainsString(str_repeat('x', 128), $oversized['stdout']);
         } finally {
             $this->removeTree($workspace);
         }

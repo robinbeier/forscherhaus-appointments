@@ -59,7 +59,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringContainsString('Persistent=true', $timer);
         self::assertStringContainsString('Unit=fh-release-archive-dump-retention.service', $timer);
         self::assertStringContainsString('StateDirectory=fh-release-retention', $service);
-        self::assertStringContainsString('/etc/fh/legacy-release-hold.v1.json', $service);
+        self::assertStringContainsString('ReadOnlyPaths=-/etc/fh/legacy-release-hold.v1.json', $service);
         self::assertStringContainsString('ProtectSystem=strict', $service);
         self::assertStringContainsString('NoNewPrivileges=yes', $service);
         self::assertStringContainsString(
@@ -122,6 +122,12 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringContainsString('LEGACY_HOLD_TEMP_SCRATCH_BYTES = 67_108_864', $helper);
         self::assertStringContainsString("bounds['temp_scratch_bytes'] != LEGACY_HOLD_TEMP_SCRATCH_BYTES", $helper);
         self::assertStringContainsString("reject('legacy_hold_bounds_drift')", $helper);
+        self::assertStringContainsString("provenance['capacity_bounds'] != observed_hold_bounds", $helper);
+        self::assertStringContainsString(
+            "'projected': observed_hold_bounds if held is not None else provenance['capacity_bounds']",
+            $helper,
+        );
+        self::assertStringContainsString("bounds['stage_inode_count'] > MAX_LEGACY_HOLD_STAGE_ENTRIES + 1", $helper);
         self::assertStringContainsString('inspect_legacy_archive(', $helper);
         self::assertStringContainsString('LEGACY_HOLD_RELEASE_ID = re.compile', $helper);
         self::assertStringContainsString("'mutation_outcome': 'unknown'", $helper);

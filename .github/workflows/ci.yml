@@ -491,10 +491,12 @@ jobs:
             tests/Unit/Scripts/AppLogRetentionRootTest.php \
             tests/Unit/Scripts/PinDeployTimingRootTest.php \
             tests/Unit/Scripts/PublishReleasePairRootTest.php \
+            tests/Unit/Scripts/LegacyReleaseHoldRootTest.php \
             tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php \
             tests/Unit/Scripts/SessionRetentionRootTest.php \
             tests/Unit/Scripts/ZeroSurpriseProductionImageCleanupRootTest.php \
             tests/Unit/Scripts/ReleaseArtifactValidatorTest.php
+          sudo python3 -m unittest tests.Unit.Scripts.legacy_release_hold_v1_test
       - name: Diagnostics (build-test database)
         if: failure()
         run: |

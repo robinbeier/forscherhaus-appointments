@@ -32,7 +32,9 @@ TEMP_SCRATCH_BYTES = 67_108_864
 MAX_HELPER_TEMPS = 32
 RENAME_NOREPLACE = 1
 MAX_STAGE_FILE_COUNT = MAX_ENTRIES
-MAX_STAGE_INODE_COUNT = MAX_ENTRIES
+# The staging root is an inode in addition to the archive's materialized
+# entries.  Keep this decode limit aligned with tar_bounds().
+MAX_STAGE_INODE_COUNT = MAX_ENTRIES + 1
 TEMP_PREFIX = '.legacy-release-hold.v1.json.rob470-'
 TEMP_PATTERN = re.compile(r'\.legacy-release-hold\.v1\.json\.rob470-[0-9a-f]{32}\.tmp\Z')
 RID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')
@@ -287,6 +289,10 @@ def normalize_member_name(name):
 
 
 def tar_bounds(record):
+    # digest_fd() consumes the shared stable descriptor.  Rewind that same
+    # descriptor before duplicating it for tarfile so hashing and scanning
+    # always inspect the complete archive.
+    os.lseek(record['fd'], 0, os.SEEK_SET)
     entries = file_count = 0
     unpacked = BLOCK_BYTES
     stage_types = {}
@@ -584,9 +590,22 @@ def provision(targets):
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
             LEDGER.begin()
             fd = os.open(temp, flags, 0o600, dir_fd=parent_fd)
+            # Bind the trusted descriptor/path identity immediately after
+            # O_EXCL creation.  If writing or fsync fails, the outer finally
+            # can remove only this exact file, without an unsafe name-only
+            # cleanup window.
+            temp_identity = file_identity(os.fstat(fd))
             LEDGER.confirm('temp_files_created')
-            write_all(fd, data)
-            os.fsync(fd)
+            try:
+                write_all(fd, data)
+                os.fsync(fd)
+            except BaseException:
+                # A partial write changes size and timestamps.  Refresh the
+                # descriptor-bound identity before the outer cleanup closes
+                # the descriptor, so unlink_owned_temp can still prove that
+                # this is exactly the O_EXCL-created file.
+                temp_identity = file_identity(os.fstat(fd))
+                raise
             temp_identity = file_identity(os.fstat(fd))
             os.close(fd)
             fd = -1
