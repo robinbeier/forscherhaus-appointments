@@ -352,7 +352,7 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
 
     def test_invalid_authorization_arguments_remain_closed(self):
         for arguments in (['provision-authorization'], ['provision-authorization', 'ROB-468'], ['inspect-authorization', 'extra']):
-            result = subprocess.run([sys.executable, str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), *arguments], capture_output=True, text=True)
+            result = subprocess.run([resolve_python_executable(), str(ROOT / 'scripts/ops/libexec/legacy_release_provenance_v1.py'), *arguments], capture_output=True, text=True)
             self.assertEqual(64, result.returncode)
             self.assertEqual('invalid_arguments', json.loads(result.stdout)['reason'])
 
