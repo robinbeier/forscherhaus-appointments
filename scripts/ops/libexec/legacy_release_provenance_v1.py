@@ -409,6 +409,8 @@ def inspect_archive(record, member_hashes):
                             unpacked_bytes += BLOCK_BYTES
                             if len(stage_types) > MAX_ARCHIVE_ENTRIES:
                                 reject('unsafe_tar')
+                            if unpacked_bytes > MAX_UNPACKED_BYTES:
+                                reject('unsafe_tar')
                     member_type = 'directory' if member.isdir() else 'file'
                     previous_type = stage_types.get(name)
                     if previous_type is not None and previous_type != member_type:
@@ -419,11 +421,15 @@ def inspect_archive(record, member_hashes):
                             reject('unsafe_tar')
                     if member.isdir() and previous_type is None:
                         unpacked_bytes += BLOCK_BYTES
+                        if unpacked_bytes > MAX_UNPACKED_BYTES:
+                            reject('unsafe_tar')
                     elif member.isfile():
                         if member.size < 0:
                             reject('unsafe_tar')
                         file_count += 1
                         unpacked_bytes += max(BLOCK_BYTES, ((member.size + BLOCK_BYTES - 1) // BLOCK_BYTES) * BLOCK_BYTES)
+                        if unpacked_bytes > MAX_UNPACKED_BYTES:
+                            reject('unsafe_tar')
                         if name in member_hashes:
                             if member.size > MAX_REQUIRED_MEMBER_BYTES:
                                 reject('required_member_invalid')
@@ -443,8 +449,6 @@ def inspect_archive(record, member_hashes):
                             if total != member.size:
                                 reject('required_member_invalid')
                             observed_required[name] = digest.hexdigest()
-                    if unpacked_bytes > MAX_UNPACKED_BYTES:
-                        reject('unsafe_tar')
     except LegacyProvenanceError:
         raise
     except (OSError, EOFError, tarfile.TarError, ValueError):

@@ -9,6 +9,7 @@ import tarfile
 BLOCK = 4096
 MAX_ARCHIVE = 17_179_869_184
 MAX_ENTRIES = 1_000_000
+MAX_UNPACKED = 68_719_476_736
 
 def reject():
     sys.stderr.write('release archive rejected\n')
@@ -43,7 +44,12 @@ def main():
                 name = member.name[2:] if member.name.startswith('./') else member.name
                 if name in ('', '.') and member.isdir():
                     continue
-                if not name or name.startswith('/') or name in ('.', '..') or any(part in ('', '.', '..') for part in name.split('/')):
+                if (
+                    not name or name.startswith('/') or len(name.encode('utf-8')) > 4096 or
+                    name in ('.', '..') or '\x00' in name or '\\' in name or
+                    any(part in ('', '.', '..') or len(part.encode('utf-8')) > 255 for part in name.split('/')) or
+                    any(ord(character) < 32 or ord(character) == 127 for character in name)
+                ):
                     reject()
                 if any(part.startswith('._') for part in name.split('/')):
                     reject()
@@ -58,6 +64,8 @@ def main():
                     if parent_name not in stage_types:
                         stage_types[parent_name] = 'directory'
                         unpacked += BLOCK
+                        if unpacked > MAX_UNPACKED:
+                            reject()
                 member_type = 'directory' if member.isdir() else 'file'
                 previous_type = stage_types.get(name)
                 if previous_type is not None and previous_type != member_type:
@@ -72,6 +80,8 @@ def main():
                     unpacked += BLOCK
                 elif member.isfile():
                     unpacked += max(BLOCK, ((member.size + BLOCK - 1) // BLOCK) * BLOCK)
+                if unpacked > MAX_UNPACKED:
+                    reject()
         after = os.fstat(fd)
         identity = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
         if identity(before) != identity(after):
