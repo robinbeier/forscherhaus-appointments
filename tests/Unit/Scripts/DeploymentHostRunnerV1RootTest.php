@@ -459,10 +459,14 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         $deployScript = "#!/bin/bash\nexit 0\n";
         self::assertSame(strlen($deployScript), file_put_contents($stage . '/deploy_ea.sh', $deployScript));
         self::assertTrue(chmod($stage . '/deploy_ea.sh', 0755));
+        self::assertTrue(mkdir($stage . '/nested/deeper', 0700, true));
+        self::assertSame(1, file_put_contents($stage . '/nested/deeper/file', 'x'));
         self::assertSame(strlen($deployScript), file_put_contents($this->root . '/deploy_ea.sh', $deployScript));
         self::assertTrue(chmod($this->root . '/deploy_ea.sh', 0755));
         $archivePath = $this->root . '/' . $release . '.tar.gz';
-        $tar = $this->runCommand(['/bin/tar', '-czf', $archivePath, '-C', $stage, '.']);
+        $tar = $this->runCommand([
+            '/bin/tar', '-czf', $archivePath, '-C', $stage, 'deploy_ea.sh', 'nested/deeper/file',
+        ]);
         self::assertSame(0, $tar['exit_code'], $tar['stderr']);
         self::assertTrue(chmod($archivePath, 0600));
         $inspection = $this->runCommand([
@@ -520,6 +524,10 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         self::assertSame($archive['stage_unpacked_bytes'], $decoded['stage_unpacked_bytes']);
         self::assertSame($digest, $decoded['host_deploy_script_sha256']);
         self::assertSame($digest, $decoded['artifact_deploy_script_sha256']);
+        self::assertSame(5, $archive['stage_inode_count']);
+        self::assertSame(5 * 4096, $archive['stage_unpacked_bytes']);
+        self::assertSame($archive['stage_inode_count'], $decoded['stage_inode_count']);
+        self::assertSame($archive['stage_unpacked_bytes'], $decoded['stage_unpacked_bytes']);
 
         $wrongAuthority = $this->runHelper(['observe-build', $this->root, $release, str_repeat('e', 64)]);
         self::assertSame(75, $wrongAuthority['exit_code']);
