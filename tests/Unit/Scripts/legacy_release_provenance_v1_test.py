@@ -191,6 +191,31 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
             legacy.preflight_targets(context)
         legacy.close_context(context)
 
+    def test_authorization_rejects_numeric_string_shaped_values(self):
+        for field in ('release_id', 'expected_commit', 'archive_sha256'):
+            fixture = self.fixture()
+            authorization = fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+            value = json.loads(authorization.read_text())
+            width = 40 if field == 'expected_commit' else 64 if field == 'archive_sha256' else 8
+            value['targets'][0][field] = int('1' * width)
+            authorization.write_bytes(legacy.canonical_json(value))
+            context = self.context(fixture)
+            with self.subTest(field=field), self.assertRaisesRegex(
+                legacy.LegacyProvenanceError, 'invalid_authorization',
+            ):
+                legacy.preflight_targets(context)
+            legacy.close_context(context)
+
+        fixture = self.fixture()
+        authorization = fixture['etc'] / pathlib.Path(legacy.AUTHORIZATION).name
+        value = json.loads(authorization.read_text())
+        value['targets'][0]['required_members']['composer.lock'] = int('1' * 64)
+        authorization.write_bytes(legacy.canonical_json(value))
+        context = self.context(fixture)
+        with self.assertRaisesRegex(legacy.LegacyProvenanceError, 'invalid_authorization'):
+            legacy.preflight_targets(context)
+        legacy.close_context(context)
+
     def test_tar_traversal_links_devices_duplicates_metadata_and_hash_drift_reject(self):
         cases = (
             'traversal', 'symlink', 'device', 'duplicate', 'missing', 'hash', 'appledouble', 'long_component', 'collision',

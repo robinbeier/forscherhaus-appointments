@@ -1830,7 +1830,8 @@ def observe_build(authority_root: str, release_id: str, authorized_sha256: str) 
         if archive_sha256 != archive_authority['sha256'] or archive_size != archive_authority['size_bytes']:
             raise Conflict()
         os.lseek(archive_descriptor, 0, os.SEEK_SET)
-        names: set[str] = set()
+        member_names: set[str] = set()
+        stage_types: dict[str, str] = {}
         entry_count = 0
         unpacked = RELEASE_BLOCK
         artifact_script_sha256 = None
@@ -1842,16 +1843,34 @@ def observe_build(authority_root: str, release_id: str, authorized_sha256: str) 
                 if (
                     not name or name.startswith('/') or len(name.encode('utf-8')) > 4096 or
                     name in ('.', '..') or any(part in ('', '.', '..') or len(part.encode('utf-8')) > 255 for part in name.split('/')) or
-                    any(part.startswith('._') for part in name.split('/')) or name in names or
+                    any(part.startswith('._') for part in name.split('/')) or name in member_names or
                     not (member.isfile() or member.isdir())
                 ):
                     reject()
-                names.add(name)
-                if len(names) > 1_000_000:
+                member_names.add(name)
+                if len(member_names) > 1_000_000:
                     reject()
-                if member.isdir():
+                parts = name.split('/')
+                for index in range(1, len(parts)):
+                    parent_name = '/'.join(parts[:index])
+                    if stage_types.get(parent_name) == 'file':
+                        reject()
+                    if parent_name not in stage_types:
+                        stage_types[parent_name] = 'directory'
+                        unpacked += RELEASE_BLOCK
+                        if len(stage_types) > 1_000_000:
+                            reject()
+                member_type = 'directory' if member.isdir() else 'file'
+                previous_type = stage_types.get(name)
+                if previous_type is not None and previous_type != member_type:
+                    reject()
+                if previous_type is None:
+                    stage_types[name] = member_type
+                    if len(stage_types) > 1_000_000:
+                        reject()
+                if member.isdir() and previous_type is None:
                     unpacked += RELEASE_BLOCK
-                else:
+                elif member.isfile():
                     entry_count += 1
                     unpacked += max(RELEASE_BLOCK, ((member.size + RELEASE_BLOCK - 1) // RELEASE_BLOCK) * RELEASE_BLOCK)
                     if unpacked > MAX_RELEASE_UNPACKED:
@@ -1895,7 +1914,7 @@ def observe_build(authority_root: str, release_id: str, authorized_sha256: str) 
         'provenance_bytes_base64': base64.b64encode(sidecar).decode('ascii'),
         'provenance_sha256': authorized_sha256,
         'stage_file_count': entry_count,
-        'stage_inode_count': len(names) + 1,
+        'stage_inode_count': len(stage_types) + 1,
         'stage_unpacked_bytes': unpacked,
         'temp_scratch_bytes': RELEASE_TEMP_SCRATCH,
     }

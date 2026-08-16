@@ -331,15 +331,22 @@ def decode_authorization(data):
             not isinstance(target, dict)
             or set(target) != {'archive_sha256', 'expected_commit', 'release_id', 'required_members', 'role'}
             or target.get('role') != role
-            or RELEASE_ID.fullmatch(str(target.get('release_id'))) is None
-            or COMMIT.fullmatch(str(target.get('expected_commit'))) is None
-            or SHA256.fullmatch(str(target.get('archive_sha256'))) is None
+            or not isinstance(target.get('release_id'), str)
+            or RELEASE_ID.fullmatch(target.get('release_id', '')) is None
+            or not isinstance(target.get('expected_commit'), str)
+            or COMMIT.fullmatch(target.get('expected_commit', '')) is None
+            or not isinstance(target.get('archive_sha256'), str)
+            or SHA256.fullmatch(target.get('archive_sha256', '')) is None
         ):
             reject('invalid_authorization')
         required_members = target.get('required_members')
         if not isinstance(required_members, dict) or tuple(sorted(required_members)) != REQUIRED_MEMBERS:
             reject('invalid_authorization')
-        if any(SHA256.fullmatch(str(required_members.get(member))) is None for member in REQUIRED_MEMBERS):
+        if any(
+            not isinstance(required_members.get(member), str)
+            or SHA256.fullmatch(required_members.get(member, '')) is None
+            for member in REQUIRED_MEMBERS
+        ):
             reject('invalid_authorization')
         decoded[role] = target
     if decoded['current']['release_id'] == decoded['rollback']['release_id']:
@@ -400,12 +407,16 @@ def inspect_archive(record, member_hashes):
                         if parent not in stage_types:
                             stage_types[parent] = 'directory'
                             unpacked_bytes += BLOCK_BYTES
+                            if len(stage_types) > MAX_ARCHIVE_ENTRIES:
+                                reject('unsafe_tar')
                     member_type = 'directory' if member.isdir() else 'file'
                     previous_type = stage_types.get(name)
                     if previous_type is not None and previous_type != member_type:
                         reject('unsafe_tar')
                     if previous_type is None:
                         stage_types[name] = member_type
+                        if len(stage_types) > MAX_ARCHIVE_ENTRIES:
+                            reject('unsafe_tar')
                     if member.isdir() and previous_type is None:
                         unpacked_bytes += BLOCK_BYTES
                     elif member.isfile():
