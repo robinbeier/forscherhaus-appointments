@@ -1841,9 +1841,10 @@ def observe_build(authority_root: str, release_id: str, authorized_sha256: str) 
                 if name in ('', '.') and member.isdir():
                     continue
                 if (
-                    not name or name.startswith('/') or len(name.encode('utf-8')) > 4096 or
+                    not name or name.startswith('/') or len(name.encode('utf-8')) > 4096 or '\x00' in name or '\\' in name or
                     name in ('.', '..') or any(part in ('', '.', '..') or len(part.encode('utf-8')) > 255 for part in name.split('/')) or
-                    any(part.startswith('._') for part in name.split('/')) or name in member_names or
+                    any(part.startswith('._') for part in name.split('/')) or
+                    any(ord(character) < 32 or ord(character) == 127 for character in name) or name in member_names or
                     not (member.isfile() or member.isdir())
                 ):
                     reject()
@@ -1860,6 +1861,8 @@ def observe_build(authority_root: str, release_id: str, authorized_sha256: str) 
                         unpacked += RELEASE_BLOCK
                         if len(stage_types) > 1_000_000:
                             reject()
+                        if unpacked > MAX_RELEASE_UNPACKED:
+                            reject()
                 member_type = 'directory' if member.isdir() else 'file'
                 previous_type = stage_types.get(name)
                 if previous_type is not None and previous_type != member_type:
@@ -1870,6 +1873,8 @@ def observe_build(authority_root: str, release_id: str, authorized_sha256: str) 
                         reject()
                 if member.isdir() and previous_type is None:
                     unpacked += RELEASE_BLOCK
+                    if unpacked > MAX_RELEASE_UNPACKED:
+                        reject()
                 elif member.isfile():
                     entry_count += 1
                     unpacked += max(RELEASE_BLOCK, ((member.size + RELEASE_BLOCK - 1) // RELEASE_BLOCK) * RELEASE_BLOCK)

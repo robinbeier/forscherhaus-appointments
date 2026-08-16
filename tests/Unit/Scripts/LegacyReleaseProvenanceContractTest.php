@@ -104,6 +104,29 @@ final class LegacyReleaseProvenanceContractTest extends TestCase
         self::assertStringContainsString('exact', strtolower($helper));
     }
 
+    public function testArchiveInspectorsShareNameSafetyAndUnpackedCeiling(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $sources = [
+            $this->helper(),
+            (string) file_get_contents($root . '/scripts/ops/libexec/inspect_release_archive_v1.py'),
+            (string) file_get_contents($root . '/scripts/ops/libexec/deployment_host_runner_fs_v1.py'),
+        ];
+
+        foreach ($sources as $source) {
+            self::assertStringContainsString('68_719_476_736', $source);
+            self::assertStringContainsString("'\\x00' in", $source);
+            self::assertStringContainsString("'\\\\' in", $source);
+            self::assertStringContainsString('ord(character) < 32', $source);
+            self::assertStringContainsString('ord(character) == 127', $source);
+            self::assertMatchesRegularExpression(
+                "/len\\((?:name|normalized)\\.encode\\('utf-8'\\)\\) > 4096/",
+                $source,
+            );
+            self::assertStringContainsString("len(part.encode('utf-8')) > 255", $source);
+        }
+    }
+
     public function testCanonicalSidecarsUseFsyncAndNoReplaceExactAttach(): void
     {
         $helper = $this->helper();

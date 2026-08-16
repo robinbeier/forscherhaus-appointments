@@ -238,6 +238,26 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
         self.assertEqual(8 * legacy.BLOCK_BYTES, archive_value['stage_unpacked_bytes'])
         legacy.close_context(context)
 
+    def test_unpacked_ceiling_rejects_explicit_and_implicit_directory_growth(self):
+        for archive_case, block_limit in (('valid', 5), ('nested', 6)):
+            fixture = self.fixture(current_tar_case=archive_case)
+            context = self.context(fixture)
+            original_limit = legacy.MAX_UNPACKED_BYTES
+            legacy.MAX_UNPACKED_BYTES = legacy.BLOCK_BYTES * block_limit
+            try:
+                with self.subTest(archive_case=archive_case), self.assertRaisesRegex(
+                    legacy.LegacyProvenanceError, 'unsafe_tar',
+                ):
+                    legacy.preflight_targets(context)
+            finally:
+                legacy.MAX_UNPACKED_BYTES = original_limit
+                legacy.close_context(context)
+
+    def test_tar_member_name_safety_rejects_backslash_control_and_nul(self):
+        for name in ('bad\\name', 'bad\x01name', 'bad\x00name'):
+            with self.subTest(name=repr(name)), self.assertRaisesRegex(legacy.LegacyProvenanceError, 'unsafe_tar'):
+                legacy.normalize_member_name(name)
+
     def test_conflicting_sidecar_and_unsafe_or_foreign_temps_block_without_archive_change(self):
         for case in ('sidecar', 'unsafe_temp', 'foreign_temp'):
             with self.subTest(case=case):
