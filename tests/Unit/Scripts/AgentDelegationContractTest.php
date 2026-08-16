@@ -25,6 +25,8 @@ class AgentDelegationContractTest extends TestCase
         self::assertSame('gpt-5.6-luna', $resolved['model']);
         self::assertSame('medium', $resolved['model_reasoning_effort']);
         self::assertSame('workspace-write', $resolved['sandbox_mode']);
+        self::assertSame('gpt-5.6-luna', $resolved['default_subagent_model']);
+        self::assertSame('medium', $resolved['default_subagent_reasoning_effort']);
         self::assertStringContainsString('Do not delegate to other agents', $role);
         self::assertStringContainsString('Do not:', $role);
         self::assertStringContainsString('Merge, push, publish a PR', $role);
@@ -38,11 +40,15 @@ class AgentDelegationContractTest extends TestCase
         $workflow = $this->readRepoFile('WORKFLOW.md');
         $index = $this->readRepoFile('docs/agent-harness-index.md');
 
-        self::assertStringContainsString('implementation_worker` by default', $agents);
+        self::assertStringContainsString('implementation_worker` contract by default', $agents);
         self::assertStringContainsString('## Model-Aware Delegation', $workflow);
         self::assertStringContainsString('gpt-5.6-luna', $workflow);
         self::assertStringContainsString('agent_type="implementation_worker"', $workflow);
-        self::assertStringContainsString('`task_name` names the delegated task path', $workflow);
+        self::assertStringContainsString('only `task_name`, `message`, and `fork_turns`', $workflow);
+        self::assertStringContainsString('generic spawn path without a model override', $workflow);
+        self::assertStringContainsString('defaults apply Luna/medium', $workflow);
+        self::assertStringContainsString('`task_name` always names the delegated task path', $workflow);
+        self::assertStringContainsString('task message must repeat the bounded ownership', $workflow);
         self::assertStringContainsString('fail closed', $workflow);
         self::assertStringContainsString('fork_turns="none"', $workflow);
         self::assertStringContainsString('fork_turns="all"', $workflow);
@@ -100,6 +106,8 @@ class AgentDelegationContractTest extends TestCase
             "model_reasoning_effort": role["model_reasoning_effort"],
             "sandbox_mode": role["sandbox_mode"],
             "max_depth": agents["max_depth"],
+            "default_subagent_model": agents["default_subagent_model"],
+            "default_subagent_reasoning_effort": agents["default_subagent_reasoning_effort"],
         }))
         PYTHON;
 

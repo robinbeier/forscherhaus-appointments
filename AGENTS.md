@@ -19,7 +19,7 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 - Treat `services.attendants_number` as fixed to `1` unless product scope changes explicitly.
 - If `docs/maps/component_ownership_map.json` marks a component as `single-owner` or `manual_approval_required`, keep changes narrow and conservative.
 - Prefer small, mergeable, low-risk diffs over broad rewrites, speculative cleanup, or wide refactors.
-- Delegate concrete, bounded, independently verifiable implementation, test, and documentation slices to `implementation_worker` by default. The primary agent retains coordination, integration, review, merge, and production authority; follow `WORKFLOW.md` for the full model-aware delegation contract.
+- Delegate concrete, bounded, independently verifiable implementation, test, and documentation slices to the Luna-backed `implementation_worker` contract by default. The project-wide subagent defaults keep legacy generic spawns on Luna/medium; current runtimes should select the registered role. The primary agent retains coordination, integration, review, merge, and production authority; follow `WORKFLOW.md` for the full model-aware delegation contract.
 
 ## Default Path
 
