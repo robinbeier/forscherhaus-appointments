@@ -54,7 +54,8 @@ class LegacyReleaseHoldTest(unittest.TestCase):
     def test_tar_bounds_counts_implicit_directories_and_block_rounded_bytes(self):
         if os.geteuid() != 0:
             self.skipTest('stable root-owned archive fixture requires root')
-        with tempfile.NamedTemporaryFile(suffix='.tar.gz') as handle:
+        with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as handle:
+            path = handle.name
             with tarfile.open(fileobj=handle, mode='w:gz') as archive:
                 nested = tarfile.TarInfo('app/config/settings.json')
                 nested.size = 1
@@ -62,12 +63,18 @@ class LegacyReleaseHoldTest(unittest.TestCase):
                 empty_dir = tarfile.TarInfo('app/storage')
                 empty_dir.type = tarfile.DIRTYPE
                 archive.addfile(empty_dir)
-            os.chmod(handle.name, 0o600)
-            record = HOLD.open_stable_regular(handle.name, HOLD.MAX_ARCHIVE_BYTES)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chown(path, 0, 0)
+        os.chmod(path, 0o600)
+        try:
+            record = HOLD.open_stable_regular(path, HOLD.MAX_ARCHIVE_BYTES)
             try:
                 bounds = HOLD.tar_bounds(record)
             finally:
                 HOLD.close_record(record)
+        finally:
+            os.unlink(path)
         self.assertEqual(1, bounds['stage_file_count'])
         self.assertEqual(5, bounds['stage_inode_count'])
         self.assertEqual(5 * HOLD.BLOCK_BYTES, bounds['stage_unpacked_bytes'])
@@ -76,18 +83,25 @@ class LegacyReleaseHoldTest(unittest.TestCase):
     def test_archive_scan_rewinds_descriptor_after_digest(self):
         if os.geteuid() != 0:
             self.skipTest('stable root-owned archive fixture requires root')
-        with tempfile.NamedTemporaryFile(suffix='.tar.gz') as handle:
+        with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as handle:
+            path = handle.name
             with tarfile.open(fileobj=handle, mode='w:gz') as archive:
                 info = tarfile.TarInfo('app/config/settings.json')
                 info.size = 1
                 archive.addfile(info, io.BytesIO(b'x'))
-            os.chmod(handle.name, 0o600)
-            record = HOLD.open_stable_regular(handle.name, HOLD.MAX_ARCHIVE_BYTES)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chown(path, 0, 0)
+        os.chmod(path, 0o600)
+        try:
+            record = HOLD.open_stable_regular(path, HOLD.MAX_ARCHIVE_BYTES)
             try:
                 self.assertTrue(HOLD.digest_fd(record['fd']))
                 bounds = HOLD.tar_bounds(record)
             finally:
                 HOLD.close_record(record)
+        finally:
+            os.unlink(path)
         self.assertEqual(1, bounds['stage_file_count'])
 
     def test_write_failure_cleans_only_the_bound_new_temp(self):
