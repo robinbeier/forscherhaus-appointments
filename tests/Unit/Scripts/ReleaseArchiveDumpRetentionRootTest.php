@@ -284,7 +284,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         $this->archivePair('held-current', 80 * 86400);
         $this->archivePair('held-rollback', 81 * 86400);
         $this->writeLegacyTarArchive('held-current');
-        $this->writeProvenance('held-current');
+        $this->writeLegacyProvenance('held-current');
         $this->writeLegacyTarArchive('held-rollback');
         unlink(self::RELEASES . '/held-rollback.build-provenance.json');
         mkdir('/etc/fh', 0700, true);
@@ -338,9 +338,9 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         $this->archivePair('held-current', 80 * 86400);
         $this->archivePair('held-rollback', 81 * 86400);
         $this->writeLegacyTarArchive('held-current');
-        $this->writeProvenance('held-current');
+        $this->writeLegacyProvenance('held-current');
         $this->writeLegacyTarArchive('held-rollback');
-        $this->writeProvenance('held-rollback');
+        $this->writeLegacyProvenance('held-rollback');
         mkdir('/etc/fh', 0700, true);
         $this->legacyHoldFixtureCreated = true;
         $current = $this->legacyHoldTarget('current', 'held-current');
@@ -361,31 +361,44 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
         $result = $this->runHelper('dry-run');
         self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
-        self::assertSame('legacy_hold_bounds_drift', $this->decode($result)['reason']);
+        $expectedReason = $field === 'temp_scratch_bytes' ? 'unsafe_legacy_hold' : 'legacy_hold_bounds_drift';
+        self::assertSame($expectedReason, $this->decode($result)['reason']);
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 
     /**
-     * @return iterable<string, array{string}>
+     * @return iterable<string, array{string, string, int}>
      */
     public static function heldArchiveProvenanceBoundsProvider(): iterable
     {
-        yield 'current' => ['held-current'];
-        yield 'rollback' => ['held-rollback'];
+        $mutations = [
+            'stage_file_count' => 2,
+            'stage_inode_count' => 4,
+            'stage_unpacked_bytes' => 8192,
+            'temp_scratch_bytes' => 64 * 1024 * 1024 - 4096,
+        ];
+        foreach (['held-current', 'held-rollback'] as $release) {
+            foreach ($mutations as $field => $value) {
+                yield $release . '_' . $field => [$release, $field, $value];
+            }
+        }
     }
 
     #[DataProvider('heldArchiveProvenanceBoundsProvider')]
-    public function testHeldArchiveRejectsUnderstatedProvenanceCapacityBounds(string $release): void
-    {
+    public function testHeldArchiveRejectsProvenanceCapacityBoundsDrift(
+        string $release,
+        string $field,
+        int $value,
+    ): void {
         $this->archivePair('held-current', 80 * 86400);
         $this->archivePair('held-rollback', 81 * 86400);
         $this->writeLegacyTarArchive('held-current');
-        $this->writeProvenance('held-current');
+        $this->writeLegacyProvenance('held-current');
         $this->writeLegacyTarArchive('held-rollback');
-        $this->writeProvenance('held-rollback');
+        $this->writeLegacyProvenance('held-rollback');
         $provenancePath = self::RELEASES . '/' . $release . '.build-provenance.json';
         $provenance = json_decode((string) file_get_contents($provenancePath), true, 32, JSON_THROW_ON_ERROR);
-        $provenance['capacity_bounds']['stage_unpacked_bytes'] = 8192;
+        $provenance['capacity_bounds'][$field] = $value;
         file_put_contents($provenancePath, $this->canonical($provenance));
         chmod($provenancePath, 0600);
         mkdir('/etc/fh', 0700, true);
@@ -716,7 +729,8 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         touch(self::RELEASES . '/' . $release . '.build-provenance.json', time() - $age);
     }
 
-    private function writeProvenance(string $release): void
+    /** @param array<string, int>|null $capacityBounds */
+    private function writeProvenance(string $release, ?array $capacityBounds = null): void
     {
         $archive = self::RELEASES . '/' . $release . '.tar.gz';
         file_put_contents(
@@ -727,7 +741,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
                     'sha256' => hash_file('sha256', $archive),
                     'size_bytes' => filesize($archive),
                 ],
-                'capacity_bounds' => [
+                'capacity_bounds' => $capacityBounds ?? [
                     'stage_file_count' => 1,
                     'stage_inode_count' => 2,
                     'stage_unpacked_bytes' => 4096,
@@ -793,12 +807,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
                 'sha256' => hash_file('sha256', $archive),
                 'size_bytes' => filesize($archive),
             ],
-            'capacity_bounds' => [
-                'stage_file_count' => 1,
-                'stage_inode_count' => 3,
-                'stage_unpacked_bytes' => 12288,
-                'temp_scratch_bytes' => 64 * 1024 * 1024,
-            ],
+            'capacity_bounds' => $this->legacyCapacityBounds(),
             'release_id' => $release,
             'role_at_provisioning' => $role,
         ];
@@ -827,6 +836,22 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         fclose($pipes[2]);
         self::assertSame(0, proc_close($process), (string) $stdout . (string) $stderr);
         chmod(self::RELEASES . '/' . $release . '.tar.gz', 0600);
+    }
+
+    private function writeLegacyProvenance(string $release): void
+    {
+        $this->writeProvenance($release, $this->legacyCapacityBounds());
+    }
+
+    /** @return array<string, int> */
+    private function legacyCapacityBounds(): array
+    {
+        return [
+            'stage_file_count' => 1,
+            'stage_inode_count' => 3,
+            'stage_unpacked_bytes' => 12288,
+            'temp_scratch_bytes' => 64 * 1024 * 1024,
+        ];
     }
 
     private function dumpSha(string $name): string
