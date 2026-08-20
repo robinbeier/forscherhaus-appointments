@@ -21,8 +21,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
         );
 
-        self::assertSame(12, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-16T19:14:40Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(13, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-20T04:03:15Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),
@@ -173,7 +173,10 @@ class CiPerformanceWorkflowContractTest extends TestCase
         self::assertStringContainsString('scripts/ops/systemd/fh-app-log-retention.timer', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeployment);
-        self::assertStringContainsString('sudo php vendor/bin/phpunit', $rootDeployment);
+        self::assertStringContainsString(
+            'sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit',
+            $rootDeployment,
+        );
         self::assertStringContainsString(
             'docker pull mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590',
             $rootDeployment,

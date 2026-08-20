@@ -5,16 +5,39 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RootHostTestPrerequisites;
 
 final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
 {
     private string $root;
     private string $helper;
+    private int $sigkill;
 
     protected function setUp(): void
     {
-        if (PHP_OS_FAMILY !== 'Linux' || posix_geteuid() !== 0) {
+        if (PHP_OS_FAMILY !== 'Linux') {
             $this->markTestSkipped('Linux root is required for the dump-attestation filesystem contract.');
+        }
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::runtimeCheck());
+        if (posix_geteuid() !== 0) {
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(
+                    false,
+                    'root_required',
+                    'Linux root is required for the dump-attestation filesystem contract.',
+                ),
+            );
+        }
+        RootHostTestPrerequisites::enforce(
+            $this,
+            RootHostTestPrerequisites::signalCheck(defined('SIGKILL') ? SIGKILL : null),
+        );
+        $this->sigkill = RootHostTestPrerequisites::signalNumber('SIGKILL', defined('SIGKILL') ? SIGKILL : null) ?? 9;
+        if ($this->name() === 'testPinnedContainerLeaseRemovesEarlyAndImportCrashThenAllowsRetry') {
+            foreach (['dockerBinaryCheck', 'dockerSocketCheck', 'dockerDaemonCheck'] as $check) {
+                RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::$check());
+            }
         }
         $this->root = sys_get_temp_dir() . '/fh-dump-attestation-root-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($this->root, 0700));
@@ -439,21 +462,42 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         self::assertFileExists($pidFile);
         $childPid = (int) file_get_contents($pidFile);
         self::assertGreaterThan(1, $childPid);
-        posix_kill((int) proc_get_status($wrapper)['pid'], SIGKILL);
+        $child = RootHostTestPrerequisites::linuxProcessObservation($childPid);
+        self::assertIsArray($child);
+        posix_kill((int) proc_get_status($wrapper)['pid'], $this->sigkill);
         fclose($pipes[1]);
         fclose($pipes[2]);
         proc_close($wrapper);
         $deadline = microtime(true) + 5;
-        while (@posix_kill($childPid, 0) && microtime(true) < $deadline) {
+        while (
+            RootHostTestPrerequisites::originalProcessIsRunning(
+                RootHostTestPrerequisites::linuxProcessObservation($childPid),
+                $child['start_time'],
+            ) &&
+            microtime(true) < $deadline
+        ) {
             usleep(50_000);
         }
-        self::assertFalse(@posix_kill($childPid, 0), 'PDEATHSIG did not terminate the Python helper.');
+        self::assertFalse(
+            RootHostTestPrerequisites::originalProcessIsRunning(
+                RootHostTestPrerequisites::linuxProcessObservation($childPid),
+                $child['start_time'],
+            ),
+            'PDEATHSIG did not terminate the original Python helper process.',
+        );
     }
 
     public function testPinnedContainerLeaseRemovesEarlyAndImportCrashThenAllowsRetry(): void
     {
         if (!$this->exactImageIsLocal()) {
-            $this->markTestSkipped('The exact ROB-465 MariaDB image must be provisioned before the root suite.');
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(
+                    false,
+                    'docker_image_missing',
+                    'The exact ROB-465 MariaDB image must be provisioned before the root suite.',
+                ),
+            );
         }
         foreach (['early' => '', 'import' => "SELECT SLEEP(30);\n"] as $phase => $delaySql) {
             $nonce = $phase === 'early' ? str_repeat('e', 32) : str_repeat('f', 32);
@@ -467,7 +511,7 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
                 self::assertTrue($this->waitForMariaDb($name, 90), 'MariaDB never became ready before import crash');
                 usleep(500_000);
             }
-            posix_kill((int) proc_get_status($process)['pid'], SIGKILL);
+            posix_kill((int) proc_get_status($process)['pid'], $this->sigkill);
             foreach ($pipes as $pipe) {
                 if (is_resource($pipe)) {
                     fclose($pipe);

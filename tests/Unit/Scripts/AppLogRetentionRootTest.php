@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RootHostTestPrerequisites;
 
 final class AppLogRetentionRootTest extends TestCase
 {
@@ -19,18 +20,50 @@ final class AppLogRetentionRootTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        if (PHP_OS_FAMILY !== 'Linux' || posix_geteuid() !== 0) {
+        if (PHP_OS_FAMILY !== 'Linux') {
             $this->markTestSkipped('Linux root is required for the protected app-log retention contract.');
         }
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::runtimeCheck());
+        if (posix_geteuid() !== 0) {
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(
+                    false,
+                    'root_required',
+                    'Linux root is required for the protected app-log retention contract.',
+                ),
+            );
+        }
         if (!is_executable('/usr/bin/setpriv')) {
-            self::fail('The Linux root gate requires /usr/bin/setpriv.');
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(
+                    false,
+                    'setpriv_missing',
+                    'The Linux root gate requires /usr/bin/setpriv.',
+                ),
+            );
         }
         if (file_exists(self::APP_ROOT) || file_exists(self::STATE_ROOT) || file_exists(self::ORCHESTRATOR_ROOT)) {
-            $this->markTestSkipped('Protected roots already exist; the root test will not mutate them.');
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(
+                    false,
+                    'protected_roots_present',
+                    'Protected roots already exist; the root test will not mutate them.',
+                ),
+            );
         }
         $web = posix_getpwnam('www-data');
         if (!is_array($web)) {
-            $this->markTestSkipped('The production www-data account is required.');
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(
+                    false,
+                    'web_user_missing',
+                    'The production www-data account is required.',
+                ),
+            );
         }
         $this->webUid = $web['uid'];
         $this->webGid = $web['gid'];
@@ -44,9 +77,21 @@ final class AppLogRetentionRootTest extends TestCase
                 $metadata['uid'] !== 0 ||
                 ($metadata['mode'] & 0022) !== 0
             ) {
-                $this->markTestSkipped('Existing web-root ancestors do not match the production trust boundary.');
+                RootHostTestPrerequisites::enforce(
+                    $this,
+                    RootHostTestPrerequisites::classify(
+                        false,
+                        'web_root_unsafe',
+                        'Existing web-root ancestors do not match the production trust boundary.',
+                        false,
+                    ),
+                );
             }
         }
+        RootHostTestPrerequisites::enforce(
+            $this,
+            RootHostTestPrerequisites::ownershipCheck($this->webUid, $this->webGid, '/var/www/html'),
+        );
         mkdir(self::LOG_ROOT, 0755, true);
         chown(self::APP_ROOT, 0);
         chgrp(self::APP_ROOT, 0);
