@@ -279,6 +279,145 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame('unsafe_incomplete_archive_pair', $this->decode($rejected)['reason']);
     }
 
+    public function testRetentionOwnedArchiveOnlyCrashPrefixResumesFromPendingSidecar(): void
+    {
+        $result = $this->runPatchedHelper(
+            "    detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)\n    mutations.begin()",
+            "    reject('after_sidecar_detach')",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('after_sidecar_detach', $this->decode($result)['reason']);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        self::assertFileDoesNotExist(self::RELEASES . '/old.build-provenance.json');
+        self::assertCount(1, glob(self::STATE . '/.pending-archive-sidecar-*'));
+
+        $resumed = $this->runHelper('execute');
+
+        self::assertSame(0, $resumed['exit'], $resumed['stdout'] . $resumed['stderr']);
+        $value = $this->decode($resumed);
+        self::assertSame('pass', $value['status']);
+        self::assertTrue($value['deletion_performed']);
+        self::assertSame('known', $value['mutation_outcome']);
+        self::assertSame(1, $value['deleted']['archive_pairs']);
+        self::assertSame(1, $value['mutation_counts']['archive_files']);
+        self::assertFileDoesNotExist(self::RELEASES . '/old.tar.gz');
+        self::assertFileDoesNotExist(self::RELEASES . '/old.build-provenance.json');
+        self::assertCount(0, glob(self::STATE . '/.pending-archive-sidecar-*'));
+    }
+
+    public function testPinnedRecoverySidecarIdentityRaceBlocksBeforeArchiveMutation(): void
+    {
+        $this->runPatchedHelper(
+            "    detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)\n    mutations.begin()",
+            "    reject('after_sidecar_detach')",
+            'execute',
+        );
+
+        $result = $this->runPatchedHelper(
+            "            unlink_pair(first['releases'], first['state'], record, MUTATIONS)",
+            "            if record.get('recovery_pending'):\n                pending = record['recovery_sidecar_leaf']\n                os.unlink(pending, dir_fd=first['state'])\n                replacement = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600, dir_fd=first['state'])\n                os.close(replacement)\n                os.fsync(first['state'])\n            unlink_pair(first['releases'], first['state'], record, MUTATIONS)",
+            'execute',
+        );
+
+        self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('candidate_changed', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testChangedRecoverySidecarBlocksResumeBeforeArchiveMutation(): void
+    {
+        $this->runPatchedHelper(
+            "    detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)\n    mutations.begin()",
+            "    reject('after_sidecar_detach')",
+            'execute',
+        );
+        $pending = (string) glob(self::STATE . '/.pending-archive-sidecar-*')[0];
+        file_put_contents($pending, "tampered\n");
+        chmod($pending, 0600);
+
+        $result = $this->runHelper('execute');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('invalid_json', $this->decode($result)['reason']);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testCanonicalMismatchedRecoverySidecarBlocksResumeBeforeArchiveMutation(): void
+    {
+        $pending = self::STATE . '/.pending-archive-sidecar-' . str_repeat('f', 32);
+        mkdir(self::STATE, 0700, true);
+        $sidecar = json_decode(
+            (string) file_get_contents(self::RELEASES . '/old.build-provenance.json'),
+            true,
+            32,
+            JSON_THROW_ON_ERROR,
+        );
+        $sidecar['archive']['sha256'] = str_repeat('f', 64);
+        file_put_contents($pending, $this->canonical($sidecar));
+        chmod($pending, 0600);
+        unlink(self::RELEASES . '/old.build-provenance.json');
+
+        $result = $this->runHelper('dry-run');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('invalid_release_sidecar', $this->decode($result)['reason']);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testDuplicateRecoverySidecarsBlockResume(): void
+    {
+        $this->runPatchedHelper(
+            "    detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)\n    mutations.begin()",
+            "    reject('after_sidecar_detach')",
+            'execute',
+        );
+        $pending = (string) glob(self::STATE . '/.pending-archive-sidecar-*')[0];
+        copy($pending, self::STATE . '/.pending-archive-sidecar-' . str_repeat('d', 32));
+        chmod(self::STATE . '/.pending-archive-sidecar-' . str_repeat('d', 32), 0600);
+
+        $result = $this->runHelper('execute');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('unsafe_pending_entry', $this->decode($result)['reason']);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testRecoverySidecarForProtectedCurrentArchiveBlocks(): void
+    {
+        $pending = self::STATE . '/.pending-archive-sidecar-' . str_repeat('e', 32);
+        mkdir(self::STATE, 0700, true);
+        copy(self::RELEASES . '/current.build-provenance.json', $pending);
+        chmod($pending, 0600);
+        unlink(self::RELEASES . '/current.build-provenance.json');
+
+        $result = $this->runHelper('dry-run');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('archive_recovery_protected', $this->decode($result)['reason']);
+        self::assertFileExists(self::RELEASES . '/current.tar.gz');
+    }
+
+    public function testRecoverySidecarForProtectedRollbackArchiveBlocks(): void
+    {
+        $pending = self::STATE . '/.pending-archive-sidecar-' . str_repeat('a', 32);
+        mkdir(self::STATE, 0700, true);
+        copy(self::RELEASES . '/rollback.build-provenance.json', $pending);
+        chmod($pending, 0600);
+        unlink(self::RELEASES . '/rollback.build-provenance.json');
+
+        $result = $this->runHelper('dry-run');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        self::assertSame('archive_recovery_protected', $this->decode($result)['reason']);
+        self::assertFileExists(self::RELEASES . '/rollback.tar.gz');
+    }
+
     public function testHeldLegacyArchivesStayProtectedAfterMarkerRotation(): void
     {
         $this->archivePair('held-current', 80 * 86400);
@@ -590,8 +729,8 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         chmod($pending, 0600);
 
         $result = $this->runPatchedHelper(
-            '        clean_pending_entries(state, web_uid, MUTATIONS)',
-            "        clean_pending_entries(state, web_uid, MUTATIONS)\n        reject('after_pending_cleanup')",
+            '        clean_pending_entries(state, web_uid, MUTATIONS, preserved_sidecars)',
+            "        clean_pending_entries(state, web_uid, MUTATIONS, preserved_sidecars)\n        reject('after_pending_cleanup')",
             'execute',
         );
 
