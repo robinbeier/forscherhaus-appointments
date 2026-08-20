@@ -18,15 +18,13 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
         if (PHP_OS_FAMILY !== 'Linux') {
             self::markTestSkipped('Linux root is required.');
         }
-        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::runtimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::processRuntimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::pythonRuntimeCheck());
         if (posix_geteuid() !== 0) {
             RootHostTestPrerequisites::enforce(
                 $this,
                 RootHostTestPrerequisites::classify(false, 'root_required', 'Linux root is required.'),
             );
-        }
-        if ($this->name() === 'testProductionDockerExecutablePassesExactTrustCheck') {
-            RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::dockerBinaryCheck());
         }
         $this->root = '/var/lib/fh-rob458-test-' . bin2hex(random_bytes(8));
         $locks = $this->root . '/locks';
@@ -89,6 +87,7 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
 
     public function testProductionDockerExecutablePassesExactTrustCheck(): void
     {
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::dockerBinaryCheck());
         self::assertFileExists('/usr/bin/docker');
         $result = $this->probe('docker', '/usr/bin/docker');
         self::assertSame(0, $result['exit'], $result['stderr']);
