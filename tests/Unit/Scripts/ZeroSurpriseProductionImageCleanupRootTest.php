@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RootHostTestPrerequisites;
 
 final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
 {
@@ -14,8 +15,18 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        if (PHP_OS_FAMILY !== 'Linux' || (function_exists('posix_geteuid') && posix_geteuid() !== 0)) {
+        if (PHP_OS_FAMILY !== 'Linux') {
             self::markTestSkipped('Linux root is required.');
+        }
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::runtimeCheck());
+        if (posix_geteuid() !== 0) {
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(false, 'root_required', 'Linux root is required.'),
+            );
+        }
+        if ($this->name() === 'testProductionDockerExecutablePassesExactTrustCheck') {
+            RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::dockerBinaryCheck());
         }
         $this->root = '/var/lib/fh-rob458-test-' . bin2hex(random_bytes(8));
         $locks = $this->root . '/locks';

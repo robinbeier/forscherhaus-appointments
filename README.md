@@ -195,7 +195,10 @@ commits on the same deterministic MySQL/bootstrap path as `pre_pr_quick.sh`,
 while the managed `pre-push` runs `pre_pr_quick.sh`. Use
 `./scripts/install-git-hooks.sh` to refresh an existing clone, or
 `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` to replace older custom
-hooks intentionally.
+hooks intentionally. Linux root/host tests use the explicit Docker Desktop
+skip versus required GitHub Actions failure contract documented in
+[Root/Host Test Harness](docs/root-host-test-harness.md); local skips never
+replace the required native-Linux CI proof.
 
 CI note:
 

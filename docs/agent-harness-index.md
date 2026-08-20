@@ -24,6 +24,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Extended local command matrix + compact guardrails | `AGENTS.md` | Cross-topic command hub without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
+| Local/CI root-host test prerequisites | `docs/root-host-test-harness.md` | Docker Desktop skip boundaries, required Linux-root failures, and security invariants. |
 | CI performance measurement and baseline | `docs/ci-performance-baseline.md` | Versioned workload epoch, timing definitions, exclusions, and post-epoch cohort status. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
 | Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
@@ -55,6 +56,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:
+  - root/host prerequisite contract: `docs/root-host-test-harness.md`
   - write-path contracts: `docs/ci-write-contracts.md`
   - integration smoke browser evidence: `docs/release-gate-dashboard.md`
   - production provider UI smoke: `docs/release-gate-provider-ui-smoke.md`

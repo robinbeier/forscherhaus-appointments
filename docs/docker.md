@@ -69,6 +69,14 @@ Alternative command in the same container context:
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 ```
 
+The managed local hooks also discover Linux root/host tests through this
+general suite. Docker Desktop does not grant the PHP container host-Docker
+authority or POSIX ownership semantics merely for those tests. Unsupported
+host-only prerequisites are classified before mutation as narrow skips, while
+the GitHub Actions Linux-root profile requires every prerequisite and fails on
+absence. See [Root/Host Test Harness](root-host-test-harness.md) for the exact
+binary, socket, daemon, signal, ownership, and capability contract.
+
 Inside the Compose network, `DB_HOST='mysql'` resolves through Docker DNS to the `mysql` service.
 When running PHP directly on the host, MySQL is reachable via `localhost:3306`, but only if your
 `config.php` uses a host-resolvable DB host (for example `127.0.0.1` or `localhost`).
