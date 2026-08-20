@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\RootHostTestPrerequisites;
 
@@ -18,14 +19,15 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
         if (PHP_OS_FAMILY !== 'Linux') {
             self::markTestSkipped('Linux root is required.');
         }
-        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::runtimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::processRuntimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::pythonRuntimeCheck());
         if (posix_geteuid() !== 0) {
             RootHostTestPrerequisites::enforce(
                 $this,
                 RootHostTestPrerequisites::classify(false, 'root_required', 'Linux root is required.'),
             );
         }
-        if ($this->name() === 'testProductionDockerExecutablePassesExactTrustCheck') {
+        if (in_array('requires-trusted-docker-binary', $this->groups(), true)) {
             RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::dockerBinaryCheck());
         }
         $this->root = '/var/lib/fh-rob458-test-' . bin2hex(random_bytes(8));
@@ -87,6 +89,7 @@ final class ZeroSurpriseProductionImageCleanupRootTest extends TestCase
         self::assertSame("global_lock_unsafe\n", $symlink['stdout']);
     }
 
+    #[Group('requires-trusted-docker-binary')]
     public function testProductionDockerExecutablePassesExactTrustCheck(): void
     {
         self::assertFileExists('/usr/bin/docker');

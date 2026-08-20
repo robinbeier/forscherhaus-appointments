@@ -28,8 +28,11 @@ final class RootHostTestPrerequisites
     }
 
     /** @return array{ok:bool,code:string,message:string,local_skippable:bool} */
-    public static function signalCheck(?int $defined = null): array
+    public static function signalCheck(?int $defined = null, ?bool $killAvailable = null): array
     {
+        if (!($killAvailable ?? function_exists('posix_kill'))) {
+            return self::classify(false, 'process_signal_missing', 'PHP POSIX signal support is required.');
+        }
         $number = self::signalNumber('SIGKILL', $defined);
         return $number === 9
             ? self::classify(true, 'signal_available', 'SIGKILL is available as signal 9.')
@@ -69,15 +72,25 @@ final class RootHostTestPrerequisites
     }
 
     /** @return array{ok:bool,code:string,message:string,local_skippable:bool} */
-    public static function runtimeCheck(): array
+    public static function processRuntimeCheck(): array
     {
-        if (!function_exists('proc_open') || !function_exists('posix_geteuid') || !function_exists('posix_kill')) {
+        if (!function_exists('proc_open') || !function_exists('posix_geteuid')) {
             return self::classify(
                 false,
                 'process_runtime_missing',
-                'PHP proc_open and POSIX process support are required.',
+                'PHP proc_open and POSIX identity support are required.',
             );
         }
+        return self::classify(
+            true,
+            'process_runtime_available',
+            'PHP process and POSIX identity support is available.',
+        );
+    }
+
+    /** @return array{ok:bool,code:string,message:string,local_skippable:bool} */
+    public static function pythonRuntimeCheck(): array
+    {
         if (!is_file('/usr/bin/python3') || !is_executable('/usr/bin/python3')) {
             return self::classify(
                 false,
@@ -85,7 +98,7 @@ final class RootHostTestPrerequisites
                 'Exact Python runtime /usr/bin/python3 is missing or not executable.',
             );
         }
-        return self::classify(true, 'process_runtime_available', 'PHP and Python process support is available.');
+        return self::classify(true, 'python_available', 'Exact Python runtime is available.');
     }
 
     /** @return array{ok:bool,code:string,message:string,local_skippable:bool} */

@@ -23,7 +23,8 @@ final class SessionRetentionRootTest extends TestCase
         if (PHP_OS_FAMILY !== 'Linux') {
             $this->markTestSkipped('Linux root is required for the protected session-retention contract.');
         }
-        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::runtimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::processRuntimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::pythonRuntimeCheck());
         if (posix_geteuid() !== 0) {
             RootHostTestPrerequisites::enforce(
                 $this,

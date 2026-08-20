@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\RootHostTestPrerequisites;
 
@@ -18,7 +19,8 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         if (PHP_OS_FAMILY !== 'Linux') {
             $this->markTestSkipped('Linux root is required for the dump-attestation filesystem contract.');
         }
-        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::runtimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::processRuntimeCheck());
+        RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::pythonRuntimeCheck());
         if (posix_geteuid() !== 0) {
             RootHostTestPrerequisites::enforce(
                 $this,
@@ -33,12 +35,10 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
             $this,
             RootHostTestPrerequisites::signalCheck(defined('SIGKILL') ? SIGKILL : null),
         );
-        $this->sigkill = RootHostTestPrerequisites::signalNumber('SIGKILL', defined('SIGKILL') ? SIGKILL : null) ?? 9;
-        if ($this->name() === 'testPinnedContainerLeaseRemovesEarlyAndImportCrashThenAllowsRetry') {
-            foreach (['dockerBinaryCheck', 'dockerSocketCheck', 'dockerDaemonCheck'] as $check) {
-                RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::$check());
-            }
+        if (in_array('requires-docker-host', $this->groups(), true)) {
+            $this->requireDockerHost();
         }
+        $this->sigkill = RootHostTestPrerequisites::signalNumber('SIGKILL', defined('SIGKILL') ? SIGKILL : null) ?? 9;
         $this->root = sys_get_temp_dir() . '/fh-dump-attestation-root-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($this->root, 0700));
         $this->helper = dirname(__DIR__, 3) . '/scripts/ops/libexec/deployment_dump_attestation_v1.py';
@@ -487,6 +487,7 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         );
     }
 
+    #[Group('requires-docker-host')]
     public function testPinnedContainerLeaseRemovesEarlyAndImportCrashThenAllowsRetry(): void
     {
         if (!$this->exactImageIsLocal()) {
@@ -603,6 +604,13 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
             ,
         );
         self::assertSame(0, $result['exit'], $result['stderr']);
+    }
+
+    private function requireDockerHost(): void
+    {
+        foreach (['dockerBinaryCheck', 'dockerSocketCheck', 'dockerDaemonCheck'] as $check) {
+            RootHostTestPrerequisites::enforce($this, RootHostTestPrerequisites::$check());
+        }
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */
