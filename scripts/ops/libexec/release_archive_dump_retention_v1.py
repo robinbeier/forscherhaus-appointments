@@ -44,7 +44,6 @@ MAX_ARCHIVE_BYTES = 16 * 1024 * 1024 * 1024
 MAX_LEGACY_HOLD_STAGE_ENTRIES = 1_000_000
 MAX_LEGACY_HOLD_STAGE_UNPACKED_BYTES = 68_719_476_736
 LEGACY_HOLD_TEMP_SCRATCH_BYTES = 67_108_864
-MAX_LEGACY_HOLD_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_SIDECAR_BYTES = 4096
 MAX_ATTESTATION_BYTES = 4096
 MAX_DUMP_UNCOMPRESSED_BYTES = 64 * 1024 * 1024 * 1024
@@ -349,6 +348,7 @@ def inspect_legacy_archive(directory, leaf):
         entries = file_count = 0
         unpacked = 4096
         stage_types = {}
+        explicit_directories = set()
         os.lseek(descriptor, 0, os.SEEK_SET)
         try:
             with os.fdopen(os.dup(descriptor), 'rb', closefd=True) as source:
@@ -360,7 +360,15 @@ def inspect_legacy_archive(directory, leaf):
                         if member.name in ('.', './') and member.isdir():
                             continue
                         name = normalize_legacy_tar_member(member.name)
-                        if name in stage_types or member.issym() or member.islnk() or member.isdev() or not (member.isfile() or member.isdir()):
+                        if member.issym() or member.islnk() or member.isdev() or not (member.isfile() or member.isdir()):
+                            reject('unsafe_legacy_archive')
+                        if name in stage_types:
+                            # Permit a directory entry that follows a child
+                            # which implicitly created that directory, while
+                            # retaining duplicate and type-conflict rejection.
+                            if member.isdir() and stage_types[name] == 'directory' and name not in explicit_directories:
+                                explicit_directories.add(name)
+                                continue
                             reject('unsafe_legacy_archive')
                         parts = name.split('/')
                         for index in range(1, len(parts)):
@@ -373,9 +381,11 @@ def inspect_legacy_archive(directory, leaf):
                             unpacked += 4096
                         stage_types[name] = 'directory' if member.isdir() else 'file'
                         if member.isdir():
+                            explicit_directories.add(name)
+                        if member.isdir():
                             unpacked += 4096
                         else:
-                            if member.size < 0 or member.size > MAX_LEGACY_HOLD_MEMBER_BYTES:
+                            if member.size < 0:
                                 reject('unsafe_legacy_archive')
                             file_count += 1
                             unpacked += max(4096, ((member.size + 4095) // 4096) * 4096)

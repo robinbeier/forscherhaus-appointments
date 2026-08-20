@@ -78,7 +78,8 @@ try:
     if value.get("status") == "blocked": expected=expected|{"reason"}
     if not isinstance(value,dict) or set(value) != expected or value.get("mode") != mode or value.get("schema") != "legacy_release_hold_result.v1" or value.get("status") not in {"pass","blocked"} or value.get("mutation_outcome") not in {"none","known","unknown"} or not isinstance(value.get("mutation_counts"),dict) or set(value["mutation_counts"]) != {"hold_published","temp_files_created","temp_files_removed"} or any(type(n) is not int or n < 0 or n > 32 for n in value["mutation_counts"].values()): raise ValueError
     total=sum(value["mutation_counts"].values())
-    if (value["mutation_outcome"] == "none") != (total == 0): raise ValueError
+    if total == 0 and value["mutation_outcome"] not in {"none","unknown"}: raise ValueError
+    if total > 0 and value["mutation_outcome"] == "none": raise ValueError
     if value["mutation_outcome"] == "known" and total == 0: raise ValueError
     if value["status"] == "pass" and value["mutation_outcome"] == "unknown": raise ValueError
     if (value["status"] == "pass") != (ssh_status == 0): raise ValueError

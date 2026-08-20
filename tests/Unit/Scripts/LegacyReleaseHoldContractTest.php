@@ -99,6 +99,20 @@ final class LegacyReleaseHoldContractTest extends TestCase
 
             file_put_contents(
                 $workspace . '/bin/ssh',
+                "#!/usr/bin/env bash\nprintf '%s\\n' '{\"mode\":\"provision\",\"mutation_counts\":{\"hold_published\":0,\"temp_files_created\":0,\"temp_files_removed\":0},\"mutation_outcome\":\"unknown\",\"reason\":\"internal_error\",\"schema\":\"legacy_release_hold_result.v1\",\"status\":\"blocked\"}'\nexit 42\n",
+            );
+            chmod($workspace . '/bin/ssh', 0755);
+            $unknownBlocked = $this->runWrapper(
+                ['--provision', '--confirm-live-write', 'ROB-470-HOLD'],
+                $workspace . '/bin',
+                $root,
+            );
+            self::assertSame(42, $unknownBlocked['exit']);
+            self::assertStringContainsString('"mutation_outcome":"unknown"', $unknownBlocked['stdout']);
+            self::assertStringContainsString('"reason":"internal_error"', $unknownBlocked['stdout']);
+
+            file_put_contents(
+                $workspace . '/bin/ssh',
                 "#!/usr/bin/env bash\nprintf '%s\\n' '{\"attached\":false,\"mode\":\"inspect\",\"mutation_counts\":{\"hold_published\":0,\"temp_files_created\":0,\"temp_files_removed\":0},\"mutation_outcome\":\"none\",\"pending\":true,\"schema\":\"legacy_release_hold_result.v1\",\"status\":\"pass\",\"targets_preflighted\":2}'\nexit 42\n",
             );
             chmod($workspace . '/bin/ssh', 0755);

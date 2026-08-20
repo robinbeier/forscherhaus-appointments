@@ -27,7 +27,6 @@ MAX_ARCHIVE_BYTES = 16 * 1024 * 1024 * 1024
 MAX_ENTRIES = 1_000_000
 MAX_UNPACKED = 68_719_476_736
 BLOCK_BYTES = 4096
-MAX_MEMBER = 16 * 1024 * 1024
 TEMP_SCRATCH_BYTES = 67_108_864
 MAX_HELPER_TEMPS = 32
 RENAME_NOREPLACE = 1
@@ -296,6 +295,7 @@ def tar_bounds(record):
     entries = file_count = 0
     unpacked = BLOCK_BYTES
     stage_types = {}
+    explicit_directories = set()
     try:
         with os.fdopen(os.dup(record['fd']), 'rb', closefd=True) as source:
             with tarfile.open(fileobj=source, mode='r:gz') as archive:
@@ -309,6 +309,13 @@ def tar_bounds(record):
                     if member.issym() or member.islnk() or member.isdev() or not (member.isfile() or member.isdir()):
                         reject('unsafe_tar_member')
                     if name in stage_types:
+                        # A child entry may materialize an implicit parent
+                        # before the archive emits that directory explicitly.
+                        # Accept that canonical ordering, but never accept a
+                        # repeated explicit entry or a type conflict.
+                        if member.isdir() and stage_types[name] == 'directory' and name not in explicit_directories:
+                            explicit_directories.add(name)
+                            continue
                         reject('unsafe_tar_member')
                     parts = name.split('/')
                     for index in range(1, len(parts)):
@@ -326,6 +333,8 @@ def tar_bounds(record):
                     member_type = 'directory' if member.isdir() else 'file'
                     if name not in stage_types:
                         stage_types[name] = member_type
+                        if member.isdir():
+                            explicit_directories.add(name)
                         if len(stage_types) > MAX_ENTRIES:
                             reject('tar_entry_limit')
                         if member.isdir():
@@ -333,7 +342,7 @@ def tar_bounds(record):
                             if unpacked > MAX_UNPACKED:
                                 reject('tar_unpacked_limit')
                     if member.isfile():
-                        if member.size < 0 or member.size > MAX_MEMBER:
+                        if member.size < 0:
                             reject('tar_unpacked_limit')
                         file_count += 1
                         unpacked += max(BLOCK_BYTES, ((member.size + BLOCK_BYTES - 1) // BLOCK_BYTES) * BLOCK_BYTES)
@@ -619,6 +628,11 @@ def provision(targets):
             source_path = os.stat(temp, dir_fd=parent_fd, follow_symlinks=False)
             if file_identity(source) != temp_identity or file_identity(source_path) != temp_identity:
                 reject('temp_changed', 75)
+            # A recovered matching temp may have been written by a prior process
+            # that crashed before syncing file data.  Sync the exact trusted
+            # descriptor immediately before publication so rename only attaches
+            # durable bytes.
+            os.fsync(source_descriptor)
             LEDGER.begin()
             LEDGER.begin()
             rename_noreplace(parent_fd, temp, os.path.basename(HOLD_PATH))
