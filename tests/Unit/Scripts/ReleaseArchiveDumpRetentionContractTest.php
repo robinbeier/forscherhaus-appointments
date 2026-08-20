@@ -59,6 +59,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringContainsString('Persistent=true', $timer);
         self::assertStringContainsString('Unit=fh-release-archive-dump-retention.service', $timer);
         self::assertStringContainsString('StateDirectory=fh-release-retention', $service);
+        self::assertStringContainsString('ReadOnlyPaths=-/etc/fh/legacy-release-hold.v1.json', $service);
         self::assertStringContainsString('ProtectSystem=strict', $service);
         self::assertStringContainsString('NoNewPrivileges=yes', $service);
         self::assertStringContainsString(
@@ -72,10 +73,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringNotContainsString('/var/www/html/easyappointments/scripts/ops/libexec', $service);
         self::assertStringNotContainsString('systemctl enable', $timer . $wrapper);
         self::assertStringNotContainsString('systemctl start', $timer . $wrapper);
-        self::assertStringContainsString(
-            '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer',
-            $docs,
-        );
+        self::assertStringContainsString('/usr/bin/systemctl enable fh-release-archive-dump-retention.timer', $docs);
         self::assertStringContainsString('/usr/bin/systemctl start fh-release-archive-dump-retention.timer', $docs);
         self::assertStringNotContainsString('enable --now fh-release-archive-dump-retention.timer', $docs);
         self::assertStringContainsString('does not activate the timer', $docs);
@@ -117,8 +115,21 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         $helper = (string) file_get_contents(
             dirname(__DIR__, 3) . '/scripts/ops/libexec/release_archive_dump_retention_v1.py',
         );
-        self::assertStringContainsString("SCHEMA = 'prod_release_archive_dump_retention.v2'", $helper);
-        self::assertStringNotContainsString("SCHEMA = 'prod_release_archive_dump_retention.v1'", $helper);
+        self::assertStringContainsString("SCHEMA = 'prod_release_archive_dump_retention.v3'", $helper);
+        self::assertStringContainsString("HOLD_PATH = '/etc/fh/legacy-release-hold.v1.json'", $helper);
+        self::assertStringContainsString("'legacy_hold_count'", $helper);
+        self::assertStringContainsString("'unheld_archive_only'", $helper);
+        self::assertStringContainsString('LEGACY_HOLD_TEMP_SCRATCH_BYTES = 67_108_864', $helper);
+        self::assertStringContainsString("bounds['temp_scratch_bytes'] != LEGACY_HOLD_TEMP_SCRATCH_BYTES", $helper);
+        self::assertStringContainsString("reject('legacy_hold_bounds_drift')", $helper);
+        self::assertStringContainsString("provenance['capacity_bounds'] != observed_hold_bounds", $helper);
+        self::assertStringContainsString(
+            "'projected': observed_hold_bounds if held is not None else provenance['capacity_bounds']",
+            $helper,
+        );
+        self::assertStringContainsString("bounds['stage_inode_count'] > MAX_LEGACY_HOLD_STAGE_ENTRIES + 1", $helper);
+        self::assertStringContainsString('inspect_legacy_archive(', $helper);
+        self::assertStringContainsString('LEGACY_HOLD_RELEASE_ID = re.compile', $helper);
         self::assertStringContainsString("'mutation_outcome': 'unknown'", $helper);
         self::assertStringContainsString("'deletion_performed': None", $helper);
         self::assertStringContainsString("'mutation_outcome': 'known' if known else 'none'", $helper);
@@ -126,11 +137,8 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringContainsString("mutations.confirm('archive_files')", $helper);
         self::assertStringContainsString("mutations.confirm('pending_archive_files')", $helper);
         self::assertStringContainsString("mutations.confirm('marker_temp_files')", $helper);
-        self::assertStringContainsString("payload.update(MUTATIONS.fields())", $helper);
-        self::assertStringNotContainsString(
-            "emit({'deletion_performed': False, 'reason': error.reason",
-            $helper,
-        );
+        self::assertStringContainsString('payload.update(MUTATIONS.fields())', $helper);
+        self::assertStringNotContainsString("emit({'deletion_performed': False, 'reason': error.reason", $helper);
     }
 
     public function testRunbookFreezesInstallPostflightAndTimerOrderAndNoOutputRecovery(): void

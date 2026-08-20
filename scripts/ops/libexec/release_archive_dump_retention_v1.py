@@ -11,14 +11,16 @@ import re
 import secrets
 import stat
 import sys
+import tarfile
 
 
-SCHEMA = 'prod_release_archive_dump_retention.v2'
+SCHEMA = 'prod_release_archive_dump_retention.v3'
 MARKER_SCHEMA = 'prod_release_archive_dump_retention_marker.v1'
 MARKER_STATUS_SCHEMA = 'prod_release_archive_dump_retention_marker_status.v1'
 WEB_ROOT = '/var/www/html'
 APP_ROOT = '/var/www/html/easyappointments'
 RELEASES_ROOT = '/root/releases'
+HOLD_PATH = '/etc/fh/legacy-release-hold.v1.json'
 BACKUP_ROOT = '/root/backups/easyappointments'
 ATTESTATION_ROOT = '/var/lib/fh-deploy-evidence/dump-attestations'
 RESTORE_IMAGE = 'mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590'
@@ -36,9 +38,13 @@ MAX_RELEASE_DIR_DELETE = 4
 MAX_ARCHIVE_PAIR_DELETE = 8
 MAX_DUMP_SET_DELETE = 4
 MAX_PENDING_ENTRIES = 32
+PENDING_ARCHIVE_SIDECAR = re.compile(r'\.pending-archive-sidecar-[0-9a-f]{32}\Z')
 MAX_CLASS_SCAN = 10_000
 MAX_TREE_ENTRIES = 1_000_000
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024 * 1024
+MAX_LEGACY_HOLD_STAGE_ENTRIES = 1_000_000
+MAX_LEGACY_HOLD_STAGE_UNPACKED_BYTES = 68_719_476_736
+LEGACY_HOLD_TEMP_SCRATCH_BYTES = 67_108_864
 MAX_SIDECAR_BYTES = 4096
 MAX_ATTESTATION_BYTES = 4096
 MAX_DUMP_UNCOMPRESSED_BYTES = 64 * 1024 * 1024 * 1024
@@ -46,6 +52,7 @@ ABSOLUTE_FREE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_USED_PERCENT = 85
 FIXED_HEADROOM_BYTES = 512 * 1024 * 1024
 RELEASE_ID = re.compile(r'[A-Za-z0-9._-]{1,128}\Z')
+LEGACY_HOLD_RELEASE_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')
 RUN_ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z')
 SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 BACKUP_SET = re.compile(r'20[0-9]{6}T[0-9]{6}Z\Z')
@@ -293,6 +300,125 @@ def stable_hash(directory, leaf, uid, gid, modes, max_bytes):
         os.close(descriptor)
 
 
+def normalize_legacy_tar_member(name):
+    normalized = name[2:] if name.startswith('./') else name
+    parts = normalized.split('/')
+    if (
+        not normalized
+        or normalized.startswith('/')
+        or len(normalized.encode('utf-8')) > 4096
+        or '\x00' in normalized
+        or '\\' in normalized
+        or any(part in ('', '.', '..') or part.startswith('._') or len(part.encode('utf-8')) > 255 for part in parts)
+        or any(ord(character) < 32 or ord(character) == 127 for character in normalized)
+    ):
+        reject('unsafe_legacy_archive')
+    return normalized
+
+
+def inspect_legacy_archive(directory, leaf):
+    before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+    descriptor = os.open(
+        leaf,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+        dir_fd=directory,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            file_identity(before) != file_identity(opened)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != 0
+            or opened.st_gid != 0
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_nlink != 1
+            or opened.st_size <= 0
+            or opened.st_size > MAX_ARCHIVE_BYTES
+        ):
+            reject('unsafe_file')
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+            if total > MAX_ARCHIVE_BYTES:
+                reject('file_too_large')
+        physical_entries = entries = file_count = 0
+        unpacked = 4096
+        stage_types = {}
+        explicit_directories = set()
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            with os.fdopen(os.dup(descriptor), 'rb', closefd=True) as source:
+                with tarfile.open(fileobj=source, mode='r:gz') as archive:
+                    for member in archive:
+                        physical_entries += 1
+                        if physical_entries > MAX_LEGACY_HOLD_STAGE_ENTRIES + 1:
+                            reject('unsafe_legacy_archive')
+                        if member.name in ('.', './') and member.isdir():
+                            continue
+                        entries += 1
+                        if entries > MAX_LEGACY_HOLD_STAGE_ENTRIES:
+                            reject('unsafe_legacy_archive')
+                        name = normalize_legacy_tar_member(member.name)
+                        if member.issym() or member.islnk() or member.isdev() or not (member.isfile() or member.isdir()):
+                            reject('unsafe_legacy_archive')
+                        if name in stage_types:
+                            # Permit a directory entry that follows a child
+                            # which implicitly created that directory, while
+                            # retaining duplicate and type-conflict rejection.
+                            if member.isdir() and stage_types[name] == 'directory' and name not in explicit_directories:
+                                explicit_directories.add(name)
+                                continue
+                            reject('unsafe_legacy_archive')
+                        parts = name.split('/')
+                        for index in range(1, len(parts)):
+                            parent = '/'.join(parts[:index])
+                            if parent in stage_types:
+                                if stage_types[parent] == 'file':
+                                    reject('unsafe_legacy_archive')
+                                continue
+                            stage_types[parent] = 'directory'
+                            unpacked += 4096
+                        stage_types[name] = 'directory' if member.isdir() else 'file'
+                        if member.isdir():
+                            explicit_directories.add(name)
+                        if member.isdir():
+                            unpacked += 4096
+                        else:
+                            if member.size < 0:
+                                reject('unsafe_legacy_archive')
+                            file_count += 1
+                            unpacked += max(4096, ((member.size + 4095) // 4096) * 4096)
+                        if len(stage_types) > MAX_LEGACY_HOLD_STAGE_ENTRIES or unpacked > MAX_LEGACY_HOLD_STAGE_UNPACKED_BYTES:
+                            reject('unsafe_legacy_archive')
+        except RetentionError:
+            raise
+        except (OSError, EOFError, tarfile.TarError, ValueError):
+            reject('unsafe_legacy_archive')
+        after = os.fstat(descriptor)
+        post = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+        if file_identity(opened) != file_identity(after) or file_identity(after) != file_identity(post) or total != opened.st_size:
+            reject('file_changed', 75)
+        return (
+            digest.hexdigest(),
+            opened.st_size,
+            file_identity(opened),
+            opened,
+            {
+                'stage_file_count': file_count,
+                'stage_inode_count': len(stage_types) + 1,
+                'stage_unpacked_bytes': unpacked,
+                'temp_scratch_bytes': LEGACY_HOLD_TEMP_SCRATCH_BYTES,
+            },
+        )
+    finally:
+        os.close(descriptor)
+
+
 def decode_canonical(data, max_bytes):
     if not isinstance(data, bytes) or len(data) <= 0 or len(data) > max_bytes:
         reject('invalid_json')
@@ -349,6 +475,52 @@ def validate_provenance(data, expected_release, archive_sha, archive_size):
         if isinstance(bounds.get(field), bool) or not isinstance(bounds.get(field), int) or bounds[field] <= 0:
             reject('invalid_release_sidecar')
     return value
+
+
+def read_legacy_hold():
+    """Read the permanent host-local hold, without exposing its identities."""
+    try:
+        parent = open_absolute_directory('/etc/fh', exact_mode=0o700)
+    except FileNotFoundError:
+        return None
+    try:
+        record = stable_regular(parent, 'legacy-release-hold.v1.json', 0, 0, {0o600}, 65_536)
+        data = record[0]
+    except FileNotFoundError:
+        return None
+    finally:
+        os.close(parent)
+    try:
+        value = json.loads(data.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        reject('unsafe_legacy_hold')
+    if canonical_json(value) != data or not isinstance(value, dict) or value.get('schema') != 'legacy_release_hold.v1':
+        reject('unsafe_legacy_hold')
+    targets = value.get('targets')
+    if not isinstance(targets, list) or len(targets) != 2:
+        reject('unsafe_legacy_hold')
+    result = {}
+    for role, target in zip(('current', 'rollback'), targets):
+        if (not isinstance(target, dict) or set(target) != {'archive', 'capacity_bounds', 'release_id', 'role_at_provisioning'}
+                or target.get('role_at_provisioning') != role):
+            reject('unsafe_legacy_hold')
+        archive = target['archive']; bounds = target['capacity_bounds']; release_id = target['release_id']
+        if (not isinstance(release_id, str) or LEGACY_HOLD_RELEASE_ID.fullmatch(release_id) is None
+                or not isinstance(archive, dict) or set(archive) != {'name', 'sha256', 'size_bytes'}
+                or archive['name'] != release_id + '.tar.gz' or SHA256.fullmatch(str(archive['sha256'])) is None
+                or isinstance(archive['size_bytes'], bool) or not isinstance(archive['size_bytes'], int)
+                or archive['size_bytes'] <= 0 or archive['size_bytes'] > MAX_ARCHIVE_BYTES
+                or not isinstance(bounds, dict) or set(bounds) != {'stage_file_count', 'stage_inode_count', 'stage_unpacked_bytes', 'temp_scratch_bytes'}
+                or any(isinstance(bounds[field], bool) or not isinstance(bounds[field], int) or bounds[field] <= 0 for field in bounds)
+                or bounds['stage_file_count'] > MAX_LEGACY_HOLD_STAGE_ENTRIES
+                or bounds['stage_inode_count'] > MAX_LEGACY_HOLD_STAGE_ENTRIES + 1
+                or bounds['stage_unpacked_bytes'] > MAX_LEGACY_HOLD_STAGE_UNPACKED_BYTES
+                or bounds['temp_scratch_bytes'] != LEGACY_HOLD_TEMP_SCRATCH_BYTES):
+            reject('unsafe_legacy_hold')
+        result[release_id] = {'sha256': archive['sha256'], 'size_bytes': archive['size_bytes'], 'capacity_bounds': bounds, 'role': role}
+    if len(result) != 2:
+        reject('unsafe_legacy_hold')
+    return result
 
 
 def validate_attestation(data, expected_sha, expected_size):
@@ -792,7 +964,7 @@ def scan_release_directories(web, current_release, rollback_release, now_ns, web
     return classes, foreign, identities
 
 
-def scan_archive_pairs(releases, current_release, rollback_release, now_ns):
+def scan_archive_pairs(releases, current_release, rollback_release, now_ns, legacy_hold, recovery_sidecars):
     names = os.listdir(releases)
     if len(names) > MAX_CLASS_SCAN:
         reject('archive_scan_limit')
@@ -807,29 +979,70 @@ def scan_archive_pairs(releases, current_release, rollback_release, now_ns):
             foreign += 1
             continue
         pair_ids.add(match.group(1))
+    if legacy_hold:
+        for held_release in legacy_hold:
+            if held_release not in pair_ids or held_release + '.tar.gz' not in names:
+                reject('legacy_hold_target_missing')
     records = []
     for release_id in pair_ids:
         archive_leaf = release_id + '.tar.gz'
         sidecar_leaf = release_id + '.build-provenance.json'
         if sidecar_leaf in names and archive_leaf not in names:
             reject('unsafe_incomplete_archive_pair')
-        archive_sha, archive_size, archive_identity, archive_meta = stable_hash(
-            releases, archive_leaf, 0, 0, {0o600}, MAX_ARCHIVE_BYTES,
-        )
+        held = legacy_hold.get(release_id) if legacy_hold else None
+        if held is None:
+            archive_sha, archive_size, archive_identity, archive_meta = stable_hash(
+                releases, archive_leaf, 0, 0, {0o600}, MAX_ARCHIVE_BYTES,
+            )
+            observed_hold_bounds = None
+        else:
+            archive_sha, archive_size, archive_identity, archive_meta, observed_hold_bounds = inspect_legacy_archive(
+                releases,
+                archive_leaf,
+            )
+            if held['capacity_bounds'] != observed_hold_bounds:
+                reject('legacy_hold_bounds_drift')
         if sidecar_leaf not in names:
-            if release_id in {current_release, rollback_release}:
-                reject('protected_archive_missing')
-            age = (now_ns - archive_meta.st_mtime_ns) // 1_000_000_000
+            if held is None:
+                recovery = recovery_sidecars.get(release_id)
+                if recovery is None:
+                    reject('unheld_archive_only')
+                if release_id in {current_release, rollback_release}:
+                    reject('archive_recovery_protected')
+                provenance = validate_provenance(recovery['data'], release_id, archive_sha, archive_size)
+                records.append({
+                    'archive_identity': archive_identity,
+                    'archive_leaf': archive_leaf,
+                    'archive_size': archive_size,
+                    'identities': {(archive_meta.st_dev, archive_meta.st_ino)},
+                    'incomplete': False,
+                    'eligible': False,
+                    'mtime_ns': archive_meta.st_mtime_ns,
+                    'projected': provenance['capacity_bounds'],
+                    'protected': False,
+                    'legacy_hold': False,
+                    'recovery_pending': True,
+                    'recovery_sidecar_fd': recovery['fd'],
+                    'recovery_sidecar_identity': recovery['identity'],
+                    'recovery_sidecar_leaf': recovery['leaf'],
+                    'release_id': release_id,
+                    'sidecar_identity': None,
+                    'sidecar_leaf': None,
+                })
+                continue
+            if held['sha256'] != archive_sha or held['size_bytes'] != archive_size:
+                reject('legacy_hold_drift')
             records.append({
                 'archive_identity': archive_identity,
                 'archive_leaf': archive_leaf,
                 'archive_size': archive_size,
-                'eligible': age >= ARCHIVE_MIN_AGE,
                 'identities': {(archive_meta.st_dev, archive_meta.st_ino)},
                 'incomplete': True,
+                'eligible': False,
                 'mtime_ns': archive_meta.st_mtime_ns,
-                'projected': None,
-                'protected': False,
+                'projected': held['capacity_bounds'],
+                'protected': True,
+                'legacy_hold': True,
                 'release_id': release_id,
                 'sidecar_identity': None,
                 'sidecar_leaf': None,
@@ -837,29 +1050,36 @@ def scan_archive_pairs(releases, current_release, rollback_release, now_ns):
             continue
         sidecar = stable_regular(releases, sidecar_leaf, 0, 0, {0o600}, MAX_SIDECAR_BYTES)
         provenance = validate_provenance(sidecar[0], release_id, archive_sha, archive_size)
+        if held is not None and provenance['capacity_bounds'] != observed_hold_bounds:
+            reject('legacy_hold_bounds_drift')
+        if held is not None and (held['sha256'] != archive_sha or held['size_bytes'] != archive_size):
+            reject('legacy_hold_drift')
         mtime_ns = max(archive_meta.st_mtime_ns, sidecar[2].st_mtime_ns)
         records.append({
             'archive_identity': archive_identity,
             'archive_leaf': archive_leaf,
             'archive_size': archive_size,
+            'eligible': False,
             'identities': {(archive_meta.st_dev, archive_meta.st_ino), (sidecar[2].st_dev, sidecar[2].st_ino)},
             'incomplete': False,
             'mtime_ns': mtime_ns,
-            'projected': provenance['capacity_bounds'],
+            'projected': observed_hold_bounds if held is not None else provenance['capacity_bounds'],
+            'protected': held is not None,
             'release_id': release_id,
             'sidecar_identity': sidecar[1],
             'sidecar_leaf': sidecar_leaf,
+            'legacy_hold': held is not None,
         })
     records.sort(key=lambda item: (item['mtime_ns'], item['release_id']), reverse=True)
     protected = {current_release, rollback_release}
     for record in records:
-        if record['incomplete']:
+        if record['incomplete'] or record.get('legacy_hold') or record.get('recovery_pending'):
             continue
         if len(protected) >= KEEP_ARCHIVE_PAIRS:
             break
         protected.add(record['release_id'])
     for record in records:
-        if record['incomplete']:
+        if record['incomplete'] or record.get('legacy_hold'):
             continue
         age = (now_ns - record['mtime_ns']) // 1_000_000_000
         record['eligible'] = record['release_id'] not in protected and age >= ARCHIVE_MIN_AGE
@@ -982,6 +1202,102 @@ def candidate_counts(release_classes, archives, dumps):
     }
 
 
+def pin_recovery_sidecar(state, name):
+    descriptor = None
+    try:
+        before = os.stat(name, dir_fd=state, follow_symlinks=False)
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=state,
+        )
+        opened = os.fstat(descriptor)
+        if (
+            file_identity(before) != file_identity(opened)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != 0
+            or opened.st_gid != 0
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_nlink != 1
+            or opened.st_size <= 0
+            or opened.st_size > MAX_SIDECAR_BYTES
+        ):
+            reject('unsafe_pending_entry')
+        data = bytearray()
+        while len(data) <= MAX_SIDECAR_BYTES:
+            chunk = os.read(descriptor, min(65_536, MAX_SIDECAR_BYTES + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(descriptor)
+        post = os.stat(name, dir_fd=state, follow_symlinks=False)
+        if file_identity(opened) != file_identity(after) or file_identity(after) != file_identity(post) or len(data) != opened.st_size:
+            reject('file_changed', 75)
+        return bytes(data), file_identity(opened), descriptor
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise
+
+
+def read_recovery_sidecars(state):
+    if state is None:
+        return {}
+    names = [name for name in os.listdir(state) if PENDING_ARCHIVE_SIDECAR.fullmatch(name)]
+    if len(names) > MAX_PENDING_ENTRIES:
+        reject('pending_cleanup_limit')
+    result = {}
+    try:
+        for name in names:
+            data, identity, descriptor = pin_recovery_sidecar(state, name)
+            try:
+                decoded = decode_canonical(data, MAX_SIDECAR_BYTES)
+            except BaseException:
+                os.close(descriptor)
+                raise
+            if (
+                set(decoded) != {
+                    'archive', 'capacity_bounds', 'expected_commit', 'observed_commit',
+                    'release_id', 'schema', 'source',
+                }
+                or not isinstance(decoded.get('release_id'), str)
+                or RELEASE_ID.fullmatch(decoded['release_id']) is None
+            ):
+                os.close(descriptor)
+                reject('unsafe_pending_entry')
+            release_id = decoded['release_id']
+            if release_id in result:
+                os.close(descriptor)
+                reject('unsafe_pending_entry')
+            result[release_id] = {'data': data, 'fd': descriptor, 'identity': identity, 'leaf': name}
+    except BaseException:
+        for recovery in result.values():
+            os.close(recovery['fd'])
+        raise
+    return result
+
+
+def revalidate_recovery_sidecar(state, recovery):
+    opened = os.fstat(recovery['fd'])
+    current = os.stat(recovery['leaf'], dir_fd=state, follow_symlinks=False)
+    if file_identity(opened) != recovery['identity'] or file_identity(current) != recovery['identity']:
+        reject('candidate_changed', 75)
+
+
+def cleanup_recovery_sidecar(state, recovery, mutations):
+    revalidate_recovery_sidecar(state, recovery)
+    mutations.begin()
+    os.unlink(recovery['leaf'], dir_fd=state)
+    mutations.finish()
+    os.fsync(state)
+    try:
+        current = os.stat(recovery['leaf'], dir_fd=state, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if file_identity(current) != recovery['identity']:
+        reject('candidate_changed', 75)
+
+
 def gather():
     try:
         web_user = pwd.getpwnam('www-data')
@@ -995,6 +1311,12 @@ def gather():
     orchestrator = open_absolute_directory(ORCHESTRATOR_ROOT, exact_mode=0o700)
     descriptors = [web, current, releases, backups, attestations, orchestrator]
     try:
+        state = open_absolute_directory(STATE_ROOT, exact_mode=0o700)
+    except FileNotFoundError:
+        state = None
+    if state is not None:
+        descriptors.append(state)
+    try:
         device = os.fstat(web).st_dev
         assert_no_nested_mounts(os.listdir(web))
         current_release = read_release_marker(current)
@@ -1004,11 +1326,15 @@ def gather():
         finally:
             os.close(exact_rollback)
         now_ns = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1_000_000_000)
+        legacy_hold = read_legacy_hold()
+        recovery_sidecars = read_recovery_sidecars(state)
+        descriptors.extend(recovery['fd'] for recovery in recovery_sidecars.values())
         release_classes, release_foreign, release_identities = scan_release_directories(
             web, current_release, rollback_release, now_ns, web_user.pw_uid, device,
         )
         archives, archive_foreign, current_archive = scan_archive_pairs(
-            releases, current_release, rollback_release, now_ns,
+            releases, current_release, rollback_release, now_ns, legacy_hold,
+            recovery_sidecars,
         )
         dumps, dump_foreign = scan_backup_sets(backups, attestations, now_ns, device)
         live_storage = open_child_directory(current, 'storage', web_user.pw_uid, web_user.pw_gid, writable_ok=True)
@@ -1032,6 +1358,7 @@ def gather():
             'backups': backups,
             'capacity': capacity,
             'current_release': current_release,
+            'legacy_hold': legacy_hold,
             'descriptors': descriptors,
             'dump_foreign': dump_foreign,
             'dumps': dumps,
@@ -1039,7 +1366,9 @@ def gather():
             'release_foreign': release_foreign,
             'release_identities': release_identities,
             'releases': releases,
+            'recovery_sidecars': recovery_sidecars,
             'rollback_release': rollback_release,
+            'state': state,
             'web': web,
         }
     except BaseException:
@@ -1076,6 +1405,7 @@ def result_payload(mode, gathered, mutations, deleted=None, remaining=None):
             and gathered['release_foreign'] == 0
         ),
         'mode': mode,
+        'legacy_hold_count': sum(1 for item in gathered['archives'] if item.get('legacy_hold')),
         'protected_archive_pair_count': sum(1 for item in gathered['archives'] if item['protected']),
         'protected_verified_dump_count': sum(1 for item in gathered['dumps'] if item['protected']),
         'release_directory_foreign_count': gathered['release_foreign'],
@@ -1119,7 +1449,7 @@ def clean_marker_temps(state, mutations):
         os.fsync(state)
 
 
-def clean_pending_entries(state, web_uid, mutations):
+def clean_pending_entries(state, web_uid, mutations, preserved_sidecars=()):
     names = [name for name in os.listdir(state) if name.startswith('.pending-')]
     if len(names) > MAX_PENDING_ENTRIES:
         reject('pending_cleanup_limit')
@@ -1138,6 +1468,8 @@ def clean_pending_entries(state, web_uid, mutations):
             os.fsync(state)
             continue
         if file_match is not None:
+            if file_match.group(1) == 'sidecar' and name in preserved_sidecars:
+                continue
             maximum = MAX_ARCHIVE_BYTES if file_match.group(1) == 'archive' else MAX_SIDECAR_BYTES
             record = stable_regular(state, name, 0, 0, {0o600}, maximum)
             current = os.stat(name, dir_fd=state, follow_symlinks=False)
@@ -1166,7 +1498,7 @@ def detach_tree(source, state, record, kind, allowed_uids, mutations):
     os.fsync(state)
 
 
-def detach_file(source, state, leaf, expected_identity, kind, mutations):
+def detach_file(source, state, leaf, expected_identity, kind, mutations, retain_pending=False):
     if os.fstat(source).st_dev != os.fstat(state).st_dev:
         reject('filesystem_mismatch')
     current = os.stat(leaf, dir_fd=source, follow_symlinks=False)
@@ -1178,6 +1510,8 @@ def detach_file(source, state, leaf, expected_identity, kind, mutations):
     mutations.confirm('archive_files')
     os.fsync(source)
     os.fsync(state)
+    if retain_pending:
+        return pending
     mutations.begin()
     os.unlink(pending, dir_fd=state)
     mutations.finish()
@@ -1230,13 +1564,33 @@ def dry_run():
 
 def unlink_pair(directory, state, record, mutations):
     if record['sidecar_leaf'] is None:
+        if record.get('recovery_pending'):
+            recovery = {
+                'fd': record['recovery_sidecar_fd'],
+                'identity': record['recovery_sidecar_identity'],
+                'leaf': record['recovery_sidecar_leaf'],
+            }
+            # The pinned canonical sidecar is the sole authority for resuming
+            # an archive-only prefix. Revalidate it immediately before the
+            # archive rename and keep its FD open through that mutation.
+            revalidate_recovery_sidecar(state, recovery)
+            detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)
+            cleanup_recovery_sidecar(state, recovery, mutations)
+            return
         detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)
         return
     # The sidecar is the publication/availability marker. Removing it first
     # makes a crash leave an explicitly undeployable archive-only prefix that
     # the next bounded pass can safely resume after the same age/protection checks.
-    detach_file(directory, state, record['sidecar_leaf'], record['sidecar_identity'], 'sidecar', mutations)
+    pending_sidecar = detach_file(
+        directory, state, record['sidecar_leaf'], record['sidecar_identity'], 'sidecar', mutations,
+        retain_pending=True,
+    )
     detach_file(directory, state, record['archive_leaf'], record['archive_identity'], 'archive', mutations)
+    mutations.begin()
+    os.unlink(pending_sidecar, dir_fd=state)
+    mutations.finish()
+    os.fsync(state)
 
 
 def unlink_dump(backups, state, record, mutations):
@@ -1273,7 +1627,12 @@ def execute():
         if first['archive_foreign'] or first['dump_foreign'] or first['release_foreign']:
             reject('unclassified_retention_entry')
         web_uid = pwd.getpwnam('www-data').pw_uid
-        clean_pending_entries(state, web_uid, MUTATIONS)
+        preserved_sidecars = {
+            record['recovery_sidecar_leaf']
+            for record in first['archives']
+            if record.get('recovery_pending')
+        }
+        clean_pending_entries(state, web_uid, MUTATIONS, preserved_sidecars)
         candidates_for_open_check = []
         for records in first['release_classes'].values():
             candidates_for_open_check.extend(record for record in records if record['eligible'])
@@ -1290,7 +1649,7 @@ def execute():
                 detach_tree(first['web'], state, record, 'release', {0, web_uid}, MUTATIONS)
                 deleted[kind + '_dirs'] += 1
         for record in [item for item in first['archives'] if item['eligible']][:MAX_ARCHIVE_PAIR_DELETE]:
-            unlink_pair(first['releases'], state, record, MUTATIONS)
+            unlink_pair(first['releases'], first['state'], record, MUTATIONS)
             deleted['archive_pairs'] += 1
         for record in [item for item in first['dumps'] if item['eligible']][:MAX_DUMP_SET_DELETE]:
             unlink_dump(first['backups'], state, record, MUTATIONS)
