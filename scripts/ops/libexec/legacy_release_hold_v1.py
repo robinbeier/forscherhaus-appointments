@@ -292,7 +292,7 @@ def tar_bounds(record):
     # descriptor before duplicating it for tarfile so hashing and scanning
     # always inspect the complete archive.
     os.lseek(record['fd'], 0, os.SEEK_SET)
-    entries = file_count = 0
+    physical_entries = entries = file_count = 0
     unpacked = BLOCK_BYTES
     stage_types = {}
     explicit_directories = set()
@@ -300,11 +300,14 @@ def tar_bounds(record):
         with os.fdopen(os.dup(record['fd']), 'rb', closefd=True) as source:
             with tarfile.open(fileobj=source, mode='r:gz') as archive:
                 for member in archive:
-                    entries += 1
-                    if entries > MAX_ENTRIES:
+                    physical_entries += 1
+                    if physical_entries > MAX_ENTRIES + 1:
                         reject('tar_entry_limit')
                     if member.name in ('.', './') and member.isdir():
                         continue
+                    entries += 1
+                    if entries > MAX_ENTRIES:
+                        reject('tar_entry_limit')
                     name = normalize_member_name(member.name)
                     if member.issym() or member.islnk() or member.isdev() or not (member.isfile() or member.isdir()):
                         reject('unsafe_tar_member')

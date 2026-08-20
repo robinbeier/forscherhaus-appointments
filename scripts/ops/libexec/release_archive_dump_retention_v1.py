@@ -345,7 +345,7 @@ def inspect_legacy_archive(directory, leaf):
             total += len(chunk)
             if total > MAX_ARCHIVE_BYTES:
                 reject('file_too_large')
-        entries = file_count = 0
+        physical_entries = entries = file_count = 0
         unpacked = 4096
         stage_types = {}
         explicit_directories = set()
@@ -354,11 +354,14 @@ def inspect_legacy_archive(directory, leaf):
             with os.fdopen(os.dup(descriptor), 'rb', closefd=True) as source:
                 with tarfile.open(fileobj=source, mode='r:gz') as archive:
                     for member in archive:
-                        entries += 1
-                        if entries > MAX_LEGACY_HOLD_STAGE_ENTRIES:
+                        physical_entries += 1
+                        if physical_entries > MAX_LEGACY_HOLD_STAGE_ENTRIES + 1:
                             reject('unsafe_legacy_archive')
                         if member.name in ('.', './') and member.isdir():
                             continue
+                        entries += 1
+                        if entries > MAX_LEGACY_HOLD_STAGE_ENTRIES:
+                            reject('unsafe_legacy_archive')
                         name = normalize_legacy_tar_member(member.name)
                         if member.issym() or member.islnk() or member.isdev() or not (member.isfile() or member.isdir()):
                             reject('unsafe_legacy_archive')

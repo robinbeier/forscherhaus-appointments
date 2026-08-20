@@ -210,6 +210,51 @@ class LegacyReleaseHoldTest(unittest.TestCase):
             ):
                 self._assert_both_scanners_reject(directory, path)
 
+    def test_tar_scanners_skip_root_directory_before_entry_limit(self):
+        if os.geteuid() != 0:
+            self.skipTest('stable root-owned archive fixture requires root')
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(HOLD, 'MAX_ENTRIES', 1), mock.patch.object(
+                RETENTION, 'MAX_LEGACY_HOLD_STAGE_ENTRIES', 1
+            ):
+                for index, root_name in enumerate(('.', './')):
+                    path = self._write_tar(
+                        directory,
+                        f'root-entry-limit-{index}.tar.gz',
+                        ((root_name, 'directory', b''), ('payload.txt', 'file', b'x')),
+                    )
+                    record = HOLD.open_stable_regular(path, HOLD.MAX_ARCHIVE_BYTES)
+                    try:
+                        bounds = HOLD.tar_bounds(record)
+                    finally:
+                        HOLD.close_record(record)
+                    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        _, _, _, _, retention_bounds = RETENTION.inspect_legacy_archive(
+                            directory_fd, os.path.basename(path)
+                        )
+                    finally:
+                        os.close(directory_fd)
+
+                    self.assertEqual(1, bounds['stage_file_count'])
+                    self.assertEqual(2, bounds['stage_inode_count'])
+                    self.assertEqual(bounds['stage_inode_count'], retention_bounds['stage_inode_count'])
+                    self.assertEqual(bounds['stage_unpacked_bytes'], retention_bounds['stage_unpacked_bytes'])
+
+    def test_tar_scanners_reject_repeated_root_directories_before_entry_limit(self):
+        if os.geteuid() != 0:
+            self.skipTest('stable root-owned archive fixture requires root')
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._write_tar(
+                directory,
+                'repeated-root-entry-limit.tar.gz',
+                (('.', 'directory', b''), ('./', 'directory', b''), ('payload.txt', 'file', b'x')),
+            )
+            with mock.patch.object(HOLD, 'MAX_ENTRIES', 1), mock.patch.object(
+                RETENTION, 'MAX_LEGACY_HOLD_STAGE_ENTRIES', 1
+            ):
+                self._assert_both_scanners_reject(directory, path)
+
     def test_tar_bounds_counts_implicit_directories_and_block_rounded_bytes(self):
         if os.geteuid() != 0:
             self.skipTest('stable root-owned archive fixture requires root')
