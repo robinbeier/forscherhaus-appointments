@@ -12,7 +12,7 @@ final class RootHostTestPrerequisitesTest extends TestCase
     public function testSigkillUsesPortableNormativeNumberWhenDefinitionIsMissing(): void
     {
         self::assertSame(9, RootHostTestPrerequisites::signalNumber('SIGKILL', null));
-        self::assertTrue(RootHostTestPrerequisites::signalCheck(null)['ok']);
+        self::assertTrue(RootHostTestPrerequisites::signalCheck(null, true)['ok']);
         $missingPosix = RootHostTestPrerequisites::signalCheck(null, false);
         self::assertSame('process_signal_missing', $missingPosix['code']);
         self::assertSame('skip', RootHostTestPrerequisites::outcome($missingPosix, false));
