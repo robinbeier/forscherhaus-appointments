@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\RootHostTestPrerequisites;
 
@@ -34,6 +35,9 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
             $this,
             RootHostTestPrerequisites::signalCheck(defined('SIGKILL') ? SIGKILL : null),
         );
+        if (in_array('requires-docker-host', $this->groups(), true)) {
+            $this->requireDockerHost();
+        }
         $this->sigkill = RootHostTestPrerequisites::signalNumber('SIGKILL', defined('SIGKILL') ? SIGKILL : null) ?? 9;
         $this->root = sys_get_temp_dir() . '/fh-dump-attestation-root-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($this->root, 0700));
@@ -483,9 +487,9 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         );
     }
 
+    #[Group('requires-docker-host')]
     public function testPinnedContainerLeaseRemovesEarlyAndImportCrashThenAllowsRetry(): void
     {
-        $this->requireDockerHost();
         if (!$this->exactImageIsLocal()) {
             RootHostTestPrerequisites::enforce(
                 $this,
