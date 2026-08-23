@@ -68,6 +68,10 @@ result, not a supported skip or simulated pass. The cleanup inventory consumes
 only this exit class and discards helper output rather than reprinting it.
 A missing fixed authority is also blocked. A canonical continuity state that
 is still `pending` is reported separately as retryable restore verification;
+global-lock or pre-/post-scan activity contention is likewise retryable rather
+than a permanent provenance mismatch. Concurrent stable-read identity changes
+have the same explicit retryable classification; no other or future admission
+reason inherits it implicitly.
 if its bound set still lacks an attestation, that set is included in the
 manifest-bound count but not the verified count. The pending state is never
 mislabeled as an unknown producer and never makes retention execution-ready,

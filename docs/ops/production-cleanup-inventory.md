@@ -46,9 +46,10 @@ It must not show:
 The dump-producer admission class is an observation only. `pass` means the
 closed registry, canonical manifests, restore attestations, fixed authorities,
 lock, and activity checks passed with a zero-mutation ledger. `blocked` is a
-fail-closed contract mismatch, `retryable` is lock or activity contention,
-and `invalid`/`unavailable` means the installed admission route cannot be
-trusted. None of these values authorizes cleanup; see
+fail-closed contract mismatch, `retryable` is an explicitly classified
+lock/activity contention or concurrent stable-read identity race, and
+`invalid`/`unavailable` means the installed admission route cannot be trusted.
+None of these values authorizes cleanup; see
 [`production-dump-producer-admission.md`](production-dump-producer-admission.md).
 
 ## Interpreting Candidates

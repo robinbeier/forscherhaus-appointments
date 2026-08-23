@@ -141,6 +141,15 @@ TERMINAL_STATES = {
     'failed_post_switch_rollback_failed',
     'manual_recovery_required',
 }
+ADMISSION_RETRYABLE_REASONS = frozenset({
+    'active_host_runner',
+    'active_production_work',
+    'candidate_changed',
+    'candidate_directory_changed',
+    'file_changed',
+    'tree_changed',
+    'unreconciled_host_runner',
+})
 MUTATION_COUNT_KEYS = (
     'archive_files',
     'dump_sets',
@@ -2078,6 +2087,22 @@ def marker_status(max_age_seconds):
         os.close(state)
 
 
+def emit_retention_error(error):
+    is_admission = len(sys.argv) == 2 and sys.argv[1] == 'admission-status'
+    schema = ADMISSION_SCHEMA if is_admission else SCHEMA
+    retryable = error.code == 75 and (
+        error.reason == 'restore_verification_pending'
+        or (is_admission and error.reason in ADMISSION_RETRYABLE_REASONS)
+    )
+    payload = {
+        'reason': error.reason,
+        'schema': schema,
+        'status': 'retryable' if retryable else 'blocked',
+    }
+    payload.update(MUTATIONS.fields())
+    emit(payload)
+
+
 def main():
     if os.name != 'posix' or os.geteuid() != 0:
         reject('root_required')
@@ -2093,11 +2118,7 @@ def main():
         else:
             reject('invalid_arguments')
     except RetentionError as error:
-        schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA
-        status = 'retryable' if error.reason == 'restore_verification_pending' else 'blocked'
-        payload = {'reason': error.reason, 'schema': schema, 'status': status}
-        payload.update(MUTATIONS.fields())
-        emit(payload)
+        emit_retention_error(error)
         raise SystemExit(error.code)
 
 
@@ -2107,11 +2128,7 @@ if __name__ == '__main__':
     except SystemExit:
         raise
     except RetentionError as error:
-        schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA
-        status = 'retryable' if error.reason == 'restore_verification_pending' else 'blocked'
-        payload = {'reason': error.reason, 'schema': schema, 'status': status}
-        payload.update(MUTATIONS.fields())
-        emit(payload)
+        emit_retention_error(error)
         raise SystemExit(error.code)
     except (OSError, TypeError, ValueError):
         schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA

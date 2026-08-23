@@ -315,8 +315,10 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
             $result = $this->runHelper('admission-status');
 
             self::assertSame(70, $result['exit'], $leaf . ': ' . $result['stdout'] . $result['stderr']);
-            self::assertSame('missing_backup_authority', $this->decode($result)['reason']);
-            self::assertSame(0, array_sum($this->decode($result)['mutation_counts']));
+            $value = $this->decode($result);
+            self::assertSame('blocked', $value['status']);
+            self::assertSame('missing_backup_authority', $value['reason']);
+            self::assertSame(0, array_sum($value['mutation_counts']));
             file_put_contents($path, $bytes);
             chmod($path, 0600);
         }
@@ -472,9 +474,28 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         }
 
         self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
-        self::assertSame('active_production_work', $this->decode($result)['reason']);
+        $value = $this->decode($result);
+        self::assertSame('retryable', $value['status']);
+        self::assertSame('active_production_work', $value['reason']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
         self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('old'));
         self::assertFileDoesNotExist(self::STATE . '/last-success.json');
+    }
+
+    public function testAdmissionStatusClassifiesPostScanActivityAsRetryable(): void
+    {
+        $result = $this->runPatchedHelper(
+            "        if activity_count() != 0:\n            reject('active_production_work', 75)\n        payload = {",
+            "        reject('active_production_work', 75)\n        payload = {",
+            'admission-status',
+        );
+
+        self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('retryable', $value['status']);
+        self::assertSame('active_production_work', $value['reason']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('old'));
     }
 
     public function testAdmissionStatusRejectsAttestationTimeThatDoesNotMatchTheManifest(): void
