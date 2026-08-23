@@ -111,6 +111,7 @@ final class BackupSetProducerRootTest extends TestCase
     {
         $first = $this->runProducer();
         self::assertSame(0, $first['exit'], $first['stderr']);
+        $this->markContinuityVerified();
         sleep(2);
         $second = $this->runProducer();
         self::assertSame(0, $second['exit'], $second['stderr']);
@@ -150,11 +151,7 @@ final class BackupSetProducerRootTest extends TestCase
             self::assertSame("\x1f\x8b\x08", substr($gzipHeader, 0, 3));
             $mtime = unpack('Vmtime', substr($gzipHeader, 4, 4));
             self::assertIsArray($mtime);
-            $expectedMtime = \DateTimeImmutable::createFromFormat(
-                '!Ymd\\THis\\Z',
-                $set,
-                new \DateTimeZone('UTC'),
-            );
+            $expectedMtime = \DateTimeImmutable::createFromFormat('!Ymd\\THis\\Z', $set, new \DateTimeZone('UTC'));
             self::assertInstanceOf(\DateTimeImmutable::class, $expectedMtime);
             self::assertSame($expectedMtime->getTimestamp(), $mtime['mtime']);
             $gzip = proc_open(['gzip', '-t', $dump], [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
@@ -259,6 +256,33 @@ final class BackupSetProducerRootTest extends TestCase
         self::assertSame('published', json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR)['status']);
         self::assertFileExists($this->root . '/backups/last_backup_set.json');
         self::assertCount(1, glob($this->root . '/backups/20*T*Z') ?: []);
+    }
+
+    public function testLegacyMarkerNewerThanProtectedHandoffMigratesOnlyWithoutContinuityState(): void
+    {
+        $baseline = $this->runProducer('2026-08-13T00:00:00Z');
+        self::assertSame(0, $baseline['exit'], $baseline['stderr']);
+        unlink($this->root . '/backups/backup_continuity_state.json');
+        file_put_contents($this->root . '/backups/last_backup_success.utc', "2026-08-13T00:00:01Z\n");
+        chmod($this->root . '/backups/last_backup_success.utc', 0600);
+
+        $migration = $this->runProducer('2026-08-13T00:00:02Z');
+
+        self::assertSame(0, $migration['exit'], $migration['stderr']);
+        self::assertSame('published', json_decode($migration['stdout'], true, flags: JSON_THROW_ON_ERROR)['status']);
+        self::assertCount(2, glob($this->root . '/backups/20*T*Z') ?: []);
+        $state = json_decode(
+            (string) file_get_contents($this->root . '/backups/backup_continuity_state.json'),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('pending', $state['status']);
+        self::assertSame('20260813T000002Z', $state['handoff']['backup_set_id']);
+
+        file_put_contents($this->root . '/backups/last_backup_success.utc', "2026-08-13T00:00:03Z\n");
+        chmod($this->root . '/backups/last_backup_success.utc', 0600);
+        self::assertSame(70, $this->runProducer('2026-08-13T00:00:04Z')['exit']);
+        self::assertCount(2, glob($this->root . '/backups/20*T*Z') ?: []);
     }
 
     public function testCrashAfterHandoffBeforeMarkerAttachesWithoutNewDumpOrHandoffRewrite(): void
@@ -426,6 +450,33 @@ final class BackupSetProducerRootTest extends TestCase
         self::assertSame([], glob($this->root . '/backups/20*T*Z') ?: []);
     }
 
+    public function testPendingContinuityStateReplaysTheSameSetUntilVerified(): void
+    {
+        $first = $this->runProducer('2026-08-13T00:00:00Z');
+        self::assertSame(0, $first['exit'], $first['stderr']);
+        $statePath = $this->root . '/backups/backup_continuity_state.json';
+        $state = json_decode((string) file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('production_backup_continuity_state.v1', $state['schema']);
+        self::assertSame('pending', $state['status']);
+        self::assertSame(0600, fileperms($statePath) & 0777);
+        self::assertSame(1, (int) (lstat($statePath)['nlink'] ?? 0));
+
+        $replay = $this->runProducer('2026-08-13T00:00:01Z');
+        self::assertSame(0, $replay['exit'], $replay['stderr']);
+        self::assertSame('attached', json_decode($replay['stdout'], true, flags: JSON_THROW_ON_ERROR)['status']);
+        self::assertCount(1, glob($this->root . '/backups/20*T*Z') ?: []);
+
+        $this->markContinuityVerified();
+        $next = $this->runProducer('2026-08-13T00:00:02Z');
+        self::assertSame(0, $next['exit'], $next['stderr']);
+        self::assertSame('published', json_decode($next['stdout'], true, flags: JSON_THROW_ON_ERROR)['status']);
+        self::assertCount(2, glob($this->root . '/backups/20*T*Z') ?: []);
+        self::assertSame(
+            'pending',
+            json_decode((string) file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR)['status'],
+        );
+    }
+
     /** @return array{exit:int,stdout:string,stderr:string} */
     private function runProducer(?string $observedAtUtc = null): array
     {
@@ -433,13 +484,7 @@ final class BackupSetProducerRootTest extends TestCase
         if ($observedAtUtc !== null) {
             $command[] = $observedAtUtc;
         }
-        $process = proc_open(
-            $command,
-            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
-            $pipes,
-            null,
-            [],
-        );
+        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, []);
         self::assertIsResource($process);
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);
@@ -447,6 +492,16 @@ final class BackupSetProducerRootTest extends TestCase
         fclose($pipes[1]);
         fclose($pipes[2]);
         return ['exit' => proc_close($process), 'stdout' => $stdout ?: '', 'stderr' => $stderr ?: ''];
+    }
+
+    private function markContinuityVerified(): void
+    {
+        $path = $this->root . '/backups/backup_continuity_state.json';
+        $state = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('pending', $state['status']);
+        $state['status'] = 'verified';
+        file_put_contents($path, json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
+        chmod($path, 0600);
     }
 
     private function removeTree(string $path): void

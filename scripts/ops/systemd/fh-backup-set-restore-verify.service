@@ -1,0 +1,34 @@
+[Unit]
+Description=Forscherhaus pending continuity-state restore verification
+After=local-fs.target docker.service
+StartLimitIntervalSec=4h
+StartLimitBurst=16
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/php -n /usr/local/libexec/fh/verify_deployment_dump_v1.php --continuity-state
+Restart=on-failure
+RestartSec=15m
+RestartPreventExitStatus=76
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/usr/local/libexec/fh /var/lib/fh-deploy-orchestrator
+ReadWritePaths=/root/backups/easyappointments /var/lib/fh-deploy-evidence /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock /var/run/docker.sock
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+AmbientCapabilities=

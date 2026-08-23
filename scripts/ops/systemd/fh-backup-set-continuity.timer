@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Forscherhaus closed backup and restore continuity daily
+
+[Timer]
+OnCalendar=*-*-* 02:17:00 UTC
+AccuracySec=1m
+Persistent=false
+Unit=fh-backup-set-producer.service
+
+[Install]
+WantedBy=timers.target

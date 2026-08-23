@@ -144,6 +144,86 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         self::assertSame(70, $rejected['exit']);
     }
 
+    public function testPendingContinuityStateBindsHandoffAndTransitionsToVerified(): void
+    {
+        $producerHelper = dirname(__DIR__, 3) . '/scripts/ops/libexec/backup_set_producer_v1.py';
+        $handoff = [
+            'backup_set_id' => gmdate('Ymd\THis\Z', time() - 60),
+            'compressed_size_bytes' => 100,
+            'dump_sha256' => str_repeat('a', 64),
+            'schema' => 'production_backup_set_handoff.v1',
+            'uncompressed_size_bytes' => 200,
+        ];
+        $producerCanonical = $this->python(
+            str_replace(
+                ['PRODUCER_HELPER', 'HANDOFF_JSON'],
+                [var_export($producerHelper, true), var_export(json_encode($handoff, JSON_THROW_ON_ERROR), true)],
+                <<<'PY'
+                import importlib.util
+                import json
+                import os
+                spec = importlib.util.spec_from_file_location('rob466_helper', PRODUCER_HELPER)
+                producer = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(producer)
+                data = producer.continuity_state_bytes('pending', json.loads(HANDOFF_JSON))
+                path = os.path.join(os.environ['ROB465_TEST_ROOT'], 'backup_continuity_state.json')
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+                os.write(fd, data)
+                os.close(fd)
+                PY
+                ,
+            ),
+        );
+        self::assertSame(0, $producerCanonical['exit'], $producerCanonical['stderr']);
+
+        $accepted = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            fd = os.open(os.environ['ROB465_TEST_ROOT'], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            state = module.read_continuity_state(fd)
+            if state[0]['handoff']['dump_sha256'] != 'a' * 64:
+                raise RuntimeError('wrong pending handoff')
+            module.mark_continuity_verified(fd, state, 'b' * 32)
+            os.close(fd)
+            PY
+            ,
+        );
+        self::assertSame(0, $accepted['exit'], $accepted['stderr']);
+        $verified = json_decode(
+            (string) file_get_contents($this->root . '/backup_continuity_state.json'),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('verified', $verified['status']);
+        self::assertSame($handoff, $verified['handoff']);
+        self::assertSame(0600, fileperms($this->root . '/backup_continuity_state.json') & 0777);
+        self::assertSame([], glob($this->root . '/.backup_continuity_state.json.tmp-*') ?: []);
+
+        $state = [
+            'handoff' => array_merge($handoff, ['dump_sha256' => str_repeat('b', 64)]),
+            'schema' => 'production_backup_continuity_state.v1',
+            'status' => 'pending',
+        ];
+        file_put_contents(
+            $this->root . '/backup_continuity_state.json',
+            json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+        );
+        chmod($this->root . '/backup_continuity_state.json', 0600);
+        $mismatch = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            fd = os.open(os.environ['ROB465_TEST_ROOT'], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            state = module.read_continuity_state(fd)
+            if state[0]['handoff']['dump_sha256'] != 'a' * 64:
+                module.reject()
+            PY
+            ,
+        );
+        self::assertSame(70, $mismatch['exit']);
+    }
+
     public function testPublishIsAtomicNoReplaceAndExactReplayOnly(): void
     {
         $sha = str_repeat('b', 64);

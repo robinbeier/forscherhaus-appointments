@@ -6,6 +6,7 @@ namespace Tests\Unit\Scripts;
 
 use Ops\DeploymentDumpAttestationProducerV1;
 use Ops\DeploymentDumpAttestationBusyV1;
+use Ops\DeploymentDumpAttestationExpiredV1;
 use Ops\DeploymentEvidenceAuthorityV1;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -49,6 +50,8 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         self::assertStringNotContainsString('getopt(', $this->cli);
         self::assertStringContainsString("\$argv[1] === '--latest-handoff'", $this->cli);
         self::assertStringContainsString('produceLatestHandoff()', $this->cli);
+        self::assertStringContainsString("\$argv[1] === '--continuity-state'", $this->cli);
+        self::assertStringContainsString('produceContinuityState()', $this->cli);
         self::assertStringContainsString('deployment_dump_handoff_attestation_result.v1', $this->cli);
         self::assertStringContainsString("BACKUP_ROOT = '/root/backups/easyappointments'", $this->helper);
         self::assertStringContainsString(
@@ -61,11 +64,13 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         self::assertStringContainsString('process, docker_before = docker_popen(', $this->helper);
         self::assertStringContainsString('verify_docker_after(docker_before)', $this->helper);
         self::assertStringContainsString("latest_handoff = sys.argv[1] == '--latest-handoff'", $this->helper);
+        self::assertStringContainsString("continuity_selector = sys.argv[1] == '--continuity-state'", $this->helper);
         self::assertStringContainsString('handoff = read_backup_handoff(backups)', $this->helper);
         self::assertStringContainsString('read_backup_success_marker(backups) != backup_id', $this->helper);
         self::assertStringContainsString('assert_handoff_matches(handoff, digest, size, unpacked)', $this->helper);
-        self::assertStringContainsString('single literal selector', $this->authorityDocs);
+        self::assertStringContainsString('two literal', $this->authorityDocs);
         self::assertStringContainsString('`--latest-handoff`', $this->authorityDocs);
+        self::assertStringContainsString('`--continuity-state`', $this->authorityDocs);
         self::assertStringContainsString('cross-binds its ID, SHA-256, compressed size,', $this->authorityDocs);
     }
 
@@ -154,6 +159,14 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         self::assertTrue(is_subclass_of(DeploymentDumpAttestationBusyV1::class, RuntimeException::class));
         self::assertStringContainsString('catch (DeploymentDumpAttestationBusyV1)', $this->cli);
         self::assertStringContainsString('exit(75)', $this->cli);
+    }
+
+    public function testExpiredContinuityStateHasDedicatedNonRetryableExit(): void
+    {
+        self::assertTrue(is_subclass_of(DeploymentDumpAttestationExpiredV1::class, RuntimeException::class));
+        self::assertStringContainsString('reject(76 if continuity_selector else 70)', $this->helper);
+        self::assertStringContainsString('catch (DeploymentDumpAttestationExpiredV1)', $this->cli);
+        self::assertStringContainsString('exit(76)', $this->cli);
     }
 
     public function testHelperContainsStableFdBoundsDurabilityAndSharedLockContracts(): void
