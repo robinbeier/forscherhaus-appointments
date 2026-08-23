@@ -15,8 +15,83 @@ import tarfile
 
 
 SCHEMA = 'prod_release_archive_dump_retention.v3'
+ADMISSION_SCHEMA = 'prod_dump_producer_admission.v1'
 MARKER_SCHEMA = 'prod_release_archive_dump_retention_marker.v1'
 MARKER_STATUS_SCHEMA = 'prod_release_archive_dump_retention_marker_status.v1'
+PRODUCER_REGISTRY_SHA256 = 'a8af75fdc6c4e7b389ec50026d9a162a49a41defab769937dd63ef5b8d98544d'
+PRODUCER_REGISTRY = {
+    'allowed_producers': {
+        'fh_backup_set_producer_v1': {
+            'binary': '/usr/local/libexec/fh-backup-set-producer-v1',
+            'database_leaf': 'db/easyappointments.sql.gz',
+            'lifecycle': {
+                'continuity_state_schema': 'production_backup_continuity_state.v1',
+                'retention_contract': 'prod_release_archive_dump_retention.v3',
+                'states': ['private_staging', 'published', 'restore_verified', 'retention_eligible'],
+            },
+            'manifest_leaf': 'meta/backup.env',
+            'manifest_schema': 'production_backup_set.v1',
+            'object_contract': {
+                'directory_gid': 0,
+                'directory_mode': '0700',
+                'directory_uid': 0,
+                'mount_crossings': 'forbidden',
+                'regular_file_gid': 0,
+                'regular_file_mode': '0600',
+                'regular_file_nlink': 1,
+                'regular_file_uid': 0,
+                'symlinks': 'forbidden',
+            },
+            'publication': {
+                'locks': [
+                    '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
+                    '.backup-set-producer.lock',
+                ],
+                'method': 'renameat2_noreplace_then_parent_fsync',
+                'staging_leaf_pattern': '\\.backup-set-producer-[0-9a-f]{32}\\.tmp',
+            },
+            'publication_root': '/root/backups/easyappointments',
+            'purpose': 'canonical_easyappointments_database_backup',
+            'restore_authority': {
+                'attestation_root': '/var/lib/fh-deploy-evidence/dump-attestations',
+                'schema': 'deployment_dump_attestation.v1',
+                'writer_id': 'fh_deployment_dump_attestation_v1',
+            },
+            'runbook': 'docs/ops/production-backup-set-producer.md',
+            'set_leaf_pattern': '20[0-9]{6}T[0-9]{6}Z',
+            'supervisor': '/usr/local/libexec/fh-backup-set-producer-supervisor-v1',
+        },
+    },
+    'preserved_classes': {
+        'install-snapshots': 'preserve_outside_dump_retention',
+    },
+    'schema': 'dump_producer_registry.v1',
+    'top_level_authorities': {
+        '.backup-set-producer.lock': {
+            'class': 'backup_set_producer_lock',
+            'writer_ids': ['fh_backup_set_producer_v1'],
+        },
+        'backup_continuity_state.json': {
+            'class': 'backup_continuity_state',
+            'writer_ids': [
+                'fh_backup_set_producer_v1',
+                'fh_deployment_dump_attestation_v1',
+            ],
+        },
+        'last_backup_set.json': {
+            'class': 'backup_set_handoff',
+            'writer_ids': ['fh_backup_set_producer_v1'],
+        },
+        'last_backup_success.utc': {
+            'class': 'backup_success_marker',
+            'writer_ids': ['fh_backup_set_producer_v1'],
+        },
+        'last_verify_success.utc': {
+            'class': 'restore_verify_success_marker',
+            'writer_ids': ['fh_deployment_dump_attestation_v1'],
+        },
+    },
+}
 WEB_ROOT = '/var/www/html'
 APP_ROOT = '/var/www/html/easyappointments'
 RELEASES_ROOT = '/root/releases'
@@ -47,6 +122,7 @@ MAX_LEGACY_HOLD_STAGE_UNPACKED_BYTES = 68_719_476_736
 LEGACY_HOLD_TEMP_SCRATCH_BYTES = 67_108_864
 MAX_SIDECAR_BYTES = 4096
 MAX_ATTESTATION_BYTES = 4096
+MAX_BACKUP_MANIFEST_BYTES = 4096
 MAX_DUMP_UNCOMPRESSED_BYTES = 64 * 1024 * 1024 * 1024
 ABSOLUTE_FREE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_USED_PERCENT = 85
@@ -56,6 +132,7 @@ LEGACY_HOLD_RELEASE_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')
 RUN_ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z')
 SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 BACKUP_SET = re.compile(r'20[0-9]{6}T[0-9]{6}Z\Z')
+UTC_MARKER = re.compile(rb'20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\n\Z')
 TERMINAL_STATES = {
     'succeeded',
     'failed_before_write',
@@ -132,6 +209,76 @@ def emit(payload):
 
 def canonical_json(payload):
     return (json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
+
+
+def producer_registry():
+    """Return the compile-time registry only when its reviewed canonical bytes remain exact."""
+    data = canonical_json(PRODUCER_REGISTRY)
+    if hashlib.sha256(data).hexdigest() != PRODUCER_REGISTRY_SHA256:
+        reject('producer_registry_drift')
+    value = decode_canonical(data, 16_384)
+    if (
+        set(value) != {'allowed_producers', 'preserved_classes', 'schema', 'top_level_authorities'}
+        or value.get('schema') != 'dump_producer_registry.v1'
+        or set(value['allowed_producers']) != {'fh_backup_set_producer_v1'}
+        or value.get('preserved_classes') != {'install-snapshots': 'preserve_outside_dump_retention'}
+        or set(value['top_level_authorities']) != {
+            '.backup-set-producer.lock',
+            'backup_continuity_state.json',
+            'last_backup_set.json',
+            'last_backup_success.utc',
+            'last_verify_success.utc',
+        }
+    ):
+        reject('producer_registry_invalid')
+    producer = value['allowed_producers']['fh_backup_set_producer_v1']
+    if (
+        set(producer) != {
+            'binary', 'database_leaf', 'lifecycle', 'manifest_leaf', 'manifest_schema',
+            'object_contract', 'publication', 'publication_root', 'purpose',
+            'restore_authority', 'runbook', 'set_leaf_pattern', 'supervisor',
+        }
+        or producer.get('publication_root') != BACKUP_ROOT
+        or producer.get('database_leaf') != 'db/easyappointments.sql.gz'
+        or producer.get('manifest_leaf') != 'meta/backup.env'
+        or producer.get('manifest_schema') != 'production_backup_set.v1'
+        or producer.get('set_leaf_pattern') != '20[0-9]{6}T[0-9]{6}Z'
+        or producer.get('binary') != '/usr/local/libexec/fh-backup-set-producer-v1'
+        or producer.get('supervisor') != '/usr/local/libexec/fh-backup-set-producer-supervisor-v1'
+        or producer.get('runbook') != 'docs/ops/production-backup-set-producer.md'
+        or producer.get('purpose') != 'canonical_easyappointments_database_backup'
+        or producer.get('object_contract') != {
+            'directory_gid': 0,
+            'directory_mode': '0700',
+            'directory_uid': 0,
+            'mount_crossings': 'forbidden',
+            'regular_file_gid': 0,
+            'regular_file_mode': '0600',
+            'regular_file_nlink': 1,
+            'regular_file_uid': 0,
+            'symlinks': 'forbidden',
+        }
+        or producer.get('publication') != {
+            'locks': [
+                '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
+                '.backup-set-producer.lock',
+            ],
+            'method': 'renameat2_noreplace_then_parent_fsync',
+            'staging_leaf_pattern': '\\.backup-set-producer-[0-9a-f]{32}\\.tmp',
+        }
+        or producer.get('lifecycle') != {
+            'continuity_state_schema': 'production_backup_continuity_state.v1',
+            'retention_contract': SCHEMA,
+            'states': ['private_staging', 'published', 'restore_verified', 'retention_eligible'],
+        }
+        or producer.get('restore_authority') != {
+            'attestation_root': ATTESTATION_ROOT,
+            'schema': 'deployment_dump_attestation.v1',
+            'writer_id': 'fh_deployment_dump_attestation_v1',
+        }
+    ):
+        reject('producer_registry_invalid')
+    return value
 
 
 def directory_identity(value):
@@ -1090,18 +1237,89 @@ def scan_archive_pairs(releases, current_release, rollback_release, now_ns, lega
     return records, foreign, by_id[current_release]
 
 
-def scan_backup_sets(backups, attestations, now_ns, device):
-    names = os.listdir(backups)
+def validate_utc_marker(backups, leaf):
+    data = stable_regular(backups, leaf, 0, 0, {0o600}, 21)[0]
+    if UTC_MARKER.fullmatch(data) is None:
+        reject('invalid_backup_authority')
+    try:
+        datetime.datetime.strptime(data.decode('ascii').strip(), '%Y-%m-%dT%H:%M:%SZ')
+    except (UnicodeDecodeError, ValueError):
+        reject('invalid_backup_authority')
+
+
+def validate_backup_manifest(backup, backup_id, dump_sha, dump_size, producer):
+    if set(os.listdir(backup)) != {'db', 'meta'}:
+        reject('invalid_backup_set_manifest')
+    try:
+        database = open_child_directory(backup, 'db', exact_mode=0o700)
+    except FileNotFoundError:
+        reject('invalid_backup_set_manifest')
+    try:
+        try:
+            metadata = open_child_directory(backup, 'meta', exact_mode=0o700)
+        except FileNotFoundError:
+            reject('invalid_backup_set_manifest')
+        try:
+            if set(os.listdir(database)) != {'easyappointments.sql.gz'} or set(os.listdir(metadata)) != {'backup.env'}:
+                reject('invalid_backup_set_manifest')
+            try:
+                manifest = stable_regular(
+                    metadata,
+                    'backup.env',
+                    0,
+                    0,
+                    {0o600},
+                    MAX_BACKUP_MANIFEST_BYTES,
+                )[0]
+            except FileNotFoundError:
+                reject('invalid_backup_set_manifest')
+            try:
+                created_at = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').strftime('%Y-%m-%dT%H:%M:%SZ')
+            except ValueError:
+                reject('invalid_backup_set_manifest')
+            expected_lines = [
+                ('schema=' + producer['manifest_schema'] + '\n').encode('ascii'),
+                ('backup_set_id=' + backup_id + '\n').encode('ascii'),
+                ('created_at_utc=' + created_at + '\n').encode('ascii'),
+                ('dump_sha256=' + dump_sha + '\n').encode('ascii'),
+                ('compressed_size_bytes=' + str(dump_size) + '\n').encode('ascii'),
+            ]
+            lines = manifest.splitlines(keepends=True)
+            if len(lines) != 6 or lines[:5] != expected_lines:
+                reject('invalid_backup_set_manifest')
+            uncompressed_match = re.fullmatch(rb'uncompressed_size_bytes=([1-9][0-9]*)\n', lines[5])
+            if uncompressed_match is None:
+                reject('invalid_backup_set_manifest')
+            dump_uncompressed_size = int(uncompressed_match.group(1))
+            if dump_uncompressed_size > MAX_DUMP_UNCOMPRESSED_BYTES:
+                reject('invalid_backup_set_manifest')
+            return created_at, dump_uncompressed_size
+        finally:
+            os.close(metadata)
+    finally:
+        os.close(database)
+
+
+def scan_backup_sets(backups, attestations, now_ns, device, registry):
+    names = sorted(os.listdir(backups))
     if len(names) > MAX_CLASS_SCAN:
         reject('dump_scan_limit')
     records = []
     foreign = 0
     producer_handoff = None
     continuity_state = None
+    pending_restore_verification = 0
+    unattested = []
+    authority_leaves = registry['top_level_authorities']
+    preserved_classes = registry['preserved_classes']
+    producer = registry['allowed_producers']['fh_backup_set_producer_v1']
+    if not set(authority_leaves).issubset(names):
+        reject('missing_backup_authority')
     for name in names:
-        if name in {'last_backup_success.utc', 'last_verify_success.utc'}:
+        if name in {'last_backup_success.utc', 'last_verify_success.utc'} and name in authority_leaves:
+            validate_utc_marker(backups, name)
             continue
-        if name == 'backup_continuity_state.json':
+        if name == 'backup_continuity_state.json' and name in authority_leaves:
             data = stable_regular(backups, name, 0, 0, {0o600}, 8192)[0]
             continuity_state = decode_canonical(data, 8192)
             handoff = continuity_state.get('handoff') if isinstance(continuity_state, dict) else None
@@ -1127,10 +1345,10 @@ def scan_backup_sets(backups, attestations, now_ns, device):
                     handoff['uncompressed_size_bytes'] > MAX_DUMP_UNCOMPRESSED_BYTES):
                 reject('invalid_backup_continuity_state')
             continue
-        if name == '.backup-set-producer.lock':
+        if name == '.backup-set-producer.lock' and name in authority_leaves:
             stable_regular(backups, name, 0, 0, {0o600}, 0, empty_ok=True)
             continue
-        if name == 'last_backup_set.json':
+        if name == 'last_backup_set.json' and name in authority_leaves:
             data = stable_regular(backups, name, 0, 0, {0o600}, 4096)[0]
             producer_handoff = decode_canonical(data, 4096)
             if (set(producer_handoff) != {'backup_set_id', 'compressed_size_bytes', 'dump_sha256',
@@ -1150,15 +1368,20 @@ def scan_backup_sets(backups, attestations, now_ns, device):
                     producer_handoff['uncompressed_size_bytes'] > MAX_DUMP_UNCOMPRESSED_BYTES):
                 reject('invalid_backup_set_handoff')
             continue
-        if name == 'install-snapshots':
-            # ROB-405 installer snapshots are a separate explicitly preserved
-            # class and never enter dump-set selection or deletion.
+        if name in preserved_classes:
+            # Registry-declared preserved classes never enter dump-set
+            # selection or deletion, but their filesystem identity still has
+            # to satisfy the closed safe-tree contract.
+            try:
+                validate_candidate_tree(backups, name, {0}, device)
+            except FileNotFoundError:
+                foreign += 1
             continue
         if BACKUP_SET.fullmatch(name) is None:
             foreign += 1
             continue
         try:
-            backup = open_child_directory(backups, name)
+            backup = open_child_directory(backups, name, exact_mode=0o700)
         except FileNotFoundError:
             foreign += 1
             continue
@@ -1170,21 +1393,40 @@ def scan_backup_sets(backups, attestations, now_ns, device):
                 continue
             try:
                 dump_sha, dump_size, _, dump_meta = stable_hash(
-                    db, 'easyappointments.sql.gz', 0, 0, {0o600, 0o640}, MAX_ARCHIVE_BYTES,
+                    db, 'easyappointments.sql.gz', 0, 0, {0o600}, MAX_ARCHIVE_BYTES,
                 )
             except FileNotFoundError:
                 foreign += 1
                 os.close(db)
                 continue
             os.close(db)
+            manifest_created_at, manifest_uncompressed_size = validate_backup_manifest(
+                backup,
+                name,
+                dump_sha,
+                dump_size,
+                producer,
+            )
             try:
                 attestation_record = stable_regular(
                     attestations, dump_sha + '.json', 0, 0, {0o600}, MAX_ATTESTATION_BYTES,
                 )
             except FileNotFoundError:
-                foreign += 1
+                tree = validate_candidate_tree(backups, name, {0}, device)
+                unattested.append({
+                    'dump_sha': dump_sha,
+                    'dump_size': dump_size,
+                    'dump_uncompressed_size': manifest_uncompressed_size,
+                    'leaf': name,
+                    'tree': tree,
+                })
                 continue
             attestation = validate_attestation(attestation_record[0], dump_sha, dump_size)
+            if (
+                attestation['dump']['created_at_utc'] != manifest_created_at
+                or attestation['dump']['uncompressed_size_bytes'] != manifest_uncompressed_size
+            ):
+                reject('backup_manifest_attestation_mismatch')
             tree = validate_candidate_tree(backups, name, {0}, device)
             attested_epoch = parse_utc(attestation['attested_at_utc'])
             records.append({
@@ -1200,17 +1442,29 @@ def scan_backup_sets(backups, attestations, now_ns, device):
             })
         finally:
             os.close(backup)
-    if producer_handoff is not None:
-        matches = [record for record in records if record['leaf'] == producer_handoff['backup_set_id']]
-        if (len(matches) != 1 or matches[0]['dump_sha'] != producer_handoff['dump_sha256'] or
-                matches[0]['dump_size'] != producer_handoff['compressed_size_bytes'] or
-                matches[0]['dump_uncompressed_size'] != producer_handoff['uncompressed_size_bytes']):
-            reject('backup_set_handoff_mismatch')
     if continuity_state is not None:
         if producer_handoff is None or continuity_state['handoff'] != producer_handoff:
             reject('backup_continuity_state_mismatch')
         if continuity_state['status'] == 'pending':
-            foreign += 1
+            pending_restore_verification = 1
+    handoff_matches = []
+    if producer_handoff is not None:
+        handoff_matches = [
+            record
+            for record in records + unattested
+            if (
+                record['leaf'] == producer_handoff['backup_set_id']
+                and record['dump_sha'] == producer_handoff['dump_sha256']
+                and record['dump_size'] == producer_handoff['compressed_size_bytes']
+                and record['dump_uncompressed_size'] == producer_handoff['uncompressed_size_bytes']
+            )
+        ]
+        if len(handoff_matches) != 1:
+            reject('backup_set_handoff_mismatch')
+    pending_unattested = 0
+    if pending_restore_verification and handoff_matches:
+        pending_unattested = sum(1 for record in unattested if record is handoff_matches[0])
+    foreign += len(unattested) - pending_unattested
     records.sort(key=lambda item: (item['attested_epoch'], item['dump_sha']), reverse=True)
     protected = {record['dump_sha'] for record in records[:KEEP_VERIFIED_DUMPS]}
     if producer_handoff is not None:
@@ -1221,7 +1475,7 @@ def scan_backup_sets(backups, attestations, now_ns, device):
         record['protected'] = record['dump_sha'] in protected
     if len(protected) < KEEP_VERIFIED_DUMPS:
         reject('insufficient_verified_restore_paths')
-    return records, foreign
+    return records, foreign, pending_restore_verification
 
 
 def candidate_counts(release_classes, archives, dumps):
@@ -1331,6 +1585,7 @@ def cleanup_recovery_sidecar(state, recovery, mutations):
 
 
 def gather():
+    registry = producer_registry()
     try:
         web_user = pwd.getpwnam('www-data')
     except KeyError:
@@ -1368,7 +1623,13 @@ def gather():
             releases, current_release, rollback_release, now_ns, legacy_hold,
             recovery_sidecars,
         )
-        dumps, dump_foreign = scan_backup_sets(backups, attestations, now_ns, device)
+        dumps, dump_foreign, dump_pending_restore = scan_backup_sets(
+            backups,
+            attestations,
+            now_ns,
+            device,
+            registry,
+        )
         live_storage = open_child_directory(current, 'storage', web_user.pw_uid, web_user.pw_gid, writable_ok=True)
         try:
             storage = scan_tree(live_storage, {0, web_user.pw_uid}, device)
@@ -1393,11 +1654,13 @@ def gather():
             'legacy_hold': legacy_hold,
             'descriptors': descriptors,
             'dump_foreign': dump_foreign,
+            'dump_pending_restore': dump_pending_restore,
             'dumps': dumps,
             'release_classes': release_classes,
             'release_foreign': release_foreign,
             'release_identities': release_identities,
             'releases': releases,
+            'producer_registry': registry,
             'recovery_sidecars': recovery_sidecars,
             'rollback_release': rollback_release,
             'state': state,
@@ -1431,9 +1694,13 @@ def result_payload(mode, gathered, mutations, deleted=None, remaining=None):
         'capacity': gathered['capacity'],
         'candidates': candidates,
         'dump_foreign_count': gathered['dump_foreign'],
+        'dump_pending_restore_verification_count': gathered['dump_pending_restore'],
+        'manifest_bound_verified_dump_count': len(gathered['dumps']),
+        'producer_registry_sha256': PRODUCER_REGISTRY_SHA256,
         'execution_ready': (
             gathered['archive_foreign'] == 0
             and gathered['dump_foreign'] == 0
+            and gathered['dump_pending_restore'] == 0
             and gathered['release_foreign'] == 0
         ),
         'mode': mode,
@@ -1583,6 +1850,57 @@ def write_marker(state, deleted, capacity):
             pass
     if stable_regular(state, MARKER_LEAF, 0, 0, {0o600}, MARKER_MAX_BYTES)[0] != data:
         reject('marker_publish_failed')
+
+
+def admission_status():
+    registry = producer_registry()
+    global_lock = open_global_lock()
+    backups = None
+    attestations = None
+    try:
+        if activity_count() != 0:
+            reject('active_production_work', 75)
+        assert_no_nonterminal_runs()
+        backups = open_absolute_directory(BACKUP_ROOT, exact_mode=0o700)
+        attestations = open_absolute_directory(ATTESTATION_ROOT, exact_mode=0o700)
+        now_ns = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1_000_000_000)
+        dumps, foreign, pending_restore = scan_backup_sets(
+            backups,
+            attestations,
+            now_ns,
+            os.fstat(backups).st_dev,
+            registry,
+        )
+        if activity_count() != 0:
+            reject('active_production_work', 75)
+        payload = {
+            'authorized_producer_count': len(registry['allowed_producers']),
+            'decision_blocked_count': foreign,
+            'foreign_count': foreign,
+            'manifest_bound_dump_count': len(dumps),
+            'pending_restore_verification_count': pending_restore,
+            'producer_registry_sha256': PRODUCER_REGISTRY_SHA256,
+            'schema': ADMISSION_SCHEMA,
+            'status': 'pass' if foreign == 0 else 'blocked',
+            'verified_dump_count': len(dumps),
+        }
+        payload.update(MUTATIONS.fields())
+        if foreign:
+            payload['reason'] = 'unclassified_dump_entry'
+        elif pending_restore:
+            payload['reason'] = 'restore_verification_pending'
+            payload['status'] = 'retryable'
+        emit(payload)
+        if foreign:
+            raise SystemExit(70)
+        if pending_restore:
+            raise SystemExit(75)
+    finally:
+        if attestations is not None:
+            os.close(attestations)
+        if backups is not None:
+            os.close(backups)
+        os.close(global_lock)
 
 
 def dry_run():
@@ -1757,12 +2075,15 @@ def main():
             dry_run()
         elif len(sys.argv) == 2 and sys.argv[1] == 'execute':
             execute()
+        elif len(sys.argv) == 2 and sys.argv[1] == 'admission-status':
+            admission_status()
         elif len(sys.argv) == 3 and sys.argv[1] == 'marker-status':
             marker_status(sys.argv[2])
         else:
             reject('invalid_arguments')
     except RetentionError as error:
-        payload = {'reason': error.reason, 'schema': SCHEMA, 'status': 'blocked'}
+        schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA
+        payload = {'reason': error.reason, 'schema': schema, 'status': 'blocked'}
         payload.update(MUTATIONS.fields())
         emit(payload)
         raise SystemExit(error.code)
@@ -1774,12 +2095,14 @@ if __name__ == '__main__':
     except SystemExit:
         raise
     except RetentionError as error:
-        payload = {'reason': error.reason, 'schema': SCHEMA, 'status': 'blocked'}
+        schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA
+        payload = {'reason': error.reason, 'schema': schema, 'status': 'blocked'}
         payload.update(MUTATIONS.fields())
         emit(payload)
         raise SystemExit(error.code)
     except (OSError, TypeError, ValueError):
-        payload = {'reason': 'internal_rejection', 'schema': SCHEMA, 'status': 'blocked'}
+        schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA
+        payload = {'reason': 'internal_rejection', 'schema': schema, 'status': 'blocked'}
         payload.update(MUTATIONS.fields())
         emit(payload)
         raise SystemExit(70)

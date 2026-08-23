@@ -1,0 +1,12 @@
+[Unit]
+Description=Observe Forscherhaus dump producer admission every 15 minutes
+Documentation=file:/var/www/html/easyappointments/docs/ops/production-dump-producer-admission.md
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00 UTC
+AccuracySec=1m
+Persistent=false
+Unit=fh-dump-producer-admission.service
+
+[Install]
+WantedBy=timers.target

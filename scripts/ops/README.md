@@ -60,6 +60,11 @@ Script inventory:
   restore-verified-dump policy; it is dry-run by default and its disabled
   systemd activation path is documented in
   [`docs/ops/production-release-archive-dump-retention.md`](../../docs/ops/production-release-archive-dump-retention.md)
+- `prod_dump_producer_admission.sh` reports the aggregate, read-only ROB-483
+  single-producer registry and canonical manifest/attestation admission class.
+  It has no execute path; installation, monitoring activation, and object
+  mutation remain separate approvals. See
+  [`docs/ops/production-dump-producer-admission.md`](../../docs/ops/production-dump-producer-admission.md).
 - `prod_backup_set_producer.sh` executes one closed ROB-480 backup-and-restore
   continuity pass only with the exact ROB-466 write and ROB-461 restore
   confirmations. ROB-480 additionally ships a disabled daily continuity timer;
@@ -128,7 +133,8 @@ Script inventory:
   activation
 - `prod_cleanup_inventory.sh` prints a read-only, redacted cleanup inventory for
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
-  classes without deleting anything
+  classes plus the aggregate dump-producer admission exit class, without
+  deleting anything or forwarding admission output
 - `prod_build_cache_retention.sh` reports aggregate Docker build-cache facts in
   read-only mode by default and exposes a separately confirmed, age- and
   storage-bounded builder-cache-only execute gate; see
