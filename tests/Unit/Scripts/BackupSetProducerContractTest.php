@@ -278,11 +278,43 @@ final class BackupSetProducerContractTest extends TestCase
             self::assertSame(0, $execute['exit'], $execute['stderr']);
             self::assertSame(
                 '-o StrictHostKeyChecking=accept-new prod.example ' .
-                    '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1 && ' .
+                    '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1' .
+                    "\n" .
+                    '-o StrictHostKeyChecking=accept-new prod.example ' .
                     '/usr/bin/php -n /usr/local/libexec/fh/verify_deployment_dump_v1.php --continuity-state' .
                     "\n",
                 (string) file_get_contents($log),
             );
+            self::assertSame(2, substr_count($this->wrapper, 'ssh "${SSH_OPTIONS[@]}"'));
+            self::assertStringNotContainsString('fh-backup-set-producer-v1 &&', $this->wrapper);
+        } finally {
+            $this->removeTree($workspace);
+        }
+    }
+
+    public function testWrapperDoesNotStartVerifierWhenProducerSshFails(): void
+    {
+        $workspace = sys_get_temp_dir() . '/rob466-wrapper-failure-' . bin2hex(random_bytes(8));
+        mkdir($workspace . '/bin', 0777, true);
+        $log = $workspace . '/ssh.log';
+        file_put_contents(
+            $workspace . '/bin/ssh',
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"\$*\" >> " . escapeshellarg($log) . "\nexit 75\n",
+        );
+        chmod($workspace . '/bin/ssh', 0755);
+        try {
+            $execute = $this->runWrapper(
+                ['--execute', '--confirm-live-write', 'ROB-466', '--confirm-live-restore', 'ROB-461'],
+                $workspace . '/bin',
+            );
+            self::assertSame(75, $execute['exit'], $execute['stderr']);
+            self::assertSame(
+                '-o StrictHostKeyChecking=accept-new prod.example ' .
+                    '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1' .
+                    "\n",
+                (string) file_get_contents($log),
+            );
+            self::assertStringNotContainsString('verify_deployment_dump_v1.php', (string) file_get_contents($log));
         } finally {
             $this->removeTree($workspace);
         }

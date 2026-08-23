@@ -62,4 +62,6 @@ fi
 prod_require_cmd ssh
 prod_print_plan 'prod-backup-set-producer' "$PROD_SSH_TARGET" 'live-write'
 ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
-    '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1 && /usr/bin/php -n /usr/local/libexec/fh/verify_deployment_dump_v1.php --continuity-state'
+    '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1'
+ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
+    '/usr/bin/php -n /usr/local/libexec/fh/verify_deployment_dump_v1.php --continuity-state'

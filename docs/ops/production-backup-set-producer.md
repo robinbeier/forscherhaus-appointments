@@ -175,12 +175,15 @@ bash scripts/ops/prod_backup_set_producer.sh \
 
 Without `--execute` and both exact confirmations the wrapper performs no SSH
 call. A confirmation supplied in plan mode is rejected. This is a fail-closed
-two-stage attempt, not one lock held across both processes: each helper acquires
-the shared production lock independently. The durable pending record binds the
-second stage to the exact first-stage output. An SSH disconnect, intervening
-lock owner, activity or marker drift can therefore leave `pending`, but can
-never be accepted as continuity evidence; the cutover stops until the exact
-state is verified.
+two-stage attempt using two separate SSH invocations, not one remote shell or
+one lock held across both processes. The verifier's remote process context
+therefore cannot retain the producer command in its own ancestor command line;
+each helper still performs the unchanged activity gate and acquires the shared
+production lock independently. The durable pending record binds the second
+stage to the exact first-stage output. An SSH disconnect, intervening lock
+owner, activity or marker drift can therefore leave `pending`, but can never be
+accepted as continuity evidence; the cutover stops until the exact state is
+verified.
 
 Install `verify_deployment_dump_v1.php` and its reviewed PHP library
 dependencies beneath `/usr/local/libexec/fh`, alongside the already required
