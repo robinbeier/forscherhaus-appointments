@@ -6,6 +6,7 @@ namespace Tests\Unit\Scripts;
 
 use Ops\DeploymentEvidenceAuthorityV1;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RootHostTestPrerequisites;
 
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentEvidenceAuthorityV1.php';
 
@@ -105,6 +106,40 @@ final class BackupSetProducerRootTest extends TestCase
         if (isset($this->root) && is_dir($this->root)) {
             $this->removeTree($this->root);
         }
+    }
+
+    public function testRecurringUnitsPassRequiredNativeSystemdVerification(): void
+    {
+        foreach (['/usr/bin/systemd-analyze', '/usr/bin/bash', '/usr/bin/php', '/usr/bin/python3'] as $binary) {
+            RootHostTestPrerequisites::enforce(
+                $this,
+                RootHostTestPrerequisites::classify(
+                    is_file($binary) && is_executable($binary),
+                    'systemd_unit_binary_missing',
+                    "Native recurring-unit verification requires exact executable $binary.",
+                ),
+            );
+        }
+
+        $process = proc_open(
+            [
+                '/usr/bin/systemd-analyze',
+                'verify',
+                dirname(__DIR__, 3) . '/scripts/ops/systemd/fh-backup-set-producer.service',
+                dirname(__DIR__, 3) . '/scripts/ops/systemd/fh-backup-set-continuity.timer',
+                dirname(__DIR__, 3) . '/scripts/ops/systemd/fh-backup-set-restore-verify.service',
+            ],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        self::assertSame(0, proc_close($process), $stdout . $stderr);
     }
 
     public function testTwoSerialRunsPublishIndependentCompatibleSetsAndAggregateOnlyOutput(): void

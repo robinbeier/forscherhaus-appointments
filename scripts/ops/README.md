@@ -311,6 +311,11 @@ Closed production backup sets:
 
 - Install `scripts/ops/libexec/backup_set_producer_v1.py` as root-owned mode
   `0555` at `/usr/local/libexec/fh-backup-set-producer-v1`.
+- Install `scripts/ops/libexec/backup_set_producer_supervisor_v1.sh` as
+  root-owned mode `0555` at
+  `/usr/local/libexec/fh-backup-set-producer-supervisor-v1`; the recurring
+  systemd producer must use this fixed parent so the Python helper's unchanged
+  parent-death binding remains effective.
 - Provision the dedicated `fh_backup` database account with only `SELECT` and
   `SHOW VIEW` on `easyappointments.*`. Provide the exact six-line connection
   authority at `/etc/fh/backup-set-producer.cnf` as root-owned mode `0600`;

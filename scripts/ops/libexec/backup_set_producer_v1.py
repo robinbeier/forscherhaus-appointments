@@ -34,6 +34,7 @@ HANDOFF_LEAF = 'last_backup_set.json'
 CONTINUITY_STATE_LEAF = 'backup_continuity_state.json'
 PHP = '/usr/bin/php'
 TERMINAL_VALIDATOR = '/usr/local/libexec/fh/validate_deployment_terminal_bundle_v1.php'
+SUPERVISOR_COMMAND = '/usr/bin/bash /usr/local/libexec/fh-backup-set-producer-supervisor-v1'
 MAX_CONFIG_BYTES = 16 * 1024
 CONFIG_PASSWORD = re.compile(r'[A-Za-z0-9_-]{32,128}\Z')
 MAX_COMPRESSED = 16 * 1024 * 1024 * 1024
@@ -242,10 +243,11 @@ def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|import_prod_backup\.sh)(?:\s|$)'),
+        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|fh-backup-set-producer-supervisor-v1|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
     count = 0
+    parent = os.getppid()
     try:
         entries = os.scandir('/proc')
     except OSError:
@@ -267,6 +269,8 @@ def activity_count():
             if len(raw) > 131_072:
                 reject()
             command = raw.replace(b'\0', b' ').decode('utf-8', 'replace').strip()
+            if int(entry.name) == parent and command == SUPERVISOR_COMMAND:
+                continue
             if command and any(pattern.search(command) for pattern in patterns):
                 count += 1
     return count

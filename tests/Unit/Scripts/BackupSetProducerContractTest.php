@@ -10,6 +10,7 @@ final class BackupSetProducerContractTest extends TestCase
 {
     private string $root;
     private string $helper;
+    private string $supervisor;
     private string $attestationHelper;
     private string $wrapper;
     private string $attestationWrapper;
@@ -21,6 +22,9 @@ final class BackupSetProducerContractTest extends TestCase
     {
         $this->root = dirname(__DIR__, 3);
         $this->helper = (string) file_get_contents($this->root . '/scripts/ops/libexec/backup_set_producer_v1.py');
+        $this->supervisor = (string) file_get_contents(
+            $this->root . '/scripts/ops/libexec/backup_set_producer_supervisor_v1.sh',
+        );
         $this->attestationHelper = (string) file_get_contents(
             $this->root . '/scripts/ops/libexec/deployment_dump_attestation_v1.py',
         );
@@ -57,7 +61,12 @@ final class BackupSetProducerContractTest extends TestCase
             (int) strpos($this->helper, 'def assert_activity_gate') -
                 (int) strpos($this->helper, 'def activity_count():'),
         );
-        self::assertStringNotContainsString('backup_set_producer_v1', $activity);
+        self::assertStringContainsString(
+            "SUPERVISOR_COMMAND = '/usr/bin/bash /usr/local/libexec/fh-backup-set-producer-supervisor-v1'",
+            $this->helper,
+        );
+        self::assertStringContainsString('fh-backup-set-producer-supervisor-v1', $activity);
+        self::assertStringContainsString('if int(entry.name) == parent and command == SUPERVISOR_COMMAND:', $activity);
         self::assertStringContainsString("'--single-transaction'", $this->helper);
         self::assertStringContainsString("'--quick'", $this->helper);
         self::assertStringContainsString("'--no-autocommit'", $this->helper);
@@ -168,6 +177,7 @@ final class BackupSetProducerContractTest extends TestCase
         ) {
             $bytes = (string) file_get_contents($this->root . '/' . $path);
             self::assertStringContainsString('backup_set_producer_v1', $bytes, $path);
+            self::assertStringContainsString('fh-backup-set-producer-supervisor-v1', $bytes, $path);
             self::assertStringContainsString('prod_backup_set_producer', $bytes, $path);
         }
     }
@@ -379,7 +389,7 @@ final class BackupSetProducerContractTest extends TestCase
     {
         self::assertStringContainsString("Type=oneshot\nUser=root\nGroup=root\nUMask=0077", $this->producerUnit);
         self::assertStringContainsString(
-            'ExecStart=/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1',
+            'ExecStart=/usr/bin/bash /usr/local/libexec/fh-backup-set-producer-supervisor-v1',
             $this->producerUnit,
         );
         self::assertStringContainsString('OnSuccess=fh-backup-set-restore-verify.service', $this->producerUnit);
@@ -409,7 +419,7 @@ final class BackupSetProducerContractTest extends TestCase
             self::assertStringContainsString($needle, $this->producerUnit, $needle);
         }
         self::assertStringContainsString(
-            'ReadOnlyPaths=/etc/fh/backup-set-producer.cnf /usr/local/libexec/fh-backup-set-producer-v1 /var/lib/fh-deploy-orchestrator',
+            'ReadOnlyPaths=/etc/fh/backup-set-producer.cnf /usr/local/libexec/fh-backup-set-producer-v1 /usr/local/libexec/fh-backup-set-producer-supervisor-v1 /var/lib/fh-deploy-orchestrator',
             $this->producerUnit,
         );
         self::assertStringContainsString(
@@ -424,6 +434,145 @@ final class BackupSetProducerContractTest extends TestCase
         foreach (['OnFailure=', 'ExecStartPost=', 'Restart=', '[Install]'] as $forbidden) {
             self::assertStringNotContainsString($forbidden, $this->producerUnit, $forbidden);
         }
+    }
+
+    public function testProducerSupervisorPreservesParentDeathBoundaryAndExitStatus(): void
+    {
+        self::assertStringContainsString('if (( $# != 0 )); then', $this->supervisor);
+        self::assertStringContainsString(
+            '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1 &',
+            $this->supervisor,
+        );
+        self::assertStringContainsString('child_pid="$!"', $this->supervisor);
+        self::assertStringContainsString('wait "$child_pid" || status="$?"', $this->supervisor);
+        self::assertStringNotContainsString('exec ', $this->supervisor);
+        foreach (['HUP', 'INT', 'TERM'] as $signal) {
+            self::assertStringContainsString("trap 'forward_signal {$signal}' {$signal}", $this->supervisor);
+        }
+
+        $probe = str_replace(
+            '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1',
+            "/usr/bin/python3 -c 'import os,sys; sys.exit(0 if os.getppid() not in (0, 1) else 81)'",
+            $this->supervisor,
+        );
+        $path = tempnam(sys_get_temp_dir(), 'fh-producer-supervisor-');
+        self::assertIsString($path);
+        try {
+            file_put_contents($path, $probe);
+            chmod($path, 0555);
+            $process = proc_open(['/usr/bin/bash', $path], [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
+            self::assertIsResource($process);
+            fclose($pipes[0]);
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            self::assertSame(0, proc_close($process), $stdout . $stderr);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function testProducerSupervisorReturnsNonZeroChildStatus(): void
+    {
+        $probe = str_replace(
+            '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1',
+            "/usr/bin/python3 -c 'raise SystemExit(75)'",
+            $this->supervisor,
+        );
+        $path = tempnam(sys_get_temp_dir(), 'fh-producer-supervisor-exit-');
+        self::assertIsString($path);
+        try {
+            file_put_contents($path, $probe);
+            chmod($path, 0555);
+            $process = proc_open(['/usr/bin/bash', $path], [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
+            self::assertIsResource($process);
+            fclose($pipes[0]);
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            self::assertSame(75, proc_close($process), $stdout . $stderr);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function testProducerSupervisorForwardsTermAndReturnsChildStatus(): void
+    {
+        $pidPath = tempnam(sys_get_temp_dir(), 'fh-producer-child-pid-');
+        $childPath = tempnam(sys_get_temp_dir(), 'fh-producer-child-');
+        $supervisorPath = tempnam(sys_get_temp_dir(), 'fh-producer-supervisor-signal-');
+        self::assertIsString($pidPath);
+        self::assertIsString($childPath);
+        self::assertIsString($supervisorPath);
+        $childPid = null;
+        $process = null;
+        try {
+            file_put_contents(
+                $childPath,
+                "import os,signal,time\n" .
+                    'open(' .
+                    var_export($pidPath, true) .
+                    ", 'w', encoding='ascii').write(str(os.getpid()))\n" .
+                    "signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(42)))\n" .
+                    "while True:\n    time.sleep(0.05)\n",
+            );
+            chmod($childPath, 0444);
+            $probe = str_replace(
+                '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1',
+                '/usr/bin/python3 -I -B ' . escapeshellarg($childPath),
+                $this->supervisor,
+            );
+            file_put_contents($supervisorPath, $probe);
+            chmod($supervisorPath, 0555);
+            $process = proc_open(
+                ['/usr/bin/bash', $supervisorPath],
+                [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+                $pipes,
+            );
+            self::assertIsResource($process);
+            fclose($pipes[0]);
+            for ($attempt = 0; $attempt < 100; $attempt++) {
+                $value = trim((string) file_get_contents($pidPath));
+                if (ctype_digit($value)) {
+                    $childPid = (int) $value;
+                    break;
+                }
+                usleep(10_000);
+            }
+            self::assertIsInt($childPid, 'The supervised child did not publish its PID.');
+            self::assertTrue(proc_terminate($process, 15));
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            self::assertSame(42, proc_close($process), $stdout . $stderr);
+            $process = null;
+            for ($attempt = 0; $attempt < 100 && $this->processExists($childPid); $attempt++) {
+                usleep(10_000);
+            }
+            self::assertFalse($this->processExists($childPid), 'The supervisor left its child alive after SIGTERM.');
+        } finally {
+            if (is_resource($process)) {
+                proc_terminate($process);
+                proc_close($process);
+            }
+            @unlink($pidPath);
+            @unlink($childPath);
+            @unlink($supervisorPath);
+        }
+    }
+
+    private function processExists(int $pid): bool
+    {
+        $process = proc_open(['/bin/kill', '-0', (string) $pid], [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return proc_close($process) === 0;
     }
 
     public function testRestoreUnitHasClosedExecAndFilesystemBoundary(): void

@@ -207,6 +207,9 @@ server has completed the fixed import and verification sequence.
 Install and validate the reviewed recurring units without activating them:
 
 ```bash
+sudo /usr/bin/install -o root -g root -m 0555 \
+  scripts/ops/libexec/backup_set_producer_supervisor_v1.sh \
+  /usr/local/libexec/fh-backup-set-producer-supervisor-v1
 sudo /usr/bin/install -o root -g root -m 0644 \
   scripts/ops/systemd/fh-backup-set-producer.service \
   /etc/systemd/system/fh-backup-set-producer.service
@@ -224,6 +227,12 @@ sudo /usr/bin/systemctl daemon-reload
 /usr/bin/systemctl is-enabled fh-backup-set-continuity.timer
 /usr/bin/systemctl is-active fh-backup-set-continuity.timer
 ```
+
+The fixed supervisor must remain the producer service's direct child of
+systemd. It keeps the Python producer as a distinct child so the unchanged
+`PR_SET_PDEATHSIG(SIGKILL)` guard binds the mutating process to that trusted
+parent; replacing the service command with a direct Python invocation is not a
+supported profile.
 
 The required pre-cutover state is `disabled` and `inactive`; both services must
 also be inactive. Continue only with the exact installed helper and unit hashes,
