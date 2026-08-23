@@ -71,7 +71,10 @@ is still `pending` is reported separately as retryable restore verification;
 if its bound set still lacks an attestation, that set is included in the
 manifest-bound count but not the verified count. The pending state is never
 mislabeled as an unknown producer and never makes retention execution-ready,
-including the crash window where an attestation already exists.
+including the crash window where an attestation already exists. The execute
+path enforces that pending state as a retryable gate before it removes any
+release, archive, or dump candidate. Existing crash-recovery cleanup of a
+trusted marker temp remains a separately accounted recovery mutation.
 
 The units describe desired state only. A separately approved installation may
 place them and validate them without activation:

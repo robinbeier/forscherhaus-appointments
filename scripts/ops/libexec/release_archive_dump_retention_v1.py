@@ -1985,6 +1985,8 @@ def execute():
             reject('filesystem_mismatch')
         if first['archive_foreign'] or first['dump_foreign'] or first['release_foreign']:
             reject('unclassified_retention_entry')
+        if first['dump_pending_restore']:
+            reject('restore_verification_pending', 75)
         web_uid = pwd.getpwnam('www-data').pw_uid
         preserved_sidecars = {
             record['recovery_sidecar_leaf']
@@ -2092,7 +2094,8 @@ def main():
             reject('invalid_arguments')
     except RetentionError as error:
         schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA
-        payload = {'reason': error.reason, 'schema': schema, 'status': 'blocked'}
+        status = 'retryable' if error.reason == 'restore_verification_pending' else 'blocked'
+        payload = {'reason': error.reason, 'schema': schema, 'status': status}
         payload.update(MUTATIONS.fields())
         emit(payload)
         raise SystemExit(error.code)
@@ -2105,7 +2108,8 @@ if __name__ == '__main__':
         raise
     except RetentionError as error:
         schema = ADMISSION_SCHEMA if len(sys.argv) == 2 and sys.argv[1] == 'admission-status' else SCHEMA
-        payload = {'reason': error.reason, 'schema': schema, 'status': 'blocked'}
+        status = 'retryable' if error.reason == 'restore_verification_pending' else 'blocked'
+        payload = {'reason': error.reason, 'schema': schema, 'status': status}
         payload.update(MUTATIONS.fields())
         emit(payload)
         raise SystemExit(error.code)

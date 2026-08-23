@@ -225,6 +225,40 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame('restore_verification_pending', $pendingAdmissionValue['reason']);
         self::assertSame(3, $pendingAdmissionValue['manifest_bound_dump_count']);
         self::assertSame(2, $pendingAdmissionValue['verified_dump_count']);
+
+        $this->dumpSet('pending-execute-candidate', 50 * 86400);
+        $pendingExecute = $this->runHelper('execute');
+        self::assertSame(75, $pendingExecute['exit'], $pendingExecute['stdout'] . $pendingExecute['stderr']);
+        $pendingExecuteValue = $this->decode($pendingExecute);
+        self::assertSame('retryable', $pendingExecuteValue['status']);
+        self::assertSame('restore_verification_pending', $pendingExecuteValue['reason']);
+        self::assertFalse($pendingExecuteValue['deletion_performed']);
+        self::assertSame('none', $pendingExecuteValue['mutation_outcome']);
+        self::assertSame(0, array_sum($pendingExecuteValue['mutation_counts']));
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('pending-execute-candidate'));
+        self::assertDirectoryExists('/var/www/html/easyappointments_prev_legacy');
+
+        $markerTemp = self::STATE . '/.last-success.json.tmp-' . str_repeat('d', 32);
+        file_put_contents($markerTemp, "trusted recovery temp\n");
+        chmod($markerTemp, 0600);
+        $pendingRecovery = $this->runHelper('execute');
+        self::assertSame(75, $pendingRecovery['exit'], $pendingRecovery['stdout'] . $pendingRecovery['stderr']);
+        $pendingRecoveryValue = $this->decode($pendingRecovery);
+        self::assertSame('retryable', $pendingRecoveryValue['status']);
+        self::assertSame('restore_verification_pending', $pendingRecoveryValue['reason']);
+        self::assertTrue($pendingRecoveryValue['deletion_performed']);
+        self::assertSame('known', $pendingRecoveryValue['mutation_outcome']);
+        self::assertSame(1, $pendingRecoveryValue['mutation_counts']['marker_temp_files']);
+        self::assertSame(0, $pendingRecoveryValue['mutation_counts']['archive_files']);
+        self::assertSame(0, $pendingRecoveryValue['mutation_counts']['dump_sets']);
+        self::assertSame(0, $pendingRecoveryValue['mutation_counts']['release_dirs']);
+        self::assertSame(1, array_sum($pendingRecoveryValue['mutation_counts']));
+        self::assertFileDoesNotExist($markerTemp);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('pending-execute-candidate'));
+        self::assertDirectoryExists('/var/www/html/easyappointments_prev_legacy');
+
         file_put_contents($pendingAttestationPath, $pendingAttestation);
         chmod($pendingAttestationPath, 0600);
         $state['status'] = 'verified';
@@ -1139,7 +1173,13 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
             ]),
         );
         chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
-        $marker = gmdate('Y-m-d\TH:i:s\Z', time() - 5 * 86400) . "\n";
+        $markerTime = \DateTimeImmutable::createFromFormat(
+            '!Ymd\THis\Z',
+            $handoff['backup_set_id'],
+            new \DateTimeZone('UTC'),
+        );
+        self::assertInstanceOf(\DateTimeImmutable::class, $markerTime);
+        $marker = $markerTime->format('Y-m-d\TH:i:s\Z') . "\n";
         file_put_contents(self::BACKUPS . '/last_backup_success.utc', $marker);
         chmod(self::BACKUPS . '/last_backup_success.utc', 0600);
         file_put_contents(self::BACKUPS . '/last_verify_success.utc', $marker);
