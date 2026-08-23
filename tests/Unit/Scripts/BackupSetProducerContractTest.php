@@ -347,6 +347,27 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString('systemctl start', $this->attestationWrapper);
     }
 
+    public function testRecurringUnitInstallRefreshesContinuityProducerBeforeSupervisorAndUnits(): void
+    {
+        $docs = (string) file_get_contents($this->root . '/docs/ops/production-backup-set-producer.md');
+        $installStart = strpos($docs, 'Install and validate the reviewed recurring units');
+        self::assertIsInt($installStart);
+        $install = substr($docs, $installStart);
+        $producer = strpos($install, 'scripts/ops/libexec/backup_set_producer_v1.py');
+        $producerTarget = strpos($install, '/usr/local/libexec/fh-backup-set-producer-v1');
+        $supervisor = strpos($install, 'scripts/ops/libexec/backup_set_producer_supervisor_v1.sh');
+        $producerUnit = strpos($install, 'scripts/ops/systemd/fh-backup-set-producer.service');
+
+        self::assertIsInt($producer);
+        self::assertIsInt($producerTarget);
+        self::assertIsInt($supervisor);
+        self::assertIsInt($producerUnit);
+        self::assertLessThan($producerTarget, $producer);
+        self::assertLessThan($supervisor, $producerTarget);
+        self::assertLessThan($supervisor, $producer);
+        self::assertLessThan($producerUnit, $supervisor);
+    }
+
     public function testContinuityStateClosesTheInterServiceHandoffGap(): void
     {
         foreach (

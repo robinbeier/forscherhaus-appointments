@@ -208,6 +208,9 @@ Install and validate the reviewed recurring units without activating them:
 
 ```bash
 sudo /usr/bin/install -o root -g root -m 0555 \
+  scripts/ops/libexec/backup_set_producer_v1.py \
+  /usr/local/libexec/fh-backup-set-producer-v1
+sudo /usr/bin/install -o root -g root -m 0555 \
   scripts/ops/libexec/backup_set_producer_supervisor_v1.sh \
   /usr/local/libexec/fh-backup-set-producer-supervisor-v1
 sudo /usr/bin/install -o root -g root -m 0644 \
