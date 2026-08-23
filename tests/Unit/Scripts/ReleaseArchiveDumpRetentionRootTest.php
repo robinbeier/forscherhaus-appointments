@@ -178,23 +178,38 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         // is calculated, not merely restate an already protected digest.
         $leaf = $this->dumpLeaf('old');
         $bytes = 'dump-old';
-        file_put_contents(
-            self::BACKUPS . '/last_backup_set.json',
-            $this->canonical([
-                'backup_set_id' => $leaf,
-                'compressed_size_bytes' => strlen($bytes),
-                'dump_sha256' => hash('sha256', $bytes),
-                'schema' => 'production_backup_set_handoff.v1',
-                'uncompressed_size_bytes' => strlen($bytes),
-            ]),
-        );
+        $handoff = [
+            'backup_set_id' => $leaf,
+            'compressed_size_bytes' => strlen($bytes),
+            'dump_sha256' => hash('sha256', $bytes),
+            'schema' => 'production_backup_set_handoff.v1',
+            'uncompressed_size_bytes' => strlen($bytes),
+        ];
+        file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
         chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        $state = [
+            'handoff' => $handoff,
+            'schema' => 'production_backup_continuity_state.v1',
+            'status' => 'verified',
+        ];
+        file_put_contents(self::BACKUPS . '/backup_continuity_state.json', $this->canonical($state));
+        chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
 
         $result = $this->runHelper('dry-run');
 
         self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
         self::assertSame(0, $this->decode($result)['dump_foreign_count']);
         self::assertSame(3, $this->decode($result)['protected_verified_dump_count']);
+
+        $state['status'] = 'pending';
+        file_put_contents(self::BACKUPS . '/backup_continuity_state.json', $this->canonical($state));
+        chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
+        $pending = $this->runHelper('dry-run');
+        self::assertSame(0, $pending['exit'], $pending['stdout'] . $pending['stderr']);
+        self::assertSame(1, $this->decode($pending)['dump_foreign_count']);
+        $state['status'] = 'verified';
+        file_put_contents(self::BACKUPS . '/backup_continuity_state.json', $this->canonical($state));
+        chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
 
         $handoff = json_decode(
             (string) file_get_contents(self::BACKUPS . '/last_backup_set.json'),

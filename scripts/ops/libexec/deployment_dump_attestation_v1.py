@@ -49,6 +49,7 @@ RUN_ID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 RUN_RE = re.compile(r'^\.run-[0-9a-f]{32}$')
 TEMP_RE = re.compile(r'^\.attestation-[0-9a-f]{64}\.tmp-[0-9a-f]{32}$')
 MARKER_TEMP_RE = re.compile(r'^\.last_verify_success\.utc\.tmp-[0-9a-f]{32}$')
+CONTINUITY_STATE_TEMP_RE = re.compile(r'^\.backup_continuity_state\.json\.tmp-[0-9a-f]{32}$')
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
 TERMINAL_STATES = {'succeeded', 'failed_before_write', 'failed_pre_switch',
@@ -666,6 +667,69 @@ def assert_handoff_matches(handoff, digest, compressed, uncompressed):
         reject()
 
 
+def continuity_state_bytes(status, handoff):
+    return canonical({'handoff': handoff, 'schema': 'production_backup_continuity_state.v1',
+                      'status': status})
+
+
+def read_continuity_state(backups):
+    leaf = 'backup_continuity_state.json'
+    before = os.stat(leaf, dir_fd=backups, follow_symlinks=False)
+    descriptor = os.open(leaf, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=backups)
+    try:
+        data = os.read(descriptor, 8193)
+        opened = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    after = os.stat(leaf, dir_fd=backups, follow_symlinks=False)
+    if (identity(before) != identity(opened) or identity(opened) != identity(after) or
+            not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or opened.st_gid != 0 or
+            opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600 or
+            len(data) == 0 or len(data) > 8192):
+        reject()
+    try:
+        value = json.loads(data)
+    except json.JSONDecodeError:
+        reject()
+    handoff = value.get('handoff') if isinstance(value, dict) else None
+    if (not isinstance(value, dict) or set(value) != {'handoff', 'schema', 'status'} or
+            value.get('schema') != 'production_backup_continuity_state.v1' or
+            value.get('status') != 'pending' or not isinstance(handoff, dict) or
+            set(handoff) != {'backup_set_id', 'compressed_size_bytes', 'dump_sha256', 'schema',
+                             'uncompressed_size_bytes'} or
+            handoff.get('schema') != 'production_backup_set_handoff.v1' or
+            not isinstance(handoff.get('backup_set_id'), str) or ID_RE.fullmatch(handoff['backup_set_id']) is None or
+            not isinstance(handoff.get('dump_sha256'), str) or
+            re.fullmatch(r'[0-9a-f]{64}', handoff['dump_sha256']) is None or
+            isinstance(handoff.get('compressed_size_bytes'), bool) or
+            not isinstance(handoff.get('compressed_size_bytes'), int) or
+            handoff['compressed_size_bytes'] <= 0 or handoff['compressed_size_bytes'] > MAX_COMPRESSED or
+            isinstance(handoff.get('uncompressed_size_bytes'), bool) or
+            not isinstance(handoff.get('uncompressed_size_bytes'), int) or
+            handoff['uncompressed_size_bytes'] <= 0 or handoff['uncompressed_size_bytes'] > MAX_UNCOMPRESSED or
+            continuity_state_bytes('pending', handoff) != data):
+        reject()
+    return value, identity(opened), data
+
+
+def mark_continuity_verified(backups, expected, nonce):
+    current = read_continuity_state(backups)
+    if current[1] != expected[1] or current[2] != expected[2]:
+        reject()
+    data = continuity_state_bytes('verified', expected[0]['handoff'])
+    temporary = '.backup_continuity_state.json.tmp-' + nonce
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                         0o600, dir_fd=backups)
+    try:
+        write_all(descriptor, data)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, 'backup_continuity_state.json', src_dir_fd=backups, dst_dir_fd=backups)
+    os.fsync(backups)
+
+
 def read_backup_success_marker(backups):
     before = os.stat('last_backup_success.utc', dir_fd=backups, follow_symlinks=False)
     descriptor = os.open('last_backup_success.utc', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
@@ -867,7 +931,7 @@ def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
+        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|fh-backup-set-producer-supervisor-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
     count = 0
@@ -1567,10 +1631,12 @@ def main():
     if len(sys.argv) != 2:
         reject()
     latest_handoff = sys.argv[1] == '--latest-handoff'
-    if not latest_handoff and not ID_RE.fullmatch(sys.argv[1]):
+    continuity_selector = sys.argv[1] == '--continuity-state'
+    if not latest_handoff and not continuity_selector and not ID_RE.fullmatch(sys.argv[1]):
         reject()
-    backup_id = None if latest_handoff else sys.argv[1]
+    backup_id = None if latest_handoff or continuity_selector else sys.argv[1]
     handoff = None
+    continuity_state = None
     if backup_id is not None:
         try:
             created = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(tzinfo=datetime.timezone.utc)
@@ -1593,8 +1659,12 @@ def main():
     assert_no_nonterminal_runs(orchestrator)
     evidence = open_absolute_directory(EVIDENCE_ROOT, 0o700)
     backups = open_absolute_directory(BACKUP_ROOT)
-    if latest_handoff:
+    if latest_handoff or continuity_selector:
         handoff = read_backup_handoff(backups)
+        if continuity_selector:
+            continuity_state = read_continuity_state(backups)
+            if continuity_state[0]['handoff'] != handoff:
+                reject()
         backup_id = handoff['backup_set_id']
         if read_backup_success_marker(backups) != backup_id:
             reject()
@@ -1603,8 +1673,10 @@ def main():
         except ValueError:
             reject()
     now = datetime.datetime.now(datetime.timezone.utc)
-    if created > now or (now - created).total_seconds() >= 14_400:
+    if created > now:
         reject()
+    if (now - created).total_seconds() >= 14_400:
+        reject(76 if continuity_selector else 70)
     created_at = created.strftime('%Y-%m-%dT%H:%M:%SZ')
     lock = os.open('.dump-attestation.lock', os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600,
                    dir_fd=evidence)
@@ -1628,6 +1700,12 @@ def main():
             reconcile_files(scratch, '.run-', RUN_RE, True)
             reconcile_files(attestations, '.attestation-', TEMP_RE, False)
             reconcile_files(backups, '.last_verify_success.utc.tmp-', MARKER_TEMP_RE, False)
+            reconcile_files(
+                backups,
+                '.backup_continuity_state.json.tmp-',
+                CONTINUITY_STATE_TEMP_RE,
+                False,
+            )
             nonce = os.urandom(16).hex()
             run_leaf = '.run-' + nonce
             os.mkdir(run_leaf, 0o700, dir_fd=scratch)
@@ -1676,6 +1754,8 @@ def main():
                         reject()
                     status = publish(attestations, data, digest, nonce)
                     success_marker(backups, restored_at, nonce)
+                if continuity_state is not None:
+                    mark_continuity_verified(backups, continuity_state, nonce)
                 output = {'attestation_bytes_base64': base64.b64encode(data).decode('ascii'),
                           'attestation_sha256': hashlib.sha256(data).hexdigest(), 'dump_sha256': digest,
                           'path': EVIDENCE_ROOT + '/dump-attestations/' + digest + '.json', 'status': status}

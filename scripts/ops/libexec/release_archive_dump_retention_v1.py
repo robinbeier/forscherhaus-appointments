@@ -655,7 +655,7 @@ def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
+        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|fh-backup-set-producer-supervisor-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
     count = 0
@@ -1097,8 +1097,35 @@ def scan_backup_sets(backups, attestations, now_ns, device):
     records = []
     foreign = 0
     producer_handoff = None
+    continuity_state = None
     for name in names:
         if name in {'last_backup_success.utc', 'last_verify_success.utc'}:
+            continue
+        if name == 'backup_continuity_state.json':
+            data = stable_regular(backups, name, 0, 0, {0o600}, 8192)[0]
+            continuity_state = decode_canonical(data, 8192)
+            handoff = continuity_state.get('handoff') if isinstance(continuity_state, dict) else None
+            if (not isinstance(continuity_state, dict) or
+                    set(continuity_state) != {'handoff', 'schema', 'status'} or
+                    continuity_state.get('schema') != 'production_backup_continuity_state.v1' or
+                    continuity_state.get('status') not in {'pending', 'verified'} or
+                    not isinstance(handoff, dict) or
+                    set(handoff) != {'backup_set_id', 'compressed_size_bytes', 'dump_sha256',
+                                     'schema', 'uncompressed_size_bytes'} or
+                    handoff.get('schema') != 'production_backup_set_handoff.v1' or
+                    not isinstance(handoff.get('backup_set_id'), str) or
+                    BACKUP_SET.fullmatch(handoff['backup_set_id']) is None or
+                    not isinstance(handoff.get('dump_sha256'), str) or
+                    SHA256.fullmatch(handoff['dump_sha256']) is None or
+                    isinstance(handoff.get('compressed_size_bytes'), bool) or
+                    not isinstance(handoff.get('compressed_size_bytes'), int) or
+                    handoff['compressed_size_bytes'] <= 0 or
+                    handoff['compressed_size_bytes'] > MAX_ARCHIVE_BYTES or
+                    isinstance(handoff.get('uncompressed_size_bytes'), bool) or
+                    not isinstance(handoff.get('uncompressed_size_bytes'), int) or
+                    handoff['uncompressed_size_bytes'] <= 0 or
+                    handoff['uncompressed_size_bytes'] > MAX_DUMP_UNCOMPRESSED_BYTES):
+                reject('invalid_backup_continuity_state')
             continue
         if name == '.backup-set-producer.lock':
             stable_regular(backups, name, 0, 0, {0o600}, 0, empty_ok=True)
@@ -1179,6 +1206,11 @@ def scan_backup_sets(backups, attestations, now_ns, device):
                 matches[0]['dump_size'] != producer_handoff['compressed_size_bytes'] or
                 matches[0]['dump_uncompressed_size'] != producer_handoff['uncompressed_size_bytes']):
             reject('backup_set_handoff_mismatch')
+    if continuity_state is not None:
+        if producer_handoff is None or continuity_state['handoff'] != producer_handoff:
+            reject('backup_continuity_state_mismatch')
+        if continuity_state['status'] == 'pending':
+            foreign += 1
     records.sort(key=lambda item: (item['attested_epoch'], item['dump_sha']), reverse=True)
     protected = {record['dump_sha'] for record in records[:KEEP_VERIFIED_DUMPS]}
     if producer_handoff is not None:

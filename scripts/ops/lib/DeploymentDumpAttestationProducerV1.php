@@ -27,6 +27,12 @@ final class DeploymentDumpAttestationProducerV1
         return self::produceSelected(['--latest-handoff'], null);
     }
 
+    /** @return array{status:string,path:string,dump_sha256:string,attestation_sha256:string} */
+    public static function produceContinuityState(): array
+    {
+        return self::produceSelected(['--continuity-state'], null);
+    }
+
     /**
      * @param list<string> $selector
      * @return array{status:string,path:string,dump_sha256:string,attestation_sha256:string}
@@ -53,6 +59,9 @@ final class DeploymentDumpAttestationProducerV1
         $exit = proc_close($process);
         if ($helperBefore !== self::trustedHelperMetadata(self::HELPER_PATH)) {
             throw new RuntimeException('dump attestation helper changed during execution');
+        }
+        if ($exit === 76) {
+            throw new DeploymentDumpAttestationExpiredV1('dump attestation continuity state is stale');
         }
         if ($exit === 75) {
             throw new DeploymentDumpAttestationBusyV1('dump attestation production is busy');
@@ -91,7 +100,7 @@ final class DeploymentDumpAttestationProducerV1
             throw new RuntimeException('dump attestation helper response is contradictory');
         }
         $record = json_decode($bytes, true);
-        $recordCreated = is_array($record) ? ($record['dump']['created_at_utc'] ?? null) : null;
+        $recordCreated = is_array($record) ? $record['dump']['created_at_utc'] ?? null : null;
         if (
             !is_array($record) ||
             ($record['dump']['sha256'] ?? null) !== $response['dump_sha256'] ||
@@ -137,11 +146,7 @@ final class DeploymentDumpAttestationProducerV1
     private static function createdAt(string $backupSetId): string
     {
         $createdAt = self::createdAtWithoutFreshness($backupSetId);
-        $value = \DateTimeImmutable::createFromFormat(
-            '!Y-m-d\\TH:i:s\\Z',
-            $createdAt,
-            new \DateTimeZone('UTC'),
-        );
+        $value = \DateTimeImmutable::createFromFormat('!Y-m-d\\TH:i:s\\Z', $createdAt, new \DateTimeZone('UTC'));
         if ($value === false) {
             throw new RuntimeException('backup-set ID is invalid');
         }
@@ -213,3 +218,5 @@ final class DeploymentDumpAttestationProducerV1
 }
 
 final class DeploymentDumpAttestationBusyV1 extends RuntimeException {}
+
+final class DeploymentDumpAttestationExpiredV1 extends RuntimeException {}

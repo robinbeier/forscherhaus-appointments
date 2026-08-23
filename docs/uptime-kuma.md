@@ -170,6 +170,12 @@ separate by design:
 - Neither monitor reads backup contents, lists backup directories, validates
   off-host retention, or proves end-to-end restoreability alone.
 
+After the separately approved ROB-480 scheduler cutover, the unchanged backup
+marker belongs only to the canonical ROB-466 producer and the restore marker
+belongs only to the paired state-bound handoff verifier. The retired
+legacy cron must not remain a second marker writer. The Push scripts and Kuma
+monitor definitions do not change during that cutover.
+
 Before the 2026-05-20 live gate, the live UI still used the older
 `Ops - Jobs Freshness` name. The monitor's intended meaning was already
 restore-verification freshness; the live gate below aligned the display name

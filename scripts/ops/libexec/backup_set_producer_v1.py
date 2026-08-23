@@ -31,8 +31,10 @@ DUMP_PATH = MARIADB_DUMP
 DATABASE = 'easyappointments'
 MARKER_LEAF = 'last_backup_success.utc'
 HANDOFF_LEAF = 'last_backup_set.json'
+CONTINUITY_STATE_LEAF = 'backup_continuity_state.json'
 PHP = '/usr/bin/php'
 TERMINAL_VALIDATOR = '/usr/local/libexec/fh/validate_deployment_terminal_bundle_v1.php'
+SUPERVISOR_COMMAND = '/usr/bin/bash /usr/local/libexec/fh-backup-set-producer-supervisor-v1'
 MAX_CONFIG_BYTES = 16 * 1024
 CONFIG_PASSWORD = re.compile(r'[A-Za-z0-9_-]{32,128}\Z')
 MAX_COMPRESSED = 16 * 1024 * 1024 * 1024
@@ -47,6 +49,7 @@ BACKUP_ID = re.compile(r'20[0-9]{6}T[0-9]{6}Z\Z')
 STAGING_LEAF = re.compile(r'\.backup-set-producer-[0-9a-f]{32}\.tmp\Z')
 MARKER_TEMP = re.compile(r'\.last_backup_success\.utc\.tmp-[0-9a-f]{32}\Z')
 HANDOFF_TEMP = re.compile(r'\.last_backup_set\.json\.tmp-[0-9a-f]{32}\Z')
+CONTINUITY_STATE_TEMP = re.compile(r'\.backup_continuity_state\.json\.tmp-[0-9a-f]{32}\Z')
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
 
@@ -240,10 +243,11 @@ def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|import_prod_backup\.sh)(?:\s|$)'),
+        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|fh-backup-set-producer-supervisor-v1|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
     count = 0
+    parent = os.getppid()
     try:
         entries = os.scandir('/proc')
     except OSError:
@@ -265,6 +269,8 @@ def activity_count():
             if len(raw) > 131_072:
                 reject()
             command = raw.replace(b'\0', b' ').decode('utf-8', 'replace').strip()
+            if int(entry.name) == parent and command == SUPERVISOR_COMMAND:
+                continue
             if command and any(pattern.search(command) for pattern in patterns):
                 count += 1
     return count
@@ -729,6 +735,83 @@ def publish_handoff(backups, backup_id, digest, compressed, unpacked, nonce, exp
     os.fsync(backups)
 
 
+def continuity_state_bytes(status, handoff):
+    return (json.dumps({'handoff': handoff, 'schema': 'production_backup_continuity_state.v1',
+                        'status': status}, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+
+
+def stable_continuity_state(backups, missing_ok=False):
+    try:
+        before = os.stat(CONTINUITY_STATE_LEAF, dir_fd=backups, follow_symlinks=False)
+        descriptor = os.open(CONTINUITY_STATE_LEAF,
+                             os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=backups)
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        reject()
+    try:
+        data = os.read(descriptor, 8193)
+        opened = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    after = os.stat(CONTINUITY_STATE_LEAF, dir_fd=backups, follow_symlinks=False)
+    if (file_identity(before) != file_identity(opened) or file_identity(opened) != file_identity(after) or
+            not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or opened.st_gid != 0 or
+            opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600 or
+            len(data) == 0 or len(data) > 8192):
+        reject()
+    try:
+        value = json.loads(data)
+    except json.JSONDecodeError:
+        reject()
+    handoff = value.get('handoff') if isinstance(value, dict) else None
+    if (not isinstance(value, dict) or set(value) != {'handoff', 'schema', 'status'} or
+            value.get('schema') != 'production_backup_continuity_state.v1' or
+            value.get('status') not in {'pending', 'verified'} or not isinstance(handoff, dict) or
+            set(handoff) != {'backup_set_id', 'compressed_size_bytes', 'dump_sha256', 'schema',
+                             'uncompressed_size_bytes'} or
+            handoff.get('schema') != 'production_backup_set_handoff.v1' or
+            not isinstance(handoff.get('backup_set_id'), str) or
+            BACKUP_ID.fullmatch(handoff['backup_set_id']) is None or
+            not isinstance(handoff.get('dump_sha256'), str) or
+            re.fullmatch(r'[0-9a-f]{64}', handoff['dump_sha256']) is None or
+            isinstance(handoff.get('compressed_size_bytes'), bool) or
+            not isinstance(handoff.get('compressed_size_bytes'), int) or
+            handoff['compressed_size_bytes'] <= 0 or
+            handoff['compressed_size_bytes'] > MAX_COMPRESSED_BYTES or
+            isinstance(handoff.get('uncompressed_size_bytes'), bool) or
+            not isinstance(handoff.get('uncompressed_size_bytes'), int) or
+            handoff['uncompressed_size_bytes'] <= 0 or
+            handoff['uncompressed_size_bytes'] > MAX_UNCOMPRESSED_BYTES or
+            continuity_state_bytes(value['status'], handoff) != data):
+        reject()
+    return value, file_identity(opened), data
+
+
+def publish_continuity_state(backups, status, handoff, nonce, expected):
+    data = continuity_state_bytes(status, handoff)
+    current = stable_continuity_state(backups, missing_ok=True)
+    if current is not None and current[2] == data:
+        return current
+    if expected is None:
+        if current is not None:
+            reject()
+    elif current is None or current[1] != expected[1] or current[2] != expected[2]:
+        reject()
+    temporary = '.backup_continuity_state.json.tmp-' + nonce
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                         0o600, dir_fd=backups)
+    try:
+        write_all(descriptor, data)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, CONTINUITY_STATE_LEAF, src_dir_fd=backups, dst_dir_fd=backups)
+    os.fsync(backups)
+    return stable_continuity_state(backups)
+
+
 def reconcile_temporary_files(backups):
     names = os.listdir(backups)
     if len(names) > 10_000:
@@ -736,14 +819,17 @@ def reconcile_temporary_files(backups):
     for name in names:
         if STAGING_LEAF.fullmatch(name):
             cleanup_current_staging(backups, name, None)
-        elif MARKER_TEMP.fullmatch(name) or HANDOFF_TEMP.fullmatch(name):
+        elif MARKER_TEMP.fullmatch(name) or HANDOFF_TEMP.fullmatch(name) or CONTINUITY_STATE_TEMP.fullmatch(name):
             metadata = os.stat(name, dir_fd=backups, follow_symlinks=False)
             if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_gid != 0 or
                     metadata.st_nlink != 1 or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_size > 4096):
                 reject()
             os.unlink(name, dir_fd=backups)
             os.fsync(backups)
-        elif name.startswith('.backup-set-producer-') or name.startswith('.last_backup_success.utc.tmp-') or name.startswith('.last_backup_set.json.tmp-'):
+        elif (name.startswith('.backup-set-producer-') or
+              name.startswith('.last_backup_success.utc.tmp-') or
+              name.startswith('.last_backup_set.json.tmp-') or
+              name.startswith('.backup_continuity_state.json.tmp-')):
             reject()
 
 
@@ -787,11 +873,33 @@ def validate_backup_set(backups, backup_id):
     return digest, compressed, unpacked_expected, created
 
 
-def attach_unmarked_set(backups, current_marker, nonce):
+def resume_pending_continuity(backups, state, current_marker, nonce):
+    handoff = state[0]['handoff']
+    backup_id = handoff['backup_set_id']
+    require_recoverable_candidate_fresh(backup_id, utc_now())
+    digest, compressed, unpacked, created = validate_backup_set(backups, backup_id)
+    if handoff_bytes(backup_id, digest, compressed, unpacked) != handoff_bytes(
+            handoff['backup_set_id'], handoff['dump_sha256'], handoff['compressed_size_bytes'],
+            handoff['uncompressed_size_bytes']):
+        reject()
+    current_handoff = stable_handoff(backups, missing_ok=True)
+    publish_handoff(backups, backup_id, digest, compressed, unpacked, nonce, current_handoff)
+    publish_marker(backups, created, nonce, current_marker)
+    return compressed, unpacked
+
+
+def attach_unmarked_set(backups, current_marker, current_state, nonce):
     marker_id = None if current_marker is None else current_marker[0].strftime('%Y%m%dT%H%M%SZ')
     current_handoff = stable_handoff(backups, missing_ok=True)
-    if current_handoff is not None and marker_id is not None and current_handoff[0]['backup_set_id'] < marker_id:
-        reject()
+    legacy_mismatch = (current_handoff is not None and marker_id is not None and
+                       current_handoff[0]['backup_set_id'] < marker_id)
+    if legacy_mismatch:
+        if current_state is not None:
+            reject()
+        # One-time ROB-480 migration baseline: the still-active legacy writer
+        # advances the shared marker but cannot publish the protected handoff.
+        # Only an absent continuity state permits a newer fresh set to replace
+        # that mismatched pair; the captured identities still guard both writes.
     candidates = sorted(name for name in os.listdir(backups)
                         if BACKUP_ID.fullmatch(name) and (marker_id is None or name > marker_id))
     if not candidates:
@@ -799,6 +907,8 @@ def attach_unmarked_set(backups, current_marker, nonce):
             # Migration from the legacy backup job: its global success marker
             # predates the protected ROB-466 handoff. The next fresh set will
             # establish the new marker+handoff pair under both locks.
+            return None
+        if legacy_mismatch:
             return None
         if marker_id != current_handoff[0]['backup_set_id']:
             reject()
@@ -810,10 +920,13 @@ def attach_unmarked_set(backups, current_marker, nonce):
         reject()
     backup_id = candidates[0]
     digest, compressed, unpacked_expected, created = validate_backup_set(backups, backup_id)
-    if current_handoff is not None and current_handoff[0]['backup_set_id'] not in {marker_id, backup_id}:
+    if (current_handoff is not None and
+            current_handoff[0]['backup_set_id'] not in {marker_id, backup_id} and not legacy_mismatch):
         reject()
     observed_at = utc_now()
     require_recoverable_candidate_fresh(backup_id, observed_at)
+    pending_handoff = json.loads(handoff_bytes(backup_id, digest, compressed, unpacked_expected))
+    publish_continuity_state(backups, 'pending', pending_handoff, nonce, current_state)
     publish_handoff(backups, backup_id, digest, compressed, unpacked_expected, nonce, current_handoff)
     publish_marker(backups, created, nonce, current_marker)
     return compressed, unpacked_expected
@@ -845,7 +958,19 @@ def main():
         assert_activity_gate(orchestrator)
         reconcile_temporary_files(backups)
         expected_marker = stable_marker(backups)
-        attached = attach_unmarked_set(backups, expected_marker, nonce)
+        expected_state = stable_continuity_state(backups, missing_ok=True)
+        if expected_state is not None and expected_state[0]['status'] == 'pending':
+            attached = resume_pending_continuity(backups, expected_state, expected_marker, nonce)
+            emit('attached', backup_sets_published=0, compressed_size_bytes=attached[0],
+                 uncompressed_size_bytes=attached[1])
+            return
+        expected_handoff = stable_handoff(backups, missing_ok=True)
+        if expected_state is not None:
+            if (expected_handoff is None or expected_state[0]['handoff'] != expected_handoff[0] or
+                    expected_marker is None or
+                    expected_marker[0].strftime('%Y%m%dT%H%M%SZ') != expected_handoff[0]['backup_set_id']):
+                reject()
+        attached = attach_unmarked_set(backups, expected_marker, expected_state, nonce)
         if attached is not None:
             emit('attached', backup_sets_published=0, compressed_size_bytes=attached[0],
                  uncompressed_size_bytes=attached[1])
@@ -853,7 +978,6 @@ def main():
         observed_at = utc_now()
         backup_id = observed_at.strftime('%Y%m%dT%H%M%SZ')
         marker_value = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').strftime('%Y-%m-%dT%H:%M:%SZ')
-        expected_handoff = stable_handoff(backups, missing_ok=True)
         candidate_marker = datetime.datetime.strptime(marker_value, '%Y-%m-%dT%H:%M:%SZ')
         if expected_marker is not None and expected_marker[0] > candidate_marker:
             reject()
@@ -869,6 +993,8 @@ def main():
         digest, compressed, unpacked = create_backup(
             backups, backup_id, nonce, dump_descriptor, dump_identity, config_descriptor, config_identity)
         staging = None
+        pending_handoff = json.loads(handoff_bytes(backup_id, digest, compressed, unpacked))
+        publish_continuity_state(backups, 'pending', pending_handoff, nonce, expected_state)
         publish_handoff(backups, backup_id, digest, compressed, unpacked, nonce, expected_handoff)
         publish_marker(backups, marker_value, nonce, expected_marker)
         marker_temporary = None
