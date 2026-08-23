@@ -42,7 +42,8 @@ choice.
 
 The top-level authority objects are fixed to their declared classes, safe
 root-owned identities, and writer IDs. Marker bytes must be one valid UTC
-timestamp. `install-snapshots` is a separately preserved root-owned,
+timestamp, and the producer-owned backup-success marker must name exactly the
+current handoff set. `install-snapshots` is a separately preserved root-owned,
 non-writable class,
 `preserve_outside_dump_retention`; it is not a dump set and is never inferred
 from a scan. The existing `decision_blocked` tree remains unchanged.
@@ -67,8 +68,10 @@ result, not a supported skip or simulated pass. The cleanup inventory consumes
 only this exit class and discards helper output rather than reprinting it.
 A missing fixed authority is also blocked. A canonical continuity state that
 is still `pending` is reported separately as retryable restore verification;
-it is never mislabeled as an unknown producer and never makes retention
-execution-ready.
+if its bound set still lacks an attestation, that set is included in the
+manifest-bound count but not the verified count. The pending state is never
+mislabeled as an unknown producer and never makes retention execution-ready,
+including the crash window where an attestation already exists.
 
 The units describe desired state only. A separately approved installation may
 place them and validate them without activation:

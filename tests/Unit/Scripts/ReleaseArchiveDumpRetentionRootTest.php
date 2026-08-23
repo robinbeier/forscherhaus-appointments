@@ -189,6 +189,10 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         ];
         file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
         chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        $markerTime = \DateTimeImmutable::createFromFormat('!Ymd\THis\Z', $leaf, new \DateTimeZone('UTC'));
+        self::assertInstanceOf(\DateTimeImmutable::class, $markerTime);
+        file_put_contents(self::BACKUPS . '/last_backup_success.utc', $markerTime->format('Y-m-d\TH:i:s\Z') . "\n");
+        chmod(self::BACKUPS . '/last_backup_success.utc', 0600);
         $state = [
             'handoff' => $handoff,
             'schema' => 'production_backup_continuity_state.v1',
@@ -217,7 +221,10 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertFalse($pendingValue['execution_ready']);
         $pendingAdmission = $this->runHelper('admission-status');
         self::assertSame(75, $pendingAdmission['exit'], $pendingAdmission['stdout'] . $pendingAdmission['stderr']);
-        self::assertSame('restore_verification_pending', $this->decode($pendingAdmission)['reason']);
+        $pendingAdmissionValue = $this->decode($pendingAdmission);
+        self::assertSame('restore_verification_pending', $pendingAdmissionValue['reason']);
+        self::assertSame(3, $pendingAdmissionValue['manifest_bound_dump_count']);
+        self::assertSame(2, $pendingAdmissionValue['verified_dump_count']);
         file_put_contents($pendingAttestationPath, $pendingAttestation);
         chmod($pendingAttestationPath, 0600);
         $state['status'] = 'verified';
@@ -306,6 +313,29 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
             self::assertSame(0, array_sum($this->decode($linked)['mutation_counts']));
         } finally {
             unlink($alias);
+        }
+    }
+
+    public function testAdmissionStatusRejectsBackupSuccessMarkerThatDoesNotMatchHandoff(): void
+    {
+        $marker = self::BACKUPS . '/last_backup_success.utc';
+        $markerBytes = (string) file_get_contents($marker);
+        file_put_contents($marker, "2000-01-01T00:00:00Z\n");
+        chmod($marker, 0600);
+
+        try {
+            $admission = $this->runHelper('admission-status');
+            self::assertSame(70, $admission['exit'], $admission['stdout'] . $admission['stderr']);
+            self::assertSame('backup_success_marker_mismatch', $this->decode($admission)['reason']);
+            self::assertSame(0, array_sum($this->decode($admission)['mutation_counts']));
+
+            $retention = $this->runHelper('dry-run');
+            self::assertSame(70, $retention['exit'], $retention['stdout'] . $retention['stderr']);
+            self::assertSame('backup_success_marker_mismatch', $this->decode($retention)['reason']);
+            self::assertSame(0, array_sum($this->decode($retention)['mutation_counts']));
+        } finally {
+            file_put_contents($marker, $markerBytes);
+            chmod($marker, 0600);
         }
     }
 

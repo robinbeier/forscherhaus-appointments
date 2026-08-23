@@ -1242,9 +1242,10 @@ def validate_utc_marker(backups, leaf):
     if UTC_MARKER.fullmatch(data) is None:
         reject('invalid_backup_authority')
     try:
-        datetime.datetime.strptime(data.decode('ascii').strip(), '%Y-%m-%dT%H:%M:%SZ')
+        value = datetime.datetime.strptime(data.decode('ascii').strip(), '%Y-%m-%dT%H:%M:%SZ')
     except (UnicodeDecodeError, ValueError):
         reject('invalid_backup_authority')
+    return value.strftime('%Y%m%dT%H%M%SZ')
 
 
 def validate_backup_manifest(backup, backup_id, dump_sha, dump_size, producer):
@@ -1306,6 +1307,7 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
         reject('dump_scan_limit')
     records = []
     foreign = 0
+    backup_success_marker = None
     producer_handoff = None
     continuity_state = None
     pending_restore_verification = 0
@@ -1317,7 +1319,9 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
         reject('missing_backup_authority')
     for name in names:
         if name in {'last_backup_success.utc', 'last_verify_success.utc'} and name in authority_leaves:
-            validate_utc_marker(backups, name)
+            marker_value = validate_utc_marker(backups, name)
+            if name == 'last_backup_success.utc':
+                backup_success_marker = marker_value
             continue
         if name == 'backup_continuity_state.json' and name in authority_leaves:
             data = stable_regular(backups, name, 0, 0, {0o600}, 8192)[0]
@@ -1442,6 +1446,8 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
             })
         finally:
             os.close(backup)
+    if producer_handoff is None or backup_success_marker != producer_handoff['backup_set_id']:
+        reject('backup_success_marker_mismatch')
     if continuity_state is not None:
         if producer_handoff is None or continuity_state['handoff'] != producer_handoff:
             reject('backup_continuity_state_mismatch')
@@ -1465,6 +1471,7 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
     if pending_restore_verification and handoff_matches:
         pending_unattested = sum(1 for record in unattested if record is handoff_matches[0])
     foreign += len(unattested) - pending_unattested
+    manifest_bound_count = len(records) + len(unattested)
     records.sort(key=lambda item: (item['attested_epoch'], item['dump_sha']), reverse=True)
     protected = {record['dump_sha'] for record in records[:KEEP_VERIFIED_DUMPS]}
     if producer_handoff is not None:
@@ -1475,7 +1482,7 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
         record['protected'] = record['dump_sha'] in protected
     if len(protected) < KEEP_VERIFIED_DUMPS:
         reject('insufficient_verified_restore_paths')
-    return records, foreign, pending_restore_verification
+    return records, foreign, pending_restore_verification, manifest_bound_count
 
 
 def candidate_counts(release_classes, archives, dumps):
@@ -1623,7 +1630,7 @@ def gather():
             releases, current_release, rollback_release, now_ns, legacy_hold,
             recovery_sidecars,
         )
-        dumps, dump_foreign, dump_pending_restore = scan_backup_sets(
+        dumps, dump_foreign, dump_pending_restore, dump_manifest_bound = scan_backup_sets(
             backups,
             attestations,
             now_ns,
@@ -1654,6 +1661,7 @@ def gather():
             'legacy_hold': legacy_hold,
             'descriptors': descriptors,
             'dump_foreign': dump_foreign,
+            'dump_manifest_bound': dump_manifest_bound,
             'dump_pending_restore': dump_pending_restore,
             'dumps': dumps,
             'release_classes': release_classes,
@@ -1694,6 +1702,7 @@ def result_payload(mode, gathered, mutations, deleted=None, remaining=None):
         'capacity': gathered['capacity'],
         'candidates': candidates,
         'dump_foreign_count': gathered['dump_foreign'],
+        'manifest_bound_dump_count': gathered['dump_manifest_bound'],
         'dump_pending_restore_verification_count': gathered['dump_pending_restore'],
         'manifest_bound_verified_dump_count': len(gathered['dumps']),
         'producer_registry_sha256': PRODUCER_REGISTRY_SHA256,
@@ -1864,7 +1873,7 @@ def admission_status():
         backups = open_absolute_directory(BACKUP_ROOT, exact_mode=0o700)
         attestations = open_absolute_directory(ATTESTATION_ROOT, exact_mode=0o700)
         now_ns = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1_000_000_000)
-        dumps, foreign, pending_restore = scan_backup_sets(
+        dumps, foreign, pending_restore, manifest_bound = scan_backup_sets(
             backups,
             attestations,
             now_ns,
@@ -1877,7 +1886,7 @@ def admission_status():
             'authorized_producer_count': len(registry['allowed_producers']),
             'decision_blocked_count': foreign,
             'foreign_count': foreign,
-            'manifest_bound_dump_count': len(dumps),
+            'manifest_bound_dump_count': manifest_bound,
             'pending_restore_verification_count': pending_restore,
             'producer_registry_sha256': PRODUCER_REGISTRY_SHA256,
             'schema': ADMISSION_SCHEMA,

@@ -117,8 +117,10 @@ final class DumpProducerAdmissionContractTest extends TestCase
         self::assertStringContainsString('def validate_backup_manifest(', $helper);
         self::assertStringContainsString("reject('invalid_backup_set_manifest')", $helper);
         self::assertStringContainsString("reject('missing_backup_authority')", $helper);
+        self::assertStringContainsString("reject('backup_success_marker_mismatch')", $helper);
         self::assertStringContainsString("'producer_registry_sha256': PRODUCER_REGISTRY_SHA256", $helper);
         self::assertStringContainsString("'manifest_bound_verified_dump_count': len(gathered['dumps'])", $helper);
+        self::assertStringContainsString("'manifest_bound_dump_count': manifest_bound", $helper);
         self::assertStringContainsString("'pending_restore_verification_count': pending_restore", $helper);
         self::assertStringContainsString("and gathered['dump_pending_restore'] == 0", $helper);
 
