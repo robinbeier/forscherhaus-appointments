@@ -107,6 +107,7 @@ MARKER_MAX_BYTES = 4096
 RELEASE_DIR_MIN_AGE = 7 * 86_400
 ARCHIVE_MIN_AGE = 30 * 86_400
 DUMP_MIN_AGE = 30 * 86_400
+MAX_PENDING_RESTORE_AGE_SECONDS = 14_400
 KEEP_ARCHIVE_PAIRS = 4
 KEEP_VERIFIED_DUMPS = 2
 MAX_RELEASE_DIR_DELETE = 4
@@ -728,6 +729,18 @@ def parse_utc(value):
         reject('invalid_timestamp')
 
 
+def require_pending_restore_fresh(backup_id, now_ns):
+    try:
+        created = datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(
+            tzinfo=datetime.timezone.utc,
+        )
+    except ValueError:
+        reject('invalid_backup_continuity_state')
+    age = now_ns // 1_000_000_000 - int(created.timestamp())
+    if age < 0 or age >= MAX_PENDING_RESTORE_AGE_SECONDS:
+        reject('pending_restore_outside_recovery_window')
+
+
 def decode_mount_field(value):
     try:
         return re.sub(
@@ -1319,6 +1332,7 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
     backup_success_marker = None
     producer_handoff = None
     continuity_state = None
+    continuity_pending = False
     pending_restore_verification = 0
     unattested = []
     authority_leaves = registry['top_level_authorities']
@@ -1461,7 +1475,7 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
         if producer_handoff is None or continuity_state['handoff'] != producer_handoff:
             reject('backup_continuity_state_mismatch')
         if continuity_state['status'] == 'pending':
-            pending_restore_verification = 1
+            continuity_pending = True
     handoff_matches = []
     if producer_handoff is not None:
         handoff_matches = [
@@ -1476,6 +1490,9 @@ def scan_backup_sets(backups, attestations, now_ns, device, registry):
         ]
         if len(handoff_matches) != 1:
             reject('backup_set_handoff_mismatch')
+    if continuity_pending:
+        require_pending_restore_fresh(producer_handoff['backup_set_id'], now_ns)
+        pending_restore_verification = 1
     pending_unattested = 0
     if pending_restore_verification and handoff_matches:
         pending_unattested = sum(1 for record in unattested if record is handoff_matches[0])

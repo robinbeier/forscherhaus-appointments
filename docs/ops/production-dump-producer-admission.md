@@ -67,14 +67,17 @@ the unchanged zero-mutation ledger. An unknown top-level entry is a blocked
 result, not a supported skip or simulated pass. The cleanup inventory consumes
 only this exit class and discards helper output rather than reprinting it.
 A missing fixed authority is also blocked. A canonical continuity state that
-is still `pending` is reported separately as retryable restore verification;
-global-lock or pre-/post-scan activity contention is likewise retryable rather
+is still `pending` is reported separately as retryable restore verification
+only while its handoff timestamp remains inside the producer's fixed four-hour
+recovery window. At or beyond 14,400 seconds, or for a future timestamp, it is
+the non-retryable `pending_restore_outside_recovery_window` manual stop.
+Global-lock or pre-/post-scan activity contention is likewise retryable rather
 than a permanent provenance mismatch. Concurrent stable-read identity changes
 have the same explicit retryable classification; no other or future admission
-reason inherits it implicitly.
-if its bound set still lacks an attestation, that set is included in the
-manifest-bound count but not the verified count. The pending state is never
-mislabeled as an unknown producer and never makes retention execution-ready,
+reason inherits it implicitly. If its bound set still lacks an attestation,
+that set is included in the manifest-bound count but not the verified count.
+The pending state is never mislabeled as an unknown producer and never makes
+retention execution-ready,
 including the crash window where an attestation already exists. The execute
 path enforces that pending state as a retryable gate before it removes any
 release, archive, or dump candidate. Existing crash-recovery cleanup of a

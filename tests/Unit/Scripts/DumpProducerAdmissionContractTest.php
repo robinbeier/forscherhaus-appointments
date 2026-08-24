@@ -118,6 +118,8 @@ final class DumpProducerAdmissionContractTest extends TestCase
         self::assertStringContainsString("reject('invalid_backup_set_manifest')", $helper);
         self::assertStringContainsString("reject('missing_backup_authority')", $helper);
         self::assertStringContainsString("reject('backup_success_marker_mismatch')", $helper);
+        self::assertStringContainsString('MAX_PENDING_RESTORE_AGE_SECONDS = 14_400', $helper);
+        self::assertStringContainsString("reject('pending_restore_outside_recovery_window')", $helper);
         self::assertStringContainsString("'producer_registry_sha256': PRODUCER_REGISTRY_SHA256", $helper);
         self::assertStringContainsString("'manifest_bound_verified_dump_count': len(gathered['dumps'])", $helper);
         self::assertStringContainsString("'manifest_bound_dump_count': manifest_bound", $helper);
