@@ -188,6 +188,10 @@ Disk, memory, or swap pressure:
 - Use `prod_doctor.sh` for resource facts first.
 - Use `prod_cleanup_inventory.sh` for read-only cleanup classification before
   proposing any deletion.
+- Use `prod_dump_producer_admission.sh` only for the separate ROB-483
+  aggregate, read-only registry/manifest observation. Installation, monitoring
+  activation, and every object mutation remain separate approvals; see
+  `docs/ops/production-dump-producer-admission.md`.
 - Use `prod_build_cache_retention.sh` for the separate, read-only Docker
   build-cache policy snapshot. Its execute path still requires an explicit
   ROB-450 live-write confirmation; see

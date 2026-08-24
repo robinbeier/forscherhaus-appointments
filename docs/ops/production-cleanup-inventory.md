@@ -18,6 +18,8 @@ The script connects to the production host and emits stable key/value facts for:
 - old release directories under the web root;
 - uploaded release archives;
 - backup and restore-verification markers;
+- aggregate dump-producer admission class (`pass`, `blocked`, `retryable`,
+  `invalid`, or `unavailable`) without forwarding helper output;
 - rebuild restore-input artifacts;
 - app `storage/sessions`, `storage/cache`, `storage/logs`, and
   `storage/uploads`;
@@ -40,6 +42,18 @@ It must not show:
 - `/etc/fh` contents;
 - tokens, Push URLs, DSNs, health tokens, passwords, or webhook URLs;
 - raw host-local config values.
+
+The dump-producer admission class is an observation only. `pass` means the
+closed registry, canonical manifests, restore attestations, fixed authorities,
+lock, and activity checks passed with a zero-mutation ledger. `blocked` is a
+fail-closed contract mismatch, `retryable` is an explicitly classified
+lock/activity contention or concurrent stable-read identity race, and
+`invalid`/`unavailable` means the installed admission route cannot be trusted.
+The exact handoff-bound pending restore state is retryable only inside its fixed
+four-hour recovery window; an expired or future-dated pending state is a
+non-retryable `pending_restore_outside_recovery_window` manual stop.
+None of these values authorizes cleanup; see
+[`production-dump-producer-admission.md`](production-dump-producer-admission.md).
 
 ## Interpreting Candidates
 

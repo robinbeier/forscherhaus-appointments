@@ -332,6 +332,19 @@ kv backup_creation_marker.status "$([[ -r "$backup_creation_marker" ]] && printf
 kv backup_creation_marker.age_days "$([[ -e "$backup_creation_marker" ]] && age_days_for_path "$backup_creation_marker" || printf missing)"
 kv restore_verify_marker.status "$([[ -r "$backup_verify_marker" ]] && printf readable || { [[ -e "$backup_verify_marker" ]] && printf present_not_readable || printf missing; })"
 kv restore_verify_marker.age_days "$([[ -e "$backup_verify_marker" ]] && age_days_for_path "$backup_verify_marker" || printf missing)"
+dump_producer_admission_status=unavailable
+if [[ -x "$RELEASE_RETENTION_HELPER" ]]; then
+    dump_producer_admission_exit=0
+    "$RELEASE_RETENTION_HELPER" admission-status >/dev/null 2>&1 || dump_producer_admission_exit=$?
+    case "$dump_producer_admission_exit" in
+        0) dump_producer_admission_status=pass ;;
+        70) dump_producer_admission_status=blocked ;;
+        75) dump_producer_admission_status=retryable ;;
+        *) dump_producer_admission_status=invalid ;;
+    esac
+fi
+kv dump_producer_admission.status "$dump_producer_admission_status"
+kv dump_producer_admission.contract registry_manifest_required
 kv backup_artifacts.retention "$(candidate_if_positive "$backup_dump_count" needs_decision)"
 
 section restore_inputs

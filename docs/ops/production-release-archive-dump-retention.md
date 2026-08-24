@@ -18,8 +18,9 @@ The helper recognizes only these protected roots and identities:
 - the fixed `/etc/fh/legacy-release-hold.v1.json` for the two explicitly held
   legacy archives; see `production-legacy-release-hold.md`.
 - root-owned backup sets below `/root/backups/easyappointments` whose
-  `db/easyappointments.sql.gz` has an exact canonical, independently
-  restore-verified attestation below
+  exact canonical `meta/backup.env` is admitted by the compile-time-pinned
+  `dump_producer_registry.v1`, and whose `db/easyappointments.sql.gz` has an
+  exact canonical, independently restore-verified attestation below
   `/var/lib/fh-deploy-evidence/dump-attestations`.
 
 Unknown names, unsafe ownership/mode/type/link identity, mount crossings,
@@ -28,6 +29,18 @@ Runner, known deploy/backup work, a busy global production-change lock, or an
 open deletion candidate blocks execute mode. Output is aggregate-only: no
 release, archive, backup, dump, or application-storage names or bytes are
 printed.
+
+The same helper exposes the separate read-only `admission-status` command
+documented in `production-dump-producer-admission.md`. It acquires the shared
+lock, rechecks activity, validates every registered manifest/attestation
+binding and fixed top-level authority, and reports aggregate counts plus the
+pinned registry digest and zero-mutation ledger. It has no execute variant;
+unknown producers, objects, writers, schemas, or manifest drift return blocked
+rather than weakening this retention contract.
+An exact canonical pending continuity handoff may identify one manifest-bound
+set before its restore attestation is published. It remains separately counted
+as pending and forces `execution_ready=false`; it is never a verified retention
+candidate or an unclassified foreign object.
 
 Every `prod_release_archive_dump_retention.v3` result also carries
 `mutation_outcome` and fixed aggregate `mutation_counts`. `none` means no

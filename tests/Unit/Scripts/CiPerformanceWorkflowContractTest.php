@@ -21,8 +21,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
             __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
         );
 
-        self::assertSame(13, $policy['workload_contract']['version']);
-        self::assertSame('2026-08-20T04:03:15Z', $policy['workload_contract']['cohort_epoch_utc']);
+        self::assertSame(14, $policy['workload_contract']['version']);
+        self::assertSame('2026-08-23T22:12:15Z', $policy['workload_contract']['cohort_epoch_utc']);
         self::assertSame(
             array_keys($jobs),
             array_keys($policy['comparison_profile']['consumer_conclusions']),
@@ -173,6 +173,8 @@ class CiPerformanceWorkflowContractTest extends TestCase
         self::assertStringContainsString('scripts/ops/systemd/fh-app-log-retention.timer', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeployment);
+        self::assertStringContainsString('scripts/ops/systemd/fh-dump-producer-admission.service', $rootDeployment);
+        self::assertStringContainsString('scripts/ops/systemd/fh-dump-producer-admission.timer', $rootDeployment);
         self::assertStringContainsString(
             'sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit',
             $rootDeployment,

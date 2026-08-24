@@ -67,6 +67,11 @@ final class ProdCleanupInventoryTest extends TestCase
             self::assertStringContainsString('release_dirs.failed.count=1', $result['stdout']);
             self::assertStringContainsString('release_archives.count=2', $result['stdout']);
             self::assertStringContainsString('backup_dumps.count=1', $result['stdout']);
+            self::assertStringContainsString('dump_producer_admission.status=unavailable', $result['stdout']);
+            self::assertStringContainsString(
+                'dump_producer_admission.contract=registry_manifest_required',
+                $result['stdout'],
+            );
             self::assertStringContainsString('restore_inputs.file_count_class=1-100', $result['stdout']);
             self::assertStringContainsString('sessions.file_count_class=1-100', $result['stdout']);
             self::assertStringContainsString('cleanup_candidate.prev_release_dirs=needs_review', $result['stdout']);
@@ -125,6 +130,51 @@ final class ProdCleanupInventoryTest extends TestCase
                 'cleanup_candidate.prev_release_dirs=keep_current_rollback',
                 $result['stdout'],
             );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testInventoryMapsEveryAdmissionExitClassWithoutForwardingHelperOutput(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-cleanup-inventory-admission-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $webRoot = $workspace . '/web';
+        $appRoot = $webRoot . '/easyappointments';
+        $helper = $workspace . '/release-retention-helper';
+
+        mkdir($stubBin, 0777, true);
+        mkdir($appRoot, 0777, true);
+
+        try {
+            $this->writeSshStub($stubBin);
+            file_put_contents($appRoot . '/_RELEASE', "ea_current 2026-06-04T15:23:36Z\n");
+
+            foreach ([0 => 'pass', 70 => 'blocked', 75 => 'retryable', 64 => 'invalid'] as $exit => $status) {
+                file_put_contents(
+                    $helper,
+                    "#!/usr/bin/env bash\nprintf 'sensitive-helper-output\\n'\nprintf 'sensitive-helper-error\\n' >&2\nexit {$exit}\n",
+                );
+                chmod($helper, 0755);
+
+                $result = $this->runCommand(
+                    ['bash', 'scripts/ops/prod_cleanup_inventory.sh', '--prod-ssh-target', 'prod.example'],
+                    $this->repoRoot(),
+                    [
+                        'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                        'CLEANUP_WEB_ROOT' => $webRoot,
+                        'CLEANUP_APP_ROOT' => $appRoot,
+                        'CLEANUP_RELEASES_DIR' => $workspace . '/releases',
+                        'CLEANUP_BACKUP_DIR' => $workspace . '/backups/easyappointments',
+                        'CLEANUP_REBUILD_RESTORE_INPUTS_DIR' => $workspace . '/rebuild-restore-inputs',
+                        'CLEANUP_RELEASE_RETENTION_HELPER' => $helper,
+                    ],
+                );
+
+                self::assertSame(0, $result['exit_code'], $result['stderr']);
+                self::assertStringContainsString('dump_producer_admission.status=' . $status, $result['stdout']);
+                self::assertStringNotContainsString('sensitive-helper', $result['stdout'] . $result['stderr']);
+            }
         } finally {
             $this->removeDirectory($workspace);
         }

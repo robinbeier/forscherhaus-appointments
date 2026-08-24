@@ -75,6 +75,17 @@ fsyncs files and directories before an atomic no-replace rename makes the final
 set visible. Only a completely published set may advance
 `last_backup_success.utc`; marker updates are monotonic and durable.
 
+The exact six-line `meta/backup.env` published with each set is also the
+canonical `production_backup_set.v1` admission manifest. The reviewed
+`dump_producer_registry.v1` maps that schema and its fixed paths to the single
+producer and restore authority; its canonical bytes are compile-time pinned in
+the retention helper. The entry also freezes purpose, owner/group/mode/link,
+staging, locks, no-clobber publication, lifecycle, recovery, and runbook
+authority. Admission and retention require the manifest set ID,
+creation time, dump digest, compressed size, and uncompressed size to agree
+with the set, dump, and restore attestation. A missing or invalid manifest is
+never repaired, inferred, or treated as legacy-compatible.
+
 Producer-owned crash prefixes are reconciled under both locks. Foreign,
 unsafe, linked or ambiguous temporary objects block without mutation. A final
 set is never overwritten or relabelled with a newer timestamp. Output is one

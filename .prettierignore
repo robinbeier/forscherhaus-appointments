@@ -11,5 +11,6 @@ system
 vendor
 scripts/release-gate/dashboard_release_gate.php
 scripts/release-gate/booking_confirmation_pdf_gate.php
+scripts/ops/config/dump_producer_registry.v1.json
 tests/Fixtures/deployment-contract-v1/*.json
 tests/Fixtures/deployment-host-runner-v1/*.json

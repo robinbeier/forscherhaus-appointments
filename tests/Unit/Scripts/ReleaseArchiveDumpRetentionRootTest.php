@@ -18,6 +18,8 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
     private const LEGACY_HOLD = '/etc/fh/legacy-release-hold.v1.json';
     private string $helper;
     private bool $legacyHoldFixtureCreated = false;
+    /** @var array<string, string> */
+    private array $dumpLeaves = [];
 
     protected function setUp(): void
     {
@@ -187,6 +189,10 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         ];
         file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
         chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        $markerTime = \DateTimeImmutable::createFromFormat('!Ymd\THis\Z', $leaf, new \DateTimeZone('UTC'));
+        self::assertInstanceOf(\DateTimeImmutable::class, $markerTime);
+        file_put_contents(self::BACKUPS . '/last_backup_success.utc', $markerTime->format('Y-m-d\TH:i:s\Z') . "\n");
+        chmod(self::BACKUPS . '/last_backup_success.utc', 0600);
         $state = [
             'handoff' => $handoff,
             'schema' => 'production_backup_continuity_state.v1',
@@ -201,12 +207,77 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame(0, $this->decode($result)['dump_foreign_count']);
         self::assertSame(3, $this->decode($result)['protected_verified_dump_count']);
 
+        $this->dumpSet('pending', 60);
+        $pendingLeaf = $this->dumpLeaf('pending');
+        $bytes = 'dump-pending';
+        $handoff = [
+            'backup_set_id' => $pendingLeaf,
+            'compressed_size_bytes' => strlen($bytes),
+            'dump_sha256' => hash('sha256', $bytes),
+            'schema' => 'production_backup_set_handoff.v1',
+            'uncompressed_size_bytes' => strlen($bytes),
+        ];
+        file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
+        chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        $markerTime = \DateTimeImmutable::createFromFormat('!Ymd\THis\Z', $pendingLeaf, new \DateTimeZone('UTC'));
+        self::assertInstanceOf(\DateTimeImmutable::class, $markerTime);
+        file_put_contents(self::BACKUPS . '/last_backup_success.utc', $markerTime->format('Y-m-d\TH:i:s\Z') . "\n");
+        chmod(self::BACKUPS . '/last_backup_success.utc', 0600);
+        $state['handoff'] = $handoff;
         $state['status'] = 'pending';
         file_put_contents(self::BACKUPS . '/backup_continuity_state.json', $this->canonical($state));
         chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
+        $pendingAttestationPath = self::ATTESTATIONS . '/' . hash('sha256', $bytes) . '.json';
+        $pendingAttestation = (string) file_get_contents($pendingAttestationPath);
+        unlink($pendingAttestationPath);
         $pending = $this->runHelper('dry-run');
         self::assertSame(0, $pending['exit'], $pending['stdout'] . $pending['stderr']);
-        self::assertSame(1, $this->decode($pending)['dump_foreign_count']);
+        $pendingValue = $this->decode($pending);
+        self::assertSame(0, $pendingValue['dump_foreign_count']);
+        self::assertSame(1, $pendingValue['dump_pending_restore_verification_count']);
+        self::assertFalse($pendingValue['execution_ready']);
+        $pendingAdmission = $this->runHelper('admission-status');
+        self::assertSame(75, $pendingAdmission['exit'], $pendingAdmission['stdout'] . $pendingAdmission['stderr']);
+        $pendingAdmissionValue = $this->decode($pendingAdmission);
+        self::assertSame('restore_verification_pending', $pendingAdmissionValue['reason']);
+        self::assertSame(4, $pendingAdmissionValue['manifest_bound_dump_count']);
+        self::assertSame(3, $pendingAdmissionValue['verified_dump_count']);
+
+        $this->dumpSet('pending-execute-candidate', 50 * 86400);
+        $pendingExecute = $this->runHelper('execute');
+        self::assertSame(75, $pendingExecute['exit'], $pendingExecute['stdout'] . $pendingExecute['stderr']);
+        $pendingExecuteValue = $this->decode($pendingExecute);
+        self::assertSame('retryable', $pendingExecuteValue['status']);
+        self::assertSame('restore_verification_pending', $pendingExecuteValue['reason']);
+        self::assertFalse($pendingExecuteValue['deletion_performed']);
+        self::assertSame('none', $pendingExecuteValue['mutation_outcome']);
+        self::assertSame(0, array_sum($pendingExecuteValue['mutation_counts']));
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('pending-execute-candidate'));
+        self::assertDirectoryExists('/var/www/html/easyappointments_prev_legacy');
+
+        $markerTemp = self::STATE . '/.last-success.json.tmp-' . str_repeat('d', 32);
+        file_put_contents($markerTemp, "trusted recovery temp\n");
+        chmod($markerTemp, 0600);
+        $pendingRecovery = $this->runHelper('execute');
+        self::assertSame(75, $pendingRecovery['exit'], $pendingRecovery['stdout'] . $pendingRecovery['stderr']);
+        $pendingRecoveryValue = $this->decode($pendingRecovery);
+        self::assertSame('retryable', $pendingRecoveryValue['status']);
+        self::assertSame('restore_verification_pending', $pendingRecoveryValue['reason']);
+        self::assertTrue($pendingRecoveryValue['deletion_performed']);
+        self::assertSame('known', $pendingRecoveryValue['mutation_outcome']);
+        self::assertSame(1, $pendingRecoveryValue['mutation_counts']['marker_temp_files']);
+        self::assertSame(0, $pendingRecoveryValue['mutation_counts']['archive_files']);
+        self::assertSame(0, $pendingRecoveryValue['mutation_counts']['dump_sets']);
+        self::assertSame(0, $pendingRecoveryValue['mutation_counts']['release_dirs']);
+        self::assertSame(1, array_sum($pendingRecoveryValue['mutation_counts']));
+        self::assertFileDoesNotExist($markerTemp);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('pending-execute-candidate'));
+        self::assertDirectoryExists('/var/www/html/easyappointments_prev_legacy');
+
+        file_put_contents($pendingAttestationPath, $pendingAttestation);
+        chmod($pendingAttestationPath, 0600);
         $state['status'] = 'verified';
         file_put_contents(self::BACKUPS . '/backup_continuity_state.json', $this->canonical($state));
         chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
@@ -221,6 +292,391 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
         chmod(self::BACKUPS . '/last_backup_set.json', 0600);
         self::assertSame(70, $this->runHelper('dry-run')['exit']);
+    }
+
+    public function testStalePendingContinuityFailsClosedWithoutCandidateMutation(): void
+    {
+        $handoff = json_decode(
+            (string) file_get_contents(self::BACKUPS . '/last_backup_set.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($handoff);
+        self::assertIsString($handoff['backup_set_id']);
+        self::assertIsString($handoff['dump_sha256']);
+        file_put_contents(
+            self::BACKUPS . '/backup_continuity_state.json',
+            $this->canonical([
+                'handoff' => $handoff,
+                'schema' => 'production_backup_continuity_state.v1',
+                'status' => 'pending',
+            ]),
+        );
+        chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
+        unlink(self::ATTESTATIONS . '/' . $handoff['dump_sha256'] . '.json');
+
+        $admission = $this->runHelper('admission-status');
+
+        self::assertSame(70, $admission['exit'], $admission['stdout'] . $admission['stderr']);
+        $admissionValue = $this->decode($admission);
+        self::assertSame('blocked', $admissionValue['status']);
+        self::assertSame('pending_restore_outside_recovery_window', $admissionValue['reason']);
+        self::assertFalse($admissionValue['deletion_performed']);
+        self::assertSame('none', $admissionValue['mutation_outcome']);
+        self::assertSame(0, array_sum($admissionValue['mutation_counts']));
+
+        $execute = $this->runHelper('execute');
+
+        self::assertSame(70, $execute['exit'], $execute['stdout'] . $execute['stderr']);
+        $executeValue = $this->decode($execute);
+        self::assertSame('blocked', $executeValue['status']);
+        self::assertSame('pending_restore_outside_recovery_window', $executeValue['reason']);
+        self::assertFalse($executeValue['deletion_performed']);
+        self::assertSame('none', $executeValue['mutation_outcome']);
+        self::assertSame(0, array_sum($executeValue['mutation_counts']));
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        self::assertDirectoryExists(self::BACKUPS . '/' . $handoff['backup_set_id']);
+        self::assertDirectoryExists('/var/www/html/easyappointments_prev_legacy');
+    }
+
+    public function testFuturePendingContinuityFailsClosedWithoutCandidateMutation(): void
+    {
+        $this->dumpSet('future-pending', -3600);
+        $leaf = $this->dumpLeaf('future-pending');
+        $bytes = 'dump-future-pending';
+        $handoff = [
+            'backup_set_id' => $leaf,
+            'compressed_size_bytes' => strlen($bytes),
+            'dump_sha256' => hash('sha256', $bytes),
+            'schema' => 'production_backup_set_handoff.v1',
+            'uncompressed_size_bytes' => strlen($bytes),
+        ];
+        file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
+        chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        $markerTime = \DateTimeImmutable::createFromFormat('!Ymd\THis\Z', $leaf, new \DateTimeZone('UTC'));
+        self::assertInstanceOf(\DateTimeImmutable::class, $markerTime);
+        file_put_contents(self::BACKUPS . '/last_backup_success.utc', $markerTime->format('Y-m-d\TH:i:s\Z') . "\n");
+        chmod(self::BACKUPS . '/last_backup_success.utc', 0600);
+        file_put_contents(
+            self::BACKUPS . '/backup_continuity_state.json',
+            $this->canonical([
+                'handoff' => $handoff,
+                'schema' => 'production_backup_continuity_state.v1',
+                'status' => 'pending',
+            ]),
+        );
+        chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
+
+        foreach (['admission-status', 'execute'] as $command) {
+            $result = $this->runHelper($command);
+
+            self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+            $value = $this->decode($result);
+            self::assertSame('blocked', $value['status']);
+            self::assertSame('pending_restore_outside_recovery_window', $value['reason']);
+            self::assertFalse($value['deletion_performed']);
+            self::assertSame('none', $value['mutation_outcome']);
+            self::assertSame(0, array_sum($value['mutation_counts']));
+        }
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+        self::assertDirectoryExists(self::BACKUPS . '/' . $leaf);
+        self::assertDirectoryExists('/var/www/html/easyappointments_prev_legacy');
+    }
+
+    public function testPendingFreshnessIsClassifiedOnlyAfterExactHandoffBinding(): void
+    {
+        $handoff = json_decode(
+            (string) file_get_contents(self::BACKUPS . '/last_backup_set.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($handoff);
+        $handoff['backup_set_id'] = '20200101T000000Z';
+        file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
+        chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        file_put_contents(self::BACKUPS . '/last_backup_success.utc', "2020-01-01T00:00:00Z\n");
+        chmod(self::BACKUPS . '/last_backup_success.utc', 0600);
+        file_put_contents(
+            self::BACKUPS . '/backup_continuity_state.json',
+            $this->canonical([
+                'handoff' => $handoff,
+                'schema' => 'production_backup_continuity_state.v1',
+                'status' => 'pending',
+            ]),
+        );
+        chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
+
+        $admission = $this->runHelper('admission-status');
+
+        self::assertSame(70, $admission['exit'], $admission['stdout'] . $admission['stderr']);
+        $value = $this->decode($admission);
+        self::assertSame('blocked', $value['status']);
+        self::assertSame('backup_set_handoff_mismatch', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+    }
+
+    public function testAdmissionStatusAcceptsOnlyManifestBoundSetsAndIsAggregateOnly(): void
+    {
+        $result = $this->runHelper('admission-status');
+
+        self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('prod_dump_producer_admission.v1', $value['schema']);
+        self::assertSame('pass', $value['status']);
+        self::assertSame(1, $value['authorized_producer_count']);
+        self::assertSame(3, $value['manifest_bound_dump_count']);
+        self::assertSame(0, $value['foreign_count']);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/', $value['producer_registry_sha256']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertStringNotContainsString($this->dumpLeaf('old'), $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('dump-old', $result['stdout'] . $result['stderr']);
+    }
+
+    public function testAdmissionStatusRequiresEveryFixedTopLevelAuthority(): void
+    {
+        foreach (
+            [
+                '.backup-set-producer.lock',
+                'backup_continuity_state.json',
+                'last_backup_set.json',
+                'last_backup_success.utc',
+                'last_verify_success.utc',
+            ]
+            as $leaf
+        ) {
+            $path = self::BACKUPS . '/' . $leaf;
+            $bytes = (string) file_get_contents($path);
+            unlink($path);
+
+            $result = $this->runHelper('admission-status');
+
+            self::assertSame(70, $result['exit'], $leaf . ': ' . $result['stdout'] . $result['stderr']);
+            $value = $this->decode($result);
+            self::assertSame('blocked', $value['status']);
+            self::assertSame('missing_backup_authority', $value['reason']);
+            self::assertSame(0, array_sum($value['mutation_counts']));
+            file_put_contents($path, $bytes);
+            chmod($path, 0600);
+        }
+    }
+
+    public function testAdmissionStatusRejectsMalformedOrLinkedAuthorityObjects(): void
+    {
+        $marker = self::BACKUPS . '/last_backup_success.utc';
+        $markerBytes = (string) file_get_contents($marker);
+        file_put_contents($marker, "not-a-utc-marker\n");
+        chmod($marker, 0600);
+
+        $malformed = $this->runHelper('admission-status');
+
+        self::assertSame(70, $malformed['exit'], $malformed['stdout'] . $malformed['stderr']);
+        self::assertSame('invalid_backup_authority', $this->decode($malformed)['reason']);
+        self::assertSame(0, array_sum($this->decode($malformed)['mutation_counts']));
+        file_put_contents($marker, $markerBytes);
+        chmod($marker, 0600);
+
+        $lock = self::BACKUPS . '/.backup-set-producer.lock';
+        $alias = sys_get_temp_dir() . '/rob483-authority-link-' . bin2hex(random_bytes(8));
+        self::assertTrue(link($lock, $alias));
+        try {
+            $linked = $this->runHelper('admission-status');
+            self::assertSame(70, $linked['exit'], $linked['stdout'] . $linked['stderr']);
+            self::assertSame('unsafe_file', $this->decode($linked)['reason']);
+            self::assertSame(0, array_sum($this->decode($linked)['mutation_counts']));
+        } finally {
+            unlink($alias);
+        }
+    }
+
+    public function testAdmissionStatusRejectsBackupSuccessMarkerThatDoesNotMatchHandoff(): void
+    {
+        $marker = self::BACKUPS . '/last_backup_success.utc';
+        $markerBytes = (string) file_get_contents($marker);
+        file_put_contents($marker, "2000-01-01T00:00:00Z\n");
+        chmod($marker, 0600);
+
+        try {
+            $admission = $this->runHelper('admission-status');
+            self::assertSame(70, $admission['exit'], $admission['stdout'] . $admission['stderr']);
+            self::assertSame('backup_success_marker_mismatch', $this->decode($admission)['reason']);
+            self::assertSame(0, array_sum($this->decode($admission)['mutation_counts']));
+
+            $retention = $this->runHelper('dry-run');
+            self::assertSame(70, $retention['exit'], $retention['stdout'] . $retention['stderr']);
+            self::assertSame('backup_success_marker_mismatch', $this->decode($retention)['reason']);
+            self::assertSame(0, array_sum($this->decode($retention)['mutation_counts']));
+        } finally {
+            file_put_contents($marker, $markerBytes);
+            chmod($marker, 0600);
+        }
+    }
+
+    public function testAdmissionStatusBlocksUnknownTopLevelEntryWithoutLeakingItsIdentity(): void
+    {
+        $secretLeaf = 'foreign-high-entropy-' . str_repeat('x', 32);
+        file_put_contents(self::BACKUPS . '/' . $secretLeaf, 'secret material');
+        chmod(self::BACKUPS . '/' . $secretLeaf, 0600);
+
+        $result = $this->runHelper('admission-status');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('prod_dump_producer_admission.v1', $value['schema']);
+        self::assertSame('blocked', $value['status']);
+        self::assertSame('unclassified_dump_entry', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertStringNotContainsString($secretLeaf, $result['stdout'] . $result['stderr']);
+        self::assertFileExists(self::BACKUPS . '/' . $secretLeaf);
+    }
+
+    public function testMissingInvalidAndUnsafeBackupManifestsFailClosed(): void
+    {
+        $leaf = $this->dumpLeaf('old');
+        $manifest = self::BACKUPS . '/' . $leaf . '/meta/backup.env';
+        $original = (string) file_get_contents($manifest);
+
+        unlink($manifest);
+        $missing = $this->runHelper('admission-status');
+        self::assertSame(70, $missing['exit'], $missing['stdout'] . $missing['stderr']);
+        self::assertSame('invalid_backup_set_manifest', $this->decode($missing)['reason']);
+
+        file_put_contents($manifest, str_replace('production_backup_set.v1', 'unknown_backup_set.v1', $original));
+        chmod($manifest, 0600);
+        $invalid = $this->runHelper('admission-status');
+        self::assertSame(70, $invalid['exit'], $invalid['stdout'] . $invalid['stderr']);
+        self::assertSame('invalid_backup_set_manifest', $this->decode($invalid)['reason']);
+
+        file_put_contents($manifest, $original);
+        chmod($manifest, 0644);
+        $unsafe = $this->runHelper('admission-status');
+        self::assertSame(70, $unsafe['exit'], $unsafe['stdout'] . $unsafe['stderr']);
+        self::assertSame('unsafe_file', $this->decode($unsafe)['reason']);
+
+        chmod($manifest, 0600);
+
+        $alias = sys_get_temp_dir() . '/rob483-manifest-link-' . bin2hex(random_bytes(8));
+        self::assertTrue(link($manifest, $alias));
+        try {
+            $linked = $this->runHelper('admission-status');
+            self::assertSame(70, $linked['exit'], $linked['stdout'] . $linked['stderr']);
+            self::assertSame('unsafe_file', $this->decode($linked)['reason']);
+        } finally {
+            unlink($alias);
+        }
+
+        chown($manifest, 'www-data');
+        $wrongOwner = $this->runHelper('admission-status');
+        self::assertSame(70, $wrongOwner['exit'], $wrongOwner['stdout'] . $wrongOwner['stderr']);
+        self::assertSame('unsafe_file', $this->decode($wrongOwner)['reason']);
+        chown($manifest, 0);
+
+        $meta = dirname($manifest);
+        chmod($meta, 0755);
+        $wrongDirectoryMode = $this->runHelper('admission-status');
+        self::assertSame(
+            70,
+            $wrongDirectoryMode['exit'],
+            $wrongDirectoryMode['stdout'] . $wrongDirectoryMode['stderr'],
+        );
+        self::assertSame('unsafe_directory_mode', $this->decode($wrongDirectoryMode)['reason']);
+        chmod($meta, 0700);
+
+        $dump = dirname($meta) . '/db/easyappointments.sql.gz';
+        chmod($dump, 0640);
+        $wrongDumpMode = $this->runHelper('admission-status');
+        self::assertSame(70, $wrongDumpMode['exit'], $wrongDumpMode['stdout'] . $wrongDumpMode['stderr']);
+        self::assertSame('unsafe_file', $this->decode($wrongDumpMode)['reason']);
+        chmod($dump, 0600);
+
+        $renamedMeta = dirname($meta) . '/metadata';
+        rename($meta, $renamedMeta);
+        $wrongPath = $this->runHelper('admission-status');
+        self::assertSame(70, $wrongPath['exit'], $wrongPath['stdout'] . $wrongPath['stderr']);
+        self::assertSame('invalid_backup_set_manifest', $this->decode($wrongPath)['reason']);
+        rename($renamedMeta, $meta);
+    }
+
+    public function testAdmissionStatusReturnsRetryableWhenTheGlobalLockIsBusy(): void
+    {
+        $lock = fopen(self::ORCHESTRATOR . '/locks/fh-production-change.lock', 'r+b');
+        self::assertIsResource($lock);
+        self::assertTrue(flock($lock, LOCK_EX | LOCK_NB));
+        try {
+            $result = $this->runHelper('admission-status');
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('retryable', $value['status']);
+        self::assertSame('active_production_work', $value['reason']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('old'));
+        self::assertFileDoesNotExist(self::STATE . '/last-success.json');
+    }
+
+    public function testAdmissionStatusClassifiesPostScanActivityAsRetryable(): void
+    {
+        $result = $this->runPatchedHelper(
+            "        if activity_count() != 0:\n            reject('active_production_work', 75)\n        payload = {",
+            "        reject('active_production_work', 75)\n        payload = {",
+            'admission-status',
+        );
+
+        self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('retryable', $value['status']);
+        self::assertSame('active_production_work', $value['reason']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('old'));
+    }
+
+    public function testAdmissionStatusRejectsAttestationTimeThatDoesNotMatchTheManifest(): void
+    {
+        $path = self::ATTESTATIONS . '/' . $this->dumpSha('old') . '.json';
+        $attestation = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+        $created = strtotime($attestation['dump']['created_at_utc']);
+        self::assertIsInt($created);
+        $attestation['dump']['created_at_utc'] = gmdate('Y-m-d\TH:i:s\Z', $created - 1);
+        file_put_contents($path, $this->canonical($attestation));
+        chmod($path, 0600);
+
+        $result = $this->runHelper('admission-status');
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('backup_manifest_attestation_mismatch', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('old'));
+    }
+
+    public function testAdmissionStatusPreservesOnlyTheSafeRegisteredInstallerSnapshotClass(): void
+    {
+        $snapshot = self::BACKUPS . '/install-snapshots';
+        mkdir($snapshot, 0700);
+        file_put_contents($snapshot . '/evidence.bin', 'installer evidence');
+        chmod($snapshot . '/evidence.bin', 0600);
+
+        $accepted = $this->runHelper('admission-status');
+        self::assertSame(0, $accepted['exit'], $accepted['stdout'] . $accepted['stderr']);
+        self::assertSame('pass', $this->decode($accepted)['status']);
+        self::assertFileExists($snapshot . '/evidence.bin');
+
+        chmod($snapshot, 0777);
+        $unsafe = $this->runHelper('admission-status');
+        self::assertSame(70, $unsafe['exit'], $unsafe['stdout'] . $unsafe['stderr']);
+        self::assertSame('candidate_directory_mode', $this->decode($unsafe)['reason']);
+        chmod($snapshot, 0700);
     }
 
     public function testUnknownEntryBusyLockAndOpenCandidateFailClosedWithoutDeletion(): void
@@ -859,6 +1315,39 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
             $this->dumpSet($name, $age);
         }
 
+        file_put_contents(self::BACKUPS . '/.backup-set-producer.lock', '');
+        chmod(self::BACKUPS . '/.backup-set-producer.lock', 0600);
+        $newBytes = 'dump-new';
+        $handoff = [
+            'backup_set_id' => $this->dumpLeaf('new'),
+            'compressed_size_bytes' => strlen($newBytes),
+            'dump_sha256' => hash('sha256', $newBytes),
+            'schema' => 'production_backup_set_handoff.v1',
+            'uncompressed_size_bytes' => strlen($newBytes),
+        ];
+        file_put_contents(self::BACKUPS . '/last_backup_set.json', $this->canonical($handoff));
+        chmod(self::BACKUPS . '/last_backup_set.json', 0600);
+        file_put_contents(
+            self::BACKUPS . '/backup_continuity_state.json',
+            $this->canonical([
+                'handoff' => $handoff,
+                'schema' => 'production_backup_continuity_state.v1',
+                'status' => 'verified',
+            ]),
+        );
+        chmod(self::BACKUPS . '/backup_continuity_state.json', 0600);
+        $markerTime = \DateTimeImmutable::createFromFormat(
+            '!Ymd\THis\Z',
+            $handoff['backup_set_id'],
+            new \DateTimeZone('UTC'),
+        );
+        self::assertInstanceOf(\DateTimeImmutable::class, $markerTime);
+        $marker = $markerTime->format('Y-m-d\TH:i:s\Z') . "\n";
+        file_put_contents(self::BACKUPS . '/last_backup_success.utc', $marker);
+        chmod(self::BACKUPS . '/last_backup_success.utc', 0600);
+        file_put_contents(self::BACKUPS . '/last_verify_success.utc', $marker);
+        chmod(self::BACKUPS . '/last_verify_success.utc', 0600);
+
         mkdir(self::ORCHESTRATOR . '/locks', 0700, true);
         touch(self::ORCHESTRATOR . '/locks/fh-production-change.lock');
         chmod(self::ORCHESTRATOR . '/locks/fh-production-change.lock', 0600);
@@ -918,19 +1407,39 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
     private function dumpSet(string $name, int $age): void
     {
-        $dir = self::BACKUPS . '/' . $this->dumpLeaf($name) . '/db';
+        $whenTimestamp = time() - $age;
+        $leaf = gmdate('Ymd\THis\Z', $whenTimestamp);
+        $this->dumpLeaves[$name] = $leaf;
+        $dir = self::BACKUPS . '/' . $leaf . '/db';
         mkdir($dir, 0700, true);
+        $meta = self::BACKUPS . '/' . $leaf . '/meta';
+        mkdir($meta, 0700);
         $bytes = 'dump-' . $name;
         file_put_contents($dir . '/easyappointments.sql.gz', $bytes);
         chmod($dir . '/easyappointments.sql.gz', 0600);
         $sha = hash('sha256', $bytes);
-        $when = gmdate('Y-m-d\TH:i:s\Z', time() - $age);
+        $created = gmdate('Y-m-d\TH:i:s\Z', $whenTimestamp);
+        file_put_contents(
+            $meta . '/backup.env',
+            "schema=production_backup_set.v1\n" .
+                "backup_set_id={$leaf}\n" .
+                "created_at_utc={$created}\n" .
+                "dump_sha256={$sha}\n" .
+                'compressed_size_bytes=' .
+                strlen($bytes) .
+                "\n" .
+                'uncompressed_size_bytes=' .
+                strlen($bytes) .
+                "\n",
+        );
+        chmod($meta . '/backup.env', 0600);
+        $when = $created;
         file_put_contents(
             self::ATTESTATIONS . '/' . $sha . '.json',
             $this->canonical([
                 'attested_at_utc' => $when,
                 'dump' => [
-                    'created_at_utc' => $when,
+                    'created_at_utc' => $created,
                     'sha256' => $sha,
                     'size_bytes' => strlen($bytes),
                     'uncompressed_size_bytes' => strlen($bytes),
@@ -1015,8 +1524,8 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
     private function dumpLeaf(string $name): string
     {
-        $offset = abs((int) crc32($name)) % (300 * 86400);
-        return gmdate('Ymd\THis\Z', strtotime('2026-01-01T00:00:00Z') + $offset);
+        self::assertArrayHasKey($name, $this->dumpLeaves);
+        return $this->dumpLeaves[$name];
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */
