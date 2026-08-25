@@ -694,16 +694,6 @@ try:
 except ContractError as error:
     emit('fail', False, error.mutated, rollback=error.rollback, reason=error.reason)
     raise SystemExit(70)
-except (OSError, ValueError, TypeError) as error:
-    reason = 'internal_error'
-    if '--root-prefix' in sys.argv:
-        root_index = sys.argv.index('--root-prefix') + 1
-        if root_index < len(sys.argv) and Path(sys.argv[root_index]) != Path('/'):
-            traceback = error.__traceback__
-            while traceback is not None and traceback.tb_next is not None:
-                traceback = traceback.tb_next
-            line = traceback.tb_lineno if traceback is not None else 0
-            error_number = error.errno if isinstance(error, OSError) else 0
-            reason = f'internal_error_{type(error).__name__}_{error_number}_{line}'
-    emit('fail', False, False, reason=reason)
+except (OSError, ValueError, TypeError):
+    emit('fail', False, False, reason='internal_error')
     raise SystemExit(70)
