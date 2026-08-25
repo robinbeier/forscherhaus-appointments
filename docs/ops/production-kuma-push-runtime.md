@@ -94,6 +94,10 @@ published verified runtime. If cron restoration or its durability sync cannot
 be proven, the runtime remains installed so migrated cron entries never point
 at an intentionally removed target; the result is truthfully reported as a
 failed rollback with a performed mutation. Recovery records remain root-only.
+Rollback restores the saved cron only while the current bytes still equal the
+version published by this transaction; a concurrent root-owned replacement is
+never overwritten and instead produces the same fail-closed retained-runtime
+state.
 Every later installed-state inspect revalidates the exact recovery directory,
 cron backup and canonical recovery metadata; missing, additional or changed
 recovery evidence fails closed.

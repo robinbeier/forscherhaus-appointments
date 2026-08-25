@@ -553,6 +553,18 @@ def execute(context):
             fsync_directory(context['cron'].parent)
             if (
                 not context['production']
+                and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_CHANGE') == '1'
+            ):
+                _, concurrent_identity = stable_read(
+                    context['cron'], context['expected_uid'], {0o644}, MAX_CRON_BYTES,
+                )
+                atomic_replace(
+                    context['cron'], context['desired_data'] + b'# concurrent-root-change\n',
+                    context['expected_uid'], concurrent_identity,
+                )
+                fsync_directory(context['cron'].parent)
+            if (
+                not context['production']
                 and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE') == '1'
             ):
                 fail('test_failure_after_cron_replace')
@@ -568,9 +580,11 @@ def execute(context):
         if cron_replaced and backup is not None:
             try:
                 backup_data, _ = stable_read(backup, context['expected_uid'], {0o600})
-                _, current_identity = stable_read(
+                current_data, current_identity = stable_read(
                     context['cron'], context['expected_uid'], {0o644}, MAX_CRON_BYTES,
                 )
+                if current_data != context['desired_data']:
+                    fail('cron_changed')
                 atomic_replace(context['cron'], backup_data, context['expected_uid'], current_identity)
                 if (
                     not context['production']

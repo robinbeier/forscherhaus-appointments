@@ -576,6 +576,33 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
+    public function testConcurrentCronChangeBlocksRollbackAndRetainsRuntime(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $beforeCron = file_get_contents($cronPath);
+            self::assertIsString($beforeCron);
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_CHANGE' => '1',
+                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE' => '1',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertSame('rollback_failed', $json['reason'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
+            $afterCron = file_get_contents($cronPath);
+            self::assertIsString($afterCron);
+            self::assertNotSame($beforeCron, $afterCron);
+            self::assertStringContainsString('# concurrent-root-change', $afterCron);
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
     /** @return array<string, mixed> */
     private function manifest(): array
     {
