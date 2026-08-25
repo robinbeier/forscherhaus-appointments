@@ -167,25 +167,24 @@ final class KumaPushRuntimeBundleTest extends TestCase
             mkdir($stubBin, 0755, true);
             mkdir($appRoot . '/storage/logs/ops', 0755, true);
             file_put_contents($credentials, "USERNAME='fixture-user'\nPASSWORD='fixture-password'\n");
-            file_put_contents($envFile, implode(PHP_EOL, [
-                'KUMA_PUSH_URL_PDF_EXPORT=https://kuma.example/push/pdf-export',
-                'KUMA_PDF_EXPORT_APP_ROOT=' . $appRoot,
-                'KUMA_PDF_EXPORT_CREDENTIALS_FILE=' . $credentials,
-                'KUMA_PUSH_ENV_FILE=' . $envFile,
-                '',
-            ]));
+            file_put_contents(
+                $envFile,
+                implode(PHP_EOL, [
+                    'KUMA_PUSH_URL_PDF_EXPORT=https://kuma.example/push/pdf-export',
+                    'KUMA_PDF_EXPORT_APP_ROOT=' . $appRoot,
+                    'KUMA_PDF_EXPORT_CREDENTIALS_FILE=' . $credentials,
+                    'KUMA_PUSH_ENV_FILE=' . $envFile,
+                    '',
+                ]),
+            );
             $this->writePdfPhpStub($stubBin . '/php', $phpLog);
             $this->writeCurlStub($stubBin . '/curl', $curlLog);
 
             $installedPdf = $fixture['root'] . self::INSTALL_ROOT . '/scripts/ops/kuma_push_pdf_export.sh';
-            $result = $this->runCommand(
-                ['bash', $installedPdf],
-                $this->repoRoot(),
-                [
-                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: '/usr/bin:/bin'),
-                    'KUMA_PUSH_ENV_FILE' => $envFile,
-                ],
-            );
+            $result = $this->runCommand(['bash', $installedPdf], $this->repoRoot(), [
+                'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: '/usr/bin:/bin'),
+                'KUMA_PUSH_ENV_FILE' => $envFile,
+            ]);
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             $gateLog = file_get_contents($phpLog);
             self::assertIsString($gateLog);
@@ -195,7 +194,10 @@ final class KumaPushRuntimeBundleTest extends TestCase
             );
             self::assertStringContainsString('RELEASE_GATE_REPO_ROOT=' . $appRoot, $gateLog);
             self::assertStringNotContainsString($fixture['source'] . '/scripts/release-gate', $gateLog);
-            self::assertStringContainsString('https://kuma.example/push/pdf-export', (string) file_get_contents($curlLog));
+            self::assertStringContainsString(
+                'https://kuma.example/push/pdf-export',
+                (string) file_get_contents($curlLog),
+            );
             self::assertFileExists($appRoot . '/storage/logs/ops/kuma-pdf-export-latest.json');
         } finally {
             $this->removeDirectory($workspace);
@@ -459,52 +461,60 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $commit = str_repeat('a', 40);
         mkdir($bin, 0755, true);
         file_put_contents($bin . '/uname', "#!/bin/sh\nprintf '%s\\n' Linux\n");
-        file_put_contents($bin . '/git', <<<'SH'
-#!/bin/sh
-case "$*" in
-  *"rev-parse HEAD"*) printf '%s\n' "$FH_WRAPPER_COMMIT" ;;
-  *) exit 0 ;;
-esac
-SH);
-        file_put_contents($bin . '/ssh', <<<'SH'
-#!/bin/sh
-set -eu
-last=''
-for arg in "$@"; do last="$arg"; done
-stage_root="$FH_WRAPPER_STAGE_ROOT"
-if printf '%s\n' "$last" | grep -q 'mktemp'; then
-  mkdir -p "$stage_root"
-  : > "$FH_WRAPPER_STAGE_MARKER"
-  printf '%s\n' mktemp >> "$FH_WRAPPER_SSH_LOG"
-  printf '%s\n' '/root/.fh-kuma-push-runtime-v1.ABCDEFGH'
-  exit 0
-fi
-if printf '%s\n' "$last" | grep -q 'tar --no-same-owner'; then
-  printf '%s\n' tar >> "$FH_WRAPPER_SSH_LOG"
-  tar -xf - -C "$stage_root"
-  exit 0
-fi
-if printf '%s\n' "$last" | grep -q -- '--source-root'; then
-  if printf '%s\n' "$last" | grep -q -- '--execute'; then
-    printf '%s\n' execute >> "$FH_WRAPPER_SSH_LOG"
-    printf '%s\n' '{"status":"pass","execution_ready":true,"bundle_installed":true,"cron_state":"installed"}'
-  else
-    printf '%s\n' inspect >> "$FH_WRAPPER_SSH_LOG"
-    if [ "${FH_WRAPPER_PREFLIGHT_FAILURE:-0}" = 1 ]; then
-      printf '%s\n' '{"status":"fail","execution_ready":false}'
-      exit 23
-    fi
-    printf '%s\n' '{"status":"pass","execution_ready":true,"mutation_performed":false}'
-  fi
-  exit 0
-fi
-if printf '%s\n' "$last" | grep -q 'rm -rf'; then
-  printf '%s\n' cleanup >> "$FH_WRAPPER_SSH_LOG"
-  rm -rf "$stage_root" "$FH_WRAPPER_STAGE_MARKER"
-  exit 0
-fi
-exit 70
-SH);
+        file_put_contents(
+            $bin . '/git',
+            <<<'SH'
+            #!/bin/sh
+            case "$*" in
+              *"rev-parse HEAD"*) printf '%s\n' "$FH_WRAPPER_COMMIT" ;;
+              *) exit 0 ;;
+            esac
+            SH
+            ,
+        );
+        file_put_contents(
+            $bin . '/ssh',
+            <<<'SH'
+            #!/bin/sh
+            set -eu
+            last=''
+            for arg in "$@"; do last="$arg"; done
+            stage_root="$FH_WRAPPER_STAGE_ROOT"
+            if printf '%s\n' "$last" | grep -q 'mktemp'; then
+              mkdir -p "$stage_root"
+              : > "$FH_WRAPPER_STAGE_MARKER"
+              printf '%s\n' mktemp >> "$FH_WRAPPER_SSH_LOG"
+              printf '%s\n' '/root/.fh-kuma-push-runtime-v1.ABCDEFGH'
+              exit 0
+            fi
+            if printf '%s\n' "$last" | grep -q 'tar --no-same-owner'; then
+              printf '%s\n' tar >> "$FH_WRAPPER_SSH_LOG"
+              tar -xf - -C "$stage_root"
+              exit 0
+            fi
+            if printf '%s\n' "$last" | grep -q -- '--source-root'; then
+              if printf '%s\n' "$last" | grep -q -- '--execute'; then
+                printf '%s\n' execute >> "$FH_WRAPPER_SSH_LOG"
+                printf '%s\n' '{"status":"pass","execution_ready":true,"bundle_installed":true,"cron_state":"installed"}'
+              else
+                printf '%s\n' inspect >> "$FH_WRAPPER_SSH_LOG"
+                if [ "${FH_WRAPPER_PREFLIGHT_FAILURE:-0}" = 1 ]; then
+                  printf '%s\n' '{"status":"fail","execution_ready":false}'
+                  exit 23
+                fi
+                printf '%s\n' '{"status":"pass","execution_ready":true,"mutation_performed":false}'
+              fi
+              exit 0
+            fi
+            if printf '%s\n' "$last" | grep -q 'rm -rf'; then
+              printf '%s\n' cleanup >> "$FH_WRAPPER_SSH_LOG"
+              rm -rf "$stage_root" "$FH_WRAPPER_STAGE_MARKER"
+              exit 0
+            fi
+            exit 70
+            SH
+            ,
+        );
         chmod($bin . '/uname', 0755);
         chmod($bin . '/git', 0755);
         chmod($bin . '/ssh', 0755);
@@ -539,9 +549,14 @@ SH);
 
     private function writePdfPhpStub(string $path, string $logPath): void
     {
-        $script = "#!/bin/sh\nset -eu\n" .
-            "if [ \"\${1:-}\" = '-r' ]; then exec " . escapeshellarg(PHP_BINARY) . " \"\$@\"; fi\n" .
-            "printf 'gate=%s RELEASE_GATE_REPO_ROOT=%s\\n' \"\$1\" \"\${RELEASE_GATE_REPO_ROOT:-}\" >> " . escapeshellarg($logPath) . "\n" .
+        $script =
+            "#!/bin/sh\nset -eu\n" .
+            "if [ \"\${1:-}\" = '-r' ]; then exec " .
+            escapeshellarg(PHP_BINARY) .
+            " \"\$@\"; fi\n" .
+            "printf 'gate=%s RELEASE_GATE_REPO_ROOT=%s\\n' \"\$1\" \"\${RELEASE_GATE_REPO_ROOT:-}\" >> " .
+            escapeshellarg($logPath) .
+            "\n" .
             "output=''\n" .
             "for arg in \"\$@\"; do case \"\$arg\" in --output-json=*) output=\"\${arg#--output-json=}\" ;; esac; done\n" .
             "[ -n \"\$output\" ]\n" .
