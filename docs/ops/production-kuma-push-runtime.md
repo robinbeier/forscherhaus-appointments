@@ -68,6 +68,11 @@ bash scripts/ops/prod_kuma_push_runtime_v1.sh \
   --expected-commit 40_HEX_MERGE_COMMIT
 ```
 
+Before its first SSH call, the wrapper requires the expected commit to equal
+local `HEAD`, the local `refs/remotes/origin/main` commit and the live
+`refs/heads/main` value returned by `git ls-remote origin`. A stale local main,
+an unmerged feature head or live remote drift is therefore a hard stop.
+
 Execute stages only the manifest, helper and closed artifact list under a
 private root directory. The helper verifies source ownership, modes, links and
 hashes; publishes the runtime directory atomically with a Linux no-replace
@@ -76,11 +81,13 @@ under `/var/lib/fh-kuma-push-runtime-v1`; and atomically migrates the cron file.
 The wrapper deletes its private staging directory only after a known successful
 result.
 
-If cron publication or postflight fails after a new runtime publication, the
-helper restores the exact prior cron bytes and removes only the newly published
-verified runtime. Recovery records remain root-only. An unknown transport
-result is never retried: retain the staging directory and perform read-only
-inventory before requesting a separate recovery decision.
+The helper records successful atomic cron publication before the fallible
+directory durability sync. If that sync, any later check or postflight fails
+after a new runtime publication, rollback first restores and durably syncs the
+exact prior cron bytes and only then removes the newly published verified
+runtime. Recovery records remain root-only. An unknown transport result is
+never retried: retain the staging directory and perform read-only inventory
+before requesting a separate recovery decision.
 
 ## Supported inspect, skip and fail states
 

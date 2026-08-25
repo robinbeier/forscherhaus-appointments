@@ -417,11 +417,6 @@ def atomic_replace(path, data, expected_uid, expected_identity):
         if identity(os.lstat(path)) != expected_identity:
             fail('cron_changed')
         os.replace(temporary, path)
-        parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-        try:
-            os.fsync(parent_fd)
-        finally:
-            os.close(parent_fd)
     finally:
         try:
             os.unlink(temporary)
@@ -502,6 +497,12 @@ def execute(context):
             cron_replaced = True
             if (
                 not context['production']
+                and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_DURABILITY') == '1'
+            ):
+                fail('test_failure_during_cron_durability')
+            fsync_directory(context['cron'].parent)
+            if (
+                not context['production']
                 and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE') == '1'
             ):
                 fail('test_failure_after_cron_replace')
@@ -521,6 +522,7 @@ def execute(context):
                     context['cron'], context['expected_uid'], {0o644}, MAX_CRON_BYTES,
                 )
                 atomic_replace(context['cron'], backup_data, context['expected_uid'], current_identity)
+                fsync_directory(context['cron'].parent)
             except BaseException as error:
                 rollback_error = error
         if target_created:

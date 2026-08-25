@@ -116,6 +116,23 @@ HEAD_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
     printf 'ERROR: local HEAD does not match --expected-commit.\n' >&2
     exit 1
 }
+ORIGIN_MAIN_COMMIT="$(git -C "$REPO_ROOT" rev-parse --verify 'refs/remotes/origin/main^{commit}')" || {
+    printf 'ERROR: unable to resolve local origin/main.\n' >&2
+    exit 1
+}
+[[ "$ORIGIN_MAIN_COMMIT" == "$EXPECTED_COMMIT" ]] || {
+    printf 'ERROR: local origin/main does not match --expected-commit.\n' >&2
+    exit 1
+}
+REMOTE_MAIN_OUTPUT="$(git -C "$REPO_ROOT" ls-remote --exit-code origin refs/heads/main)" || {
+    printf 'ERROR: unable to verify live origin/main.\n' >&2
+    exit 1
+}
+EXPECTED_REMOTE_MAIN_OUTPUT="${EXPECTED_COMMIT}"$'\t''refs/heads/main'
+[[ "$REMOTE_MAIN_OUTPUT" == "$EXPECTED_REMOTE_MAIN_OUTPUT" ]] || {
+    printf 'ERROR: live origin/main does not match --expected-commit.\n' >&2
+    exit 1
+}
 git -C "$REPO_ROOT" diff --quiet || {
     printf 'ERROR: tracked worktree changes present.\n' >&2
     exit 1

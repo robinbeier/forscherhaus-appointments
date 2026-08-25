@@ -97,6 +97,28 @@ final class KumaPushRuntimeBundleTest extends TestCase
             self::assertNotSame(0, $wrongCommit['exit_code']);
             self::assertStringContainsString('does not match', $wrongCommit['stderr']);
             self::assertFileDoesNotExist($fixture['ssh_log']);
+
+            $unmerged = $this->runWrapper(array_merge($fixture, ['origin_main_commit' => str_repeat('c', 40)]), [
+                '--execute',
+                '--confirm-live-write',
+                'ROB-489',
+                '--expected-commit',
+                $fixture['commit'],
+            ]);
+            self::assertNotSame(0, $unmerged['exit_code']);
+            self::assertStringContainsString('origin/main does not match', $unmerged['stderr']);
+            self::assertFileDoesNotExist($fixture['ssh_log']);
+
+            $remoteDrift = $this->runWrapper(array_merge($fixture, ['remote_main_commit' => str_repeat('d', 40)]), [
+                '--execute',
+                '--confirm-live-write',
+                'ROB-489',
+                '--expected-commit',
+                $fixture['commit'],
+            ]);
+            self::assertNotSame(0, $remoteDrift['exit_code']);
+            self::assertStringContainsString('live origin/main does not match', $remoteDrift['stderr']);
+            self::assertFileDoesNotExist($fixture['ssh_log']);
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
@@ -433,6 +455,26 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
+    public function testCronDurabilityFailureRollsBackPublishedCronBeforeRemovingBundle(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $beforeCron = file_get_contents($cronPath);
+            self::assertIsString($beforeCron);
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_DURABILITY' => '1',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
+            self::assertSame($beforeCron, file_get_contents($cronPath));
+            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
     /** @return array<string, mixed> */
     private function manifest(): array
     {
@@ -530,6 +572,8 @@ final class KumaPushRuntimeBundleTest extends TestCase
             #!/bin/sh
             case "$*" in
               *"rev-parse HEAD"*) printf '%s\n' "$FH_WRAPPER_COMMIT" ;;
+              *"rev-parse --verify refs/remotes/origin/main^{commit}"*) printf '%s\n' "$FH_WRAPPER_ORIGIN_MAIN_COMMIT" ;;
+              *"ls-remote --exit-code origin refs/heads/main"*) printf '%s\trefs/heads/main\n' "$FH_WRAPPER_REMOTE_MAIN_COMMIT" ;;
               *) exit 0 ;;
             esac
             SH
@@ -602,6 +646,8 @@ final class KumaPushRuntimeBundleTest extends TestCase
             [
                 'PATH' => $fixture['bin'] . PATH_SEPARATOR . dirname(PHP_BINARY) . PATH_SEPARATOR . '/usr/bin:/bin',
                 'FH_WRAPPER_COMMIT' => $fixture['commit'],
+                'FH_WRAPPER_ORIGIN_MAIN_COMMIT' => $fixture['origin_main_commit'] ?? $fixture['commit'],
+                'FH_WRAPPER_REMOTE_MAIN_COMMIT' => $fixture['remote_main_commit'] ?? $fixture['commit'],
                 'FH_WRAPPER_STAGE_ROOT' => $fixture['stage_root'],
                 'FH_WRAPPER_STAGE_MARKER' => $fixture['stage_marker'],
                 'FH_WRAPPER_SSH_LOG' => $fixture['ssh_log'],

@@ -105,7 +105,8 @@ Script inventory:
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
 - `prod_kuma_push_runtime_v1.sh` plans or performs the exact ROB-489 immutable
   runtime installation and ten-invocation cron path migration over Tailscale;
-  default mode is local plan-only
+  default mode is local plan-only, while execute additionally binds local HEAD,
+  local origin/main and live origin/main to the same expected merge commit
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
