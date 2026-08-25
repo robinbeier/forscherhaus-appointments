@@ -8,8 +8,10 @@ source "$SCRIPT_DIR/lib/kuma_push_common.sh"
 
 kuma_push_load_env_file
 
-REPO_ROOT="${KUMA_PDF_EXPORT_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-GATE_OUTPUT_DIR="${KUMA_PDF_EXPORT_OUTPUT_DIR:-${REPO_ROOT}/storage/logs/ops}"
+RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+APP_ROOT="${KUMA_PDF_EXPORT_APP_ROOT:-${KUMA_PDF_EXPORT_REPO_ROOT:-/var/www/html/easyappointments}}"
+GATE_SCRIPT="${RUNTIME_ROOT}/scripts/release-gate/dashboard_release_gate.php"
+GATE_OUTPUT_DIR="${KUMA_PDF_EXPORT_OUTPUT_DIR:-${APP_ROOT}/storage/logs/ops}"
 GATE_OUTPUT_FILE="${GATE_OUTPUT_DIR}/kuma-pdf-export-latest.json"
 WINDOW_DAYS="${KUMA_PDF_EXPORT_WINDOW_DAYS:-30}"
 BASE_URL="${KUMA_PDF_EXPORT_BASE_URL:-http://localhost}"
@@ -42,7 +44,7 @@ cleanup() {
 trap cleanup EXIT
 
 set +e
-php "$REPO_ROOT/scripts/release-gate/dashboard_release_gate.php" \
+RELEASE_GATE_REPO_ROOT="$APP_ROOT" php "$GATE_SCRIPT" \
   --base-url="$BASE_URL" \
   --index-page="$INDEX_PAGE" \
   --username="$USERNAME" \

@@ -1,0 +1,12 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_services.sh >> /var/log/kuma_push_host_services.log 2>&1
+* * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_resources.sh >> /var/log/kuma_push_host_resources.log 2>&1
+*/15 * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_ops_jobs.sh >> /var/log/kuma_push_ops_jobs.log 2>&1
+* * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_app_logs.sh >> /var/log/kuma_push_app_logs.log 2>&1
+* * * * * root sleep 30; KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_app_logs.sh >> /var/log/kuma_push_app_logs.log 2>&1
+* * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_php_fpm_logs.sh >> /var/log/kuma_push_php_fpm_logs.log 2>&1
+* * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_pdf_renderer_logs.sh >> /var/log/kuma_push_pdf_renderer_logs.log 2>&1
+*/15 * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_pdf_export.sh >> /var/log/kuma_push_pdf_export.log 2>&1
+* * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_apache_scanner_activity.sh >> /var/log/kuma_push_apache_scanner_activity.log 2>&1
+*/15 * * * * root KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_backup_creation.sh >> /var/log/kuma_push_backup_creation.log 2>&1
