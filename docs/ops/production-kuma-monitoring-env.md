@@ -144,9 +144,14 @@ exercise the same no-clobber contract.
 
 Immediately before either installed-helper invocation, the trusted staged
 installer opens the fixed target with `O_NOFOLLOW`, binds its complete identity
-and exact merged hash, then invokes that already-open descriptor through
-`/proc/self/fd`. The wrapper never executes a path based only on an earlier
-install preflight.
+and exact merged hash, reads the bounded helper bytes from that descriptor, and
+copies those bytes into a private anonymous execution snapshot. The isolated
+Python bootstrap inherits only the snapshot descriptor plus its expected size
+and hash, verifies both again, and then executes the snapshot. It neither
+reopens the target pathname nor transports the helper source through process
+arguments. The wrapper never executes a path based only on an earlier install
+preflight, and it does not depend on runtime-specific `/proc/self/fd` script-path
+behavior.
 
 Separately approved single Env transaction, only after exact installation:
 

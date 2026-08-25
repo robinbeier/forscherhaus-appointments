@@ -155,7 +155,7 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
         self::assertSame('target_conflict', $this->json($invoked['stdout'])['reason'] ?? null);
     }
 
-    public function testInvokeInstalledRunsTheAlreadyOpenExactHelper(): void
+    public function testInvokeInstalledRunsTheExactBytesCopiedFromTheOpenHelper(): void
     {
         $env = $this->root . '/root/backups/uptime-kuma-push.env';
         file_put_contents($env, "KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0\n");

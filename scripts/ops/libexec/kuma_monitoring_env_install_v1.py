@@ -12,6 +12,7 @@ import re
 import secrets
 import stat
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -21,6 +22,42 @@ CONFIRMATION = 'ROB-490'
 MAX_SOURCE_BYTES = 1_000_000
 RENAME_NOREPLACE = 1
 RENAME_EXCL = 0x00000004
+INVOKE_BOOTSTRAP = r'''
+import hashlib
+import json
+import os
+import sys
+
+descriptor = int(sys.argv[1])
+expected_size = int(sys.argv[2])
+expected_sha256 = sys.argv[3]
+program = sys.argv[4]
+sys.argv = [program, *sys.argv[5:]]
+chunks = []
+while True:
+    chunk = os.read(descriptor, 65536)
+    if not chunk:
+        break
+    chunks.append(chunk)
+os.close(descriptor)
+source = b''.join(chunks)
+if len(source) != expected_size or hashlib.sha256(source).hexdigest() != expected_sha256:
+    payload = {
+        'execution_ready': False,
+        'mutation_performed': False,
+        'reason': 'execution_snapshot_invalid',
+        'status': 'fail',
+    }
+    sys.stdout.write(json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n')
+    raise SystemExit(70)
+scope = {
+    '__cached__': None,
+    '__file__': program,
+    '__name__': '__main__',
+    '__package__': None,
+}
+exec(compile(source, program, 'exec'), scope, scope)
+'''
 
 
 class ContractError(Exception):
@@ -307,6 +344,7 @@ def invoke_installed(context, execute_helper):
     if context['install_state'] != 'installed':
         fail('installed_helper_required')
     target = context['target']
+    snapshot = None
     try:
         before = os.lstat(target)
         fd = os.open(target, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -333,14 +371,25 @@ def invoke_installed(context, execute_helper):
             or hashlib.sha256(data).hexdigest() != context['expected_sha256']
         ):
             fail('target_changed')
-        os.lseek(fd, 0, os.SEEK_SET)
-        os.set_inheritable(fd, True)
-        descriptor_root = '/proc/self/fd' if sys.platform.startswith('linux') else '/dev/fd'
+        try:
+            snapshot = tempfile.TemporaryFile()
+            snapshot.write(data)
+            snapshot.flush()
+            snapshot.seek(0)
+            snapshot_fd = snapshot.fileno()
+            os.set_inheritable(snapshot_fd, True)
+        except OSError:
+            fail('execution_snapshot_unavailable')
         helper_arguments = [
             sys.executable,
             '-I',
             '-B',
-            f'{descriptor_root}/{fd}',
+            '-c',
+            INVOKE_BOOTSTRAP,
+            str(snapshot_fd),
+            str(len(data)),
+            context['expected_sha256'],
+            str(target),
         ]
         if context['root_prefix'] != Path('/'):
             helper_arguments.extend(['--root-prefix', str(context['root_prefix'])])
@@ -348,6 +397,8 @@ def invoke_installed(context, execute_helper):
             helper_arguments.extend(['--execute', '--confirm-live-write', CONFIRMATION])
         os.execve(sys.executable, helper_arguments, os.environ.copy())
     finally:
+        if snapshot is not None:
+            snapshot.close()
         os.close(fd)
 
 
