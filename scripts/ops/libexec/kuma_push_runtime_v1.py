@@ -654,6 +654,13 @@ def execute(context):
                 and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE') == '1'
             ):
                 fail('test_failure_after_cron_replace')
+            if (
+                not context['production']
+                and backup is not None
+                and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_MUTATE_RECOVERY_AFTER_CRON') == '1'
+            ):
+                backup.write_bytes(b'# concurrent-root-recovery-change\n')
+                backup.chmod(0o600)
         refreshed = preflight(argparse.Namespace(
             root_prefix=str(context['root_prefix']),
             source_root=str(context['source_root']),
@@ -669,14 +676,14 @@ def execute(context):
         )
         if cron_replaced and backup is not None:
             try:
-                backup_data, _ = stable_read(backup, context['expected_uid'], {0o600})
                 current_data, current_identity = stable_read(
                     context['cron'], context['expected_uid'], {0o644}, MAX_CRON_BYTES,
                 )
                 if current_data != context['desired_data']:
                     fail('cron_changed')
                 atomic_replace(
-                    context['cron'], backup_data, current_data, context['expected_uid'], current_identity,
+                    context['cron'], context['cron_data'], current_data,
+                    context['expected_uid'], current_identity,
                 )
                 if (
                     not context['production']

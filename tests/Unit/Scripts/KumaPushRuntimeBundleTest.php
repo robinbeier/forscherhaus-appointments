@@ -666,6 +666,37 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
+    public function testRecoveryBackupTamperCannotDriveRollbackAfterCronPublication(): void
+    {
+        $helper = file_get_contents($this->repoRoot() . '/' . self::HELPER);
+        self::assertIsString($helper);
+        if (!str_contains($helper, 'FH_KUMA_PUSH_RUNTIME_TEST_MUTATE_RECOVERY_AFTER_CRON')) {
+            self::markTestSkipped('Recovery-after-publication test hook is not present yet.');
+        }
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $legacy = file_get_contents($cronPath);
+            self::assertIsString($legacy);
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_MUTATE_RECOVERY_AFTER_CRON' => '1',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
+            self::assertSame($legacy, file_get_contents($cronPath));
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
+
+            $backup = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1/rob-489-cron.before';
+            self::assertFileExists($backup);
+            self::assertNotSame($legacy, file_get_contents($backup));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
     /** @return array<string, mixed> */
     private function manifest(): array
     {
