@@ -197,6 +197,10 @@ final class KumaMonitoringEnvProductionWrapperTest extends TestCase
             #!/usr/bin/env bash
             printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
             payload="${!#}"
+            if [[ "${FAKE_INVALID_RESULT:-}" == '1' && "$payload" == *"--invoke-source inspect"* ]]; then
+                printf '%s\n' '{"execution_ready":false,"mutation_performed":false,"reason":"test_invalid","status":"fail"}'
+                exit 0
+            fi
             case "$payload" in
               *"mktemp -d"*) printf '/root/.fh-kuma-monitoring-env-v1.ABCDEFGH\n' ;;
               *"/usr/bin/tar "*) dd of=/dev/null 2>/dev/null ;;
@@ -245,6 +249,16 @@ final class KumaMonitoringEnvProductionWrapperTest extends TestCase
             self::assertStringContainsString('--invoke-installed execute --confirm-live-write ROB-490', $log);
             self::assertStringContainsString('--invoke-source inspect', $log);
             self::assertMatchesRegularExpression("/--expected-sha256 '[0-9a-f]{64}'/", $log);
+
+            $optimizedInvalid = $this->runWrapper(
+                ['--inspect', '--expected-commit', $expected],
+                array_merge($environment, ['FAKE_INVALID_RESULT' => '1', 'PYTHONOPTIMIZE' => '1']),
+            );
+            self::assertNotSame(0, $optimizedInvalid['exit_code']);
+            self::assertStringNotContainsString(
+                '[prod-kuma-monitoring-env-v1] inspect passed',
+                $optimizedInvalid['stdout'],
+            );
         } finally {
             unlink($bin . '/git');
             unlink($bin . '/ssh');

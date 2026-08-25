@@ -141,6 +141,16 @@ final class KumaMonitoringEnvV1Test extends TestCase
             self::assertSame('append_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
             self::assertSame($before, $this->snapshot());
         }
+
+        foreach (["true ||\n", "true &&\n", "printf value |\n", "return 0\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
     }
 
     public function testTargetDefinitionInsideBashCompoundContextFailsClosed(): void

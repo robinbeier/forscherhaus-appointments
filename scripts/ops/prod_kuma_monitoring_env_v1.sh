@@ -187,7 +187,7 @@ if (( INSTALL_INSPECT_RC != 0 )); then
     printf 'ERROR: installer preflight failed; staging is retained and no mutation is attempted.\n' >&2
     exit "$INSTALL_INSPECT_RC"
 fi
-python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); assert value.get("status") == "pass" and value.get("execution_ready") is True and value.get("mutation_performed") is False and value.get("install_state") in {"absent","installed"}' <<<"$INSTALL_INSPECT_OUTPUT"
+python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); raise SystemExit(0 if value.get("status") == "pass" and value.get("execution_ready") is True and value.get("mutation_performed") is False and value.get("install_state") in {"absent","installed"} else 70)' <<<"$INSTALL_INSPECT_OUTPUT"
 
 if [[ "$MODE" == 'install' ]]; then
     set +e
@@ -202,7 +202,7 @@ if [[ "$MODE" == 'install' ]]; then
         printf 'ERROR: helper installation did not return a known pass; staging is retained and no retry is attempted.\n' >&2
         exit "$RESULT_RC"
     fi
-    python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); assert value.get("status") == "pass" and value.get("execution_ready") is True and value.get("install_state") == "installed"' <<<"$RESULT_OUTPUT"
+    python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); raise SystemExit(0 if value.get("status") == "pass" and value.get("execution_ready") is True and value.get("install_state") == "installed" else 70)' <<<"$RESULT_OUTPUT"
     set +e
     HELPER_OUTPUT="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
         "/usr/bin/python3 -I -B '${REMOTE_STAGE}/${INSTALLER_RELATIVE}' \
@@ -219,7 +219,7 @@ elif [[ "$MODE" == 'inspect' ]]; then
     HELPER_RC=$?
     set -e
 else
-    python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); assert value.get("install_state") == "installed"' <<<"$INSTALL_INSPECT_OUTPUT" || {
+    python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); raise SystemExit(0 if value.get("install_state") == "installed" else 70)' <<<"$INSTALL_INSPECT_OUTPUT" || {
         printf 'ERROR: execute requires the exact helper to be installed by the separate install gate.\n' >&2
         exit 70
     }
@@ -237,7 +237,7 @@ if (( HELPER_RC != 0 )); then
     printf 'ERROR: helper result is not a known pass; staging is retained and no retry is attempted.\n' >&2
     exit "$HELPER_RC"
 fi
-python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); assert value.get("status") == "pass" and value.get("execution_ready") is True' <<<"$HELPER_OUTPUT"
+python3 -c 'import json,sys; value=json.loads(sys.stdin.read()); raise SystemExit(0 if value.get("status") == "pass" and value.get("execution_ready") is True else 70)' <<<"$HELPER_OUTPUT"
 
 ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
     "case '${REMOTE_STAGE}' in /root/.fh-kuma-monitoring-env-v1.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) rm -rf -- '${REMOTE_STAGE}' ;; *) exit 70 ;; esac"

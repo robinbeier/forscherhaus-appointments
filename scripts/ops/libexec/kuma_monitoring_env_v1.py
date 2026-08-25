@@ -199,6 +199,7 @@ def shell_line_contexts(data):
     blocks = []
     continuation_kind = None
     heredocs = []
+    early_control = False
     command_word = re.compile(rb'(?:^|[;|&])\s*([A-Za-z_][A-Za-z0-9_]*)')
     block_openers = {
         b'case': b'esac',
@@ -209,7 +210,8 @@ def shell_line_contexts(data):
         b'while': b'done',
     }
 
-    for body in data.split(b'\n'):
+    lines = data.split(b'\n')
+    for line_index, body in enumerate(lines):
         if heredocs:
             contexts.append(False)
             delimiter, strip_tabs = heredocs[0]
@@ -218,7 +220,8 @@ def shell_line_contexts(data):
                 heredocs.pop(0)
             continue
 
-        contexts.append(quote is None and not compounds and not blocks and continuation_kind is None)
+        incoming_continuation = continuation_kind
+        contexts.append(quote is None and not compounds and not blocks and incoming_continuation is None)
         continuation_kind = None
         visible = bytearray(b' ' * len(body))
         declared_heredocs = []
@@ -289,6 +292,8 @@ def shell_line_contexts(data):
 
         for match in command_word.finditer(bytes(visible)):
             word = match.group(1)
+            if word in {b'exec', b'exit', b'return'}:
+                early_control = True
             if blocks and word == blocks[-1]:
                 blocks.pop()
             elif word in block_openers:
@@ -296,6 +301,14 @@ def shell_line_contexts(data):
         structural = bytes(visible).rstrip()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
+        elif not structural and incoming_continuation == 'operator':
+            continuation_kind = 'operator'
+        elif (
+            not structural
+            and incoming_continuation == 'escape'
+            and line_index == len(lines) - 1
+        ):
+            continuation_kind = 'escape'
         heredocs.extend(declared_heredocs)
 
     complete = quote is None and not compounds and not blocks and continuation_kind is None and not heredocs
@@ -306,7 +319,7 @@ def shell_line_contexts(data):
         and continuation_kind == 'escape'
         and not heredocs
     )
-    return contexts, complete, trailing_escape_only
+    return contexts, complete, trailing_escape_only, early_control
 
 
 def parse_env(data):
@@ -316,7 +329,7 @@ def parse_env(data):
         data.decode('utf-8')
     except UnicodeDecodeError:
         fail('env_invalid_utf8')
-    contexts, shell_complete, trailing_escape_only = shell_line_contexts(data)
+    contexts, shell_complete, trailing_escape_only, early_control = shell_line_contexts(data)
     key = KEY.encode('ascii')
     matches = []
     offset = 0
@@ -326,7 +339,7 @@ def parse_env(data):
                 fail('definition_ambiguous')
             matches.append((chr(body[-1]), offset + len(key) + 1))
         offset += len(body) + 1
-    if not shell_complete and not trailing_escape_only:
+    if early_control or (not shell_complete and not trailing_escape_only):
         fail('env_shell_context_invalid')
     if len(matches) > 1:
         fail('duplicate_definition')

@@ -46,8 +46,10 @@ control block or conditional compound is rejected. A missing key is appended,
 adding one preceding newline only when the existing final byte is not a
 newline; an open shell context or odd trailing backslash before that boundary
 is rejected because Bash would not evaluate the append as the requested
-assignment. A `0` changes at exactly its single value-byte position. A `1` is
-already converged and is never rewritten.
+assignment. A terminal continued operator and an early shell control transfer
+such as top-level `return`, `exit` or `exec` are likewise unsupported and fail
+before mutation. A `0` changes at exactly its single value-byte position. A
+`1` is already converged and is never rewritten.
 
 The desired Env must also remain within the same bounded Env-size contract.
 An append that would cross that limit fails during read-only preflight before
