@@ -244,6 +244,22 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
         );
     }
 
+    public function testLinuxInvocationUsesTheKernelBoundCurrentInterpreter(): void
+    {
+        $script = <<<'PY'
+        import importlib.util,json,sys
+        spec=importlib.util.spec_from_file_location('rob490_installer',sys.argv[1])
+        module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        module.sys.platform='linux'
+        module.sys.executable=''
+        print(json.dumps({'interpreter':module.current_interpreter()}))
+        PY;
+        $result = $this->runCommand(['python3', '-c', $script, $this->installer]);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('/proc/self/exe', $this->json($result['stdout'])['interpreter'] ?? null);
+    }
+
     /** @return array{exit_code:int,stdout:string,stderr:string} */
     private function runInstaller(array $arguments = [], array $environment = [], ?string $sha256 = null): array
     {

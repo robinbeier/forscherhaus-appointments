@@ -201,6 +201,20 @@ def fsync_directory(path):
         os.close(fd)
 
 
+def current_interpreter():
+    if sys.platform.startswith('linux'):
+        kernel_path = Path('/proc/self/exe')
+        try:
+            os.readlink(kernel_path)
+        except OSError:
+            fail('execution_interpreter_unavailable')
+        return str(kernel_path)
+    candidate = Path(sys.executable)
+    if not sys.executable or not candidate.is_absolute():
+        fail('execution_interpreter_unavailable')
+    return str(candidate)
+
+
 def rename_noreplace(parent, source, target):
     libc = ctypes.CDLL(None, use_errno=True)
     parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
@@ -380,8 +394,9 @@ def invoke_installed(context, execute_helper):
             os.set_inheritable(snapshot_fd, True)
         except OSError:
             fail('execution_snapshot_unavailable')
+        interpreter = current_interpreter()
         helper_arguments = [
-            sys.executable,
+            interpreter,
             '-I',
             '-B',
             '-c',
@@ -395,7 +410,7 @@ def invoke_installed(context, execute_helper):
             helper_arguments.extend(['--root-prefix', str(context['root_prefix'])])
         if execute_helper:
             helper_arguments.extend(['--execute', '--confirm-live-write', CONFIRMATION])
-        os.execve(sys.executable, helper_arguments, os.environ.copy())
+        os.execve(interpreter, helper_arguments, os.environ.copy())
     finally:
         if snapshot is not None:
             snapshot.close()
@@ -501,16 +516,6 @@ if __name__ == '__main__':
     except ContractError as error:
         emit('fail', False, error.mutated, reason=error.reason)
         raise SystemExit(70)
-    except (OSError, ValueError, TypeError) as error:
-        reason = 'internal_error'
-        if '--root-prefix' in sys.argv:
-            root_index = sys.argv.index('--root-prefix') + 1
-            if root_index < len(sys.argv) and Path(sys.argv[root_index]) != Path('/'):
-                traceback = error.__traceback__
-                while traceback is not None and traceback.tb_next is not None:
-                    traceback = traceback.tb_next
-                line = traceback.tb_lineno if traceback is not None else 0
-                error_number = error.errno if isinstance(error, OSError) else 0
-                reason = f'internal_error_{type(error).__name__}_{error_number}_{line}'
-        emit('fail', False, False, reason=reason)
+    except (OSError, ValueError, TypeError):
+        emit('fail', False, False, reason='internal_error')
         raise SystemExit(70)

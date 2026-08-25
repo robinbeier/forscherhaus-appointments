@@ -160,7 +160,10 @@ and hash, verifies both again, and then executes the snapshot. It neither
 reopens the target pathname nor transports the helper source through process
 arguments. The wrapper never executes a path based only on an earlier install
 preflight, and it does not depend on runtime-specific `/proc/self/fd` script-path
-behavior.
+behavior. On Linux, the bootstrap re-enters the already-running Python
+interpreter through the kernel-bound `/proc/self/exe`; invocation therefore
+does not depend on `PATH` or `sys.executable` surviving a caller's reduced
+environment.
 
 Separately approved single Env transaction, only after exact installation:
 
