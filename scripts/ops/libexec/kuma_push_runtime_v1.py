@@ -407,6 +407,48 @@ def attach_recovery(state, cron_data, desired_data, expected_uid):
     return backup
 
 
+def validate_recovery(root_prefix, desired_data, cron_template, expected_uid, production):
+    state = mapped(root_prefix, STATE_ROOT)
+    validate_ancestors(state.parent, root_prefix, expected_uid)
+    if not state.exists():
+        fail('recovery_missing')
+    state_identity = validate_directory(state, expected_uid, 0o700)
+    try:
+        entries = {entry.name for entry in os.scandir(state)}
+    except OSError:
+        fail('recovery_invalid')
+    if entries != {'rob-489-cron.before', 'rob-489-recovery.json'}:
+        fail('recovery_invalid')
+
+    backup_data, _ = stable_read(state / 'rob-489-cron.before', expected_uid, {0o600}, MAX_CRON_BYTES)
+    recovery_data, _ = stable_read(state / 'rob-489-recovery.json', expected_uid, {0o600}, MAX_CRON_BYTES)
+    try:
+        recovery = json.loads(recovery_data)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        fail('recovery_invalid')
+    if not isinstance(recovery, dict) or set(recovery) != {
+        'cron_path', 'desired_sha256', 'issue', 'original_sha256', 'runtime_root', 'schema'
+    }:
+        fail('recovery_invalid')
+    if (
+        recovery['cron_path'] != CRON_PATH
+        or recovery['desired_sha256'] != sha256(desired_data)
+        or recovery['issue'] != CONFIRMATION
+        or recovery['original_sha256'] != sha256(backup_data)
+        or recovery['runtime_root'] != INSTALL_ROOT
+        or recovery['schema'] != 'fh_kuma_push_runtime_recovery.v1'
+    ):
+        fail('recovery_invalid')
+    backup_state, backup_desired = classify_cron(backup_data, cron_template, production)
+    if backup_state != 'legacy' or backup_desired != desired_data:
+        fail('recovery_invalid')
+    try:
+        if identity(os.lstat(state)) != state_identity:
+            fail('recovery_changed')
+    except OSError:
+        fail('recovery_changed')
+
+
 def atomic_replace(path, data, expected_uid, expected_identity):
     current = os.lstat(path)
     if identity(current) != expected_identity:
@@ -461,6 +503,8 @@ def preflight(args):
     cron_state, desired_data = classify_cron(cron_data, cron_template, production)
     if cron_state == 'installed' and not installed:
         fail('cron_without_bundle')
+    if cron_state == 'installed':
+        validate_recovery(root_prefix, desired_data, cron_template, expected_uid, production)
     return {
         'cron': cron,
         'cron_data': cron_data,

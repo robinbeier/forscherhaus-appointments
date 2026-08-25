@@ -148,6 +148,11 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 ['show:' . $fixture['commit'], 'archive:' . $fixture['commit']],
                 file($fixture['git_log'], FILE_IGNORE_NEW_LINES),
             );
+            self::assertSame(
+                ['safe'],
+                file($fixture['extract_log'], FILE_IGNORE_NEW_LINES),
+                'Root extraction must discard unsafe archived permissions under a fixed umask.',
+            );
             self::assertFileDoesNotExist($fixture['stage_marker']);
         } finally {
             $this->removeDirectory($fixture['workspace']);
@@ -303,6 +308,52 @@ final class KumaPushRuntimeBundleTest extends TestCase
             $inspectJson = $this->jsonOutput($inspect['stdout']);
             self::assertSame('pass', $inspectJson['status'] ?? null);
             self::assertTrue($inspectJson['execution_ready'] ?? false);
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testInstalledRuntimeRequiresIntactRecoveryState(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $install = $this->runHelper($fixture['source'], $fixture['root'], true);
+            self::assertSame(0, $install['exit_code'], $install['stderr']);
+            $recoveryRoot = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1';
+            $this->removeDirectory($recoveryRoot);
+
+            $inspect = $this->runHelper($fixture['source'], $fixture['root']);
+            self::assertNotSame(0, $inspect['exit_code']);
+            $json = $this->jsonOutput($inspect['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertFalse($json['execution_ready'] ?? true);
+            self::assertSame('recovery_missing', $json['reason'] ?? null);
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testInstalledRuntimeRejectsTamperedRecoveryMetadata(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $install = $this->runHelper($fixture['source'], $fixture['root'], true);
+            self::assertSame(0, $install['exit_code'], $install['stderr']);
+            $recoveryPath = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1/rob-489-recovery.json';
+            $recovery = json_decode((string) file_get_contents($recoveryPath), true, 512, JSON_THROW_ON_ERROR);
+            self::assertIsArray($recovery);
+            $recovery['desired_sha256'] = str_repeat('0', 64);
+            file_put_contents($recoveryPath, json_encode($recovery, JSON_THROW_ON_ERROR) . PHP_EOL);
+            chmod($recoveryPath, 0600);
+
+            $inspect = $this->runHelper($fixture['source'], $fixture['root']);
+            self::assertNotSame(0, $inspect['exit_code']);
+            $json = $this->jsonOutput($inspect['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertFalse($json['execution_ready'] ?? true);
+            self::assertSame('recovery_invalid', $json['reason'] ?? null);
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
@@ -612,6 +663,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $bin = $workspace . '/bin';
         $gitLog = $workspace . '/git.log';
         $sshLog = $workspace . '/ssh.log';
+        $extractLog = $workspace . '/extract.log';
         $stageMarker = $workspace . '/stage-retained';
         $stageRoot = $workspace . '/stage';
         $commit = str_repeat('a', 40);
@@ -656,9 +708,14 @@ final class KumaPushRuntimeBundleTest extends TestCase
               printf '%s\n' '/root/.fh-kuma-push-runtime-v1.ABCDEFGH'
               exit 0
             fi
-            if printf '%s\n' "$last" | grep -q 'tar --no-same-owner'; then
+            if printf '%s\n' "$last" | grep -q '/usr/bin/tar --no-same-owner --no-same-permissions'; then
               printf '%s\n' tar >> "$FH_WRAPPER_SSH_LOG"
-              tar -xf - -C "$stage_root"
+              case "$last" in
+                "umask 022; "*) printf '%s\n' safe >> "$FH_WRAPPER_EXTRACT_LOG" ;;
+                *) exit 71 ;;
+              esac
+              umask 022
+              tar --no-same-permissions -xf - -C "$stage_root"
               exit 0
             fi
             if printf '%s\n' "$last" | grep -q -- '--source-root'; then
@@ -692,6 +749,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
             'workspace' => $workspace,
             'bin' => $bin,
             'git_log' => $gitLog,
+            'extract_log' => $extractLog,
             'ssh_log' => $sshLog,
             'stage_marker' => $stageMarker,
             'stage_root' => $stageRoot,
@@ -710,6 +768,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 'PATH' => $fixture['bin'] . PATH_SEPARATOR . dirname(PHP_BINARY) . PATH_SEPARATOR . '/usr/bin:/bin',
                 'FH_WRAPPER_COMMIT' => $fixture['commit'],
                 'FH_WRAPPER_GIT_LOG' => $fixture['git_log'],
+                'FH_WRAPPER_EXTRACT_LOG' => $fixture['extract_log'],
                 'FH_WRAPPER_ORIGIN_MAIN_COMMIT' => $fixture['origin_main_commit'] ?? $fixture['commit'],
                 'FH_WRAPPER_REPO_ROOT' => $this->repoRoot(),
                 'FH_WRAPPER_REMOTE_MAIN_COMMIT' => $fixture['remote_main_commit'] ?? $fixture['commit'],

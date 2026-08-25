@@ -164,7 +164,8 @@ REMOTE_STAGE="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
 }
 
 git -C "$REPO_ROOT" archive --format=tar "$EXPECTED_COMMIT" -- "${ARTIFACTS[@]}" \
-    | ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" "tar --no-same-owner -xf - -C '${REMOTE_STAGE}'"
+    | ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
+        "umask 022; /usr/bin/tar --no-same-owner --no-same-permissions -xf - -C '${REMOTE_STAGE}'"
 
 set +e
 INSPECT_OUTPUT="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \

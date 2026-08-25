@@ -73,8 +73,10 @@ local `HEAD`, the local `refs/remotes/origin/main` commit and the live
 `refs/heads/main` value returned by `git ls-remote origin`. It derives the
 closed artifact list from that commit's manifest and streams the payload with
 `git archive` from the same immutable commit object; the writable worktree is
-never the production payload source. A stale local main, an unmerged feature
-head or live remote drift is therefore a hard stop.
+never the production payload source. Root extraction discards archived owner
+and permission metadata under a fixed safe umask before the helper validates
+the staged trust contract. A stale local main, an unmerged feature head or live
+remote drift is therefore a hard stop.
 
 Execute stages only the manifest, helper and closed artifact list under a
 private root directory. The helper verifies source ownership, modes, links and
@@ -92,6 +94,9 @@ published verified runtime. If cron restoration or its durability sync cannot
 be proven, the runtime remains installed so migrated cron entries never point
 at an intentionally removed target; the result is truthfully reported as a
 failed rollback with a performed mutation. Recovery records remain root-only.
+Every later installed-state inspect revalidates the exact recovery directory,
+cron backup and canonical recovery metadata; missing, additional or changed
+recovery evidence fails closed.
 An unknown transport result is never retried: retain the staging directory and
 perform read-only inventory before requesting a separate recovery decision.
 
