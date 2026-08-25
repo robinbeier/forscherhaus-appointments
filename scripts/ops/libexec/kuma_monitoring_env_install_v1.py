@@ -424,6 +424,11 @@ def invoke_installed(context, execute_helper):
             os.set_inheritable(snapshot_fd, True)
         except OSError:
             fail('execution_snapshot_unavailable')
+        if (
+            context['root_prefix'] != Path('/')
+            and os.environ.get('FH_KUMA_MONITORING_INSTALL_TEST_EMPTY_SYS_EXECUTABLE', '') == '1'
+        ):
+            sys.executable = ''
         interpreter = current_interpreter()
         helper_arguments = [
             interpreter,

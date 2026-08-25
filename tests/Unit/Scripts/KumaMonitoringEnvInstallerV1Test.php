@@ -288,9 +288,38 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
         self::assertSame('/proc/self/exe', $this->json($result['stdout'])['interpreter'] ?? null);
     }
 
-    /** @return array{exit_code:int,stdout:string,stderr:string} */
-    private function runInstaller(array $arguments = [], array $environment = [], ?string $sha256 = null): array
+    public function testInvokeInstalledCompletesThroughKernelInterpreterWithReducedEnvironment(): void
     {
+        $env = $this->root . '/root/backups/uptime-kuma-push.env';
+        file_put_contents($env, "KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0\n");
+        chmod($env, 0600);
+        $installed = $this->runInstaller(['--execute', '--confirm-live-write', 'ROB-490']);
+        self::assertSame(0, $installed['exit_code'], $installed['stderr']);
+
+        $invoked = $this->runInstaller(
+            ['--invoke-installed', 'inspect'],
+            [
+                'PATH' => (string) getenv('PATH'),
+                'FH_KUMA_MONITORING_INSTALL_TEST_EMPTY_SYS_EXECUTABLE' => '1',
+            ],
+            null,
+            false,
+        );
+
+        self::assertSame(0, $invoked['exit_code'], $invoked['stdout'] . $invoked['stderr']);
+        $json = $this->json($invoked['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+    }
+
+    /** @return array{exit_code:int,stdout:string,stderr:string} */
+    private function runInstaller(
+        array $arguments = [],
+        array $environment = [],
+        ?string $sha256 = null,
+        bool $inheritEnvironment = true,
+    ): array {
         $command = array_merge(
             [
                 'python3',
@@ -304,18 +333,18 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
             ],
             $arguments,
         );
-        return $this->runCommand($command, $environment);
+        return $this->runCommand($command, $environment, $inheritEnvironment);
     }
 
     /** @return array{exit_code:int,stdout:string,stderr:string} */
-    private function runCommand(array $command, array $environment = []): array
+    private function runCommand(array $command, array $environment = [], bool $inheritEnvironment = true): array
     {
         $process = proc_open(
             $command,
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             dirname(__DIR__, 3),
-            array_merge($_ENV, $environment),
+            $inheritEnvironment ? array_merge($_ENV, $environment) : $environment,
         );
         self::assertIsResource($process);
         fclose($pipes[0]);
