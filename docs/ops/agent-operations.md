@@ -179,8 +179,10 @@ PDF rendering fails:
 Kuma is red:
 
 - Compare public HTTP checks with Push monitor freshness.
-- Run the relevant `scripts/ops/kuma_push_*.sh` manually only when the env file
-  exists on the host and output can stay redacted.
+- Run the relevant fixed
+  `/usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_*.sh`
+  entrypoint manually only when the env file exists on the host and output can
+  stay redacted. See `docs/ops/production-kuma-push-runtime.md`.
 - Never print Push URLs or tokens.
 
 Disk, memory, or swap pressure:

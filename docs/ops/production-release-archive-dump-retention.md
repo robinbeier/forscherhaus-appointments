@@ -168,9 +168,9 @@ rollout has this exact order:
    `/root/backups/uptime-kuma-push.env`, then run and verify the existing push:
 
    ```bash
-   ssh -o StrictHostKeyChecking=accept-new \
+     ssh -o StrictHostKeyChecking=accept-new \
      "${PROD_SSH_TARGET:-root@188.245.244.123}" \
-     'KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /var/www/html/easyappointments/scripts/ops/kuma_push_host_resources.sh'
+     'KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_resources.sh'
    ```
 
 7. Enabling and starting are separate gates because `Persistent=true` may run

@@ -1,0 +1,100 @@
+{
+    "schema": "fh_kuma_push_runtime_bundle.v1",
+    "runtime": "v1",
+    "install_root": "/usr/local/libexec/fh-kuma-push-runtime-v1",
+    "cron_path": "/etc/cron.d/fh-uptime-kuma-push",
+    "cron_source": "scripts/ops/config/fh-uptime-kuma-push.cron",
+    "cron_sha256": "2c944b17de08b5605e3ad3af5af6c726105c86a02355877d7f35dbf301c1dde4",
+    "files": [
+        {
+            "source": "scripts/ops/kuma_push_apache_scanner_activity.sh",
+            "install": "scripts/ops/kuma_push_apache_scanner_activity.sh",
+            "role": "entrypoint",
+            "sha256": "cce2443335f24428ddace5e3642590c95badbbfc47c93454553414c4785a5f93"
+        },
+        {
+            "source": "scripts/ops/kuma_push_app_logs.sh",
+            "install": "scripts/ops/kuma_push_app_logs.sh",
+            "role": "entrypoint",
+            "sha256": "ebff42c82930c99926b97ddb3f6855fa2625edbdc2693d74e6f2974af504bad4"
+        },
+        {
+            "source": "scripts/ops/kuma_push_backup_creation.sh",
+            "install": "scripts/ops/kuma_push_backup_creation.sh",
+            "role": "entrypoint",
+            "sha256": "7a8921e24cd7a6f1147f4cc9e12e951bb667c39f8b71c5ce19593b98c0aebb92"
+        },
+        {
+            "source": "scripts/ops/kuma_push_host_resources.sh",
+            "install": "scripts/ops/kuma_push_host_resources.sh",
+            "role": "entrypoint",
+            "sha256": "abb4693849b27170f83db30c5891bd329c182595a54e81c2ecc27eb069570440"
+        },
+        {
+            "source": "scripts/ops/kuma_push_host_services.sh",
+            "install": "scripts/ops/kuma_push_host_services.sh",
+            "role": "entrypoint",
+            "sha256": "d09630fb6e482bac3fa75f64dee874ecf9a069bf25486b7c97be867764862a6f"
+        },
+        {
+            "source": "scripts/ops/kuma_push_ops_jobs.sh",
+            "install": "scripts/ops/kuma_push_ops_jobs.sh",
+            "role": "entrypoint",
+            "sha256": "0f6d7fc4391f553a85c44cfea37571f3e8dc0e9c653ce1581caed0efeed80f3d"
+        },
+        {
+            "source": "scripts/ops/kuma_push_pdf_export.sh",
+            "install": "scripts/ops/kuma_push_pdf_export.sh",
+            "role": "entrypoint",
+            "sha256": "4ae3ae3068c388e71626ca96feb04e7db055b28cac23dcc775db4a47bf5778e0"
+        },
+        {
+            "source": "scripts/ops/kuma_push_pdf_renderer_logs.sh",
+            "install": "scripts/ops/kuma_push_pdf_renderer_logs.sh",
+            "role": "entrypoint",
+            "sha256": "174ffe223d5d2aa97160f430bc59692910ed5b76b9159f5dbdf838a3c609c45c"
+        },
+        {
+            "source": "scripts/ops/kuma_push_php_fpm_logs.sh",
+            "install": "scripts/ops/kuma_push_php_fpm_logs.sh",
+            "role": "entrypoint",
+            "sha256": "93dfc173cd958fd271bb23211d1334952694df6c3f6931adb1de46a24a4dc2cc"
+        },
+        {
+            "source": "scripts/ops/lib/kuma_push_common.sh",
+            "install": "scripts/ops/lib/kuma_push_common.sh",
+            "role": "shell_library",
+            "sha256": "b6bde394c17eed0163e17cdaee02d88f0d6457a57a0688b342ad14cede120fc3"
+        },
+        {
+            "source": "scripts/ops/lib/app_log_classification.sh",
+            "install": "scripts/ops/lib/app_log_classification.sh",
+            "role": "shell_library",
+            "sha256": "b8dd554faa7a0468f98eefccfb3432a498ea284a1ac1de1a4e84227f4c782623"
+        },
+        {
+            "source": "scripts/release-gate/dashboard_release_gate.php",
+            "install": "scripts/release-gate/dashboard_release_gate.php",
+            "role": "pdf_gate",
+            "sha256": "84cfd56628609398cde896d4c345a53a578cc8399f1722b58904563f68019842"
+        },
+        {
+            "source": "scripts/release-gate/lib/GateAssertions.php",
+            "install": "scripts/release-gate/lib/GateAssertions.php",
+            "role": "pdf_gate_library",
+            "sha256": "d162247e0a7f894b78bd53b96097f15d63758a27f892e6545b52fa818dccc633"
+        },
+        {
+            "source": "scripts/release-gate/lib/GateCliSupport.php",
+            "install": "scripts/release-gate/lib/GateCliSupport.php",
+            "role": "pdf_gate_library",
+            "sha256": "83e4c3153ce82c2f1b1ec1a1114ab6fffd4daffaa860d46fb0b11acedb725ba0"
+        },
+        {
+            "source": "scripts/release-gate/lib/GateHttpClient.php",
+            "install": "scripts/release-gate/lib/GateHttpClient.php",
+            "role": "pdf_gate_library",
+            "sha256": "dafbcd13db438c760378a560d65672bb6fecb284fed46944049b43899da28067"
+        }
+    ]
+}

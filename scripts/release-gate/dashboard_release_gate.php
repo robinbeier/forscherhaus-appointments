@@ -21,7 +21,7 @@ $checks = [];
 $failure = null;
 $exitCode = RELEASE_GATE_EXIT_SUCCESS;
 
-$repoRoot = dirname(__DIR__, 2);
+$repoRoot = resolveReleaseGateRepoRoot();
 $defaultOutputPath = $repoRoot . '/storage/logs/release-gate/dashboard-gate-' . gmdate('Ymd\THis\Z') . '.json';
 $csrfDefaults = GateCliSupport::resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
 
@@ -306,6 +306,25 @@ if ($exitCode === RELEASE_GATE_EXIT_SUCCESS) {
 }
 
 exit($exitCode);
+
+function resolveReleaseGateRepoRoot(): string
+{
+    $defaultRoot = dirname(__DIR__, 2);
+    $override = getenv('RELEASE_GATE_REPO_ROOT');
+
+    if (!is_string($override) || $override === '') {
+        return $defaultRoot;
+    }
+
+    $resolved = realpath($override);
+
+    if (!is_string($resolved) || $resolved === '' || !str_starts_with($resolved, '/')) {
+        fwrite(STDERR, 'Invalid release-gate repository root.' . PHP_EOL);
+        exit(RELEASE_GATE_EXIT_RUNTIME_ERROR);
+    }
+
+    return rtrim($resolved, '/');
+}
 
 /**
  * @return array{

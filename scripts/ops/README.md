@@ -32,8 +32,11 @@ dry-run/execute split, the exact live confirmation token, fail-closed stop
 rules, and the required post-normalization ROB-440 dry-run without authorizing
 production execution by merge alone.
 
-Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template
-and `scripts/ops/uptime-kuma-crontab.example` as the cron template.
+Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template.
+The immutable root runtime, canonical `/etc/cron.d` file and migration contract
+are documented in
+[`docs/ops/production-kuma-push-runtime.md`](../../docs/ops/production-kuma-push-runtime.md);
+`scripts/ops/uptime-kuma-crontab.example` remains the personal-crontab form.
 
 Deep-health monitor boundary:
 
@@ -100,6 +103,9 @@ Script inventory:
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
 - `kuma_push_apache_scanner_activity.sh` watches recent Apache access logs for common scanner probes and only alerts on actionable scanner activity
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
+- `prod_kuma_push_runtime_v1.sh` plans or performs the exact ROB-489 immutable
+  runtime installation and ten-invocation cron path migration over Tailscale;
+  default mode is local plan-only
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
@@ -201,6 +207,8 @@ Optional PDF renderer log env:
 
 Optional PDF export env:
 
+- `KUMA_PDF_EXPORT_APP_ROOT` default `/var/www/html/easyappointments`; the
+  historical `KUMA_PDF_EXPORT_REPO_ROOT` remains a compatibility fallback
 - `KUMA_PDF_EXPORT_BASE_URL` default `http://localhost`
 - `KUMA_PDF_EXPORT_INDEX_PAGE` default `index.php`
 - `KUMA_PDF_EXPORT_CREDENTIALS_FILE` default `/etc/fh/release-gate-admin.env`

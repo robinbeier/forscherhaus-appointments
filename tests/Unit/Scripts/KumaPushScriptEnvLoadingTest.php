@@ -133,6 +133,7 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
             $outputDir = $workspace . '/pdf-export-output';
             $phpGateArgsFile = $workspace . '/php-gate-args.txt';
             $phpSummaryArgsFile = $workspace . '/php-summary-args.txt';
+            $releaseGateRepoRootFile = $workspace . '/release-gate-repo-root.txt';
             $reportPath = $outputDir . '/kuma-pdf-export-latest.json';
 
             mkdir($repoOverride . '/scripts/release-gate', 0777, true);
@@ -178,6 +179,7 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                 fi
 
                 printf '%s\n' "$*" > "$PHP_GATE_ARGS_FILE"
+                printf '%s\n' "${RELEASE_GATE_REPO_ROOT:-}" > "$RELEASE_GATE_REPO_ROOT_FILE"
 
                 output_json=""
                 for arg in "$@"; do
@@ -217,6 +219,7 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                 'KUMA_PUSH_ENV_FILE' => $envFile,
                 'PHP_GATE_ARGS_FILE' => $phpGateArgsFile,
                 'PHP_SUMMARY_ARGS_FILE' => $phpSummaryArgsFile,
+                'RELEASE_GATE_REPO_ROOT_FILE' => $releaseGateRepoRootFile,
             ]);
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
@@ -226,9 +229,10 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
             $phpArgs = file_get_contents($phpGateArgsFile);
             self::assertIsString($phpArgs);
             self::assertStringContainsString(
-                $repoOverride . '/scripts/release-gate/dashboard_release_gate.php',
+                $this->repoRoot() . '/scripts/release-gate/dashboard_release_gate.php',
                 $phpArgs,
             );
+            self::assertSame($repoOverride . PHP_EOL, file_get_contents($releaseGateRepoRootFile));
             self::assertStringContainsString('--base-url=https://appointments.example.test', $phpArgs);
             self::assertStringContainsString('--index-page=app.php', $phpArgs);
             self::assertStringContainsString('--pdf-health-url=https://renderer.example.test/healthz', $phpArgs);

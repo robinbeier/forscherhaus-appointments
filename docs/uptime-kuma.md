@@ -12,6 +12,7 @@ Repository-owned:
 - push scripts: `scripts/ops/kuma_push_*.sh`
 - host-local env example: `scripts/ops/uptime-kuma-push.env.example`
 - crontab example: `scripts/ops/uptime-kuma-crontab.example`
+- immutable root runtime: `docs/ops/production-kuma-push-runtime.md`
 
 Host-owned:
 
@@ -130,8 +131,10 @@ generated Push URLs into a host-local env file based on
 
 ## Push Script Installation
 
-Deploy the app artifact first so `scripts/ops` exists on the host, then create
-the host-local env file:
+Install the versioned, root-controlled runtime described in
+`docs/ops/production-kuma-push-runtime.md`. Root cron must never execute Push
+scripts or their libraries from the app release tree. Create the host-local env
+file separately:
 
 ```bash
 install -m 0600 scripts/ops/uptime-kuma-push.env.example /root/backups/uptime-kuma-push.env
@@ -139,8 +142,9 @@ install -m 0600 scripts/ops/uptime-kuma-push.env.example /root/backups/uptime-ku
 
 Fill in real Push URLs on the host only.
 
-Install cron entries from `scripts/ops/uptime-kuma-crontab.example`. The current
-production schedule runs:
+For `/etc/cron.d`, the canonical desired state is
+`scripts/ops/config/fh-uptime-kuma-push.cron`; the personal-crontab form remains
+in `scripts/ops/uptime-kuma-crontab.example`. The production schedule runs:
 
 - host services every minute
 - host resources every minute
