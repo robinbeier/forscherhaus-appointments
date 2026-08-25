@@ -192,6 +192,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 $fixture['root'] . self::INSTALL_ROOT . '/scripts/release-gate/dashboard_release_gate.php',
                 $gateLog,
             );
+            self::assertStringContainsString('summary=-r', $gateLog);
             self::assertStringContainsString('RELEASE_GATE_REPO_ROOT=' . $appRoot, $gateLog);
             self::assertStringNotContainsString($fixture['source'] . '/scripts/release-gate', $gateLog);
             self::assertStringContainsString(
@@ -199,6 +200,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 (string) file_get_contents($curlLog),
             );
             self::assertFileExists($appRoot . '/storage/logs/ops/kuma-pdf-export-latest.json');
+            self::assertStringContainsString('OK dashboard_pdf_gate=all_checks_passed', $result['stdout']);
         } finally {
             $this->removeDirectory($workspace);
         }
@@ -307,6 +309,67 @@ final class KumaPushRuntimeBundleTest extends TestCase
             self::assertNotSame(0, $result['exit_code']);
             self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
             self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testSourceHardlinkIsRejectedBeforeDryRun(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $source = $fixture['source'] . '/scripts/ops/kuma_push_host_resources.sh';
+            $alias = $fixture['workspace'] . '/source-hardlink-alias';
+            if (!link($source, $alias)) {
+                self::markTestSkipped('Source hardlinks are unavailable on this filesystem.');
+            }
+            self::assertSame(2, (int) (stat($source)['nlink'] ?? 0));
+            $result = $this->runHelper($fixture['source'], $fixture['root']);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
+            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testGroupOrWorldWritableSourceIsRejectedBeforeDryRun(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $source = $fixture['source'] . '/scripts/ops/kuma_push_host_resources.sh';
+            chmod($source, 0666);
+            self::assertSame('0666', substr(sprintf('%o', (int) fileperms($source)), -4));
+            $result = $this->runHelper($fixture['source'], $fixture['root']);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
+            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testExternalHardlinkAfterInstallationBlocksFurtherInspection(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $install = $this->runHelper($fixture['source'], $fixture['root'], true);
+            self::assertSame(0, $install['exit_code'], $install['stderr']);
+            $installed = $fixture['root'] . self::INSTALL_ROOT . '/scripts/ops/kuma_push_host_resources.sh';
+            $alias = $fixture['workspace'] . '/installed-hardlink-alias';
+            if (!link($installed, $alias)) {
+                self::markTestSkipped('Installed-file hardlinks are unavailable on this filesystem.');
+            }
+            self::assertSame(2, (int) (stat($installed)['nlink'] ?? 0));
+            $cronPath = $fixture['root'] . self::CRON;
+            $cronBefore = file_get_contents($cronPath);
+            $result = $this->runHelper($fixture['source'], $fixture['root']);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
+            self::assertSame($cronBefore, file_get_contents($cronPath));
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
@@ -551,7 +614,9 @@ final class KumaPushRuntimeBundleTest extends TestCase
     {
         $script =
             "#!/bin/sh\nset -eu\n" .
-            "if [ \"\${1:-}\" = '-r' ]; then exec " .
+            "if [ \"\${1:-}\" = '-r' ]; then printf 'summary=-r\\n' >> " .
+            escapeshellarg($logPath) .
+            '; exec ' .
             escapeshellarg(PHP_BINARY) .
             " \"\$@\"; fi\n" .
             "printf 'gate=%s RELEASE_GATE_REPO_ROOT=%s\\n' \"\$1\" \"\${RELEASE_GATE_REPO_ROOT:-}\" >> " .
