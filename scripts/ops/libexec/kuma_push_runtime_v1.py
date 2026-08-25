@@ -493,8 +493,10 @@ def validate_recovery(root_prefix, desired_data, cron_template, expected_uid, pr
 def inject_concurrent_cron(path, expected_data, desired_data, expected_uid, test_hook):
     if test_hook == 'installed':
         concurrent_data = desired_data
-    elif test_hook == 'legacy_drift':
+    elif test_hook in {'legacy_drift', 'restore_race'}:
         concurrent_data = expected_data + b'# concurrent-prepublication-change\n'
+    elif test_hook == 'restore_race_newer':
+        concurrent_data = expected_data + b'# concurrent-restore-change\n'
     else:
         return
     temporary = path.parent / ('.fh-uptime-kuma-push.concurrent-' + secrets.token_hex(16) + '.tmp')
@@ -517,9 +519,12 @@ def atomic_replace(path, data, expected_data, expected_uid, expected_identity, t
     exchanged = False
     try:
         write_file_exclusive(temporary, data, 0o644, expected_uid)
+        published_identity = identity(os.lstat(temporary))
         inject_concurrent_cron(path, expected_data, data, expected_uid, test_hook)
         rename_exchange(path.parent, temporary.name, path.name)
         exchanged = True
+        previous_data = None
+        previous_identity = None
         matches_expected = False
         try:
             previous_data, previous_identity = stable_read(
@@ -533,10 +538,35 @@ def atomic_replace(path, data, expected_data, expected_uid, expected_identity, t
             matches_expected = False
         if not matches_expected:
             try:
+                if previous_data is None or previous_identity is None:
+                    fail('cron_exchange_restore_failed', True, False)
+                if test_hook == 'restore_race':
+                    inject_concurrent_cron(
+                        path, data, data, expected_uid, 'restore_race_newer',
+                    )
                 rename_exchange(path.parent, temporary.name, path.name)
-                exchanged = False
+                restored_data, restored_identity = stable_read(
+                    path, expected_uid, {0o644}, MAX_CRON_BYTES,
+                )
+                displaced_data, displaced_identity = stable_read(
+                    temporary, expected_uid, {0o644}, MAX_CRON_BYTES,
+                )
+                if (
+                    restored_data != previous_data
+                    or stable_object_identity(restored_identity)
+                    != stable_object_identity(previous_identity)
+                    or displaced_data != data
+                    or stable_object_identity(displaced_identity)
+                    != stable_object_identity(published_identity)
+                ):
+                    fail('cron_exchange_restore_failed', True, False)
                 os.unlink(temporary)
+                exchanged = False
                 fsync_directory(path.parent)
+            except ContractError as error:
+                if not error.rollback_safe:
+                    raise
+                fail('cron_exchange_restore_failed', True, False)
             except BaseException:
                 fail('cron_exchange_restore_failed', True, False)
             fail('cron_changed')
@@ -621,14 +651,16 @@ def execute(context):
                 state, context['cron_data'], context['desired_data'], context['expected_uid'],
             )
             recovery_mutated = recovery_mutated or recovery_written
+            cron_test_hook = ''
+            if not context['production']:
+                cron_test_hook = os.environ.get(
+                    'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH', '',
+                )
+                if os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_DURING_RESTORE') == '1':
+                    cron_test_hook = 'restore_race'
             atomic_replace(
                 context['cron'], context['desired_data'], context['cron_data'], context['expected_uid'],
-                context['cron_identity'],
-                (
-                    os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH', '')
-                    if not context['production']
-                    else ''
-                ),
+                context['cron_identity'], cron_test_hook,
             )
             cron_replaced = True
             if (

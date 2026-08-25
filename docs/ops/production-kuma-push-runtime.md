@@ -109,10 +109,15 @@ The recovery state is not hidden behind a simulated no-mutation result.
 Rollback restores the saved cron only while the current bytes still equal the
 version published by this transaction; a concurrent root-owned replacement is
 never overwritten and instead produces the same fail-closed retained-runtime
-state. The restore payload is the immutable cron snapshot read and verified in
-memory before the first mutation. The persistent recovery backup is evidence,
-not a later restore authority, so concurrent backup drift can fail postflight
-but can never inject changed bytes into the live cron.
+state. An exchange recovery deletes its displaced temporary object only after
+that object is proven to be the exact inode and bytes published by this
+transaction. If another root writer wins during recovery, its displaced bytes
+remain in the private ROB-489 dot-temporary namespace and the result is
+`rollback_failed`; they are never silently unlinked. The restore payload is
+the immutable cron snapshot read and verified in memory before the first
+mutation. The persistent recovery backup is evidence, not a later restore
+authority, so concurrent backup drift can fail postflight but can never inject
+changed bytes into the live cron.
 Every later installed-state inspect revalidates the exact recovery directory,
 cron backup and canonical recovery metadata; missing, additional or changed
 recovery evidence fails closed.

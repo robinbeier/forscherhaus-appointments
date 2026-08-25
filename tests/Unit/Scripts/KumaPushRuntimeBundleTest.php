@@ -685,6 +685,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
             self::assertNotSame(0, $result['exit_code']);
             $json = $this->jsonOutput($result['stdout']);
             self::assertSame('fail', $json['status'] ?? null);
+            self::assertSame('recovery_invalid', $json['reason'] ?? null);
             self::assertTrue($json['mutation_performed'] ?? false);
             self::assertSame($legacy, file_get_contents($cronPath));
             self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
@@ -692,6 +693,47 @@ final class KumaPushRuntimeBundleTest extends TestCase
             $backup = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1/rob-489-cron.before';
             self::assertFileExists($backup);
             self::assertNotSame($legacy, file_get_contents($backup));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testConcurrentWriterDuringCronRestoreIsRetainedUnderRob489TempNamespace(): void
+    {
+        $helper = file_get_contents($this->repoRoot() . '/' . self::HELPER);
+        self::assertIsString($helper);
+        if (!str_contains($helper, 'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_DURING_RESTORE')) {
+            self::markTestSkipped('Concurrent-restore test hook is not present yet.');
+        }
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $legacy = file_get_contents($cronPath);
+            self::assertIsString($legacy);
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH' => 'legacy_drift',
+                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_DURING_RESTORE' => '1',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertSame('rollback_failed', $json['reason'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
+
+            $liveCron = file_get_contents($cronPath);
+            self::assertSame($legacy . "# concurrent-prepublication-change\n", $liveCron);
+            self::assertStringNotContainsString('# concurrent-restore-change', (string) $liveCron);
+
+            $retained = false;
+            foreach (glob(dirname($cronPath) . '/.fh-uptime-kuma-push.rob489-*.tmp') ?: [] as $temporary) {
+                if (str_contains((string) file_get_contents($temporary), '# concurrent-restore-change')) {
+                    $retained = true;
+                    break;
+                }
+            }
+            self::assertTrue($retained, 'Concurrent writer B bytes must remain in the ROB-489 temp namespace.');
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
