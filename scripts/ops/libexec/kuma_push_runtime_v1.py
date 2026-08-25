@@ -51,13 +51,14 @@ EXPECTED_FILES = {
 
 
 class ContractError(Exception):
-    def __init__(self, reason):
+    def __init__(self, reason, mutated=False):
         super().__init__(reason)
         self.reason = reason
+        self.mutated = mutated
 
 
-def fail(reason):
-    raise ContractError(reason)
+def fail(reason, mutated=False):
+    raise ContractError(reason, mutated)
 
 
 def emit(status, ready=False, mutated=False, **extra):
@@ -315,7 +316,6 @@ def rename_noreplace(parent, source, target):
         if result != 0:
             error = ctypes.get_errno()
             raise OSError(error, os.strerror(error))
-        os.fsync(parent_fd)
     finally:
         os.close(parent_fd)
 
@@ -486,6 +486,12 @@ def execute(context):
         if not context['installed']:
             install_bundle(context['target'], context['sources'], context['expected_uid'])
             target_created = True
+            if (
+                not context['production']
+                and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_FAIL_BUNDLE_DURABILITY') == '1'
+            ):
+                fail('test_failure_during_bundle_durability')
+            fsync_directory(context['target'].parent)
         if context['cron_state'] == 'legacy':
             state = ensure_state(context['root_prefix'], context['expected_uid'])
             backup = attach_recovery(
@@ -522,16 +528,21 @@ def execute(context):
                     context['cron'], context['expected_uid'], {0o644}, MAX_CRON_BYTES,
                 )
                 atomic_replace(context['cron'], backup_data, context['expected_uid'], current_identity)
+                if (
+                    not context['production']
+                    and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_ROLLBACK_DURABILITY') == '1'
+                ):
+                    fail('test_failure_during_cron_rollback_durability')
                 fsync_directory(context['cron'].parent)
             except BaseException as error:
                 rollback_error = error
-        if target_created:
+        if target_created and rollback_error is None:
             try:
                 remove_published_bundle(context['target'], context['sources'], context['expected_uid'])
             except BaseException as error:
                 rollback_error = rollback_error or error
         if rollback_error is not None:
-            fail('rollback_failed')
+            fail('rollback_failed', True)
         raise
 
 
@@ -583,7 +594,7 @@ def main():
 try:
     main()
 except ContractError as error:
-    emit('fail', False, False, reason=error.reason)
+    emit('fail', False, error.mutated, reason=error.reason)
     raise SystemExit(70)
 except (OSError, ValueError, TypeError):
     emit('fail', False, False, reason='internal_error')

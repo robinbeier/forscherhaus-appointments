@@ -68,48 +68,12 @@ fi
     printf 'ERROR: --execute requires a lowercase 40-hex --expected-commit.\n' >&2
     exit 1
 }
-for command in git python3 ssh tar; do
+for command in git python3 ssh; do
     command -v "$command" >/dev/null 2>&1 || {
         printf 'ERROR: missing required command: %s\n' "$command" >&2
         exit 1
     }
 done
-
-ARTIFACTS=("$MANIFEST_RELATIVE" "$HELPER_RELATIVE")
-ARTIFACT_OUTPUT="$(python3 - "$REPO_ROOT/$MANIFEST_RELATIVE" <<'PY'
-import json
-import pathlib
-import re
-import sys
-
-with open(sys.argv[1], 'r', encoding='utf-8') as handle:
-    manifest = json.load(handle)
-if (
-    manifest.get('schema') != 'fh_kuma_push_runtime_bundle.v1'
-    or manifest.get('runtime') != 'v1'
-    or manifest.get('install_root') != '/usr/local/libexec/fh-kuma-push-runtime-v1'
-    or manifest.get('cron_path') != '/etc/cron.d/fh-uptime-kuma-push'
-    or not isinstance(manifest.get('files'), list)
-    or len(manifest['files']) != 15
-):
-    raise SystemExit('invalid runtime manifest')
-paths = [manifest.get('cron_source')] + [entry.get('source') for entry in manifest['files']]
-if len(paths) != len(set(paths)):
-    raise SystemExit('duplicate runtime artifact')
-for path in paths:
-    if (
-        not isinstance(path, str)
-        or pathlib.PurePosixPath(path).is_absolute()
-        or '..' in pathlib.PurePosixPath(path).parts
-        or not re.fullmatch(r'[A-Za-z0-9._/-]+', path)
-    ):
-        raise SystemExit('invalid runtime artifact path')
-    print(path)
-PY
-)"
-while IFS= read -r artifact; do
-    [[ -n "$artifact" ]] && ARTIFACTS+=("$artifact")
-done <<<"$ARTIFACT_OUTPUT"
 
 HEAD_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 [[ "$HEAD_COMMIT" == "$EXPECTED_COMMIT" ]] || {
@@ -141,12 +105,56 @@ git -C "$REPO_ROOT" diff --cached --quiet || {
     printf 'ERROR: staged worktree changes present.\n' >&2
     exit 1
 }
-for artifact in "${ARTIFACTS[@]}"; do
-    [[ -f "${REPO_ROOT}/${artifact}" && ! -L "${REPO_ROOT}/${artifact}" ]] || {
-        printf 'ERROR: missing or linked runtime artifact.\n' >&2
-        exit 1
-    }
-done
+
+ARTIFACTS=("$MANIFEST_RELATIVE" "$HELPER_RELATIVE")
+ARTIFACT_OUTPUT="$(python3 - "$REPO_ROOT" "$EXPECTED_COMMIT" "$MANIFEST_RELATIVE" "$HELPER_RELATIVE" <<'PY'
+import json
+import pathlib
+import re
+import subprocess
+import sys
+
+repository, commit, manifest_path, helper_path = sys.argv[1:]
+result = subprocess.run(
+    ['git', '-C', repository, 'show', f'{commit}:{manifest_path}'],
+    check=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+)
+manifest = json.loads(result.stdout.decode('utf-8'))
+if (
+    manifest.get('schema') != 'fh_kuma_push_runtime_bundle.v1'
+    or manifest.get('runtime') != 'v1'
+    or manifest.get('install_root') != '/usr/local/libexec/fh-kuma-push-runtime-v1'
+    or manifest.get('cron_path') != '/etc/cron.d/fh-uptime-kuma-push'
+    or not isinstance(manifest.get('files'), list)
+    or len(manifest['files']) != 15
+):
+    raise SystemExit('invalid runtime manifest')
+paths = [manifest_path, helper_path, manifest.get('cron_source')] + [
+    entry.get('source') for entry in manifest['files']
+]
+if len(paths) != len(set(paths)):
+    raise SystemExit('duplicate runtime artifact')
+for path in paths:
+    if (
+        not isinstance(path, str)
+        or pathlib.PurePosixPath(path).is_absolute()
+        or '..' in pathlib.PurePosixPath(path).parts
+        or not re.fullmatch(r'[A-Za-z0-9._/-]+', path)
+    ):
+        raise SystemExit('invalid runtime artifact path')
+for path in paths[2:]:
+    print(path)
+PY
+)"
+while IFS= read -r artifact; do
+    [[ -n "$artifact" ]] && ARTIFACTS+=("$artifact")
+done <<<"$ARTIFACT_OUTPUT"
+[[ "${#ARTIFACTS[@]}" -eq 18 ]] || {
+    printf 'ERROR: runtime artifact count contract failed.\n' >&2
+    exit 1
+}
 
 REMOTE_STAGE="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
     'umask 077; mktemp -d -p /root .fh-kuma-push-runtime-v1.XXXXXXXX')"
@@ -155,7 +163,7 @@ REMOTE_STAGE="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
     exit 1
 }
 
-tar -C "$REPO_ROOT" -cf - "${ARTIFACTS[@]}" \
+git -C "$REPO_ROOT" archive --format=tar "$EXPECTED_COMMIT" -- "${ARTIFACTS[@]}" \
     | ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" "tar --no-same-owner -xf - -C '${REMOTE_STAGE}'"
 
 set +e

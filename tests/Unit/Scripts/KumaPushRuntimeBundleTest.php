@@ -144,6 +144,10 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 ['mktemp', 'tar', 'inspect', 'execute', 'cleanup'],
                 file($fixture['ssh_log'], FILE_IGNORE_NEW_LINES),
             );
+            self::assertSame(
+                ['show:' . $fixture['commit'], 'archive:' . $fixture['commit']],
+                file($fixture['git_log'], FILE_IGNORE_NEW_LINES),
+            );
             self::assertFileDoesNotExist($fixture['stage_marker']);
         } finally {
             $this->removeDirectory($fixture['workspace']);
@@ -475,6 +479,52 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
+    public function testBundleDurabilityFailureTracksAndRemovesPublishedRuntime(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $beforeCron = file_get_contents($cronPath);
+            self::assertIsString($beforeCron);
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_BUNDLE_DURABILITY' => '1',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($beforeCron, file_get_contents($cronPath));
+            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testFailedCronRollbackRetainsRuntimeAndReportsMutation(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $beforeCron = file_get_contents($cronPath);
+            self::assertIsString($beforeCron);
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE' => '1',
+                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_ROLLBACK_DURABILITY' => '1',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertSame('rollback_failed', $json['reason'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
+            self::assertSame($beforeCron, file_get_contents($cronPath));
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
     /** @return array<string, mixed> */
     private function manifest(): array
     {
@@ -560,6 +610,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
     {
         $workspace = sys_get_temp_dir() . '/kuma-push-wrapper-' . bin2hex(random_bytes(8));
         $bin = $workspace . '/bin';
+        $gitLog = $workspace . '/git.log';
         $sshLog = $workspace . '/ssh.log';
         $stageMarker = $workspace . '/stage-retained';
         $stageRoot = $workspace . '/stage';
@@ -574,6 +625,17 @@ final class KumaPushRuntimeBundleTest extends TestCase
               *"rev-parse HEAD"*) printf '%s\n' "$FH_WRAPPER_COMMIT" ;;
               *"rev-parse --verify refs/remotes/origin/main^{commit}"*) printf '%s\n' "$FH_WRAPPER_ORIGIN_MAIN_COMMIT" ;;
               *"ls-remote --exit-code origin refs/heads/main"*) printf '%s\trefs/heads/main\n' "$FH_WRAPPER_REMOTE_MAIN_COMMIT" ;;
+              *"show $FH_WRAPPER_COMMIT:scripts/ops/config/kuma_push_runtime_bundle_v1.json"*)
+                printf 'show:%s\n' "$FH_WRAPPER_COMMIT" >> "$FH_WRAPPER_GIT_LOG"
+                cat "$FH_WRAPPER_REPO_ROOT/scripts/ops/config/kuma_push_runtime_bundle_v1.json"
+                ;;
+              *"archive --format=tar $FH_WRAPPER_COMMIT --"*)
+                printf 'archive:%s\n' "$FH_WRAPPER_COMMIT" >> "$FH_WRAPPER_GIT_LOG"
+                while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do shift; done
+                [ "$#" -gt 0 ]
+                shift
+                exec /usr/bin/tar -C "$FH_WRAPPER_REPO_ROOT" -cf - "$@"
+                ;;
               *) exit 0 ;;
             esac
             SH
@@ -629,6 +691,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         return [
             'workspace' => $workspace,
             'bin' => $bin,
+            'git_log' => $gitLog,
             'ssh_log' => $sshLog,
             'stage_marker' => $stageMarker,
             'stage_root' => $stageRoot,
@@ -646,7 +709,9 @@ final class KumaPushRuntimeBundleTest extends TestCase
             [
                 'PATH' => $fixture['bin'] . PATH_SEPARATOR . dirname(PHP_BINARY) . PATH_SEPARATOR . '/usr/bin:/bin',
                 'FH_WRAPPER_COMMIT' => $fixture['commit'],
+                'FH_WRAPPER_GIT_LOG' => $fixture['git_log'],
                 'FH_WRAPPER_ORIGIN_MAIN_COMMIT' => $fixture['origin_main_commit'] ?? $fixture['commit'],
+                'FH_WRAPPER_REPO_ROOT' => $this->repoRoot(),
                 'FH_WRAPPER_REMOTE_MAIN_COMMIT' => $fixture['remote_main_commit'] ?? $fixture['commit'],
                 'FH_WRAPPER_STAGE_ROOT' => $fixture['stage_root'],
                 'FH_WRAPPER_STAGE_MARKER' => $fixture['stage_marker'],
