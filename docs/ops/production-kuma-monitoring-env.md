@@ -39,11 +39,15 @@ KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1
 The source may contain no active definition or exactly one active definition
 with value `0` or `1` on a physical LF-delimited line. CRLF on the target line,
 Unicode/non-shell line separators, embedded occurrences and other ambiguous
-shell boundaries fail closed. A missing key is appended, adding one preceding
-newline only when the existing final byte is not a newline; an odd trailing
-backslash before that boundary is rejected because Bash would consume the
-append as a continuation. A `0` changes at exactly its single value-byte
-position. A `1` is already converged and is never rewritten.
+shell boundaries fail closed. The target line must also be a top-level,
+self-contained Bash assignment. An exact-looking line inside a multiline
+quote, heredoc, command substitution, function, brace/subshell group or shell
+control block or conditional compound is rejected. A missing key is appended,
+adding one preceding newline only when the existing final byte is not a
+newline; an open shell context or odd trailing backslash before that boundary
+is rejected because Bash would not evaluate the append as the requested
+assignment. A `0` changes at exactly its single value-byte position. A `1` is
+already converged and is never rewritten.
 
 The desired Env must also remain within the same bounded Env-size contract.
 An append that would cross that limit fails during read-only preflight before

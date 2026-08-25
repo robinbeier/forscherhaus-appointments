@@ -162,6 +162,153 @@ def stable_read(path, expected_uid, expected_mode, maximum, reason):
     return bytes(data), opened
 
 
+def parse_heredoc_operator(body, offset):
+    index = offset + 2
+    if index < len(body) and body[index:index + 1] == b'<':
+        fail('env_shell_context_invalid')
+    strip_tabs = False
+    if index < len(body) and body[index:index + 1] == b'-':
+        strip_tabs = True
+        index += 1
+    while index < len(body) and body[index:index + 1] in {b' ', b'\t'}:
+        index += 1
+    if index >= len(body):
+        fail('env_shell_context_invalid')
+    quote = body[index:index + 1]
+    if quote in {b"'", b'"'}:
+        end = body.find(quote, index + 1)
+        if end < 0:
+            fail('env_shell_context_invalid')
+        delimiter = body[index + 1:end]
+        index = end + 1
+    else:
+        end = index
+        while end < len(body) and body[end:end + 1] not in b' \t;|&()<>':
+            end += 1
+        delimiter = body[index:end].replace(b'\\', b'')
+        index = end
+    if not delimiter or b'\x00' in delimiter:
+        fail('env_shell_context_invalid')
+    return (delimiter, strip_tabs), index
+
+
+def shell_line_contexts(data):
+    contexts = []
+    quote = None
+    compounds = []
+    blocks = []
+    continuation_kind = None
+    heredocs = []
+    command_word = re.compile(rb'(?:^|[;|&])\s*([A-Za-z_][A-Za-z0-9_]*)')
+    block_openers = {
+        b'case': b'esac',
+        b'for': b'done',
+        b'if': b'fi',
+        b'select': b'done',
+        b'until': b'done',
+        b'while': b'done',
+    }
+
+    for body in data.split(b'\n'):
+        if heredocs:
+            contexts.append(False)
+            delimiter, strip_tabs = heredocs[0]
+            candidate = body.lstrip(b'\t') if strip_tabs else body
+            if candidate == delimiter:
+                heredocs.pop(0)
+            continue
+
+        contexts.append(quote is None and not compounds and not blocks and continuation_kind is None)
+        continuation_kind = None
+        visible = bytearray(b' ' * len(body))
+        declared_heredocs = []
+        index = 0
+        while index < len(body):
+            current = body[index:index + 1]
+            if quote == b"'":
+                if current == quote:
+                    quote = None
+                index += 1
+                continue
+            if quote in {b'"', b'`'}:
+                if current == b'\\':
+                    if index + 1 >= len(body):
+                        continuation_kind = 'escape'
+                        index += 1
+                    else:
+                        index += 2
+                    continue
+                if current == quote:
+                    quote = None
+                index += 1
+                continue
+            if current == b'#' and (
+                index == 0 or body[index - 1:index] in b' \t;|&(){}'
+            ):
+                break
+            if current == b'\\':
+                if index + 1 >= len(body):
+                    continuation_kind = 'escape'
+                    index += 1
+                else:
+                    index += 2
+                continue
+            if current in {b"'", b'"', b'`'}:
+                quote = current
+                index += 1
+                continue
+            if body[index:index + 2] == b'<<':
+                specification, index = parse_heredoc_operator(body, index)
+                declared_heredocs.append(specification)
+                continue
+            if body[index:index + 2] == b'[[':
+                compounds.append(b']]')
+                index += 2
+                continue
+            if body[index:index + 2] == b']]':
+                if compounds and compounds[-1] == b']]':
+                    compounds.pop()
+                index += 2
+                continue
+            if body[index:index + 2] in {b'$(', b'${'}:
+                compounds.append(b')' if body[index + 1:index + 2] == b'(' else b'}')
+                index += 2
+                continue
+            if current in {b'(', b'{'}:
+                compounds.append(b')' if current == b'(' else b'}')
+                index += 1
+                continue
+            if current in {b')', b'}'}:
+                if compounds and compounds[-1] == current:
+                    compounds.pop()
+                visible[index] = current[0]
+                index += 1
+                continue
+            visible[index] = current[0]
+            index += 1
+
+        for match in command_word.finditer(bytes(visible)):
+            word = match.group(1)
+            if blocks and word == blocks[-1]:
+                blocks.pop()
+            elif word in block_openers:
+                blocks.append(block_openers[word])
+        structural = bytes(visible).rstrip()
+        if structural.endswith((b'&&', b'||', b'|')):
+            continuation_kind = 'operator'
+        heredocs.extend(declared_heredocs)
+
+    complete = quote is None and not compounds and not blocks and continuation_kind is None and not heredocs
+    trailing_escape_only = (
+        quote is None
+        and not compounds
+        and not blocks
+        and continuation_kind == 'escape'
+        and not heredocs
+    )
+    return contexts, complete, trailing_escape_only
+
+
 def parse_env(data):
     if b'\x00' in data:
         fail('env_contract_invalid')
@@ -169,15 +316,18 @@ def parse_env(data):
         data.decode('utf-8')
     except UnicodeDecodeError:
         fail('env_invalid_utf8')
+    contexts, shell_complete, trailing_escape_only = shell_line_contexts(data)
     key = KEY.encode('ascii')
     matches = []
     offset = 0
-    for body in data.split(b'\n'):
+    for line_index, body in enumerate(data.split(b'\n')):
         if key in body:
-            if body not in {key + b'=0', key + b'=1'}:
+            if not contexts[line_index] or body not in {key + b'=0', key + b'=1'}:
                 fail('definition_ambiguous')
             matches.append((chr(body[-1]), offset + len(key) + 1))
         offset += len(body) + 1
+    if not shell_complete and not trailing_escape_only:
+        fail('env_shell_context_invalid')
     if len(matches) > 1:
         fail('duplicate_definition')
     return matches[0] if matches else (None, None)

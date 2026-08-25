@@ -143,6 +143,36 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testTargetDefinitionInsideBashCompoundContextFailsClosed(): void
+    {
+        foreach (
+            [
+                "X='foo\n" . self::KEY . "=0\nbar'\n",
+                'X="foo' . "\n" . self::KEY . '=0' . "\n" . 'bar"' . "\n",
+                "cat <<'ENV_VALUE'\n" . self::KEY . "=0\nENV_VALUE\n",
+                "configure() {\n" . self::KEY . "=0\n}\n",
+                "X=$(\n" . self::KEY . "=0\n)\n",
+                "if true; then\n" . self::KEY . "=0\nfi\n",
+                "[[\n" . self::KEY . "=0\n]]\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            self::assertSame('definition_ambiguous', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
+
+        $original = "X='foo\nbar'\n";
+        $this->writeEnv($original);
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame($original . self::KEY . "=1\n", file_get_contents($this->envPath));
+    }
+
     public function testConfirmationAndAmbiguousDefinitionsFailClosed(): void
     {
         $this->writeEnv("SECRET_TOKEN=do-not-print\n");
