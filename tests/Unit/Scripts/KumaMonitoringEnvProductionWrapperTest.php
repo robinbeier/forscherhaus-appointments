@@ -74,6 +74,8 @@ final class KumaMonitoringEnvProductionWrapperTest extends TestCase
         self::assertStringContainsString('staging is retained and no retry is attempted', $source);
         self::assertStringContainsString('--invoke-installed execute --confirm-live-write ROB-490', $source);
         self::assertStringContainsString('--invoke-installed inspect', $source);
+        self::assertStringContainsString('--invoke-source inspect', $source);
+        self::assertStringNotContainsString('-I -B \'${REMOTE_STAGE}/${HELPER_RELATIVE}\'', $source);
         self::assertStringNotContainsString('systemctl', $source);
         self::assertStringNotContainsString('kuma_push_host_resources.sh', $source);
         self::assertStringNotContainsString('fh-release-archive-dump-retention', $source);
@@ -200,6 +202,7 @@ final class KumaMonitoringEnvProductionWrapperTest extends TestCase
               *"/usr/bin/tar "*) dd of=/dev/null 2>/dev/null ;;
               *"--invoke-installed execute"*) printf '%s\n' '{"execution_ready":true,"monitoring_state":"enabled","mutation_performed":true,"recovery_state":"intact","rollback_outcome":"not_required","status":"pass"}' ;;
               *"--invoke-installed inspect"*) printf '%s\n' '{"execution_ready":true,"monitoring_state":"would_enable","mutation_performed":false,"recovery_state":"intact","rollback_outcome":"not_required","status":"pass"}' ;;
+              *"--invoke-source inspect"*) printf '%s\n' '{"execution_ready":true,"monitoring_state":"would_enable","mutation_performed":false,"recovery_state":"intact","rollback_outcome":"not_required","status":"pass"}' ;;
               *"--execute --confirm-live-write ROB-490"*) printf '%s\n' '{"execution_ready":true,"install_state":"installed","mutation_performed":false,"status":"pass"}' ;;
               *"--expected-sha256 "*) printf '%s\n' '{"execution_ready":true,"install_state":"installed","mutation_performed":false,"status":"pass"}' ;;
               *"rm -rf --"*) exit 0 ;;
@@ -217,6 +220,10 @@ final class KumaMonitoringEnvProductionWrapperTest extends TestCase
         ];
 
         try {
+            $inspect = $this->runWrapper(['--inspect', '--expected-commit', $expected], $environment);
+            self::assertSame(0, $inspect['exit_code'], $inspect['stderr']);
+            self::assertStringContainsString('[prod-kuma-monitoring-env-v1] inspect passed', $inspect['stdout']);
+
             $install = $this->runWrapper(
                 ['--install', '--confirm-live-write', 'ROB-490', '--expected-commit', $expected],
                 $environment,
@@ -236,6 +243,7 @@ final class KumaMonitoringEnvProductionWrapperTest extends TestCase
             self::assertStringContainsString('StrictHostKeyChecking=yes', $log);
             self::assertStringContainsString('--invoke-installed inspect', $log);
             self::assertStringContainsString('--invoke-installed execute --confirm-live-write ROB-490', $log);
+            self::assertStringContainsString('--invoke-source inspect', $log);
             self::assertMatchesRegularExpression("/--expected-sha256 '[0-9a-f]{64}'/", $log);
         } finally {
             unlink($bin . '/git');

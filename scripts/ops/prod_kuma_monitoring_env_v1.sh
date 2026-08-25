@@ -213,7 +213,9 @@ if [[ "$MODE" == 'install' ]]; then
 elif [[ "$MODE" == 'inspect' ]]; then
     set +e
     HELPER_OUTPUT="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" \
-        "/usr/bin/python3 -I -B '${REMOTE_STAGE}/${HELPER_RELATIVE}'")"
+        "/usr/bin/python3 -I -B '${REMOTE_STAGE}/${INSTALLER_RELATIVE}' \
+        --source '${REMOTE_STAGE}/${HELPER_RELATIVE}' --expected-sha256 '${HELPER_SHA256}' \
+        --invoke-source inspect")"
     HELPER_RC=$?
     set -e
 else

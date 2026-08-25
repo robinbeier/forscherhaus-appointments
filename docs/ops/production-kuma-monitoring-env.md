@@ -169,19 +169,19 @@ after each descriptor-bound read; if a post-publication writer replaces it, the
 installer fails and preserves `mutation_performed=true` for the completed
 publication.
 
-Immediately before either installed-helper invocation, the trusted staged
-installer opens the fixed target with `O_NOFOLLOW`, binds its complete identity
-and exact merged hash, reads the bounded helper bytes from that descriptor, and
-copies those bytes into a private anonymous execution snapshot. The isolated
-Python bootstrap inherits only the snapshot descriptor plus its expected size
-and hash, verifies both again, and then executes the snapshot. It neither
-reopens the target pathname nor transports the helper source through process
-arguments. The wrapper never executes a path based only on an earlier install
-preflight, and it does not depend on runtime-specific `/proc/self/fd` script-path
-behavior. On Linux, the bootstrap re-enters the already-running Python
-interpreter through the kernel-bound `/proc/self/exe`; invocation therefore
-does not depend on `PATH` or `sys.executable` surviving a caller's reduced
-environment.
+Immediately before staged inspection or either installed-helper invocation,
+the trusted staged installer opens the selected source with `O_NOFOLLOW`, binds
+its complete identity and exact merged hash, reads the bounded helper bytes
+from that descriptor, and copies those bytes into a private anonymous execution
+snapshot. The isolated Python bootstrap inherits only the snapshot descriptor
+plus its expected size and hash, verifies both again, and then executes the
+snapshot. It neither reopens the helper pathname nor transports the helper
+source through process arguments. The wrapper never executes a path based only
+on an earlier preflight, and it does not depend on runtime-specific
+`/proc/self/fd` script-path behavior. On Linux, the bootstrap re-enters the
+already-running Python interpreter through the kernel-bound `/proc/self/exe`;
+invocation therefore does not depend on `PATH` or `sys.executable` surviving a
+caller's reduced environment.
 
 Separately approved single Env transaction, only after exact installation:
 

@@ -199,6 +199,22 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
         self::assertFalse($json['mutation_performed'] ?? true);
     }
 
+    public function testInvokeSourceRunsTheExactStagedBytesWithoutInstallation(): void
+    {
+        $env = $this->root . '/root/backups/uptime-kuma-push.env';
+        file_put_contents($env, "KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0\n");
+        chmod($env, 0600);
+
+        $invoked = $this->runInstaller(['--invoke-source', 'inspect']);
+
+        self::assertSame(0, $invoked['exit_code'], $invoked['stdout'] . $invoked['stderr']);
+        $json = $this->json($invoked['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertFileDoesNotExist($this->root . self::TARGET);
+    }
+
     public function testInvokeInstalledExecuteMutatesOnceAndThenConverges(): void
     {
         $env = $this->root . '/root/backups/uptime-kuma-push.env';

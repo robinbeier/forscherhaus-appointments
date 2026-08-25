@@ -384,11 +384,57 @@ def preflight(args):
     }
 
 
+def invoke_snapshot(context, data, program, execute_helper):
+    snapshot = None
+    try:
+        snapshot = tempfile.TemporaryFile()
+        snapshot.write(data)
+        snapshot.flush()
+        snapshot.seek(0)
+        snapshot_fd = snapshot.fileno()
+        os.set_inheritable(snapshot_fd, True)
+    except OSError:
+        fail('execution_snapshot_unavailable')
+    try:
+        if (
+            context['root_prefix'] != Path('/')
+            and os.environ.get('FH_KUMA_MONITORING_INSTALL_TEST_EMPTY_SYS_EXECUTABLE', '') == '1'
+        ):
+            sys.executable = ''
+        interpreter = current_interpreter()
+        helper_arguments = [
+            interpreter,
+            '-I',
+            '-B',
+            '-c',
+            INVOKE_BOOTSTRAP,
+            str(snapshot_fd),
+            str(len(data)),
+            context['expected_sha256'],
+            str(program),
+        ]
+        if context['root_prefix'] != Path('/'):
+            helper_arguments.extend(['--root-prefix', str(context['root_prefix'])])
+        if execute_helper:
+            helper_arguments.extend(['--execute', '--confirm-live-write', CONFIRMATION])
+        os.execve(interpreter, helper_arguments, os.environ.copy())
+    finally:
+        snapshot.close()
+
+
+def invoke_source(context):
+    source_data, source_identity = stable_read(
+        context['source'], context['expected_uid'], 0o555,
+    )
+    if source_data != context['source_data'] or source_identity != context['source_identity']:
+        fail('source_changed')
+    invoke_snapshot(context, source_data, context['source'], False)
+
+
 def invoke_installed(context, execute_helper):
     if context['install_state'] != 'installed':
         fail('installed_helper_required')
     target = context['target']
-    snapshot = None
     try:
         before = os.lstat(target)
         fd = os.open(target, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -415,40 +461,8 @@ def invoke_installed(context, execute_helper):
             or hashlib.sha256(data).hexdigest() != context['expected_sha256']
         ):
             fail('target_changed')
-        try:
-            snapshot = tempfile.TemporaryFile()
-            snapshot.write(data)
-            snapshot.flush()
-            snapshot.seek(0)
-            snapshot_fd = snapshot.fileno()
-            os.set_inheritable(snapshot_fd, True)
-        except OSError:
-            fail('execution_snapshot_unavailable')
-        if (
-            context['root_prefix'] != Path('/')
-            and os.environ.get('FH_KUMA_MONITORING_INSTALL_TEST_EMPTY_SYS_EXECUTABLE', '') == '1'
-        ):
-            sys.executable = ''
-        interpreter = current_interpreter()
-        helper_arguments = [
-            interpreter,
-            '-I',
-            '-B',
-            '-c',
-            INVOKE_BOOTSTRAP,
-            str(snapshot_fd),
-            str(len(data)),
-            context['expected_sha256'],
-            str(target),
-        ]
-        if context['root_prefix'] != Path('/'):
-            helper_arguments.extend(['--root-prefix', str(context['root_prefix'])])
-        if execute_helper:
-            helper_arguments.extend(['--execute', '--confirm-live-write', CONFIRMATION])
-        os.execve(interpreter, helper_arguments, os.environ.copy())
+        invoke_snapshot(context, bytes(data), target, execute_helper)
     finally:
-        if snapshot is not None:
-            snapshot.close()
         os.close(fd)
 
 
@@ -502,12 +516,18 @@ def parse_arguments():
     parser.add_argument('--expected-sha256', required=True)
     parser.add_argument('--root-prefix', default='/')
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--invoke-source', choices=('inspect',))
     parser.add_argument('--invoke-installed', choices=('inspect', 'execute'))
     parser.add_argument('--confirm-live-write', default='')
     args = parser.parse_args()
     if re.fullmatch(r'[0-9a-f]{64}', args.expected_sha256) is None:
         fail('expected_hash_invalid')
-    if args.execute and args.invoke_installed is not None:
+    action_count = sum((
+        args.execute,
+        args.invoke_source is not None,
+        args.invoke_installed is not None,
+    ))
+    if action_count > 1:
         fail('action_contract_invalid')
     live_write = args.execute or args.invoke_installed == 'execute'
     if live_write:
@@ -521,6 +541,8 @@ def parse_arguments():
 def main():
     args = parse_arguments()
     context = preflight(args)
+    if args.invoke_source is not None:
+        invoke_source(context)
     if args.invoke_installed is not None:
         invoke_installed(context, args.invoke_installed == 'execute')
     if not args.execute:
