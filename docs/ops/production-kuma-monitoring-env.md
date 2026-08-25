@@ -42,6 +42,10 @@ only when the existing final byte is not a newline. A `0` changes at exactly
 its single value-byte position. A `1` is already converged and is never
 rewritten.
 
+The desired Env must also remain within the same bounded Env-size contract.
+An append that would cross that limit fails during read-only preflight before
+recovery publication or any exchange.
+
 Duplicate, commented, disabled, prefixed, embedded or differently valued
 definitions fail closed. All other bytes, including line endings, Push URLs,
 tokens, monitor identities and every unrelated Env value, remain byte-for-byte
@@ -94,6 +98,11 @@ displaced object is still the exact bound original. A newer writer during
 recovery is never overwritten or unlinked; the result becomes
 `rollback_failed`, and private displaced evidence is retained for a separate
 read-only recovery decision.
+
+This guarded rollback applies to both classified contract failures and
+unexpected runtime failures while the exact pair is still present. After the
+displaced original has been durably unlinked, failures are reported as unknown
+mutating outcomes and are never retried.
 
 Only an object proven to be the helper's exact private replacement may be
 unlinked. Recovery publication or any begun Exchange makes

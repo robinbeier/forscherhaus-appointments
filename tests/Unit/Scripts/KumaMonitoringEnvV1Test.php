@@ -49,6 +49,21 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testKeyAppendThatWouldExceedMaximumFailsBeforeMutation(): void
+    {
+        $this->writeEnv(str_repeat('A', 4_000_000));
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code']);
+        self::assertSame($before, $this->snapshot());
+        $json = $this->json($result['stdout']);
+        self::assertSame('desired_env_too_large', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame('not_required', $json['rollback_outcome'] ?? null);
+    }
+
     public function testEnabledDryRunWithoutRecoveryFailsWithoutMutation(): void
     {
         $this->writeEnv(self::KEY . "=1\n");
@@ -252,6 +267,25 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame(70, $result['exit_code']);
         $json = $this->json($result['stdout']);
         self::assertSame('test_failure_after_exchange', $json['reason'] ?? null);
+        self::assertSame('succeeded', $json['rollback_outcome'] ?? null);
+        self::assertTrue($json['mutation_performed'] ?? false);
+        self::assertSame($original, file_get_contents($this->envPath));
+        self::assertSame([], glob($this->root . '/root/backups/.fh-kuma-monitoring-env-v1.pending-*'));
+        self::assertStringNotContainsString('remain-hidden', $result['stdout'] . $result['stderr']);
+    }
+
+    public function testUnexpectedPostExchangeFailureRollsBackExactOriginal(): void
+    {
+        $original = self::KEY . "=0\nSECRET=remain-hidden\n";
+        $this->writeEnv($original);
+        $result = $this->runHelper(
+            ['--execute', '--confirm-live-write', 'ROB-490'],
+            ['FH_KUMA_MONITORING_TEST_FAIL_UNEXPECTED_AFTER_EXCHANGE' => '1'],
+        );
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('execution_failed', $json['reason'] ?? null);
         self::assertSame('succeeded', $json['rollback_outcome'] ?? null);
         self::assertTrue($json['mutation_performed'] ?? false);
         self::assertSame($original, file_get_contents($this->envPath));

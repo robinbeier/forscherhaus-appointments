@@ -531,6 +531,8 @@ def execute_transaction(context):
                 env, pending, desired, replacement_identity, original, env_identity,
                 expected_uid, root_prefix, 'test_failure_env_durability',
             )
+        if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_FAIL_UNEXPECTED_AFTER_EXCHANGE') == '1':
+            raise OSError(errno.EIO, 'test unexpected post-exchange failure')
         fsync_directory(env.parent)
         exact_exchange_object(pending, original, env_identity, expected_uid, 'displaced_changed')
         os.unlink(pending)
@@ -564,6 +566,11 @@ def execute_transaction(context):
             raise ContractError(error.reason, True, rollback) from error
         raise
     except BaseException as error:
+        if exchanged and replacement_identity is not None:
+            raise rollback_exchange(
+                env, pending, desired, replacement_identity, original, env_identity,
+                expected_uid, root_prefix, 'execution_failed',
+            ) from error
         raise ContractError('execution_failed', recovery_mutated or exchange_begun, 'failed') from error
 
 
@@ -586,6 +593,8 @@ def inspect_context(root_prefix):
     )
     value, value_offset = parse_env(original)
     desired = desired_env(original, value, value_offset)
+    if len(desired) > MAX_ENV_BYTES:
+        fail('desired_env_too_large')
     if value == '1':
         if not state.exists() or state.is_symlink():
             fail('recovery_missing')
