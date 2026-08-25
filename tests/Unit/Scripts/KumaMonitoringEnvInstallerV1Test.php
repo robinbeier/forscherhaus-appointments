@@ -164,7 +164,7 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
         self::assertSame(0, $installed['exit_code'], $installed['stderr']);
 
         $invoked = $this->runInstaller(['--invoke-installed', 'inspect']);
-        self::assertSame(0, $invoked['exit_code'], $invoked['stderr']);
+        self::assertSame(0, $invoked['exit_code'], $invoked['stdout'] . $invoked['stderr']);
         $json = $this->json($invoked['stdout']);
         self::assertSame('pass', $json['status'] ?? null);
         self::assertSame('would_enable', $json['monitoring_state'] ?? null);
@@ -180,7 +180,7 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
         self::assertSame(0, $installed['exit_code'], $installed['stderr']);
 
         $executed = $this->runInstaller(['--invoke-installed', 'execute', '--confirm-live-write', 'ROB-490']);
-        self::assertSame(0, $executed['exit_code'], $executed['stderr']);
+        self::assertSame(0, $executed['exit_code'], $executed['stdout'] . $executed['stderr']);
         $json = $this->json($executed['stdout']);
         self::assertSame('pass', $json['status'] ?? null);
         self::assertSame('enabled', $json['monitoring_state'] ?? null);
