@@ -96,10 +96,10 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertFalse($this->json($again['stdout'])['mutation_performed'] ?? true);
     }
 
-    public function testZeroToOneChangesExactlyOneByteAndPreservesCrLfAndFinalNewlineState(): void
+    public function testZeroToOneChangesExactlyOneByteAndPreservesUnrelatedBytes(): void
     {
-        $original = "UTF8=grü\r\n" . self::KEY . "=0\r\nTAIL=yes";
-        $expected = "UTF8=grü\r\n" . self::KEY . "=1\r\nTAIL=yes";
+        $original = "UTF8=grü\r\n" . self::KEY . "=0\nTAIL=yes";
+        $expected = "UTF8=grü\r\n" . self::KEY . "=1\nTAIL=yes";
         $this->writeEnv($original);
 
         $run = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
@@ -110,6 +110,37 @@ final class KumaMonitoringEnvV1Test extends TestCase
             $differences += $original[$index] === $expected[$index] ? 0 : 1;
         }
         self::assertSame(1, $differences);
+    }
+
+    public function testShellAmbiguousLineBoundariesAndAppendContinuationFailClosed(): void
+    {
+        foreach (
+            [
+                "X=prefix\v" . self::KEY . "=0\n",
+                "X=prefix\f" . self::KEY . "=0\n",
+                "X=prefix\u{0085}" . self::KEY . "=0\n",
+                self::KEY . "=0\r\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code']);
+            self::assertSame('definition_ambiguous', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
+
+        foreach (['X=value\\', "X=value\\\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code']);
+            self::assertSame('append_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
     }
 
     public function testConfirmationAndAmbiguousDefinitionsFailClosed(): void
@@ -313,6 +344,65 @@ final class KumaMonitoringEnvV1Test extends TestCase
         $pending = glob($this->root . '/root/backups/.fh-kuma-monitoring-env-v1.pending-*');
         self::assertCount(1, $pending);
         self::assertSame(self::KEY . "=0\n", file_get_contents($pending[0]));
+    }
+
+    public function testConcurrentPendingWriterCannotBecomeRollbackAuthority(): void
+    {
+        $this->writeEnv(self::KEY . "=0\n");
+        $result = $this->runHelper(
+            ['--execute', '--confirm-live-write', 'ROB-490'],
+            ['FH_KUMA_MONITORING_TEST_CONCURRENT_PENDING_AFTER_EXCHANGE' => '1'],
+        );
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('rollback_failed', $json['reason'] ?? null);
+        self::assertSame('failed', $json['rollback_outcome'] ?? null);
+        self::assertTrue($json['mutation_performed'] ?? false);
+        self::assertSame(self::KEY . "=1\n", file_get_contents($this->envPath));
+        $pending = glob($this->root . '/root/backups/.fh-kuma-monitoring-env-v1.pending-*');
+        self::assertCount(1, $pending);
+        self::assertSame("FOREIGN_PENDING_WRITER=1\n", file_get_contents($pending[0]));
+    }
+
+    public function testExchangeFailureCleansExactPendingBeforeReporting(): void
+    {
+        $original = self::KEY . "=0\n";
+        $desired = self::KEY . "=1\n";
+        $this->writeEnv($original);
+        $this->writeRecovery($original, $desired);
+        $recoveryBefore = $this->recoverySnapshot();
+        $result = $this->runHelper(
+            ['--execute', '--confirm-live-write', 'ROB-490'],
+            ['FH_KUMA_MONITORING_TEST_FAIL_EXCHANGE' => '1'],
+        );
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('execution_failed', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($original, file_get_contents($this->envPath));
+        self::assertSame($recoveryBefore, $this->recoverySnapshot());
+        self::assertSame([], glob($this->root . '/root/backups/.fh-kuma-monitoring-env-v1.pending-*'));
+    }
+
+    public function testRecoveryDriftBeforeOriginalUnlinkTriggersGuardedRollback(): void
+    {
+        $original = self::KEY . "=0\n";
+        $this->writeEnv($original);
+        $result = $this->runHelper(
+            ['--execute', '--confirm-live-write', 'ROB-490'],
+            ['FH_KUMA_MONITORING_TEST_TAMPER_RECOVERY_BEFORE_UNLINK' => '1'],
+        );
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('recovery_invalid', $json['reason'] ?? null);
+        self::assertSame('succeeded', $json['rollback_outcome'] ?? null);
+        self::assertTrue($json['mutation_performed'] ?? false);
+        self::assertSame($original, file_get_contents($this->envPath));
+        self::assertSame("{}\n", file_get_contents($this->state . '/rob-490-recovery.json'));
+        self::assertSame([], glob($this->root . '/root/backups/.fh-kuma-monitoring-env-v1.pending-*'));
     }
 
     public function testDurabilityFailureRollsBackBeforeUnlinkAndFinalFailureIsTruthful(): void

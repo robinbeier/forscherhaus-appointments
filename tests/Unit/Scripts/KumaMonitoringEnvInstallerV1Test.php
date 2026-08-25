@@ -114,6 +114,34 @@ final class KumaMonitoringEnvInstallerV1Test extends TestCase
         self::assertSame([], glob($this->root . '/usr/local/libexec/.fh-kuma-monitoring-env-v1.pending-*'));
     }
 
+    public function testPostPublicationTargetReplacementIsAReportedMutation(): void
+    {
+        $result = $this->runInstaller(
+            ['--execute', '--confirm-live-write', 'ROB-490'],
+            ['FH_KUMA_MONITORING_INSTALL_TEST_TARGET_REPLACE_AFTER_READ' => '1'],
+        );
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('target_changed', $json['reason'] ?? null);
+        self::assertTrue($json['mutation_performed'] ?? false);
+        self::assertSame("foreign-target-race\n", file_get_contents($this->root . self::TARGET));
+    }
+
+    public function testSymlinkedTargetAncestorFailsBeforePublication(): void
+    {
+        rmdir($this->root . '/usr/local/libexec');
+        rmdir($this->root . '/usr/local');
+        mkdir($this->root . '/opt/local/libexec', 0755, true);
+        symlink('../opt/local', $this->root . '/usr/local');
+
+        $result = $this->runInstaller(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code']);
+        self::assertSame('directory_contract_invalid', $this->json($result['stdout'])['reason'] ?? null);
+        self::assertFileDoesNotExist($this->root . '/opt/local/libexec/fh-kuma-monitoring-env-v1');
+    }
+
     public function testExactConcurrentPublicationConvergesWithoutClobbering(): void
     {
         $race = $this->runInstaller(

@@ -37,20 +37,24 @@ KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1
 ```
 
 The source may contain no active definition or exactly one active definition
-with value `0` or `1`. A missing key is appended, adding one preceding newline
-only when the existing final byte is not a newline. A `0` changes at exactly
-its single value-byte position. A `1` is already converged and is never
-rewritten.
+with value `0` or `1` on a physical LF-delimited line. CRLF on the target line,
+Unicode/non-shell line separators, embedded occurrences and other ambiguous
+shell boundaries fail closed. A missing key is appended, adding one preceding
+newline only when the existing final byte is not a newline; an odd trailing
+backslash before that boundary is rejected because Bash would consume the
+append as a continuation. A `0` changes at exactly its single value-byte
+position. A `1` is already converged and is never rewritten.
 
 The desired Env must also remain within the same bounded Env-size contract.
 An append that would cross that limit fails during read-only preflight before
 recovery publication or any exchange.
 
-Duplicate, commented, disabled, prefixed, embedded or differently valued
-definitions fail closed. All other bytes, including line endings, Push URLs,
-tokens, monitor identities and every unrelated Env value, remain byte-for-byte
-unchanged. Output contains only a closed aggregate JSON result and never emits
-Env bytes, hashes, URLs, tokens or monitor identities.
+Duplicate, commented, disabled, prefixed, embedded, CRLF-terminated or
+differently valued definitions fail closed. All unrelated bytes, including
+unrelated line endings, Push URLs, tokens, monitor identities and every other
+Env value, remain byte-for-byte unchanged. Output contains only a closed
+aggregate JSON result and never emits Env bytes, hashes, URLs, tokens or monitor
+identities.
 
 ## Recovery adoption and publication
 
@@ -98,6 +102,12 @@ displaced object is still the exact bound original. A newer writer during
 recovery is never overwritten or unlinked; the result becomes
 `rollback_failed`, and private displaced evidence is retained for a separate
 read-only recovery decision.
+
+The recovery pair is revalidated again after the live directory is durable and
+before the displaced original is unlinked. Recovery drift while the exact
+Exchange pair still exists therefore routes through the same guarded rollback.
+An unsupported or failed Exchange durably removes only the still-exact private
+replacement before reporting failure; a foreign pending object is retained.
 
 This guarded rollback applies to both classified contract failures and
 unexpected runtime failures while the exact pair is still present. After the
@@ -149,7 +159,11 @@ The installer publishes only the exact hash-bound helper at the fixed path via
 `RENAME_NOREPLACE`. An exact existing helper is idempotent; a different target
 is never replaced. Linux production requires `renameat2`; the Darwin
 `renameatx_np(RENAME_EXCL)` path exists only so isolated macOS fixtures can
-exercise the same no-clobber contract.
+exercise the same no-clobber contract. Every original ancestor component is
+validated without resolving through symlinks. The target pathname is re-lstat'd
+after each descriptor-bound read; if a post-publication writer replaces it, the
+installer fails and preserves `mutation_performed=true` for the completed
+publication.
 
 Immediately before either installed-helper invocation, the trusted staged
 installer opens the fixed target with `O_NOFOLLOW`, binds its complete identity

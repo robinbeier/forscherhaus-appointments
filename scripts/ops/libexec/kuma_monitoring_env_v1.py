@@ -166,18 +166,18 @@ def parse_env(data):
     if b'\x00' in data:
         fail('env_contract_invalid')
     try:
-        text = data.decode('utf-8')
+        data.decode('utf-8')
     except UnicodeDecodeError:
         fail('env_invalid_utf8')
+    key = KEY.encode('ascii')
     matches = []
     offset = 0
-    for line in text.splitlines(keepends=True):
-        body = line.rstrip('\r\n')
-        if KEY in body:
-            if body not in {KEY + '=0', KEY + '=1'}:
+    for body in data.split(b'\n'):
+        if key in body:
+            if body not in {key + b'=0', key + b'=1'}:
                 fail('definition_ambiguous')
-            matches.append((body[-1], offset + len(KEY) + 1))
-        offset += len(line.encode('utf-8'))
+            matches.append((chr(body[-1]), offset + len(key) + 1))
+        offset += len(body) + 1
     if len(matches) > 1:
         fail('duplicate_definition')
     return matches[0] if matches else (None, None)
@@ -185,6 +185,10 @@ def parse_env(data):
 
 def desired_env(original, value, value_offset):
     if value is None:
+        tail = original[:-1] if original.endswith(b'\n') else original
+        trailing_escapes = len(tail) - len(tail.rstrip(b'\\'))
+        if trailing_escapes % 2 == 1:
+            fail('append_context_invalid')
         separator = b'\n' if original and not original.endswith(b'\n') else b''
         return original + separator + (KEY + '=1\n').encode('ascii')
     if value == '1':
@@ -463,6 +467,9 @@ def rollback_exchange(env, pending, live_data, live_identity, displaced_data,
         inject_foreign_env(env, b'FOREIGN_RESTORE_WRITER=1\n', expected_uid)
     try:
         exact_exchange_object(env, live_data, live_identity, expected_uid, 'rollback_live_changed')
+        exact_exchange_object(
+            pending, displaced_data, displaced_identity, expected_uid, 'rollback_displaced_changed',
+        )
         rename_exchange(env.parent, pending.name, env.name)
         exact_exchange_object(env, displaced_data, displaced_identity, expected_uid, 'rollback_restore_invalid')
         exact_exchange_object(pending, live_data, live_identity, expected_uid, 'rollback_displaced_invalid')
@@ -471,6 +478,18 @@ def rollback_exchange(env, pending, live_data, live_identity, displaced_data,
         return ContractError(failure_reason, True, 'succeeded')
     except BaseException:
         return ContractError('rollback_failed', True, 'failed')
+
+
+def cleanup_pending(pending, desired, replacement_identity, expected_uid):
+    if not pending.exists() and not pending.is_symlink():
+        return
+    data, current = stable_read(
+        pending, expected_uid, 0o600, MAX_ENV_BYTES, 'pending_cleanup_invalid',
+    )
+    if replacement_identity is None or data != desired or identity(current) != identity(replacement_identity):
+        fail('pending_cleanup_invalid', True, 'failed')
+    os.unlink(pending)
+    fsync_directory(pending.parent)
 
 
 def execute_transaction(context):
@@ -499,41 +518,36 @@ def execute_transaction(context):
             fail('env_changed', recovery_mutated)
         if identity(current) != identity(env_identity):
             fail('env_changed', recovery_mutated)
+        if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_FAIL_EXCHANGE') == '1':
+            raise OSError(errno.EOPNOTSUPP, 'test exchange unavailable')
         rename_exchange(env.parent, pending.name, env.name)
         exchanged = True
         exchange_begun = True
-        displaced_data, displaced_identity = stable_read(
-            pending, expected_uid, 0o600, MAX_ENV_BYTES, 'displaced_contract_invalid',
+        if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_CONCURRENT_PENDING_AFTER_EXCHANGE') == '1':
+            inject_foreign_env(pending, b'FOREIGN_PENDING_WRITER=1\n', expected_uid)
+        exact_exchange_object(
+            env, desired, replacement_identity, expected_uid, 'published_contract_invalid',
         )
-        live_matches = True
-        try:
-            exact_exchange_object(
-                env, desired, replacement_identity, expected_uid, 'published_contract_invalid',
-            )
-        except ContractError:
-            live_matches = False
-        original_matches = (
-            displaced_data == original
-            and exchange_stable_identity(displaced_identity) == exchange_stable_identity(env_identity)
+        exact_exchange_object(
+            pending, original, env_identity, expected_uid, 'displaced_contract_invalid',
         )
-        if not original_matches or not live_matches:
-            raise rollback_exchange(
-                env, pending, desired, replacement_identity, displaced_data,
-                displaced_identity, expected_uid, root_prefix, 'concurrent_writer',
-            )
         if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_FAIL_AFTER_EXCHANGE') == '1':
-            raise rollback_exchange(
-                env, pending, desired, replacement_identity, original, env_identity,
-                expected_uid, root_prefix, 'test_failure_after_exchange',
-            )
+            fail('test_failure_after_exchange')
         if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_FAIL_ENV_DURABILITY') == '1':
-            raise rollback_exchange(
-                env, pending, desired, replacement_identity, original, env_identity,
-                expected_uid, root_prefix, 'test_failure_env_durability',
-            )
+            fail('test_failure_env_durability')
         if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_FAIL_UNEXPECTED_AFTER_EXCHANGE') == '1':
             raise OSError(errno.EIO, 'test unexpected post-exchange failure')
         fsync_directory(env.parent)
+        if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_TAMPER_RECOVERY_BEFORE_UNLINK') == '1':
+            evidence = context['state'] / 'rob-490-recovery.json'
+            evidence_fd = os.open(evidence, os.O_WRONLY | os.O_TRUNC | os.O_CLOEXEC | os.O_NOFOLLOW)
+            try:
+                os.write(evidence_fd, b'{}\n')
+                os.fsync(evidence_fd)
+            finally:
+                os.close(evidence_fd)
+            fsync_directory(context['state'])
+        validate_recovery(context['state'], original, desired, expected_uid, False)
         exact_exchange_object(pending, original, env_identity, expected_uid, 'displaced_changed')
         os.unlink(pending)
         exchanged = False
@@ -548,17 +562,14 @@ def execute_transaction(context):
         validate_recovery(context['state'], refreshed['original'], desired, expected_uid, True)
         return True
     except ContractError as error:
+        if exchanged and replacement_identity is not None:
+            raise rollback_exchange(
+                env, pending, desired, replacement_identity, original, env_identity,
+                expected_uid, root_prefix, error.reason,
+            ) from error
         if not exchanged:
             try:
-                if pending.exists() or pending.is_symlink():
-                    data, current = stable_read(
-                        pending, expected_uid, 0o600, MAX_ENV_BYTES, 'pending_cleanup_invalid',
-                    )
-                    if replacement_identity is not None and (
-                        data != desired or identity(current) != identity(replacement_identity)
-                    ):
-                        raise ContractError('pending_cleanup_invalid', True, 'failed')
-                    os.unlink(pending)
+                cleanup_pending(pending, desired, replacement_identity, expected_uid)
             except FileNotFoundError:
                 pass
         if (recovery_mutated or exchange_begun) and not error.mutated:
@@ -571,6 +582,10 @@ def execute_transaction(context):
                 env, pending, desired, replacement_identity, original, env_identity,
                 expected_uid, root_prefix, 'execution_failed',
             ) from error
+        try:
+            cleanup_pending(pending, desired, replacement_identity, expected_uid)
+        except FileNotFoundError:
+            pass
         raise ContractError('execution_failed', recovery_mutated or exchange_begun, 'failed') from error
 
 

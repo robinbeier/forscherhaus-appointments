@@ -131,7 +131,7 @@ def validate_directory(path, expected_uid, exact_mode=None):
 
 
 def validate_ancestors(path, stop, expected_uid):
-    path = path.resolve(strict=False)
+    path = Path(os.path.abspath(path))
     stop = stop.resolve(strict=True)
     try:
         relative = path.relative_to(stop)
@@ -144,7 +144,8 @@ def validate_ancestors(path, stop, expected_uid):
         validate_directory(current, expected_uid)
 
 
-def stable_read(path, expected_uid, expected_mode, reason='source_contract_invalid'):
+def stable_read(path, expected_uid, expected_mode, reason='source_contract_invalid',
+                replace_after_read=False):
     try:
         before = os.lstat(path)
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -173,13 +174,34 @@ def stable_read(path, expected_uid, expected_mode, reason='source_contract_inval
                 fail(reason)
         after = os.fstat(fd)
         if identity(after) != identity(opened):
-            fail('source_changed')
+            fail(reason.replace('_contract_invalid', '_changed'))
+        if replace_after_read:
+            foreign = path.parent / ('.fh-kuma-monitoring-env-v1.foreign-' + secrets.token_hex(16))
+            foreign_fd = os.open(
+                foreign,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                0o555,
+            )
+            try:
+                os.write(foreign_fd, b'foreign-target-race\n')
+                os.fchmod(foreign_fd, 0o555)
+                os.fsync(foreign_fd)
+            finally:
+                os.close(foreign_fd)
+            os.replace(foreign, path)
+            fsync_directory(path.parent)
+        try:
+            current = os.lstat(path)
+        except OSError:
+            fail(reason.replace('_contract_invalid', '_changed'))
+        if identity(current) != identity(opened):
+            fail(reason.replace('_contract_invalid', '_changed'))
         return bytes(data), identity(opened)
     finally:
         os.close(fd)
 
 
-def validate_target(path, expected_uid, expected_data, expected_sha256):
+def validate_target(path, expected_uid, expected_data, expected_sha256, root_prefix):
     if not path.exists():
         try:
             os.lstat(path)
@@ -187,7 +209,13 @@ def validate_target(path, expected_uid, expected_data, expected_sha256):
             return 'absent'
         except OSError:
             fail('target_contract_invalid')
-    data, _ = stable_read(path, expected_uid, 0o555, 'target_contract_invalid')
+    replace_after_read = (
+        root_prefix != Path('/')
+        and os.environ.get('FH_KUMA_MONITORING_INSTALL_TEST_TARGET_REPLACE_AFTER_READ', '') == '1'
+    )
+    data, _ = stable_read(
+        path, expected_uid, 0o555, 'target_contract_invalid', replace_after_read,
+    )
     if data != expected_data or hashlib.sha256(data).hexdigest() != expected_sha256:
         fail('target_conflict')
     return 'installed'
@@ -341,7 +369,9 @@ def preflight(args):
 
     target = mapped(root_prefix, TARGET)
     validate_ancestors(target.parent, root_prefix, expected_uid)
-    install_state = validate_target(target, expected_uid, source_data, args.expected_sha256)
+    install_state = validate_target(
+        target, expected_uid, source_data, args.expected_sha256, root_prefix,
+    )
     return {
         'expected_sha256': args.expected_sha256,
         'expected_uid': expected_uid,
@@ -447,9 +477,15 @@ def execute(context):
         context['target'], context['source_data'], context['expected_uid'],
         context['root_prefix'],
     )
-    target_state = validate_target(
-        context['target'], context['expected_uid'], context['source_data'], context['expected_sha256'],
-    )
+    try:
+        target_state = validate_target(
+            context['target'], context['expected_uid'], context['source_data'],
+            context['expected_sha256'], context['root_prefix'],
+        )
+    except ContractError as error:
+        if published and not error.mutated:
+            raise ContractError(error.reason, True) from error
+        raise
     if target_state != 'installed':
         fail('postflight_failed', published)
     return published
