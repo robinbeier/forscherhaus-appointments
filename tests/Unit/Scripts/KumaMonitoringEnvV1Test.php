@@ -160,6 +160,7 @@ final class KumaMonitoringEnvV1Test extends TestCase
                 "X='foo\n" . self::KEY . "=0\nbar'\n",
                 'X="foo' . "\n" . self::KEY . '=0' . "\n" . 'bar"' . "\n",
                 "cat <<'ENV_VALUE'\n" . self::KEY . "=0\nENV_VALUE\n",
+                "cat <<'E'OF\n" . self::KEY . "=0\nEOF\n",
                 "configure() {\n" . self::KEY . "=0\n}\n",
                 "X=$(\n" . self::KEY . "=0\n)\n",
                 "if true; then\n" . self::KEY . "=0\nfi\n",

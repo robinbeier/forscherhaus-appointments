@@ -174,19 +174,43 @@ def parse_heredoc_operator(body, offset):
         index += 1
     if index >= len(body):
         fail('env_shell_context_invalid')
-    quote = body[index:index + 1]
-    if quote in {b"'", b'"'}:
-        end = body.find(quote, index + 1)
-        if end < 0:
-            fail('env_shell_context_invalid')
-        delimiter = body[index + 1:end]
-        index = end + 1
-    else:
-        end = index
-        while end < len(body) and body[end:end + 1] not in b' \t;|&()<>':
-            end += 1
-        delimiter = body[index:end].replace(b'\\', b'')
-        index = end
+    delimiter = bytearray()
+    while index < len(body) and body[index:index + 1] not in b' \t;|&()<>':
+        current = body[index:index + 1]
+        if current == b"'":
+            end = body.find(b"'", index + 1)
+            if end < 0:
+                fail('env_shell_context_invalid')
+            delimiter.extend(body[index + 1:end])
+            index = end + 1
+            continue
+        if current == b'"':
+            index += 1
+            while index < len(body) and body[index:index + 1] != b'"':
+                current = body[index:index + 1]
+                if current == b'\\':
+                    if index + 1 >= len(body):
+                        fail('env_shell_context_invalid')
+                    following = body[index + 1:index + 2]
+                    if following in {b'$', b'`', b'"', b'\\'}:
+                        delimiter.extend(following)
+                        index += 2
+                        continue
+                delimiter.extend(current)
+                index += 1
+            if index >= len(body):
+                fail('env_shell_context_invalid')
+            index += 1
+            continue
+        if current == b'\\':
+            if index + 1 >= len(body):
+                fail('env_shell_context_invalid')
+            delimiter.extend(body[index + 1:index + 2])
+            index += 2
+            continue
+        delimiter.extend(current)
+        index += 1
+    delimiter = bytes(delimiter)
     if not delimiter or b'\x00' in delimiter:
         fail('env_shell_context_invalid')
     return (delimiter, strip_tabs), index
