@@ -480,6 +480,55 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
+    public function testPrePublicationCronDriftIsPreservedAndCannotLeaveRemovedRuntimePath(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $legacy = file_get_contents($cronPath);
+            self::assertIsString($legacy);
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH' => 'legacy_drift',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
+            self::assertSame($legacy . "# concurrent-prepublication-change\n", file_get_contents($cronPath));
+            self::assertStringNotContainsString(self::INSTALL_ROOT . '/', (string) file_get_contents($cronPath));
+            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
+    public function testPrePublicationInstalledCronRetainsThePublishedRuntime(): void
+    {
+        $fixture = $this->fixture();
+
+        try {
+            $cronPath = $fixture['root'] . self::CRON;
+            $legacy = file_get_contents($cronPath);
+            self::assertIsString($legacy);
+            $desired = str_replace(
+                '/var/www/html/easyappointments/scripts/ops/',
+                self::INSTALL_ROOT . '/scripts/ops/',
+                $legacy,
+            );
+            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
+                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH' => 'installed',
+            ]);
+            self::assertNotSame(0, $result['exit_code']);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertSame('rollback_failed', $json['reason'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
+            self::assertSame($desired, file_get_contents($cronPath));
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
+        } finally {
+            $this->removeDirectory($fixture['workspace']);
+        }
+    }
+
     public function testCronWriteFailureRollsBackInstalledBundleAndRedactsSensitiveValues(): void
     {
         $fixture = $this->fixture();
@@ -495,6 +544,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
             self::assertNotSame(0, $result['exit_code']);
             $json = $this->jsonOutput($result['stdout']);
             self::assertSame('fail', $json['status'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
             self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
             $afterCron = file_get_contents($cronPath);
             self::assertSame($beforeCron, $afterCron);

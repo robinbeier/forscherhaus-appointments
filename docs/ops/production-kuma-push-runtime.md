@@ -82,7 +82,10 @@ Execute stages only the manifest, helper and closed artifact list under a
 private root directory. The helper verifies source ownership, modes, links and
 hashes; publishes the runtime directory atomically with a Linux no-replace
 rename; records the original cron bytes plus a secret-free recovery manifest
-under `/var/lib/fh-kuma-push-runtime-v1`; and atomically migrates the cron file.
+under `/var/lib/fh-kuma-push-runtime-v1`; and migrates the cron file with an
+atomic exchange-and-verify operation. The exchanged prior object must retain
+the exact preflight inode identity, trusted metadata and bytes. A concurrent
+replacement is atomically restored instead of being overwritten.
 The wrapper deletes its private staging directory only after a known successful
 result.
 
@@ -94,6 +97,9 @@ published verified runtime. If cron restoration or its durability sync cannot
 be proven, the runtime remains installed so migrated cron entries never point
 at an intentionally removed target; the result is truthfully reported as a
 failed rollback with a performed mutation. Recovery records remain root-only.
+If rollback restores both cron and runtime but newly written root-only recovery
+evidence remains, the failed result still reports `mutation_performed=true`.
+The recovery state is not hidden behind a simulated no-mutation result.
 Rollback restores the saved cron only while the current bytes still equal the
 version published by this transaction; a concurrent root-owned replacement is
 never overwritten and instead produces the same fail-closed retained-runtime

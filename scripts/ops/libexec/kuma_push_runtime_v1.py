@@ -26,6 +26,7 @@ CONFIRMATION = 'ROB-489'
 MAX_FILE_BYTES = 2_000_000
 MAX_CRON_BYTES = 64_000
 RENAME_NOREPLACE = 1
+RENAME_EXCHANGE = 2
 
 ENTRYPOINTS = (
     'kuma_push_apache_scanner_activity.sh',
@@ -51,14 +52,15 @@ EXPECTED_FILES = {
 
 
 class ContractError(Exception):
-    def __init__(self, reason, mutated=False):
+    def __init__(self, reason, mutated=False, rollback_safe=True):
         super().__init__(reason)
         self.reason = reason
         self.mutated = mutated
+        self.rollback_safe = rollback_safe
 
 
-def fail(reason, mutated=False):
-    raise ContractError(reason, mutated)
+def fail(reason, mutated=False, rollback_safe=True):
+    raise ContractError(reason, mutated, rollback_safe)
 
 
 def emit(status, ready=False, mutated=False, **extra):
@@ -86,6 +88,10 @@ def identity(value):
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
+
+
+def stable_object_identity(identity_value):
+    return identity_value[:-1]
 
 
 def sha256(data):
@@ -320,6 +326,23 @@ def rename_noreplace(parent, source, target):
         os.close(parent_fd)
 
 
+def rename_exchange(parent, source, target):
+    libc = ctypes.CDLL(None, use_errno=True)
+    parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        if hasattr(libc, 'renameat2'):
+            result = libc.renameat2(parent_fd, source.encode(), parent_fd, target.encode(), RENAME_EXCHANGE)
+        elif sys.platform == 'darwin' and hasattr(libc, 'renameatx_np'):
+            result = libc.renameatx_np(parent_fd, source.encode(), parent_fd, target.encode(), 0x00000002)
+        else:
+            fail('rename_exchange_unavailable')
+        if result != 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+    finally:
+        os.close(parent_fd)
+
+
 def write_file_exclusive(path, data, mode, expected_uid):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, mode)
     try:
@@ -364,17 +387,26 @@ def ensure_state(root_prefix, expected_uid):
     state = mapped(root_prefix, STATE_ROOT)
     parent = state.parent
     validate_ancestors(parent, root_prefix, expected_uid)
-    if not state.exists():
-        os.mkdir(state, 0o700)
-        if os.geteuid() == 0:
-            os.chown(state, expected_uid, trusted_gid(expected_uid))
-        parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-        try:
-            os.fsync(parent_fd)
-        finally:
-            os.close(parent_fd)
-    validate_directory(state, expected_uid, 0o700)
-    return state
+    created = False
+    try:
+        if not state.exists():
+            os.mkdir(state, 0o700)
+            created = True
+            if os.geteuid() == 0:
+                os.chown(state, expected_uid, trusted_gid(expected_uid))
+            parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+        validate_directory(state, expected_uid, 0o700)
+        return state, created
+    except BaseException as error:
+        if created:
+            if isinstance(error, ContractError):
+                raise ContractError(error.reason, True, error.rollback_safe) from error
+            fail('state_publication_incomplete', True)
+        raise
 
 
 def fsync_directory(path):
@@ -396,15 +428,24 @@ def attach_recovery(state, cron_data, desired_data, expected_uid):
         'runtime_root': INSTALL_ROOT,
         'schema': 'fh_kuma_push_runtime_recovery.v1',
     }, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
-    for path, data in ((backup, cron_data), (recovery, recovery_data)):
-        if path.exists():
-            attached, _ = stable_read(path, expected_uid, {0o600})
-            if attached != data:
-                fail('recovery_conflict')
-        else:
-            write_file_exclusive(path, data, 0o600, expected_uid)
-    fsync_directory(state)
-    return backup
+    written = False
+    try:
+        for path, data in ((backup, cron_data), (recovery, recovery_data)):
+            if path.exists():
+                attached, _ = stable_read(path, expected_uid, {0o600})
+                if attached != data:
+                    fail('recovery_conflict')
+            else:
+                write_file_exclusive(path, data, 0o600, expected_uid)
+                written = True
+        fsync_directory(state)
+        return backup, written
+    except BaseException as error:
+        if written:
+            if isinstance(error, ContractError):
+                raise ContractError(error.reason, True, error.rollback_safe) from error
+            fail('recovery_publication_incomplete', True)
+        raise
 
 
 def validate_recovery(root_prefix, desired_data, cron_template, expected_uid, production):
@@ -449,21 +490,71 @@ def validate_recovery(root_prefix, desired_data, cron_template, expected_uid, pr
         fail('recovery_changed')
 
 
-def atomic_replace(path, data, expected_uid, expected_identity):
-    current = os.lstat(path)
-    if identity(current) != expected_identity:
-        fail('cron_changed')
-    temporary = path.parent / ('.fh-uptime-kuma-push.rob489-' + secrets.token_hex(16) + '.tmp')
+def inject_concurrent_cron(path, expected_data, desired_data, expected_uid, test_hook):
+    if test_hook == 'installed':
+        concurrent_data = desired_data
+    elif test_hook == 'legacy_drift':
+        concurrent_data = expected_data + b'# concurrent-prepublication-change\n'
+    else:
+        return
+    temporary = path.parent / ('.fh-uptime-kuma-push.concurrent-' + secrets.token_hex(16) + '.tmp')
     try:
-        write_file_exclusive(temporary, data, 0o644, expected_uid)
-        if identity(os.lstat(path)) != expected_identity:
-            fail('cron_changed')
+        write_file_exclusive(temporary, concurrent_data, 0o644, expected_uid)
         os.replace(temporary, path)
+        fsync_directory(path.parent)
     finally:
         try:
             os.unlink(temporary)
         except FileNotFoundError:
             pass
+
+
+def atomic_replace(path, data, expected_data, expected_uid, expected_identity, test_hook=''):
+    current = os.lstat(path)
+    if identity(current) != expected_identity:
+        fail('cron_changed')
+    temporary = path.parent / ('.fh-uptime-kuma-push.rob489-' + secrets.token_hex(16) + '.tmp')
+    exchanged = False
+    try:
+        write_file_exclusive(temporary, data, 0o644, expected_uid)
+        inject_concurrent_cron(path, expected_data, data, expected_uid, test_hook)
+        rename_exchange(path.parent, temporary.name, path.name)
+        exchanged = True
+        matches_expected = False
+        try:
+            previous_data, previous_identity = stable_read(
+                temporary, expected_uid, {0o644}, MAX_CRON_BYTES,
+            )
+            matches_expected = (
+                previous_data == expected_data
+                and stable_object_identity(previous_identity) == stable_object_identity(expected_identity)
+            )
+        except BaseException:
+            matches_expected = False
+        if not matches_expected:
+            try:
+                rename_exchange(path.parent, temporary.name, path.name)
+                exchanged = False
+                os.unlink(temporary)
+                fsync_directory(path.parent)
+            except BaseException:
+                fail('cron_exchange_restore_failed', True, False)
+            fail('cron_changed')
+        try:
+            os.unlink(temporary)
+        except BaseException:
+            fail('cron_publication_incomplete', True, False)
+    except BaseException:
+        if not exchanged:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+        raise
+
+
+def cron_references_runtime(data):
+    return (INSTALL_ROOT + '/').encode('utf-8') in data
 
 
 def remove_published_bundle(target, source_contract, expected_uid):
@@ -525,6 +616,7 @@ def preflight(args):
 def execute(context):
     target_created = False
     cron_replaced = False
+    recovery_mutated = False
     backup = None
     try:
         if not context['installed']:
@@ -537,12 +629,20 @@ def execute(context):
                 fail('test_failure_during_bundle_durability')
             fsync_directory(context['target'].parent)
         if context['cron_state'] == 'legacy':
-            state = ensure_state(context['root_prefix'], context['expected_uid'])
-            backup = attach_recovery(
+            state, state_created = ensure_state(context['root_prefix'], context['expected_uid'])
+            recovery_mutated = state_created
+            backup, recovery_written = attach_recovery(
                 state, context['cron_data'], context['desired_data'], context['expected_uid'],
             )
+            recovery_mutated = recovery_mutated or recovery_written
             atomic_replace(
-                context['cron'], context['desired_data'], context['expected_uid'], context['cron_identity'],
+                context['cron'], context['desired_data'], context['cron_data'], context['expected_uid'],
+                context['cron_identity'],
+                (
+                    os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH', '')
+                    if not context['production']
+                    else ''
+                ),
             )
             cron_replaced = True
             if (
@@ -560,7 +660,7 @@ def execute(context):
                 )
                 atomic_replace(
                     context['cron'], context['desired_data'] + b'# concurrent-root-change\n',
-                    context['expected_uid'], concurrent_identity,
+                    context['desired_data'], context['expected_uid'], concurrent_identity,
                 )
                 fsync_directory(context['cron'].parent)
             if (
@@ -575,8 +675,12 @@ def execute(context):
         if not refreshed['installed'] or refreshed['cron_state'] != 'installed':
             fail('postflight_failed')
         return target_created or cron_replaced
-    except BaseException:
-        rollback_error = None
+    except BaseException as original_error:
+        rollback_error = (
+            original_error
+            if isinstance(original_error, ContractError) and not original_error.rollback_safe
+            else None
+        )
         if cron_replaced and backup is not None:
             try:
                 backup_data, _ = stable_read(backup, context['expected_uid'], {0o600})
@@ -585,7 +689,9 @@ def execute(context):
                 )
                 if current_data != context['desired_data']:
                     fail('cron_changed')
-                atomic_replace(context['cron'], backup_data, context['expected_uid'], current_identity)
+                atomic_replace(
+                    context['cron'], backup_data, current_data, context['expected_uid'], current_identity,
+                )
                 if (
                     not context['production']
                     and os.environ.get('FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_ROLLBACK_DURABILITY') == '1'
@@ -596,11 +702,20 @@ def execute(context):
                 rollback_error = error
         if target_created and rollback_error is None:
             try:
+                current_data, _ = stable_read(
+                    context['cron'], context['expected_uid'], {0o644}, MAX_CRON_BYTES,
+                )
+                if cron_references_runtime(current_data):
+                    fail('cron_references_runtime')
                 remove_published_bundle(context['target'], context['sources'], context['expected_uid'])
             except BaseException as error:
                 rollback_error = rollback_error or error
         if rollback_error is not None:
             fail('rollback_failed', True)
+        if recovery_mutated:
+            if isinstance(original_error, ContractError):
+                raise ContractError(original_error.reason, True, original_error.rollback_safe) from original_error
+            fail('execution_failed', True)
         raise
 
 
