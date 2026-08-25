@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export GIT_NO_REPLACE_OBJECTS=1
 
 if [[ "$(uname -s)" == 'Darwin' ]]; then
     export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"

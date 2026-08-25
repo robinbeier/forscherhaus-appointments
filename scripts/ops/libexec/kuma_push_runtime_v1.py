@@ -553,20 +553,6 @@ def atomic_replace(path, data, expected_data, expected_uid, expected_identity, t
         raise
 
 
-def cron_references_runtime(data):
-    return (INSTALL_ROOT + '/').encode('utf-8') in data
-
-
-def remove_published_bundle(target, source_contract, expected_uid):
-    validate_target(target, source_contract, expected_uid)
-    shutil.rmtree(target)
-    parent_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        os.fsync(parent_fd)
-    finally:
-        os.close(parent_fd)
-
-
 def preflight(args):
     requested_root_prefix = Path(args.root_prefix)
     if not requested_root_prefix.is_absolute():
@@ -700,19 +686,9 @@ def execute(context):
                 fsync_directory(context['cron'].parent)
             except BaseException as error:
                 rollback_error = error
-        if target_created and rollback_error is None:
-            try:
-                current_data, _ = stable_read(
-                    context['cron'], context['expected_uid'], {0o644}, MAX_CRON_BYTES,
-                )
-                if cron_references_runtime(current_data):
-                    fail('cron_references_runtime')
-                remove_published_bundle(context['target'], context['sources'], context['expected_uid'])
-            except BaseException as error:
-                rollback_error = rollback_error or error
         if rollback_error is not None:
             fail('rollback_failed', True)
-        if recovery_mutated:
+        if target_created or recovery_mutated:
             if isinstance(original_error, ContractError):
                 raise ContractError(original_error.reason, True, original_error.rollback_safe) from original_error
             fail('execution_failed', True)

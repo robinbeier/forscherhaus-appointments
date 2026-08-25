@@ -73,7 +73,10 @@ local `HEAD`, the local `refs/remotes/origin/main` commit and the live
 `refs/heads/main` value returned by `git ls-remote origin`. It derives the
 closed artifact list from that commit's manifest and streams the payload with
 `git archive` from the same immutable commit object; the writable worktree is
-never the production payload source. Root extraction discards archived owner
+never the production payload source. The wrapper forces
+`GIT_NO_REPLACE_OBJECTS=1` for every local Git operation, so local replacement
+refs cannot substitute a different tree beneath the verified commit ID. Root
+extraction discards archived owner
 and permission metadata under a fixed safe umask before the helper validates
 the staged trust contract. A stale local main, an unmerged feature head or live
 remote drift is therefore a hard stop.
@@ -91,12 +94,15 @@ result.
 
 The helper records each successful atomic bundle or cron publication before its
 fallible parent-directory durability sync. If that sync, any later check or
-postflight fails after a new runtime publication, rollback first restores and
-durably syncs the exact prior cron bytes and only then removes the newly
-published verified runtime. If cron restoration or its durability sync cannot
-be proven, the runtime remains installed so migrated cron entries never point
-at an intentionally removed target; the result is truthfully reported as a
-failed rollback with a performed mutation. Recovery records remain root-only.
+postflight fails after a new runtime publication, rollback restores and durably
+syncs the exact prior cron bytes when that can still be proven. A published
+runtime is monotonic and is never removed automatically: an independent
+root-owned cron writer could otherwise begin referencing it between the last
+reference check and deletion. The retained immutable bundle is safe and
+idempotently reusable; every such failed result truthfully reports a performed
+mutation. If cron restoration or its durability sync cannot be proven, the
+result is additionally reported as a failed rollback. Recovery records remain
+root-only.
 If rollback restores both cron and runtime but newly written root-only recovery
 evidence remains, the failed result still reports `mutation_performed=true`.
 The recovery state is not hidden behind a simulated no-mutation result.

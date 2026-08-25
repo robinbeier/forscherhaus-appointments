@@ -148,6 +148,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 ['show:' . $fixture['commit'], 'archive:' . $fixture['commit']],
                 file($fixture['git_log'], FILE_IGNORE_NEW_LINES),
             );
+            self::assertSame("1\n", file_get_contents($fixture['git_env_log']));
             self::assertSame(
                 ['safe'],
                 file($fixture['extract_log'], FILE_IGNORE_NEW_LINES),
@@ -157,6 +158,14 @@ final class KumaPushRuntimeBundleTest extends TestCase
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
+    }
+
+    public function testProductionWrapperDisablesGitReplaceRefsForCommitArchive(): void
+    {
+        $wrapper = file_get_contents($this->repoRoot() . '/scripts/ops/prod_kuma_push_runtime_v1.sh');
+        self::assertIsString($wrapper);
+        self::assertStringContainsString('export GIT_NO_REPLACE_OBJECTS=1', $wrapper);
+        self::assertStringContainsString('git -C "$REPO_ROOT" archive', $wrapper);
     }
 
     public function testProductionWrapperRetainsStageAfterReadOnlyPreflightFailure(): void
@@ -480,7 +489,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
-    public function testPrePublicationCronDriftIsPreservedAndCannotLeaveRemovedRuntimePath(): void
+    public function testPrePublicationCronDriftIsPreservedAndRetainsPublishedRuntime(): void
     {
         $fixture = $this->fixture();
 
@@ -492,10 +501,12 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH' => 'legacy_drift',
             ]);
             self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
             self::assertSame($legacy . "# concurrent-prepublication-change\n", file_get_contents($cronPath));
             self::assertStringNotContainsString(self::INSTALL_ROOT . '/', (string) file_get_contents($cronPath));
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
@@ -520,7 +531,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
             self::assertNotSame(0, $result['exit_code']);
             $json = $this->jsonOutput($result['stdout']);
             self::assertSame('fail', $json['status'] ?? null);
-            self::assertSame('rollback_failed', $json['reason'] ?? null);
+            self::assertSame('cron_changed', $json['reason'] ?? null);
             self::assertTrue($json['mutation_performed'] ?? false);
             self::assertSame($desired, file_get_contents($cronPath));
             self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
@@ -545,7 +556,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
             $json = $this->jsonOutput($result['stdout']);
             self::assertSame('fail', $json['status'] ?? null);
             self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
             $afterCron = file_get_contents($cronPath);
             self::assertSame($beforeCron, $afterCron);
             self::assertSame($beforeCronHash, hash('sha256', (string) $afterCron));
@@ -560,7 +571,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
-    public function testCronDurabilityFailureRollsBackPublishedCronBeforeRemovingBundle(): void
+    public function testCronDurabilityFailureRollsBackPublishedCronAndRetainsBundle(): void
     {
         $fixture = $this->fixture();
 
@@ -572,15 +583,17 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_DURABILITY' => '1',
             ]);
             self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
+            $json = $this->jsonOutput($result['stdout']);
+            self::assertSame('fail', $json['status'] ?? null);
+            self::assertTrue($json['mutation_performed'] ?? false);
             self::assertSame($beforeCron, file_get_contents($cronPath));
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
     }
 
-    public function testBundleDurabilityFailureTracksAndRemovesPublishedRuntime(): void
+    public function testBundleDurabilityFailureTracksAndRetainsPublishedRuntime(): void
     {
         $fixture = $this->fixture();
 
@@ -594,9 +607,9 @@ final class KumaPushRuntimeBundleTest extends TestCase
             self::assertNotSame(0, $result['exit_code']);
             $json = $this->jsonOutput($result['stdout']);
             self::assertSame('fail', $json['status'] ?? null);
-            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertTrue($json['mutation_performed'] ?? false);
             self::assertSame($beforeCron, file_get_contents($cronPath));
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
+            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
         } finally {
             $this->removeDirectory($fixture['workspace']);
         }
@@ -739,6 +752,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $workspace = sys_get_temp_dir() . '/kuma-push-wrapper-' . bin2hex(random_bytes(8));
         $bin = $workspace . '/bin';
         $gitLog = $workspace . '/git.log';
+        $gitEnvLog = $workspace . '/git-env.log';
         $sshLog = $workspace . '/ssh.log';
         $extractLog = $workspace . '/extract.log';
         $stageMarker = $workspace . '/stage-retained';
@@ -760,6 +774,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 ;;
               *"archive --format=tar $FH_WRAPPER_COMMIT --"*)
                 printf 'archive:%s\n' "$FH_WRAPPER_COMMIT" >> "$FH_WRAPPER_GIT_LOG"
+                printf '%s\n' "${GIT_NO_REPLACE_OBJECTS:-unset}" >> "$FH_WRAPPER_GIT_ENV_LOG"
                 while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do shift; done
                 [ "$#" -gt 0 ]
                 shift
@@ -826,6 +841,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
             'workspace' => $workspace,
             'bin' => $bin,
             'git_log' => $gitLog,
+            'git_env_log' => $gitEnvLog,
             'extract_log' => $extractLog,
             'ssh_log' => $sshLog,
             'stage_marker' => $stageMarker,
@@ -845,6 +861,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 'PATH' => $fixture['bin'] . PATH_SEPARATOR . dirname(PHP_BINARY) . PATH_SEPARATOR . '/usr/bin:/bin',
                 'FH_WRAPPER_COMMIT' => $fixture['commit'],
                 'FH_WRAPPER_GIT_LOG' => $fixture['git_log'],
+                'FH_WRAPPER_GIT_ENV_LOG' => $fixture['git_env_log'],
                 'FH_WRAPPER_EXTRACT_LOG' => $fixture['extract_log'],
                 'FH_WRAPPER_ORIGIN_MAIN_COMMIT' => $fixture['origin_main_commit'] ?? $fixture['commit'],
                 'FH_WRAPPER_REPO_ROOT' => $this->repoRoot(),
