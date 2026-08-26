@@ -90,11 +90,14 @@ are unsupported for the same reason; those commands appearing only inside an
 uninvoked function definition stay definition-only. Top-level `coproc` is also
 unsupported because a coprocess can invoke an Env-defined function and a later
 `wait` can propagate its status before the appended assignment. Executed
-`alias`, `unalias`, `enable`, `hash`, `set`, `shopt` and `trap` commands are unsupported
-because they can change later command resolution, shell behavior or the
-appended assignment itself. Expansion-produced command words are likewise
+`alias`, `unalias`, `enable`, `hash`, `set`, `shopt` and `trap` commands are
+unsupported because they can change later command resolution, shell behavior
+or the appended assignment itself. A `command_not_found_handle` definition is
+also unsupported because Bash can invoke that function implicitly for a later
+unresolved command; the helper does not execute the Env to prove that every
+command will resolve. Expansion-produced command words are likewise
 unsupported; the helper never evaluates Env values to infer their runtime
-identity. Uninvoked function definitions, including same-line `if`, `for`,
+identity. Other uninvoked function definitions, including same-line `if`, `for`,
 `select`, `until` and `while` bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Same-line `case`
 bodies and command-bearing tails after a same-line function block are outside
@@ -115,8 +118,9 @@ Top-level process substitutions remain read-only only while no later executed
 fails closed before mutation, including across physical lines.
 Assignment-position, status-only, redirection-only and combined
 assignment/redirection-only command substitutions, including substitutions
-after one or more completed assignments, are unsupported because Bash
-can propagate their dynamically produced status and the helper never executes
+after one or more completed assignments and command substitutions nested in a
+parameter expansion in those positions, are unsupported because Bash can
+propagate their dynamically produced status and the helper never executes
 arbitrary Env code to simulate it. This includes both `$(...)` and legacy
 backtick substitutions. Quoted and unquoted arithmetic expansions remain value
 expansions, and the same status checks do not execute inside uninvoked function

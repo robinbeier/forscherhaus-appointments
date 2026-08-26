@@ -526,9 +526,10 @@ def shell_line_contexts(data):
                     token = body[index:index + 2]
                     if token in {b'$(', b'${', b'$['}:
                         if (
-                            token == b'$('
-                            and body[index:index + 3] != b'$(('
-                            and projection_compound_depth is None
+                            body[index:index + 3] != b'$(('
+                            and token == b'$('
+                            and not projection_function_depths
+                            and projection_function_block_depth is None
                             and projection_status_depends_on_substitution(
                                 command_projection_buffer,
                                 command_projection,
@@ -753,9 +754,8 @@ def shell_line_contexts(data):
                 continue
             if body[index:index + 2] in {b'$(', b'${', b'$[', b'>(', b'<('}:
                 if (
-                    body[index:index + 2] == b'$('
-                    and body[index:index + 3] != b'$(('
-                    and projection_compound_depth is None
+                    body[index:index + 3] != b'$(('
+                    and body[index:index + 2] == b'$('
                     and not projection_function_depths
                     and projection_function_block_depth is None
                     and projection_status_depends_on_substitution(
@@ -941,6 +941,14 @@ def shell_line_contexts(data):
             # the structural view proves that the name itself was neither
             # quoted nor commented out by the shell scanner.
             if visible_bytes[function_start:function_end] == function_name:
+                if function_name == b'command_not_found_handle':
+                    # Bash can invoke this specially named function without an
+                    # explicit textual call when a later command is missing.
+                    # Static command-word analysis cannot prove that every
+                    # command will resolve in the consumer, so defining the
+                    # implicit hook anywhere in the protected Env is outside
+                    # the supported writer grammar.
+                    early_control = True
                 defined_function_names.add(function_name)
                 block_match = same_line_function_block_opener.match(
                     body,
