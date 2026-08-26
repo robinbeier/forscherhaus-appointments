@@ -77,10 +77,76 @@ control block or conditional compound is rejected. A missing key is appended,
 adding one preceding newline only when the existing final byte is not a
 newline; an open shell context or odd trailing backslash before that boundary
 is rejected because Bash would not evaluate the append as the requested
-assignment. A terminal continued operator and an early shell control transfer
+assignment. Shell-context projection remains linear across the supported
+4,000,000-byte Env bound, including adjacent empty quotes. A terminal continued
+operator and an early shell control transfer
 such as top-level `return`, `exit` or `exec` are likewise unsupported and fail
-before mutation. A `0` changes at exactly its single value-byte position. A
-`1` is already converged and is never rewritten.
+before mutation. An actually invoked `return`, `exit` or `exec` outside an
+uninvoked function definition is unsupported regardless of subshell, pipeline
+or background placement, including controls preceded by assignment or
+redirection prefixes. The helper does not try to prove those contexts safe:
+Env-defined aliases, functions, traps, command resolution and later waits can
+all change their effective status. `command -v`/`-V` queries remain queries
+rather than calls. Actually executed `eval`, `source` and dot-source commands
+are unsupported for the same reason; those commands appearing only inside an
+uninvoked function definition stay definition-only. Top-level `coproc` is also
+unsupported because a coprocess can invoke an Env-defined function and a later
+`wait` can propagate its status before the appended assignment. Executed
+`alias`, `unalias`, `compgen`, `declare`, `enable`, `fc`, `hash`, `history`,
+`let`, `mapfile`, `readarray`, `readonly`, `set`, `shopt`, `trap` and `typeset`
+commands are unsupported because they can change later command resolution,
+variable attributes, shell behavior, arithmetic status, invoke dynamic
+callbacks, replay history or affect the appended assignment itself. A
+`command_not_found_handle`
+definition is also unsupported because Bash can invoke that function implicitly
+for a later unresolved command; the helper does not execute the Env to prove
+that every command will resolve. Function definitions named `command` or
+`builtin` are unsupported because they shadow the wrappers used by the static
+command grammar. Expansion-produced command words, ANSI-C/locale-quoted command
+words and quoted `builtin`/`command` wrappers are likewise unsupported; the
+helper never evaluates or normalizes arbitrary Env bytes to infer their runtime
+command identity. This includes brace- and pathname-expanded command words;
+the helper does not infer a Kuma consumer's working-directory contents.
+Exporting shell functions, including through runtime-produced `export` options,
+is unsupported because a child shell can invoke them before the appended flag
+is loaded. Required-value parameter expansions using `?` or `:?` in executed
+scope, including indexed and indirect parameters, are unsupported because an
+absent value aborts sourcing before the appended assignment; the helper does not
+resolve protected Env state. Other uninvoked function definitions, including
+same-line `if`, `for`,
+`select`, `until` and `while` bodies and definition-only output redirections
+with quoted or expanded targets, remain read-only shell data. Same-line `case`
+bodies and command-bearing tails after a same-line function block are outside
+the supported grammar and fail closed before mutation. Their
+unescaped physical newlines stay command boundaries. An executed top-level
+`[[ ... ]]` conditional is unsupported because its false status can trigger
+`errexit` before the appended assignment; operands inside an uninvoked function
+definition remain definition-only conditional syntax. Arithmetic-command
+operands inside uninvoked function definitions likewise stay out of the
+command projection. An actually executed arithmetic command is unsupported
+because zero evaluates to failure, nonzero to success, and the helper never
+evaluates Env expressions; structurally invalid arithmetic also fails closed.
+The helper does not use a literal-`false &&` execution exemption. Command
+resolution can be changed by aliases, builtin enablement, the command hash table
+or shell options, while enclosing groups can propagate the failed left-hand
+status. Controls and arithmetic commands behind that spelling therefore remain
+unsupported and fail closed. The reserved `time` prefix is recognized with its
+supported `-p` option and `--` separator, so a timed control command remains
+subject to the same fail-closed classification.
+Top-level process substitutions remain read-only only while no later executed
+`wait` can consume their asynchronous status. A later `wait` is unsupported and
+fails closed before mutation, including across physical lines.
+Assignment-position, status-only, redirection-only and combined
+assignment/redirection-only command substitutions, including substitutions
+after one or more completed assignments and command substitutions nested in a
+parameter expansion in those positions, are unsupported because Bash can
+propagate their dynamically produced status and the helper never executes
+arbitrary Env code to simulate it. This includes both `$(...)` and legacy
+backtick substitutions. Quoted and unquoted arithmetic expansions remain value
+expansions, and the same status checks do not execute inside uninvoked function
+definitions. A `0`
+changes at exactly its single value-byte position. A `1` is already converged
+and is never rewritten.
 
 The desired Env must also remain within the same bounded Env-size contract.
 An append that would cross that limit fails during read-only preflight before

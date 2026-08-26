@@ -25,6 +25,7 @@ MAX_ENV_BYTES = 4_000_000
 MAX_EVIDENCE_BYTES = 4_100_000
 RENAME_NOREPLACE = 1
 RENAME_EXCHANGE = 2
+SHELL_WORD_BREAKS = b' \t;|&(){}<>'
 
 
 class ContractError(Exception):
@@ -216,19 +217,205 @@ def parse_heredoc_operator(body, offset):
     return (delimiter, strip_tabs), index
 
 
+def command_projection_literal(value):
+    # Quoted shell separators and whitespace remain part of one shell word.
+    # A fixed placeholder preserves that word boundary without exposing data.
+    return b'x' if value in SHELL_WORD_BREAKS else value
+
+
+def projection_starts_word(buffer, current):
+    if current:
+        return current[-1] in SHELL_WORD_BREAKS
+    if buffer:
+        return buffer[-1] in SHELL_WORD_BREAKS
+    return True
+
+
+def empty_quote_closes_word(body, index, projection, projection_start, starts_word):
+    return (
+        projection_start == len(projection)
+        and starts_word
+        and (
+            index + 1 >= len(body)
+            or body[index + 1:index + 2] in SHELL_WORD_BREAKS
+        )
+    )
+
+
+def function_block_tail_is_definition_only(tail):
+    candidate = tail
+    redirection = re.compile(
+        rb'^[ \t]*(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
+        rb'[ \t]*[^ \t;|&]+'
+    )
+    while True:
+        match = redirection.match(candidate)
+        if match is None:
+            break
+        candidate = candidate[match.end():]
+    return re.fullmatch(rb'[ \t;]*', candidate) is not None
+
+
+def projection_status_depends_on_substitution(buffer, current):
+    projected = bytes(buffer + current)
+    command = re.split(rb'[;|&]', projected)[-1]
+    redirection_operator = (
+        rb'(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
+    )
+    assignment = rb'[A-Za-z_][A-Za-z0-9_]*\+?=[^ \t;|&]*'
+    completed_prefix = (
+        rb'(?:'
+        + assignment
+        + rb'|'
+        + redirection_operator
+        + rb'[ \t]*[^ \t;|&]+)'
+    )
+    completed_prefix_sequence = rb'(?:' + completed_prefix + rb'[ \t]+)*'
+    redirection_without_target = re.fullmatch(
+        rb'[ \t]*'
+        + completed_prefix_sequence
+        + redirection_operator
+        + rb'[ \t]*',
+        command,
+    ) is not None
+    completed_assignments = re.fullmatch(
+        rb'[ \t]*' + completed_prefix_sequence + assignment + rb'[ \t]*',
+        command,
+    ) is not None
+    completed_prefixes = re.fullmatch(
+        rb'[ \t]*(?:' + completed_prefix + rb'[ \t]+)+',
+        command,
+    ) is not None
+    return (
+        not command.strip(b' \t')
+        or redirection_without_target
+        or completed_assignments
+        or completed_prefixes
+        or (
+            re.fullmatch(
+                rb'[ \t]*' + completed_prefix_sequence
+                + rb'[A-Za-z_][A-Za-z0-9_]*=',
+                command,
+            ) is not None
+        )
+    )
+
+
+def legacy_backtick_status_is_guarded(value, opening_index):
+    index = opening_index + 1
+    while index < len(value):
+        if value[index:index + 1] == b'\\':
+            index += 2
+            continue
+        if value[index:index + 1] == b'`':
+            tail = value[index + 1:]
+            return re.match(
+                rb'[ \t]*\|\|[ \t]+true(?:[ \t;]|$)',
+                tail,
+            ) is not None
+        index += 1
+    return False
+
+
+def simple_parameter_end(value, index):
+    if value[index:index + 1] != b'$' or index + 1 >= len(value):
+        return None
+    following = value[index + 1:index + 2]
+    if re.match(rb'[A-Za-z_]', following):
+        end = index + 2
+        while end < len(value) and re.match(rb'[A-Za-z0-9_]', value[end:end + 1]):
+            end += 1
+        return end
+    if re.match(rb'[0-9@*#?$!\-]', following):
+        return index + 2
+    return None
+
+
+def parameter_expansion_can_error(value, index):
+    return re.match(
+        rb'\$\{!?(?:'
+        rb'[A-Za-z_][A-Za-z0-9_]*(?:\[[^]\r\n]*\])?'
+        rb'|[0-9@*#?$!\-]'
+        rb')(?::)?\?',
+        value[index:],
+    ) is not None
+
+
 def shell_line_contexts(data):
+    # Invariants: structural stacks preserve Bash balance; the projection keeps
+    # only command-word semantics; continuation state joins physical lines; and
+    # function spans scope return without weakening exit/exec detection.
     contexts = []
     quote = None
     compounds = []
     blocks = []
     continuation_kind = None
+    continuation_escape_joins_word = False
     heredocs = []
     early_control = False
     invalid_closer = False
+    projection_compound_depth = None
+    projection_return_quote = None
+    projection_function_depths = []
+    projection_function_spans = []
+    projection_conditional_offsets = []
+    projection_process_substitution_offsets = []
+    projection_subshell_depths = []
+    projection_brace_depths = []
+    projection_function_block_depth = None
+    projection_function_block_start = None
+    arithmetic_invalid = False
+    arithmetic_status_unknown = False
+    conditional_status_unknown = False
+    status_bearing_command_substitution_unknown = False
+    process_substitution_waitable = False
+    backtick_return_quote = None
+    quote_projection_start = None
+    quote_starts_word = False
+    syntax_marker = b'\x00'
+    dynamic_expansion_marker = b'\x01'
+    command_projection_buffer = bytearray()
+    pending_function_header = False
+    redirection = (
+        rb'(?:(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
+        rb'[ \t]*[^ \t;|&]+[ \t]+)'
+    )
+    assignment = rb'(?:[A-Za-z_][A-Za-z0-9_]*\+?=[^ \t;|&]*[ \t]+)'
+    simple_command_prefix = rb'(?:(?:' + assignment + rb'|' + redirection + rb'))*'
+    wrapper = (
+        rb'(?:builtin[ \t]+(?:' + redirection + rb')*'
+        rb'(?:--[ \t]+(?:' + redirection + rb')*)?'
+        rb'|command[ \t]+(?:(?:-[pVv]+)[ \t]+|' + redirection + rb')*'
+        rb'(?:--[ \t]+(?:' + redirection + rb')*)?)'
+    )
+    reserved_pipeline_prefix = (
+        rb'(?:(?:!|time(?:[ \t]+-p)?(?:[ \t]+--)?|then|do|else|elif)[ \t]+)*'
+    )
+    projection_reserved_pipeline_prefix = (
+        rb'(?:(?:!|time(?:[ \t]+-p)?(?:[ \t]+--)?|then|do|else|elif|if|until|while)[ \t]+)*'
+    )
     command_word = re.compile(
-        rb'(?:^|[;|&])\s*'
-        rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*)\s+)*'
-        rb'([A-Za-z_][A-Za-z0-9_]*)'
+        rb'(?:^|[;|&])[ \t]*'
+        + reserved_pipeline_prefix +
+        simple_command_prefix +
+        rb'(?P<wrappers>(?:' + wrapper + rb')*)'
+        rb'(?P<word>[A-Za-z_][A-Za-z0-9_]*)'
+        rb'(?=$|[ \t;|&(){}<>])'
+    )
+    projection_command_word = re.compile(
+        rb'(?:^|[;|&])[ \t]*'
+        + projection_reserved_pipeline_prefix +
+        simple_command_prefix +
+        rb'(?P<wrappers>(?:' + wrapper + rb')*)'
+        rb'(?P<word>[^ \t;|&(){}<>]+)'
+        rb'(?=$|[ \t;|&(){}<>])'
+    )
+    redirection_token = re.compile(
+        rb'^(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))(?P<target>.*)$'
     )
     block_openers = {
         b'case': b'esac',
@@ -238,6 +425,28 @@ def shell_line_contexts(data):
         b'until': b'done',
         b'while': b'done',
     }
+    function_header = re.compile(
+        rb'(?:^|[;|&])[ \t]*(?:'
+        rb'function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?'
+        rb'|[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)'
+        rb')[ \t]*$'
+    )
+    function_block_opener = re.compile(
+        rb'(?P<word>case|for|if|select|until|while)(?=$|[ \t])'
+    )
+    same_line_function_block_opener = re.compile(
+        rb'(?P<word>for|if|select|until|while)(?=$|[ \t])'
+    )
+    function_definition_name = re.compile(
+        rb'(?:^|[;|&])[ \t]*(?:'
+        rb'function[ \t]+(?P<function_name>[A-Za-z_][A-Za-z0-9_]*)'
+        rb'(?:[ \t]*\([ \t]*\))?'
+        rb'|(?P<plain_name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\([ \t]*\)'
+        rb')[ \t]*(?=\{|\(|\[\[|case(?:$|[ \t])|for(?:$|[ \t])|'
+        rb'if(?:$|[ \t])|select(?:$|[ \t])|until(?:$|[ \t])|'
+        rb'while(?:$|[ \t])|$)'
+    )
+    defined_function_names = set()
 
     lines = data.split(b'\n')
     for line_index, body in enumerate(lines):
@@ -250,90 +459,877 @@ def shell_line_contexts(data):
             continue
 
         incoming_continuation = continuation_kind
-        contexts.append(quote is None and not compounds and not blocks and incoming_continuation is None)
+        incoming_escape_joins_word = continuation_escape_joins_word
+        incoming_function_header = pending_function_header
+        incoming_function_brace = False
+        incoming_function_block_word = None
+        incoming_function_conditional = False
+        contexts.append(
+            quote is None
+            and not compounds
+            and not blocks
+            and incoming_continuation is None
+            and not incoming_function_header
+        )
         continuation_kind = None
-        visible = bytearray(b' ' * len(body))
+        continuation_escape_joins_word = False
+        if incoming_function_header:
+            stripped = body.lstrip(b' \t')
+            if not stripped or stripped.startswith(b'#'):
+                pending_function_header = True
+            elif stripped.startswith(b'{') and (
+                len(stripped) == 1 or stripped[1:2] in b' \t'
+            ):
+                incoming_function_brace = True
+            elif stripped.startswith(b'('):
+                pending_function_header = False
+            elif stripped.startswith(b'[[') and (
+                len(stripped) == 2 or stripped[2:3] in b' \t'
+            ):
+                # [[ ... ]] is a Bash compound command and therefore a valid
+                # split function body. Its operands are not shell commands.
+                pending_function_header = False
+                incoming_function_conditional = True
+            else:
+                block_match = function_block_opener.match(stripped)
+                pending_function_header = False
+                if block_match:
+                    incoming_function_block_word = block_match.group('word')
+                else:
+                    invalid_closer = True
+        # structural_visible retains source offsets for balance/continuation.
+        # command_projection is the quote-aware view used only for command words.
+        structural_visible = bytearray(b' ' * len(body))
+        command_projection = bytearray()
         declared_heredocs = []
         index = 0
         while index < len(body):
             current = body[index:index + 1]
             if quote == b"'":
                 if current == quote:
+                    if (
+                        projection_compound_depth is None
+                        and empty_quote_closes_word(
+                            body,
+                            index,
+                            command_projection,
+                            quote_projection_start,
+                            quote_starts_word,
+                        )
+                    ):
+                        command_projection.extend(b'x')
+                    elif projection_compound_depth is None:
+                        # Preserve that this shell word used quoting. The NUL
+                        # marker is stripped for builtin control names but
+                        # prevents quoted reserved words becoming syntax.
+                        command_projection.extend(syntax_marker)
                     quote = None
+                    quote_projection_start = None
+                    quote_starts_word = False
+                elif projection_compound_depth is None:
+                    command_projection.extend(command_projection_literal(current))
                 index += 1
                 continue
             if quote in {b'"', b'`'}:
+                if quote == b'"' and current == b'$':
+                    parameter_end = simple_parameter_end(body, index)
+                    if parameter_end is not None:
+                        if projection_compound_depth is None:
+                            command_projection.extend(dynamic_expansion_marker)
+                        index = parameter_end
+                        continue
+                    token = body[index:index + 2]
+                    if token in {b'$(', b'${', b'$['}:
+                        if (
+                            token == b'${'
+                            and parameter_expansion_can_error(body, index)
+                            and not projection_function_depths
+                            and projection_function_block_depth is None
+                            and function_definition_name.search(body[:index]) is None
+                        ):
+                            # The ``?`` and ``:?`` operators can abort a sourced
+                            # Env before the appended assignment is evaluated.
+                            # The helper never resolves protected Env state.
+                            early_control = True
+                        if (
+                            body[index:index + 3] != b'$(('
+                            and token == b'$('
+                            and not projection_function_depths
+                            and projection_function_block_depth is None
+                            and projection_status_depends_on_substitution(
+                                command_projection_buffer,
+                                command_projection,
+                            )
+                        ):
+                            # Assignment-only and substitution-only commands
+                            # inherit the substitution status. Arbitrary Env
+                            # code is not executed here to guess that status.
+                            status_bearing_command_substitution_unknown = True
+                        closers = {b'$(': b')', b'${': b'}', b'$[': b']'}
+                        compounds.append(closers[token])
+                        if projection_compound_depth is None:
+                            command_projection.extend(dynamic_expansion_marker)
+                            projection_compound_depth = len(compounds)
+                            projection_return_quote = b'"'
+                        quote = None
+                        index += 2
+                        continue
                 if current == b'\\':
                     if index + 1 >= len(body):
                         continuation_kind = 'escape'
+                        continuation_escape_joins_word = False
                         index += 1
                     else:
+                        following = body[index + 1:index + 2]
+                        if projection_compound_depth is None and quote != b'`':
+                            special = b'$`"\\' if quote == b'"' else b'$`\\'
+                            if following not in special:
+                                command_projection.extend(b'\\')
+                            command_projection.extend(command_projection_literal(following))
                         index += 2
                     continue
                 if current == quote:
-                    quote = None
+                    closing_quote = quote
+                    if (
+                        closing_quote == b'"'
+                        and projection_compound_depth is None
+                        and empty_quote_closes_word(
+                            body,
+                            index,
+                            command_projection,
+                            quote_projection_start,
+                            quote_starts_word,
+                        )
+                    ):
+                        command_projection.extend(b'x')
+                    elif closing_quote == b'"' and projection_compound_depth is None:
+                        command_projection.extend(syntax_marker)
+                    quote = backtick_return_quote if closing_quote == b'`' else None
+                    backtick_return_quote = None
+                    if closing_quote == b'"':
+                        quote_projection_start = None
+                        quote_starts_word = False
+                elif quote == b'"' and current == b'`':
+                    if (
+                        projection_compound_depth is None
+                        and not projection_function_depths
+                        and projection_function_block_depth is None
+                        and projection_status_depends_on_substitution(
+                            command_projection_buffer,
+                            command_projection,
+                        )
+                        and not legacy_backtick_status_is_guarded(body, index)
+                    ):
+                        # Legacy backticks have the same status-bearing
+                        # assignment/substitution semantics as ``$(...)``.
+                        status_bearing_command_substitution_unknown = True
+                    if projection_compound_depth is None:
+                        command_projection.extend(dynamic_expansion_marker)
+                    backtick_return_quote = b'"'
+                    quote = b'`'
+                elif projection_compound_depth is None and quote != b'`':
+                    command_projection.extend(command_projection_literal(current))
                 index += 1
                 continue
             if current == b'#' and (
                 index == 0 or body[index - 1:index] in b' \t;|&(){}'
+            ) and not (
+                index == 0
+                and incoming_continuation == 'escape'
+                and incoming_escape_joins_word
             ):
                 break
             if current == b'\\':
                 if index + 1 >= len(body):
                     continuation_kind = 'escape'
+                    projected = bytes(command_projection_buffer + command_projection)
+                    continuation_escape_joins_word = bool(
+                        projected and projected[-1:] not in SHELL_WORD_BREAKS
+                    )
                     index += 1
                 else:
+                    following = body[index + 1:index + 2]
+                    if projection_compound_depth is None:
+                        command_projection.extend(command_projection_literal(following))
+                        command_projection.extend(syntax_marker)
                     index += 2
                 continue
-            if current in {b"'", b'"', b'`'}:
+            parameter_end = simple_parameter_end(body, index)
+            if parameter_end is not None:
+                # Keep an unquoted expansion opaque but contiguous in the
+                # structural view. This preserves definition-only redirection
+                # targets without exposing the parameter name as shell syntax.
+                structural_visible[index:parameter_end] = b'x' * (parameter_end - index)
+                if projection_compound_depth is None:
+                    command_projection.extend(dynamic_expansion_marker)
+                index = parameter_end
+                continue
+            if current in {b"'", b'"'}:
+                structural_visible[index] = ord('x')
+                quote_projection_start = len(command_projection)
+                quote_starts_word = projection_starts_word(
+                    command_projection_buffer,
+                    command_projection,
+                )
                 quote = current
+                index += 1
+                continue
+            if current == b'`':
+                structural_visible[index] = ord('x')
+                if (
+                    projection_compound_depth is None
+                    and not projection_function_depths
+                    and projection_function_block_depth is None
+                    and projection_status_depends_on_substitution(
+                        command_projection_buffer,
+                        command_projection,
+                    )
+                    and not legacy_backtick_status_is_guarded(body, index)
+                ):
+                    # Backticks execute a command substitution while sourcing;
+                    # do not infer its status without executing arbitrary Env.
+                    status_bearing_command_substitution_unknown = True
+                if projection_compound_depth is None:
+                    command_projection.extend(dynamic_expansion_marker)
+                backtick_return_quote = None
+                quote = b'`'
                 index += 1
                 continue
             if body[index:index + 2] == b'<<':
                 specification, index = parse_heredoc_operator(body, index)
                 declared_heredocs.append(specification)
+                if projection_compound_depth is None:
+                    command_projection.extend(b' ')
                 continue
             if body[index:index + 2] == b'[[':
+                same_line_function_conditional = bool(
+                    function_header.search(body[:index])
+                )
+                definition_only_conditional = bool(
+                    (
+                        incoming_function_conditional
+                        and not body[:index].strip(b' \t')
+                    )
+                    or same_line_function_conditional
+                )
+                if not (
+                    definition_only_conditional
+                ):
+                    projection_conditional_offsets.append(
+                        len(command_projection_buffer) + len(command_projection)
+                    )
                 compounds.append(b']]')
+                if (
+                    definition_only_conditional
+                    and projection_compound_depth is None
+                ):
+                    # A split or same-line direct ``[[ ... ]]`` function body
+                    # is definition-only. Hide its operands from command-word
+                    # and conditional-status classification.
+                    command_projection.extend(b';')
+                    projection_compound_depth = len(compounds)
+                index += 2
+                continue
+            if (
+                current in {b'*', b'?', b'['}
+                and projection_compound_depth is None
+            ):
+                # Unquoted pathname expansion can synthesize a shell control,
+                # function or alias at the command-word position. Preserve it
+                # as a dynamic marker rather than guessing the consumer CWD.
+                structural_visible[index] = ord('x')
+                command_projection.extend(dynamic_expansion_marker)
+                index += 1
+                continue
+            if body[index:index + 2] == b'((':
+                arithmetic_close = body.find(b'))', index + 2)
+                if arithmetic_close >= 0 and re.match(
+                    rb'[ \t]*(?:exec|exit|return)[ \t]+[^ \t]',
+                    body[index + 2:arithmetic_close],
+                ):
+                    # A control-word spelling followed by a separate operand
+                    # is not a valid arithmetic expression. It must not be
+                    # reclassified as a successful subshell control.
+                    arithmetic_invalid = True
+                arithmetic_definition_only = bool(
+                    projection_function_depths
+                    or function_header.search(body[:index])
+                    or (incoming_function_header and not body[:index].strip(b' \t'))
+                )
+                if not arithmetic_definition_only:
+                    # Arithmetic command status depends on evaluated Env state:
+                    # zero is failure and nonzero is success. The helper never
+                    # evaluates arbitrary Env expressions to predict errexit.
+                    arithmetic_status_unknown = True
+                compounds.append(b'))')
+                if projection_compound_depth is None:
+                    command_projection.extend(b';')
+                    projection_compound_depth = len(compounds)
+                index += 2
+                continue
+            if body[index:index + 2] == b'))' and compounds and compounds[-1] == b'))':
+                compounds.pop()
+                if (
+                    projection_compound_depth is not None
+                    and len(compounds) < projection_compound_depth
+                ):
+                    projection_compound_depth = None
+                    if projection_return_quote is not None:
+                        quote = projection_return_quote
+                        projection_return_quote = None
                 index += 2
                 continue
             if body[index:index + 2] == b']]':
                 if compounds and compounds[-1] == b']]':
                     compounds.pop()
+                    if (
+                        projection_compound_depth is not None
+                        and len(compounds) < projection_compound_depth
+                    ):
+                        projection_compound_depth = None
+                        if projection_return_quote is not None:
+                            quote = projection_return_quote
+                            projection_return_quote = None
+                    index += 2
+                elif compounds and compounds[-1] == b']':
+                    # Arithmetic array syntax can close immediately before the
+                    # legacy $[...] delimiter. Consume one bracket at a time.
+                    compounds.pop()
+                    if (
+                        projection_compound_depth is not None
+                        and len(compounds) < projection_compound_depth
+                    ):
+                        projection_compound_depth = None
+                        if projection_return_quote is not None:
+                            quote = projection_return_quote
+                            projection_return_quote = None
+                    index += 1
                 else:
                     invalid_closer = True
+                    index += 2
+                continue
+            if body[index:index + 2] in {b'$(', b'${', b'$[', b'>(', b'<('}:
+                if (
+                    body[index:index + 2] == b'${'
+                    and parameter_expansion_can_error(body, index)
+                    and not projection_function_depths
+                    and projection_function_block_depth is None
+                    and function_definition_name.search(body[:index]) is None
+                ):
+                    # Required-value parameter expansion is status-bearing for
+                    # a sourcing shell when the referenced value is absent.
+                    early_control = True
+                if (
+                    body[index:index + 3] != b'$(('
+                    and body[index:index + 2] == b'$('
+                    and not projection_function_depths
+                    and projection_function_block_depth is None
+                    and projection_status_depends_on_substitution(
+                        command_projection_buffer,
+                        command_projection,
+                    )
+                ):
+                    status_bearing_command_substitution_unknown = True
+                closers = {b'(': b')', b'{': b'}', b'[': b']'}
+                if (
+                    body[index:index + 2] in {b'>(', b'<('}
+                    and projection_compound_depth is None
+                ):
+                    projection_process_substitution_offsets.append(
+                        len(command_projection_buffer) + len(command_projection)
+                    )
+                compounds.append(closers[body[index + 1:index + 2]])
+                if projection_compound_depth is None:
+                    # SOH cannot occur in validated input. Internally it marks
+                    # a dynamic expansion that may assemble a command word.
+                    marker = dynamic_expansion_marker
+                    command_projection.extend(marker)
+                    projection_compound_depth = len(compounds)
                 index += 2
                 continue
-            if body[index:index + 2] in {b'$(', b'${'}:
-                compounds.append(b')' if body[index + 1:index + 2] == b'(' else b'}')
-                index += 2
+            if current == b'[' and compounds and compounds[-1] == b']':
+                compounds.append(b']')
+                index += 1
+                continue
+            if current == b']' and compounds and compounds[-1] == b']':
+                compounds.pop()
+                if (
+                    projection_compound_depth is not None
+                    and len(compounds) < projection_compound_depth
+                ):
+                    projection_compound_depth = None
+                    if projection_return_quote is not None:
+                        quote = projection_return_quote
+                        projection_return_quote = None
+                index += 1
                 continue
             if current in {b'(', b'{'}:
                 compounds.append(b')' if current == b'(' else b'}')
+                same_line_function_header = bool(
+                    current == b'{' and function_header.search(body[:index])
+                )
+                function_brace_token = bool(
+                    current == b'{'
+                    and (index + 1 == len(body) or body[index + 1:index + 2] in b' \t')
+                )
+                if (
+                    current == b'{'
+                    and (same_line_function_header or incoming_function_header)
+                    and not function_brace_token
+                ):
+                    invalid_closer = True
+                function_signature_parenthesis = bool(
+                    current == b'('
+                    and re.fullmatch(
+                        rb'[ \t]*(?:function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*',
+                        body[:index],
+                    )
+                    and re.match(rb'\([ \t]*\)', body[index:])
+                )
+                if (
+                    current == b'{'
+                    and projection_compound_depth is None
+                    and not function_brace_token
+                ):
+                    # A non-reserved ``{`` begins brace expansion, not a brace
+                    # command group. Represent the entire expansion as one
+                    # dynamic word so expansion-produced command names are
+                    # rejected while ordinary argument expansions stay data.
+                    command_projection.extend(dynamic_expansion_marker)
+                    projection_compound_depth = len(compounds)
+                if (
+                    current == b'('
+                    and projection_compound_depth is None
+                    and not function_signature_parenthesis
+                ):
+                    # Parenthesized command groups execute in a subshell. Keep
+                    # their command projection scoped so nested commands retain
+                    # their physical boundaries until the group closes.
+                    command_projection.extend(b';')
+                    subshell_start = len(command_projection_buffer) + len(command_projection)
+                    projection_subshell_depths.append((len(compounds), subshell_start))
+                    same_line_function_body = bool(function_header.search(body[:index]))
+                    split_line_function_body = bool(
+                        incoming_function_header and not body[:index].strip(b' \t')
+                    )
+                    if same_line_function_body or split_line_function_body:
+                        projection_function_depths.append((len(compounds), subshell_start))
+                        pending_function_header = False
+                if (
+                    current == b'{'
+                    and projection_compound_depth is None
+                    and function_brace_token
+                    and (
+                        same_line_function_header
+                        or (
+                            incoming_function_brace
+                            and not body[:index].strip(b' \t')
+                        )
+                    )
+                ):
+                    # Sourcing a function definition does not execute its body.
+                    # Record its projected range so return is classified in
+                    # function scope. Exit/exec remain conservatively fail-closed.
+                    command_projection.extend(b';')
+                    projection_function_depths.append((
+                        len(compounds),
+                        len(command_projection_buffer) + len(command_projection),
+                    ))
+                    pending_function_header = False
+                elif (
+                    current == b'{'
+                    and projection_compound_depth is None
+                    and function_brace_token
+                ):
+                    # A sourced brace group executes in the current shell.
+                    # Buffer its projected span so nested commands retain their
+                    # physical command boundaries during classification.
+                    command_projection.extend(b';')
+                    projection_brace_depths.append((
+                        len(compounds),
+                        len(command_projection_buffer) + len(command_projection),
+                    ))
                 index += 1
                 continue
             if current in {b')', b'}'}:
+                closed_projection = False
                 if compounds and compounds[-1] == current:
                     compounds.pop()
+                    if (
+                        projection_function_depths
+                        and len(compounds) < projection_function_depths[-1][0]
+                    ):
+                        _, function_start = projection_function_depths.pop()
+                        command_projection.extend(b';')
+                        projection_function_spans.append((
+                            function_start,
+                            len(command_projection_buffer) + len(command_projection),
+                        ))
+                    if (
+                        projection_subshell_depths
+                        and len(compounds) < projection_subshell_depths[-1][0]
+                    ):
+                        projection_subshell_depths.pop()
+                        following = body[index + 1:index + 2]
+                        if following and following not in SHELL_WORD_BREAKS:
+                            invalid_closer = True
+                        command_projection.extend(b';')
+                        closed_projection = True
+                    if (
+                        projection_brace_depths
+                        and len(compounds) < projection_brace_depths[-1][0]
+                    ):
+                        projection_brace_depths.pop()
+                        command_projection.extend(b';')
+                        closed_projection = True
+                    if (
+                        projection_compound_depth is not None
+                        and len(compounds) < projection_compound_depth
+                    ):
+                        projection_compound_depth = None
+                        closed_projection = True
+                        if projection_return_quote is not None:
+                            quote = projection_return_quote
+                            projection_return_quote = None
                 else:
                     invalid_closer = True
-                visible[index] = current[0]
+                structural_visible[index] = current[0]
+                if projection_compound_depth is None and not closed_projection:
+                    command_projection.extend(current)
                 index += 1
                 continue
-            visible[index] = current[0]
+            structural_visible[index] = current[0]
+            if projection_compound_depth is None:
+                command_projection.extend(current)
             index += 1
 
-        for match in command_word.finditer(bytes(visible)):
-            word = match.group(1)
-            if word in {b'exec', b'exit', b'return'}:
-                early_control = True
+        visible_bytes = bytes(structural_visible)
+        same_line_function_block_words = []
+        for definition_match in function_definition_name.finditer(body):
+            function_group = (
+                'function_name'
+                if definition_match.group('function_name') is not None
+                else 'plain_name'
+            )
+            function_name = definition_match.group(function_group)
+            function_start = definition_match.start(function_group)
+            function_end = definition_match.end(function_group)
+            # The raw spelling retains ``()`` for recognizing definitions;
+            # the structural view proves that the name itself was neither
+            # quoted nor commented out by the shell scanner.
+            if visible_bytes[function_start:function_end] == function_name:
+                if function_name in {
+                    b'builtin',
+                    b'command',
+                    b'command_not_found_handle',
+                }:
+                    # Bash can invoke command_not_found_handle without an
+                    # explicit textual call, while functions named command or
+                    # builtin shadow the wrappers used by the static command
+                    # grammar. These definitions therefore make later command
+                    # resolution unprovable without executing protected Env
+                    # code and are outside the supported writer grammar.
+                    early_control = True
+                defined_function_names.add(function_name)
+                block_match = same_line_function_block_opener.match(
+                    body,
+                    definition_match.end(),
+                )
+                if (
+                    block_match is not None
+                    and visible_bytes[block_match.start('word'):block_match.end('word')]
+                    == block_match.group('word')
+                ):
+                    same_line_function_block_words.append(block_match.group('word'))
+        # The generic command-word matcher cannot see an opener immediately
+        # after the closing ``)`` of a same-line function header. Seed that
+        # structural block before scanning its closer so the body is scoped as
+        # definition-only. Same-line case arms and command-bearing tails remain
+        # explicitly unsupported because they need a wider Bash grammar.
+        for block_word in same_line_function_block_words:
+            if projection_function_block_depth is not None:
+                invalid_closer = True
+                continue
+            blocks.append(block_openers[block_word])
+            projection_function_block_depth = len(blocks)
+            projection_function_block_start = len(command_projection_buffer)
+        function_block_closed_tail = None
+        for match in command_word.finditer(visible_bytes):
+            # Shell reserved words are structural only when parsed directly.
+            # Behind builtin/command they are ordinary operands (including
+            # command -v/-V queries), never block delimiters.
+            if match.group('wrappers'):
+                continue
+            word = match.group('word')
             if blocks and word == blocks[-1]:
                 blocks.pop()
+                if (
+                    projection_function_block_depth is not None
+                    and len(blocks) < projection_function_block_depth
+                ):
+                    function_block_closed_tail = visible_bytes[match.end('word'):]
+                    projection_function_block_depth = None
             elif word in {b'done', b'esac', b'fi'}:
                 invalid_closer = True
             elif word in block_openers:
                 blocks.append(block_openers[word])
-        structural = bytes(visible).rstrip()
+                if (
+                    incoming_function_block_word == word
+                    and projection_function_block_depth is None
+                ):
+                    projection_function_block_depth = len(blocks)
+                    projection_function_block_start = len(command_projection_buffer)
+
+        if function_block_closed_tail is not None:
+            if not function_block_tail_is_definition_only(function_block_closed_tail):
+                invalid_closer = True
+            projection_function_spans.append((
+                projection_function_block_start,
+                len(command_projection_buffer) + len(command_projection),
+            ))
+            projection_function_block_start = None
+
+        structural = bytes(structural_visible).rstrip()
+        operator_continues = bool(
+            structural.endswith((b'&&', b'||', b'|'))
+            or (not structural and incoming_continuation == 'operator')
+        )
+        command_projection_buffer.extend(command_projection)
+        if (
+            projection_compound_depth is not None
+            or projection_function_depths
+            or projection_function_block_depth is not None
+            or projection_subshell_depths
+            or projection_brace_depths
+        ):
+            # The expansion marker already represents the entire potentially
+            # empty compound across physical lines. Function projections also
+            # remain buffered until their closing brace records the full span.
+            if (
+                quote is None
+                and continuation_kind != 'escape'
+                and not operator_continues
+            ):
+                # An unescaped physical newline is a shell command boundary.
+                # Preserve it while buffering scopes so adjacent line-local
+                # words cannot assemble into a synthetic control command.
+                command_projection_buffer.extend(b';')
+        elif quote is not None and continuation_kind != 'escape':
+            command_projection_buffer.extend(b'x')
+        elif continuation_kind == 'escape':
+            # Backslash-newline is removed by Bash, so the surrounding shell
+            # word continues byte-for-byte on the next physical line.
+            pass
+        else:
+            projected_commands = bytes(command_projection_buffer)
+            for match in projection_command_word.finditer(projected_commands):
+                word = match.group('word')
+                static_word = word.replace(syntax_marker, b'').replace(
+                    dynamic_expansion_marker,
+                    b'',
+                )
+                inside_function = any(
+                    start <= match.start('word') < end
+                    for start, end in projection_function_spans
+                )
+                tail = projected_commands[match.end():]
+                wrappers = [
+                    wrapper_word
+                    for wrapper_word in re.split(rb'[ \t]+', match.group('wrappers').strip())
+                    if wrapper_word
+                ]
+                command_query = False
+                export_function_option = False
+                command_options = False
+                command_options_ended = False
+                skip_redirection_target = False
+                for wrapper_word in wrappers:
+                    if skip_redirection_target:
+                        skip_redirection_target = False
+                        continue
+                    redirection_match = redirection_token.match(wrapper_word)
+                    if redirection_match:
+                        skip_redirection_target = not redirection_match.group('target')
+                        continue
+                    if wrapper_word == b'command':
+                        command_options = True
+                        command_options_ended = False
+                        continue
+                    if wrapper_word == b'builtin':
+                        command_options = False
+                        command_options_ended = False
+                        continue
+                    if command_options and wrapper_word == b'--':
+                        command_options_ended = True
+                        continue
+                    if (
+                        command_options
+                        and not command_options_ended
+                        and re.fullmatch(rb'-[pVv]+', wrapper_word)
+                    ):
+                        if b'v' in wrapper_word or b'V' in wrapper_word:
+                            command_query = True
+                if static_word == b'export' and not inside_function:
+                    export_tail = re.split(rb'[;|&]', tail, maxsplit=1)[0]
+                    for export_word in re.split(rb'[ \t]+', export_tail.strip()):
+                        if not export_word:
+                            continue
+                        if (
+                            dynamic_expansion_marker in export_word
+                            or syntax_marker in export_word
+                        ):
+                            # A runtime-produced option can resolve to ``-f``.
+                            export_function_option = True
+                            break
+                        if export_word == b'--':
+                            break
+                        if not export_word.startswith(b'-') or export_word == b'-':
+                            break
+                        if b'f' in export_word[1:]:
+                            export_function_option = True
+                            break
+                if (
+                    syntax_marker in word
+                    and static_word in {b'builtin', b'command'}
+                    and not inside_function
+                ):
+                    # Quoted wrapper spellings execute after quote removal but
+                    # cannot be parsed by the literal wrapper grammar above.
+                    # Reject the dynamic wrapper rather than trusting its
+                    # hidden operand classification.
+                    early_control = True
+                elif (
+                    word.startswith(b'$')
+                    and syntax_marker in word
+                    and not inside_function
+                ):
+                    # ANSI-C and locale-quoted command words can decode or
+                    # concatenate into shell controls and wrappers. Their
+                    # runtime command identity is outside the static grammar.
+                    early_control = True
+                elif export_function_option and not command_query:
+                    # Exported functions can be invoked by a child shell and
+                    # abort the sourcing consumer before the appended flag.
+                    # Do not execute protected Env code to predict that status.
+                    early_control = True
+                elif (
+                    static_word
+                    in {
+                        b'alias',
+                        b'compgen',
+                        b'declare',
+                        b'enable',
+                        b'fc',
+                        b'hash',
+                        b'history',
+                        b'let',
+                        b'mapfile',
+                        b'readarray',
+                        b'readonly',
+                        b'set',
+                        b'shopt',
+                        b'trap',
+                        b'typeset',
+                        b'unalias',
+                    }
+                    and not command_query
+                    and not inside_function
+                ):
+                    # Runtime resolver, option, arithmetic-status, callback,
+                    # history-replay and trap mutations can change a later
+                    # command, the source status or the appended assignment
+                    # itself. Static proof without executing arbitrary Env code
+                    # is unsupported.
+                    early_control = True
+                elif (
+                    static_word == b'wait'
+                    and not command_query
+                    and not inside_function
+                    and (
+                        process_substitution_waitable
+                        or any(
+                            offset < match.start('word')
+                            and not any(
+                                start <= offset < end
+                                for start, end in projection_function_spans
+                            )
+                            for offset in projection_process_substitution_offsets
+                        )
+                    )
+                ):
+                    # Process substitution publishes an asynchronous process
+                    # through $!. A later wait can propagate its hidden status
+                    # before the appended monitoring assignment is sourced.
+                    early_control = True
+                elif static_word in {b'exec', b'exit', b'return'} and not command_query:
+                    if inside_function:
+                        if static_word != b'return':
+                            early_control = True
+                    else:
+                        # Executed shell controls are outside the supported Env
+                        # grammar regardless of subshell, pipeline or background
+                        # placement. Proving their status would require executing
+                        # Env-defined aliases, functions, traps or later waits.
+                        early_control = True
+                elif (
+                    static_word in {b'.', b'eval', b'source'}
+                    and not command_query
+                    and not inside_function
+                ):
+                    # Eval and sourced input can invoke controls, functions or
+                    # status-bearing constructs hidden in ordinary argument
+                    # bytes. Executing those bytes to prove safety is outside
+                    # this helper.
+                    early_control = True
+                elif static_word == b'coproc' and not command_query and not inside_function:
+                    # A top-level coprocess can execute an Env-defined function
+                    # asynchronously and a later wait can propagate its status
+                    # before the appended assignment. Proving the operand and
+                    # every possible wait path would require executing Env code.
+                    early_control = True
+                elif (
+                    dynamic_expansion_marker in word
+                    and not command_query
+                    and not inside_function
+                    and re.match(rb'[A-Za-z_][A-Za-z0-9_]*=', word) is None
+                ):
+                    # An expanded command word can resolve to a shell control,
+                    # function, alias or failing command. Its runtime identity
+                    # is deliberately not inferred from Env values.
+                    early_control = True
+                elif (
+                    not command_query
+                    and static_word in defined_function_names
+                    and not inside_function
+                    # The command projection also sees the function name in
+                    # the compact ``name()`` definition syntax. Only a later
+                    # invocation can affect the sourcing shell's status.
+                    and re.match(rb'[ \t]*\)', tail) is None
+                ):
+                    early_control = True
+            if any(
+                not any(
+                    start <= offset < end
+                    for start, end in projection_function_spans
+                )
+                for offset in projection_process_substitution_offsets
+            ):
+                process_substitution_waitable = True
+            if any(
+                not any(
+                    start <= offset < end
+                    for start, end in projection_function_spans
+                )
+                for offset in projection_conditional_offsets
+            ):
+                # Conditional-command status depends on the protected Env.
+                # A false result can trigger errexit before the appended
+                # monitoring assignment, so the helper never predicts it.
+                conditional_status_unknown = True
+            command_projection_buffer.clear()
+            projection_function_spans.clear()
+            projection_conditional_offsets.clear()
+            projection_process_substitution_offsets.clear()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
         elif not structural and incoming_continuation == 'operator':
@@ -345,6 +1341,12 @@ def shell_line_contexts(data):
         ):
             continuation_kind = 'escape'
         heredocs.extend(declared_heredocs)
+        declaration = body
+        comment_at = declaration.find(b'#')
+        if comment_at >= 0:
+            declaration = declaration[:comment_at]
+        if function_header.fullmatch(declaration):
+            pending_function_header = True
 
     complete = (
         quote is None
@@ -353,6 +1355,13 @@ def shell_line_contexts(data):
         and continuation_kind is None
         and not heredocs
         and not invalid_closer
+        and not pending_function_header
+        and projection_function_block_depth is None
+        and not projection_subshell_depths
+        and not arithmetic_invalid
+        and not arithmetic_status_unknown
+        and not conditional_status_unknown
+        and not status_bearing_command_substitution_unknown
     )
     trailing_escape_only = (
         quote is None
