@@ -25,6 +25,8 @@ MAX_ENV_BYTES = 4_000_000
 MAX_EVIDENCE_BYTES = 4_100_000
 RENAME_NOREPLACE = 1
 RENAME_EXCHANGE = 2
+SHELL_WORD_BREAKS = b' \t;|&(){}<>'
+BACKGROUND_OPERATOR = re.compile(rb'(?<![<>&])&(?![&>])')
 
 
 class ContractError(Exception):
@@ -219,7 +221,30 @@ def parse_heredoc_operator(body, offset):
 def command_projection_literal(value):
     # Quoted shell separators and whitespace remain part of one shell word.
     # A fixed placeholder preserves that word boundary without exposing data.
-    return b'x' if value in b' \t;|&(){}<>' else value
+    return b'x' if value in SHELL_WORD_BREAKS else value
+
+
+def projection_starts_word(buffer, current):
+    projected = bytes(buffer + current)
+    return not projected or projected[-1:] in SHELL_WORD_BREAKS
+
+
+def empty_quote_closes_word(body, index, projection, projection_start, starts_word):
+    return (
+        projection_start == len(projection)
+        and starts_word
+        and (
+            index + 1 >= len(body)
+            or body[index + 1:index + 2] in SHELL_WORD_BREAKS
+        )
+    )
+
+
+def control_tail_is_backgrounded(tail):
+    command_end = re.search(rb'[;|]', tail)
+    if command_end is not None:
+        tail = tail[:command_end.start()]
+    return BACKGROUND_OPERATOR.search(tail) is not None
 
 
 def simple_parameter_end(value, index):
@@ -237,19 +262,28 @@ def simple_parameter_end(value, index):
 
 
 def shell_line_contexts(data):
+    # Invariants: structural stacks preserve Bash balance; the projection keeps
+    # only command-word semantics; continuation state joins physical lines; and
+    # function spans scope return without weakening exit/exec detection.
     contexts = []
     quote = None
     compounds = []
     blocks = []
     continuation_kind = None
+    continuation_escape_joins_word = False
     heredocs = []
     early_control = False
     invalid_closer = False
     projection_compound_depth = None
     projection_return_quote = None
+    projection_function_depths = []
+    projection_function_spans = []
     backtick_return_quote = None
+    quote_projection_start = None
+    quote_starts_word = False
     expansion_marker = b'\x00'
     command_projection_buffer = bytearray()
+    pending_function_header = False
     redirection = (
         rb'(?:(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
         rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
@@ -287,6 +321,12 @@ def shell_line_contexts(data):
         b'until': b'done',
         b'while': b'done',
     }
+    function_header = re.compile(
+        rb'(?:^|[;|&])[ \t]*(?:'
+        rb'function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?'
+        rb'|[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)'
+        rb')[ \t]*$'
+    )
 
     lines = data.split(b'\n')
     for line_index, body in enumerate(lines):
@@ -299,8 +339,24 @@ def shell_line_contexts(data):
             continue
 
         incoming_continuation = continuation_kind
-        contexts.append(quote is None and not compounds and not blocks and incoming_continuation is None)
+        incoming_escape_joins_word = continuation_escape_joins_word
+        incoming_function_header = pending_function_header
+        contexts.append(
+            quote is None
+            and not compounds
+            and not blocks
+            and incoming_continuation is None
+            and not incoming_function_header
+        )
         continuation_kind = None
+        continuation_escape_joins_word = False
+        if incoming_function_header:
+            stripped = body.lstrip(b' \t')
+            if not stripped or stripped.startswith(b'#'):
+                pending_function_header = True
+            elif not stripped.startswith(b'{'):
+                pending_function_header = False
+                invalid_closer = True
         # structural_visible retains source offsets for balance/continuation.
         # command_projection is the quote-aware view used only for command words.
         structural_visible = bytearray(b' ' * len(body))
@@ -311,7 +367,20 @@ def shell_line_contexts(data):
             current = body[index:index + 1]
             if quote == b"'":
                 if current == quote:
+                    if (
+                        projection_compound_depth is None
+                        and empty_quote_closes_word(
+                            body,
+                            index,
+                            command_projection,
+                            quote_projection_start,
+                            quote_starts_word,
+                        )
+                    ):
+                        command_projection.extend(b'x')
                     quote = None
+                    quote_projection_start = None
+                    quote_starts_word = False
                 elif projection_compound_depth is None:
                     command_projection.extend(command_projection_literal(current))
                 index += 1
@@ -338,6 +407,7 @@ def shell_line_contexts(data):
                 if current == b'\\':
                     if index + 1 >= len(body):
                         continuation_kind = 'escape'
+                        continuation_escape_joins_word = False
                         index += 1
                     else:
                         following = body[index + 1:index + 2]
@@ -349,8 +419,24 @@ def shell_line_contexts(data):
                         index += 2
                     continue
                 if current == quote:
-                    quote = backtick_return_quote if quote == b'`' else None
+                    closing_quote = quote
+                    if (
+                        closing_quote == b'"'
+                        and projection_compound_depth is None
+                        and empty_quote_closes_word(
+                            body,
+                            index,
+                            command_projection,
+                            quote_projection_start,
+                            quote_starts_word,
+                        )
+                    ):
+                        command_projection.extend(b'x')
+                    quote = backtick_return_quote if closing_quote == b'`' else None
                     backtick_return_quote = None
+                    if closing_quote == b'"':
+                        quote_projection_start = None
+                        quote_starts_word = False
                 elif quote == b'"' and current == b'`':
                     if projection_compound_depth is None:
                         command_projection.extend(expansion_marker)
@@ -362,11 +448,19 @@ def shell_line_contexts(data):
                 continue
             if current == b'#' and (
                 index == 0 or body[index - 1:index] in b' \t;|&(){}'
-            ) and not (index == 0 and incoming_continuation == 'escape'):
+            ) and not (
+                index == 0
+                and incoming_continuation == 'escape'
+                and incoming_escape_joins_word
+            ):
                 break
             if current == b'\\':
                 if index + 1 >= len(body):
                     continuation_kind = 'escape'
+                    projected = bytes(command_projection_buffer + command_projection)
+                    continuation_escape_joins_word = bool(
+                        projected and projected[-1:] not in SHELL_WORD_BREAKS
+                    )
                     index += 1
                 else:
                     following = body[index + 1:index + 2]
@@ -381,6 +475,11 @@ def shell_line_contexts(data):
                 index = parameter_end
                 continue
             if current in {b"'", b'"'}:
+                quote_projection_start = len(command_projection)
+                quote_starts_word = projection_starts_word(
+                    command_projection_buffer,
+                    command_projection,
+                )
                 quote = current
                 index += 1
                 continue
@@ -459,12 +558,42 @@ def shell_line_contexts(data):
                 continue
             if current in {b'(', b'{'}:
                 compounds.append(b')' if current == b'(' else b'}')
+                if (
+                    current == b'{'
+                    and projection_compound_depth is None
+                    and (
+                        function_header.search(body[:index])
+                        or (
+                            incoming_function_header
+                            and not body[:index].strip(b' \t')
+                        )
+                    )
+                ):
+                    # Sourcing a function definition does not execute its body.
+                    # Record its projected range so return is classified in
+                    # function scope. Exit/exec remain conservatively fail-closed.
+                    command_projection.extend(b';')
+                    projection_function_depths.append((
+                        len(compounds),
+                        len(command_projection_buffer) + len(command_projection),
+                    ))
+                    pending_function_header = False
                 index += 1
                 continue
             if current in {b')', b'}'}:
                 closed_projection = False
                 if compounds and compounds[-1] == current:
                     compounds.pop()
+                    if (
+                        projection_function_depths
+                        and len(compounds) < projection_function_depths[-1][0]
+                    ):
+                        _, function_start = projection_function_depths.pop()
+                        command_projection.extend(b';')
+                        projection_function_spans.append((
+                            function_start,
+                            len(command_projection_buffer) + len(command_projection),
+                        ))
                     if (
                         projection_compound_depth is not None
                         and len(compounds) < projection_compound_depth
@@ -502,9 +631,10 @@ def shell_line_contexts(data):
                 blocks.append(block_openers[word])
 
         command_projection_buffer.extend(command_projection)
-        if projection_compound_depth is not None:
+        if projection_compound_depth is not None or projection_function_depths:
             # The expansion marker already represents the entire potentially
-            # empty compound across physical lines.
+            # empty compound across physical lines. Function projections also
+            # remain buffered until their closing brace records the full span.
             pass
         elif quote is not None and continuation_kind != 'escape':
             command_projection_buffer.extend(b'x')
@@ -513,9 +643,14 @@ def shell_line_contexts(data):
             # word continues byte-for-byte on the next physical line.
             pass
         else:
-            for match in projection_command_word.finditer(bytes(command_projection_buffer)):
+            projected_commands = bytes(command_projection_buffer)
+            for match in projection_command_word.finditer(projected_commands):
                 word = match.group('word')
                 static_word = word.replace(expansion_marker, b'')
+                inside_function = any(
+                    start <= match.start('word') < end
+                    for start, end in projection_function_spans
+                )
                 wrappers = [
                     wrapper_word
                     for wrapper_word in re.split(rb'[ \t]+', match.group('wrappers').strip())
@@ -551,9 +686,16 @@ def shell_line_contexts(data):
                     ):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
-                if static_word in {b'exec', b'exit', b'return'} and not command_query:
+                tail = projected_commands[match.end():]
+                if (
+                    static_word in {b'exec', b'exit', b'return'}
+                    and not command_query
+                    and not control_tail_is_backgrounded(tail)
+                    and not (inside_function and static_word == b'return')
+                ):
                     early_control = True
             command_projection_buffer.clear()
+            projection_function_spans.clear()
         structural = bytes(structural_visible).rstrip()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
@@ -566,6 +708,12 @@ def shell_line_contexts(data):
         ):
             continuation_kind = 'escape'
         heredocs.extend(declared_heredocs)
+        declaration = body
+        comment_at = declaration.find(b'#')
+        if comment_at >= 0:
+            declaration = declaration[:comment_at]
+        if function_header.fullmatch(declaration):
+            pending_function_header = True
 
     complete = (
         quote is None
@@ -574,6 +722,7 @@ def shell_line_contexts(data):
         and continuation_kind is None
         and not heredocs
         and not invalid_closer
+        and not pending_function_header
     )
     trailing_escape_only = (
         quote is None
