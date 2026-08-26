@@ -103,7 +103,10 @@ that every command will resolve. Function definitions named `command` or
 command grammar. Expansion-produced command words, ANSI-C/locale-quoted command
 words and quoted `builtin`/`command` wrappers are likewise unsupported; the
 helper never evaluates or normalizes arbitrary Env bytes to infer their runtime
-command identity. Other uninvoked function definitions, including
+command identity. This includes brace-expanded command words. Required-value
+parameter expansions using `?` or `:?` in executed scope are unsupported because
+an absent value aborts sourcing before the appended assignment; the helper does
+not resolve protected Env state. Other uninvoked function definitions, including
 same-line `if`, `for`,
 `select`, `until` and `while` bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Same-line `case`
@@ -121,7 +124,9 @@ The helper does not use a literal-`false &&` execution exemption. Command
 resolution can be changed by aliases, builtin enablement, the command hash table
 or shell options, while enclosing groups can propagate the failed left-hand
 status. Controls and arithmetic commands behind that spelling therefore remain
-unsupported and fail closed.
+unsupported and fail closed. The reserved `time` prefix is recognized with its
+supported `-p` option and `--` separator, so a timed control command remains
+subject to the same fail-closed classification.
 Top-level process substitutions remain read-only only while no later executed
 `wait` can consume their asynchronous status. A later `wait` is unsupported and
 fails closed before mutation, including across physical lines.

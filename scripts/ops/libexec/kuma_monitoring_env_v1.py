@@ -330,6 +330,13 @@ def simple_parameter_end(value, index):
     return None
 
 
+def parameter_expansion_can_error(value, index):
+    return re.match(
+        rb'\$\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!\-])(?::)?\?',
+        value[index:],
+    ) is not None
+
+
 def shell_line_contexts(data):
     # Invariants: structural stacks preserve Bash balance; the projection keeps
     # only command-word semantics; continuation state joins physical lines; and
@@ -379,10 +386,10 @@ def shell_line_contexts(data):
         rb'(?:--[ \t]+(?:' + redirection + rb')*)?)'
     )
     reserved_pipeline_prefix = (
-        rb'(?:(?:!|time(?:[ \t]+-p)?|then|do|else|elif)[ \t]+)*'
+        rb'(?:(?:!|time(?:[ \t]+-p)?(?:[ \t]+--)?|then|do|else|elif)[ \t]+)*'
     )
     projection_reserved_pipeline_prefix = (
-        rb'(?:(?:!|time(?:[ \t]+-p)?|then|do|else|elif|if|until|while)[ \t]+)*'
+        rb'(?:(?:!|time(?:[ \t]+-p)?(?:[ \t]+--)?|then|do|else|elif|if|until|while)[ \t]+)*'
     )
     command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
@@ -527,6 +534,17 @@ def shell_line_contexts(data):
                         continue
                     token = body[index:index + 2]
                     if token in {b'$(', b'${', b'$['}:
+                        if (
+                            token == b'${'
+                            and parameter_expansion_can_error(body, index)
+                            and not projection_function_depths
+                            and projection_function_block_depth is None
+                            and function_definition_name.search(body[:index]) is None
+                        ):
+                            # The ``?`` and ``:?`` operators can abort a sourced
+                            # Env before the appended assignment is evaluated.
+                            # The helper never resolves protected Env state.
+                            early_control = True
                         if (
                             body[index:index + 3] != b'$(('
                             and token == b'$('
@@ -763,6 +781,16 @@ def shell_line_contexts(data):
                 continue
             if body[index:index + 2] in {b'$(', b'${', b'$[', b'>(', b'<('}:
                 if (
+                    body[index:index + 2] == b'${'
+                    and parameter_expansion_can_error(body, index)
+                    and not projection_function_depths
+                    and projection_function_block_depth is None
+                    and function_definition_name.search(body[:index]) is None
+                ):
+                    # Required-value parameter expansion is status-bearing for
+                    # a sourcing shell when the referenced value is absent.
+                    early_control = True
+                if (
                     body[index:index + 3] != b'$(('
                     and body[index:index + 2] == b'$('
                     and not projection_function_depths
@@ -829,6 +857,17 @@ def shell_line_contexts(data):
                     )
                     and re.match(rb'\([ \t]*\)', body[index:])
                 )
+                if (
+                    current == b'{'
+                    and projection_compound_depth is None
+                    and not function_brace_token
+                ):
+                    # A non-reserved ``{`` begins brace expansion, not a brace
+                    # command group. Represent the entire expansion as one
+                    # dynamic word so expansion-produced command names are
+                    # rejected while ordinary argument expansions stay data.
+                    command_projection.extend(dynamic_expansion_marker)
+                    projection_compound_depth = len(compounds)
                 if (
                     current == b'('
                     and projection_compound_depth is None
