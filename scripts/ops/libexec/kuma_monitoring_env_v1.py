@@ -216,6 +216,12 @@ def parse_heredoc_operator(body, offset):
     return (delimiter, strip_tabs), index
 
 
+def command_projection_literal(value):
+    # Quoted shell separators and whitespace remain part of one shell word.
+    # A fixed placeholder preserves that word boundary without exposing data.
+    return b'x' if value in b' \t;|&(){}<>' else value
+
+
 def shell_line_contexts(data):
     contexts = []
     quote = None
@@ -225,14 +231,28 @@ def shell_line_contexts(data):
     heredocs = []
     early_control = False
     invalid_closer = False
+    projection_compound_depth = None
+    command_projection_buffer = bytearray()
+    redirection = (
+        rb'(?:(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
+        rb'\s*[^\s;|]+\s+)'
+    )
+    wrapper = (
+        rb'(?:builtin\s+(?:(?:--)\s+|' + redirection + rb')*'
+        rb'|command\s+(?:(?:-[pVv]+)\s+|' + redirection + rb')*'
+        rb'(?:--\s+(?:' + redirection + rb')*)?)'
+    )
     command_word = re.compile(
         rb'(?:^|[;|&])\s*'
         rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*)\s+)*'
-        rb'(?P<wrappers>(?:'
-        rb'builtin(?:\s+--)?\s+'
-        rb'|command(?:\s+(?:--|-[pVv]+))*\s+'
-        rb')*)'
+        rb'(?P<wrappers>(?:' + wrapper + rb')*)'
         rb'(?P<word>[A-Za-z_][A-Za-z0-9_]*)'
+        rb'(?=$|[\s;|&(){}<>])'
+    )
+    redirection_token = re.compile(
+        rb'^(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))(?P<target>.*)$'
     )
     block_openers = {
         b'case': b'esac',
@@ -256,7 +276,10 @@ def shell_line_contexts(data):
         incoming_continuation = continuation_kind
         contexts.append(quote is None and not compounds and not blocks and incoming_continuation is None)
         continuation_kind = None
-        visible = bytearray(b' ' * len(body))
+        # structural_visible retains source offsets for balance/continuation.
+        # command_projection is the quote-aware view used only for command words.
+        structural_visible = bytearray(b' ' * len(body))
+        command_projection = bytearray()
         declared_heredocs = []
         index = 0
         while index < len(body):
@@ -264,6 +287,8 @@ def shell_line_contexts(data):
             if quote == b"'":
                 if current == quote:
                     quote = None
+                elif projection_compound_depth is None:
+                    command_projection.extend(command_projection_literal(current))
                 index += 1
                 continue
             if quote in {b'"', b'`'}:
@@ -272,21 +297,29 @@ def shell_line_contexts(data):
                         continuation_kind = 'escape'
                         index += 1
                     else:
+                        following = body[index + 1:index + 2]
+                        if projection_compound_depth is None:
+                            command_projection.extend(command_projection_literal(following))
                         index += 2
                     continue
                 if current == quote:
                     quote = None
+                elif projection_compound_depth is None:
+                    command_projection.extend(command_projection_literal(current))
                 index += 1
                 continue
             if current == b'#' and (
                 index == 0 or body[index - 1:index] in b' \t;|&(){}'
-            ):
+            ) and not (index == 0 and incoming_continuation == 'escape'):
                 break
             if current == b'\\':
                 if index + 1 >= len(body):
                     continuation_kind = 'escape'
                     index += 1
                 else:
+                    following = body[index + 1:index + 2]
+                    if projection_compound_depth is None:
+                        command_projection.extend(command_projection_literal(following))
                     index += 2
                 continue
             if current in {b"'", b'"', b'`'}:
@@ -296,6 +329,8 @@ def shell_line_contexts(data):
             if body[index:index + 2] == b'<<':
                 specification, index = parse_heredoc_operator(body, index)
                 declared_heredocs.append(specification)
+                if projection_compound_depth is None:
+                    command_projection.extend(b' ')
                 continue
             if body[index:index + 2] == b'[[':
                 compounds.append(b']]')
@@ -304,19 +339,32 @@ def shell_line_contexts(data):
             if body[index:index + 2] == b']]':
                 if compounds and compounds[-1] == b']]':
                     compounds.pop()
+                    if (
+                        projection_compound_depth is not None
+                        and len(compounds) < projection_compound_depth
+                    ):
+                        projection_compound_depth = None
                     index += 2
                 elif compounds and compounds[-1] == b']':
                     # Arithmetic array syntax can close immediately before the
                     # legacy $[...] delimiter. Consume one bracket at a time.
                     compounds.pop()
+                    if (
+                        projection_compound_depth is not None
+                        and len(compounds) < projection_compound_depth
+                    ):
+                        projection_compound_depth = None
                     index += 1
                 else:
                     invalid_closer = True
                     index += 2
                 continue
-            if body[index:index + 2] in {b'$(', b'${', b'$['}:
+            if body[index:index + 2] in {b'$(', b'${', b'$[', b'>(', b'<('}:
                 closers = {b'(': b')', b'{': b'}', b'[': b']'}
                 compounds.append(closers[body[index + 1:index + 2]])
+                if projection_compound_depth is None:
+                    command_projection.extend(b'x')
+                    projection_compound_depth = len(compounds)
                 index += 2
                 continue
             if current == b'[' and compounds and compounds[-1] == b']':
@@ -325,6 +373,11 @@ def shell_line_contexts(data):
                 continue
             if current == b']' and compounds and compounds[-1] == b']':
                 compounds.pop()
+                if (
+                    projection_compound_depth is not None
+                    and len(compounds) < projection_compound_depth
+                ):
+                    projection_compound_depth = None
                 index += 1
                 continue
             if current in {b'(', b'{'}:
@@ -334,36 +387,78 @@ def shell_line_contexts(data):
             if current in {b')', b'}'}:
                 if compounds and compounds[-1] == current:
                     compounds.pop()
+                    if (
+                        projection_compound_depth is not None
+                        and len(compounds) < projection_compound_depth
+                    ):
+                        projection_compound_depth = None
                 else:
                     invalid_closer = True
-                visible[index] = current[0]
+                structural_visible[index] = current[0]
+                if projection_compound_depth is None:
+                    command_projection.extend(current)
                 index += 1
                 continue
-            visible[index] = current[0]
+            structural_visible[index] = current[0]
+            if projection_compound_depth is None:
+                command_projection.extend(current)
             index += 1
 
-        for match in command_word.finditer(bytes(visible)):
+        visible_bytes = bytes(structural_visible)
+        for match in command_word.finditer(visible_bytes):
             word = match.group('word')
-            wrappers = match.group('wrappers').split()
-            command_query = False
-            for wrapper_index, wrapper in enumerate(wrappers):
-                if wrapper != b'command':
-                    continue
-                option_index = wrapper_index + 1
-                while option_index < len(wrappers) and wrappers[option_index].startswith(b'-'):
-                    option = wrappers[option_index]
-                    if option != b'--' and (b'v' in option or b'V' in option):
-                        command_query = True
-                    option_index += 1
-            if word in {b'exec', b'exit', b'return'} and not command_query:
-                early_control = True
             if blocks and word == blocks[-1]:
                 blocks.pop()
             elif word in {b'done', b'esac', b'fi'}:
                 invalid_closer = True
             elif word in block_openers:
                 blocks.append(block_openers[word])
-        structural = bytes(visible).rstrip()
+
+        command_projection_buffer.extend(command_projection)
+        if quote is not None or projection_compound_depth is not None:
+            command_projection_buffer.extend(b'x')
+        elif continuation_kind == 'escape':
+            # Backslash-newline is removed by Bash, so the surrounding shell
+            # word continues byte-for-byte on the next physical line.
+            pass
+        else:
+            for match in command_word.finditer(bytes(command_projection_buffer)):
+                word = match.group('word')
+                wrappers = match.group('wrappers').split()
+                command_query = False
+                command_options = False
+                command_options_ended = False
+                skip_redirection_target = False
+                for wrapper_word in wrappers:
+                    if skip_redirection_target:
+                        skip_redirection_target = False
+                        continue
+                    redirection_match = redirection_token.match(wrapper_word)
+                    if redirection_match:
+                        skip_redirection_target = not redirection_match.group('target')
+                        continue
+                    if wrapper_word == b'command':
+                        command_options = True
+                        command_options_ended = False
+                        continue
+                    if wrapper_word == b'builtin':
+                        command_options = False
+                        command_options_ended = False
+                        continue
+                    if command_options and wrapper_word == b'--':
+                        command_options_ended = True
+                        continue
+                    if (
+                        command_options
+                        and not command_options_ended
+                        and re.fullmatch(rb'-[pVv]+', wrapper_word)
+                    ):
+                        if b'v' in wrapper_word or b'V' in wrapper_word:
+                            command_query = True
+                if word in {b'exec', b'exit', b'return'} and not command_query:
+                    early_control = True
+            command_projection_buffer.clear()
+        structural = bytes(structural_visible).rstrip()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
         elif not structural and incoming_continuation == 'operator':

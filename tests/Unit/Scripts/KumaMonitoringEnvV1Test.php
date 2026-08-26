@@ -227,6 +227,22 @@ final class KumaMonitoringEnvV1Test extends TestCase
             [
                 "builtin return 0\n",
                 "command return 0\n",
+                "builtin 2>/dev/null return 0\n",
+                "command -p 2>/dev/null return 0\n",
+                "builtin > \"a b\" return 0\n",
+                "command -p > 'a b' return 0\n",
+                "builtin >$(printf value) return 0\n",
+                "command -p >$((1 + 2)) return 0\n",
+                "builtin > >(printf value) return 0\n",
+                "command -p > >(printf 'a b') return 0\n",
+                "builtin >\"a\nb\" return 0\n",
+                "command -p >$((1 +\n2)) return 0\n",
+                'builtin >a\\' . "\n" . "b return 0\n",
+                'command -p >path\\' . "\n" . "withx -p return 0\n",
+                'builtin >a\\' . "\n" . "#x return 0\n",
+                'command -p >path\\' . "\n" . "#x return 0\n",
+                "command -- return 0\n",
+                "command 2>/dev/null -- return 0\n",
                 "SECRET_TOKEN=do-not-print builtin -- return 0\n",
                 "SECRET_TOKEN=do-not-print command -p return 0\n",
                 "command builtin return 0\n",
@@ -247,9 +263,42 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
-    public function testCommandQueryOptionsDoNotPretendToTransferControl(): void
+    public function testCommandQueriesAndOrdinaryRedirectionsRemainValidDryRuns(): void
     {
-        foreach (["command -v return\n", "command -V exit\n", "command -pv exec\n"] as $contents) {
+        foreach (
+            [
+                "command -v return\n",
+                "command -V exit\n",
+                "command -pv exec\n",
+                "command 2>/dev/null -v return\n",
+                "command >\"a b\" -V exit\n",
+                "command >$(printf value) -V exit\n",
+                "command >$((1 + 2)) -v return\n",
+                "command > >(printf value) -v return\n",
+                'command >path\\' . "\n" . "#x -v return\n",
+                "command -- -v return\n",
+                "command 2>/dev/null -- -V exit\n",
+                "printf value 2>/dev/null\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper();
+
+            self::assertSame(0, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('pass', $json['status'] ?? null);
+            self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testCommandNamesBeginningWithControlWordsRemainOrdinaryDryRuns(): void
+    {
+        foreach (["command return-this\n", "command exit.status\n"] as $contents) {
             $this->writeEnv($contents);
             $before = $this->snapshot();
 
