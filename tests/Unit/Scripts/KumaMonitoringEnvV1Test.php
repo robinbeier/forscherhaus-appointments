@@ -197,6 +197,56 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testMultilineLegacyArithmeticContextFailsClosedBeforeMutation(): void
+    {
+        foreach (['$[1+' . "\n" . self::KEY . "=0\n]\n", 'X=$[array[' . "\n" . self::KEY . "=0\n]]\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('definition_ambiguous', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+
+        $this->writeEnv('X=$[array[0]]' . "\n");
+        $before = $this->snapshot();
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('would_enable', $this->json($result['stdout'])['monitoring_state'] ?? null);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testKeylessBuiltinAndCommandReturnContextsFailClosedBeforeAppend(): void
+    {
+        foreach (
+            [
+                "builtin return 0\n",
+                "command return 0\n",
+                "SECRET_TOKEN=do-not-print builtin -- return 0\n",
+                "SECRET_TOKEN=do-not-print command -p return 0\n",
+                "command builtin return 0\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+            self::assertStringNotContainsString('do-not-print', $result['stdout'] . $result['stderr']);
+        }
+    }
+
     public function testUnmatchedShellDelimitersFailClosedBeforeMutation(): void
     {
         foreach (["X=1 )\n", "X=1 }\n", self::KEY . "=0\n)\n", self::KEY . "=0\n}\n"] as $contents) {

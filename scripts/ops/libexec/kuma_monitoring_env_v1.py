@@ -228,6 +228,7 @@ def shell_line_contexts(data):
     command_word = re.compile(
         rb'(?:^|[;|&])\s*'
         rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*)\s+)*'
+        rb'(?:(?:builtin|command)(?:\s+(?:--|-[pVv]+))*\s+)*'
         rb'([A-Za-z_][A-Za-z0-9_]*)'
     )
     block_openers = {
@@ -300,13 +301,28 @@ def shell_line_contexts(data):
             if body[index:index + 2] == b']]':
                 if compounds and compounds[-1] == b']]':
                     compounds.pop()
+                    index += 2
+                elif compounds and compounds[-1] == b']':
+                    # Arithmetic array syntax can close immediately before the
+                    # legacy $[...] delimiter. Consume one bracket at a time.
+                    compounds.pop()
+                    index += 1
                 else:
                     invalid_closer = True
+                    index += 2
+                continue
+            if body[index:index + 2] in {b'$(', b'${', b'$['}:
+                closers = {b'(': b')', b'{': b'}', b'[': b']'}
+                compounds.append(closers[body[index + 1:index + 2]])
                 index += 2
                 continue
-            if body[index:index + 2] in {b'$(', b'${'}:
-                compounds.append(b')' if body[index + 1:index + 2] == b'(' else b'}')
-                index += 2
+            if current == b'[' and compounds and compounds[-1] == b']':
+                compounds.append(b']')
+                index += 1
+                continue
+            if current == b']' and compounds and compounds[-1] == b']':
+                compounds.pop()
+                index += 1
                 continue
             if current in {b'(', b'{'}:
                 compounds.append(b')' if current == b'(' else b'}')
