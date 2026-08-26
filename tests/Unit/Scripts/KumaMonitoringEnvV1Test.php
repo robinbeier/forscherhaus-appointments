@@ -628,6 +628,68 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testAssignmentRedirectionStatusSubstitutionFailsClosedBeforeMutation(): void
+    {
+        $contents = "X=1 >\$(printf /tmp/rob490-redir; return 2)\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testEvalExecutedFunctionFailsClosedBeforeMutation(): void
+    {
+        $contents = "f() { return 2; }; eval f\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testValidArithmeticExpansionAssignmentRemainsReadOnly(): void
+    {
+        $contents = "X=\$((1))\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testUninvokedFunctionCommandSubstitutionRemainsReadOnly(): void
+    {
+        $contents = "f() { X=\$(return 2); }\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testSameLineCompoundFunctionDefinitionsFailClosedWhenInvoked(): void
     {
         foreach (["f() (( 0 )); f\n", "f() [[ 1 ]]; f\n"] as $contents) {

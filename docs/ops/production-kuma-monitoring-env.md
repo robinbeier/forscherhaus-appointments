@@ -84,7 +84,9 @@ uninvoked function definition is unsupported regardless of subshell, pipeline
 or background placement. The helper does not try to prove those contexts safe:
 Env-defined aliases, functions, traps, command resolution and later waits can
 all change their effective status. `command -v`/`-V` queries remain queries
-rather than calls. Uninvoked function definitions,
+rather than calls. An actually executed `eval` is unsupported for the same
+reason; an `eval` appearing only inside an uninvoked function definition stays
+definition-only. Uninvoked function definitions,
 including same-line compound bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
@@ -96,9 +98,12 @@ evaluates Env expressions; structurally invalid arithmetic also fails closed.
 Only an immediate right-hand command behind
 top-level literal `false &&` is proven unexecuted; the same construct inside a
 subshell fails closed because the failed left side becomes the subshell status.
-Assignment-position, status-only and redirection-only command substitutions
-are unsupported because Bash can propagate their dynamically produced status
-and the helper never executes arbitrary Env code to simulate it. A `0`
+Assignment-position, status-only, redirection-only and combined
+assignment/redirection-only command substitutions are unsupported because Bash
+can propagate their dynamically produced status and the helper never executes
+arbitrary Env code to simulate it. Arithmetic expansions remain value
+expansions, and the same status checks do not execute inside uninvoked function
+definitions. A `0`
 changes at exactly its single value-byte position. A `1` is already converged
 and is never rewritten.
 

@@ -270,10 +270,18 @@ def projection_status_depends_on_substitution(buffer, current):
         rb'(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
         rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
     )
+    assignment = rb'[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*'
+    completed_prefix = (
+        rb'(?:'
+        + assignment
+        + rb'|'
+        + redirection_operator
+        + rb'[ \t]*[^ \t;|&]+)'
+    )
     redirection_without_target = re.fullmatch(
         rb'[ \t]*(?:'
-        + redirection_operator
-        + rb'[ \t]*[^ \t;|&]+[ \t]+)*'
+        + completed_prefix
+        + rb'[ \t]+)*'
         + redirection_operator
         + rb'[ \t]*',
         command,
@@ -687,7 +695,10 @@ def shell_line_contexts(data):
             if body[index:index + 2] in {b'$(', b'${', b'$[', b'>(', b'<('}:
                 if (
                     body[index:index + 2] == b'$('
+                    and body[index:index + 3] != b'$(('
                     and projection_compound_depth is None
+                    and not projection_function_depths
+                    and projection_function_block_depth is None
                     and projection_status_depends_on_substitution(
                         command_projection_buffer,
                         command_projection,
@@ -990,6 +1001,11 @@ def shell_line_contexts(data):
                         # placement. Proving their status would require executing
                         # Env-defined aliases, functions, traps or later waits.
                         early_control = True
+                elif static_word == b'eval' and not command_query and not inside_function:
+                    # Eval can invoke controls, functions or status-bearing
+                    # constructs hidden in ordinary argument bytes. Executing
+                    # those bytes to prove safety is outside this helper.
+                    early_control = True
                 elif (
                     not command_query
                     and (
