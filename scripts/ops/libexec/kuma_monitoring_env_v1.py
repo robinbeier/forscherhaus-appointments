@@ -239,81 +239,6 @@ def empty_quote_closes_word(body, index, projection, projection_start, starts_wo
     )
 
 
-def projected_control_tail_is_backgrounded(tail):
-    # `tail` comes from the quote-aware command projection: comments are
-    # absent, while quoted or escaped shell separators are opaque markers.
-    # Only structural list depth and the first projected operator remain to be
-    # classified here.
-    compounds = []
-    index = 0
-    while index < len(tail):
-        current = tail[index:index + 1]
-        if current in {b'(', b'{'}:
-            compounds.append(b')' if current == b'(' else b'}')
-            index += 1
-            continue
-        if current in {b')', b'}'}:
-            if compounds and compounds[-1] == current:
-                compounds.pop()
-            elif not compounds:
-                return False
-            index += 1
-            continue
-        if compounds:
-            index += 1
-            continue
-        if current == b'|':
-            if tail[index:index + 2] == b'||':
-                return False
-            # A later pipeline command is resolved in the Env-defined shell
-            # state. Even a spelling such as ``true`` can have been disabled,
-            # aliased or shadowed, so no pipeline tail is a static success
-            # proof without executing untrusted Env code.
-            return False
-        if current == b';':
-            return False
-        if current == b'&':
-            previous = tail[index - 1:index] if index else b''
-            following = tail[index + 1:index + 2]
-            if following == b'&':
-                return False
-            if previous in {b'<', b'>'} or following == b'>':
-                index += 1
-                continue
-            if re.search(
-                rb'(?:^|[;|&])[ \t]*'
-                rb'(?:(?:!|time(?:[ \t]+-p)?)[ \t]+)*'
-                rb'(?:(?:builtin(?:[ \t]+--)?'
-                rb'|command(?:[ \t]+(?:-p|--))*)[ \t]+)?'
-                rb'(?:wait|eval)(?=$|[ \t;|&])',
-                tail[index + 1:],
-            ):
-                # A foreground wait, or dynamic eval that can execute one,
-                # can propagate the background control's nonzero status back
-                # into Kuma's errexit consumer.
-                return False
-            return True
-        index += 1
-    return False
-
-
-def subshell_control_is_guaranteed_success(word, tail):
-    # Kuma sources the Env with errexit. Only literal, side-effect-free success
-    # statuses are safe to treat as non-transfers from the parent shell; every
-    # dynamic or failing subshell control remains fail-closed.
-    candidate = tail.lstrip(b' \t')
-    if word in {b'return', b'exit'}:
-        # Argumentless return/exit inherit the preceding command status.
-        # A literal zero is only sufficient when no later command inside the
-        # same enclosing subshell can replace that successful status.
-        return re.fullmatch(rb'0[ \t]*(?:;[ \t]*)*', candidate) is not None
-    if word == b'exec':
-        # Argumentless exec only preserves the subshell status when no later
-        # command in that same subshell can replace its successful result.
-        return re.fullmatch(rb'(?:[ \t]*;)*[ \t]*', candidate) is not None
-    return False
-
-
 def function_block_tail_is_definition_only(tail):
     candidate = tail
     redirection = re.compile(
@@ -341,7 +266,19 @@ def projected_command_is_statically_unexecuted(projected_commands, match):
 def projection_status_depends_on_substitution(buffer, current):
     projected = bytes(buffer + current)
     command = re.split(rb'[;|&]', projected)[-1]
-    return not command.strip(b' \t') or (
+    redirection_operator = (
+        rb'(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
+    )
+    redirection_without_target = re.fullmatch(
+        rb'[ \t]*(?:'
+        + redirection_operator
+        + rb'[ \t]*[^ \t;|&]+[ \t]+)*'
+        + redirection_operator
+        + rb'[ \t]*',
+        command,
+    ) is not None
+    return not command.strip(b' \t') or redirection_without_target or (
         re.fullmatch(
             rb'[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*[ \t]+)*'
             rb'[A-Za-z_][A-Za-z0-9_]*=',
@@ -986,24 +923,11 @@ def shell_line_contexts(data):
                     start <= match.start('word') < end
                     for start, end in projection_function_spans
                 )
-                containing_subshells = [
-                    span
+                inside_subshell = any(
+                    span[0] <= match.start('word') < span[1]
                     for span in projection_subshell_spans
-                    if span[0] <= match.start('word') < span[1]
-                ]
-                inside_subshell = bool(containing_subshells)
-                tail = projected_commands[match.end():]
-                subshell_status_is_guaranteed_success = bool(
-                    containing_subshells
-                    and all(
-                        not span[2]
-                        and subshell_control_is_guaranteed_success(
-                            static_word,
-                            projected_commands[match.end():span[1]],
-                        )
-                        for span in containing_subshells
-                    )
                 )
+                tail = projected_commands[match.end():]
                 wrappers = [
                     wrapper_word
                     for wrapper_word in re.split(rb'[ \t]+', match.group('wrappers').strip())
@@ -1049,14 +973,11 @@ def shell_line_contexts(data):
                     if inside_function:
                         if static_word != b'return':
                             early_control = True
-                    elif (
-                        not projected_control_tail_is_backgrounded(tail)
-                        and not (
-                            inside_subshell
-                            and subshell_status_is_guaranteed_success
-                            and not statically_unexecuted
-                        )
-                    ):
+                    else:
+                        # Executed shell controls are outside the supported Env
+                        # grammar regardless of subshell, pipeline or background
+                        # placement. Proving their status would require executing
+                        # Env-defined aliases, functions, traps or later waits.
                         early_control = True
                 elif (
                     not command_query

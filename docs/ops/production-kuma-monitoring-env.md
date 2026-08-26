@@ -79,27 +79,23 @@ newline; an open shell context or odd trailing backslash before that boundary
 is rejected because Bash would not evaluate the append as the requested
 assignment. A terminal continued operator and an early shell control transfer
 such as top-level `return`, `exit` or `exec` are likewise unsupported and fail
-before mutation. This includes argumentless or dynamic subshell controls,
-waited background controls, status-affecting subshell redirections and calls
-to functions defined by the Env, including dynamically expanded calls.
-`command -v`/`-V` queries remain queries rather than calls, and wrapped
-`builtin wait`, non-query `command wait`, `time wait` or a dynamic `eval` can
-still propagate a waited background status. Uninvoked function definitions,
+before mutation. An actually invoked `return`, `exit` or `exec` outside an
+uninvoked function definition is unsupported regardless of subshell, pipeline
+or background placement. The helper does not try to prove those contexts safe:
+Env-defined aliases, functions, traps, command resolution and later waits can
+all change their effective status. `command -v`/`-V` queries remain queries
+rather than calls. Uninvoked function definitions,
 including same-line compound bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
-remain conditional syntax rather than projected commands. An argumentless
-subshell `exec` is only considered terminal when no later command in that same
-or any enclosing subshell can determine its status. Arithmetic-command
+remain conditional syntax rather than projected commands. Arithmetic-command
 operands likewise stay out of the command projection, while structurally
-invalid arithmetic fails closed. A non-final control in a pipeline is
-unsupported because an Env can change command resolution before the pipeline;
-the helper never assumes a command spelling is immutable. An immediate
-right-hand command behind top-level literal `false &&` is proven unexecuted,
-but the same construct inside a subshell fails closed because the failed left
-side becomes the subshell status. Assignment-position and status-only command substitutions are
-unsupported because Bash propagates their dynamically produced status and the
-helper never executes arbitrary Env code to simulate that status. A `0`
+invalid arithmetic fails closed. Only an immediate right-hand command behind
+top-level literal `false &&` is proven unexecuted; the same construct inside a
+subshell fails closed because the failed left side becomes the subshell status.
+Assignment-position, status-only and redirection-only command substitutions
+are unsupported because Bash can propagate their dynamically produced status
+and the helper never executes arbitrary Env code to simulate it. A `0`
 changes at exactly its single value-byte position. A `1` is already converged
 and is never rewritten.
 

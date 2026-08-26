@@ -286,16 +286,18 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
-    public function testControlsInsideParenthesizedSubshellsDoNotTransferFromSource(): void
+    public function testControlsInsideParenthesizedSubshellsFailClosedBeforeMutation(): void
     {
-        foreach (["(command return 0)\n", "(\"return\" 0)\n"] as $contents) {
+        foreach (["(command return 0)\n", "(\"return\" 0)\n", "(return 0); true\n", "(return 0)\n"] as $contents) {
             $this->writeEnv($contents);
             $before = $this->snapshot();
 
-            $result = $this->runHelper();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
 
-            self::assertSame(0, $result['exit_code'], $contents);
-            self::assertSame('would_enable', $this->json($result['stdout'])['monitoring_state'] ?? null);
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
             self::assertSame($before, $this->snapshot());
         }
 
@@ -306,22 +308,6 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame(70, $result['exit_code']);
         self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
         self::assertSame($before, $this->snapshot());
-
-        $this->writeEnv("(return 0); true\n");
-        $before = $this->snapshot();
-        $result = $this->runHelper();
-
-        self::assertSame(0, $result['exit_code']);
-        self::assertSame('would_enable', $this->json($result['stdout'])['monitoring_state'] ?? null);
-        self::assertSame($before, $this->snapshot());
-
-        $original = "(return 0)\n";
-        $this->writeEnv($original);
-        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
-
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertTrue($this->json($result['stdout'])['mutation_performed'] ?? false);
-        self::assertSame($original . self::KEY . "=1\n", file_get_contents($this->envPath));
 
         foreach (["(return 2)\n", "(exit 2)\n", "(exec true)\n", "(exec false)\n", "(exec; false)\n"] as $contents) {
             $this->writeEnv($contents);
@@ -344,16 +330,19 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
-    public function testLiteralSuccessfulExitSubshellCanConverge(): void
+    public function testLiteralSuccessfulExitSubshellFailsClosedBeforeMutation(): void
     {
-        $original = "(exit 0)\n";
-        $this->writeEnv($original);
+        $contents = "(exit 0)\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
 
         $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
 
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertTrue($this->json($result['stdout'])['mutation_performed'] ?? false);
-        self::assertSame($original . self::KEY . "=1\n", file_get_contents($this->envPath));
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
     }
 
     public function testEnclosingFailureAfterSubshellControlFailsClosedBeforeMutation(): void
@@ -947,16 +936,18 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
-    public function testBackgroundedControlsDoNotTransferFromTheSourcingShell(): void
+    public function testBackgroundedControlsFailClosedBeforeMutation(): void
     {
         foreach (["command return 0 & true\n", "exit 0 & true\n", "exec true & true\n"] as $contents) {
             $this->writeEnv($contents);
             $before = $this->snapshot();
 
-            $result = $this->runHelper();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
 
-            self::assertSame(0, $result['exit_code'], $contents);
-            self::assertSame('would_enable', $this->json($result['stdout'])['monitoring_state'] ?? null);
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
             self::assertSame($before, $this->snapshot());
         }
 
@@ -986,6 +977,81 @@ final class KumaMonitoringEnvV1Test extends TestCase
 
         self::assertSame(70, $result['exit_code']);
         self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testRedirectionOnlyStatusSubstitutionFailsClosedBeforeMutation(): void
+    {
+        $contents = ">\$(printf /tmp/rob490-redir; return 2)\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testDebugTrapBeforeSubshellReturnFailsClosedBeforeMutation(): void
+    {
+        $contents = "trap 'true' DEBUG\n(return 0)\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testPreControlFailureBeforeReturnFailsClosedBeforeMutation(): void
+    {
+        $contents = "(false; return 0)\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testMultilineBackgroundControlFollowedByWaitFailsClosedBeforeMutation(): void
+    {
+        $contents = "exit 2 &\nwait \$!\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testDefinedReturnShadowingBeforeSubshellReturnFailsClosedBeforeMutation(): void
+    {
+        $contents = "return() { true; }\n(return 0)\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
         self::assertSame($before, $this->snapshot());
     }
 
