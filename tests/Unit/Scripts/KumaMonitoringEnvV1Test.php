@@ -266,6 +266,7 @@ final class KumaMonitoringEnvV1Test extends TestCase
                 'command -p >path\\' . "\n" . "#x return 0\n",
                 "command -- return 0\n",
                 "command 2>/dev/null -- return 0\n",
+                "command -v >foo& return 0\n",
                 "SECRET_TOKEN=do-not-print builtin -- return 0\n",
                 "SECRET_TOKEN=do-not-print command -p return 0\n",
                 "command builtin return 0\n",
@@ -334,6 +335,10 @@ final class KumaMonitoringEnvV1Test extends TestCase
                 'command "ret\\' . "\n" . 'urn-this"' . "\n",
                 '"ret\\urn" || true' . "\n",
                 'command "ret\\urn" || true' . "\n",
+                '`return` || true' . "\n",
+                '`echo return` || true' . "\n",
+                '"prefix-`return`-suffix" || true' . "\n",
+                '"prefix-`echo return`-suffix" || true' . "\n",
             ]
             as $contents
         ) {

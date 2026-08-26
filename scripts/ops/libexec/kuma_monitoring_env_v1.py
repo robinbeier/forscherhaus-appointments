@@ -232,11 +232,12 @@ def shell_line_contexts(data):
     early_control = False
     invalid_closer = False
     projection_compound_depth = None
+    backtick_return_quote = None
     command_projection_buffer = bytearray()
     redirection = (
         rb'(?:(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
         rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
-        rb'\s*[^\s;|]+\s+)'
+        rb'\s*[^\s;|&]+\s+)'
     )
     wrapper = (
         rb'(?:builtin\s+(?:(?:--)\s+|' + redirection + rb')*'
@@ -298,7 +299,7 @@ def shell_line_contexts(data):
                         index += 1
                     else:
                         following = body[index + 1:index + 2]
-                        if projection_compound_depth is None:
+                        if projection_compound_depth is None and quote != b'`':
                             special = b'$`"\\' if quote == b'"' else b'$`\\'
                             if following not in special:
                                 command_projection.extend(b'\\')
@@ -306,8 +307,14 @@ def shell_line_contexts(data):
                         index += 2
                     continue
                 if current == quote:
-                    quote = None
-                elif projection_compound_depth is None:
+                    quote = backtick_return_quote if quote == b'`' else None
+                    backtick_return_quote = None
+                elif quote == b'"' and current == b'`':
+                    if projection_compound_depth is None:
+                        command_projection.extend(b'x')
+                    backtick_return_quote = b'"'
+                    quote = b'`'
+                elif projection_compound_depth is None and quote != b'`':
                     command_projection.extend(command_projection_literal(current))
                 index += 1
                 continue
@@ -325,8 +332,15 @@ def shell_line_contexts(data):
                         command_projection.extend(command_projection_literal(following))
                     index += 2
                 continue
-            if current in {b"'", b'"', b'`'}:
+            if current in {b"'", b'"'}:
                 quote = current
+                index += 1
+                continue
+            if current == b'`':
+                if projection_compound_depth is None:
+                    command_projection.extend(b'x')
+                backtick_return_quote = None
+                quote = b'`'
                 index += 1
                 continue
             if body[index:index + 2] == b'<<':
