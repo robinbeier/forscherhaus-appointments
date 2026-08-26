@@ -328,7 +328,13 @@ final class KumaMonitoringEnvV1Test extends TestCase
     public function testCommandNamesBeginningWithControlWordsRemainOrdinaryDryRuns(): void
     {
         foreach (
-            ["command return-this\n", "command exit.status\n", 'command "ret\\' . "\n" . 'urn-this"' . "\n"]
+            [
+                "command return-this\n",
+                "command exit.status\n",
+                'command "ret\\' . "\n" . 'urn-this"' . "\n",
+                '"ret\\urn" || true' . "\n",
+                'command "ret\\urn" || true' . "\n",
+            ]
             as $contents
         ) {
             $this->writeEnv($contents);

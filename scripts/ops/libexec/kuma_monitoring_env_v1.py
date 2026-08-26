@@ -299,6 +299,9 @@ def shell_line_contexts(data):
                     else:
                         following = body[index + 1:index + 2]
                         if projection_compound_depth is None:
+                            special = b'$`"\\' if quote == b'"' else b'$`\\'
+                            if following not in special:
+                                command_projection.extend(b'\\')
                             command_projection.extend(command_projection_literal(following))
                         index += 2
                     continue
