@@ -224,8 +224,11 @@ def command_projection_literal(value):
 
 
 def projection_starts_word(buffer, current):
-    projected = bytes(buffer + current)
-    return not projected or projected[-1:] in SHELL_WORD_BREAKS
+    if current:
+        return current[-1] in SHELL_WORD_BREAKS
+    if buffer:
+        return buffer[-1] in SHELL_WORD_BREAKS
+    return True
 
 
 def empty_quote_closes_word(body, index, projection, projection_start, starts_word):

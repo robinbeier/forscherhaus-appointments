@@ -77,7 +77,9 @@ control block or conditional compound is rejected. A missing key is appended,
 adding one preceding newline only when the existing final byte is not a
 newline; an open shell context or odd trailing backslash before that boundary
 is rejected because Bash would not evaluate the append as the requested
-assignment. A terminal continued operator and an early shell control transfer
+assignment. Shell-context projection remains linear across the supported
+4,000,000-byte Env bound, including adjacent empty quotes. A terminal continued
+operator and an early shell control transfer
 such as top-level `return`, `exit` or `exec` are likewise unsupported and fail
 before mutation. An actually invoked `return`, `exit` or `exec` outside an
 uninvoked function definition is unsupported regardless of subshell, pipeline

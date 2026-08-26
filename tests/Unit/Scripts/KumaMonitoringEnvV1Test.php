@@ -64,6 +64,25 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame('not_required', $json['rollback_outcome'] ?? null);
     }
 
+    public function testNearLimitAdjacentQuotesRemainLinearAndMutationFree(): void
+    {
+        $contents = 'ROB490_QUOTES=' . str_repeat("''", 500_000) . "\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $startedAt = microtime(true);
+        $result = $this->runHelper();
+        $elapsed = microtime(true) - $startedAt;
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertLessThan(8.0, $elapsed, 'Adjacent quote parsing must remain linear.');
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testEnabledDryRunWithoutRecoveryFailsWithoutMutation(): void
     {
         $this->writeEnv(self::KEY . "=1\n");
