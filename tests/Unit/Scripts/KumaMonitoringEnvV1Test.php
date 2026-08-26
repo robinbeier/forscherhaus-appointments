@@ -247,6 +247,23 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testCommandQueryOptionsDoNotPretendToTransferControl(): void
+    {
+        foreach (["command -v return\n", "command -V exit\n", "command -pv exec\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper();
+
+            self::assertSame(0, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('pass', $json['status'] ?? null);
+            self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
     public function testUnmatchedShellDelimitersFailClosedBeforeMutation(): void
     {
         foreach (["X=1 )\n", "X=1 }\n", self::KEY . "=0\n)\n", self::KEY . "=0\n}\n"] as $contents) {

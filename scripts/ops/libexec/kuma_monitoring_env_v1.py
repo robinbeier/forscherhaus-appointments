@@ -228,8 +228,11 @@ def shell_line_contexts(data):
     command_word = re.compile(
         rb'(?:^|[;|&])\s*'
         rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*)\s+)*'
-        rb'(?:(?:builtin|command)(?:\s+(?:--|-[pVv]+))*\s+)*'
-        rb'([A-Za-z_][A-Za-z0-9_]*)'
+        rb'(?P<wrappers>(?:'
+        rb'builtin(?:\s+--)?\s+'
+        rb'|command(?:\s+(?:--|-[pVv]+))*\s+'
+        rb')*)'
+        rb'(?P<word>[A-Za-z_][A-Za-z0-9_]*)'
     )
     block_openers = {
         b'case': b'esac',
@@ -340,8 +343,19 @@ def shell_line_contexts(data):
             index += 1
 
         for match in command_word.finditer(bytes(visible)):
-            word = match.group(1)
-            if word in {b'exec', b'exit', b'return'}:
+            word = match.group('word')
+            wrappers = match.group('wrappers').split()
+            command_query = False
+            for wrapper_index, wrapper in enumerate(wrappers):
+                if wrapper != b'command':
+                    continue
+                option_index = wrapper_index + 1
+                while option_index < len(wrappers) and wrappers[option_index].startswith(b'-'):
+                    option = wrappers[option_index]
+                    if option != b'--' and (b'v' in option or b'V' in option):
+                        command_query = True
+                    option_index += 1
+            if word in {b'exec', b'exit', b'return'} and not command_query:
                 early_control = True
             if blocks and word == blocks[-1]:
                 blocks.pop()
