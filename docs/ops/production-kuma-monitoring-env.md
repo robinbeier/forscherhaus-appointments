@@ -84,9 +84,9 @@ uninvoked function definition is unsupported regardless of subshell, pipeline
 or background placement. The helper does not try to prove those contexts safe:
 Env-defined aliases, functions, traps, command resolution and later waits can
 all change their effective status. `command -v`/`-V` queries remain queries
-rather than calls. An actually executed `eval` is unsupported for the same
-reason; an `eval` appearing only inside an uninvoked function definition stays
-definition-only. Uninvoked function definitions,
+rather than calls. Actually executed `eval`, `source` and dot-source commands
+are unsupported for the same reason; those commands appearing only inside an
+uninvoked function definition stay definition-only. Uninvoked function definitions,
 including same-line compound bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
@@ -95,15 +95,17 @@ operands inside uninvoked function definitions likewise stay out of the
 command projection. An actually executed arithmetic command is unsupported
 because zero evaluates to failure, nonzero to success, and the helper never
 evaluates Env expressions; structurally invalid arithmetic also fails closed.
-Only an immediate right-hand command behind
-top-level literal `false &&` is proven unexecuted, including an immediate
-arithmetic-command RHS; the same construct inside a subshell fails closed
-because the failed left side becomes the subshell status.
+Only an immediate right-hand command behind top-level literal `false &&` is
+proven unexecuted, including an immediate arithmetic-command RHS. The proof is
+disabled after executed alias, unalias or shell-option commands and inside brace
+groups or subshells, where command resolution or enclosing status propagation
+can change the result.
 Assignment-position, status-only, redirection-only and combined
-assignment/redirection-only command substitutions are unsupported because Bash
+assignment/redirection-only command substitutions, including substitutions
+after one or more completed assignments, are unsupported because Bash
 can propagate their dynamically produced status and the helper never executes
 arbitrary Env code to simulate it. This includes both `$(...)` and legacy
-backtick substitutions. Arithmetic expansions remain value
+backtick substitutions. Quoted and unquoted arithmetic expansions remain value
 expansions, and the same status checks do not execute inside uninvoked function
 definitions. A `0`
 changes at exactly its single value-byte position. A `1` is already converged

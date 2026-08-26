@@ -286,7 +286,11 @@ def projection_status_depends_on_substitution(buffer, current):
         + rb'[ \t]*',
         command,
     ) is not None
-    return not command.strip(b' \t') or redirection_without_target or (
+    completed_assignments = re.fullmatch(
+        rb'[ \t]*(?:' + assignment + rb'[ \t]+)*' + assignment + rb'[ \t]*',
+        command,
+    ) is not None
+    return not command.strip(b' \t') or redirection_without_target or completed_assignments or (
         re.fullmatch(
             rb'[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*[ \t]+)*'
             rb'[A-Za-z_][A-Za-z0-9_]*=',
@@ -344,6 +348,8 @@ def shell_line_contexts(data):
     projection_function_spans = []
     projection_subshell_depths = []
     projection_subshell_spans = []
+    projection_brace_depths = []
+    projection_brace_spans = []
     projection_function_block_depth = None
     projection_function_block_start = None
     arithmetic_invalid = False
@@ -382,7 +388,7 @@ def shell_line_contexts(data):
         + reserved_pipeline_prefix +
         rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*)[ \t]+)*'
         rb'(?P<wrappers>(?:' + wrapper + rb')*)'
-        rb'(?P<word>[A-Za-z_\x00][A-Za-z0-9_\x00]*)'
+        rb'(?P<word>(?:[A-Za-z_\x00][A-Za-z0-9_\x00]*|\.))'
         rb'(?=$|[ \t;|&(){}<>])'
     )
     redirection_token = re.compile(
@@ -416,6 +422,7 @@ def shell_line_contexts(data):
         rb'while(?:$|[ \t])|$)'
     )
     defined_function_names = set()
+    literal_false_resolution_stable = True
 
     lines = data.split(b'\n')
     for line_index, body in enumerate(lines):
@@ -511,6 +518,7 @@ def shell_line_contexts(data):
                     if token in {b'$(', b'${', b'$['}:
                         if (
                             token == b'$('
+                            and body[index:index + 3] != b'$(('
                             and projection_compound_depth is None
                             and projection_status_depends_on_substitution(
                                 command_projection_buffer,
@@ -683,7 +691,12 @@ def shell_line_contexts(data):
                     or (incoming_function_header and not body[:index].strip(b' \t'))
                 )
                 arithmetic_statically_unexecuted = bool(
-                    not projection_subshell_depths
+                    literal_false_resolution_stable
+                    and not projection_subshell_depths
+                    and re.search(
+                        rb'(?:^|[;|&])[ \t]*(?:alias|shopt|unalias)(?=$|[ \t;|&])',
+                        bytes(command_projection_buffer + command_projection),
+                    ) is None
                     and re.search(
                         rb'(?:^|;)[ \t]*false[ \t]*&&[ \t]*$',
                         bytes(command_projection_buffer + command_projection),
@@ -845,6 +858,19 @@ def shell_line_contexts(data):
                         len(command_projection_buffer) + len(command_projection),
                     ))
                     pending_function_header = False
+                elif (
+                    current == b'{'
+                    and projection_compound_depth is None
+                    and function_brace_token
+                ):
+                    # A sourced brace group executes in the current shell. Its
+                    # failed final command can become the group's status, so a
+                    # literal-false RHS proof must not escape this scope.
+                    command_projection.extend(b';')
+                    projection_brace_depths.append((
+                        len(compounds),
+                        len(command_projection_buffer) + len(command_projection),
+                    ))
                 index += 1
                 continue
             if current in {b')', b'}'}:
@@ -883,6 +909,17 @@ def shell_line_contexts(data):
                             subshell_start,
                             len(command_projection_buffer) + len(command_projection),
                             enclosing_status_unknown,
+                        ))
+                        closed_projection = True
+                    if (
+                        projection_brace_depths
+                        and len(compounds) < projection_brace_depths[-1][0]
+                    ):
+                        _, brace_start = projection_brace_depths.pop()
+                        command_projection.extend(b';')
+                        projection_brace_spans.append((
+                            brace_start,
+                            len(command_projection_buffer) + len(command_projection),
                         ))
                         closed_projection = True
                     if (
@@ -968,6 +1005,7 @@ def shell_line_contexts(data):
             or projection_function_depths
             or projection_function_block_depth is not None
             or projection_subshell_depths
+            or projection_brace_depths
         ):
             # The expansion marker already represents the entire potentially
             # empty compound across physical lines. Function projections also
@@ -999,6 +1037,10 @@ def shell_line_contexts(data):
                 inside_subshell = any(
                     span[0] <= match.start('word') < span[1]
                     for span in projection_subshell_spans
+                )
+                inside_brace_group = any(
+                    start <= match.start('word') < end
+                    for start, end in projection_brace_spans
                 )
                 tail = projected_commands[match.end():]
                 wrappers = [
@@ -1040,7 +1082,21 @@ def shell_line_contexts(data):
                     projected_commands,
                     match,
                 )
-                if statically_unexecuted and not inside_subshell:
+                if (
+                    static_word in {b'alias', b'shopt', b'unalias'}
+                    and not command_query
+                    and not inside_function
+                    and not statically_unexecuted
+                ):
+                    # These commands can change the resolution of the literal
+                    # ``false`` used by the one narrow unexecuted-RHS proof.
+                    literal_false_resolution_stable = False
+                if (
+                    statically_unexecuted
+                    and literal_false_resolution_stable
+                    and not inside_subshell
+                    and not inside_brace_group
+                ):
                     continue
                 if static_word in {b'exec', b'exit', b'return'} and not command_query:
                     if inside_function:
@@ -1052,10 +1108,15 @@ def shell_line_contexts(data):
                         # placement. Proving their status would require executing
                         # Env-defined aliases, functions, traps or later waits.
                         early_control = True
-                elif static_word == b'eval' and not command_query and not inside_function:
-                    # Eval can invoke controls, functions or status-bearing
-                    # constructs hidden in ordinary argument bytes. Executing
-                    # those bytes to prove safety is outside this helper.
+                elif (
+                    static_word in {b'.', b'eval', b'source'}
+                    and not command_query
+                    and not inside_function
+                ):
+                    # Eval and sourced input can invoke controls, functions or
+                    # status-bearing constructs hidden in ordinary argument
+                    # bytes. Executing those bytes to prove safety is outside
+                    # this helper.
                     early_control = True
                 elif (
                     not command_query
@@ -1073,6 +1134,7 @@ def shell_line_contexts(data):
             command_projection_buffer.clear()
             projection_function_spans.clear()
             projection_subshell_spans.clear()
+            projection_brace_spans.clear()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
         elif not structural and incoming_continuation == 'operator':
