@@ -295,8 +295,10 @@ def shell_line_contexts(data):
         rb'|command[ \t]+(?:(?:-[pVv]+)[ \t]+|' + redirection + rb')*'
         rb'(?:--[ \t]+(?:' + redirection + rb')*)?)'
     )
+    reserved_pipeline_prefix = rb'(?:(?:!|time(?:[ \t]+-p)?)[ \t]+)*'
     command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
+        + reserved_pipeline_prefix +
         rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*)[ \t]+)*'
         rb'(?P<wrappers>(?:' + wrapper + rb')*)'
         rb'(?P<word>[A-Za-z_][A-Za-z0-9_]*)'
@@ -304,6 +306,7 @@ def shell_line_contexts(data):
     )
     projection_command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
+        + reserved_pipeline_prefix +
         rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*)[ \t]+)*'
         rb'(?P<wrappers>(?:' + wrapper + rb')*)'
         rb'(?P<word>[A-Za-z_\x00][A-Za-z0-9_\x00]*)'
@@ -558,6 +561,24 @@ def shell_line_contexts(data):
                 continue
             if current in {b'(', b'{'}:
                 compounds.append(b')' if current == b'(' else b'}')
+                function_signature_parenthesis = bool(
+                    current == b'('
+                    and re.fullmatch(
+                        rb'[ \t]*(?:function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*',
+                        body[:index],
+                    )
+                    and re.match(rb'\([ \t]*\)', body[index:])
+                )
+                if (
+                    current == b'('
+                    and projection_compound_depth is None
+                    and not function_signature_parenthesis
+                ):
+                    # Parenthesized command groups execute in a subshell, so
+                    # return/exit/exec inside them cannot transfer from the
+                    # shell that sources the monitoring Env.
+                    command_projection.extend(b'x')
+                    projection_compound_depth = len(compounds)
                 if (
                     current == b'{'
                     and projection_compound_depth is None

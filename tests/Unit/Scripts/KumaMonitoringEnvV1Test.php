@@ -236,6 +236,53 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testReservedPipelinePrefixesBeforeContinuedControlsFailClosed(): void
+    {
+        foreach (
+            ["! \\\nreturn 0\n", "time \\\nreturn 0\n", "time -p \\\nexit 0\n", "! time \\\ncommand exec true\n"]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testControlsInsideParenthesizedSubshellsDoNotTransferFromSource(): void
+    {
+        foreach (["(command return 0)\n", "(\"return\" 0)\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper();
+
+            self::assertSame(0, $result['exit_code'], $contents);
+            self::assertSame('would_enable', $this->json($result['stdout'])['monitoring_state'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
+
+        $this->writeEnv("{ command return 0; }\n");
+        $before = $this->snapshot();
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code']);
+        self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+        self::assertSame($before, $this->snapshot());
+
+        $original = "(return 0)\n";
+        $this->writeEnv($original);
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertTrue($this->json($result['stdout'])['mutation_performed'] ?? false);
+        self::assertSame($original . self::KEY . "=1\n", file_get_contents($this->envPath));
+    }
+
     public function testMultilineLegacyArithmeticContextFailsClosedBeforeMutation(): void
     {
         foreach (['$[1+' . "\n" . self::KEY . "=0\n]\n", 'X=$[array[' . "\n" . self::KEY . "=0\n]]\n"] as $contents) {
