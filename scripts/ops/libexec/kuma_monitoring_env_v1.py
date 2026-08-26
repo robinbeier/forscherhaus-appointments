@@ -1118,6 +1118,8 @@ def shell_line_contexts(data):
                         b'enable',
                         b'hash',
                         b'let',
+                        b'mapfile',
+                        b'readarray',
                         b'readonly',
                         b'set',
                         b'shopt',
@@ -1128,10 +1130,10 @@ def shell_line_contexts(data):
                     and not command_query
                     and not inside_function
                 ):
-                    # Runtime resolver, option, arithmetic-status and trap
-                    # mutations can change a later command, the source status
-                    # or the appended assignment itself. Static proof without
-                    # executing arbitrary Env code is unsupported.
+                    # Runtime resolver, option, arithmetic-status, callback
+                    # and trap mutations can change a later command, the source
+                    # status or the appended assignment itself. Static proof
+                    # without executing arbitrary Env code is unsupported.
                     early_control = True
                 elif (
                     static_word == b'wait'
