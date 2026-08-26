@@ -778,6 +778,76 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testAssignmentAppendBeforeReturnFailsClosedBeforeMutation(): void
+    {
+        $contents = "A+=x return 2\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testAnsiAndLocaleQuotedReturnWordsFailClosedBeforeMutation(): void
+    {
+        foreach (["\$'return' 2\n", "\$\"return\" 2\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testIndirectReadonlyCommandTargetsFailClosedBeforeMutation(): void
+    {
+        foreach (
+            [
+                "K=KUMA_RELEASE_RETENTION_MONITOR_\nK=\"\${K}ENABLED\"\nreadonly \"\$K\"\n",
+                "declare -r ROB490_LOCKED=1\n",
+                "typeset -r ROB490_LOCKED=1\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testQuotedBuiltinAndCommandWrappersFailClosedBeforeMutation(): void
+    {
+        foreach (["\"builtin\" return 2\n", "\"command\" return 2\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
     public function testEvalExecutedFunctionFailsClosedBeforeMutation(): void
     {
         $contents = "f() { return 2; }; eval f\n";

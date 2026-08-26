@@ -261,7 +261,7 @@ def projection_status_depends_on_substitution(buffer, current):
         rb'(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
         rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
     )
-    assignment = rb'[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*'
+    assignment = rb'[A-Za-z_][A-Za-z0-9_]*\+?=[^ \t;|&]*'
     completed_prefix = (
         rb'(?:'
         + assignment
@@ -368,7 +368,7 @@ def shell_line_contexts(data):
         rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
         rb'[ \t]*[^ \t;|&]+[ \t]+)'
     )
-    assignment = rb'(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*[ \t]+)'
+    assignment = rb'(?:[A-Za-z_][A-Za-z0-9_]*\+?=[^ \t;|&]*[ \t]+)'
     simple_command_prefix = rb'(?:(?:' + assignment + rb'|' + redirection + rb'))*'
     wrapper = (
         rb'(?:builtin[ \t]+(?:' + redirection + rb')*'
@@ -1088,8 +1088,38 @@ def shell_line_contexts(data):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
                 if (
+                    syntax_marker in word
+                    and static_word in {b'builtin', b'command'}
+                    and not inside_function
+                ):
+                    # Quoted wrapper spellings execute after quote removal but
+                    # cannot be parsed by the literal wrapper grammar above.
+                    # Reject the dynamic wrapper rather than trusting its
+                    # hidden operand classification.
+                    early_control = True
+                elif (
+                    word.startswith(b'$')
+                    and syntax_marker in word
+                    and not inside_function
+                ):
+                    # ANSI-C and locale-quoted command words can decode or
+                    # concatenate into shell controls and wrappers. Their
+                    # runtime command identity is outside the static grammar.
+                    early_control = True
+                elif (
                     static_word
-                    in {b'alias', b'enable', b'hash', b'set', b'shopt', b'trap', b'unalias'}
+                    in {
+                        b'alias',
+                        b'declare',
+                        b'enable',
+                        b'hash',
+                        b'readonly',
+                        b'set',
+                        b'shopt',
+                        b'trap',
+                        b'typeset',
+                        b'unalias',
+                    }
                     and not command_query
                     and not inside_function
                 ):

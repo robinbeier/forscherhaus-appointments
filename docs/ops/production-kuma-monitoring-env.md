@@ -90,14 +90,17 @@ are unsupported for the same reason; those commands appearing only inside an
 uninvoked function definition stay definition-only. Top-level `coproc` is also
 unsupported because a coprocess can invoke an Env-defined function and a later
 `wait` can propagate its status before the appended assignment. Executed
-`alias`, `unalias`, `enable`, `hash`, `set`, `shopt` and `trap` commands are
-unsupported because they can change later command resolution, shell behavior
-or the appended assignment itself. A `command_not_found_handle` definition is
-also unsupported because Bash can invoke that function implicitly for a later
+`alias`, `unalias`, `declare`, `enable`, `hash`, `readonly`, `set`, `shopt`,
+`trap` and `typeset` commands are unsupported because they can
+change later command resolution, variable attributes, shell behavior or the
+appended assignment itself. A `command_not_found_handle` definition is also
+unsupported because Bash can invoke that function implicitly for a later
 unresolved command; the helper does not execute the Env to prove that every
-command will resolve. Expansion-produced command words are likewise
-unsupported; the helper never evaluates Env values to infer their runtime
-identity. Other uninvoked function definitions, including same-line `if`, `for`,
+command will resolve. Expansion-produced command words, ANSI-C/locale-quoted
+command words and quoted `builtin`/`command` wrappers are likewise unsupported;
+the helper never evaluates or normalizes arbitrary Env bytes to infer their
+runtime command identity. Other uninvoked function definitions, including
+same-line `if`, `for`,
 `select`, `until` and `while` bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Same-line `case`
 bodies and command-bearing tails after a same-line function block are outside
