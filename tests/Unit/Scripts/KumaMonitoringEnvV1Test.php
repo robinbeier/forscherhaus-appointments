@@ -902,6 +902,62 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testLeadingRedirectionsBeforeControlsFailClosedBeforeMutation(): void
+    {
+        $target = $this->root . '/return-redir';
+        foreach (['>' . escapeshellarg($target) . " return 2\n", '2>/dev/null exit 2\n'] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testUninvokedSameLineFunctionBlockBodyRemainsSourceable(): void
+    {
+        $contents = "f() if true; then return 2; fi\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertTrue($json['mutation_performed'] ?? false);
+        self::assertSame($contents . self::KEY . "=1\n", file_get_contents($this->envPath));
+    }
+
+    public function testWiderSameLineFunctionBlockGrammarFailsClosedBeforeMutation(): void
+    {
+        foreach (["f() case x in x) return 2;; esac\n", "f() if true; then return 2; fi; echo ok\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
     public function testSameLineCompoundFunctionDefinitionsFailClosedWhenInvoked(): void
     {
         foreach (["f() (( 0 )); f\n", "f() [[ 1 ]]; f\n"] as $contents) {

@@ -366,6 +366,8 @@ def shell_line_contexts(data):
         rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
         rb'[ \t]*[^ \t;|&]+[ \t]+)'
     )
+    assignment = rb'(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*[ \t]+)'
+    simple_command_prefix = rb'(?:(?:' + assignment + rb'|' + redirection + rb'))*'
     wrapper = (
         rb'(?:builtin[ \t]+(?:' + redirection + rb')*'
         rb'(?:--[ \t]+(?:' + redirection + rb')*)?'
@@ -378,7 +380,7 @@ def shell_line_contexts(data):
     command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
         + reserved_pipeline_prefix +
-        rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*)[ \t]+)*'
+        simple_command_prefix +
         rb'(?P<wrappers>(?:' + wrapper + rb')*)'
         rb'(?P<word>[A-Za-z_][A-Za-z0-9_]*)'
         rb'(?=$|[ \t;|&(){}<>])'
@@ -386,7 +388,7 @@ def shell_line_contexts(data):
     projection_command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
         + reserved_pipeline_prefix +
-        rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*)[ \t]+)*'
+        simple_command_prefix +
         rb'(?P<wrappers>(?:' + wrapper + rb')*)'
         rb'(?P<word>[^ \t;|&(){}<>]+)'
         rb'(?=$|[ \t;|&(){}<>])'
@@ -411,6 +413,9 @@ def shell_line_contexts(data):
     )
     function_block_opener = re.compile(
         rb'(?P<word>case|for|if|select|until|while)(?=$|[ \t])'
+    )
+    same_line_function_block_opener = re.compile(
+        rb'(?P<word>for|if|select|until|while)(?=$|[ \t])'
     )
     function_definition_name = re.compile(
         rb'(?:^|[;|&])[ \t]*(?:'
@@ -910,6 +915,7 @@ def shell_line_contexts(data):
             index += 1
 
         visible_bytes = bytes(structural_visible)
+        same_line_function_block_words = []
         for definition_match in function_definition_name.finditer(body):
             function_group = (
                 'function_name'
@@ -924,6 +930,28 @@ def shell_line_contexts(data):
             # quoted nor commented out by the shell scanner.
             if visible_bytes[function_start:function_end] == function_name:
                 defined_function_names.add(function_name)
+                block_match = same_line_function_block_opener.match(
+                    body,
+                    definition_match.end(),
+                )
+                if (
+                    block_match is not None
+                    and visible_bytes[block_match.start('word'):block_match.end('word')]
+                    == block_match.group('word')
+                ):
+                    same_line_function_block_words.append(block_match.group('word'))
+        # The generic command-word matcher cannot see an opener immediately
+        # after the closing ``)`` of a same-line function header. Seed that
+        # structural block before scanning its closer so the body is scoped as
+        # definition-only. Same-line case arms and command-bearing tails remain
+        # explicitly unsupported because they need a wider Bash grammar.
+        for block_word in same_line_function_block_words:
+            if projection_function_block_depth is not None:
+                invalid_closer = True
+                continue
+            blocks.append(block_openers[block_word])
+            projection_function_block_depth = len(blocks)
+            projection_function_block_start = len(command_projection_buffer)
         function_block_closed_tail = None
         for match in command_word.finditer(visible_bytes):
             # Shell reserved words are structural only when parsed directly.

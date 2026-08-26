@@ -81,7 +81,8 @@ assignment. A terminal continued operator and an early shell control transfer
 such as top-level `return`, `exit` or `exec` are likewise unsupported and fail
 before mutation. An actually invoked `return`, `exit` or `exec` outside an
 uninvoked function definition is unsupported regardless of subshell, pipeline
-or background placement. The helper does not try to prove those contexts safe:
+or background placement, including controls preceded by assignment or
+redirection prefixes. The helper does not try to prove those contexts safe:
 Env-defined aliases, functions, traps, command resolution and later waits can
 all change their effective status. `command -v`/`-V` queries remain queries
 rather than calls. Actually executed `eval`, `source` and dot-source commands
@@ -93,9 +94,11 @@ unsupported because a coprocess can invoke an Env-defined function and a later
 because they can change later command resolution, shell behavior or the
 appended assignment itself. Expansion-produced command words are likewise
 unsupported; the helper never evaluates Env values to infer their runtime
-identity. Uninvoked function definitions,
-including same-line compound bodies and definition-only output redirections
-with quoted or expanded targets, remain read-only shell data. Their
+identity. Uninvoked function definitions, including same-line `if`, `for`,
+`select`, `until` and `while` bodies and definition-only output redirections
+with quoted or expanded targets, remain read-only shell data. Same-line `case`
+bodies and command-bearing tails after a same-line function block are outside
+the supported grammar and fail closed before mutation. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
 remain conditional syntax rather than projected commands. Arithmetic-command
 operands inside uninvoked function definitions likewise stay out of the
