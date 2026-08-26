@@ -332,7 +332,10 @@ def simple_parameter_end(value, index):
 
 def parameter_expansion_can_error(value, index):
     return re.match(
-        rb'\$\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!\-])(?::)?\?',
+        rb'\$\{!?(?:'
+        rb'[A-Za-z_][A-Za-z0-9_]*(?:\[[^]\r\n]*\])?'
+        rb'|[0-9@*#?$!\-]'
+        rb')(?::)?\?',
         value[index:],
     ) is not None
 
@@ -1133,6 +1136,7 @@ def shell_line_contexts(data):
                     if wrapper_word
                 ]
                 command_query = False
+                export_function_option = False
                 command_options = False
                 command_options_ended = False
                 skip_redirection_target = False
@@ -1162,6 +1166,25 @@ def shell_line_contexts(data):
                     ):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
+                if static_word == b'export' and not inside_function:
+                    export_tail = re.split(rb'[;|&]', tail, maxsplit=1)[0]
+                    for export_word in re.split(rb'[ \t]+', export_tail.strip()):
+                        if not export_word:
+                            continue
+                        if (
+                            dynamic_expansion_marker in export_word
+                            or syntax_marker in export_word
+                        ):
+                            # A runtime-produced option can resolve to ``-f``.
+                            export_function_option = True
+                            break
+                        if export_word == b'--':
+                            break
+                        if not export_word.startswith(b'-') or export_word == b'-':
+                            break
+                        if b'f' in export_word[1:]:
+                            export_function_option = True
+                            break
                 if (
                     syntax_marker in word
                     and static_word in {b'builtin', b'command'}
@@ -1180,6 +1203,11 @@ def shell_line_contexts(data):
                     # ANSI-C and locale-quoted command words can decode or
                     # concatenate into shell controls and wrappers. Their
                     # runtime command identity is outside the static grammar.
+                    early_control = True
+                elif export_function_option and not command_query:
+                    # Exported functions can be invoked by a child shell and
+                    # abort the sourcing consumer before the appended flag.
+                    # Do not execute protected Env code to predict that status.
                     early_control = True
                 elif (
                     static_word

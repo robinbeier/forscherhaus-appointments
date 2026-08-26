@@ -1061,33 +1061,49 @@ final class KumaMonitoringEnvV1Test extends TestCase
 
     public function testUnsetRequiredParameterExpansionFailsClosedBeforeMutation(): void
     {
-        $contents = "Y=\${ROB490_MISSING:?boom}\n";
-        $this->writeEnv($contents);
-        $before = $this->snapshot();
+        foreach (
+            [
+                "Y=\${ROB490_MISSING:?boom}\n",
+                "Y=\${ROB490_MISSING[0]:?boom}\n",
+                "ROB490_NAME=ROB490_MISSING\nY=\${!ROB490_NAME:?boom}\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
 
-        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
 
-        self::assertSame(70, $result['exit_code'], $contents);
-        $json = $this->json($result['stdout']);
-        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
-        self::assertFalse($json['mutation_performed'] ?? true);
-        self::assertSame($before, $this->snapshot());
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
     }
 
     public function testRequiredParameterExpansionInUninvokedSameLineFunctionRemainsReadOnly(): void
     {
-        $contents = "f() if true; then Y=\${ROB490_MISSING:?boom}; fi\n";
-        $this->writeEnv($contents);
-        $before = $this->snapshot();
+        foreach (
+            [
+                "f() if true; then Y=\${ROB490_MISSING:?boom}; fi\n",
+                "f() if true; then Y=\${ROB490_MISSING[0]:?boom}; fi\n",
+                "f() if true; then N=ROB490_MISSING; Y=\${!N:?boom}; fi\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
 
-        $result = $this->runHelper();
+            $result = $this->runHelper();
 
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        $json = $this->json($result['stdout']);
-        self::assertSame('pass', $json['status'] ?? null);
-        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
-        self::assertFalse($json['mutation_performed'] ?? true);
-        self::assertSame($before, $this->snapshot());
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $json = $this->json($result['stdout']);
+            self::assertSame('pass', $json['status'] ?? null);
+            self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
     }
 
     public function testTimeWrappedReturnFailsClosedBeforeMutation(): void
@@ -1134,6 +1150,28 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
         self::assertFalse($json['mutation_performed'] ?? true);
         self::assertSame($before, $this->snapshot());
+    }
+
+    public function testExportedFunctionInvokedByChildShellFailsClosedBeforeMutation(): void
+    {
+        foreach (
+            [
+                "f()\n{\nreturn 2\n}\nexport -f f\nbash -c f\n",
+                "f() { return 2; }\nROB490_EXPORT_OPTION=-f\nexport \"\$ROB490_EXPORT_OPTION\" f\nbash -c f\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
     }
 
     public function testValidArithmeticExpansionAssignmentRemainsReadOnly(): void
@@ -1525,6 +1563,8 @@ final class KumaMonitoringEnvV1Test extends TestCase
                 "command\vreturn || true\n",
                 "command\rreturn || true\n",
                 "printf value 2>/dev/null\n",
+                "export ROB490_VALUE=-f\n",
+                "export -p >/dev/null\n",
             ]
             as $contents
         ) {

@@ -105,10 +105,12 @@ words and quoted `builtin`/`command` wrappers are likewise unsupported; the
 helper never evaluates or normalizes arbitrary Env bytes to infer their runtime
 command identity. This includes brace- and pathname-expanded command words;
 the helper does not infer a Kuma consumer's working-directory contents.
-Required-value
-parameter expansions using `?` or `:?` in executed scope are unsupported because
-an absent value aborts sourcing before the appended assignment; the helper does
-not resolve protected Env state. Other uninvoked function definitions, including
+Exporting shell functions, including through runtime-produced `export` options,
+is unsupported because a child shell can invoke them before the appended flag
+is loaded. Required-value parameter expansions using `?` or `:?` in executed
+scope, including indexed and indirect parameters, are unsupported because an
+absent value aborts sourcing before the appended assignment; the helper does not
+resolve protected Env state. Other uninvoked function definitions, including
 same-line `if`, `for`,
 `select`, `until` and `while` bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Same-line `case`
