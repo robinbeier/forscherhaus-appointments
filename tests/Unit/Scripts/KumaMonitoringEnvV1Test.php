@@ -973,6 +973,22 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testUninvokedSameLineFunctionWithExpandedRedirectionRemainsReadOnly(): void
+    {
+        $contents = "f() if true; then :; fi >\$HOME/rob490-out\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testHistoryAndFcReexecuteReturnFunctionFailsClosedBeforeMutation(): void
     {
         $contents = "f(){ return 2; }\nhistory -s f\nfc -s\n";

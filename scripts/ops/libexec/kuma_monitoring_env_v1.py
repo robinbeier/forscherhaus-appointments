@@ -650,7 +650,10 @@ def shell_line_contexts(data):
                 continue
             parameter_end = simple_parameter_end(body, index)
             if parameter_end is not None:
-                structural_visible[index] = ord('x')
+                # Keep an unquoted expansion opaque but contiguous in the
+                # structural view. This preserves definition-only redirection
+                # targets without exposing the parameter name as shell syntax.
+                structural_visible[index:parameter_end] = b'x' * (parameter_end - index)
                 if projection_compound_depth is None:
                     command_projection.extend(dynamic_expansion_marker)
                 index = parameter_end
