@@ -290,7 +290,9 @@ def subshell_control_is_guaranteed_success(word, tail):
         # Argumentless return/exit inherit the preceding command status.
         return re.match(rb'0[ \t]*(?:;|$)', candidate) is not None
     if word == b'exec':
-        return re.match(rb'(?:;|$)', candidate) is not None
+        # Argumentless exec only preserves the subshell status when no later
+        # command in that same subshell can replace its successful result.
+        return re.fullmatch(rb'(?:[ \t]*;)*[ \t]*', candidate) is not None
     return False
 
 
@@ -425,6 +427,7 @@ def shell_line_contexts(data):
         incoming_function_header = pending_function_header
         incoming_function_brace = False
         incoming_function_block_word = None
+        incoming_function_conditional = False
         contexts.append(
             quote is None
             and not compounds
@@ -450,6 +453,7 @@ def shell_line_contexts(data):
                 # [[ ... ]] is a Bash compound command and therefore a valid
                 # split function body. Its operands are not shell commands.
                 pending_function_header = False
+                incoming_function_conditional = True
             else:
                 block_match = function_block_opener.match(stripped)
                 pending_function_header = False
@@ -606,6 +610,15 @@ def shell_line_contexts(data):
                 continue
             if body[index:index + 2] == b'[[':
                 compounds.append(b']]')
+                if (
+                    incoming_function_conditional
+                    and not body[:index].strip(b' \t')
+                    and projection_compound_depth is None
+                ):
+                    # A split ``[[ ... ]]`` function body is definition-only.
+                    # Hide its operands from command-word classification.
+                    command_projection.extend(b';')
+                    projection_compound_depth = len(compounds)
                 index += 2
                 continue
             if body[index:index + 2] == b']]':
@@ -839,6 +852,11 @@ def shell_line_contexts(data):
             ))
             projection_function_block_start = None
 
+        structural = bytes(structural_visible).rstrip()
+        operator_continues = bool(
+            structural.endswith((b'&&', b'||', b'|'))
+            or (not structural and incoming_continuation == 'operator')
+        )
         command_projection_buffer.extend(command_projection)
         if (
             projection_compound_depth is not None
@@ -849,7 +867,15 @@ def shell_line_contexts(data):
             # The expansion marker already represents the entire potentially
             # empty compound across physical lines. Function projections also
             # remain buffered until their closing brace records the full span.
-            pass
+            if (
+                quote is None
+                and continuation_kind != 'escape'
+                and not operator_continues
+            ):
+                # An unescaped physical newline is a shell command boundary.
+                # Preserve it while buffering scopes so adjacent line-local
+                # words cannot assemble into a synthetic control command.
+                command_projection_buffer.extend(b';')
         elif quote is not None and continuation_kind != 'escape':
             command_projection_buffer.extend(b'x')
         elif continuation_kind == 'escape':
@@ -871,6 +897,11 @@ def shell_line_contexts(data):
                     if span[0] <= match.start('word') < span[1]
                 ]
                 inside_subshell = bool(containing_subshells)
+                subshell_tail = tail = projected_commands[match.end():]
+                if containing_subshells:
+                    subshell_tail = projected_commands[
+                        match.end():min(span[1] for span in containing_subshells)
+                    ]
                 subshell_enclosing_status_unknown = any(
                     span[2] for span in containing_subshells
                 )
@@ -909,7 +940,6 @@ def shell_line_contexts(data):
                     ):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
-                tail = projected_commands[match.end():]
                 if static_word in {b'exec', b'exit', b'return'} and not command_query:
                     if inside_function:
                         if static_word != b'return':
@@ -919,7 +949,10 @@ def shell_line_contexts(data):
                         and not (
                             inside_subshell
                             and not subshell_enclosing_status_unknown
-                            and subshell_control_is_guaranteed_success(static_word, tail)
+                            and subshell_control_is_guaranteed_success(
+                                static_word,
+                                subshell_tail,
+                            )
                         )
                     ):
                         early_control = True
@@ -935,7 +968,6 @@ def shell_line_contexts(data):
             command_projection_buffer.clear()
             projection_function_spans.clear()
             projection_subshell_spans.clear()
-        structural = bytes(structural_visible).rstrip()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
         elif not structural and incoming_continuation == 'operator':

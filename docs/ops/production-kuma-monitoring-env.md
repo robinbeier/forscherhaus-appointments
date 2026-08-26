@@ -82,9 +82,12 @@ such as top-level `return`, `exit` or `exec` are likewise unsupported and fail
 before mutation. This includes argumentless or dynamic subshell controls,
 waited background controls, status-affecting subshell redirections and calls
 to functions defined by the Env. Uninvoked function definitions, including a
-definition-only output redirection, remain read-only shell data. A `0` changes
-at exactly its single value-byte position. A `1` is already converged and is
-never rewritten.
+definition-only output redirection, remain read-only shell data. Their
+unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
+remain conditional syntax rather than projected commands. An argumentless
+subshell `exec` is only considered terminal when no later command in that same
+subshell can determine its status. A `0` changes at exactly its single
+value-byte position. A `1` is already converged and is never rewritten.
 
 The desired Env must also remain within the same bounded Env-size contract.
 An append that would cross that limit fails during read-only preflight before

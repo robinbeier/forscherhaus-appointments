@@ -323,7 +323,7 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertTrue($this->json($result['stdout'])['mutation_performed'] ?? false);
         self::assertSame($original . self::KEY . "=1\n", file_get_contents($this->envPath));
 
-        foreach (["(return 2)\n", "(exit 2)\n", "(exec true)\n", "(exec false)\n"] as $contents) {
+        foreach (["(return 2)\n", "(exit 2)\n", "(exec true)\n", "(exec false)\n", "(exec; false)\n"] as $contents) {
             $this->writeEnv($contents);
             $before = $this->snapshot();
             $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
@@ -420,18 +420,19 @@ final class KumaMonitoringEnvV1Test extends TestCase
 
     public function testSplitFunctionWithConditionalExpressionBodyRemainsReadOnly(): void
     {
-        $contents = "f()\n[[ 1 ]]\n";
-        $this->writeEnv($contents);
-        $before = $this->snapshot();
+        foreach (["f()\n[[ 1 ]]\n", "f()\n[[ exit ]]\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
 
-        $result = $this->runHelper();
+            $result = $this->runHelper();
 
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        $json = $this->json($result['stdout']);
-        self::assertSame('pass', $json['status'] ?? null);
-        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
-        self::assertFalse($json['mutation_performed'] ?? true);
-        self::assertSame($before, $this->snapshot());
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $json = $this->json($result['stdout']);
+            self::assertSame('pass', $json['status'] ?? null);
+            self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
     }
 
     public function testMultilineLegacyArithmeticContextFailsClosedBeforeMutation(): void
@@ -627,6 +628,7 @@ final class KumaMonitoringEnvV1Test extends TestCase
         foreach (
             [
                 "f() { command return 0; }\n",
+                "f() {\nex\nit 0\n}\n",
                 "f() { command \"return\" 0; }\n",
                 "f()\n{\ncommand return 0\n}\n",
                 "function f { command return 0; }\n",
