@@ -344,14 +344,16 @@ def projected_command_is_statically_unexecuted(projected_commands, match):
     return re.search(rb'(?:^|;)[ \t]*false[ \t]*&&[ \t]*$', prefix) is not None
 
 
-def projection_is_assignment_only(buffer, current):
+def projection_status_depends_on_substitution(buffer, current):
     projected = bytes(buffer + current)
     command = re.split(rb'[;|&]', projected)[-1]
-    return re.fullmatch(
-        rb'[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*[ \t]+)*'
-        rb'[A-Za-z_][A-Za-z0-9_]*=',
-        command,
-    ) is not None
+    return not command.strip(b' \t') or (
+        re.fullmatch(
+            rb'[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*[ \t]+)*'
+            rb'[A-Za-z_][A-Za-z0-9_]*=',
+            command,
+        ) is not None
+    )
 
 
 def simple_parameter_end(value, index):
@@ -390,7 +392,7 @@ def shell_line_contexts(data):
     projection_function_block_depth = None
     projection_function_block_start = None
     arithmetic_invalid = False
-    assignment_command_substitution_unknown = False
+    status_bearing_command_substitution_unknown = False
     backtick_return_quote = None
     quote_projection_start = None
     quote_starts_word = False
@@ -554,15 +556,15 @@ def shell_line_contexts(data):
                         if (
                             token == b'$('
                             and projection_compound_depth is None
-                            and projection_is_assignment_only(
+                            and projection_status_depends_on_substitution(
                                 command_projection_buffer,
                                 command_projection,
                             )
                         ):
-                            # An assignment command inherits the status of its
-                            # command substitution. Arbitrary Env code is not
-                            # executed here to guess that status.
-                            assignment_command_substitution_unknown = True
+                            # Assignment-only and substitution-only commands
+                            # inherit the substitution status. Arbitrary Env
+                            # code is not executed here to guess that status.
+                            status_bearing_command_substitution_unknown = True
                         closers = {b'$(': b')', b'${': b'}', b'$[': b']'}
                         compounds.append(closers[token])
                         if projection_compound_depth is None:
@@ -744,12 +746,12 @@ def shell_line_contexts(data):
                 if (
                     body[index:index + 2] == b'$('
                     and projection_compound_depth is None
-                    and projection_is_assignment_only(
+                    and projection_status_depends_on_substitution(
                         command_projection_buffer,
                         command_projection,
                     )
                 ):
-                    assignment_command_substitution_unknown = True
+                    status_bearing_command_substitution_unknown = True
                 closers = {b'(': b')', b'{': b'}', b'[': b']'}
                 compounds.append(closers[body[index + 1:index + 2]])
                 if projection_compound_depth is None:
@@ -1102,7 +1104,7 @@ def shell_line_contexts(data):
         and projection_function_block_depth is None
         and not projection_subshell_depths
         and not arithmetic_invalid
-        and not assignment_command_substitution_unknown
+        and not status_bearing_command_substitution_unknown
     )
     trailing_escape_only = (
         quote is None

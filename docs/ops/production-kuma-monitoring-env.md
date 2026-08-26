@@ -95,11 +95,11 @@ operands likewise stay out of the command projection, while structurally
 invalid arithmetic fails closed. A non-final control in a pipeline is exempted
 only for a narrowly proven literal-success pipeline under `pipefail`; an
 immediate right-hand command behind literal `false &&` is likewise proven
-unexecuted. Assignment-position command substitutions are unsupported because
-Bash propagates their dynamically produced status and the helper never
-executes arbitrary Env code to simulate that status. A `0` changes at exactly
-its single value-byte position. A `1` is already converged and is never
-rewritten.
+unexecuted. Assignment-position and status-only command substitutions are
+unsupported because Bash propagates their dynamically produced status and the
+helper never executes arbitrary Env code to simulate that status. A `0`
+changes at exactly its single value-byte position. A `1` is already converged
+and is never rewritten.
 
 The desired Env must also remain within the same bounded Env-size contract.
 An append that would cross that limit fails during read-only preflight before
