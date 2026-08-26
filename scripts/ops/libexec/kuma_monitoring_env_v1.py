@@ -323,6 +323,7 @@ def shell_line_contexts(data):
     projection_function_block_depth = None
     projection_function_block_start = None
     arithmetic_invalid = False
+    arithmetic_status_unknown = False
     status_bearing_command_substitution_unknown = False
     backtick_return_quote = None
     quote_projection_start = None
@@ -626,6 +627,16 @@ def shell_line_contexts(data):
                     # is not a valid arithmetic expression. It must not be
                     # reclassified as a successful subshell control.
                     arithmetic_invalid = True
+                arithmetic_definition_only = bool(
+                    projection_function_depths
+                    or function_header.search(body[:index])
+                    or (incoming_function_header and not body[:index].strip(b' \t'))
+                )
+                if not arithmetic_definition_only:
+                    # Arithmetic command status depends on evaluated Env state:
+                    # zero is failure and nonzero is success. The helper never
+                    # evaluates arbitrary Env expressions to predict errexit.
+                    arithmetic_status_unknown = True
                 compounds.append(b'))')
                 if projection_compound_depth is None:
                     command_projection.extend(b';')
@@ -1024,6 +1035,7 @@ def shell_line_contexts(data):
         and projection_function_block_depth is None
         and not projection_subshell_depths
         and not arithmetic_invalid
+        and not arithmetic_status_unknown
         and not status_bearing_command_substitution_unknown
     )
     trailing_escape_only = (

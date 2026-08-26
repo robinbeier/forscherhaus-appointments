@@ -464,18 +464,33 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
-    public function testAssignedExitNameInArithmeticContextRemainsReadOnly(): void
+    public function testExecutedArithmeticContextsFailClosedBeforeMutation(): void
     {
-        $contents = "exit=1; (( exit ))\n";
+        foreach (["exit=1; (( exit ))\n", "exit=0; (( exit ))\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testAliasShadowingBeforeSubshellReturnFailsClosedBeforeMutation(): void
+    {
+        $contents = "shopt -s expand_aliases\nalias return=false\n(return 0)\n";
         $this->writeEnv($contents);
         $before = $this->snapshot();
 
-        $result = $this->runHelper();
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
 
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(70, $result['exit_code'], $contents);
         $json = $this->json($result['stdout']);
-        self::assertSame('pass', $json['status'] ?? null);
-        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
         self::assertFalse($json['mutation_performed'] ?? true);
         self::assertSame($before, $this->snapshot());
     }

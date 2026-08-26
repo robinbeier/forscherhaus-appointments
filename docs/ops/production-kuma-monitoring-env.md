@@ -89,8 +89,11 @@ including same-line compound bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
 remain conditional syntax rather than projected commands. Arithmetic-command
-operands likewise stay out of the command projection, while structurally
-invalid arithmetic fails closed. Only an immediate right-hand command behind
+operands inside uninvoked function definitions likewise stay out of the
+command projection. An actually executed arithmetic command is unsupported
+because zero evaluates to failure, nonzero to success, and the helper never
+evaluates Env expressions; structurally invalid arithmetic also fails closed.
+Only an immediate right-hand command behind
 top-level literal `false &&` is proven unexecuted; the same construct inside a
 subshell fails closed because the failed left side becomes the subshell status.
 Assignment-position, status-only and redirection-only command substitutions
