@@ -90,11 +90,12 @@ are unsupported for the same reason; those commands appearing only inside an
 uninvoked function definition stay definition-only. Top-level `coproc` is also
 unsupported because a coprocess can invoke an Env-defined function and a later
 `wait` can propagate its status before the appended assignment. Executed
-`alias`, `unalias`, `compgen`, `declare`, `enable`, `hash`, `let`, `mapfile`,
-`readarray`, `readonly`, `set`, `shopt`, `trap` and `typeset` commands are
-unsupported because they can change later command resolution, variable
-attributes, shell behavior, arithmetic status, invoke dynamic callbacks or
-affect the appended assignment itself. A `command_not_found_handle`
+`alias`, `unalias`, `compgen`, `declare`, `enable`, `fc`, `hash`, `history`,
+`let`, `mapfile`, `readarray`, `readonly`, `set`, `shopt`, `trap` and `typeset`
+commands are unsupported because they can change later command resolution,
+variable attributes, shell behavior, arithmetic status, invoke dynamic
+callbacks, replay history or affect the appended assignment itself. A
+`command_not_found_handle`
 definition is also unsupported because Bash can invoke that function implicitly
 for a later unresolved command; the helper does not execute the Env to prove
 that every command will resolve. Function definitions named `command` or

@@ -973,6 +973,21 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testHistoryAndFcReexecuteReturnFunctionFailsClosedBeforeMutation(): void
+    {
+        $contents = "f(){ return 2; }\nhistory -s f\nfc -s\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testEvalExecutedFunctionFailsClosedBeforeMutation(): void
     {
         $contents = "f() { return 2; }; eval f\n";
