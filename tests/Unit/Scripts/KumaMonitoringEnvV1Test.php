@@ -186,7 +186,23 @@ final class KumaMonitoringEnvV1Test extends TestCase
 
     public function testAssignmentPrefixedEarlyControlTransfersFailClosedBeforeMutation(): void
     {
-        foreach (["X=1 return 0\n", "X=1 exit 0\n", "X=1 exec true\n"] as $contents) {
+        foreach (
+            [
+                "X=1 return 0\n",
+                "X=1 exit 0\n",
+                "X=1 exec true\n",
+                "EMPTY=\nreturn\${EMPTY} 0\n",
+                "EMPTY=\n\${EMPTY}return 0\n",
+                "EMPTY=\nreturn\$EMPTY 0\n",
+                "EMPTY=\n\"return\${EMPTY}\" 0\n",
+                "EMPTY=\n\"return\$EMPTY\" 0\n",
+                "return\$(false) 0\n",
+                "\"return\$(false)\" 0\n",
+                'return`false` 0' . "\n",
+                '"return`false`" 0' . "\n",
+            ]
+            as $contents
+        ) {
             $this->writeEnv($contents);
             $before = $this->snapshot();
             $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
@@ -308,6 +324,10 @@ final class KumaMonitoringEnvV1Test extends TestCase
                 "builtin esac\n",
                 "command -- -v return\n",
                 "command 2>/dev/null -- -V exit\n",
+                "builtin -- -- return 0\n",
+                "command\freturn || true\n",
+                "command\vreturn || true\n",
+                "command\rreturn || true\n",
                 "printf value 2>/dev/null\n",
             ]
             as $contents

@@ -222,6 +222,20 @@ def command_projection_literal(value):
     return b'x' if value in b' \t;|&(){}<>' else value
 
 
+def simple_parameter_end(value, index):
+    if value[index:index + 1] != b'$' or index + 1 >= len(value):
+        return None
+    following = value[index + 1:index + 2]
+    if re.match(rb'[A-Za-z_]', following):
+        end = index + 2
+        while end < len(value) and re.match(rb'[A-Za-z0-9_]', value[end:end + 1]):
+            end += 1
+        return end
+    if re.match(rb'[0-9@*#?$!\-]', following):
+        return index + 2
+    return None
+
+
 def shell_line_contexts(data):
     contexts = []
     quote = None
@@ -232,24 +246,34 @@ def shell_line_contexts(data):
     early_control = False
     invalid_closer = False
     projection_compound_depth = None
+    projection_return_quote = None
     backtick_return_quote = None
+    expansion_marker = b'\x00'
     command_projection_buffer = bytearray()
     redirection = (
         rb'(?:(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
         rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
-        rb'\s*[^\s;|&]+\s+)'
+        rb'[ \t]*[^ \t;|&]+[ \t]+)'
     )
     wrapper = (
-        rb'(?:builtin\s+(?:(?:--)\s+|' + redirection + rb')*'
-        rb'|command\s+(?:(?:-[pVv]+)\s+|' + redirection + rb')*'
-        rb'(?:--\s+(?:' + redirection + rb')*)?)'
+        rb'(?:builtin[ \t]+(?:' + redirection + rb')*'
+        rb'(?:--[ \t]+(?:' + redirection + rb')*)?'
+        rb'|command[ \t]+(?:(?:-[pVv]+)[ \t]+|' + redirection + rb')*'
+        rb'(?:--[ \t]+(?:' + redirection + rb')*)?)'
     )
     command_word = re.compile(
-        rb'(?:^|[;|&])\s*'
-        rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*)\s+)*'
+        rb'(?:^|[;|&])[ \t]*'
+        rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*)[ \t]+)*'
         rb'(?P<wrappers>(?:' + wrapper + rb')*)'
         rb'(?P<word>[A-Za-z_][A-Za-z0-9_]*)'
-        rb'(?=$|[\s;|&(){}<>])'
+        rb'(?=$|[ \t;|&(){}<>])'
+    )
+    projection_command_word = re.compile(
+        rb'(?:^|[;|&])[ \t]*'
+        rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*)[ \t]+)*'
+        rb'(?P<wrappers>(?:' + wrapper + rb')*)'
+        rb'(?P<word>[A-Za-z_\x00][A-Za-z0-9_\x00]*)'
+        rb'(?=$|[ \t;|&(){}<>])'
     )
     redirection_token = re.compile(
         rb'^(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
@@ -293,6 +317,24 @@ def shell_line_contexts(data):
                 index += 1
                 continue
             if quote in {b'"', b'`'}:
+                if quote == b'"' and current == b'$':
+                    parameter_end = simple_parameter_end(body, index)
+                    if parameter_end is not None:
+                        if projection_compound_depth is None:
+                            command_projection.extend(expansion_marker)
+                        index = parameter_end
+                        continue
+                    token = body[index:index + 2]
+                    if token in {b'$(', b'${', b'$['}:
+                        closers = {b'$(': b')', b'${': b'}', b'$[': b']'}
+                        compounds.append(closers[token])
+                        if projection_compound_depth is None:
+                            command_projection.extend(expansion_marker)
+                            projection_compound_depth = len(compounds)
+                            projection_return_quote = b'"'
+                        quote = None
+                        index += 2
+                        continue
                 if current == b'\\':
                     if index + 1 >= len(body):
                         continuation_kind = 'escape'
@@ -311,7 +353,7 @@ def shell_line_contexts(data):
                     backtick_return_quote = None
                 elif quote == b'"' and current == b'`':
                     if projection_compound_depth is None:
-                        command_projection.extend(b'x')
+                        command_projection.extend(expansion_marker)
                     backtick_return_quote = b'"'
                     quote = b'`'
                 elif projection_compound_depth is None and quote != b'`':
@@ -332,13 +374,19 @@ def shell_line_contexts(data):
                         command_projection.extend(command_projection_literal(following))
                     index += 2
                 continue
+            parameter_end = simple_parameter_end(body, index)
+            if parameter_end is not None:
+                if projection_compound_depth is None:
+                    command_projection.extend(expansion_marker)
+                index = parameter_end
+                continue
             if current in {b"'", b'"'}:
                 quote = current
                 index += 1
                 continue
             if current == b'`':
                 if projection_compound_depth is None:
-                    command_projection.extend(b'x')
+                    command_projection.extend(expansion_marker)
                 backtick_return_quote = None
                 quote = b'`'
                 index += 1
@@ -361,6 +409,9 @@ def shell_line_contexts(data):
                         and len(compounds) < projection_compound_depth
                     ):
                         projection_compound_depth = None
+                        if projection_return_quote is not None:
+                            quote = projection_return_quote
+                            projection_return_quote = None
                     index += 2
                 elif compounds and compounds[-1] == b']':
                     # Arithmetic array syntax can close immediately before the
@@ -371,6 +422,9 @@ def shell_line_contexts(data):
                         and len(compounds) < projection_compound_depth
                     ):
                         projection_compound_depth = None
+                        if projection_return_quote is not None:
+                            quote = projection_return_quote
+                            projection_return_quote = None
                     index += 1
                 else:
                     invalid_closer = True
@@ -380,7 +434,10 @@ def shell_line_contexts(data):
                 closers = {b'(': b')', b'{': b'}', b'[': b']'}
                 compounds.append(closers[body[index + 1:index + 2]])
                 if projection_compound_depth is None:
-                    command_projection.extend(b'x')
+                    # NUL cannot occur in validated input. Internally it marks
+                    # an expansion that may disappear and assemble a command.
+                    marker = expansion_marker if current == b'$' else b'x'
+                    command_projection.extend(marker)
                     projection_compound_depth = len(compounds)
                 index += 2
                 continue
@@ -395,6 +452,9 @@ def shell_line_contexts(data):
                     and len(compounds) < projection_compound_depth
                 ):
                     projection_compound_depth = None
+                    if projection_return_quote is not None:
+                        quote = projection_return_quote
+                        projection_return_quote = None
                 index += 1
                 continue
             if current in {b'(', b'{'}:
@@ -402,6 +462,7 @@ def shell_line_contexts(data):
                 index += 1
                 continue
             if current in {b')', b'}'}:
+                closed_projection = False
                 if compounds and compounds[-1] == current:
                     compounds.pop()
                     if (
@@ -409,10 +470,14 @@ def shell_line_contexts(data):
                         and len(compounds) < projection_compound_depth
                     ):
                         projection_compound_depth = None
+                        closed_projection = True
+                        if projection_return_quote is not None:
+                            quote = projection_return_quote
+                            projection_return_quote = None
                 else:
                     invalid_closer = True
                 structural_visible[index] = current[0]
-                if projection_compound_depth is None:
+                if projection_compound_depth is None and not closed_projection:
                     command_projection.extend(current)
                 index += 1
                 continue
@@ -438,7 +503,9 @@ def shell_line_contexts(data):
 
         command_projection_buffer.extend(command_projection)
         if projection_compound_depth is not None:
-            command_projection_buffer.extend(b'x')
+            # The expansion marker already represents the entire potentially
+            # empty compound across physical lines.
+            pass
         elif quote is not None and continuation_kind != 'escape':
             command_projection_buffer.extend(b'x')
         elif continuation_kind == 'escape':
@@ -446,9 +513,14 @@ def shell_line_contexts(data):
             # word continues byte-for-byte on the next physical line.
             pass
         else:
-            for match in command_word.finditer(bytes(command_projection_buffer)):
+            for match in projection_command_word.finditer(bytes(command_projection_buffer)):
                 word = match.group('word')
-                wrappers = match.group('wrappers').split()
+                static_word = word.replace(expansion_marker, b'')
+                wrappers = [
+                    wrapper_word
+                    for wrapper_word in re.split(rb'[ \t]+', match.group('wrappers').strip())
+                    if wrapper_word
+                ]
                 command_query = False
                 command_options = False
                 command_options_ended = False
@@ -479,7 +551,7 @@ def shell_line_contexts(data):
                     ):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
-                if word in {b'exec', b'exit', b'return'} and not command_query:
+                if static_word in {b'exec', b'exit', b'return'} and not command_query:
                     early_control = True
             command_projection_buffer.clear()
         structural = bytes(structural_visible).rstrip()
