@@ -239,7 +239,7 @@ def empty_quote_closes_word(body, index, projection, projection_start, starts_wo
     )
 
 
-def projected_control_tail_is_backgrounded(word, tail):
+def projected_control_tail_is_backgrounded(tail):
     # `tail` comes from the quote-aware command projection: comments are
     # absent, while quoted or escaped shell separators are opaque markers.
     # Only structural list depth and the first projected operator remain to be
@@ -265,18 +265,10 @@ def projected_control_tail_is_backgrounded(word, tail):
         if current == b'|':
             if tail[index:index + 2] == b'||':
                 return False
-            control_argument = tail[:index].strip(b' \t')
-            successful_control = bool(
-                word in {b'return', b'exit'} and control_argument == b'0'
-            )
-            successful_pipeline_tail = bool(
-                re.fullmatch(rb'\|[ \t]+true[ \t;]*', tail[index:])
-            )
-            if successful_control and successful_pipeline_tail:
-                # A non-final pipeline command runs in a subshell. With
-                # pipefail, this narrow literal-success pipeline still reaches
-                # the appended assignment.
-                return True
+            # A later pipeline command is resolved in the Env-defined shell
+            # state. Even a spelling such as ``true`` can have been disabled,
+            # aliased or shadowed, so no pipeline tail is a static success
+            # proof without executing untrusted Env code.
             return False
         if current == b';':
             return False
@@ -293,11 +285,12 @@ def projected_control_tail_is_backgrounded(word, tail):
                 rb'(?:(?:!|time(?:[ \t]+-p)?)[ \t]+)*'
                 rb'(?:(?:builtin(?:[ \t]+--)?'
                 rb'|command(?:[ \t]+(?:-p|--))*)[ \t]+)?'
-                rb'wait(?=$|[ \t;|&])',
+                rb'(?:wait|eval)(?=$|[ \t;|&])',
                 tail[index + 1:],
             ):
-                # A foreground wait can propagate the background control's
-                # nonzero status back into Kuma's errexit consumer.
+                # A foreground wait, or dynamic eval that can execute one,
+                # can propagate the background control's nonzero status back
+                # into Kuma's errexit consumer.
                 return False
             return True
         index += 1
@@ -338,8 +331,9 @@ def function_block_tail_is_definition_only(tail):
 
 def projected_command_is_statically_unexecuted(projected_commands, match):
     # This is intentionally a narrow proof, not a general evaluator for Bash
-    # conditionals. A literal ``false &&`` cannot execute its immediate RHS;
-    # every dynamic or nested condition remains conservatively fail-closed.
+    # conditionals. A literal ``false &&`` cannot execute its immediate RHS.
+    # The caller separately rejects this construct inside a subshell because
+    # the failed LHS then becomes a status-bearing enclosing command.
     prefix = projected_commands[:match.start('wrappers')]
     return re.search(rb'(?:^|;)[ \t]*false[ \t]*&&[ \t]*$', prefix) is not None
 
@@ -1045,17 +1039,22 @@ def shell_line_contexts(data):
                     ):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
-                if projected_command_is_statically_unexecuted(projected_commands, match):
+                statically_unexecuted = projected_command_is_statically_unexecuted(
+                    projected_commands,
+                    match,
+                )
+                if statically_unexecuted and not inside_subshell:
                     continue
                 if static_word in {b'exec', b'exit', b'return'} and not command_query:
                     if inside_function:
                         if static_word != b'return':
                             early_control = True
                     elif (
-                        not projected_control_tail_is_backgrounded(static_word, tail)
+                        not projected_control_tail_is_backgrounded(tail)
                         and not (
                             inside_subshell
                             and subshell_status_is_guaranteed_success
+                            and not statically_unexecuted
                         )
                     ):
                         early_control = True

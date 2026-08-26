@@ -83,19 +83,21 @@ before mutation. This includes argumentless or dynamic subshell controls,
 waited background controls, status-affecting subshell redirections and calls
 to functions defined by the Env, including dynamically expanded calls.
 `command -v`/`-V` queries remain queries rather than calls, and wrapped
-`builtin wait`, non-query `command wait` or `time wait` still propagate a
-waited background status. Uninvoked function definitions, including same-line
-compound bodies and definition-only output redirections with quoted or
-expanded targets, remain read-only shell data. Their
+`builtin wait`, non-query `command wait`, `time wait` or a dynamic `eval` can
+still propagate a waited background status. Uninvoked function definitions,
+including same-line compound bodies and definition-only output redirections
+with quoted or expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
 remain conditional syntax rather than projected commands. An argumentless
 subshell `exec` is only considered terminal when no later command in that same
 or any enclosing subshell can determine its status. Arithmetic-command
 operands likewise stay out of the command projection, while structurally
-invalid arithmetic fails closed. A non-final control in a pipeline is exempted
-only for a narrowly proven literal-success pipeline under `pipefail`; an
-immediate right-hand command behind literal `false &&` is likewise proven
-unexecuted. Assignment-position and status-only command substitutions are
+invalid arithmetic fails closed. A non-final control in a pipeline is
+unsupported because an Env can change command resolution before the pipeline;
+the helper never assumes a command spelling is immutable. An immediate
+right-hand command behind top-level literal `false &&` is proven unexecuted,
+but the same construct inside a subshell fails closed because the failed left
+side becomes the subshell status. Assignment-position and status-only command substitutions are
 unsupported because Bash propagates their dynamically produced status and the
 helper never executes arbitrary Env code to simulate that status. A `0`
 changes at exactly its single value-byte position. A `1` is already converged
