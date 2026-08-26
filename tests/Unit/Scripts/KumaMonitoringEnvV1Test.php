@@ -848,6 +848,54 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testSubshellFunctionDefinitionFollowedByCallFailsClosed(): void
+    {
+        foreach (["function f ( return 2; )\nf\n", "function f ( return 2 )\nf\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testCommandAndBuiltinFunctionShadowingFailsClosed(): void
+    {
+        foreach (["command() { return 2; }; command true\n", "builtin() { return 2; }; builtin true\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testLetControlsFailClosedBeforeMutation(): void
+    {
+        foreach (["let 0\n", "builtin let 0\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
     public function testEvalExecutedFunctionFailsClosedBeforeMutation(): void
     {
         $contents = "f() { return 2; }; eval f\n";

@@ -427,7 +427,7 @@ def shell_line_contexts(data):
         rb'function[ \t]+(?P<function_name>[A-Za-z_][A-Za-z0-9_]*)'
         rb'(?:[ \t]*\([ \t]*\))?'
         rb'|(?P<plain_name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\([ \t]*\)'
-        rb')[ \t]*(?=\{|\(\(|\[\[|case(?:$|[ \t])|for(?:$|[ \t])|'
+        rb')[ \t]*(?=\{|\(|\[\[|case(?:$|[ \t])|for(?:$|[ \t])|'
         rb'if(?:$|[ \t])|select(?:$|[ \t])|until(?:$|[ \t])|'
         rb'while(?:$|[ \t])|$)'
     )
@@ -941,13 +941,17 @@ def shell_line_contexts(data):
             # the structural view proves that the name itself was neither
             # quoted nor commented out by the shell scanner.
             if visible_bytes[function_start:function_end] == function_name:
-                if function_name == b'command_not_found_handle':
-                    # Bash can invoke this specially named function without an
-                    # explicit textual call when a later command is missing.
-                    # Static command-word analysis cannot prove that every
-                    # command will resolve in the consumer, so defining the
-                    # implicit hook anywhere in the protected Env is outside
-                    # the supported writer grammar.
+                if function_name in {
+                    b'builtin',
+                    b'command',
+                    b'command_not_found_handle',
+                }:
+                    # Bash can invoke command_not_found_handle without an
+                    # explicit textual call, while functions named command or
+                    # builtin shadow the wrappers used by the static command
+                    # grammar. These definitions therefore make later command
+                    # resolution unprovable without executing protected Env
+                    # code and are outside the supported writer grammar.
                     early_control = True
                 defined_function_names.add(function_name)
                 block_match = same_line_function_block_opener.match(
@@ -1113,6 +1117,7 @@ def shell_line_contexts(data):
                         b'declare',
                         b'enable',
                         b'hash',
+                        b'let',
                         b'readonly',
                         b'set',
                         b'shopt',
@@ -1123,9 +1128,10 @@ def shell_line_contexts(data):
                     and not command_query
                     and not inside_function
                 ):
-                    # Runtime resolver, option and trap mutations can change a
-                    # later command or the appended assignment itself. Static
-                    # proof without executing arbitrary Env code is unsupported.
+                    # Runtime resolver, option, arithmetic-status and trap
+                    # mutations can change a later command, the source status
+                    # or the appended assignment itself. Static proof without
+                    # executing arbitrary Env code is unsupported.
                     early_control = True
                 elif (
                     static_word == b'wait'
