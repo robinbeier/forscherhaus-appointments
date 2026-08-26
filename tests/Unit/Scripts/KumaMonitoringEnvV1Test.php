@@ -418,6 +418,101 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testIndirectlyInvokedNonzeroFunctionFailsClosedBeforeMutation(): void
+    {
+        $contents = "f() { return 2; }; NAME=f; \$NAME\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testFunctionDefinitionCommandQueriesRemainReadOnly(): void
+    {
+        foreach (["f() { return 2; }; command -v f\n", "f() { return 2; }; command -V f\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper();
+
+            self::assertSame(0, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('pass', $json['status'] ?? null);
+            self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testWaitWrappersAfterBackgroundedExitFailClosedBeforeMutation(): void
+    {
+        foreach (["exit 2 & builtin wait \$!\n", "exit 2 & command wait \$!\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testAssignedExitNameInArithmeticContextRemainsReadOnly(): void
+    {
+        $contents = "exit=1; (( exit ))\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testArithmeticReturnContextFailsClosedBeforeMutation(): void
+    {
+        $contents = "((return 0))\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testCommandReturnPipelineRemainsReadOnly(): void
+    {
+        $contents = "command return 0 | true\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testSplitFunctionWithConditionalExpressionBodyRemainsReadOnly(): void
     {
         foreach (["f()\n[[ 1 ]]\n", "f()\n[[ exit ]]\n"] as $contents) {

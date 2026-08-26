@@ -239,7 +239,7 @@ def empty_quote_closes_word(body, index, projection, projection_start, starts_wo
     )
 
 
-def projected_control_tail_is_backgrounded(tail):
+def projected_control_tail_is_backgrounded(word, tail):
     # `tail` comes from the quote-aware command projection: comments are
     # absent, while quoted or escaped shell separators are opaque markers.
     # Only structural list depth and the first projected operator remain to be
@@ -262,7 +262,23 @@ def projected_control_tail_is_backgrounded(tail):
         if compounds:
             index += 1
             continue
-        if current in {b';', b'|'}:
+        if current == b'|':
+            if tail[index:index + 2] == b'||':
+                return False
+            control_argument = tail[:index].strip(b' \t')
+            successful_control = bool(
+                word in {b'return', b'exit'} and control_argument == b'0'
+            )
+            successful_pipeline_tail = bool(
+                re.fullmatch(rb'\|[ \t]+true[ \t;]*', tail[index:])
+            )
+            if successful_control and successful_pipeline_tail:
+                # A non-final pipeline command runs in a subshell. With
+                # pipefail, this narrow literal-success pipeline still reaches
+                # the appended assignment.
+                return True
+            return False
+        if current == b';':
             return False
         if current == b'&':
             previous = tail[index - 1:index] if index else b''
@@ -272,7 +288,13 @@ def projected_control_tail_is_backgrounded(tail):
             if previous in {b'<', b'>'} or following == b'>':
                 index += 1
                 continue
-            if re.search(rb'(?:^|[;|&])[ \t]*wait(?=$|[ \t;|&])', tail[index + 1:]):
+            if re.search(
+                rb'(?:^|[;|&])[ \t]*(?:'
+                rb'builtin(?:[ \t]+--)?[ \t]+'
+                rb'|command(?:[ \t]+(?:-p|--))*[ \t]+'
+                rb')?wait(?=$|[ \t;|&])',
+                tail[index + 1:],
+            ):
                 # A foreground wait can propagate the background control's
                 # nonzero status back into Kuma's errexit consumer.
                 return False
@@ -346,6 +368,7 @@ def shell_line_contexts(data):
     projection_subshell_spans = []
     projection_function_block_depth = None
     projection_function_block_start = None
+    arithmetic_invalid = False
     backtick_return_quote = None
     quote_projection_start = None
     quote_starts_word = False
@@ -619,6 +642,34 @@ def shell_line_contexts(data):
                     # Hide its operands from command-word classification.
                     command_projection.extend(b';')
                     projection_compound_depth = len(compounds)
+                index += 2
+                continue
+            if body[index:index + 2] == b'((':
+                arithmetic_close = body.find(b'))', index + 2)
+                if arithmetic_close >= 0 and re.match(
+                    rb'[ \t]*(?:exec|exit|return)[ \t]+[^ \t]',
+                    body[index + 2:arithmetic_close],
+                ):
+                    # A control-word spelling followed by a separate operand
+                    # is not a valid arithmetic expression. It must not be
+                    # reclassified as a successful subshell control.
+                    arithmetic_invalid = True
+                compounds.append(b'))')
+                if projection_compound_depth is None:
+                    command_projection.extend(b';')
+                    projection_compound_depth = len(compounds)
+                index += 2
+                continue
+            if body[index:index + 2] == b'))' and compounds and compounds[-1] == b'))':
+                compounds.pop()
+                if (
+                    projection_compound_depth is not None
+                    and len(compounds) < projection_compound_depth
+                ):
+                    projection_compound_depth = None
+                    if projection_return_quote is not None:
+                        quote = projection_return_quote
+                        projection_return_quote = None
                 index += 2
                 continue
             if body[index:index + 2] == b']]':
@@ -945,7 +996,7 @@ def shell_line_contexts(data):
                         if static_word != b'return':
                             early_control = True
                     elif (
-                        not projected_control_tail_is_backgrounded(tail)
+                        not projected_control_tail_is_backgrounded(static_word, tail)
                         and not (
                             inside_subshell
                             and not subshell_enclosing_status_unknown
@@ -957,7 +1008,11 @@ def shell_line_contexts(data):
                     ):
                         early_control = True
                 elif (
-                    static_word in defined_function_names
+                    not command_query
+                    and (
+                        static_word in defined_function_names
+                        or (defined_function_names and expansion_marker in word)
+                    )
                     and not inside_function
                     # The command projection also sees the function name in
                     # the compact ``name()`` definition syntax. Only a later
@@ -996,6 +1051,7 @@ def shell_line_contexts(data):
         and not pending_function_header
         and projection_function_block_depth is None
         and not projection_subshell_depths
+        and not arithmetic_invalid
     )
     trailing_escape_only = (
         quote is None
