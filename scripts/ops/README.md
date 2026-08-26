@@ -36,6 +36,9 @@ Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template.
 The immutable root runtime, canonical `/etc/cron.d` file and migration contract
 are documented in
 [`docs/ops/production-kuma-push-runtime.md`](../../docs/ops/production-kuma-push-runtime.md);
+the separate transactional Retention-monitor activation contract is documented
+in
+[`docs/ops/production-kuma-monitoring-env.md`](../../docs/ops/production-kuma-monitoring-env.md);
 `scripts/ops/uptime-kuma-crontab.example` remains the personal-crontab form.
 
 Deep-health monitor boundary:
@@ -108,6 +111,11 @@ Script inventory:
   default mode is local plan-only, while execute additionally binds local HEAD,
   local origin/main and live origin/main to the same expected merge commit and
   transfers the closed payload directly from that commit with `git archive`
+- `prod_kuma_monitoring_env_v1.sh` is local plan-only by default and provides
+  separate exact-commit Inspect, no-clobber Helper-Install and single Env-Execute
+  modes for ROB-490; the Execute path is the only supported post-bootstrap Env
+  writer and holds the canonical writer-authority lock throughout the
+  transaction; it never performs a Push or a timer/service action
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate

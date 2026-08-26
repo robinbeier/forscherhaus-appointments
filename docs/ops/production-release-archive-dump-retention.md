@@ -163,9 +163,12 @@ rollout has this exact order:
    marker. A `partial`, `blocked`, `known`, or `unknown` mutation outcome never
    substitutes for this postflight.
 
-6. Obtain a separate monitoring approval, set
-   `KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1` in the protected
-   `/root/backups/uptime-kuma-push.env`, then run and verify the existing push:
+6. Obtain a separate monitoring approval and use the exact-commit,
+   root-controlled ROB-490 transaction from
+   `docs/ops/production-kuma-monitoring-env.md` to set
+   `KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1` in the protected Env. The helper
+   installation and the single Env transaction are separate modes. Only after
+   their exact postflight may the separately approved existing Push run:
 
    ```bash
      ssh -o StrictHostKeyChecking=accept-new \

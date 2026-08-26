@@ -1,0 +1,25 @@
+{
+    "bootstrap": {
+        "manual_post_bootstrap_writes_supported": false,
+        "secret_population_phase": "pre-authority"
+    },
+    "env_path": "/root/backups/uptime-kuma-push.env",
+    "lock_contract": {
+        "coordination": "flock-exclusive",
+        "file_type": "regular",
+        "gid": 0,
+        "mode": "0600",
+        "nlink": 1,
+        "uid": 0
+    },
+    "lock_path": "/run/fh-kuma-monitoring-v1.lock",
+    "schema": "fh_kuma_monitoring_env_writer_authority.v1",
+    "supported_post_bootstrap_writers": [
+        {
+            "confirmation": "ROB-490",
+            "id": "rob-490-monitoring-activation",
+            "installed_path": "/usr/local/libexec/fh-kuma-monitoring-env-v1",
+            "repository_path": "scripts/ops/libexec/kuma_monitoring_env_v1.py"
+        }
+    ]
+}

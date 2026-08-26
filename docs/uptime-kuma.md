@@ -13,6 +13,8 @@ Repository-owned:
 - host-local env example: `scripts/ops/uptime-kuma-push.env.example`
 - crontab example: `scripts/ops/uptime-kuma-crontab.example`
 - immutable root runtime: `docs/ops/production-kuma-push-runtime.md`
+- transactional Retention-monitor Env gate:
+  `docs/ops/production-kuma-monitoring-env.md`
 
 Host-owned:
 
@@ -141,6 +143,12 @@ install -m 0600 scripts/ops/uptime-kuma-push.env.example /root/backups/uptime-ku
 ```
 
 Fill in real Push URLs on the host only.
+
+Enabling the existing ROB-453 retention-success signal is not a manual Env edit.
+Use the separately approved, exact-commit transaction in
+`docs/ops/production-kuma-monitoring-env.md`. Helper installation, the single
+Env transaction, one Push, timer enablement and timer start remain distinct
+gates.
 
 For `/etc/cron.d`, the canonical desired state is
 `scripts/ops/config/fh-uptime-kuma-push.cron`; the personal-crontab form remains
