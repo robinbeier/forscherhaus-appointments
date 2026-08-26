@@ -295,6 +295,22 @@ def projection_status_depends_on_substitution(buffer, current):
     )
 
 
+def legacy_backtick_status_is_guarded(value, opening_index):
+    index = opening_index + 1
+    while index < len(value):
+        if value[index:index + 1] == b'\\':
+            index += 2
+            continue
+        if value[index:index + 1] == b'`':
+            tail = value[index + 1:]
+            return re.match(
+                rb'[ \t]*\|\|[ \t]+true(?:[ \t;]|$)',
+                tail,
+            ) is not None
+        index += 1
+    return False
+
+
 def simple_parameter_end(value, index):
     if value[index:index + 1] != b'$' or index + 1 >= len(value):
         return None
@@ -550,6 +566,19 @@ def shell_line_contexts(data):
                         quote_projection_start = None
                         quote_starts_word = False
                 elif quote == b'"' and current == b'`':
+                    if (
+                        projection_compound_depth is None
+                        and not projection_function_depths
+                        and projection_function_block_depth is None
+                        and projection_status_depends_on_substitution(
+                            command_projection_buffer,
+                            command_projection,
+                        )
+                        and not legacy_backtick_status_is_guarded(body, index)
+                    ):
+                        # Legacy backticks have the same status-bearing
+                        # assignment/substitution semantics as ``$(...)``.
+                        status_bearing_command_substitution_unknown = True
                     if projection_compound_depth is None:
                         command_projection.extend(expansion_marker)
                     backtick_return_quote = b'"'
@@ -600,6 +629,19 @@ def shell_line_contexts(data):
                 continue
             if current == b'`':
                 structural_visible[index] = ord('x')
+                if (
+                    projection_compound_depth is None
+                    and not projection_function_depths
+                    and projection_function_block_depth is None
+                    and projection_status_depends_on_substitution(
+                        command_projection_buffer,
+                        command_projection,
+                    )
+                    and not legacy_backtick_status_is_guarded(body, index)
+                ):
+                    # Backticks execute a command substitution while sourcing;
+                    # do not infer its status without executing arbitrary Env.
+                    status_bearing_command_substitution_unknown = True
                 if projection_compound_depth is None:
                     command_projection.extend(expansion_marker)
                 backtick_return_quote = None
@@ -640,10 +682,19 @@ def shell_line_contexts(data):
                     or function_header.search(body[:index])
                     or (incoming_function_header and not body[:index].strip(b' \t'))
                 )
-                if not arithmetic_definition_only:
+                arithmetic_statically_unexecuted = bool(
+                    not projection_subshell_depths
+                    and re.search(
+                        rb'(?:^|;)[ \t]*false[ \t]*&&[ \t]*$',
+                        bytes(command_projection_buffer + command_projection),
+                    )
+                )
+                if not arithmetic_definition_only and not arithmetic_statically_unexecuted:
                     # Arithmetic command status depends on evaluated Env state:
                     # zero is failure and nonzero is success. The helper never
                     # evaluates arbitrary Env expressions to predict errexit.
+                    # The one supported top-level literal ``false &&`` proof
+                    # guarantees that its immediate arithmetic RHS is skipped.
                     arithmetic_status_unknown = True
                 compounds.append(b'))')
                 if projection_compound_depth is None:

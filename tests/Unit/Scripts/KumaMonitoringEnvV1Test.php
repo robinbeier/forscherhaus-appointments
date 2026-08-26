@@ -526,6 +526,37 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testLegacyBacktickReturnFailsClosedBeforeMutation(): void
+    {
+        $contents = "true && `return 2`\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testFalseAndArithmeticCommandRemainsReadOnly(): void
+    {
+        $contents = "false && (( 0 ))\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testSplitFunctionWithConditionalExpressionBodyRemainsReadOnly(): void
     {
         foreach (

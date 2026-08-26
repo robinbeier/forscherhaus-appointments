@@ -96,12 +96,14 @@ command projection. An actually executed arithmetic command is unsupported
 because zero evaluates to failure, nonzero to success, and the helper never
 evaluates Env expressions; structurally invalid arithmetic also fails closed.
 Only an immediate right-hand command behind
-top-level literal `false &&` is proven unexecuted; the same construct inside a
-subshell fails closed because the failed left side becomes the subshell status.
+top-level literal `false &&` is proven unexecuted, including an immediate
+arithmetic-command RHS; the same construct inside a subshell fails closed
+because the failed left side becomes the subshell status.
 Assignment-position, status-only, redirection-only and combined
 assignment/redirection-only command substitutions are unsupported because Bash
 can propagate their dynamically produced status and the helper never executes
-arbitrary Env code to simulate it. Arithmetic expansions remain value
+arbitrary Env code to simulate it. This includes both `$(...)` and legacy
+backtick substitutions. Arithmetic expansions remain value
 expansions, and the same status checks do not execute inside uninvoked function
 definitions. A `0`
 changes at exactly its single value-byte position. A `1` is already converged
