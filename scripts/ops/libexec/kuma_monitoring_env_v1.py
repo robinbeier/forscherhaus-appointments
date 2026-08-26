@@ -696,24 +696,44 @@ def shell_line_contexts(data):
                     command_projection.extend(b' ')
                 continue
             if body[index:index + 2] == b'[[':
+                same_line_function_conditional = bool(
+                    function_header.search(body[:index])
+                )
+                definition_only_conditional = bool(
+                    (
+                        incoming_function_conditional
+                        and not body[:index].strip(b' \t')
+                    )
+                    or same_line_function_conditional
+                )
                 if not (
-                    incoming_function_conditional
-                    and not body[:index].strip(b' \t')
+                    definition_only_conditional
                 ):
                     projection_conditional_offsets.append(
                         len(command_projection_buffer) + len(command_projection)
                     )
                 compounds.append(b']]')
                 if (
-                    incoming_function_conditional
-                    and not body[:index].strip(b' \t')
+                    definition_only_conditional
                     and projection_compound_depth is None
                 ):
-                    # A split ``[[ ... ]]`` function body is definition-only.
-                    # Hide its operands from command-word classification.
+                    # A split or same-line direct ``[[ ... ]]`` function body
+                    # is definition-only. Hide its operands from command-word
+                    # and conditional-status classification.
                     command_projection.extend(b';')
                     projection_compound_depth = len(compounds)
                 index += 2
+                continue
+            if (
+                current in {b'*', b'?', b'['}
+                and projection_compound_depth is None
+            ):
+                # Unquoted pathname expansion can synthesize a shell control,
+                # function or alias at the command-word position. Preserve it
+                # as a dynamic marker rather than guessing the consumer CWD.
+                structural_visible[index] = ord('x')
+                command_projection.extend(dynamic_expansion_marker)
+                index += 1
                 continue
             if body[index:index + 2] == b'((':
                 arithmetic_close = body.find(b'))', index + 2)

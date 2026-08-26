@@ -103,7 +103,9 @@ that every command will resolve. Function definitions named `command` or
 command grammar. Expansion-produced command words, ANSI-C/locale-quoted command
 words and quoted `builtin`/`command` wrappers are likewise unsupported; the
 helper never evaluates or normalizes arbitrary Env bytes to infer their runtime
-command identity. This includes brace-expanded command words. Required-value
+command identity. This includes brace- and pathname-expanded command words;
+the helper does not infer a Kuma consumer's working-directory contents.
+Required-value
 parameter expansions using `?` or `:?` in executed scope are unsupported because
 an absent value aborts sourcing before the appended assignment; the helper does
 not resolve protected Env state. Other uninvoked function definitions, including

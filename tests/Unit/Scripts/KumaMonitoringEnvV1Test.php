@@ -989,6 +989,61 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testPathnameExpandedReturnCommandFailsClosedBeforeMutation(): void
+    {
+        $commandPath = dirname(__DIR__, 3) . '/return';
+        self::assertFalse(file_exists($commandPath) || is_link($commandPath));
+        file_put_contents($commandPath, "#!/bin/sh\nexit 0\n");
+        chmod($commandPath, 0755);
+
+        try {
+            $contents = "retur? 0\n";
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        } finally {
+            unlink($commandPath);
+        }
+    }
+
+    public function testUninvokedDirectConditionalFunctionRemainsReadOnly(): void
+    {
+        $contents = "f() [[ 0 == 1 ]]\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testTopLevelConditionalAfterFunctionDefinitionFailsClosedBeforeMutation(): void
+    {
+        $contents = "f() { :; }\n[[ 0 == 1 ]]\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testHistoryAndFcReexecuteReturnFunctionFailsClosedBeforeMutation(): void
     {
         $contents = "f(){ return 2; }\nhistory -s f\nfc -s\n";
