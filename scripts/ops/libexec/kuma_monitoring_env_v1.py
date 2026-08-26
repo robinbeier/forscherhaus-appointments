@@ -719,6 +719,9 @@ def cleanup_pending(pending, desired, replacement_identity, expected_uid, lock, 
     if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_REPLACE_LOCK_BEFORE_PENDING_UNLINK') == '1':
         inject_foreign_env(lock, b'', expected_uid)
     validate_writer_lock(lock, lock_fd, expected_uid)
+    # The pathname unlink is authority-safe only because every supported writer
+    # is excluded by the canonical lock. Non-cooperative root mutation is
+    # explicitly outside the supported writer contract.
     os.unlink(pending)
     fsync_directory(pending.parent)
 

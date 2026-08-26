@@ -17,6 +17,8 @@ production phase remains a separate explicit gate.
 - protected Env: `/root/backups/uptime-kuma-push.env`
 - recovery state: `/var/lib/fh-kuma-monitoring-v1`
 - transaction lock: `/run/fh-kuma-monitoring-v1.lock`
+- writer-authority manifest:
+  `scripts/ops/config/kuma_monitoring_env_writer_authority.v1.json`
 
 `/run/fh-kuma-monitoring-v1.lock` is the canonical exclusive writer-authority
 lock. Every supported post-bootstrap writer of the protected Env must acquire
@@ -37,6 +39,15 @@ no-clobber semantics. That durable namespace change is reported as
 `mutation_performed=true` even when the Env was already converged; subsequent
 confirmed runs reuse the exact lock and remain mutation-free when no other
 change is required.
+
+The versioned manifest is the machine-readable repository inventory for this
+authority. Contract tests bind its fixed Env path, lock metadata and complete
+supported-writer set to the helper and this runbook. It is not a production
+runtime import: the helper, installer and operator wrapper deliberately keep
+their small trust primitives self-contained so an already hash-bound artifact
+cannot acquire a second mutable import dependency between verification and
+execution. Any future supported writer must first update the manifest, adopt
+the canonical lock and pass the same contract tests.
 
 The installed helper must be a regular `root:root`, mode `0555`, Single-Link
 file beneath root-controlled ancestors with no group/world write bit. The Env

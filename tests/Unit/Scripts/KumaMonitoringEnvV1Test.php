@@ -254,6 +254,55 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($afterFirst, $this->snapshot());
     }
 
+    public function testWriterAuthorityManifestBindsTheCompleteRuntimeContract(): void
+    {
+        $repository = dirname(__DIR__, 3);
+        $manifestPath = $repository . '/scripts/ops/config/kuma_monitoring_env_writer_authority.v1.json';
+        $manifest = json_decode((string) file_get_contents($manifestPath), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame('fh_kuma_monitoring_env_writer_authority.v1', $manifest['schema'] ?? null);
+        self::assertSame('/root/backups/uptime-kuma-push.env', $manifest['env_path'] ?? null);
+        self::assertSame('/run/fh-kuma-monitoring-v1.lock', $manifest['lock_path'] ?? null);
+        self::assertSame(
+            [
+                'coordination' => 'flock-exclusive',
+                'file_type' => 'regular',
+                'gid' => 0,
+                'mode' => '0600',
+                'nlink' => 1,
+                'uid' => 0,
+            ],
+            $manifest['lock_contract'] ?? null,
+        );
+        self::assertSame(
+            [
+                [
+                    'confirmation' => 'ROB-490',
+                    'id' => 'rob-490-monitoring-activation',
+                    'installed_path' => '/usr/local/libexec/fh-kuma-monitoring-env-v1',
+                    'repository_path' => 'scripts/ops/libexec/kuma_monitoring_env_v1.py',
+                ],
+            ],
+            $manifest['supported_post_bootstrap_writers'] ?? null,
+        );
+        self::assertSame(
+            [
+                'manual_post_bootstrap_writes_supported' => false,
+                'secret_population_phase' => 'pre-authority',
+            ],
+            $manifest['bootstrap'] ?? null,
+        );
+
+        $helper = (string) file_get_contents($repository . '/scripts/ops/libexec/kuma_monitoring_env_v1.py');
+        $runbook = (string) file_get_contents($repository . '/docs/ops/production-kuma-monitoring-env.md');
+        self::assertStringContainsString("ENV_PATH = '" . $manifest['env_path'] . "'", $helper);
+        self::assertStringContainsString("LOCK_PATH = '" . $manifest['lock_path'] . "'", $helper);
+        self::assertStringContainsString("CONFIRMATION = 'ROB-490'", $helper);
+        self::assertStringContainsString('stat.S_IMODE(opened.st_mode) != 0o600', $helper);
+        self::assertStringContainsString('opened.st_nlink != 1', $helper);
+        self::assertStringContainsString('kuma_monitoring_env_writer_authority.v1.json', $runbook);
+    }
+
     public function testInvalidCanonicalLockContractFailsWithoutMutation(): void
     {
         $this->writeEnv(self::KEY . "=0\n");
@@ -293,6 +342,32 @@ final class KumaMonitoringEnvV1Test extends TestCase
             self::assertSame($before, $this->snapshot());
             unlink($lock);
         }
+    }
+
+    public function testCanonicalLockSymlinkAndHardlinkFailWithoutMutation(): void
+    {
+        $this->writeEnv(self::KEY . "=0\n");
+        $lock = $this->root . '/run/fh-kuma-monitoring-v1.lock';
+        $target = $this->root . '/run/foreign-lock';
+        file_put_contents($target, '');
+        chmod($target, 0600);
+        symlink($target, $lock);
+        $beforeSymlink = $this->snapshot();
+
+        $symlink = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $symlink['exit_code']);
+        self::assertSame('lock_invalid', $this->json($symlink['stdout'])['reason'] ?? null);
+        self::assertSame($beforeSymlink, $this->snapshot());
+        unlink($lock);
+
+        link($target, $lock);
+        $beforeHardlink = $this->snapshot();
+        $hardlink = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $hardlink['exit_code']);
+        self::assertSame('lock_invalid', $this->json($hardlink['stdout'])['reason'] ?? null);
+        self::assertSame($beforeHardlink, $this->snapshot());
     }
 
     public function testConfirmationAndAmbiguousDefinitionsFailClosed(): void
