@@ -797,6 +797,21 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    public function testCoprocFunctionWaitFailsClosedBeforeMutation(): void
+    {
+        $contents = "f()\n{\nreturn 2\n}\ncoproc f\nwait \$COPROC_PID\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(70, $result['exit_code'], $contents);
+        $json = $this->json($result['stdout']);
+        self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testSameLineCompoundFunctionDefinitionsFailClosedWhenInvoked(): void
     {
         foreach (["f() (( 0 )); f\n", "f() [[ 1 ]]; f\n"] as $contents) {

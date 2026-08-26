@@ -86,7 +86,9 @@ Env-defined aliases, functions, traps, command resolution and later waits can
 all change their effective status. `command -v`/`-V` queries remain queries
 rather than calls. Actually executed `eval`, `source` and dot-source commands
 are unsupported for the same reason; those commands appearing only inside an
-uninvoked function definition stay definition-only. Uninvoked function definitions,
+uninvoked function definition stay definition-only. Top-level `coproc` is also
+unsupported because a coprocess can invoke an Env-defined function and a later
+`wait` can propagate its status before the appended assignment. Uninvoked function definitions,
 including same-line compound bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands

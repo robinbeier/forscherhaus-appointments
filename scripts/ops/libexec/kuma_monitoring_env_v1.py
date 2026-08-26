@@ -1118,6 +1118,12 @@ def shell_line_contexts(data):
                     # bytes. Executing those bytes to prove safety is outside
                     # this helper.
                     early_control = True
+                elif static_word == b'coproc' and not command_query and not inside_function:
+                    # A top-level coprocess can execute an Env-defined function
+                    # asynchronously and a later wait can propagate its status
+                    # before the appended assignment. Proving the operand and
+                    # every possible wait path would require executing Env code.
+                    early_control = True
                 elif (
                     not command_query
                     and (
