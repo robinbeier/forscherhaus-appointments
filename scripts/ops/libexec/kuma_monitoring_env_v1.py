@@ -347,6 +347,7 @@ def shell_line_contexts(data):
     projection_return_quote = None
     projection_function_depths = []
     projection_function_spans = []
+    projection_process_substitution_offsets = []
     projection_subshell_depths = []
     projection_brace_depths = []
     projection_function_block_depth = None
@@ -354,6 +355,7 @@ def shell_line_contexts(data):
     arithmetic_invalid = False
     arithmetic_status_unknown = False
     status_bearing_command_substitution_unknown = False
+    process_substitution_waitable = False
     backtick_return_quote = None
     quote_projection_start = None
     quote_starts_word = False
@@ -377,6 +379,9 @@ def shell_line_contexts(data):
     reserved_pipeline_prefix = (
         rb'(?:(?:!|time(?:[ \t]+-p)?|then|do|else|elif)[ \t]+)*'
     )
+    projection_reserved_pipeline_prefix = (
+        rb'(?:(?:!|time(?:[ \t]+-p)?|then|do|else|elif|if|until|while)[ \t]+)*'
+    )
     command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
         + reserved_pipeline_prefix +
@@ -387,7 +392,7 @@ def shell_line_contexts(data):
     )
     projection_command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
-        + reserved_pipeline_prefix +
+        + projection_reserved_pipeline_prefix +
         simple_command_prefix +
         rb'(?P<wrappers>(?:' + wrapper + rb')*)'
         rb'(?P<word>[^ \t;|&(){}<>]+)'
@@ -760,6 +765,13 @@ def shell_line_contexts(data):
                 ):
                     status_bearing_command_substitution_unknown = True
                 closers = {b'(': b')', b'{': b'}', b'[': b']'}
+                if (
+                    body[index:index + 2] in {b'>(', b'<('}
+                    and projection_compound_depth is None
+                ):
+                    projection_process_substitution_offsets.append(
+                        len(command_projection_buffer) + len(command_projection)
+                    )
                 compounds.append(closers[body[index + 1:index + 2]])
                 if projection_compound_depth is None:
                     # SOH cannot occur in validated input. Internally it marks
@@ -1068,13 +1080,34 @@ def shell_line_contexts(data):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
                 if (
-                    static_word in {b'alias', b'enable', b'hash', b'shopt', b'trap', b'unalias'}
+                    static_word
+                    in {b'alias', b'enable', b'hash', b'set', b'shopt', b'trap', b'unalias'}
                     and not command_query
                     and not inside_function
                 ):
                     # Runtime resolver, option and trap mutations can change a
                     # later command or the appended assignment itself. Static
                     # proof without executing arbitrary Env code is unsupported.
+                    early_control = True
+                elif (
+                    static_word == b'wait'
+                    and not command_query
+                    and not inside_function
+                    and (
+                        process_substitution_waitable
+                        or any(
+                            offset < match.start('word')
+                            and not any(
+                                start <= offset < end
+                                for start, end in projection_function_spans
+                            )
+                            for offset in projection_process_substitution_offsets
+                        )
+                    )
+                ):
+                    # Process substitution publishes an asynchronous process
+                    # through $!. A later wait can propagate its hidden status
+                    # before the appended monitoring assignment is sourced.
                     early_control = True
                 elif static_word in {b'exec', b'exit', b'return'} and not command_query:
                     if inside_function:
@@ -1122,8 +1155,17 @@ def shell_line_contexts(data):
                     and re.match(rb'[ \t]*\)', tail) is None
                 ):
                     early_control = True
+            if any(
+                not any(
+                    start <= offset < end
+                    for start, end in projection_function_spans
+                )
+                for offset in projection_process_substitution_offsets
+            ):
+                process_substitution_waitable = True
             command_projection_buffer.clear()
             projection_function_spans.clear()
+            projection_process_substitution_offsets.clear()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
         elif not structural and incoming_continuation == 'operator':

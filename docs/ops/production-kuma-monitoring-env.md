@@ -90,7 +90,7 @@ are unsupported for the same reason; those commands appearing only inside an
 uninvoked function definition stay definition-only. Top-level `coproc` is also
 unsupported because a coprocess can invoke an Env-defined function and a later
 `wait` can propagate its status before the appended assignment. Executed
-`alias`, `unalias`, `enable`, `hash`, `shopt` and `trap` commands are unsupported
+`alias`, `unalias`, `enable`, `hash`, `set`, `shopt` and `trap` commands are unsupported
 because they can change later command resolution, shell behavior or the
 appended assignment itself. Expansion-produced command words are likewise
 unsupported; the helper never evaluates Env values to infer their runtime
@@ -110,6 +110,9 @@ resolution can be changed by aliases, builtin enablement, the command hash table
 or shell options, while enclosing groups can propagate the failed left-hand
 status. Controls and arithmetic commands behind that spelling therefore remain
 unsupported and fail closed.
+Top-level process substitutions remain read-only only while no later executed
+`wait` can consume their asynchronous status. A later `wait` is unsupported and
+fails closed before mutation, including across physical lines.
 Assignment-position, status-only, redirection-only and combined
 assignment/redirection-only command substitutions, including substitutions
 after one or more completed assignments, are unsupported because Bash
