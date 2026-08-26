@@ -197,6 +197,29 @@ final class KumaMonitoringEnvV1Test extends TestCase
         }
     }
 
+    public function testQuotedBackslashContinuedEarlyControlsFailClosedBeforeMutation(): void
+    {
+        foreach (
+            [
+                '"ret\\' . "\n" . 'urn" 0' . "\n",
+                '"ex\\' . "\n" . 'it" 0' . "\n",
+                '"ex\\' . "\n" . 'ec" true' . "\n",
+                'command "ret\\' . "\n" . 'urn" 0' . "\n",
+                'builtin "ret\\' . "\n" . 'urn" 0' . "\n",
+            ]
+            as $contents
+        ) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
     public function testMultilineLegacyArithmeticContextFailsClosedBeforeMutation(): void
     {
         foreach (['$[1+' . "\n" . self::KEY . "=0\n]\n", 'X=$[array[' . "\n" . self::KEY . "=0\n]]\n"] as $contents) {
@@ -304,7 +327,10 @@ final class KumaMonitoringEnvV1Test extends TestCase
 
     public function testCommandNamesBeginningWithControlWordsRemainOrdinaryDryRuns(): void
     {
-        foreach (["command return-this\n", "command exit.status\n"] as $contents) {
+        foreach (
+            ["command return-this\n", "command exit.status\n", 'command "ret\\' . "\n" . 'urn-this"' . "\n"]
+            as $contents
+        ) {
             $this->writeEnv($contents);
             $before = $this->snapshot();
 

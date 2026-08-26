@@ -420,7 +420,9 @@ def shell_line_contexts(data):
                 blocks.append(block_openers[word])
 
         command_projection_buffer.extend(command_projection)
-        if quote is not None or projection_compound_depth is not None:
+        if projection_compound_depth is not None:
+            command_projection_buffer.extend(b'x')
+        elif quote is not None and continuation_kind != 'escape':
             command_projection_buffer.extend(b'x')
         elif continuation_kind == 'escape':
             # Backslash-newline is removed by Bash, so the surrounding shell
