@@ -88,7 +88,12 @@ rather than calls. Actually executed `eval`, `source` and dot-source commands
 are unsupported for the same reason; those commands appearing only inside an
 uninvoked function definition stay definition-only. Top-level `coproc` is also
 unsupported because a coprocess can invoke an Env-defined function and a later
-`wait` can propagate its status before the appended assignment. Uninvoked function definitions,
+`wait` can propagate its status before the appended assignment. Executed
+`alias`, `unalias`, `enable`, `hash`, `shopt` and `trap` commands are unsupported
+because they can change later command resolution, shell behavior or the
+appended assignment itself. Expansion-produced command words are likewise
+unsupported; the helper never evaluates Env values to infer their runtime
+identity. Uninvoked function definitions,
 including same-line compound bodies and definition-only output redirections
 with quoted or expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
@@ -97,11 +102,11 @@ operands inside uninvoked function definitions likewise stay out of the
 command projection. An actually executed arithmetic command is unsupported
 because zero evaluates to failure, nonzero to success, and the helper never
 evaluates Env expressions; structurally invalid arithmetic also fails closed.
-Only an immediate right-hand command behind top-level literal `false &&` is
-proven unexecuted, including an immediate arithmetic-command RHS. The proof is
-disabled after executed alias, unalias or shell-option commands and inside brace
-groups or subshells, where command resolution or enclosing status propagation
-can change the result.
+The helper does not use a literal-`false &&` execution exemption. Command
+resolution can be changed by aliases, builtin enablement, the command hash table
+or shell options, while enclosing groups can propagate the failed left-hand
+status. Controls and arithmetic commands behind that spelling therefore remain
+unsupported and fail closed.
 Assignment-position, status-only, redirection-only and combined
 assignment/redirection-only command substitutions, including substitutions
 after one or more completed assignments, are unsupported because Bash
