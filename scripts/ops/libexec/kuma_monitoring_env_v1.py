@@ -416,6 +416,12 @@ def shell_line_contexts(data):
                 incoming_function_brace = True
             elif stripped.startswith(b'('):
                 pending_function_header = False
+            elif stripped.startswith(b'[[') and (
+                len(stripped) == 2 or stripped[2:3] in b' \t'
+            ):
+                # [[ ... ]] is a Bash compound command and therefore a valid
+                # split function body. Its operands are not shell commands.
+                pending_function_header = False
             else:
                 block_match = function_block_opener.match(stripped)
                 pending_function_header = False
@@ -717,10 +723,13 @@ def shell_line_contexts(data):
                         following = body[index + 1:index + 2]
                         if following and following not in SHELL_WORD_BREAKS:
                             invalid_closer = True
+                        enclosing_tail = body[index + 1:].lstrip(b' \t')
+                        enclosing_status_unknown = enclosing_tail.startswith((b'|', b'&&'))
                         command_projection.extend(b';')
                         projection_subshell_spans.append((
                             subshell_start,
                             len(command_projection_buffer) + len(command_projection),
+                            enclosing_status_unknown,
                         ))
                         closed_projection = True
                     if (
@@ -807,9 +816,14 @@ def shell_line_contexts(data):
                     start <= match.start('word') < end
                     for start, end in projection_function_spans
                 )
-                inside_subshell = any(
-                    start <= match.start('word') < end
-                    for start, end in projection_subshell_spans
+                containing_subshells = [
+                    span
+                    for span in projection_subshell_spans
+                    if span[0] <= match.start('word') < span[1]
+                ]
+                inside_subshell = bool(containing_subshells)
+                subshell_enclosing_status_unknown = any(
+                    span[2] for span in containing_subshells
                 )
                 wrappers = [
                     wrapper_word
@@ -855,6 +869,7 @@ def shell_line_contexts(data):
                         not projected_control_tail_is_backgrounded(tail)
                         and not (
                             inside_subshell
+                            and not subshell_enclosing_status_unknown
                             and subshell_control_is_guaranteed_success(static_word, tail)
                         )
                     ):

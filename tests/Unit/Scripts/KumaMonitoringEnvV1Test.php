@@ -356,6 +356,38 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($original . self::KEY . "=1\n", file_get_contents($this->envPath));
     }
 
+    public function testEnclosingFailureAfterSubshellControlFailsClosedBeforeMutation(): void
+    {
+        foreach (["(true; return 0) | false\n", "(true; exit 0) && false\n", "( (return 0) ) | false\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            $json = $this->json($result['stdout']);
+            self::assertSame('env_shell_context_invalid', $json['reason'] ?? null);
+            self::assertFalse($json['mutation_performed'] ?? true);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testSplitFunctionWithConditionalExpressionBodyRemainsReadOnly(): void
+    {
+        $contents = "f()\n[[ 1 ]]\n";
+        $this->writeEnv($contents);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper();
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('pass', $json['status'] ?? null);
+        self::assertSame('would_enable', $json['monitoring_state'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
     public function testMultilineLegacyArithmeticContextFailsClosedBeforeMutation(): void
     {
         foreach (['$[1+' . "\n" . self::KEY . "=0\n]\n", 'X=$[array[' . "\n" . self::KEY . "=0\n]]\n"] as $contents) {
