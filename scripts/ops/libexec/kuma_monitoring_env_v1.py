@@ -272,6 +272,10 @@ def projected_control_tail_is_backgrounded(tail):
             if previous in {b'<', b'>'} or following == b'>':
                 index += 1
                 continue
+            if re.search(rb'(?:^|[;|&])[ \t]*wait(?=$|[ \t;|&])', tail[index + 1:]):
+                # A foreground wait can propagate the background control's
+                # nonzero status back into Kuma's errexit consumer.
+                return False
             return True
         index += 1
     return False
@@ -283,10 +287,26 @@ def subshell_control_is_guaranteed_success(word, tail):
     # dynamic or failing subshell control remains fail-closed.
     candidate = tail.lstrip(b' \t')
     if word in {b'return', b'exit'}:
-        return re.match(rb'(?:0[ \t]*)?(?:;|$)', candidate) is not None
+        # Argumentless return/exit inherit the preceding command status.
+        return re.match(rb'0[ \t]*(?:;|$)', candidate) is not None
     if word == b'exec':
         return re.match(rb'(?:;|$)', candidate) is not None
     return False
+
+
+def function_block_tail_is_definition_only(tail):
+    candidate = tail
+    redirection = re.compile(
+        rb'^[ \t]*(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+        rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))'
+        rb'[ \t]*[^ \t;|&]+'
+    )
+    while True:
+        match = redirection.match(candidate)
+        if match is None:
+            break
+        candidate = candidate[match.end():]
+    return re.fullmatch(rb'[ \t;]*', candidate) is not None
 
 
 def simple_parameter_end(value, index):
@@ -381,6 +401,14 @@ def shell_line_contexts(data):
     function_block_opener = re.compile(
         rb'(?P<word>case|for|if|select|until|while)(?=$|[ \t])'
     )
+    function_definition_name = re.compile(
+        rb'(?:^|[;|&])[ \t]*(?:'
+        rb'function[ \t]+(?P<function_name>[A-Za-z_][A-Za-z0-9_]*)'
+        rb'(?:[ \t]*\([ \t]*\))?'
+        rb'|(?P<plain_name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\([ \t]*\)'
+        rb')[ \t]*(?=\{|$)'
+    )
+    defined_function_names = set()
 
     lines = data.split(b'\n')
     for line_index, body in enumerate(lines):
@@ -724,7 +752,14 @@ def shell_line_contexts(data):
                         if following and following not in SHELL_WORD_BREAKS:
                             invalid_closer = True
                         enclosing_tail = body[index + 1:].lstrip(b' \t')
-                        enclosing_status_unknown = enclosing_tail.startswith((b'|', b'&&'))
+                        enclosing_status_unknown = bool(
+                            enclosing_tail.startswith((b'|', b'&&'))
+                            or re.match(
+                                rb'(?:(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?'
+                                rb'(?:<<<|<<-|>>|<>|>\||<&|>&|>|<)|&(?:>>|>))',
+                                enclosing_tail,
+                            )
+                        )
                         command_projection.extend(b';')
                         projection_subshell_spans.append((
                             subshell_start,
@@ -754,6 +789,20 @@ def shell_line_contexts(data):
             index += 1
 
         visible_bytes = bytes(structural_visible)
+        for definition_match in function_definition_name.finditer(body):
+            function_group = (
+                'function_name'
+                if definition_match.group('function_name') is not None
+                else 'plain_name'
+            )
+            function_name = definition_match.group(function_group)
+            function_start = definition_match.start(function_group)
+            function_end = definition_match.end(function_group)
+            # The raw spelling retains ``()`` for recognizing definitions;
+            # the structural view proves that the name itself was neither
+            # quoted nor commented out by the shell scanner.
+            if visible_bytes[function_start:function_end] == function_name:
+                defined_function_names.add(function_name)
         function_block_closed_tail = None
         for match in command_word.finditer(visible_bytes):
             # Shell reserved words are structural only when parsed directly.
@@ -782,7 +831,7 @@ def shell_line_contexts(data):
                     projection_function_block_start = len(command_projection_buffer)
 
         if function_block_closed_tail is not None:
-            if not re.fullmatch(rb'[ \t;]*', function_block_closed_tail):
+            if not function_block_tail_is_definition_only(function_block_closed_tail):
                 invalid_closer = True
             projection_function_spans.append((
                 projection_function_block_start,
@@ -874,6 +923,15 @@ def shell_line_contexts(data):
                         )
                     ):
                         early_control = True
+                elif (
+                    static_word in defined_function_names
+                    and not inside_function
+                    # The command projection also sees the function name in
+                    # the compact ``name()`` definition syntax. Only a later
+                    # invocation can affect the sourcing shell's status.
+                    and re.match(rb'[ \t]*\)', tail) is None
+                ):
+                    early_control = True
             command_projection_buffer.clear()
             projection_function_spans.clear()
             projection_subshell_spans.clear()
