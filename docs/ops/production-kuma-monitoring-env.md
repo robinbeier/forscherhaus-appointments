@@ -83,17 +83,23 @@ before mutation. This includes argumentless or dynamic subshell controls,
 waited background controls, status-affecting subshell redirections and calls
 to functions defined by the Env, including dynamically expanded calls.
 `command -v`/`-V` queries remain queries rather than calls, and wrapped
-`builtin wait` or non-query `command wait` still propagate a waited background
-status. Uninvoked function definitions, including a definition-only output
-redirection, remain read-only shell data. Their
+`builtin wait`, non-query `command wait` or `time wait` still propagate a
+waited background status. Uninvoked function definitions, including same-line
+compound bodies and definition-only output redirections with quoted or
+expanded targets, remain read-only shell data. Their
 unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
 remain conditional syntax rather than projected commands. An argumentless
 subshell `exec` is only considered terminal when no later command in that same
-subshell can determine its status. Arithmetic-command operands likewise stay
-out of the command projection, while structurally invalid arithmetic fails
-closed. A non-final control in a pipeline is exempted only for a narrowly
-proven literal-success pipeline under `pipefail`. A `0` changes at exactly its
-single value-byte position. A `1` is already converged and is never rewritten.
+or any enclosing subshell can determine its status. Arithmetic-command
+operands likewise stay out of the command projection, while structurally
+invalid arithmetic fails closed. A non-final control in a pipeline is exempted
+only for a narrowly proven literal-success pipeline under `pipefail`; an
+immediate right-hand command behind literal `false &&` is likewise proven
+unexecuted. Assignment-position command substitutions are unsupported because
+Bash propagates their dynamically produced status and the helper never
+executes arbitrary Env code to simulate that status. A `0` changes at exactly
+its single value-byte position. A `1` is already converged and is never
+rewritten.
 
 The desired Env must also remain within the same bounded Env-size contract.
 An append that would cross that limit fails during read-only preflight before

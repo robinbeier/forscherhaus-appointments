@@ -289,10 +289,11 @@ def projected_control_tail_is_backgrounded(word, tail):
                 index += 1
                 continue
             if re.search(
-                rb'(?:^|[;|&])[ \t]*(?:'
-                rb'builtin(?:[ \t]+--)?[ \t]+'
-                rb'|command(?:[ \t]+(?:-p|--))*[ \t]+'
-                rb')?wait(?=$|[ \t;|&])',
+                rb'(?:^|[;|&])[ \t]*'
+                rb'(?:(?:!|time(?:[ \t]+-p)?)[ \t]+)*'
+                rb'(?:(?:builtin(?:[ \t]+--)?'
+                rb'|command(?:[ \t]+(?:-p|--))*)[ \t]+)?'
+                rb'wait(?=$|[ \t;|&])',
                 tail[index + 1:],
             ):
                 # A foreground wait can propagate the background control's
@@ -310,7 +311,9 @@ def subshell_control_is_guaranteed_success(word, tail):
     candidate = tail.lstrip(b' \t')
     if word in {b'return', b'exit'}:
         # Argumentless return/exit inherit the preceding command status.
-        return re.match(rb'0[ \t]*(?:;|$)', candidate) is not None
+        # A literal zero is only sufficient when no later command inside the
+        # same enclosing subshell can replace that successful status.
+        return re.fullmatch(rb'0[ \t]*(?:;[ \t]*)*', candidate) is not None
     if word == b'exec':
         # Argumentless exec only preserves the subshell status when no later
         # command in that same subshell can replace its successful result.
@@ -331,6 +334,24 @@ def function_block_tail_is_definition_only(tail):
             break
         candidate = candidate[match.end():]
     return re.fullmatch(rb'[ \t;]*', candidate) is not None
+
+
+def projected_command_is_statically_unexecuted(projected_commands, match):
+    # This is intentionally a narrow proof, not a general evaluator for Bash
+    # conditionals. A literal ``false &&`` cannot execute its immediate RHS;
+    # every dynamic or nested condition remains conservatively fail-closed.
+    prefix = projected_commands[:match.start('wrappers')]
+    return re.search(rb'(?:^|;)[ \t]*false[ \t]*&&[ \t]*$', prefix) is not None
+
+
+def projection_is_assignment_only(buffer, current):
+    projected = bytes(buffer + current)
+    command = re.split(rb'[;|&]', projected)[-1]
+    return re.fullmatch(
+        rb'[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]*[ \t]+)*'
+        rb'[A-Za-z_][A-Za-z0-9_]*=',
+        command,
+    ) is not None
 
 
 def simple_parameter_end(value, index):
@@ -369,6 +390,7 @@ def shell_line_contexts(data):
     projection_function_block_depth = None
     projection_function_block_start = None
     arithmetic_invalid = False
+    assignment_command_substitution_unknown = False
     backtick_return_quote = None
     quote_projection_start = None
     quote_starts_word = False
@@ -431,7 +453,9 @@ def shell_line_contexts(data):
         rb'function[ \t]+(?P<function_name>[A-Za-z_][A-Za-z0-9_]*)'
         rb'(?:[ \t]*\([ \t]*\))?'
         rb'|(?P<plain_name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\([ \t]*\)'
-        rb')[ \t]*(?=\{|$)'
+        rb')[ \t]*(?=\{|\(\(|\[\[|case(?:$|[ \t])|for(?:$|[ \t])|'
+        rb'if(?:$|[ \t])|select(?:$|[ \t])|until(?:$|[ \t])|'
+        rb'while(?:$|[ \t])|$)'
     )
     defined_function_names = set()
 
@@ -527,6 +551,18 @@ def shell_line_contexts(data):
                         continue
                     token = body[index:index + 2]
                     if token in {b'$(', b'${', b'$['}:
+                        if (
+                            token == b'$('
+                            and projection_compound_depth is None
+                            and projection_is_assignment_only(
+                                command_projection_buffer,
+                                command_projection,
+                            )
+                        ):
+                            # An assignment command inherits the status of its
+                            # command substitution. Arbitrary Env code is not
+                            # executed here to guess that status.
+                            assignment_command_substitution_unknown = True
                         closers = {b'$(': b')', b'${': b'}', b'$[': b']'}
                         compounds.append(closers[token])
                         if projection_compound_depth is None:
@@ -605,11 +641,13 @@ def shell_line_contexts(data):
                 continue
             parameter_end = simple_parameter_end(body, index)
             if parameter_end is not None:
+                structural_visible[index] = ord('x')
                 if projection_compound_depth is None:
                     command_projection.extend(expansion_marker)
                 index = parameter_end
                 continue
             if current in {b"'", b'"'}:
+                structural_visible[index] = ord('x')
                 quote_projection_start = len(command_projection)
                 quote_starts_word = projection_starts_word(
                     command_projection_buffer,
@@ -619,6 +657,7 @@ def shell_line_contexts(data):
                 index += 1
                 continue
             if current == b'`':
+                structural_visible[index] = ord('x')
                 if projection_compound_depth is None:
                     command_projection.extend(expansion_marker)
                 backtick_return_quote = None
@@ -702,6 +741,15 @@ def shell_line_contexts(data):
                     index += 2
                 continue
             if body[index:index + 2] in {b'$(', b'${', b'$[', b'>(', b'<('}:
+                if (
+                    body[index:index + 2] == b'$('
+                    and projection_compound_depth is None
+                    and projection_is_assignment_only(
+                        command_projection_buffer,
+                        command_projection,
+                    )
+                ):
+                    assignment_command_substitution_unknown = True
                 closers = {b'(': b')', b'{': b'}', b'[': b']'}
                 compounds.append(closers[body[index + 1:index + 2]])
                 if projection_compound_depth is None:
@@ -948,13 +996,17 @@ def shell_line_contexts(data):
                     if span[0] <= match.start('word') < span[1]
                 ]
                 inside_subshell = bool(containing_subshells)
-                subshell_tail = tail = projected_commands[match.end():]
-                if containing_subshells:
-                    subshell_tail = projected_commands[
-                        match.end():min(span[1] for span in containing_subshells)
-                    ]
-                subshell_enclosing_status_unknown = any(
-                    span[2] for span in containing_subshells
+                tail = projected_commands[match.end():]
+                subshell_status_is_guaranteed_success = bool(
+                    containing_subshells
+                    and all(
+                        not span[2]
+                        and subshell_control_is_guaranteed_success(
+                            static_word,
+                            projected_commands[match.end():span[1]],
+                        )
+                        for span in containing_subshells
+                    )
                 )
                 wrappers = [
                     wrapper_word
@@ -991,6 +1043,8 @@ def shell_line_contexts(data):
                     ):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
+                if projected_command_is_statically_unexecuted(projected_commands, match):
+                    continue
                 if static_word in {b'exec', b'exit', b'return'} and not command_query:
                     if inside_function:
                         if static_word != b'return':
@@ -999,11 +1053,7 @@ def shell_line_contexts(data):
                         not projected_control_tail_is_backgrounded(static_word, tail)
                         and not (
                             inside_subshell
-                            and not subshell_enclosing_status_unknown
-                            and subshell_control_is_guaranteed_success(
-                                static_word,
-                                subshell_tail,
-                            )
+                            and subshell_status_is_guaranteed_success
                         )
                     ):
                         early_control = True
@@ -1052,6 +1102,7 @@ def shell_line_contexts(data):
         and projection_function_block_depth is None
         and not projection_subshell_depths
         and not arithmetic_invalid
+        and not assignment_command_substitution_unknown
     )
     trailing_escape_only = (
         quote is None
