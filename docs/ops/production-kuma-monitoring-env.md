@@ -90,11 +90,11 @@ are unsupported for the same reason; those commands appearing only inside an
 uninvoked function definition stay definition-only. Top-level `coproc` is also
 unsupported because a coprocess can invoke an Env-defined function and a later
 `wait` can propagate its status before the appended assignment. Executed
-`alias`, `unalias`, `declare`, `enable`, `hash`, `let`, `mapfile`, `readarray`,
-`readonly`, `set`, `shopt`, `trap` and `typeset` commands are unsupported
-because they can change later command resolution, variable attributes, shell
-behavior, arithmetic status, invoke dynamic callbacks or affect the appended
-assignment itself. A `command_not_found_handle`
+`alias`, `unalias`, `compgen`, `declare`, `enable`, `hash`, `let`, `mapfile`,
+`readarray`, `readonly`, `set`, `shopt`, `trap` and `typeset` commands are
+unsupported because they can change later command resolution, variable
+attributes, shell behavior, arithmetic status, invoke dynamic callbacks or
+affect the appended assignment itself. A `command_not_found_handle`
 definition is also unsupported because Bash can invoke that function implicitly
 for a later unresolved command; the helper does not execute the Env to prove
 that every command will resolve. Function definitions named `command` or
@@ -108,8 +108,10 @@ same-line `if`, `for`,
 with quoted or expanded targets, remain read-only shell data. Same-line `case`
 bodies and command-bearing tails after a same-line function block are outside
 the supported grammar and fail closed before mutation. Their
-unescaped physical newlines stay command boundaries, and `[[ ... ]]` operands
-remain conditional syntax rather than projected commands. Arithmetic-command
+unescaped physical newlines stay command boundaries. An executed top-level
+`[[ ... ]]` conditional is unsupported because its false status can trigger
+`errexit` before the appended assignment; operands inside an uninvoked function
+definition remain definition-only conditional syntax. Arithmetic-command
 operands inside uninvoked function definitions likewise stay out of the
 command projection. An actually executed arithmetic command is unsupported
 because zero evaluates to failure, nonzero to success, and the helper never

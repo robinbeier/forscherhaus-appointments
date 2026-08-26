@@ -347,6 +347,7 @@ def shell_line_contexts(data):
     projection_return_quote = None
     projection_function_depths = []
     projection_function_spans = []
+    projection_conditional_offsets = []
     projection_process_substitution_offsets = []
     projection_subshell_depths = []
     projection_brace_depths = []
@@ -354,6 +355,7 @@ def shell_line_contexts(data):
     projection_function_block_start = None
     arithmetic_invalid = False
     arithmetic_status_unknown = False
+    conditional_status_unknown = False
     status_bearing_command_substitution_unknown = False
     process_substitution_waitable = False
     backtick_return_quote = None
@@ -673,6 +675,13 @@ def shell_line_contexts(data):
                     command_projection.extend(b' ')
                 continue
             if body[index:index + 2] == b'[[':
+                if not (
+                    incoming_function_conditional
+                    and not body[:index].strip(b' \t')
+                ):
+                    projection_conditional_offsets.append(
+                        len(command_projection_buffer) + len(command_projection)
+                    )
                 compounds.append(b']]')
                 if (
                     incoming_function_conditional
@@ -1114,6 +1123,7 @@ def shell_line_contexts(data):
                     static_word
                     in {
                         b'alias',
+                        b'compgen',
                         b'declare',
                         b'enable',
                         b'hash',
@@ -1209,8 +1219,20 @@ def shell_line_contexts(data):
                 for offset in projection_process_substitution_offsets
             ):
                 process_substitution_waitable = True
+            if any(
+                not any(
+                    start <= offset < end
+                    for start, end in projection_function_spans
+                )
+                for offset in projection_conditional_offsets
+            ):
+                # Conditional-command status depends on the protected Env.
+                # A false result can trigger errexit before the appended
+                # monitoring assignment, so the helper never predicts it.
+                conditional_status_unknown = True
             command_projection_buffer.clear()
             projection_function_spans.clear()
+            projection_conditional_offsets.clear()
             projection_process_substitution_offsets.clear()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
@@ -1242,6 +1264,7 @@ def shell_line_contexts(data):
         and not projection_subshell_depths
         and not arithmetic_invalid
         and not arithmetic_status_unknown
+        and not conditional_status_unknown
         and not status_bearing_command_substitution_unknown
     )
     trailing_escape_only = (
