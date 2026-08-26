@@ -406,6 +406,11 @@ def shell_line_contexts(data):
 
         visible_bytes = bytes(structural_visible)
         for match in command_word.finditer(visible_bytes):
+            # Shell reserved words are structural only when parsed directly.
+            # Behind builtin/command they are ordinary operands (including
+            # command -v/-V queries), never block delimiters.
+            if match.group('wrappers'):
+                continue
             word = match.group('word')
             if blocks and word == blocks[-1]:
                 blocks.pop()
