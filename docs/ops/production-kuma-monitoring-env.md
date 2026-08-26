@@ -18,6 +18,26 @@ production phase remains a separate explicit gate.
 - recovery state: `/var/lib/fh-kuma-monitoring-v1`
 - transaction lock: `/run/fh-kuma-monitoring-v1.lock`
 
+`/run/fh-kuma-monitoring-v1.lock` is the canonical exclusive writer-authority
+lock. Every supported post-bootstrap writer of the protected Env must acquire
+and hold this lock across revalidation, mutation, rollback and cleanup. The
+ROB-490 helper is currently the only supported post-bootstrap Env writer;
+Kuma push scripts are readers only. Initial secret population is a separate
+pre-authority bootstrap phase. Manual later edits to the protected Env are
+unsupported and do not receive the transaction's no-clobber or rollback
+guarantees.
+
+The no-clobber and rollback guarantees apply to coordinated writers that honor
+this authority contract. Arbitrary non-cooperative root mutation is outside the
+supported authority. The helper nevertheless validates identity and content
+again at every guarded boundary and treats any detected drift as a fail-closed
+hard failure; it never silently treats such drift as a successful transaction.
+The first confirmed Execute may create the canonical mode-`0600` lock with
+no-clobber semantics. That durable namespace change is reported as
+`mutation_performed=true` even when the Env was already converged; subsequent
+confirmed runs reuse the exact lock and remain mutation-free when no other
+change is required.
+
 The installed helper must be a regular `root:root`, mode `0555`, Single-Link
 file beneath root-controlled ancestors with no group/world write bit. The Env
 and both recovery files must be regular `root:root`, mode `0600`, Single-Link
@@ -102,12 +122,22 @@ count, size and mtime for both the displaced original and the published
 replacement. No other metadata normalization is supported.
 
 A concurrent writer before Exchange is detected by the full immediate
-identity recheck and is not overwritten. A failure after Exchange rolls back
-only while the live object is still the exact helper-owned replacement and the
-displaced object is still the exact bound original. A newer writer during
-recovery is never overwritten or unlinked; the result becomes
+identity recheck and is not overwritten. Every supported writer is excluded
+from the final identity-check/Exchange and identity-check/unlink windows by the
+canonical exclusive lock, whose pathname, descriptor identity and trust
+metadata are revalidated immediately before each pathname mutation. A failure
+after Exchange rolls back only while the live object is still the exact
+helper-owned replacement and the displaced object is still the exact bound
+original. A detected newer object during recovery is never restored or
+unlinked; the result becomes
 `rollback_failed`, and private displaced evidence is retained for a separate
 read-only recovery decision.
+
+Linux does not provide a pathname operation that combines `RENAME_EXCHANGE` or
+`unlink` with an expected-inode compare-and-swap condition. The transaction's
+race guarantee therefore depends on the coordinated writer authority above.
+An arbitrary non-cooperative root process can violate that authority; this is
+an unsupported host mutation, never a successful or simulated transaction.
 
 The recovery pair is revalidated again after the live directory is durable and
 before the displaced original is unlinked. Recovery drift while the exact
@@ -120,8 +150,9 @@ unexpected runtime failures while the exact pair is still present. After the
 displaced original has been durably unlinked, failures are reported as unknown
 mutating outcomes and are never retried.
 
-Only an object proven to be the helper's exact private replacement may be
-unlinked. Recovery publication or any begun Exchange makes
+Within the coordinated writer authority, only an object proven to be the
+helper's exact private replacement while the canonical lock remains bound may
+be unlinked. Recovery publication or any begun Exchange makes
 `mutation_performed=true`, including after a successful rollback. Every result
 contains `rollback_outcome=not_required|succeeded|failed`. Unknown transport
 outcomes are never retried.

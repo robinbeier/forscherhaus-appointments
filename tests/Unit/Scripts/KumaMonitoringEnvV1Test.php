@@ -184,6 +184,117 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($original . self::KEY . "=1\n", file_get_contents($this->envPath));
     }
 
+    public function testAssignmentPrefixedEarlyControlTransfersFailClosedBeforeMutation(): void
+    {
+        foreach (["X=1 return 0\n", "X=1 exit 0\n", "X=1 exec true\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testUnmatchedShellDelimitersFailClosedBeforeMutation(): void
+    {
+        foreach (["X=1 )\n", "X=1 }\n", self::KEY . "=0\n)\n", self::KEY . "=0\n}\n"] as $contents) {
+            $this->writeEnv($contents);
+            $before = $this->snapshot();
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code'], $contents);
+            self::assertSame('env_shell_context_invalid', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+        }
+    }
+
+    public function testCanonicalLockHeldByAnotherWriterFailsWithoutMutation(): void
+    {
+        $this->writeEnv(self::KEY . "=0\n");
+        $lock = $this->root . '/run/fh-kuma-monitoring-v1.lock';
+        file_put_contents($lock, '');
+        chmod($lock, 0600);
+        $handle = fopen($lock, 'c');
+        self::assertIsResource($handle);
+        self::assertTrue(flock($handle, LOCK_EX | LOCK_NB));
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('lock_busy', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+
+    public function testCanonicalLockCreationIsReportedAndThenConverges(): void
+    {
+        $original = self::KEY . "=0\n";
+        $enabled = self::KEY . "=1\n";
+        $this->writeEnv($enabled);
+        $this->writeRecovery($original, $enabled);
+
+        $first = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(0, $first['exit_code'], $first['stderr']);
+        self::assertTrue($this->json($first['stdout'])['mutation_performed'] ?? false);
+        self::assertSame($enabled, file_get_contents($this->envPath));
+        self::assertFileExists($this->root . '/run/fh-kuma-monitoring-v1.lock');
+        $afterFirst = $this->snapshot();
+
+        $second = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(0, $second['exit_code'], $second['stderr']);
+        self::assertFalse($this->json($second['stdout'])['mutation_performed'] ?? true);
+        self::assertSame($afterFirst, $this->snapshot());
+    }
+
+    public function testInvalidCanonicalLockContractFailsWithoutMutation(): void
+    {
+        $this->writeEnv(self::KEY . "=0\n");
+        $lock = $this->root . '/run/fh-kuma-monitoring-v1.lock';
+        mkdir($lock, 0700);
+        $before = $this->snapshot();
+
+        $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('lock_invalid', $json['reason'] ?? null);
+        self::assertFalse($json['mutation_performed'] ?? true);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testWrongCanonicalLockModeAndOwnerFailWithoutMutation(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::markTestSkipped('Owner fixture requires root in the isolated test container.');
+        }
+
+        foreach ([0644, 0600] as $mode) {
+            $this->writeEnv(self::KEY . "=0\n");
+            $lock = $this->root . '/run/fh-kuma-monitoring-v1.lock';
+            file_put_contents($lock, '');
+            chmod($lock, $mode);
+            if ($mode === 0600) {
+                chown($lock, 65534);
+            }
+            $before = $this->snapshot();
+
+            $result = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+
+            self::assertSame(70, $result['exit_code']);
+            self::assertSame('lock_invalid', $this->json($result['stdout'])['reason'] ?? null);
+            self::assertSame($before, $this->snapshot());
+            unlink($lock);
+        }
+    }
+
     public function testConfirmationAndAmbiguousDefinitionsFailClosed(): void
     {
         $this->writeEnv("SECRET_TOKEN=do-not-print\n");
@@ -412,6 +523,9 @@ final class KumaMonitoringEnvV1Test extends TestCase
         $desired = self::KEY . "=1\n";
         $this->writeEnv($original);
         $this->writeRecovery($original, $desired);
+        $lock = $this->root . '/run/fh-kuma-monitoring-v1.lock';
+        file_put_contents($lock, '');
+        chmod($lock, 0600);
         $recoveryBefore = $this->recoverySnapshot();
         $result = $this->runHelper(
             ['--execute', '--confirm-live-write', 'ROB-490'],
@@ -425,6 +539,31 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($original, file_get_contents($this->envPath));
         self::assertSame($recoveryBefore, $this->recoverySnapshot());
         self::assertSame([], glob($this->root . '/root/backups/.fh-kuma-monitoring-env-v1.pending-*'));
+    }
+
+    public function testLockDriftBeforePendingUnlinkFailsClosedAndRetainsEvidence(): void
+    {
+        $original = self::KEY . "=0\n";
+        $desired = self::KEY . "=1\n";
+        $this->writeEnv($original);
+        $this->writeRecovery($original, $desired);
+        $result = $this->runHelper(
+            ['--execute', '--confirm-live-write', 'ROB-490'],
+            [
+                'FH_KUMA_MONITORING_TEST_FAIL_EXCHANGE' => '1',
+                'FH_KUMA_MONITORING_TEST_REPLACE_LOCK_BEFORE_PENDING_UNLINK' => '1',
+            ],
+        );
+
+        self::assertSame(70, $result['exit_code']);
+        $json = $this->json($result['stdout']);
+        self::assertSame('lock_invalid', $json['reason'] ?? null);
+        self::assertTrue($json['mutation_performed'] ?? false);
+        self::assertSame('failed', $json['rollback_outcome'] ?? null);
+        self::assertSame($original, file_get_contents($this->envPath));
+        $pending = glob($this->root . '/root/backups/.fh-kuma-monitoring-env-v1.pending-*');
+        self::assertCount(1, $pending);
+        self::assertSame($desired, file_get_contents($pending[0]));
     }
 
     public function testRecoveryDriftBeforeOriginalUnlinkTriggersGuardedRollback(): void

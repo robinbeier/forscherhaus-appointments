@@ -224,7 +224,12 @@ def shell_line_contexts(data):
     continuation_kind = None
     heredocs = []
     early_control = False
-    command_word = re.compile(rb'(?:^|[;|&])\s*([A-Za-z_][A-Za-z0-9_]*)')
+    invalid_closer = False
+    command_word = re.compile(
+        rb'(?:^|[;|&])\s*'
+        rb'(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*)\s+)*'
+        rb'([A-Za-z_][A-Za-z0-9_]*)'
+    )
     block_openers = {
         b'case': b'esac',
         b'for': b'done',
@@ -295,6 +300,8 @@ def shell_line_contexts(data):
             if body[index:index + 2] == b']]':
                 if compounds and compounds[-1] == b']]':
                     compounds.pop()
+                else:
+                    invalid_closer = True
                 index += 2
                 continue
             if body[index:index + 2] in {b'$(', b'${'}:
@@ -308,6 +315,8 @@ def shell_line_contexts(data):
             if current in {b')', b'}'}:
                 if compounds and compounds[-1] == current:
                     compounds.pop()
+                else:
+                    invalid_closer = True
                 visible[index] = current[0]
                 index += 1
                 continue
@@ -320,6 +329,8 @@ def shell_line_contexts(data):
                 early_control = True
             if blocks and word == blocks[-1]:
                 blocks.pop()
+            elif word in {b'done', b'esac', b'fi'}:
+                invalid_closer = True
             elif word in block_openers:
                 blocks.append(block_openers[word])
         structural = bytes(visible).rstrip()
@@ -335,13 +346,21 @@ def shell_line_contexts(data):
             continuation_kind = 'escape'
         heredocs.extend(declared_heredocs)
 
-    complete = quote is None and not compounds and not blocks and continuation_kind is None and not heredocs
+    complete = (
+        quote is None
+        and not compounds
+        and not blocks
+        and continuation_kind is None
+        and not heredocs
+        and not invalid_closer
+    )
     trailing_escape_only = (
         quote is None
         and not compounds
         and not blocks
         and continuation_kind == 'escape'
         and not heredocs
+        and not invalid_closer
     )
     return contexts, complete, trailing_escape_only, early_control
 
@@ -648,8 +667,27 @@ def exact_exchange_object(path, expected_data, expected_identity, expected_uid, 
     return current
 
 
+def validate_writer_lock(path, fd, expected_uid):
+    try:
+        opened = os.fstat(fd)
+        current = os.lstat(path)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fail('lock_invalid')
+    if (
+        identity(opened) != identity(current)
+        or not stat.S_ISREG(opened.st_mode)
+        or opened.st_uid != expected_uid
+        or opened.st_gid != trusted_gid(expected_uid)
+        or stat.S_IMODE(opened.st_mode) != 0o600
+        or opened.st_nlink != 1
+    ):
+        fail('lock_invalid')
+
+
 def rollback_exchange(env, pending, live_data, live_identity, displaced_data,
-                      displaced_identity, expected_uid, root_prefix, failure_reason):
+                      displaced_identity, expected_uid, root_prefix, lock, lock_fd,
+                      failure_reason):
     if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_CONCURRENT_DURING_RESTORE') == '1':
         inject_foreign_env(env, b'FOREIGN_RESTORE_WRITER=1\n', expected_uid)
     try:
@@ -657,9 +695,11 @@ def rollback_exchange(env, pending, live_data, live_identity, displaced_data,
         exact_exchange_object(
             pending, displaced_data, displaced_identity, expected_uid, 'rollback_displaced_changed',
         )
+        validate_writer_lock(lock, lock_fd, expected_uid)
         rename_exchange(env.parent, pending.name, env.name)
         exact_exchange_object(env, displaced_data, displaced_identity, expected_uid, 'rollback_restore_invalid')
         exact_exchange_object(pending, live_data, live_identity, expected_uid, 'rollback_displaced_invalid')
+        validate_writer_lock(lock, lock_fd, expected_uid)
         os.unlink(pending)
         fsync_directory(env.parent)
         return ContractError(failure_reason, True, 'succeeded')
@@ -667,7 +707,8 @@ def rollback_exchange(env, pending, live_data, live_identity, displaced_data,
         return ContractError('rollback_failed', True, 'failed')
 
 
-def cleanup_pending(pending, desired, replacement_identity, expected_uid):
+def cleanup_pending(pending, desired, replacement_identity, expected_uid, lock, lock_fd,
+                    root_prefix):
     if not pending.exists() and not pending.is_symlink():
         return
     data, current = stable_read(
@@ -675,6 +716,9 @@ def cleanup_pending(pending, desired, replacement_identity, expected_uid):
     )
     if replacement_identity is None or data != desired or identity(current) != identity(replacement_identity):
         fail('pending_cleanup_invalid', True, 'failed')
+    if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_REPLACE_LOCK_BEFORE_PENDING_UNLINK') == '1':
+        inject_foreign_env(lock, b'', expected_uid)
+    validate_writer_lock(lock, lock_fd, expected_uid)
     os.unlink(pending)
     fsync_directory(pending.parent)
 
@@ -686,6 +730,9 @@ def execute_transaction(context):
     original = context['original']
     desired = context['desired']
     env_identity = context['env_identity']
+    lock = context['lock']
+    lock_fd = context['lock_fd']
+    validate_writer_lock(lock, lock_fd, expected_uid)
     recovery_mutated = publish_recovery(
         context['state'], original, desired, root_prefix, expected_uid,
     )
@@ -707,6 +754,7 @@ def execute_transaction(context):
             fail('env_changed', recovery_mutated)
         if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_FAIL_EXCHANGE') == '1':
             raise OSError(errno.EOPNOTSUPP, 'test exchange unavailable')
+        validate_writer_lock(lock, lock_fd, expected_uid)
         rename_exchange(env.parent, pending.name, env.name)
         exchanged = True
         exchange_begun = True
@@ -736,6 +784,7 @@ def execute_transaction(context):
             fsync_directory(context['state'])
         validate_recovery(context['state'], original, desired, expected_uid, False)
         exact_exchange_object(pending, original, env_identity, expected_uid, 'displaced_changed')
+        validate_writer_lock(lock, lock_fd, expected_uid)
         os.unlink(pending)
         exchanged = False
         if test_hook(root_prefix, 'FH_KUMA_MONITORING_TEST_FAIL_FINAL_DURABILITY') == '1':
@@ -752,13 +801,22 @@ def execute_transaction(context):
         if exchanged and replacement_identity is not None:
             raise rollback_exchange(
                 env, pending, desired, replacement_identity, original, env_identity,
-                expected_uid, root_prefix, error.reason,
+                expected_uid, root_prefix, lock, lock_fd, error.reason,
             ) from error
         if not exchanged:
             try:
-                cleanup_pending(pending, desired, replacement_identity, expected_uid)
+                cleanup_pending(
+                    pending, desired, replacement_identity, expected_uid, lock, lock_fd,
+                    root_prefix,
+                )
             except FileNotFoundError:
                 pass
+            except ContractError as cleanup_error:
+                raise ContractError(
+                    cleanup_error.reason,
+                    recovery_mutated or replacement_identity is not None,
+                    'failed',
+                ) from cleanup_error
         if (recovery_mutated or exchange_begun) and not error.mutated:
             rollback = 'failed' if exchange_begun else error.rollback
             raise ContractError(error.reason, True, rollback) from error
@@ -767,12 +825,21 @@ def execute_transaction(context):
         if exchanged and replacement_identity is not None:
             raise rollback_exchange(
                 env, pending, desired, replacement_identity, original, env_identity,
-                expected_uid, root_prefix, 'execution_failed',
+                expected_uid, root_prefix, lock, lock_fd, 'execution_failed',
             ) from error
         try:
-            cleanup_pending(pending, desired, replacement_identity, expected_uid)
+            cleanup_pending(
+                pending, desired, replacement_identity, expected_uid, lock, lock_fd,
+                root_prefix,
+            )
         except FileNotFoundError:
             pass
+        except ContractError as cleanup_error:
+            raise ContractError(
+                cleanup_error.reason,
+                recovery_mutated or replacement_identity is not None,
+                'failed',
+            ) from cleanup_error
         raise ContractError('execution_failed', recovery_mutated or exchange_begun, 'failed') from error
 
 
@@ -823,8 +890,19 @@ def inspect_context(root_prefix):
 
 
 def open_lock(path, expected_uid):
+    created = False
     try:
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        fd = os.open(
+            path,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+        created = True
+    except FileExistsError:
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+        except OSError:
+            fail('lock_invalid')
     except OSError:
         fail('lock_invalid')
     opened = os.fstat(fd)
@@ -832,7 +910,7 @@ def open_lock(path, expected_uid):
         current = os.lstat(path)
     except OSError:
         os.close(fd)
-        fail('lock_invalid')
+        fail('lock_invalid', created, 'failed' if created else 'not_required')
     if (
         identity(opened) != identity(current)
         or not stat.S_ISREG(opened.st_mode)
@@ -842,13 +920,20 @@ def open_lock(path, expected_uid):
         or opened.st_nlink != 1
     ):
         os.close(fd)
-        fail('lock_invalid')
+        fail('lock_invalid', created, 'failed' if created else 'not_required')
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         os.close(fd)
-        fail('lock_busy')
-    return fd
+        fail('lock_busy', created, 'failed' if created else 'not_required')
+    try:
+        validate_writer_lock(path, fd, expected_uid)
+    except ContractError as error:
+        os.close(fd)
+        if created and not error.mutated:
+            raise ContractError(error.reason, True, 'failed') from error
+        raise
+    return fd, created
 
 
 def parse_arguments():
@@ -879,16 +964,23 @@ def main():
         monitoring = 'enabled' if context['value'] == '1' else 'would_enable'
         emit('pass', True, False, monitoring, context['recovery_state'])
         return
-    lock_fd = open_lock(context['lock'], context['expected_uid'])
+    lock_fd, lock_created = open_lock(context['lock'], context['expected_uid'])
     try:
-        context = inspect_context(args.root_prefix)
-        if context['value'] == '1':
-            emit('pass', True, False, 'enabled', 'intact')
-            return
-        mutated = execute_transaction(context)
+        try:
+            context = inspect_context(args.root_prefix)
+            context['lock_fd'] = lock_fd
+            validate_writer_lock(context['lock'], lock_fd, context['expected_uid'])
+            if context['value'] == '1':
+                emit('pass', True, lock_created, 'enabled', 'intact')
+                return
+            mutated = execute_transaction(context)
+        except ContractError as error:
+            if lock_created and not error.mutated:
+                raise ContractError(error.reason, True, 'failed') from error
+            raise
     finally:
         os.close(lock_fd)
-    emit('pass', True, mutated, 'enabled', 'intact')
+    emit('pass', True, mutated or lock_created, 'enabled', 'intact')
 
 
 try:

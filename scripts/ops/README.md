@@ -113,7 +113,9 @@ Script inventory:
   transfers the closed payload directly from that commit with `git archive`
 - `prod_kuma_monitoring_env_v1.sh` is local plan-only by default and provides
   separate exact-commit Inspect, no-clobber Helper-Install and single Env-Execute
-  modes for ROB-490; it never performs a Push or a timer/service action
+  modes for ROB-490; the Execute path is the only supported post-bootstrap Env
+  writer and holds the canonical writer-authority lock throughout the
+  transaction; it never performs a Push or a timer/service action
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
