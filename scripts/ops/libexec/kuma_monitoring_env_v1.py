@@ -26,7 +26,6 @@ MAX_EVIDENCE_BYTES = 4_100_000
 RENAME_NOREPLACE = 1
 RENAME_EXCHANGE = 2
 SHELL_WORD_BREAKS = b' \t;|&(){}<>'
-BACKGROUND_OPERATOR = re.compile(rb'(?<![<>&])&(?![&>])')
 
 
 class ContractError(Exception):
@@ -240,11 +239,54 @@ def empty_quote_closes_word(body, index, projection, projection_start, starts_wo
     )
 
 
-def control_tail_is_backgrounded(tail):
-    command_end = re.search(rb'[;|]', tail)
-    if command_end is not None:
-        tail = tail[:command_end.start()]
-    return BACKGROUND_OPERATOR.search(tail) is not None
+def projected_control_tail_is_backgrounded(tail):
+    # `tail` comes from the quote-aware command projection: comments are
+    # absent, while quoted or escaped shell separators are opaque markers.
+    # Only structural list depth and the first projected operator remain to be
+    # classified here.
+    compounds = []
+    index = 0
+    while index < len(tail):
+        current = tail[index:index + 1]
+        if current in {b'(', b'{'}:
+            compounds.append(b')' if current == b'(' else b'}')
+            index += 1
+            continue
+        if current in {b')', b'}'}:
+            if compounds and compounds[-1] == current:
+                compounds.pop()
+            elif not compounds:
+                return False
+            index += 1
+            continue
+        if compounds:
+            index += 1
+            continue
+        if current in {b';', b'|'}:
+            return False
+        if current == b'&':
+            previous = tail[index - 1:index] if index else b''
+            following = tail[index + 1:index + 2]
+            if following == b'&':
+                return False
+            if previous in {b'<', b'>'} or following == b'>':
+                index += 1
+                continue
+            return True
+        index += 1
+    return False
+
+
+def subshell_control_is_guaranteed_success(word, tail):
+    # Kuma sources the Env with errexit. Only literal, side-effect-free success
+    # statuses are safe to treat as non-transfers from the parent shell; every
+    # dynamic or failing subshell control remains fail-closed.
+    candidate = tail.lstrip(b' \t')
+    if word in {b'return', b'exit'}:
+        return re.match(rb'(?:0[ \t]*)?(?:;|$)', candidate) is not None
+    if word == b'exec':
+        return re.match(rb'(?:;|$)', candidate) is not None
+    return False
 
 
 def simple_parameter_end(value, index):
@@ -278,6 +320,10 @@ def shell_line_contexts(data):
     projection_return_quote = None
     projection_function_depths = []
     projection_function_spans = []
+    projection_subshell_depths = []
+    projection_subshell_spans = []
+    projection_function_block_depth = None
+    projection_function_block_start = None
     backtick_return_quote = None
     quote_projection_start = None
     quote_starts_word = False
@@ -295,7 +341,9 @@ def shell_line_contexts(data):
         rb'|command[ \t]+(?:(?:-[pVv]+)[ \t]+|' + redirection + rb')*'
         rb'(?:--[ \t]+(?:' + redirection + rb')*)?)'
     )
-    reserved_pipeline_prefix = rb'(?:(?:!|time(?:[ \t]+-p)?)[ \t]+)*'
+    reserved_pipeline_prefix = (
+        rb'(?:(?:!|time(?:[ \t]+-p)?|then|do|else|elif)[ \t]+)*'
+    )
     command_word = re.compile(
         rb'(?:^|[;|&])[ \t]*'
         + reserved_pipeline_prefix +
@@ -330,6 +378,9 @@ def shell_line_contexts(data):
         rb'|[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)'
         rb')[ \t]*$'
     )
+    function_block_opener = re.compile(
+        rb'(?P<word>case|for|if|select|until|while)(?=$|[ \t])'
+    )
 
     lines = data.split(b'\n')
     for line_index, body in enumerate(lines):
@@ -344,6 +395,8 @@ def shell_line_contexts(data):
         incoming_continuation = continuation_kind
         incoming_escape_joins_word = continuation_escape_joins_word
         incoming_function_header = pending_function_header
+        incoming_function_brace = False
+        incoming_function_block_word = None
         contexts.append(
             quote is None
             and not compounds
@@ -357,9 +410,19 @@ def shell_line_contexts(data):
             stripped = body.lstrip(b' \t')
             if not stripped or stripped.startswith(b'#'):
                 pending_function_header = True
-            elif not stripped.startswith(b'{'):
+            elif stripped.startswith(b'{') and (
+                len(stripped) == 1 or stripped[1:2] in b' \t'
+            ):
+                incoming_function_brace = True
+            elif stripped.startswith(b'('):
                 pending_function_header = False
-                invalid_closer = True
+            else:
+                block_match = function_block_opener.match(stripped)
+                pending_function_header = False
+                if block_match:
+                    incoming_function_block_word = block_match.group('word')
+                else:
+                    invalid_closer = True
         # structural_visible retains source offsets for balance/continuation.
         # command_projection is the quote-aware view used only for command words.
         structural_visible = bytearray(b' ' * len(body))
@@ -381,6 +444,11 @@ def shell_line_contexts(data):
                         )
                     ):
                         command_projection.extend(b'x')
+                    elif projection_compound_depth is None:
+                        # Preserve that this shell word used quoting. The NUL
+                        # marker is stripped for builtin control names but
+                        # prevents quoted reserved words becoming syntax.
+                        command_projection.extend(expansion_marker)
                     quote = None
                     quote_projection_start = None
                     quote_starts_word = False
@@ -435,6 +503,8 @@ def shell_line_contexts(data):
                         )
                     ):
                         command_projection.extend(b'x')
+                    elif closing_quote == b'"' and projection_compound_depth is None:
+                        command_projection.extend(expansion_marker)
                     quote = backtick_return_quote if closing_quote == b'`' else None
                     backtick_return_quote = None
                     if closing_quote == b'"':
@@ -469,6 +539,7 @@ def shell_line_contexts(data):
                     following = body[index + 1:index + 2]
                     if projection_compound_depth is None:
                         command_projection.extend(command_projection_literal(following))
+                        command_projection.extend(expansion_marker)
                     index += 2
                 continue
             parameter_end = simple_parameter_end(body, index)
@@ -561,6 +632,19 @@ def shell_line_contexts(data):
                 continue
             if current in {b'(', b'{'}:
                 compounds.append(b')' if current == b'(' else b'}')
+                same_line_function_header = bool(
+                    current == b'{' and function_header.search(body[:index])
+                )
+                function_brace_token = bool(
+                    current == b'{'
+                    and (index + 1 == len(body) or body[index + 1:index + 2] in b' \t')
+                )
+                if (
+                    current == b'{'
+                    and (same_line_function_header or incoming_function_header)
+                    and not function_brace_token
+                ):
+                    invalid_closer = True
                 function_signature_parenthesis = bool(
                     current == b'('
                     and re.fullmatch(
@@ -574,18 +658,28 @@ def shell_line_contexts(data):
                     and projection_compound_depth is None
                     and not function_signature_parenthesis
                 ):
-                    # Parenthesized command groups execute in a subshell, so
-                    # return/exit/exec inside them cannot transfer from the
-                    # shell that sources the monitoring Env.
-                    command_projection.extend(b'x')
-                    projection_compound_depth = len(compounds)
+                    # Parenthesized command groups execute in a subshell. Keep
+                    # their command projection scoped so a literal success can
+                    # be distinguished from a nonzero status that would abort
+                    # Kuma's errexit consumer before the appended assignment.
+                    command_projection.extend(b';')
+                    subshell_start = len(command_projection_buffer) + len(command_projection)
+                    projection_subshell_depths.append((len(compounds), subshell_start))
+                    same_line_function_body = bool(function_header.search(body[:index]))
+                    split_line_function_body = bool(
+                        incoming_function_header and not body[:index].strip(b' \t')
+                    )
+                    if same_line_function_body or split_line_function_body:
+                        projection_function_depths.append((len(compounds), subshell_start))
+                        pending_function_header = False
                 if (
                     current == b'{'
                     and projection_compound_depth is None
+                    and function_brace_token
                     and (
-                        function_header.search(body[:index])
+                        same_line_function_header
                         or (
-                            incoming_function_header
+                            incoming_function_brace
                             and not body[:index].strip(b' \t')
                         )
                     )
@@ -616,6 +710,20 @@ def shell_line_contexts(data):
                             len(command_projection_buffer) + len(command_projection),
                         ))
                     if (
+                        projection_subshell_depths
+                        and len(compounds) < projection_subshell_depths[-1][0]
+                    ):
+                        _, subshell_start = projection_subshell_depths.pop()
+                        following = body[index + 1:index + 2]
+                        if following and following not in SHELL_WORD_BREAKS:
+                            invalid_closer = True
+                        command_projection.extend(b';')
+                        projection_subshell_spans.append((
+                            subshell_start,
+                            len(command_projection_buffer) + len(command_projection),
+                        ))
+                        closed_projection = True
+                    if (
                         projection_compound_depth is not None
                         and len(compounds) < projection_compound_depth
                     ):
@@ -637,6 +745,7 @@ def shell_line_contexts(data):
             index += 1
 
         visible_bytes = bytes(structural_visible)
+        function_block_closed_tail = None
         for match in command_word.finditer(visible_bytes):
             # Shell reserved words are structural only when parsed directly.
             # Behind builtin/command they are ordinary operands (including
@@ -646,13 +755,39 @@ def shell_line_contexts(data):
             word = match.group('word')
             if blocks and word == blocks[-1]:
                 blocks.pop()
+                if (
+                    projection_function_block_depth is not None
+                    and len(blocks) < projection_function_block_depth
+                ):
+                    function_block_closed_tail = visible_bytes[match.end('word'):]
+                    projection_function_block_depth = None
             elif word in {b'done', b'esac', b'fi'}:
                 invalid_closer = True
             elif word in block_openers:
                 blocks.append(block_openers[word])
+                if (
+                    incoming_function_block_word == word
+                    and projection_function_block_depth is None
+                ):
+                    projection_function_block_depth = len(blocks)
+                    projection_function_block_start = len(command_projection_buffer)
+
+        if function_block_closed_tail is not None:
+            if not re.fullmatch(rb'[ \t;]*', function_block_closed_tail):
+                invalid_closer = True
+            projection_function_spans.append((
+                projection_function_block_start,
+                len(command_projection_buffer) + len(command_projection),
+            ))
+            projection_function_block_start = None
 
         command_projection_buffer.extend(command_projection)
-        if projection_compound_depth is not None or projection_function_depths:
+        if (
+            projection_compound_depth is not None
+            or projection_function_depths
+            or projection_function_block_depth is not None
+            or projection_subshell_depths
+        ):
             # The expansion marker already represents the entire potentially
             # empty compound across physical lines. Function projections also
             # remain buffered until their closing brace records the full span.
@@ -671,6 +806,10 @@ def shell_line_contexts(data):
                 inside_function = any(
                     start <= match.start('word') < end
                     for start, end in projection_function_spans
+                )
+                inside_subshell = any(
+                    start <= match.start('word') < end
+                    for start, end in projection_subshell_spans
                 )
                 wrappers = [
                     wrapper_word
@@ -708,15 +847,21 @@ def shell_line_contexts(data):
                         if b'v' in wrapper_word or b'V' in wrapper_word:
                             command_query = True
                 tail = projected_commands[match.end():]
-                if (
-                    static_word in {b'exec', b'exit', b'return'}
-                    and not command_query
-                    and not control_tail_is_backgrounded(tail)
-                    and not (inside_function and static_word == b'return')
-                ):
-                    early_control = True
+                if static_word in {b'exec', b'exit', b'return'} and not command_query:
+                    if inside_function:
+                        if static_word != b'return':
+                            early_control = True
+                    elif (
+                        not projected_control_tail_is_backgrounded(tail)
+                        and not (
+                            inside_subshell
+                            and subshell_control_is_guaranteed_success(static_word, tail)
+                        )
+                    ):
+                        early_control = True
             command_projection_buffer.clear()
             projection_function_spans.clear()
+            projection_subshell_spans.clear()
         structural = bytes(structural_visible).rstrip()
         if structural.endswith((b'&&', b'||', b'|')):
             continuation_kind = 'operator'
@@ -744,6 +889,8 @@ def shell_line_contexts(data):
         and not heredocs
         and not invalid_closer
         and not pending_function_header
+        and projection_function_block_depth is None
+        and not projection_subshell_depths
     )
     trailing_escape_only = (
         quote is None
