@@ -18,6 +18,10 @@ final class BookingWebMcpRuntimeTest extends TestCase
 
     public function testJavaScriptRuntimeContract(): void
     {
+        if (!is_file($this->repositoryRoot . '/node_modules/moment-timezone/package.json')) {
+            $this->markTestSkipped('Frontend dependencies are unavailable in this PHP-only test shard.');
+        }
+
         $process = proc_open(
             ['node', '--test', 'tests/JavaScript/booking_webmcp.test.js'],
             [
