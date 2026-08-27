@@ -43,7 +43,7 @@ final class BookingWebMcpRuntimeTest extends TestCase
         $exitCode = proc_close($process);
 
         self::assertSame(0, $exitCode, trim($stdout . PHP_EOL . $stderr));
-        self::assertMatchesRegularExpression('/(?:#|ℹ) pass 13/', $stdout);
+        self::assertMatchesRegularExpression('/(?:#|ℹ) pass 15/', $stdout);
         self::assertMatchesRegularExpression('/(?:#|ℹ) fail 0/', $stdout);
     }
 
@@ -109,6 +109,20 @@ final class BookingWebMcpRuntimeTest extends TestCase
         self::assertStringContainsString("$('.wizard-frame').stop(true, true).hide()", $prepareFunction);
         self::assertStringContainsString("$('#wizard-frame-3').show()", $prepareFunction);
         self::assertStringNotContainsString(".trigger('click')", $prepareFunction);
+
+        $clearDefinition = strpos($prepareFunction, 'const clearStaleAvailability');
+        $clearBeforeMutation = strpos($prepareFunction, 'clearStaleAvailability();', $clearDefinition);
+        $serviceMutation = strpos($prepareFunction, '$selectService.val(String(serviceId))');
+        $catchBlock = strpos($prepareFunction, '} catch (error) {');
+        $clearAfterFailure = strpos($prepareFunction, 'clearStaleAvailability();', $catchBlock);
+
+        self::assertIsInt($clearDefinition);
+        self::assertIsInt($clearBeforeMutation);
+        self::assertIsInt($serviceMutation);
+        self::assertIsInt($catchBlock);
+        self::assertIsInt($clearAfterFailure);
+        self::assertLessThan($serviceMutation, $clearBeforeMutation);
+        self::assertGreaterThan($catchBlock, $clearAfterFailure);
     }
 
     private function read(string $relativePath): string

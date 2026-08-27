@@ -18,6 +18,7 @@ App.Pages.BookingWebMcp = (function () {
 
     let registrationController = null;
     let registrationPromise = null;
+    let activePreparation = null;
 
     function isEnabled() {
         return String(vars('webmcp_booking_pilot_enabled') || '0') === '1';
@@ -90,6 +91,40 @@ App.Pages.BookingWebMcp = (function () {
         if (signal?.aborted) {
             throw signal.reason ?? new DOMException('The WebMCP tool call was aborted.', 'AbortError');
         }
+    }
+
+    function beginPreparation(signal) {
+        activePreparation?.controller.abort(
+            new DOMException('A newer booking preparation superseded this request.', 'AbortError'),
+        );
+
+        const controller = new AbortController();
+        const preparation = {controller, signal, abortListener: null};
+
+        if (signal) {
+            preparation.abortListener = () => controller.abort(signal.reason);
+            if (signal.aborted) {
+                preparation.abortListener();
+            } else {
+                signal.addEventListener('abort', preparation.abortListener, {once: true});
+            }
+        }
+
+        activePreparation = preparation;
+        return preparation;
+    }
+
+    function finishPreparation(preparation) {
+        if (preparation.signal && preparation.abortListener) {
+            preparation.signal.removeEventListener('abort', preparation.abortListener);
+        }
+
+        if (activePreparation !== preparation) {
+            return false;
+        }
+
+        activePreparation = null;
+        return true;
     }
 
     function assertAllowedKeys(input, allowedKeys) {
@@ -271,25 +306,35 @@ App.Pages.BookingWebMcp = (function () {
         assertDateWithinBookingWindow(selectedDateMoment, 'date');
         const selectedDate = selectedDateMoment.format('YYYY-MM-DD');
         const selectedTime = parseTime(input.time);
+        const preparation = beginPreparation(signal);
 
-        const prepared = await App.Pages.Booking.prepareBookingSelection({
-            serviceId: service.record.id,
-            providerId: provider.id,
-            selectedDate,
-            selectedTime,
-            signal,
-        });
+        try {
+            assertNotAborted(preparation.controller.signal);
 
-        assertNotAborted(signal);
+            const prepared = await App.Pages.Booking.prepareBookingSelection({
+                serviceId: service.record.id,
+                providerId: provider.id,
+                selectedDate,
+                selectedTime,
+                signal: preparation.controller.signal,
+            });
 
-        return {
-            prepared: true,
-            service_key: input.service_key,
-            provider_key: input.provider_key,
-            date: prepared.selected_date,
-            time: prepared.selected_time,
-            next_step: 'Enter and verify contact details in the visible form, then confirm the booking yourself.',
-        };
+            assertNotAborted(preparation.controller.signal);
+            if (activePreparation !== preparation) {
+                throw new DOMException('A newer booking preparation superseded this request.', 'AbortError');
+            }
+
+            return {
+                prepared: true,
+                service_key: input.service_key,
+                provider_key: input.provider_key,
+                date: prepared.selected_date,
+                time: prepared.selected_time,
+                next_step: 'Enter and verify contact details in the visible form, then confirm the booking yourself.',
+            };
+        } finally {
+            finishPreparation(preparation);
+        }
     }
 
     function toolDefinitions() {

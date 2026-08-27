@@ -54,6 +54,7 @@ App.Pages.Booking = (function () {
     let manageMode = vars('manage_mode') || false;
     let hasScrolledToNextButton = false; // Avoid repeated auto-scrolls after time selection.
     let suppressServiceAvailabilityRefresh = false;
+    let bookingPreparationSequence = 0;
     const noSlotFallbackShownEvents = new Set();
 
     /**
@@ -1188,6 +1189,23 @@ App.Pages.Booking = (function () {
             throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
         }
 
+        const preparationSequence = ++bookingPreparationSequence;
+        const assertCurrentPreparation = () => {
+            if (preparationSequence !== bookingPreparationSequence) {
+                throw new DOMException('A newer booking preparation superseded this request.', 'AbortError');
+            }
+
+            if (signal?.aborted) {
+                throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
+            }
+        };
+
+        const clearStaleAvailability = () => {
+            if (preparationSequence === bookingPreparationSequence) {
+                $availableHours.empty();
+            }
+        };
+
         const selectedDateMoment = moment(selectedDate, 'YYYY-MM-DD', true);
 
         if (!selectedDateMoment.isValid()) {
@@ -1207,73 +1225,76 @@ App.Pages.Booking = (function () {
             throw new Error('The requested service is not available.');
         }
 
-        suppressServiceAvailabilityRefresh = true;
-
+        // Clear the old service/provider's hours before any selection mutation. If a later
+        // availability request fails or is aborted, stale hours cannot remain actionable.
+        clearStaleAvailability();
         try {
-            $selectService.val(String(serviceId)).trigger('change');
-        } finally {
-            suppressServiceAvailabilityRefresh = false;
+            suppressServiceAvailabilityRefresh = true;
+            try {
+                $selectService.val(String(serviceId)).trigger('change');
+            } finally {
+                suppressServiceAvailabilityRefresh = false;
+            }
+
+            const providerExists = $selectProvider
+                .find('option')
+                .toArray()
+                .some((option) => String(option.value) === String(providerId));
+
+            if (!providerExists) {
+                throw new Error('The requested provider is not available for this service.');
+            }
+
+            $selectProvider.val(String(providerId));
+
+            const unavailableDatesRequest = App.Http.Booking.getUnavailableDates(
+                String(providerId),
+                String(serviceId),
+                selectedDate,
+                1,
+                {preserveSelection: true, signal},
+            );
+
+            if (unavailableDatesRequest) {
+                await unavailableDatesRequest;
+            }
+
+            assertCurrentPreparation();
+
+            App.Utils.UI.setDateTimePickerValue($selectDate, selectedDateMoment.toDate());
+
+            const request = App.Http.Booking.getAvailableHours(selectedDate, signal);
+            await request;
+
+            assertCurrentPreparation();
+
+            const $selectedHour = $availableHours.find('.available-hour').filter((index, availableHour) => {
+                return String($(availableHour).data('value')) === String(selectedTime);
+            });
+
+            if (!$selectedHour.length) {
+                throw new Error('The requested slot is no longer available.');
+            }
+
+            $availableHours.find('.selected-hour').removeClass('selected-hour');
+            $selectedHour.first().addClass('selected-hour');
+            updateConfirmFrame();
+
+            $('.wizard-frame').stop(true, true).hide();
+            $('.active-step').removeClass('active-step');
+            $('#step-3').addClass('active-step');
+            $('#wizard-frame-3').show();
+
+            return {
+                service_id: String(serviceId),
+                provider_id: String(providerId),
+                selected_date: selectedDate,
+                selected_time: selectedTime,
+            };
+        } catch (error) {
+            clearStaleAvailability();
+            throw error;
         }
-
-        const providerExists = $selectProvider
-            .find('option')
-            .toArray()
-            .some((option) => String(option.value) === String(providerId));
-
-        if (!providerExists) {
-            throw new Error('The requested provider is not available for this service.');
-        }
-
-        $selectProvider.val(String(providerId));
-
-        const unavailableDatesRequest = App.Http.Booking.getUnavailableDates(
-            String(providerId),
-            String(serviceId),
-            selectedDate,
-            1,
-            {preserveSelection: true, signal},
-        );
-
-        if (unavailableDatesRequest) {
-            await unavailableDatesRequest;
-        }
-
-        if (signal?.aborted) {
-            throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
-        }
-
-        App.Utils.UI.setDateTimePickerValue($selectDate, selectedDateMoment.toDate());
-
-        const request = App.Http.Booking.getAvailableHours(selectedDate, signal);
-        await request;
-
-        if (signal?.aborted) {
-            throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
-        }
-
-        const $selectedHour = $availableHours.find('.available-hour').filter((index, availableHour) => {
-            return String($(availableHour).data('value')) === String(selectedTime);
-        });
-
-        if (!$selectedHour.length) {
-            throw new Error('The requested slot is no longer available.');
-        }
-
-        $availableHours.find('.selected-hour').removeClass('selected-hour');
-        $selectedHour.first().addClass('selected-hour');
-        updateConfirmFrame();
-
-        $('.wizard-frame').stop(true, true).hide();
-        $('.active-step').removeClass('active-step');
-        $('#step-3').addClass('active-step');
-        $('#wizard-frame-3').show();
-
-        return {
-            service_id: String(serviceId),
-            provider_id: String(providerId),
-            selected_date: selectedDate,
-            selected_time: selectedTime,
-        };
     }
 
     document.addEventListener('DOMContentLoaded', initialize);

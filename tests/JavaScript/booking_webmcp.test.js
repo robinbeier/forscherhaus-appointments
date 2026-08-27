@@ -110,6 +110,10 @@ function createHarness(options = {}) {
                     async prepareBookingSelection(input) {
                         preparationCalls.push(input);
 
+                        if (options.prepareBookingSelection) {
+                            return options.prepareBookingSelection(input);
+                        }
+
                         if (options.prepareError) {
                             throw new Error(options.prepareError);
                         }
@@ -523,6 +527,73 @@ test('reschedule, abort and preparation errors remain free of booking mutation',
         /slot disappeared/,
     );
     assert.equal(failed.preparationCalls.length, 1);
+});
+
+test('overlapping prepare_booking calls supersede older visible state', async () => {
+    const harness = createHarness({
+        prepareBookingSelection(input) {
+            if (input.selectedTime === '09:00') {
+                return new Promise((resolve, reject) => {
+                    input.signal.addEventListener('abort', () => reject(input.signal.reason), {once: true});
+                });
+            }
+
+            return Promise.resolve({selected_date: input.selectedDate, selected_time: input.selectedTime});
+        },
+    });
+    await harness.api.initialize();
+    const tool = harness.activeTools.get('prepare_booking');
+
+    const first = tool.execute(
+        {service_key: 'service_1', provider_key: 'provider_1', date: '2026-09-01', time: '09:00'},
+        {signal: new AbortController().signal},
+    );
+    const second = tool.execute(
+        {service_key: 'service_1', provider_key: 'provider_1', date: '2026-09-01', time: '10:30'},
+        {signal: new AbortController().signal},
+    );
+
+    await assert.rejects(first, /superseded|aborted/i);
+    assert.deepEqual(JSON.parse(JSON.stringify(await second)), {
+        prepared: true,
+        service_key: 'service_1',
+        provider_key: 'provider_1',
+        date: '2026-09-01',
+        time: '10:30',
+        next_step: 'Enter and verify contact details in the visible form, then confirm the booking yourself.',
+    });
+    assert.equal(harness.preparationCalls.length, 2);
+});
+
+test('an invalid retry does not supersede an active valid preparation', async () => {
+    let finishPreparation;
+    const harness = createHarness({
+        prepareBookingSelection(input) {
+            return new Promise((resolve) => {
+                finishPreparation = () =>
+                    resolve({selected_date: input.selectedDate, selected_time: input.selectedTime});
+            });
+        },
+    });
+    await harness.api.initialize();
+    const tool = harness.activeTools.get('prepare_booking');
+
+    const valid = tool.execute(
+        {service_key: 'service_1', provider_key: 'provider_1', date: '2026-09-01', time: '09:00'},
+        {signal: new AbortController().signal},
+    );
+
+    await assert.rejects(
+        tool.execute(
+            {service_key: 'service_999', provider_key: 'provider_1', date: '2026-09-01', time: '10:30'},
+            {signal: new AbortController().signal},
+        ),
+        /Unknown service_key/,
+    );
+
+    assert.equal(harness.preparationCalls[0].signal.aborted, false);
+    finishPreparation();
+    assert.equal((await valid).prepared, true);
 });
 
 test('a late abort stops an in-flight availability tool call', async () => {
