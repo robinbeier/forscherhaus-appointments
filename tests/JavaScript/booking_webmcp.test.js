@@ -310,6 +310,8 @@ function createBookingSelectionHarness() {
     let resolveAvailable;
     let wizardFrame3Shown = false;
     let availableStarted = false;
+    let ordinaryRequest = null;
+    let ordinaryRenderedResponses = 0;
     function createRequest() {
         let resolvePromise;
         let rejectPromise;
@@ -319,6 +321,7 @@ function createBookingSelectionHarness() {
             rejectPromise = reject;
         });
         const request = {
+            aborted: false,
             doneCallback: null,
             failCallback: null,
             alwaysCallback: null,
@@ -347,6 +350,7 @@ function createBookingSelectionHarness() {
             abort() {
                 if (settled) return;
                 settled = true;
+                this.aborted = true;
                 const error = new DOMException('aborted', 'AbortError');
                 this.failCallback?.(error);
                 this.alwaysCallback?.();
@@ -357,10 +361,14 @@ function createBookingSelectionHarness() {
     }
     const unavailable = createRequest();
     const available = createRequest();
-    available.done(() => {
-        availableHours.renderedResponses += 1;
-        availableHours.manualHoursPresent = true;
-    });
+    function markRendered(request, ordinary = false) {
+        request.done(() => {
+            availableHours.renderedResponses += 1;
+            if (ordinary) ordinaryRenderedResponses += 1;
+            availableHours.manualHoursPresent = true;
+        });
+    }
+    markRendered(available);
     resolveUnavailable = (value) => unavailable.resolve(value);
     resolveAvailable = (value) => available.resolve(value);
 
@@ -478,11 +486,13 @@ function createBookingSelectionHarness() {
                         return unavailable;
                     },
                     getAvailableHours(selectedDate, signal) {
-                        availableStarted = true;
+                        const request = ordinaryRequest || available;
+                        ordinaryRequest = null;
+                        if (request === available) availableStarted = true;
                         if (signal) {
-                            signal.addEventListener('abort', () => available.abort(), {once: true});
+                            signal.addEventListener('abort', () => request.abort(), {once: true});
                         }
-                        return available;
+                        return request;
                     },
                 },
             },
@@ -558,11 +568,24 @@ function createBookingSelectionHarness() {
         userChangeTimezone() {
             context.App.Pages.Booking.invalidateBookingPreparation();
         },
+        startOrdinaryAvailability() {
+            ordinaryRequest = createRequest();
+            markRendered(ordinaryRequest, true);
+            const request = context.App.Http.Booking.getAvailableHours('2026-08-31');
+            request.then(
+                () => {},
+                () => {},
+            );
+            return request;
+        },
         get manualHoursPresent() {
             return availableHours.manualHoursPresent;
         },
         get availableStarted() {
             return availableStarted;
+        },
+        get ordinaryRenderedResponses() {
+            return ordinaryRenderedResponses;
         },
     };
 }
@@ -972,7 +995,7 @@ test('booking preparation aborts after a visible provider change during unavaila
     await assert.rejects(execution, (error) => error.name === 'AbortError');
     assert.equal(harness.availableHours.emptyCalls > 0, true);
     assert.equal(harness.manualHoursPresent, true);
-    assert.equal(harness.availableHours.renderedResponses, 0);
+    assert.equal(harness.ordinaryRenderedResponses, 0);
     assert.equal(harness.wizardFrame3Shown, false);
 });
 
@@ -1038,6 +1061,29 @@ test('booking preparation aborts after a visible timezone change during availabl
     assert.equal(harness.wizardFrame3Shown, false);
     assert.equal(harness.availableHours.renderedResponses, 0);
     assert.equal(harness.manualHoursPresent, true);
+});
+
+test('booking preparation aborts pre-existing ordinary availability before its late render', async () => {
+    const harness = createBookingSelectionHarness();
+    const ordinaryRequest = harness.startOrdinaryAvailability();
+    const execution = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-01',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+
+    assert.equal(ordinaryRequest.aborted, true);
+    harness.resolveUnavailable([]);
+    while (!harness.availableStarted) await new Promise((resolve) => setImmediate(resolve));
+    harness.userChangeService('12');
+    harness.setManualHours();
+    harness.resolveAvailable([]);
+    await assert.rejects(execution, (error) => error.name === 'AbortError');
+    assert.equal(harness.ordinaryRenderedResponses, 0);
+    assert.equal(harness.manualHoursPresent, true);
+    assert.equal(harness.wizardFrame3Shown, false);
 });
 
 test('a late abort stops an in-flight availability tool call', async () => {

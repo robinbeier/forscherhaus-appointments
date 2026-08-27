@@ -57,7 +57,37 @@ App.Pages.Booking = (function () {
     let suppressPreparationInvalidation = false;
     let bookingPreparationSequence = 0;
     let activeBookingPreparation = null;
+    const trackedAvailabilityRequests = new Set();
     const noSlotFallbackShownEvents = new Set();
+
+    function trackAvailabilityRequests() {
+        ['getAvailableHours', 'getUnavailableDates'].forEach((methodName) => {
+            const originalMethod = App.Http.Booking[methodName];
+
+            if (typeof originalMethod !== 'function' || originalMethod.__bookingPreparationTracked) {
+                return;
+            }
+
+            const trackedMethod = function (...args) {
+                const request = originalMethod.apply(this, args);
+
+                if (request?.abort && request?.always) {
+                    trackedAvailabilityRequests.add(request);
+                    request.always(() => trackedAvailabilityRequests.delete(request));
+                }
+
+                return request;
+            };
+
+            trackedMethod.__bookingPreparationTracked = true;
+            App.Http.Booking[methodName] = trackedMethod;
+        });
+    }
+
+    function abortTrackedAvailabilityRequests() {
+        [...trackedAvailabilityRequests].forEach((request) => request.abort());
+        trackedAvailabilityRequests.clear();
+    }
 
     function invalidateBookingPreparation() {
         if (suppressPreparationInvalidation) {
@@ -70,6 +100,8 @@ App.Pages.Booking = (function () {
         activeBookingPreparation = null;
         bookingPreparationSequence++;
     }
+
+    trackAvailabilityRequests();
 
     /**
      * Detect the month step.
@@ -1262,6 +1294,7 @@ App.Pages.Booking = (function () {
         activeBookingPreparation?.controller.abort(
             new DOMException('A newer booking preparation superseded this request.', 'AbortError'),
         );
+        abortTrackedAvailabilityRequests();
         const preparationController = new AbortController();
         const preparation = {controller: preparationController, signal, abortListener: null};
 
