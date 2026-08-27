@@ -167,13 +167,33 @@ the helper adopt the exact two-file ROB-488 evidence already published by the
 failed first gate. Authority instead requires all of the following:
 
 - exact directory and file trust metadata;
-- one and only one closed `fh_kuma_monitoring_recovery.v1` manifest;
-- fixed Env path and issue `ROB-488` or `ROB-490`;
+- one and only one closed `fh_kuma_monitoring_recovery.v1` manifest in one of
+  two exact forms: the five-field ROB-490 form or the six-field historical
+  ROB-488 form;
+- fixed Env path; issue `ROB-490` is valid only for the five-field form and
+  issue `ROB-488` only for the historical form;
+- the historical form additionally contains exactly one `original_identity`
+  object with exactly `device`, `gid`, `inode`, `mode`, `nlink`, `size` and
+  `uid`; all fields except `mode` are JSON integers and `mode` is exactly four
+  octal digits;
 - exact original and desired SHA-256 bindings;
 - backup bytes that transform to the desired bytes under the same closed Env
   rule;
 - current Env bytes equal to the bound original before activation or to the
   bound desired bytes after activation.
+
+While the historical source Env is still live, all seven persisted identity
+values must match that exact source object. A successful Exchange intentionally
+unlinks that original inode. In the subsequently converged state the helper
+therefore keeps the historical manifest byte-for-byte unchanged, requires the
+same closed structure and types, and rebinds every still-observable value:
+device, owner, group, mode and link count to the protected live Env, and size to
+the bound original backup bytes. The persisted source inode must remain a
+non-negative integer but cannot be re-derived after that source inode has been
+durably unlinked. Its authority comes from the already validated, root-protected
+recovery publication; rewriting or normalizing the manifest is unsupported.
+Arbitrary later root tampering remains outside the coordinated writer authority,
+and every drift the helper can observe still fails closed.
 
 Existing recovery evidence is never overwritten, renamed or deleted. Drift is
 a hard failure. When no recovery exists, confirmed execution constructs the

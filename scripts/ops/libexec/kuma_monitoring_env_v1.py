@@ -21,6 +21,13 @@ LOCK_PATH = '/run/fh-kuma-monitoring-v1.lock'
 KEY = 'KUMA_RELEASE_RETENTION_MONITOR_ENABLED'
 CONFIRMATION = 'ROB-490'
 SCHEMA = 'fh_kuma_monitoring_recovery.v1'
+MODERN_RECOVERY_FIELDS = frozenset({
+    'desired_sha256', 'env_path', 'issue', 'original_sha256', 'schema',
+})
+LEGACY_RECOVERY_FIELDS = MODERN_RECOVERY_FIELDS | {'original_identity'}
+LEGACY_IDENTITY_FIELDS = frozenset({
+    'device', 'gid', 'inode', 'mode', 'nlink', 'size', 'uid',
+})
 MAX_ENV_BYTES = 4_000_000
 MAX_EVIDENCE_BYTES = 4_100_000
 RENAME_NOREPLACE = 1
@@ -1525,7 +1532,35 @@ def recovery_files(state, expected_uid):
     return values
 
 
-def validate_recovery(state, current, desired, expected_uid, current_enabled):
+def valid_legacy_original_identity(value, current_identity, original, current_enabled):
+    if not isinstance(value, dict) or set(value) != LEGACY_IDENTITY_FIELDS:
+        return False
+    integer_fields = {'device', 'gid', 'inode', 'nlink', 'size', 'uid'}
+    if any(type(value[field]) is not int for field in integer_fields):
+        return False
+    if type(value['mode']) is not str or re.fullmatch(r'[0-7]{4}', value['mode']) is None:
+        return False
+
+    # Before activation the live Env is the historical source object, so all
+    # seven persisted fields must match it exactly. After activation that inode
+    # has intentionally been unlinked; the exact persisted shape remains
+    # mandatory and every still-rederivable field remains bound.
+    expected = {
+        'device': current_identity.st_dev,
+        'gid': current_identity.st_gid,
+        'mode': format(stat.S_IMODE(current_identity.st_mode), '04o'),
+        'nlink': current_identity.st_nlink,
+        'size': len(original),
+        'uid': current_identity.st_uid,
+    }
+    if any(value[field] != expected[field] for field in expected):
+        return False
+    if current_enabled:
+        return value['inode'] >= 0
+    return value['inode'] == current_identity.st_ino
+
+
+def validate_recovery(state, current, current_identity, desired, expected_uid, current_enabled):
     values = recovery_files(state, expected_uid)
     candidates = []
     for index, (_, data, _) in enumerate(values):
@@ -1533,14 +1568,20 @@ def validate_recovery(state, current, desired, expected_uid, current_enabled):
             parsed = json.loads(data.decode('utf-8'))
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-        if not isinstance(parsed, dict) or set(parsed) != {
-            'desired_sha256', 'env_path', 'issue', 'original_sha256', 'schema'
-        }:
+        if not isinstance(parsed, dict):
+            continue
+        fields = set(parsed)
+        modern = fields == MODERN_RECOVERY_FIELDS and parsed.get('issue') == CONFIRMATION
+        legacy = fields == LEGACY_RECOVERY_FIELDS and parsed.get('issue') == 'ROB-488'
+        if not modern and not legacy:
             continue
         if (
             parsed['env_path'] != ENV_PATH
-            or parsed['issue'] not in {'ROB-488', CONFIRMATION}
             or parsed['schema'] != SCHEMA
+        ):
+            continue
+        if legacy and not valid_legacy_original_identity(
+            parsed['original_identity'], current_identity, values[1 - index][1], current_enabled,
         ):
             continue
         candidates.append((index, parsed))
@@ -1589,7 +1630,11 @@ def test_hook(root_prefix, name):
 def publish_recovery(state, original, desired, root_prefix, expected_uid):
     if state.exists() or state.is_symlink():
         validate_directory(state, expected_uid, 0o700)
-        validate_recovery(state, original, desired, expected_uid, False)
+        _, original_identity = stable_read(
+            mapped(root_prefix, ENV_PATH), expected_uid, 0o600, MAX_ENV_BYTES,
+            'env_contract_invalid',
+        )
+        validate_recovery(state, original, original_identity, desired, expected_uid, False)
         return False
     parent = state.parent
     temporary = parent / ('.fh-kuma-monitoring-v1.pending-' + secrets.token_hex(16))
@@ -1618,7 +1663,7 @@ def publish_recovery(state, original, desired, root_prefix, expected_uid):
             if race == 'exact':
                 write_exclusive(state / 'legacy.before', original, 0o600, expected_uid, 'test_hook_failed')
                 write_exclusive(
-                    state / 'legacy.json', evidence_payload(original, desired, 'ROB-488'),
+                    state / 'legacy.json', evidence_payload(original, desired),
                     0o600, expected_uid, 'test_hook_failed',
                 )
             else:
@@ -1636,7 +1681,11 @@ def publish_recovery(state, original, desired, root_prefix, expected_uid):
                 raise
         if not published:
             remove_private_tree(temporary, expected_uid, private_expected)
-        validate_recovery(state, original, desired, expected_uid, False)
+        _, original_identity = stable_read(
+            mapped(root_prefix, ENV_PATH), expected_uid, 0o600, MAX_ENV_BYTES,
+            'env_contract_invalid',
+        )
+        validate_recovery(state, original, original_identity, desired, expected_uid, False)
         return published
     except ContractError as error:
         if not published and temporary.exists():
@@ -1794,7 +1843,9 @@ def execute_transaction(context):
             finally:
                 os.close(evidence_fd)
             fsync_directory(context['state'])
-        validate_recovery(context['state'], original, desired, expected_uid, False)
+        validate_recovery(
+            context['state'], original, env_identity, desired, expected_uid, False,
+        )
         exact_exchange_object(pending, original, env_identity, expected_uid, 'displaced_changed')
         validate_writer_lock(lock, lock_fd, expected_uid)
         os.unlink(pending)
@@ -1807,7 +1858,10 @@ def execute_transaction(context):
         refreshed = inspect_context(root_prefix)
         if refreshed['value'] != '1' or refreshed['desired'] != desired:
             fail('postflight_failed', True, 'failed')
-        validate_recovery(context['state'], refreshed['original'], desired, expected_uid, True)
+        validate_recovery(
+            context['state'], refreshed['original'], refreshed['env_identity'], desired,
+            expected_uid, True,
+        )
         return True
     except ContractError as error:
         if exchanged and replacement_identity is not None:
@@ -1879,11 +1933,11 @@ def inspect_context(root_prefix):
     if value == '1':
         if not state.exists() or state.is_symlink():
             fail('recovery_missing')
-        validate_recovery(state, original, original, expected_uid, True)
+        validate_recovery(state, original, env_identity, original, expected_uid, True)
         recovery_state = 'intact'
     elif state.exists() or state.is_symlink():
         validate_directory(state, expected_uid, 0o700)
-        validate_recovery(state, original, desired, expected_uid, False)
+        validate_recovery(state, original, env_identity, desired, expected_uid, False)
         recovery_state = 'intact'
     else:
         recovery_state = 'absent'

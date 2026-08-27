@@ -2158,7 +2158,25 @@ final class KumaMonitoringEnvV1Test extends TestCase
         $original = self::KEY . "=0\nSECRET_TOKEN=never-print\n";
         $desired = self::KEY . "=1\nSECRET_TOKEN=never-print\n";
         $this->writeEnv($original);
-        $this->writeRecovery($original, $desired, 'ROB-488', 'legacy-original.env', 'legacy-recovery.json');
+        $this->writeRecovery($original, $desired, 'ROB-488', 'legacy-original.env', 'legacy-recovery.json', true);
+        $manifest = json_decode(
+            (string) file_get_contents($this->state . '/legacy-recovery.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            ['desired_sha256', 'env_path', 'issue', 'original_identity', 'original_sha256', 'schema'],
+            array_keys($manifest),
+        );
+        self::assertSame(
+            ['device', 'gid', 'inode', 'mode', 'nlink', 'size', 'uid'],
+            array_keys($manifest['original_identity']),
+        );
+        foreach (['device', 'gid', 'inode', 'nlink', 'size', 'uid'] as $field) {
+            self::assertIsInt($manifest['original_identity'][$field]);
+        }
+        self::assertMatchesRegularExpression('/^[0-7]{4}$/', $manifest['original_identity']['mode']);
         $evidenceBefore = $this->recoverySnapshot();
 
         $inspect = $this->runHelper();
@@ -2171,6 +2189,82 @@ final class KumaMonitoringEnvV1Test extends TestCase
         self::assertSame($desired, file_get_contents($this->envPath));
         self::assertSame($evidenceBefore, $this->recoverySnapshot());
         self::assertStringNotContainsString('never-print', $execute['stdout'] . $execute['stderr']);
+
+        $convergedInspect = $this->runHelper();
+        self::assertSame(0, $convergedInspect['exit_code'], $convergedInspect['stderr']);
+        self::assertSame('enabled', $this->json($convergedInspect['stdout'])['monitoring_state'] ?? null);
+        self::assertFalse($this->json($convergedInspect['stdout'])['mutation_performed'] ?? true);
+        self::assertSame($evidenceBefore, $this->recoverySnapshot());
+
+        $idempotentExecute = $this->runHelper(['--execute', '--confirm-live-write', 'ROB-490']);
+        self::assertSame(0, $idempotentExecute['exit_code'], $idempotentExecute['stderr']);
+        self::assertFalse($this->json($idempotentExecute['stdout'])['mutation_performed'] ?? true);
+        self::assertSame($desired, file_get_contents($this->envPath));
+        self::assertSame($evidenceBefore, $this->recoverySnapshot());
+    }
+
+    /**
+     * The historical manifest is intentionally strict: all seven identity
+     * fields are required, with integer stat values and an exact four-digit
+     * octal mode string. Every malformed variant must remain mutation-free.
+     */
+    public function testLegacyOriginalIdentityMalformedVariantsFailClosed(): void
+    {
+        $original = self::KEY . "=0\n";
+        $desired = self::KEY . "=1\n";
+
+        $variants = [
+            'missing' => static function (array $identity): array {
+                unset($identity['inode']);
+                return $identity;
+            },
+            'additional' => static function (array $identity): array {
+                $identity['extra'] = 1;
+                return $identity;
+            },
+            'wrong_type' => static function (array $identity): array {
+                $identity['uid'] = (string) $identity['uid'];
+                return $identity;
+            },
+            'negative_inode' => static function (array $identity): array {
+                $identity['inode'] = -1;
+                return $identity;
+            },
+            'bad_mode' => static function (array $identity): array {
+                $identity['mode'] = '755';
+                return $identity;
+            },
+            'value_mismatch' => static function (array $identity): array {
+                $identity['size']++;
+                return $identity;
+            },
+            'inode_value_mismatch' => static function (array $identity): array {
+                $identity['inode']++;
+                return $identity;
+            },
+        ];
+
+        foreach ($variants as $label => $mutate) {
+            $this->removeTree($this->state);
+            $this->writeEnv($original);
+            $this->writeRecovery($original, $desired, 'ROB-488', 'legacy-original.env', 'legacy-recovery.json', true);
+            $manifestPath = $this->state . '/legacy-recovery.json';
+            $manifest = json_decode((string) file_get_contents($manifestPath), true, 512, JSON_THROW_ON_ERROR);
+            $manifest['original_identity'] = $mutate($manifest['original_identity']);
+            file_put_contents(
+                $manifestPath,
+                json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+            );
+            chmod($manifestPath, 0600);
+
+            $before = $this->snapshot();
+            $result = $this->runHelper();
+
+            self::assertSame(70, $result['exit_code'], $label);
+            self::assertSame('recovery_invalid', $this->json($result['stdout'])['reason'] ?? null, $label);
+            self::assertFalse($this->json($result['stdout'])['mutation_performed'] ?? true, $label);
+            self::assertSame($before, $this->snapshot(), $label);
+        }
     }
 
     public function testRecoveryMissingExtraTamperedMismatchedAndSymlinkEvidenceFailClosed(): void
@@ -2488,22 +2582,35 @@ final class KumaMonitoringEnvV1Test extends TestCase
         string $issue = 'ROB-490',
         string $originalLeaf = 'original.env',
         string $evidenceLeaf = 'recovery.json',
+        bool $legacyIdentity = false,
     ): void {
         mkdir($this->state, 0700, true);
         file_put_contents($this->state . '/' . $originalLeaf, $original);
         chmod($this->state . '/' . $originalLeaf, 0600);
+        $manifest = [
+            'desired_sha256' => hash('sha256', $desired),
+            'env_path' => '/root/backups/uptime-kuma-push.env',
+            'issue' => $issue,
+            'original_sha256' => hash('sha256', $original),
+            'schema' => 'fh_kuma_monitoring_recovery.v1',
+        ];
+        if ($legacyIdentity) {
+            $stat = stat($this->envPath);
+            self::assertIsArray($stat);
+            $manifest['original_identity'] = [
+                'device' => $stat['dev'],
+                'gid' => $stat['gid'],
+                'inode' => $stat['ino'],
+                'mode' => sprintf('%04o', $stat['mode'] & 07777),
+                'nlink' => $stat['nlink'],
+                'size' => $stat['size'],
+                'uid' => $stat['uid'],
+            ];
+        }
+        ksort($manifest);
         file_put_contents(
             $this->state . '/' . $evidenceLeaf,
-            json_encode(
-                [
-                    'desired_sha256' => hash('sha256', $desired),
-                    'env_path' => '/root/backups/uptime-kuma-push.env',
-                    'issue' => $issue,
-                    'original_sha256' => hash('sha256', $original),
-                    'schema' => 'fh_kuma_monitoring_recovery.v1',
-                ],
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
-            ) . "\n",
+            json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
         );
         chmod($this->state . '/' . $evidenceLeaf, 0600);
     }
