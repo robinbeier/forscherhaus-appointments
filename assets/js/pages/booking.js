@@ -54,8 +54,22 @@ App.Pages.Booking = (function () {
     let manageMode = vars('manage_mode') || false;
     let hasScrolledToNextButton = false; // Avoid repeated auto-scrolls after time selection.
     let suppressServiceAvailabilityRefresh = false;
+    let suppressPreparationInvalidation = false;
     let bookingPreparationSequence = 0;
+    let activeBookingPreparation = null;
     const noSlotFallbackShownEvents = new Set();
+
+    function invalidateBookingPreparation() {
+        if (suppressPreparationInvalidation) {
+            return;
+        }
+
+        activeBookingPreparation?.controller.abort(
+            new DOMException('The visible booking selection changed during preparation.', 'AbortError'),
+        );
+        activeBookingPreparation = null;
+        bookingPreparationSequence++;
+    }
 
     /**
      * Detect the month step.
@@ -232,11 +246,13 @@ App.Pages.Booking = (function () {
             minDate: moment().subtract(1, 'day').set({hours: 23, minutes: 59, seconds: 59}).toDate(),
             maxDate: moment().add(vars('future_booking_limit'), 'days').toDate(),
             onChange: (selectedDates) => {
+                invalidateBookingPreparation();
                 App.Http.Booking.getAvailableHours(moment(selectedDates[0]).format('YYYY-MM-DD'));
                 App.Pages.Booking.updateConfirmFrame();
             },
 
             onMonthChange: (selectedDates, dateStr, instance) => {
+                invalidateBookingPreparation();
                 $selectDate.parent().fadeTo(400, 0.3); // Change opacity during loading
 
                 if (monthTimeout) {
@@ -265,6 +281,7 @@ App.Pages.Booking = (function () {
             },
 
             onYearChange: (selectedDates, dateStr, instance) => {
+                invalidateBookingPreparation();
                 setTimeout(() => {
                     const previousMoment = moment(instance.selectedDates[0]);
 
@@ -447,6 +464,7 @@ App.Pages.Booking = (function () {
          * Event: Timezone "Changed"
          */
         $selectTimezone.on('change', () => {
+            invalidateBookingPreparation();
             const date = App.Utils.UI.getDateTimePickerValue($selectDate);
 
             if (!date) {
@@ -464,6 +482,7 @@ App.Pages.Booking = (function () {
          * Whenever the provider changes the available appointment date - time periods must be updated.
          */
         $selectProvider.on('change', (event) => {
+            invalidateBookingPreparation();
             const $target = $(event.target);
 
             const todayDateTimeObject = new Date();
@@ -487,6 +506,7 @@ App.Pages.Booking = (function () {
          * become visible.
          */
         $selectService.on('change', (event) => {
+            invalidateBookingPreparation();
             const $target = $(event.target);
             const serviceId = $selectService.val();
             $selectProvider.parent().prop('hidden', !Boolean(serviceId));
@@ -634,6 +654,7 @@ App.Pages.Booking = (function () {
          * Triggered whenever the user clicks on an available hour for his appointment.
          */
         $availableHours.on('click', '.available-hour', (event) => {
+            invalidateBookingPreparation();
             $availableHours.find('.selected-hour').removeClass('selected-hour');
             $(event.currentTarget).addClass('selected-hour');
             App.Pages.Booking.updateConfirmFrame();
@@ -1195,13 +1216,26 @@ App.Pages.Booking = (function () {
                 throw new DOMException('A newer booking preparation superseded this request.', 'AbortError');
             }
 
-            if (signal?.aborted) {
-                throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
+            if (preparationSignal?.aborted) {
+                throw (
+                    preparationSignal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError')
+                );
+            }
+
+            if (
+                String($selectService.val()) !== String(serviceId) ||
+                String($selectProvider.val()) !== String(providerId)
+            ) {
+                throw new DOMException('The visible booking selection changed during preparation.', 'AbortError');
             }
         };
 
-        const clearStaleAvailability = () => {
-            if (preparationSequence === bookingPreparationSequence) {
+        const clearStaleAvailability = (force = false) => {
+            const selectionStillMatches =
+                String($selectService.val()) === String(serviceId) &&
+                String($selectProvider.val()) === String(providerId);
+
+            if (preparationSequence === bookingPreparationSequence && (force || selectionStillMatches)) {
                 $availableHours.empty();
             }
         };
@@ -1225,15 +1259,35 @@ App.Pages.Booking = (function () {
             throw new Error('The requested service is not available.');
         }
 
+        activeBookingPreparation?.controller.abort(
+            new DOMException('A newer booking preparation superseded this request.', 'AbortError'),
+        );
+        const preparationController = new AbortController();
+        const preparation = {controller: preparationController, signal, abortListener: null};
+
+        if (signal) {
+            preparation.abortListener = () => preparationController.abort(signal.reason);
+            if (signal.aborted) {
+                preparation.abortListener();
+            } else {
+                signal.addEventListener('abort', preparation.abortListener, {once: true});
+            }
+        }
+
+        activeBookingPreparation = preparation;
+        const preparationSignal = preparationController.signal;
+
         // Clear the old service/provider's hours before any selection mutation. If a later
         // availability request fails or is aborted, stale hours cannot remain actionable.
-        clearStaleAvailability();
+        clearStaleAvailability(true);
         try {
+            suppressPreparationInvalidation = true;
             suppressServiceAvailabilityRefresh = true;
             try {
                 $selectService.val(String(serviceId)).trigger('change');
             } finally {
                 suppressServiceAvailabilityRefresh = false;
+                suppressPreparationInvalidation = false;
             }
 
             const providerExists = $selectProvider
@@ -1252,7 +1306,7 @@ App.Pages.Booking = (function () {
                 String(serviceId),
                 selectedDate,
                 1,
-                {preserveSelection: true, signal},
+                {preserveSelection: true, signal: preparationSignal},
             );
 
             if (unavailableDatesRequest) {
@@ -1261,9 +1315,14 @@ App.Pages.Booking = (function () {
 
             assertCurrentPreparation();
 
-            App.Utils.UI.setDateTimePickerValue($selectDate, selectedDateMoment.toDate());
+            suppressPreparationInvalidation = true;
+            try {
+                App.Utils.UI.setDateTimePickerValue($selectDate, selectedDateMoment.toDate());
+            } finally {
+                suppressPreparationInvalidation = false;
+            }
 
-            const request = App.Http.Booking.getAvailableHours(selectedDate, signal);
+            const request = App.Http.Booking.getAvailableHours(selectedDate, preparationSignal);
             await request;
 
             assertCurrentPreparation();
@@ -1294,6 +1353,13 @@ App.Pages.Booking = (function () {
         } catch (error) {
             clearStaleAvailability();
             throw error;
+        } finally {
+            if (signal && preparation.abortListener) {
+                signal.removeEventListener('abort', preparation.abortListener);
+            }
+            if (activeBookingPreparation === preparation) {
+                activeBookingPreparation = null;
+            }
         }
     }
 
@@ -1308,6 +1374,7 @@ App.Pages.Booking = (function () {
         scrollToFirstAvailableHour,
         setNoSlotFallbackProminent,
         trackNoSlotEmptyStateShown,
+        invalidateBookingPreparation,
         prepareBookingSelection,
     };
 })();

@@ -8,6 +8,7 @@ const moment = require('moment-timezone');
 const repositoryRoot = path.resolve(__dirname, '..', '..');
 const adapterSource = fs.readFileSync(path.join(repositoryRoot, 'assets/js/pages/booking_webmcp.js'), 'utf8');
 const httpClientSource = fs.readFileSync(path.join(repositoryRoot, 'assets/js/http/booking_http_client.js'), 'utf8');
+const bookingPageSource = fs.readFileSync(path.join(repositoryRoot, 'assets/js/pages/booking.js'), 'utf8');
 
 moment.now = () => Date.UTC(2026, 7, 27, 12, 0, 0);
 
@@ -289,6 +290,279 @@ function createUnavailableDatesHarness() {
             request.doneCallback?.(response);
             settleRequest.resolve(response);
             request.alwaysCallbacks.forEach((callback) => callback());
+        },
+    };
+}
+
+function createBookingSelectionHarness() {
+    const service = {value: '11', options: [{value: '11'}]};
+    const provider = {value: '71', options: [{value: '71'}, {value: '72'}]};
+    const date = {};
+    const availableHours = {emptyCalls: 0, manualHoursPresent: false, renderedResponses: 0};
+    const wizardFrame = {
+        stop() {
+            return this;
+        },
+        hide() {},
+        show() {},
+    };
+    let resolveUnavailable;
+    let resolveAvailable;
+    let wizardFrame3Shown = false;
+    let availableStarted = false;
+    function createRequest() {
+        let resolvePromise;
+        let rejectPromise;
+        let settled = false;
+        const promise = new Promise((resolve, reject) => {
+            resolvePromise = resolve;
+            rejectPromise = reject;
+        });
+        const request = {
+            doneCallback: null,
+            failCallback: null,
+            alwaysCallback: null,
+            done(callback) {
+                this.doneCallback = callback;
+                return this;
+            },
+            fail(callback) {
+                this.failCallback = callback;
+                return this;
+            },
+            always(callback) {
+                this.alwaysCallback = callback;
+                return this;
+            },
+            then(resolve, reject) {
+                return promise.then(resolve, reject);
+            },
+            resolve(value) {
+                if (settled) return;
+                settled = true;
+                this.doneCallback?.(value);
+                this.alwaysCallback?.();
+                resolvePromise(value);
+            },
+            abort() {
+                if (settled) return;
+                settled = true;
+                const error = new DOMException('aborted', 'AbortError');
+                this.failCallback?.(error);
+                this.alwaysCallback?.();
+                rejectPromise(error);
+            },
+        };
+        return request;
+    }
+    const unavailable = createRequest();
+    const available = createRequest();
+    available.done(() => {
+        availableHours.renderedResponses += 1;
+        availableHours.manualHoursPresent = true;
+    });
+    resolveUnavailable = (value) => unavailable.resolve(value);
+    resolveAvailable = (value) => available.resolve(value);
+
+    function control(state) {
+        return {
+            val(value) {
+                if (arguments.length) {
+                    state.value = String(value);
+                    return this;
+                }
+                return state.value;
+            },
+            find(selector) {
+                if (selector === 'option') {
+                    return {toArray: () => state.options};
+                }
+                return {toArray: () => [], length: 0};
+            },
+            trigger() {
+                return this;
+            },
+            on(event, callback) {
+                if (event === 'change') state.onChange = callback;
+                return this;
+            },
+            userChange(value) {
+                state.value = String(value);
+                state.onChange?.({target: this});
+            },
+            empty() {
+                state.options = [];
+                return this;
+            },
+            append() {
+                return this;
+            },
+            parent() {
+                return {prop() {}};
+            },
+            closest() {
+                return {find: () => ({trigger() {}})};
+            },
+        };
+    }
+
+    const serviceControl = control(service);
+    const providerControl = control(provider);
+    const dateControl = control(date);
+    const availableControl = {
+        empty() {
+            availableHours.emptyCalls += 1;
+            availableHours.manualHoursPresent = false;
+            return this;
+        },
+        find() {
+            return {filter: () => ({length: 0}), length: 0};
+        },
+    };
+    const genericControl = {
+        on() {
+            return this;
+        },
+        find() {
+            return {length: 0, toArray: () => []};
+        },
+        val() {
+            return '';
+        },
+        prop() {
+            return false;
+        },
+        text() {
+            return '';
+        },
+        empty() {
+            return this;
+        },
+        append() {
+            return this;
+        },
+        parent() {
+            return this;
+        },
+        closest() {
+            return this;
+        },
+        stop() {
+            return this;
+        },
+        hide() {
+            return this;
+        },
+        show() {
+            return this;
+        },
+        removeClass() {
+            return this;
+        },
+        addClass() {
+            return this;
+        },
+    };
+    const context = {
+        AbortController,
+        DOMException,
+        Option: function Option(text, value) {
+            this.text = text;
+            this.value = value;
+        },
+        App: {
+            Http: {
+                Booking: {
+                    getUnavailableDates(providerId, serviceId, selectedDate, monthChangeStep, options = {}) {
+                        options.signal?.addEventListener('abort', () => unavailable.abort(), {once: true});
+                        return unavailable;
+                    },
+                    getAvailableHours(selectedDate, signal) {
+                        availableStarted = true;
+                        if (signal) {
+                            signal.addEventListener('abort', () => available.abort(), {once: true});
+                        }
+                        return available;
+                    },
+                },
+            },
+            Utils: {
+                UI: {
+                    setDateTimePickerValue() {},
+                    getDateTimePickerValue() {
+                        return null;
+                    },
+                },
+            },
+            Pages: {},
+        },
+        document: {addEventListener() {}},
+        lang: (value) => value,
+        moment,
+        vars(key) {
+            if (key === 'manage_mode') return false;
+            if (key === 'available_services') return [{id: 11, duration: 30}];
+            if (key === 'available_providers')
+                return [
+                    {id: 71, services: [11]},
+                    {id: 72, services: [11]},
+                ];
+            return null;
+        },
+        window: {moment},
+        $: (selector) => {
+            if (selector === '#select-service') return serviceControl;
+            if (selector === '#select-provider') return providerControl;
+            if (selector === '#select-date') return dateControl;
+            if (selector === '#available-hours') return availableControl;
+            if (selector === '#wizard-frame-3') {
+                return {
+                    ...genericControl,
+                    show() {
+                        wizardFrame3Shown = true;
+                    },
+                };
+            }
+            return genericControl;
+        },
+    };
+
+    vm.createContext(context);
+    vm.runInContext(bookingPageSource, context, {filename: 'booking.js'});
+
+    return {
+        api: context.App.Pages.Booking,
+        availableHours,
+        provider,
+        resolveAvailable,
+        resolveUnavailable,
+        service,
+        get wizardFrame3Shown() {
+            return wizardFrame3Shown;
+        },
+        setManualHours() {
+            availableHours.manualHoursPresent = true;
+        },
+        userChangeService(value) {
+            serviceControl.userChange(value);
+            context.App.Pages.Booking.invalidateBookingPreparation();
+        },
+        userChangeProvider(value) {
+            providerControl.userChange(value);
+            context.App.Pages.Booking.invalidateBookingPreparation();
+        },
+        userChangeDate(value) {
+            date.value = value;
+            context.App.Pages.Booking.invalidateBookingPreparation();
+        },
+        userChangeTimezone() {
+            context.App.Pages.Booking.invalidateBookingPreparation();
+        },
+        get manualHoursPresent() {
+            return availableHours.manualHoursPresent;
+        },
+        get availableStarted() {
+            return availableStarted;
         },
     };
 }
@@ -680,6 +954,90 @@ test('an invalid retry does not supersede an active valid preparation', async ()
     assert.equal(harness.preparationCalls[0].signal.aborted, false);
     finishPreparation();
     assert.equal((await valid).prepared, true);
+});
+
+test('booking preparation aborts after a visible provider change during unavailable-date wait', async () => {
+    const harness = createBookingSelectionHarness();
+    const execution = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-01',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+
+    harness.userChangeProvider('72');
+    harness.setManualHours();
+    harness.resolveUnavailable([]);
+    await assert.rejects(execution, (error) => error.name === 'AbortError');
+    assert.equal(harness.availableHours.emptyCalls > 0, true);
+    assert.equal(harness.manualHoursPresent, true);
+    assert.equal(harness.availableHours.renderedResponses, 0);
+    assert.equal(harness.wizardFrame3Shown, false);
+});
+
+test('booking preparation aborts after a visible service change during available-hours wait', async () => {
+    const harness = createBookingSelectionHarness();
+    const execution = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-01',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+
+    harness.resolveUnavailable([]);
+    while (!harness.availableStarted) {
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+    harness.userChangeService('12');
+    harness.setManualHours();
+    harness.resolveAvailable([]);
+    await assert.rejects(execution, (error) => error.name === 'AbortError');
+    assert.equal(harness.availableHours.emptyCalls > 0, true);
+    assert.equal(harness.manualHoursPresent, true);
+    assert.equal(harness.availableHours.renderedResponses, 0);
+    assert.equal(harness.wizardFrame3Shown, false);
+});
+
+test('booking preparation aborts after a visible date change during available-hours wait', async () => {
+    const harness = createBookingSelectionHarness();
+    const execution = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-01',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+    harness.resolveUnavailable([]);
+    while (!harness.availableStarted) await new Promise((resolve) => setImmediate(resolve));
+    harness.userChangeDate('2026-09-02');
+    harness.setManualHours();
+    harness.resolveAvailable([]);
+    await assert.rejects(execution, (error) => error.name === 'AbortError');
+    assert.equal(harness.wizardFrame3Shown, false);
+    assert.equal(harness.availableHours.renderedResponses, 0);
+    assert.equal(harness.manualHoursPresent, true);
+});
+
+test('booking preparation aborts after a visible timezone change during available-hours wait', async () => {
+    const harness = createBookingSelectionHarness();
+    const execution = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-01',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+    harness.resolveUnavailable([]);
+    while (!harness.availableStarted) await new Promise((resolve) => setImmediate(resolve));
+    harness.userChangeTimezone();
+    harness.setManualHours();
+    harness.resolveAvailable([]);
+    await assert.rejects(execution, (error) => error.name === 'AbortError');
+    assert.equal(harness.wizardFrame3Shown, false);
+    assert.equal(harness.availableHours.renderedResponses, 0);
+    assert.equal(harness.manualHoursPresent, true);
 });
 
 test('a late abort stops an in-flight availability tool call', async () => {

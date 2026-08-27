@@ -43,7 +43,7 @@ final class BookingWebMcpRuntimeTest extends TestCase
         $exitCode = proc_close($process);
 
         self::assertSame(0, $exitCode, trim($stdout . PHP_EOL . $stderr));
-        self::assertMatchesRegularExpression('/(?:#|ℹ) pass 16/', $stdout);
+        self::assertMatchesRegularExpression('/(?:#|ℹ) pass 20/', $stdout);
         self::assertMatchesRegularExpression('/(?:#|ℹ) fail 0/', $stdout);
     }
 
@@ -103,15 +103,18 @@ final class BookingWebMcpRuntimeTest extends TestCase
         ) {
             self::assertStringNotContainsString($forbidden, $prepareFunction, $forbidden);
         }
-        self::assertStringContainsString('App.Http.Booking.getAvailableHours(selectedDate, signal)', $prepareFunction);
+        self::assertStringContainsString(
+            'App.Http.Booking.getAvailableHours(selectedDate, preparationSignal)',
+            $prepareFunction,
+        );
         self::assertStringContainsString('App.Http.Booking.getUnavailableDates(', $prepareFunction);
-        self::assertStringContainsString('{preserveSelection: true, signal}', $prepareFunction);
+        self::assertStringContainsString('{preserveSelection: true, signal: preparationSignal}', $prepareFunction);
         self::assertStringContainsString("$('.wizard-frame').stop(true, true).hide()", $prepareFunction);
         self::assertStringContainsString("$('#wizard-frame-3').show()", $prepareFunction);
         self::assertStringNotContainsString(".trigger('click')", $prepareFunction);
 
         $clearDefinition = strpos($prepareFunction, 'const clearStaleAvailability');
-        $clearBeforeMutation = strpos($prepareFunction, 'clearStaleAvailability();', $clearDefinition);
+        $clearBeforeMutation = strpos($prepareFunction, 'clearStaleAvailability(true);', $clearDefinition);
         $serviceMutation = strpos($prepareFunction, '$selectService.val(String(serviceId))');
         $catchBlock = strpos($prepareFunction, '} catch (error) {');
         $clearAfterFailure = strpos($prepareFunction, 'clearStaleAvailability();', $catchBlock);
