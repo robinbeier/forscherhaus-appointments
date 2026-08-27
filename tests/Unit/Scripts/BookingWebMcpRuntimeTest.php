@@ -43,7 +43,7 @@ final class BookingWebMcpRuntimeTest extends TestCase
         $exitCode = proc_close($process);
 
         self::assertSame(0, $exitCode, trim($stdout . PHP_EOL . $stderr));
-        self::assertMatchesRegularExpression('/(?:#|ℹ) pass 15/', $stdout);
+        self::assertMatchesRegularExpression('/(?:#|ℹ) pass 16/', $stdout);
         self::assertMatchesRegularExpression('/(?:#|ℹ) fail 0/', $stdout);
     }
 

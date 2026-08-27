@@ -193,7 +193,7 @@ function createHttpClientHarness() {
         App: {
             Http: {},
             Pages: {Booking: {}},
-            Utils: {Url: {siteUrl: (value) => value}},
+            Utils: {Url: {siteUrl: (value) => value, queryParam: () => null}},
         },
         $: jquery,
         lang: (value) => value,
@@ -205,6 +205,92 @@ function createHttpClientHarness() {
     vm.runInContext(httpClientSource, context, {filename: 'booking_http_client.js'});
 
     return {api: context.App.Http.Booking, request};
+}
+
+function createUnavailableDatesHarness() {
+    const disabledDates = [];
+    let ajaxCalls = 0;
+    let settleRequest;
+    const requestPromise = new Promise((resolve, reject) => {
+        settleRequest = {resolve, reject};
+    });
+    const request = {
+        doneCallback: null,
+        failCallback: null,
+        alwaysCallbacks: [],
+        abort() {},
+        done(callback) {
+            this.doneCallback = callback;
+            return this;
+        },
+        fail(callback) {
+            this.failCallback = callback;
+            return this;
+        },
+        always(callback) {
+            this.alwaysCallbacks.push(callback);
+            return this;
+        },
+        then(resolve, reject) {
+            return requestPromise.then(resolve, reject);
+        },
+    };
+    const datePicker = {
+        set(name, dates) {
+            assert.equal(name, 'disable');
+            disabledDates.push(...dates);
+        },
+    };
+    const selectDate = {
+        0: {_flatpickr: datePicker},
+        parent() {
+            return {fadeTo() {}};
+        },
+    };
+    const emptyHours = {empty() {}, text() {}};
+    const jquery = (selector) => {
+        if (selector === '#select-date') {
+            return selectDate;
+        }
+        if (selector === '#available-hours') {
+            return emptyHours;
+        }
+        return {fadeTo() {}};
+    };
+    jquery.ajax = () => {
+        ajaxCalls += 1;
+        return request;
+    };
+    const context = {
+        App: {
+            Http: {},
+            Pages: {Booking: {manageMode: false}},
+            Utils: {Url: {siteUrl: (value) => value, queryParam: () => null}},
+        },
+        $: jquery,
+        lang: (value) => value,
+        vars(key) {
+            return key === 'no_slot_fallback_enabled' ? '0' : null;
+        },
+        window: {moment},
+    };
+
+    vm.createContext(context);
+    vm.runInContext(httpClientSource, context, {filename: 'booking_http_client.js'});
+
+    return {
+        api: context.App.Http.Booking,
+        get ajaxCalls() {
+            return ajaxCalls;
+        },
+        disabledDates,
+        request,
+        resolveRequest(response) {
+            request.doneCallback?.(response);
+            settleRequest.resolve(response);
+            request.alwaysCallbacks.forEach((callback) => callback());
+        },
+    };
 }
 
 test('feature disabled and unsupported browsers preserve the normal booking flow', async () => {
@@ -682,6 +768,31 @@ test('the shared availability client projects timezone shifts and aborts an in-f
     assert.equal(typeof registeredAbortListener, 'function');
     cleanupHarness.request.complete();
     assert.equal(removedAbortListenerCount, 1);
+});
+
+test('preserveSelection marks the requested unavailable month without a forward search', async () => {
+    const harness = createUnavailableDatesHarness();
+    const controller = new AbortController();
+    const completion = harness.api.getUnavailableDates(71, 11, '2026-09-15', 1, {
+        preserveSelection: true,
+        signal: controller.signal,
+    });
+    let settled = false;
+    const awaitedCompletion = Promise.resolve(completion).then(() => {
+        settled = true;
+    });
+
+    assert.equal(harness.request.doneCallback !== null, true);
+    await Promise.resolve();
+    assert.equal(settled, false);
+    harness.resolveRequest({is_month_unavailable: true});
+    await awaitedCompletion;
+
+    assert.equal(settled, true);
+    assert.equal(harness.ajaxCalls, 1);
+    assert.equal(harness.disabledDates.length, 30);
+    assert.equal(moment(harness.disabledDates[0]).format('YYYY-MM-DD'), '2026-09-01');
+    assert.equal(moment(harness.disabledDates.at(-1)).format('YYYY-MM-DD'), '2026-09-30');
 });
 
 test('registration is idempotent, abort-controlled and recovers from partial failure', async () => {

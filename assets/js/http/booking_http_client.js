@@ -430,6 +430,23 @@ App.Http.Booking = (function () {
                 // find a date that has at least one slot
 
                 if (response.is_month_unavailable) {
+                    if (options.preserveSelection) {
+                        const selectedDateMoment = moment(selectedDateString);
+                        const startOfMonthMoment = selectedDateMoment.clone().startOf('month');
+                        const endOfMonthMoment = selectedDateMoment.clone().endOf('month');
+                        const unavailableDates = [];
+
+                        while (startOfMonthMoment.isSameOrBefore(endOfMonthMoment, 'day')) {
+                            unavailableDates.push(startOfMonthMoment.format('YYYY-MM-DD'));
+                            startOfMonthMoment.add(1, 'day');
+                        }
+
+                        // Assisted preparation must not search forward: doing so starts another request whose
+                        // late response can mutate the calendar after the visible selection has changed.
+                        applyUnavailableDates(unavailableDates, selectedDateString, false);
+                        return;
+                    }
+
                     if (!searchedMonthStart) {
                         searchedMonthStart = selectedDateString;
                     }
