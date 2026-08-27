@@ -86,8 +86,9 @@ App.Http.Booking = (function () {
      * provider and date.
      *
      * @param {String} selectedDate The selected date of the available hours we need.
+     * @param {AbortSignal} [signal] Optional cancellation signal for assisted UI preparation.
      */
-    function getAvailableHours(selectedDate) {
+    function getAvailableHours(selectedDate, signal) {
         $availableHours.empty();
 
         // Find the selected service duration (it is going to be send within the "data" object).
@@ -107,94 +108,200 @@ App.Http.Booking = (function () {
         // If the manage mode is true then the appointment's start date should return as available too.
         const appointmentId = vars('manage_mode') ? vars('appointment_data').id : null;
 
-        // Make ajax post request and get the available hours.
+        const request = queryAvailableHours({
+            serviceId: $selectService.val(),
+            providerId: $selectProvider.val(),
+            selectedDate,
+            serviceDuration,
+            manageMode: Number(vars('manage_mode') || 0),
+            appointmentId,
+            signal,
+        });
+
+        request.done((response) => {
+            renderAvailableHours(response, selectedDate, serviceId);
+        });
+
+        return request;
+    }
+
+    /**
+     * Query the existing read-only availability endpoint without changing the booking UI.
+     *
+     * @param {Object} options
+     * @param {Number|String} options.serviceId
+     * @param {Number|String} options.providerId
+     * @param {String} options.selectedDate
+     * @param {Number} [options.serviceDuration]
+     * @param {Number} [options.manageMode]
+     * @param {Number|null} [options.appointmentId]
+     * @param {AbortSignal} [options.signal]
+     *
+     * @return {JQuery.jqXHR}
+     */
+    function queryAvailableHours({
+        serviceId,
+        providerId,
+        selectedDate,
+        serviceDuration,
+        manageMode = 0,
+        appointmentId = null,
+        signal,
+    }) {
         const url = App.Utils.Url.siteUrl('booking/get_available_hours');
 
         const data = {
             csrf_token: vars('csrf_token'),
-            service_id: $selectService.val(),
-            provider_id: $selectProvider.val(),
+            service_id: serviceId,
+            provider_id: providerId,
             selected_date: selectedDate,
             service_duration: serviceDuration,
-            manage_mode: Number(vars('manage_mode') || 0),
+            manage_mode: Number(manageMode || 0),
             appointment_id: appointmentId,
         };
 
-        $.post(url, data).done((response) => {
-            $availableHours.empty();
-            App.Pages.Booking.resetTimeSelectionScroll();
+        const request = $.ajax({
+            url,
+            method: 'post',
+            data,
+            dataType: 'json',
+        });
 
-            // The response contains the available hours for the selected provider and service. Fill the available
-            // hours div with response data.
-            if (response.length > 0) {
-                let providerId = $selectProvider.val();
+        return bindAbortSignal(request, signal);
+    }
 
-                if (providerId === 'any-provider') {
-                    for (const availableProvider of vars('available_providers')) {
-                        if (availableProvider.services.indexOf(Number(serviceId)) !== -1) {
-                            providerId = availableProvider.id; // Use first available provider.
-                            break;
-                        }
+    function bindAbortSignal(request, signal) {
+        if (!signal) {
+            return request;
+        }
+
+        const abortRequest = () => request.abort();
+
+        if (signal.aborted) {
+            abortRequest();
+        } else {
+            signal.addEventListener('abort', abortRequest, {once: true});
+            request.always(() => signal.removeEventListener('abort', abortRequest));
+        }
+
+        return request;
+    }
+
+    /**
+     * Project one server-authoritative provider hour into the timezone selected on the public booking page.
+     *
+     * Returning null preserves the existing rule that a timezone-shifted hour outside the selected calendar day
+     * is not visible to the user.
+     *
+     * @param {Object} options
+     * @param {String} options.selectedDate
+     * @param {String} options.availableHour
+     * @param {String} options.providerTimezone
+     * @param {String} options.selectedTimezone
+     * @param {String} [options.timeFormat]
+     *
+     * @return {Object|null}
+     */
+    function projectAvailableHour({
+        selectedDate,
+        availableHour,
+        providerTimezone,
+        selectedTimezone,
+        timeFormat = 'HH:mm',
+    }) {
+        const displayMoment = moment
+            .tz(`${selectedDate} ${String(availableHour)}:00`, providerTimezone)
+            .tz(selectedTimezone);
+
+        if (displayMoment.format('YYYY-MM-DD') !== selectedDate) {
+            return null;
+        }
+
+        return {
+            value: String(availableHour),
+            displayStart: displayMoment.format('YYYY-MM-DDTHH:mm:ssZ'),
+            displayText: displayMoment.format(timeFormat),
+        };
+    }
+
+    function renderAvailableHours(response, selectedDate, serviceId) {
+        $availableHours.empty();
+        App.Pages.Booking.resetTimeSelectionScroll();
+
+        // The response contains the available hours for the selected provider and service. Fill the available
+        // hours div with response data.
+        if (response.length > 0) {
+            let providerId = $selectProvider.val();
+
+            if (providerId === 'any-provider') {
+                for (const availableProvider of vars('available_providers')) {
+                    if (availableProvider.services.indexOf(Number(serviceId)) !== -1) {
+                        providerId = availableProvider.id; // Use first available provider.
+                        break;
                     }
                 }
+            }
 
-                const provider = vars('available_providers').find(
-                    (availableProvider) => Number(providerId) === Number(availableProvider.id),
-                );
+            const provider = vars('available_providers').find(
+                (availableProvider) => Number(providerId) === Number(availableProvider.id),
+            );
 
-                if (!provider) {
-                    throw new Error('Could not find provider.');
-                }
+            if (!provider) {
+                throw new Error('Could not find provider.');
+            }
 
-                const providerTimezone = provider.timezone;
-                const selectedTimezone = $('#select-timezone').val();
-                const timeFormat = vars('time_format') === 'regular' ? 'h:mm a' : 'HH:mm';
+            const providerTimezone = provider.timezone;
+            const selectedTimezone = $('#select-timezone').val();
+            const timeFormat = vars('time_format') === 'regular' ? 'h:mm a' : 'HH:mm';
 
-                response.forEach((availableHour) => {
-                    const availableHourMoment = moment
-                        .tz(selectedDate + ' ' + availableHour + ':00', providerTimezone)
-                        .tz(selectedTimezone);
-
-                    if (availableHourMoment.format('YYYY-MM-DD') !== selectedDate) {
-                        return; // Due to the selected timezone the available hour belongs to another date.
-                    }
-
-                    $availableHours.append(
-                        $('<button/>', {
-                            'class': 'btn btn-outline-secondary w-100 shadow-none available-hour',
-                            'data': {
-                                'value': availableHour,
-                            },
-                            'text': availableHourMoment.format(timeFormat),
-                        }),
-                    );
+            response.forEach((availableHour) => {
+                const projectedHour = projectAvailableHour({
+                    selectedDate,
+                    availableHour,
+                    providerTimezone,
+                    selectedTimezone,
+                    timeFormat,
                 });
 
-                if (App.Pages.Booking.manageMode) {
-                    // Set the appointment's start time as the default selection.
-                    $('.available-hour')
-                        .removeClass('selected-hour')
-                        .filter(
-                            (index, availableHourEl) =>
-                                $(availableHourEl).text() ===
-                                moment(vars('appointment_data').start_datetime).format(timeFormat),
-                        )
-                        .addClass('selected-hour');
-                } else {
-                    // Set the first available hour as the default selection.
-                    $('.available-hour:eq(0)').addClass('selected-hour');
+                if (!projectedHour) {
+                    return; // Due to the selected timezone the available hour belongs to another date.
                 }
 
-                App.Pages.Booking.updateConfirmFrame();
-                setNoSlotFallbackProminent(false);
+                $availableHours.append(
+                    $('<button/>', {
+                        'class': 'btn btn-outline-secondary w-100 shadow-none available-hour',
+                        'data': {
+                            'value': projectedHour.value,
+                        },
+                        'text': projectedHour.displayText,
+                    }),
+                );
+            });
+
+            if (App.Pages.Booking.manageMode) {
+                // Set the appointment's start time as the default selection.
+                $('.available-hour')
+                    .removeClass('selected-hour')
+                    .filter(
+                        (index, availableHourEl) =>
+                            $(availableHourEl).text() ===
+                            moment(vars('appointment_data').start_datetime).format(timeFormat),
+                    )
+                    .addClass('selected-hour');
+            } else {
+                // Set the first available hour as the default selection.
+                $('.available-hour:eq(0)').addClass('selected-hour');
             }
 
-            App.Pages.Booking.scrollToFirstAvailableHour();
+            App.Pages.Booking.updateConfirmFrame();
+            setNoSlotFallbackProminent(false);
+        }
 
-            if (!$availableHours.find('.available-hour').length) {
-                renderNoAvailableHoursState();
-            }
-        });
+        App.Pages.Booking.scrollToFirstAvailableHour();
+
+        if (!$availableHours.find('.available-hour').length) {
+            renderNoAvailableHoursState();
+        }
     }
 
     /**
@@ -286,8 +393,11 @@ App.Http.Booking = (function () {
      * @param {Number} serviceId The selected service ID.
      * @param {String} selectedDateString Y-m-d value of the selected date.
      * @param {Number} [monthChangeStep] Whether to add or subtract months.
+     * @param {Object} [options]
+     * @param {Boolean} [options.preserveSelection] Do not auto-select the first enabled day.
+     * @param {AbortSignal} [options.signal] Optional cancellation signal for assisted UI preparation.
      */
-    function getUnavailableDates(providerId, serviceId, selectedDateString, monthChangeStep = 1) {
+    function getUnavailableDates(providerId, serviceId, selectedDateString, monthChangeStep = 1, options = {}) {
         if (processingUnavailableDates) {
             return;
         }
@@ -309,7 +419,7 @@ App.Http.Booking = (function () {
             appointment_id: appointmentId,
         };
 
-        $.ajax({
+        const request = $.ajax({
             url: url,
             type: 'GET',
             data: data,
@@ -336,7 +446,7 @@ App.Http.Booking = (function () {
                             startOfMonthMoment.add(Math.abs(monthChangeStep), 'days'); // Move to the next day
                         }
 
-                        applyUnavailableDates(unavailableDates, searchedMonthStart, true);
+                        applyUnavailableDates(unavailableDates, searchedMonthStart, !options.preserveSelection);
                         searchedMonthStart = undefined;
                         searchedMonthCounter = 0;
 
@@ -349,18 +459,20 @@ App.Http.Booking = (function () {
                     selectedDateMoment.add(1, 'month');
 
                     const nextSelectedDate = selectedDateMoment.format('YYYY-MM-DD');
-                    getUnavailableDates(providerId, serviceId, nextSelectedDate, monthChangeStep);
+                    getUnavailableDates(providerId, serviceId, nextSelectedDate, monthChangeStep, options);
 
                     return;
                 }
 
                 unavailableDatesBackup = response;
                 selectedDateStringBackup = selectedDateString;
-                applyUnavailableDates(response, selectedDateString, true);
+                applyUnavailableDates(response, selectedDateString, !options.preserveSelection);
             })
             .fail(() => {
                 $selectDate.parent().fadeTo(400, 1);
             });
+
+        return bindAbortSignal(request, options.signal);
     }
 
     function applyPreviousUnavailableDates() {
@@ -442,6 +554,8 @@ App.Http.Booking = (function () {
     return {
         registerAppointment,
         getAvailableHours,
+        queryAvailableHours,
+        projectAvailableHour,
         getUnavailableDates,
         applyPreviousUnavailableDates,
         deletePersonalInformation,

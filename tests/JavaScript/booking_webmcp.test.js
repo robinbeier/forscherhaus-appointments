@@ -1,0 +1,635 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+const moment = require('moment-timezone');
+
+const repositoryRoot = path.resolve(__dirname, '..', '..');
+const adapterSource = fs.readFileSync(path.join(repositoryRoot, 'assets/js/pages/booking_webmcp.js'), 'utf8');
+const httpClientSource = fs.readFileSync(path.join(repositoryRoot, 'assets/js/http/booking_http_client.js'), 'utf8');
+
+moment.now = () => Date.UTC(2026, 7, 27, 12, 0, 0);
+
+function projectAvailableHour({selectedDate, availableHour, providerTimezone, selectedTimezone, timeFormat = 'HH:mm'}) {
+    const displayMoment = moment
+        .tz(`${selectedDate} ${String(availableHour)}:00`, providerTimezone)
+        .tz(selectedTimezone);
+
+    if (displayMoment.format('YYYY-MM-DD') !== selectedDate) {
+        return null;
+    }
+
+    return {
+        value: String(availableHour),
+        displayStart: displayMoment.format('YYYY-MM-DDTHH:mm:ssZ'),
+        displayText: displayMoment.format(timeFormat),
+    };
+}
+
+function createHarness(options = {}) {
+    const values = {
+        webmcp_booking_pilot_enabled: options.enabled === false ? '0' : '1',
+        available_services: [
+            {
+                id: 11,
+                name: 'Consultation\u0000  meeting',
+                duration: 30,
+                description: 'Do not expose this free-form field.',
+                price: 100,
+            },
+        ],
+        available_providers: [
+            {
+                id: 71,
+                first_name: 'Alice',
+                last_name: 'Teacher',
+                email: 'alice@example.test',
+                room: 'Private room',
+                timezone: 'Europe/Berlin',
+                services: [11],
+            },
+        ],
+        default_timezone: 'Europe/Berlin',
+        future_booking_limit: 30,
+        manage_mode: options.manageMode || false,
+        ...options.values,
+    };
+    const registeredCalls = [];
+    const activeTools = new Map();
+    const queryCalls = [];
+    const preparationCalls = [];
+    const documentListeners = new Map();
+    const windowListeners = new Map();
+    let registrationAttempt = 0;
+    let rejectRegistrationAt = options.rejectRegistrationAt || null;
+
+    const modelContext =
+        options.supported === false
+            ? undefined
+            : {
+                  async registerTool(tool, registrationOptions) {
+                      registrationAttempt += 1;
+
+                      if (registrationAttempt === rejectRegistrationAt) {
+                          throw new Error('registration rejected');
+                      }
+
+                      registeredCalls.push({tool, registrationOptions});
+                      activeTools.set(tool.name, tool);
+                      registrationOptions.signal.addEventListener(
+                          'abort',
+                          () => {
+                              activeTools.delete(tool.name);
+                          },
+                          {once: true},
+                      );
+                  },
+              };
+
+    const context = {
+        AbortController,
+        DOMException,
+        App: {
+            Http: {
+                Booking: {
+                    async queryAvailableHours(input) {
+                        queryCalls.push(input);
+
+                        if (options.queryAvailableHours) {
+                            return options.queryAvailableHours(input);
+                        }
+
+                        return options.availableHours || ['09:00', 'invalid', '10:30'];
+                    },
+                    projectAvailableHour,
+                },
+            },
+            Pages: {
+                Booking: {
+                    async prepareBookingSelection(input) {
+                        preparationCalls.push(input);
+
+                        if (options.prepareError) {
+                            throw new Error(options.prepareError);
+                        }
+
+                        return {
+                            selected_date: input.selectedDate,
+                            selected_time: input.selectedTime,
+                        };
+                    },
+                },
+            },
+        },
+        console: {
+            warn() {},
+        },
+        document: {
+            modelContext,
+            addEventListener(name, listener) {
+                documentListeners.set(name, listener);
+            },
+        },
+        vars(key) {
+            return values[key];
+        },
+        window: {
+            moment,
+            addEventListener(name, listener) {
+                windowListeners.set(name, listener);
+            },
+        },
+        $(selector) {
+            assert.equal(selector, '#select-timezone');
+            return {
+                val() {
+                    return options.selectedTimezone || 'Europe/Berlin';
+                },
+            };
+        },
+    };
+
+    vm.createContext(context);
+    vm.runInContext(adapterSource, context, {filename: 'booking_webmcp.js'});
+
+    return {
+        api: context.App.Pages.BookingWebMcp,
+        activeTools,
+        documentListeners,
+        preparationCalls,
+        queryCalls,
+        registeredCalls,
+        values,
+        windowListeners,
+        allowRegistrations() {
+            rejectRegistrationAt = null;
+        },
+    };
+}
+
+function createHttpClientHarness() {
+    const request = {
+        abortCount: 0,
+        alwaysCallbacks: [],
+        abort() {
+            this.abortCount += 1;
+        },
+        always(callback) {
+            this.alwaysCallbacks.push(callback);
+            return this;
+        },
+        complete() {
+            this.alwaysCallbacks.forEach((callback) => callback());
+        },
+    };
+    const jquery = () => ({});
+    jquery.ajax = () => request;
+    const context = {
+        App: {
+            Http: {},
+            Pages: {Booking: {}},
+            Utils: {Url: {siteUrl: (value) => value}},
+        },
+        $: jquery,
+        lang: (value) => value,
+        vars: () => null,
+        window: {moment},
+    };
+
+    vm.createContext(context);
+    vm.runInContext(httpClientSource, context, {filename: 'booking_http_client.js'});
+
+    return {api: context.App.Http.Booking, request};
+}
+
+test('feature disabled and unsupported browsers preserve the normal booking flow', async () => {
+    const disabled = createHarness({enabled: false});
+    assert.equal(await disabled.api.initialize(), false);
+    assert.equal(disabled.registeredCalls.length, 0);
+
+    const unsupported = createHarness({supported: false});
+    assert.equal(await unsupported.api.initialize(), false);
+    assert.equal(unsupported.registeredCalls.length, 0);
+});
+
+test('registers exactly the three closed-contract tools with narrow schemas', async () => {
+    const harness = createHarness();
+
+    assert.equal(await harness.api.initialize(), true);
+    assert.equal(await harness.api.initialize(), true);
+    assert.deepEqual([...harness.activeTools.keys()], ['list_services', 'find_available_slots', 'prepare_booking']);
+    assert.deepEqual(Array.from(harness.api.toolNames), ['list_services', 'find_available_slots', 'prepare_booking']);
+    assert.equal(harness.registeredCalls.length, 3);
+
+    for (const {tool} of harness.registeredCalls) {
+        assert.equal(tool.inputSchema.additionalProperties, false);
+    }
+
+    const schemas = JSON.stringify(harness.registeredCalls.map(({tool}) => tool.inputSchema));
+    for (const forbidden of ['first_name', 'last_name', 'email', 'phone', 'address', 'notes', 'captcha', 'consent']) {
+        assert.equal(schemas.includes(forbidden), false, forbidden);
+    }
+
+    assert.equal(harness.activeTools.get('list_services').annotations.readOnlyHint, true);
+    assert.equal(harness.activeTools.get('find_available_slots').annotations.readOnlyHint, true);
+    assert.equal(harness.activeTools.get('prepare_booking').annotations.readOnlyHint, false);
+});
+
+test('list_services returns only minimal public service data and opaque provider keys', async () => {
+    const harness = createHarness();
+    await harness.api.initialize();
+
+    const result = await harness.activeTools.get('list_services').execute({}, {signal: new AbortController().signal});
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+        services: [
+            {
+                service_key: 'service_1',
+                name: 'Consultation meeting',
+                duration_minutes: 30,
+                provider_keys: ['provider_1'],
+            },
+        ],
+    });
+
+    const encoded = JSON.stringify(result);
+    for (const forbidden of ['Alice', 'Teacher', 'alice@example.test', 'Private room', 'Europe/Berlin', '"id":71']) {
+        assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+});
+
+test('find_available_slots uses only the server-authoritative read query and returns no provider data', async () => {
+    const harness = createHarness();
+    await harness.api.initialize();
+
+    const result = await harness.activeTools.get('find_available_slots').execute(
+        {
+            service_key: 'service_1',
+            provider_key: 'provider_1',
+            start_date: '2026-09-01',
+            end_date: '2026-09-02',
+        },
+        {signal: new AbortController().signal},
+    );
+
+    assert.equal(harness.queryCalls.length, 2);
+    assert.equal(harness.preparationCalls.length, 0);
+    assert.deepEqual(
+        harness.queryCalls.map(({serviceId, providerId, selectedDate, manageMode, appointmentId}) => ({
+            serviceId,
+            providerId,
+            selectedDate,
+            manageMode,
+            appointmentId,
+        })),
+        [
+            {serviceId: 11, providerId: 71, selectedDate: '2026-09-01', manageMode: 0, appointmentId: null},
+            {serviceId: 11, providerId: 71, selectedDate: '2026-09-02', manageMode: 0, appointmentId: null},
+        ],
+    );
+    assert.equal(result.slots.length, 4);
+    assert.deepEqual(Object.keys(result.slots[0]).sort(), ['date', 'display_start', 'display_timezone', 'time']);
+
+    const encoded = JSON.stringify(result);
+    for (const forbidden of [
+        'Alice',
+        'Teacher',
+        'alice@example.test',
+        'Private room',
+        '"provider_id"',
+        '"service_id"',
+    ]) {
+        assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+});
+
+test('find_available_slots stays inside the visible booking window and hides timezone-shifted slots', async () => {
+    const harness = createHarness({
+        selectedTimezone: 'America/Los_Angeles',
+        availableHours: ['00:30', '09:00'],
+    });
+    await harness.api.initialize();
+    const tool = harness.activeTools.get('find_available_slots');
+
+    const inRangeResult = await tool.execute(
+        {
+            service_key: 'service_1',
+            provider_key: 'provider_1',
+            start_date: '2026-08-27',
+            end_date: '2026-08-27',
+        },
+        {signal: new AbortController().signal},
+    );
+
+    assert.equal(inRangeResult.slots.length, 1);
+    assert.equal(inRangeResult.slots[0].time, '09:00');
+    assert.equal(inRangeResult.slots[0].display_start, '2026-08-27T00:00:00-07:00');
+
+    await assert.rejects(
+        tool.execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_1',
+                start_date: '2026-08-26',
+                end_date: '2026-08-27',
+            },
+            {signal: new AbortController().signal},
+        ),
+        /visible booking range/,
+    );
+
+    await assert.rejects(
+        tool.execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_1',
+                start_date: '2026-09-27',
+                end_date: '2026-09-27',
+            },
+            {signal: new AbortController().signal},
+        ),
+        /visible booking range/,
+    );
+});
+
+test('find_available_slots rejects a provider that does not belong to the selected service', async () => {
+    const harness = createHarness({
+        values: {
+            available_providers: [
+                {
+                    id: 71,
+                    timezone: 'Europe/Berlin',
+                    services: [11],
+                },
+                {
+                    id: 72,
+                    timezone: 'Europe/Berlin',
+                    services: [99],
+                },
+            ],
+        },
+    });
+    await harness.api.initialize();
+
+    await assert.rejects(
+        harness.activeTools.get('find_available_slots').execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_2',
+                start_date: '2026-09-01',
+                end_date: '2026-09-01',
+            },
+            {signal: new AbortController().signal},
+        ),
+        /not available for this service/,
+    );
+    assert.equal(harness.queryCalls.length, 0);
+});
+
+test('find_available_slots rejects overbroad, invalid and personal inputs before network access', async () => {
+    const harness = createHarness();
+    await harness.api.initialize();
+    const tool = harness.activeTools.get('find_available_slots');
+
+    await assert.rejects(
+        tool.execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_1',
+                start_date: '2026-09-01',
+                end_date: '2026-09-15',
+            },
+            {signal: new AbortController().signal},
+        ),
+        /limited to 14 days/,
+    );
+    await assert.rejects(
+        tool.execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_1',
+                start_date: '2026-09-01',
+                end_date: '2026-09-01',
+                email: 'person@example.test',
+            },
+            {signal: new AbortController().signal},
+        ),
+        /Unsupported tool input/,
+    );
+    assert.equal(harness.queryCalls.length, 0);
+});
+
+test('prepare_booking delegates only visible selection state and never accepts contact or confirmation input', async () => {
+    const harness = createHarness();
+    await harness.api.initialize();
+    const tool = harness.activeTools.get('prepare_booking');
+
+    const result = await tool.execute(
+        {
+            service_key: 'service_1',
+            provider_key: 'provider_1',
+            date: '2026-09-01',
+            time: '09:00',
+        },
+        {signal: new AbortController().signal},
+    );
+
+    assert.equal(harness.preparationCalls.length, 1);
+    assert.deepEqual(
+        Object.fromEntries(Object.entries(harness.preparationCalls[0]).filter(([key]) => key !== 'signal')),
+        {serviceId: 11, providerId: 71, selectedDate: '2026-09-01', selectedTime: '09:00'},
+    );
+    assert.equal(harness.queryCalls.length, 0);
+    assert.equal(result.prepared, true);
+    assert.equal(JSON.stringify(result).includes('71'), false);
+
+    await assert.rejects(
+        tool.execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_1',
+                date: '2026-09-01',
+                time: '09:00',
+                confirm: true,
+            },
+            {signal: new AbortController().signal},
+        ),
+        /Unsupported tool input/,
+    );
+    assert.equal(harness.preparationCalls.length, 1);
+});
+
+test('prepare_booking rejects dates outside the visible booking window', async () => {
+    const harness = createHarness();
+    await harness.api.initialize();
+
+    await assert.rejects(
+        harness.activeTools.get('prepare_booking').execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_1',
+                date: '2026-08-26',
+                time: '09:00',
+            },
+            {signal: new AbortController().signal},
+        ),
+        /visible booking range/,
+    );
+
+    assert.equal(harness.preparationCalls.length, 0);
+});
+
+test('reschedule, abort and preparation errors remain free of booking mutation', async () => {
+    const reschedule = createHarness({manageMode: true});
+    await reschedule.api.initialize();
+    await assert.rejects(
+        reschedule.activeTools
+            .get('prepare_booking')
+            .execute(
+                {service_key: 'service_1', provider_key: 'provider_1', date: '2026-09-01', time: '09:00'},
+                {signal: new AbortController().signal},
+            ),
+        /unavailable while rescheduling/,
+    );
+    assert.equal(reschedule.preparationCalls.length, 0);
+
+    const aborted = createHarness();
+    await aborted.api.initialize();
+    const controller = new AbortController();
+    controller.abort(new DOMException('stop', 'AbortError'));
+    await assert.rejects(
+        aborted.activeTools.get('find_available_slots').execute(
+            {
+                service_key: 'service_1',
+                provider_key: 'provider_1',
+                start_date: '2026-09-01',
+                end_date: '2026-09-01',
+            },
+            {signal: controller.signal},
+        ),
+        /stop/,
+    );
+    assert.equal(aborted.queryCalls.length, 0);
+
+    const failed = createHarness({prepareError: 'slot disappeared'});
+    await failed.api.initialize();
+    await assert.rejects(
+        failed.activeTools
+            .get('prepare_booking')
+            .execute(
+                {service_key: 'service_1', provider_key: 'provider_1', date: '2026-09-01', time: '09:00'},
+                {signal: new AbortController().signal},
+            ),
+        /slot disappeared/,
+    );
+    assert.equal(failed.preparationCalls.length, 1);
+});
+
+test('a late abort stops an in-flight availability tool call', async () => {
+    let resolveQuery;
+    const harness = createHarness({
+        queryAvailableHours() {
+            return new Promise((resolve) => {
+                resolveQuery = resolve;
+            });
+        },
+    });
+    await harness.api.initialize();
+    const controller = new AbortController();
+    const execution = harness.activeTools.get('find_available_slots').execute(
+        {
+            service_key: 'service_1',
+            provider_key: 'provider_1',
+            start_date: '2026-09-01',
+            end_date: '2026-09-01',
+        },
+        {signal: controller.signal},
+    );
+
+    assert.equal(harness.queryCalls.length, 1);
+    assert.equal(harness.queryCalls[0].signal, controller.signal);
+    controller.abort(new DOMException('stop', 'AbortError'));
+    resolveQuery(['09:00']);
+
+    await assert.rejects(execution, /stop/);
+});
+
+test('the shared availability client projects timezone shifts and aborts an in-flight request', () => {
+    const harness = createHttpClientHarness();
+    const controller = new AbortController();
+
+    assert.equal(
+        harness.api.projectAvailableHour({
+            selectedDate: '2026-08-27',
+            availableHour: '00:30',
+            providerTimezone: 'Europe/Berlin',
+            selectedTimezone: 'America/Los_Angeles',
+        }),
+        null,
+    );
+    assert.equal(
+        harness.api.projectAvailableHour({
+            selectedDate: '2026-08-27',
+            availableHour: '09:00',
+            providerTimezone: 'Europe/Berlin',
+            selectedTimezone: 'America/Los_Angeles',
+        }).displayStart,
+        '2026-08-27T00:00:00-07:00',
+    );
+
+    harness.api.queryAvailableHours({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-08-27',
+        signal: controller.signal,
+    });
+    controller.abort();
+    assert.equal(harness.request.abortCount, 1);
+
+    const cleanupHarness = createHttpClientHarness();
+    let registeredAbortListener;
+    let removedAbortListenerCount = 0;
+    const trackedSignal = {
+        aborted: false,
+        addEventListener(name, listener) {
+            assert.equal(name, 'abort');
+            registeredAbortListener = listener;
+        },
+        removeEventListener(name, listener) {
+            assert.equal(name, 'abort');
+            assert.equal(listener, registeredAbortListener);
+            removedAbortListenerCount += 1;
+        },
+    };
+
+    cleanupHarness.api.queryAvailableHours({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-08-27',
+        signal: trackedSignal,
+    });
+    assert.equal(typeof registeredAbortListener, 'function');
+    cleanupHarness.request.complete();
+    assert.equal(removedAbortListenerCount, 1);
+});
+
+test('registration is idempotent, abort-controlled and recovers from partial failure', async () => {
+    const harness = createHarness();
+    await harness.api.initialize();
+    await harness.api.initialize();
+    assert.equal(harness.registeredCalls.length, 3);
+    assert.equal(harness.activeTools.size, 3);
+
+    harness.api.shutdown();
+    assert.equal(harness.activeTools.size, 0);
+    await harness.api.initialize();
+    assert.equal(harness.registeredCalls.length, 6);
+    assert.equal(harness.activeTools.size, 3);
+
+    const partial = createHarness({rejectRegistrationAt: 2});
+    assert.equal(await partial.api.initialize(), false);
+    assert.equal(partial.activeTools.size, 0);
+    partial.allowRegistrations();
+    assert.equal(await partial.api.initialize(), true);
+    assert.equal(partial.activeTools.size, 3);
+});

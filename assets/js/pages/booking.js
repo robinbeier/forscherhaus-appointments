@@ -53,6 +53,7 @@ App.Pages.Booking = (function () {
      */
     let manageMode = vars('manage_mode') || false;
     let hasScrolledToNextButton = false; // Avoid repeated auto-scrolls after time selection.
+    let suppressServiceAvailabilityRefresh = false;
     const noSlotFallbackShownEvents = new Set();
 
     /**
@@ -525,11 +526,13 @@ App.Pages.Booking = (function () {
                 $(new Option(lang('any_provider'), 'any-provider')).insertAfter($selectProvider.find('option:first'));
             }
 
-            App.Http.Booking.getUnavailableDates(
-                $selectProvider.val(),
-                $target.val(),
-                moment(App.Utils.UI.getDateTimePickerValue($selectDate)).format('YYYY-MM-DD'),
-            );
+            if (!suppressServiceAvailabilityRefresh) {
+                App.Http.Booking.getUnavailableDates(
+                    $selectProvider.val(),
+                    $target.val(),
+                    moment(App.Utils.UI.getDateTimePickerValue($selectDate)).format('YYYY-MM-DD'),
+                );
+            }
 
             App.Pages.Booking.updateConfirmFrame();
 
@@ -1160,6 +1163,119 @@ App.Pages.Booking = (function () {
         }
     }
 
+    /**
+     * Prepare an already validated public slot in the visible booking wizard.
+     *
+     * This is the single integration seam for assisted booking preparation. It changes only the existing service,
+     * provider, date and time controls, advances to the visible contact step, and never reaches confirmation or
+     * submits the booking form.
+     *
+     * @param {Object} selection
+     * @param {Number|String} selection.serviceId
+     * @param {Number|String} selection.providerId
+     * @param {String} selection.selectedDate
+     * @param {String} selection.selectedTime
+     * @param {AbortSignal} [selection.signal]
+     *
+     * @return {Promise<Object>}
+     */
+    async function prepareBookingSelection({serviceId, providerId, selectedDate, selectedTime, signal}) {
+        if (manageMode) {
+            throw new Error('WebMCP booking preparation is unavailable while rescheduling.');
+        }
+
+        if (signal?.aborted) {
+            throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
+        }
+
+        const selectedDateMoment = moment(selectedDate, 'YYYY-MM-DD', true);
+
+        if (!selectedDateMoment.isValid()) {
+            throw new Error('The requested date is invalid.');
+        }
+
+        const serviceExists = vars('available_services').some(
+            (availableService) => Number(availableService.id) === Number(serviceId),
+        );
+
+        const serviceOptionExists = $selectService
+            .find('option')
+            .toArray()
+            .some((option) => String(option.value) === String(serviceId));
+
+        if (!serviceExists || !serviceOptionExists) {
+            throw new Error('The requested service is not available.');
+        }
+
+        suppressServiceAvailabilityRefresh = true;
+
+        try {
+            $selectService.val(String(serviceId)).trigger('change');
+        } finally {
+            suppressServiceAvailabilityRefresh = false;
+        }
+
+        const providerExists = $selectProvider
+            .find('option')
+            .toArray()
+            .some((option) => String(option.value) === String(providerId));
+
+        if (!providerExists) {
+            throw new Error('The requested provider is not available for this service.');
+        }
+
+        $selectProvider.val(String(providerId));
+
+        const unavailableDatesRequest = App.Http.Booking.getUnavailableDates(
+            String(providerId),
+            String(serviceId),
+            selectedDate,
+            1,
+            {preserveSelection: true, signal},
+        );
+
+        if (unavailableDatesRequest) {
+            await unavailableDatesRequest;
+        }
+
+        if (signal?.aborted) {
+            throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
+        }
+
+        App.Utils.UI.setDateTimePickerValue($selectDate, selectedDateMoment.toDate());
+
+        const request = App.Http.Booking.getAvailableHours(selectedDate, signal);
+        await request;
+
+        if (signal?.aborted) {
+            throw signal.reason ?? new DOMException('The booking preparation was aborted.', 'AbortError');
+        }
+
+        const $selectedHour = $availableHours.find('.available-hour').filter((index, availableHour) => {
+            return String($(availableHour).data('value')) === String(selectedTime);
+        });
+
+        if (!$selectedHour.length) {
+            throw new Error('The requested slot is no longer available.');
+        }
+
+        $availableHours.find('.selected-hour').removeClass('selected-hour');
+        $selectedHour.first().addClass('selected-hour');
+        updateConfirmFrame();
+
+        $('.wizard-frame').stop(true, true).hide();
+        $('.active-step').removeClass('active-step');
+        $('#step-3').addClass('active-step');
+        $('#wizard-frame-3').show();
+
+        return {
+            service_id: String(serviceId),
+            provider_id: String(providerId),
+            selected_date: selectedDate,
+            selected_time: selectedTime,
+        };
+    }
+
     document.addEventListener('DOMContentLoaded', initialize);
 
     return {
@@ -1171,5 +1287,6 @@ App.Pages.Booking = (function () {
         scrollToFirstAvailableHour,
         setNoSlotFallbackProminent,
         trackNoSlotEmptyStateShown,
+        prepareBookingSelection,
     };
 })();
