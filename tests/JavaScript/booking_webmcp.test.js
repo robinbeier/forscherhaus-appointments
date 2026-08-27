@@ -590,6 +590,122 @@ function createBookingSelectionHarness() {
     };
 }
 
+function createRecursiveUnavailableDatesHarness() {
+    const disabledDates = [];
+    let ajaxCalls = 0;
+    const requests = [];
+
+    function createRequest() {
+        let resolvePromise;
+        let rejectPromise;
+        let settled = false;
+        const promise = new Promise((resolve, reject) => {
+            resolvePromise = resolve;
+            rejectPromise = reject;
+        });
+        const request = {
+            aborted: false,
+            doneCallback: null,
+            alwaysCallback: null,
+            done(callback) {
+                this.doneCallback = callback;
+                return this;
+            },
+            fail() {
+                return this;
+            },
+            always(callback) {
+                this.alwaysCallback = callback;
+                return this;
+            },
+            then(resolve, reject) {
+                return promise.then(resolve, reject);
+            },
+            resolve(value) {
+                if (settled) return;
+                settled = true;
+                this.doneCallback?.(value);
+                this.alwaysCallback?.();
+                resolvePromise(value);
+            },
+            abort() {
+                if (settled) return;
+                settled = true;
+                this.aborted = true;
+                this.alwaysCallback?.();
+                rejectPromise(new DOMException('aborted', 'AbortError'));
+            },
+        };
+        requests.push(request);
+        return request;
+    }
+
+    const selectDate = {
+        0: {
+            _flatpickr: {
+                set(name, dates) {
+                    assert.equal(name, 'disable');
+                    disabledDates.push(...dates);
+                },
+            },
+        },
+        parent() {
+            return {fadeTo() {}};
+        },
+    };
+    const availableHours = {empty() {}, text() {}};
+    const jquery = (selector) => {
+        if (selector === '#select-date') return selectDate;
+        if (selector === '#available-hours') return availableHours;
+        return {fadeTo() {}};
+    };
+    jquery.ajax = () => {
+        ajaxCalls += 1;
+        return createRequest();
+    };
+    const context = {
+        App: {
+            Http: {},
+            Pages: {Booking: {manageMode: false}},
+            Utils: {
+                Url: {
+                    siteUrl: (value) => value,
+                    queryParam: () => null,
+                },
+            },
+        },
+        lang: (value) => value,
+        vars(key) {
+            return key === 'no_slot_fallback_enabled' ? '0' : null;
+        },
+        window: {moment},
+    };
+    context.$ = jquery;
+    vm.createContext(context);
+    vm.runInContext(httpClientSource, context, {filename: 'booking_http_client.js'});
+
+    const tracked = new Set();
+    const original = context.App.Http.Booking.getUnavailableDates;
+    context.App.Http.Booking.getUnavailableDates = (...args) => {
+        const request = original(...args);
+        if (request?.abort && request?.always) {
+            tracked.add(request);
+            request.always(() => tracked.delete(request));
+        }
+        return request;
+    };
+
+    return {
+        api: context.App.Http.Booking,
+        ajaxCalls: () => ajaxCalls,
+        disabledDates,
+        requests,
+        abortTracked() {
+            [...tracked].forEach((request) => request.abort());
+        },
+    };
+}
+
 test('feature disabled and unsupported browsers preserve the normal booking flow', async () => {
     const disabled = createHarness({enabled: false});
     assert.equal(await disabled.api.initialize(), false);
@@ -1197,6 +1313,28 @@ test('preserveSelection marks the requested unavailable month without a forward 
     assert.equal(harness.disabledDates.length, 30);
     assert.equal(moment(harness.disabledDates[0]).format('YYYY-MM-DD'), '2026-09-01');
     assert.equal(moment(harness.disabledDates.at(-1)).format('YYYY-MM-DD'), '2026-09-30');
+});
+
+test('unavailable-date forward search routes recursive child requests through the exported seam', async () => {
+    const harness = createRecursiveUnavailableDatesHarness();
+    const completion = harness.api.getUnavailableDates(71, 11, '2026-09-15');
+    const parent = harness.requests[0];
+    parent.resolve({is_month_unavailable: true});
+    await completion;
+
+    assert.equal(harness.ajaxCalls(), 2);
+    const child = harness.requests[1];
+    assert.equal(child.aborted, false);
+    child.then(
+        () => {},
+        () => {},
+    );
+
+    // A preparation boundary aborts all tracked availability work, including the recursive child.
+    harness.abortTracked();
+    assert.equal(child.aborted, true);
+    child.resolve({is_month_unavailable: false, dates: []});
+    assert.equal(harness.disabledDates.length, 0);
 });
 
 test('registration is idempotent, abort-controlled and recovers from partial failure', async () => {

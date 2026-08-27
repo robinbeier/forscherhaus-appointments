@@ -476,7 +476,15 @@ App.Http.Booking = (function () {
                     selectedDateMoment.add(1, 'month');
 
                     const nextSelectedDate = selectedDateMoment.format('YYYY-MM-DD');
-                    getUnavailableDates(providerId, serviceId, nextSelectedDate, monthChangeStep, options);
+                    // Route recursive searches through the exported method so Booking's request tracker can
+                    // cancel the entire chain when assisted preparation supersedes it.
+                    App.Http.Booking.getUnavailableDates(
+                        providerId,
+                        serviceId,
+                        nextSelectedDate,
+                        monthChangeStep,
+                        options,
+                    );
 
                     return;
                 }
