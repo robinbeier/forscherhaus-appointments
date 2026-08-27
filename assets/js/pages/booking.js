@@ -58,7 +58,17 @@ App.Pages.Booking = (function () {
     let bookingPreparationSequence = 0;
     let activeBookingPreparation = null;
     const trackedAvailabilityRequests = new Set();
+    let calendarRefreshTimer = null;
+    let calendarRefreshGeneration = 0;
     const noSlotFallbackShownEvents = new Set();
+
+    function cancelPendingCalendarRefresh() {
+        calendarRefreshGeneration++;
+        if (calendarRefreshTimer) {
+            clearTimeout(calendarRefreshTimer);
+            calendarRefreshTimer = null;
+        }
+    }
 
     function trackAvailabilityRequests() {
         ['getAvailableHours', 'getUnavailableDates'].forEach((methodName) => {
@@ -99,6 +109,7 @@ App.Pages.Booking = (function () {
         );
         activeBookingPreparation = null;
         bookingPreparationSequence++;
+        cancelPendingCalendarRefresh();
     }
 
     trackAvailabilityRequests();
@@ -271,8 +282,6 @@ App.Pages.Booking = (function () {
         // Initialize page's components (tooltips, date pickers etc).
         tippy('[data-tippy-content]');
 
-        let monthTimeout;
-
         App.Utils.UI.initializeDatePicker($selectDate, {
             inline: true,
             minDate: moment().subtract(1, 'day').set({hours: 23, minutes: 59, seconds: 59}).toDate(),
@@ -287,11 +296,15 @@ App.Pages.Booking = (function () {
                 invalidateBookingPreparation();
                 $selectDate.parent().fadeTo(400, 0.3); // Change opacity during loading
 
-                if (monthTimeout) {
-                    clearTimeout(monthTimeout);
+                const refreshGeneration = ++calendarRefreshGeneration;
+                if (calendarRefreshTimer) {
+                    clearTimeout(calendarRefreshTimer);
                 }
+                calendarRefreshTimer = setTimeout(() => {
+                    if (refreshGeneration !== calendarRefreshGeneration) {
+                        return;
+                    }
 
-                monthTimeout = setTimeout(() => {
                     const previousMoment = moment(instance.selectedDates[0]);
 
                     const displayedMonthMoment = moment(
@@ -309,12 +322,21 @@ App.Pages.Booking = (function () {
                         displayedMonthMoment.format('YYYY-MM-DD'),
                         monthChangeStep,
                     );
+                    calendarRefreshTimer = null;
                 }, 500);
             },
 
             onYearChange: (selectedDates, dateStr, instance) => {
                 invalidateBookingPreparation();
-                setTimeout(() => {
+                const refreshGeneration = ++calendarRefreshGeneration;
+                if (calendarRefreshTimer) {
+                    clearTimeout(calendarRefreshTimer);
+                }
+                calendarRefreshTimer = setTimeout(() => {
+                    if (refreshGeneration !== calendarRefreshGeneration) {
+                        return;
+                    }
+
                     const previousMoment = moment(instance.selectedDates[0]);
 
                     const displayedMonthMoment = moment(
@@ -332,6 +354,7 @@ App.Pages.Booking = (function () {
                         displayedMonthMoment.format('YYYY-MM-DD'),
                         monthChangeStep,
                     );
+                    calendarRefreshTimer = null;
                 }, 500);
             },
         });
@@ -1294,6 +1317,7 @@ App.Pages.Booking = (function () {
         activeBookingPreparation?.controller.abort(
             new DOMException('A newer booking preparation superseded this request.', 'AbortError'),
         );
+        cancelPendingCalendarRefresh();
         abortTrackedAvailabilityRequests();
         const preparationController = new AbortController();
         const preparation = {controller: preparationController, signal, abortListener: null};

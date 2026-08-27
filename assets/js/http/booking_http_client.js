@@ -533,7 +533,7 @@ App.Http.Booking = (function () {
 
                 if (unavailableDates.indexOf(moment(currentDate).format('YYYY-MM-DD')) === -1) {
                     App.Utils.UI.setDateTimePickerValue($selectDate, currentDate);
-                    getAvailableHours(moment(currentDate).format('YYYY-MM-DD'));
+                    App.Http.Booking.getAvailableHours(moment(currentDate).format('YYYY-MM-DD'));
                     break;
                 }
             }

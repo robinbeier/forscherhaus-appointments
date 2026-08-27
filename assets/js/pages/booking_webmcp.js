@@ -84,7 +84,7 @@ App.Pages.BookingWebMcp = (function () {
 
     function normalizeDuration(value) {
         const duration = Number(value);
-        return Number.isInteger(duration) && duration > 0 && duration <= 1440 ? duration : 1;
+        return Number.isInteger(duration) && duration > 0 ? duration : 1;
     }
 
     function assertNotAborted(signal) {
