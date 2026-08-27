@@ -64,6 +64,7 @@ function createHarness(options = {}) {
     const windowListeners = new Map();
     let registrationAttempt = 0;
     let rejectRegistrationAt = options.rejectRegistrationAt || null;
+    let deferredRegistration = null;
 
     const modelContext =
         options.supported === false
@@ -74,6 +75,12 @@ function createHarness(options = {}) {
 
                       if (registrationAttempt === rejectRegistrationAt) {
                           throw new Error('registration rejected');
+                      }
+
+                      if (registrationAttempt === options.deferRegistrationAt) {
+                          return new Promise((resolve, reject) => {
+                              deferredRegistration = {resolve, reject};
+                          });
                       }
 
                       registeredCalls.push({tool, registrationOptions});
@@ -169,6 +176,16 @@ function createHarness(options = {}) {
         windowListeners,
         allowRegistrations() {
             rejectRegistrationAt = null;
+        },
+        rejectDeferredRegistration() {
+            assert.ok(deferredRegistration);
+            deferredRegistration.reject(new Error('old registration rejected'));
+            deferredRegistration = null;
+        },
+        resolveDeferredRegistration() {
+            assert.ok(deferredRegistration);
+            deferredRegistration.resolve();
+            deferredRegistration = null;
         },
     };
 }
@@ -1674,4 +1691,43 @@ test('registration is idempotent, abort-controlled and recovers from partial fai
     partial.allowRegistrations();
     assert.equal(await partial.api.initialize(), true);
     assert.equal(partial.activeTools.size, 3);
+});
+
+test('a late old registration failure cannot clear a BFCache replacement', async () => {
+    const harness = createHarness({deferRegistrationAt: 2});
+    const oldInitialization = harness.api.initialize();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    harness.windowListeners.get('pagehide')();
+    harness.windowListeners.get('pageshow')({persisted: true});
+    const newInitialization = harness.api.initialize();
+    assert.equal(await newInitialization, true);
+    assert.equal(harness.activeTools.size, 3);
+
+    harness.rejectDeferredRegistration();
+    assert.equal(await oldInitialization, false);
+    assert.equal(harness.activeTools.size, 3);
+
+    harness.api.shutdown();
+    assert.equal(harness.activeTools.size, 0);
+});
+
+test('a late old registration success cannot continue after a BFCache replacement', async () => {
+    const harness = createHarness({deferRegistrationAt: 2});
+    const oldInitialization = harness.api.initialize();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    harness.windowListeners.get('pagehide')();
+    harness.windowListeners.get('pageshow')({persisted: true});
+    assert.equal(await harness.api.initialize(), true);
+    assert.equal(harness.registeredCalls.length, 4);
+    assert.equal(harness.activeTools.size, 3);
+
+    harness.resolveDeferredRegistration();
+    assert.equal(await oldInitialization, false);
+    assert.equal(harness.registeredCalls.length, 4);
+    assert.equal(harness.activeTools.size, 3);
+
+    harness.api.shutdown();
+    assert.equal(harness.activeTools.size, 0);
 });

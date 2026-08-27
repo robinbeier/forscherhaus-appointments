@@ -416,19 +416,31 @@ App.Pages.BookingWebMcp = (function () {
         const controller = new AbortController();
         registrationController = controller;
 
-        registrationPromise = (async () => {
+        const attemptPromise = (async () => {
             for (const tool of toolDefinitions()) {
                 await document.modelContext.registerTool(tool, {signal: controller.signal});
+                if (controller.signal.aborted || registrationController !== controller) {
+                    throw controller.signal.reason || new DOMException('aborted', 'AbortError');
+                }
+            }
+
+            if (controller.signal.aborted || registrationController !== controller) {
+                throw controller.signal.reason || new DOMException('aborted', 'AbortError');
             }
 
             return true;
-        })().catch((error) => {
+        })();
+        let settledAttemptPromise;
+        settledAttemptPromise = attemptPromise.catch((error) => {
             controller.abort();
-            registrationController = null;
-            registrationPromise = null;
+            if (registrationController === controller && registrationPromise === settledAttemptPromise) {
+                registrationController = null;
+                registrationPromise = null;
+            }
             console.warn('WebMCP booking pilot registration failed.', error);
             return false;
         });
+        registrationPromise = settledAttemptPromise;
 
         return registrationPromise;
     }
