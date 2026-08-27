@@ -112,6 +112,21 @@ App.Pages.Booking = (function () {
         cancelPendingCalendarRefresh();
     }
 
+    function returnToAvailableStepAfterPreparationFailure(preparationSequence) {
+        if (preparationSequence !== bookingPreparationSequence) {
+            return;
+        }
+
+        if (!$('#wizard-frame-3').is(':visible')) {
+            return;
+        }
+
+        $('.wizard-frame').stop(true, true).hide();
+        $('.active-step').removeClass('active-step');
+        $('#step-2').addClass('active-step');
+        $('#wizard-frame-2').show();
+    }
+
     trackAvailabilityRequests();
 
     /**
@@ -1409,6 +1424,7 @@ App.Pages.Booking = (function () {
             };
         } catch (error) {
             clearStaleAvailability();
+            returnToAvailableStepAfterPreparationFailure(preparationSequence);
             throw error;
         } finally {
             if (signal && preparation.abortListener) {
