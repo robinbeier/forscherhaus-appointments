@@ -125,6 +125,8 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'def validate_nested_mount_records(',
                 'def trusted_lock_device(orchestrator):',
                 'def assert_pre_mutation_mount_safety():',
+                'def revalidate_pre_mutation_mount_safety(mount_safety):',
+                'def close_pre_mutation_mount_safety(mount_safety):',
                 'PROC_SNAPSHOT_ATTEMPTS = 5',
                 'def stable_proc_mount_snapshot(orchestrator):',
                 "snapshot['mountinfo_before'] == snapshot['mountinfo_after']",
@@ -145,7 +147,9 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'regular, empty, root-owned',
                 'kernel handle `net:[inode]`',
                 'grants no protected-path exception',
-                'preparation or cleanup mutation',
+                'keeps the validated web-root, orchestrator-root, `/var/lib`',
+                'existing state path and descriptor identities must still match',
+                'immediately before the first cleanup mutation',
                 'zero-mutation ledger',
                 'change the service capability set',
             ]
@@ -162,11 +166,20 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertIsInt($executeStart);
         self::assertIsInt($markerStart);
         $execute = substr($helper, $executeStart, $markerStart - $executeStart);
-        $mountPreflight = strpos($execute, 'assert_pre_mutation_mount_safety()');
-        $statePreparation = strpos($execute, 'state = prepare_state_directory()');
+        $mountPreflight = strpos($execute, 'mount_safety = assert_pre_mutation_mount_safety()');
+        $statePreparation = strpos($execute, 'state = prepare_state_directory(mount_safety)');
+        $mountRevalidation = strpos($execute, 'revalidate_pre_mutation_mount_safety(mount_safety)', $statePreparation);
+        $markerCleanup = strpos($execute, 'clean_marker_temps(state, MUTATIONS)');
+        $mountClose = strrpos($execute, 'close_pre_mutation_mount_safety(mount_safety)');
         self::assertIsInt($mountPreflight);
         self::assertIsInt($statePreparation);
+        self::assertIsInt($mountRevalidation);
+        self::assertIsInt($markerCleanup);
+        self::assertIsInt($mountClose);
         self::assertTrue($mountPreflight < $statePreparation);
+        self::assertTrue($statePreparation < $mountRevalidation);
+        self::assertTrue($mountRevalidation < $markerCleanup);
+        self::assertTrue($markerCleanup < $mountClose);
         self::assertSame(3, preg_match_all('/\bCAP_[A-Z0-9_]+\b/', $service));
     }
 

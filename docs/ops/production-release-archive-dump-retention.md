@@ -81,14 +81,31 @@ that closed positive-inode form when both filesystem type and mount source are
 exactly `nsfs`; mount points remain absolute.
 The parser compatibility grants no protected-path exception. Any such mount at
 or below a protected tree is still an additional nested boundary and is rejected.
-Execute performs the same strict mount preflight before state-directory
-preparation or cleanup mutation, then repeats it during the locked inventory.
-Any Symlink, Hardlink, race, malformed state, additional protected mount,
-different source/device/root/parent, non-service context, or changing namespace
-remains fail-closed as `unsafe_global_lock`, `mount_state_unknown`, or
-`nested_mount_boundary` with a zero-mutation ledger. This exception does not
-change the service capability set or any activity, open-file, lock, capacity,
-hold, continuity, handoff, admission, parent-death, Docker, or socket check.
+Execute acquires the same strict mount preflight before state-directory
+preparation and keeps the validated web-root, orchestrator-root, `/var/lib`
+parent, and any existing state-directory descriptors open through marker-temp
+cleanup. The existing state path and descriptor identities must still match at
+the immediate pre-cleanup revalidation; the path is not reopened by name. If
+systemd did not already create the state directory, the complete
+pinned-boundary observation is repeated immediately before that directory is
+created through the pinned parent. After acquiring the state lock, descriptor
+and path identities and the complete mount/cgroup/namespace observation are
+repeated again immediately before the first cleanup mutation. Cleanup itself
+uses the already open, validated state-directory descriptor, so a later
+pathname mount cannot redirect the operation. The locked inventory then
+performs the full mount check again with its own pinned target descriptors.
+
+Any Symlink, Hardlink, detected race, malformed state, additional protected
+mount, different source/device/root/parent, non-service context, or changing
+namespace remains fail-closed as `unsafe_global_lock`, `mount_state_unknown`,
+or `nested_mount_boundary`. Drift at acquisition or the immediate pre-mutation
+revalidation retains the zero-mutation ledger. Non-cooperating privileged host
+mount changes after that last observation are outside the service authority;
+the helper has no `CAP_SYS_ADMIN`, continues to operate only through pinned
+descriptors, and rejects drift on the next bounded observation. This exception
+does not change the service capability set or any activity, open-file, lock,
+capacity, hold, continuity, handoff, admission, parent-death, Docker, or socket
+check.
 
 Every `prod_release_archive_dump_retention.v3` result also carries
 `mutation_outcome` and fixed aggregate `mutation_counts`. `none` means no

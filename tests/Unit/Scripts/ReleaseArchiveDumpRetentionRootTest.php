@@ -822,6 +822,62 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 
+    public function testExecuteRejectsMountDriftAfterAcquisitionBeforeMarkerTempCleanup(): void
+    {
+        mkdir(self::STATE, 0700, true);
+        $temp = self::STATE . '/.last-success.json.tmp-' . str_repeat('f', 32);
+        file_put_contents($temp, "temporary marker\n");
+        chmod($temp, 0600);
+
+        $result = $this->runPatchedHelper(
+            "def assert_no_nested_mounts(web_names, orchestrator):\n    snapshot = stable_proc_mount_snapshot(orchestrator)",
+            "_mount_safety_checks = 0\n\ndef assert_no_nested_mounts(web_names, orchestrator):\n    global _mount_safety_checks\n    _mount_safety_checks += 1\n    if _mount_safety_checks == 2:\n        reject('nested_mount_boundary')\n    snapshot = stable_proc_mount_snapshot(orchestrator)",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('nested_mount_boundary', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertFileExists($temp);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testExecutePinsAndRevalidatesStateDirectoryBeforeMarkerTempCleanup(): void
+    {
+        mkdir(self::STATE, 0700, true);
+        $tempLeaf = '.last-success.json.tmp-' . str_repeat('a', 32);
+        $temp = self::STATE . '/' . $tempLeaf;
+        $racedState = self::STATE . '.raced';
+        file_put_contents($temp, "temporary marker\n");
+        chmod($temp, 0600);
+
+        $result = $this->runPatchedHelper(
+            "    state = None\n    global_lock = None",
+            "    state = None\n    os.rename(STATE_ROOT, STATE_ROOT + '.raced')\n    os.mkdir(STATE_ROOT, 0o700)\n    global_lock = None",
+            'execute',
+        );
+
+        try {
+            self::assertFileExists($racedState . '/' . $tempLeaf);
+            self::assertFileDoesNotExist(self::STATE . '/' . $tempLeaf);
+        } finally {
+            $this->removeTree(self::STATE);
+            rename($racedState, self::STATE);
+        }
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('nested_mount_boundary', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertFileExists($temp);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
     public function testArchiveOnlyCrashPrefixWithoutPermanentHoldFailsClosedAndSidecarOnlyRejects(): void
     {
         unlink(self::RELEASES . '/old.build-provenance.json');

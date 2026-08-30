@@ -366,17 +366,24 @@ def open_absolute_directory(path, final_uid=0, final_gid=0, exact_mode=None, wri
         raise
 
 
-def prepare_state_directory():
-    parent = open_absolute_directory('/var/lib')
+def prepare_state_directory(mount_safety):
+    state = mount_safety.get('state')
+    if state is not None:
+        return state
+    parent = mount_safety['state_parent']
+    # StateDirectory normally exists before ExecStart. If it does not, repeat
+    # the pinned service-boundary check immediately before the first namespace
+    # mutation rather than relying only on the earlier acquisition snapshot.
+    revalidate_pre_mutation_mount_safety(mount_safety)
     try:
-        try:
-            os.mkdir('fh-release-retention', 0o700, dir_fd=parent)
-            os.fsync(parent)
-        except FileExistsError:
-            pass
-        return open_child_directory(parent, 'fh-release-retention', exact_mode=0o700)
-    finally:
-        os.close(parent)
+        os.mkdir('fh-release-retention', 0o700, dir_fd=parent)
+        os.fsync(parent)
+    except FileExistsError:
+        pass
+    state = open_child_directory(parent, 'fh-release-retention', exact_mode=0o700)
+    mount_safety['state'] = state
+    mount_safety['state_identity'] = directory_identity(os.fstat(state))
+    return state
 
 
 def stable_regular(directory, leaf, uid, gid, modes, max_bytes, missing_ok=False, empty_ok=False):
@@ -1866,16 +1873,81 @@ def revalidate_recovery_sidecar(state, recovery):
         reject('candidate_changed', 75)
 
 
+def revalidate_pre_mutation_mount_safety(mount_safety):
+    try:
+        web = mount_safety['web']
+        orchestrator = mount_safety['orchestrator']
+        state_parent = mount_safety['state_parent']
+        state = mount_safety.get('state')
+        state_path_identity = (
+            directory_identity(os.stat('fh-release-retention', dir_fd=state_parent, follow_symlinks=False))
+            if state is not None
+            else None
+        )
+        if (
+            directory_identity(os.fstat(web)) != mount_safety['web_identity']
+            or directory_identity(os.fstat(orchestrator)) != mount_safety['orchestrator_identity']
+            or directory_identity(os.fstat(state_parent)) != mount_safety['state_parent_identity']
+            or (
+                state is not None
+                and (
+                    directory_identity(os.fstat(state)) != mount_safety['state_identity']
+                    or state_path_identity != mount_safety['state_identity']
+                )
+            )
+        ):
+            reject('nested_mount_boundary')
+        web_names = os.listdir(web)
+    except (KeyError, OSError, TypeError):
+        reject('mount_state_unknown')
+    assert_no_nested_mounts(web_names, orchestrator)
+
+
 def assert_pre_mutation_mount_safety():
     web = open_absolute_directory(WEB_ROOT)
+    orchestrator = None
+    state_parent = None
+    state = None
     try:
         orchestrator = open_absolute_directory(ORCHESTRATOR_ROOT, exact_mode=0o700)
+        state_parent = open_absolute_directory('/var/lib')
         try:
-            assert_no_nested_mounts(os.listdir(web), orchestrator)
-        finally:
+            state = open_child_directory(state_parent, 'fh-release-retention', exact_mode=0o700)
+        except FileNotFoundError:
+            pass
+        mount_safety = {
+            'orchestrator': orchestrator,
+            'orchestrator_identity': directory_identity(os.fstat(orchestrator)),
+            'state': state,
+            'state_identity': directory_identity(os.fstat(state)) if state is not None else None,
+            'state_parent': state_parent,
+            'state_parent_identity': directory_identity(os.fstat(state_parent)),
+            'web': web,
+            'web_identity': directory_identity(os.fstat(web)),
+        }
+        revalidate_pre_mutation_mount_safety(mount_safety)
+        return mount_safety
+    except BaseException:
+        if state is not None:
+            os.close(state)
+        if state_parent is not None:
+            os.close(state_parent)
+        if orchestrator is not None:
             os.close(orchestrator)
-    finally:
         os.close(web)
+        raise
+
+
+def close_pre_mutation_mount_safety(mount_safety):
+    seen = set()
+    for key in ('state', 'state_parent', 'orchestrator', 'web'):
+        try:
+            descriptor = mount_safety[key]
+            if descriptor is not None and descriptor not in seen:
+                seen.add(descriptor)
+                os.close(descriptor)
+        except (KeyError, OSError, TypeError):
+            pass
 
 
 def cleanup_recovery_sidecar(state, recovery, mutations):
@@ -2267,16 +2339,20 @@ def unlink_dump(backups, state, record, mutations):
 
 
 def execute():
-    assert_pre_mutation_mount_safety()
-    state = prepare_state_directory()
+    mount_safety = assert_pre_mutation_mount_safety()
+    state = None
     global_lock = None
     first = None
     second = None
     try:
+        state = prepare_state_directory(mount_safety)
         try:
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             reject('cleanup_lock_busy', 75)
+        # Keep the initially validated roots pinned and repeat the complete
+        # mount observation immediately before the first cleanup mutation.
+        revalidate_pre_mutation_mount_safety(mount_safety)
         clean_marker_temps(state, MUTATIONS)
         global_lock = open_global_lock()
         if activity_count() != 0:
@@ -2341,7 +2417,7 @@ def execute():
             close_gathered(second)
         if global_lock is not None:
             os.close(global_lock)
-        os.close(state)
+        close_pre_mutation_mount_safety(mount_safety)
 
 
 def marker_status(max_age_seconds):
