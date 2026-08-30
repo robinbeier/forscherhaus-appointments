@@ -110,10 +110,13 @@ the three final reviews are finding-free, the primary agent records one
 new, unedited, owner-authored, privacy-safe attestation for their unchanged
 head as described in `docs/exact-head-mergegate.md`. The gate checks that
 attestation, exact review-activity watermarks, blocking CI, mergeability, and
-the PR identity observed both before and after evidence collection together.
-A still-active `CHANGES_REQUESTED` review, watermark drift, or newer trusted
-review feedback invalidates the attestation; close or resolve the finding and
-publish a fresh attestation comment before rerunning the gate.
+two identical bounded review-evidence observations. PR identity is observed
+before the first evidence observation, after it, and immediately before the
+second; all three reads must remain equal. A still-active `CHANGES_REQUESTED`
+review, watermark drift, edited inline feedback, newer trusted review feedback,
+or a newer invalid attestation marker invalidates the attestation; close or
+resolve the finding and publish a fresh attestation comment before rerunning
+the gate.
 
 The attestation is an accountable owner assertion, not cryptographic proof of
 agent execution. The repository-local gate is designed to prevent accidental

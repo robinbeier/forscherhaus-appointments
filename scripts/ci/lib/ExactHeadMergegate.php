@@ -69,6 +69,16 @@ final class ExactHeadMergegate
                 : 'Pull request identity changed or was not revalidated after evidence collection.',
         );
 
+        $reviewEvidenceRevalidated = ($snapshot['review_evidence_revalidated'] ?? null) === true;
+        self::addGate(
+            $gates,
+            $reviewEvidenceRevalidated ? 'pass' : 'fail',
+            $reviewEvidenceRevalidated ? 'review_evidence_revalidated' : 'review_evidence_drift_during_evaluation',
+            $reviewEvidenceRevalidated
+                ? 'Review evidence remained stable across bounded repeated observations.'
+                : 'Review evidence changed or was not revalidated during evaluation.',
+        );
+
         $pr = $snapshot['pr'] ?? null;
         if (!is_array($pr)) {
             self::addGate($gates, 'fail', 'pr_snapshot', 'Pull request snapshot is missing.');
@@ -294,24 +304,45 @@ final class ExactHeadMergegate
         array &$gates,
     ): void {
         $candidates = [];
+        $markerEvidenceMalformed = false;
         if (is_array($comments)) {
             foreach ($comments as $comment) {
-                $candidate = self::parseReviewAttestation($policy, $comment, $sha);
-                if ($candidate !== null) {
-                    $candidates[] = $candidate;
+                if (
+                    !is_array($comment) ||
+                    !in_array($comment['author_association'] ?? null, $policy['trusted_associations'], true) ||
+                    !is_string($comment['body'] ?? null) ||
+                    !str_starts_with($comment['body'], '<!-- ' . $policy['attestation_marker'])
+                ) {
+                    continue;
                 }
+
+                $updatedAt = self::normalizeGitHubTimestamp($comment['updated_at'] ?? null);
+                if ($updatedAt === null || (!is_int($comment['id'] ?? null) && !is_string($comment['id'] ?? null))) {
+                    $markerEvidenceMalformed = true;
+                    continue;
+                }
+
+                $candidates[] = [
+                    'comment' => $comment,
+                    'sort_at' => $updatedAt,
+                    'comment_id' => $comment['id'],
+                ];
             }
         }
 
         usort($candidates, static function (array $left, array $right): int {
-            $timeOrder = strcmp($right['attested_at'], $left['attested_at']);
+            $timeOrder = strcmp($right['sort_at'], $left['sort_at']);
             if ($timeOrder !== 0) {
                 return $timeOrder;
             }
 
             return ((int) $right['comment_id']) <=> ((int) $left['comment_id']);
         });
-        $attestation = $candidates[0] ?? null;
+        $latestMarkerComment = $candidates[0]['comment'] ?? null;
+        $attestation =
+            !$markerEvidenceMalformed && is_array($latestMarkerComment)
+                ? self::parseReviewAttestation($policy, $latestMarkerComment, $sha)
+                : null;
         $validAttestationFound = is_array($attestation);
         $laterFeedback =
             $validAttestationFound &&
@@ -471,7 +502,7 @@ final class ExactHeadMergegate
             }
         }
 
-        $latestReviewByActor = [];
+        $reviewTransitions = [];
         $observedWatermarks = ['review_id' => 0, 'review_comment_id' => 0];
         foreach ($reviewActivity as $activity) {
             if (
@@ -494,21 +525,17 @@ final class ExactHeadMergegate
             $watermarkKey = $activity['kind'] === 'review' ? 'review_id' : 'review_comment_id';
             $observedWatermarks[$watermarkKey] = max($observedWatermarks[$watermarkKey], $activity['id']);
 
+            if ($activity['kind'] === 'review_comment' && strcmp($occurredAt, $attestation['attested_at']) >= 0) {
+                return true;
+            }
+
             if (($activity['kind'] ?? null) === 'review' && ($activity['commit_sha'] ?? null) === $sha) {
-                $actor = $activity['actor_ref'];
-                $existing = $latestReviewByActor[$actor] ?? null;
-                if (
-                    !is_array($existing) ||
-                    strcmp($occurredAt, $existing['occurred_at']) > 0 ||
-                    ($occurredAt === $existing['occurred_at'] &&
-                        (int) ($activity['id'] ?? 0) > (int) ($existing['id'] ?? 0))
-                ) {
-                    $latestReviewByActor[$actor] = [
-                        'occurred_at' => $occurredAt,
-                        'id' => $activity['id'] ?? null,
-                        'state' => $activity['state'] ?? null,
-                    ];
-                }
+                $reviewTransitions[] = [
+                    'occurred_at' => $occurredAt,
+                    'id' => (int) ($activity['id'] ?? 0),
+                    'state' => $activity['state'] ?? null,
+                    'actor_ref' => $activity['actor_ref'],
+                ];
             }
         }
 
@@ -516,13 +543,37 @@ final class ExactHeadMergegate
             return true;
         }
 
-        foreach ($latestReviewByActor as $review) {
-            if (($review['state'] ?? null) === 'CHANGES_REQUESTED') {
+        usort(
+            $reviewTransitions,
+            static fn(array $left, array $right): int => [$left['occurred_at'], $left['id']] <=> [
+                $right['occurred_at'],
+                $right['id'],
+            ],
+        );
+        $blockingReviewers = [];
+        foreach ($reviewTransitions as $review) {
+            $state = $review['state'] ?? null;
+            $actorRef = $review['actor_ref'] ?? null;
+            if (!is_string($actorRef) || !is_string($state)) {
+                return true;
+            }
+
+            if ($state === 'CHANGES_REQUESTED') {
+                $blockingReviewers[$actorRef] = true;
+                continue;
+            }
+
+            if (in_array($state, ['APPROVED', 'DISMISSED'], true)) {
+                unset($blockingReviewers[$actorRef]);
+                continue;
+            }
+
+            if ($state !== 'COMMENTED') {
                 return true;
             }
         }
 
-        return false;
+        return $blockingReviewers !== [];
     }
 
     private static function normalizeGitHubTimestamp(mixed $timestamp): ?string

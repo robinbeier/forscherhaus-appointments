@@ -228,7 +228,8 @@ function loadExactHeadMergegatePolicy(string $contractPath): array
     if (
         !is_array($mergegate) ||
         ($mergegate['schema_version'] ?? null) !== 1 ||
-        ($mergegate['pr_revalidation'] ?? null) !== 'before_and_after_evidence_collection' ||
+        ($mergegate['pr_revalidation'] ?? null) !== 'before_between_and_immediately_before_final_review_observation' ||
+        ($mergegate['review_evidence_revalidation'] ?? null) !== 'two_identical_bounded_observations' ||
         ($mergegate['review_lens_source'] ?? null) !== 'review.sensitive_change_lenses' ||
         !is_array($review) ||
         !is_array($ci) ||
@@ -468,15 +469,18 @@ function fetchExactHeadMergegateSnapshot(
         $prefix . '/commits/' . $reviewedSha . '/pulls',
         null,
     );
-    $comments = fetchExactHeadMergegateCollection($request, $prefix . '/issues/' . $prNumber . '/comments', null);
-    $reviews = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/reviews', null);
-    $reviewComments = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/comments', null);
+    $initialReviewEvidence = fetchExactHeadMergegateReviewEvidence($request, $prefix, $prNumber);
+    $middlePullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
     $finalPullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
+    $finalReviewEvidence = fetchExactHeadMergegateReviewEvidence($request, $prefix, $prNumber);
 
     $identityFields = ['number', 'state', 'draft', 'base_ref', 'head_sha', 'head_ref', 'head_repository'];
     $prHeadRevalidated = true;
     foreach ($identityFields as $field) {
-        if (($initialPullRequest[$field] ?? null) !== ($finalPullRequest[$field] ?? null)) {
+        if (
+            ($initialPullRequest[$field] ?? null) !== ($middlePullRequest[$field] ?? null) ||
+            ($middlePullRequest[$field] ?? null) !== ($finalPullRequest[$field] ?? null)
+        ) {
             $prHeadRevalidated = false;
             break;
         }
@@ -485,6 +489,7 @@ function fetchExactHeadMergegateSnapshot(
     return [
         'pr' => $finalPullRequest,
         'pr_head_revalidated' => $prHeadRevalidated,
+        'review_evidence_revalidated' => $initialReviewEvidence === $finalReviewEvidence,
         'workflow_runs' => array_map(
             static fn(mixed $run): array => normalizeExactHeadMergegateWorkflowRun($run),
             $workflowRuns,
@@ -494,6 +499,22 @@ function fetchExactHeadMergegateSnapshot(
             $checkRuns,
         ),
         'associated_pr_numbers' => normalizeExactHeadMergegateAssociatedPullRequests($associatedPullRequests),
+        'comments' => $finalReviewEvidence['comments'],
+        'review_activity' => $finalReviewEvidence['review_activity'],
+    ];
+}
+
+/**
+ * @param Closure(string): array<string, mixed> $request
+ * @return array{comments:array<int, array<string, mixed>>,review_activity:array<int, array<string, mixed>>}
+ */
+function fetchExactHeadMergegateReviewEvidence(Closure $request, string $prefix, int $prNumber): array
+{
+    $comments = fetchExactHeadMergegateCollection($request, $prefix . '/issues/' . $prNumber . '/comments', null);
+    $reviews = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/reviews', null);
+    $reviewComments = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/comments', null);
+
+    return [
         'comments' => array_map(
             static fn(mixed $comment): array => normalizeExactHeadMergegateComment($comment),
             $comments,

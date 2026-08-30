@@ -32,11 +32,12 @@ or duplicate input fails closed.
 The command uses authenticated GitHub GET requests and binds all evidence to
 the same pull request and reviewed SHA:
 
-1. The pull request is read before and again after all other evidence. Its
-   number, state, draft flag, base, head SHA, head branch, and head repository
-   must remain identical across both observations. The final observation must
-   be open, non-draft, target main, have the reviewed SHA as its current head,
-   and report mergeable=true with a clean mergeability state.
+1. The pull request is read before the first review-evidence observation,
+   after it, and once more immediately before the second review-evidence
+   observation. Its number, state, draft flag, base, head SHA, head branch, and
+   head repository must remain identical across all three reads. The third PR
+   read must be open, non-draft, target main, have the reviewed SHA as its
+   current head, and report mergeable=true with a clean mergeability state.
 2. GitHub's commit-to-PR association binds that SHA to the pull request, and a
    completed successful pull_request run of the canonical CI workflow binds
    the same SHA, head branch, head repository, pull request number, and check
@@ -49,11 +50,14 @@ the same pull request and reviewed SHA:
    skipped as success.
 5. One new, unedited owner-authored PR comment contains a complete, canonical
    review attestation for the reviewed SHA and the exact formal-review and
-   inline-review-comment watermarks observed when it was published.
+   inline-review-comment watermarks observed when it was published. The newest
+   owner comment carrying the attestation marker must itself be valid; a newer
+   malformed, edited, or wrong-SHA marker comment invalidates older evidence.
 6. No still-active CHANGES_REQUESTED review targets that SHA, no trusted issue
    comment is newer than the selected attestation, and the current formal
    review and inline review comment maxima still equal the attested
-   watermarks.
+   watermarks. The normalized issue comments, formal reviews, and inline review
+   comments must also be strictly identical across the two bounded observations.
 
 Missing, pending, cancelled, neutral, failed, timed-out, stale, duplicated,
 wrong-suite, wrong-SHA, or malformed evidence blocks the merge. Advisory jobs
@@ -103,7 +107,10 @@ non-blocking review state. Any review watermark drift, or a newer
 owner/member/collaborator issue comment, makes the attestation stale and
 requires a fresh finding-free review decision plus a fresh attestation. This
 closes later-feedback drift without writing reviewer identity or comment
-contents to the report.
+contents to the report. An inline review comment whose update timestamp is at
+or after the attestation timestamp is also blocking. Equality is deliberately
+fail-closed because GitHub timestamps have only second precision; publish a
+fresh attestation in a later second instead of guessing event order.
 
 ## Result and Landing
 
@@ -124,13 +131,20 @@ Exit codes:
 - 1: GitHub state was read successfully but the pull request is not ready
 - 2: input, contract, API, pagination, or report publication failed
 
-Only an exit 0 after the final PR-head revalidation permits the Linear
-transition to Ready to Merge. A read-only observation cannot lock GitHub state;
-the contract's compare-and-swap merge command is the final race boundary:
+Only an exit 0 after the final PR-head and review-evidence revalidations permits
+the Linear transition to Ready to Merge. The final evidence collection ends on
+review state; the contract's compare-and-swap merge command is the final
+head-SHA race boundary:
 
 ~~~bash
 gh pr merge --merge --match-head-commit <current_head_sha>
 ~~~
+
+GitHub offers no matching compare-and-swap primitive for arbitrary review
+comments. Run the gate immediately before the merge command; feedback arriving
+after its final review observation invalidates the process evidence and requires
+a fresh review and gate run. Repository branch protection remains authoritative
+for GitHub-native review requirements.
 
 Afterward, verify the merge commit and origin/main before moving the issue to
 Done. A successful gate is repository merge evidence; it is never deployment

@@ -76,6 +76,20 @@ final class ExactHeadMergegateTest extends TestCase
         self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
     }
 
+    public function testMissingOrChangedReviewEvidenceObservationFailsClosed(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment()];
+        unset($snapshot['review_evidence_revalidated']);
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_evidence_drift_during_evaluation', array_column($report['gates'], 'code'));
+
+        $snapshot['review_evidence_revalidated'] = false;
+        self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+    }
+
     public function testWorkflowMustBindExactPullRequestShaAndCheckSuite(): void
     {
         $snapshot = $this->snapshot();
@@ -88,19 +102,27 @@ final class ExactHeadMergegateTest extends TestCase
         self::assertContains('required_check_missing_or_duplicate', array_column($report['gates'], 'code'));
     }
 
-    public function testWrongHeadBaseDraftMergeabilityAndCheckConclusionsFail(): void
+    public function testEachPullRequestInvariantFailsIndependently(): void
     {
-        $snapshot = $this->snapshot();
-        $snapshot['pr']['head_sha'] = str_repeat('a', 40);
-        $snapshot['pr']['base_ref'] = 'release';
-        $snapshot['pr']['draft'] = true;
-        $snapshot['pr']['mergeable'] = false;
-        $snapshot['pr']['mergeable_state'] = 'blocked';
-        $snapshot['check_runs'][0]['conclusion'] = 'failure';
-        $snapshot['check_runs'][1]['conclusion'] = 'skipped';
-        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
-        self::assertSame('fail', $report['status']);
-        self::assertGreaterThanOrEqual(5, count($report['gates']));
+        $cases = [
+            'number' => [13, 'pr_number'],
+            'state' => ['closed', 'pr_state'],
+            'draft' => [true, 'pr_draft'],
+            'base_ref' => ['release', 'pr_base'],
+            'head_sha' => [str_repeat('a', 40), 'pr_head'],
+            'mergeable' => [false, 'pr_mergeable'],
+            'mergeable_state' => ['blocked', 'pr_mergeable_state'],
+        ];
+
+        foreach ($cases as $field => [$invalidValue, $expectedCode]) {
+            $snapshot = $this->snapshot();
+            $snapshot['comments'] = [$this->attestationComment()];
+            $snapshot['pr'][$field] = $invalidValue;
+            $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+            self::assertSame('fail', $report['status'], $field);
+            self::assertContains($expectedCode, array_column($report['gates'], 'code'), $field);
+        }
     }
 
     public function testConditionalSkippedIsAllowedButRequiredSkippedIsNot(): void
@@ -127,17 +149,22 @@ final class ExactHeadMergegateTest extends TestCase
 
     public function testLatestMatchingWorkflowRunMustBeSuccessful(): void
     {
-        $snapshot = $this->snapshot();
-        $latest = $snapshot['workflow_runs'][0];
-        $latest['id'] = 102;
-        $latest['status'] = 'in_progress';
-        $latest['conclusion'] = null;
-        $snapshot['workflow_runs'][] = $latest;
-        $snapshot['comments'] = [$this->attestationComment()];
-        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        foreach (
+            [['status' => 'in_progress', 'conclusion' => null], ['status' => 'completed', 'conclusion' => 'failure']]
+            as $latestState
+        ) {
+            $snapshot = $this->snapshot();
+            $latest = $snapshot['workflow_runs'][0];
+            $latest['id'] = 102;
+            $latest['status'] = $latestState['status'];
+            $latest['conclusion'] = $latestState['conclusion'];
+            $snapshot['workflow_runs'][] = $latest;
+            $snapshot['comments'] = [$this->attestationComment()];
+            $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
 
-        self::assertSame('fail', $report['status']);
-        self::assertContains('workflow_missing_or_stale', array_column($report['gates'], 'code'));
+            self::assertSame('fail', $report['status']);
+            self::assertContains('workflow_missing_or_stale', array_column($report['gates'], 'code'));
+        }
     }
 
     public function testAttestationIsRejectedWhenStaleMalformedUntrustedOrDuplicated(): void
@@ -163,6 +190,26 @@ final class ExactHeadMergegateTest extends TestCase
 
         $snapshot['comments'] = [[...$this->attestationComment(), 'updated_at' => '2026-08-30T20:00:01Z']];
         self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+    }
+
+    public function testLatestOwnerMarkerCommentMustItselfBeAValidAttestation(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [
+            $this->attestationComment(),
+            [
+                'id' => 501,
+                'author_association' => 'OWNER',
+                'created_at' => '2026-08-30T20:00:01Z',
+                'updated_at' => '2026-08-30T20:00:01Z',
+                'body' => "<!-- exact-head-review-attestation:v1\n{invalid-json}\n-->",
+            ],
+        ];
+
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_attestation_invalid', array_column($report['gates'], 'code'));
     }
 
     public function testNewerTrustedFeedbackAndOutstandingChangesRequestedInvalidateAttestation(): void
@@ -218,6 +265,37 @@ final class ExactHeadMergegateTest extends TestCase
         self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
     }
 
+    public function testCommentOnlyReviewDoesNotClearOutstandingChangesRequested(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment('OWNER', 701, 0)];
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review',
+                'id' => 700,
+                'author_association' => 'MEMBER',
+                'actor_ref' => str_repeat('d', 64),
+                'state' => 'CHANGES_REQUESTED',
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T19:59:00Z',
+            ],
+            [
+                'kind' => 'review',
+                'id' => 701,
+                'author_association' => 'MEMBER',
+                'actor_ref' => str_repeat('d', 64),
+                'state' => 'COMMENTED',
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T19:59:30Z',
+            ],
+        ];
+
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+    }
+
     public function testLaterNonBlockingReviewPassesWithFreshMatchingWatermark(): void
     {
         $snapshot = $this->snapshot();
@@ -256,7 +334,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'actor_ref' => str_repeat('e', 64),
                 'state' => null,
                 'commit_sha' => self::SHA,
-                'occurred_at' => '2026-08-30T20:00:00Z',
+                'occurred_at' => '2026-08-30T19:59:59Z',
             ],
         ];
         $snapshot['comments'] = [$this->attestationComment('OWNER', 0, 650)];
@@ -266,6 +344,30 @@ final class ExactHeadMergegateTest extends TestCase
         $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
         self::assertSame('fail', $report['status']);
         self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+    }
+
+    public function testEditedInlineReviewCommentAtOrAfterAttestationIsBlocking(): void
+    {
+        foreach (['2026-08-30T20:00:00Z', '2026-08-30T20:00:01Z'] as $updatedAt) {
+            $snapshot = $this->snapshot();
+            $snapshot['review_activity'] = [
+                [
+                    'kind' => 'review_comment',
+                    'id' => 650,
+                    'author_association' => 'MEMBER',
+                    'actor_ref' => str_repeat('e', 64),
+                    'state' => null,
+                    'commit_sha' => self::SHA,
+                    'occurred_at' => $updatedAt,
+                ],
+            ];
+            $snapshot['comments'] = [$this->attestationComment('OWNER', 0, 650)];
+
+            $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+            self::assertSame('fail', $report['status']);
+            self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+        }
     }
 
     /** @return array<string,mixed> */
@@ -289,6 +391,7 @@ final class ExactHeadMergegateTest extends TestCase
     {
         return [
             'pr_head_revalidated' => true,
+            'review_evidence_revalidated' => true,
             'pr' => [
                 'number' => 12,
                 'state' => 'open',

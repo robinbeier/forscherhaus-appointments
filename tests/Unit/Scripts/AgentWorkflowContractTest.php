@@ -62,8 +62,12 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('ci.yml', $contract['land']['exact_head_mergegate']['workflow_file'] ?? null);
         self::assertSame('CI', $contract['land']['exact_head_mergegate']['workflow_name'] ?? null);
         self::assertSame(
-            'before_and_after_evidence_collection',
+            'before_between_and_immediately_before_final_review_observation',
             $contract['land']['exact_head_mergegate']['pr_revalidation'] ?? null,
+        );
+        self::assertSame(
+            'two_identical_bounded_observations',
+            $contract['land']['exact_head_mergegate']['review_evidence_revalidation'] ?? null,
         );
         self::assertSame(
             'review.sensitive_change_lenses',

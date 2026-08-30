@@ -14,7 +14,8 @@
             "base_ref": "main",
             "workflow_file": "ci.yml",
             "workflow_name": "CI",
-            "pr_revalidation": "before_and_after_evidence_collection",
+            "pr_revalidation": "before_between_and_immediately_before_final_review_observation",
+            "review_evidence_revalidation": "two_identical_bounded_observations",
             "review_lens_source": "review.sensitive_change_lenses",
             "required_checks": [
                 "changes",
@@ -101,7 +102,7 @@
             "required_sections": {
                 "## Evidence Contract": ["The command uses authenticated GitHub GET requests and binds all evidence"],
                 "## Review Attestation": ["The three final reviews remain independent review work."],
-                "## Result and Landing": ["Only an exit 0 after the final PR-head revalidation permits the Linear"]
+                "## Result and Landing": ["Only an exit 0 after the final PR-head and review-evidence revalidations"]
             }
         },
         "docs/ci-write-contracts.md": {

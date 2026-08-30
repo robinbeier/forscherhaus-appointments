@@ -54,6 +54,8 @@ contract.
       `docs/exact-head-mergegate.md`
     - run
       `composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<current_head_sha>`
+    - require its bounded PR-identity and repeated review-evidence observations
+      to remain unchanged through the final read
     - only after exit `0`, move the Linear issue to `Ready to Merge`
     - confirm the current PR head still matches that exact reviewed,
       CI-green, mergegate-approved head

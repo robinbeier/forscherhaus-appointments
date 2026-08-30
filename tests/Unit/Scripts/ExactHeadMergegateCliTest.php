@@ -110,6 +110,10 @@ final class ExactHeadMergegateCliTest extends TestCase
                 '/repos/acme/app/pulls/12/reviews?per_page=100&page=1',
                 '/repos/acme/app/pulls/12/comments?per_page=100&page=1',
                 '/repos/acme/app/pulls/12',
+                '/repos/acme/app/pulls/12',
+                '/repos/acme/app/issues/12/comments?per_page=100&page=1',
+                '/repos/acme/app/pulls/12/reviews?per_page=100&page=1',
+                '/repos/acme/app/pulls/12/comments?per_page=100&page=1',
             ],
             $requestedPaths,
         );
@@ -123,17 +127,97 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertStringNotContainsString($this->attestation(), $report);
     }
 
-    public function testCliFailsClosedWhenPullRequestHeadChangesDuringEvidenceCollection(): void
+    public function testCliFailsClosedWhenAnyPullRequestIdentityFieldChangesDuringEvidenceCollection(): void
+    {
+        $mutations = [
+            'number' => static function (array $payload): array {
+                $payload['number'] = 13;
+                return $payload;
+            },
+            'state' => static function (array $payload): array {
+                $payload['state'] = 'closed';
+                return $payload;
+            },
+            'draft' => static function (array $payload): array {
+                $payload['draft'] = true;
+                return $payload;
+            },
+            'base_ref' => static function (array $payload): array {
+                $payload['base']['ref'] = 'release';
+                return $payload;
+            },
+            'head_sha' => static function (array $payload): array {
+                $payload['head']['sha'] = str_repeat('f', 40);
+                return $payload;
+            },
+            'head_ref' => static function (array $payload): array {
+                $payload['head']['ref'] = 'other-feature';
+                return $payload;
+            },
+            'head_repository' => static function (array $payload): array {
+                $payload['head']['repo']['full_name'] = 'acme/other';
+                return $payload;
+            },
+        ];
+
+        foreach ($mutations as $field => $mutate) {
+            $requestedPaths = [];
+            $pullRequestReads = 0;
+            $validRequest = $this->validRequest($requestedPaths);
+            $request = static function (string $path) use ($validRequest, &$pullRequestReads, $mutate): array {
+                $payload = $validRequest($path);
+                if ($path === '/repos/' . self::REPOSITORY . '/pulls/12') {
+                    $pullRequestReads++;
+                    if ($pullRequestReads === 2) {
+                        $payload = $mutate($payload);
+                    }
+                }
+
+                return $payload;
+            };
+            $reportPath = $this->temporaryPath();
+            $exitCode = runExactHeadMergegateCli(
+                [
+                    'check_exact_head_mergegate.php',
+                    '--pr=12',
+                    '--reviewed-sha=' . self::SHA,
+                    '--output-json=' . $reportPath,
+                ],
+                $request,
+                static fn(): string => self::REPOSITORY,
+                dirname(__DIR__, 3),
+            );
+
+            self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode, $field);
+            self::assertSame(3, $pullRequestReads, $field);
+            self::assertStringContainsString(
+                'pr_head_drift_during_evaluation',
+                (string) file_get_contents($reportPath),
+                $field,
+            );
+        }
+    }
+
+    public function testCliFailsClosedWhenReviewEvidenceChangesDuringEvaluation(): void
     {
         $requestedPaths = [];
-        $pullRequestReads = 0;
+        $reviewCommentReads = 0;
         $validRequest = $this->validRequest($requestedPaths);
-        $request = static function (string $path) use ($validRequest, &$pullRequestReads): array {
+        $request = static function (string $path) use ($validRequest, &$reviewCommentReads): array {
             $payload = $validRequest($path);
-            if ($path === '/repos/' . self::REPOSITORY . '/pulls/12') {
-                $pullRequestReads++;
-                if ($pullRequestReads === 2) {
-                    $payload['head']['sha'] = str_repeat('f', 40);
+            if (str_contains($path, '/pulls/12/comments?')) {
+                $reviewCommentReads++;
+                if ($reviewCommentReads === 2) {
+                    return [
+                        [
+                            'id' => 650,
+                            'author_association' => 'MEMBER',
+                            'commit_id' => self::SHA,
+                            'created_at' => '2026-08-30T20:00:01Z',
+                            'updated_at' => '2026-08-30T20:00:01Z',
+                            'user' => ['id' => 42],
+                        ],
+                    ];
                 }
             }
 
@@ -153,8 +237,11 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
-        self::assertSame(2, $pullRequestReads);
-        self::assertStringContainsString('pr_head_drift_during_evaluation', (string) file_get_contents($reportPath));
+        self::assertSame(2, $reviewCommentReads);
+        self::assertStringContainsString(
+            'review_evidence_drift_during_evaluation',
+            (string) file_get_contents($reportPath),
+        );
     }
 
     public function testCliFailsClosedWhenAttestationIsMissing(): void
