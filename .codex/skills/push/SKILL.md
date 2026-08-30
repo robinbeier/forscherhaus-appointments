@@ -39,9 +39,10 @@ must be pushed to an existing PR.
       template and remove placeholders.
 7. After the PR exists:
     - attach it to the Linear issue with [$linear](../linear/SKILL.md)
-    - move the issue to `In Review` by default
-    - move it directly to `Ready to Merge` instead when the PR should stay fully
-      agent-owned through the review/merge loop
+    - move the issue to `In Review`
+    - do not move it to `Ready to Merge` during publish; that state is reserved
+      for the later unchanged exact PR head after blocking CI and the required
+      final reviews are both green and finding-free
     - update the `## Codex Workpad` comment with compact validation status,
       merge/review posture, and next expected action
 8. Reply with the PR URL.
@@ -59,7 +60,10 @@ gh pr view --json state,url,number 2>/dev/null || true
 - Use `--force-with-lease` only if history was intentionally rewritten.
 - If push fails for auth or permissions, stop and surface the exact error.
 - After creating or updating the PR, the Linear issue should not stay in
-  `In Progress`; move it to `In Review` or `Ready to Merge`.
+  `In Progress`; move it to `In Review`.
+- Any push after review or CI evidence was collected makes that landing
+  evidence stale. Return the issue to `In Review` until exact-head CI and the
+  required final reviews are re-established on the new head.
 - Keep the PR linked on the Linear issue itself; do not duplicate the PR URL in
   the workpad.
 - If the correct diff is already present and validated, stop exploring and

@@ -20,11 +20,20 @@ class AgentWorkflowContractTest extends TestCase
     {
         $workflow = $this->readRepoFile('WORKFLOW.md');
         $template = $this->readRepoFile('.github/pull_request_template.md');
+        $pushSkill = $this->readRepoFile('.codex/skills/push/SKILL.md');
+        $landSkill = $this->readRepoFile('.codex/skills/land/SKILL.md');
 
         self::assertStringContainsString('same unchanged exact commit', $workflow);
         self::assertStringContainsString('Any new push returns the issue to `In Review`', $workflow);
         self::assertStringContainsString('reviewed head, CI head, and current PR head are identical', $workflow);
         self::assertStringContainsString('PR-Head, CI-Head und final reviewter Head sind identisch', $template);
+        self::assertStringContainsString('do not move it to `Ready to Merge` during publish', $pushSkill);
+        self::assertStringContainsString('Any push after review or CI evidence was collected', $pushSkill);
+        self::assertStringContainsString(
+            'Any push after `Ready to Merge` immediately invalidates the landing',
+            $landSkill,
+        );
+        self::assertStringContainsString('gh pr merge --merge --match-head-commit <current_head_sha>', $landSkill);
     }
 
     public function testSensitiveChangesRequireThreeIndependentReviewLenses(): void
