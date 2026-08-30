@@ -519,11 +519,49 @@ final class ExactHeadMergegateTest extends TestCase
                 'occurred_at' => '2026-08-30T19:59:59Z',
             ],
         ];
-        $snapshot['comments'] = [$this->attestationComment('OWNER', 0, 650)];
+        $snapshot['comments'] = [
+            $this->attestationComment('OWNER', 0, 650, $this->reviewPayloadDigest($snapshot['review_activity'])),
+        ];
         self::assertSame('pass', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
 
         $snapshot['review_activity'][] = [...$snapshot['review_activity'][0], 'id' => 651];
         $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+    }
+
+    public function testDeletedLowerInlineReviewCommentChangesReviewPayloadDigest(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review_comment',
+                'id' => 649,
+                'author_association' => 'NONE',
+                'actor_ref' => str_repeat('e', 64),
+                'state' => null,
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T19:59:58Z',
+            ],
+            [
+                'kind' => 'review_comment',
+                'id' => 650,
+                'author_association' => 'NONE',
+                'actor_ref' => str_repeat('f', 64),
+                'state' => null,
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T19:59:59Z',
+            ],
+        ];
+        $snapshot['comments'] = [
+            $this->attestationComment('OWNER', 0, 650, $this->reviewPayloadDigest($snapshot['review_activity'])),
+        ];
+
+        self::assertSame('pass', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+
+        array_shift($snapshot['review_activity']);
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
         self::assertSame('fail', $report['status']);
         self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
     }
@@ -758,17 +796,33 @@ final class ExactHeadMergegateTest extends TestCase
     {
         $payloadEntries = [];
         foreach ($entries as $entry) {
-            if (($entry['kind'] ?? null) !== 'review' || ($entry['commit_sha'] ?? null) !== self::SHA) {
+            if (($entry['kind'] ?? null) === 'review') {
+                if (($entry['commit_sha'] ?? null) !== self::SHA) {
+                    continue;
+                }
+
+                $payloadEntries[] = [
+                    'kind' => 'review',
+                    'id' => (int) ($entry['id'] ?? 0),
+                    'actor_ref' => $entry['actor_ref'] ?? null,
+                    'state' => $entry['state'] ?? null,
+                    'commit_sha' => $entry['commit_sha'] ?? null,
+                    'occurred_at' => $entry['occurred_at'] ?? null,
+                    'content_digest' => $entry['content_digest'] ?? null,
+                ];
+                continue;
+            }
+
+            if (($entry['kind'] ?? null) !== 'review_comment') {
                 continue;
             }
 
             $payloadEntries[] = [
+                'kind' => 'review_comment',
                 'id' => (int) ($entry['id'] ?? 0),
                 'actor_ref' => $entry['actor_ref'] ?? null,
-                'state' => $entry['state'] ?? null,
                 'commit_sha' => $entry['commit_sha'] ?? null,
                 'occurred_at' => $entry['occurred_at'] ?? null,
-                'content_digest' => $entry['content_digest'] ?? null,
             ];
         }
         usort(

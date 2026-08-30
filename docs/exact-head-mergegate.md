@@ -117,8 +117,9 @@ keys, a different verdict, or a different SHA are rejected.
 The numeric watermarks are the largest current IDs returned by the formal
 review and inline review comment collections, or 0 when that collection is
 empty. The payload digest is the privacy-safe hash of the normalized exact-SHA
-formal review payloads currently visible on the pull request. Together they
-make later activity and later formal-review body edits detectable without
+formal review payloads plus the normalized inline review comment evidence set
+currently visible on the pull request. Together they make later activity,
+inline-comment deletion, and formal-review body edits detectable without
 writing review text or identities into the report. A higher, lower, deleted,
 or otherwise different current maximum or payload digest invalidates the
 attestation.
@@ -140,14 +141,14 @@ later push requires a new comment after fresh final reviews.
 The gate also reads formal reviews and inline review comments. A current-SHA
 CHANGES_REQUESTED state remains blocking until the same reviewer has a later
 non-blocking review state. Any review watermark drift, formal-review payload
-digest drift, or a newer owner/member/collaborator issue comment makes the
-attestation stale and requires a fresh finding-free review decision plus a
-fresh attestation. This closes later-feedback drift without writing reviewer
-identity or comment contents to the report. An inline review comment whose
-update timestamp is at or after the attestation timestamp is also blocking. A
-same-second edit to an older trusted issue comment is blocking as well because
-GitHub timestamps have only second precision; publish a fresh attestation in a
-later second instead of guessing event order.
+digest drift, inline-review evidence drift, or a newer owner/member/collaborator
+issue comment makes the attestation stale and requires a fresh finding-free
+review decision plus a fresh attestation. This closes later-feedback drift
+without writing reviewer identity or comment contents to the report. An inline
+review comment whose update timestamp is at or after the attestation timestamp
+is also blocking. A same-second edit to an older trusted issue comment is
+blocking as well because GitHub timestamps have only second precision; publish
+a fresh attestation in a later second instead of guessing event order.
 
 ## Result and Landing
 

@@ -83,24 +83,40 @@ final class ExactHeadMergegate
             $watermarkKey = $activity['kind'] === 'review' ? 'review_id' : 'review_comment_id';
             $watermark[$watermarkKey] = max($watermark[$watermarkKey], $activity['id']);
 
-            if ($activity['kind'] !== 'review' || ($activity['commit_sha'] ?? null) !== $sha) {
+            if ($activity['kind'] === 'review') {
+                if (($activity['commit_sha'] ?? null) !== $sha) {
+                    continue;
+                }
+                if (
+                    !is_string($activity['state'] ?? null) ||
+                    !is_string($activity['content_digest'] ?? null) ||
+                    preg_match('/^[0-9a-f]{64}$/D', $activity['content_digest']) !== 1
+                ) {
+                    return null;
+                }
+
+                $reviewPayloadEntries[] = [
+                    'kind' => 'review',
+                    'id' => $activity['id'],
+                    'actor_ref' => $activity['actor_ref'],
+                    'state' => $activity['state'],
+                    'commit_sha' => $sha,
+                    'occurred_at' => self::normalizeGitHubTimestamp($activity['occurred_at']),
+                    'content_digest' => $activity['content_digest'],
+                ];
                 continue;
             }
-            if (
-                !is_string($activity['state'] ?? null) ||
-                !is_string($activity['content_digest'] ?? null) ||
-                preg_match('/^[0-9a-f]{64}$/D', $activity['content_digest']) !== 1
-            ) {
+
+            if (!is_string($activity['commit_sha'] ?? null)) {
                 return null;
             }
 
             $reviewPayloadEntries[] = [
+                'kind' => 'review_comment',
                 'id' => $activity['id'],
                 'actor_ref' => $activity['actor_ref'],
-                'state' => $activity['state'],
-                'commit_sha' => $sha,
+                'commit_sha' => $activity['commit_sha'],
                 'occurred_at' => self::normalizeGitHubTimestamp($activity['occurred_at']),
-                'content_digest' => $activity['content_digest'],
             ];
         }
 
