@@ -255,14 +255,17 @@ class BookingFlowFixtures
 
     public function customerExistsByEmail(string $email): bool
     {
-        $count = $this->CI->db
+        return $this->countCustomersByEmail($email) > 0;
+    }
+
+    public function countCustomersByEmail(string $email): int
+    {
+        return (int) $this->CI->db
             ->from('users')
             ->join('roles', 'roles.id = users.id_roles', 'inner')
             ->where('roles.slug', DB_SLUG_CUSTOMER)
             ->where('users.email', $email)
             ->count_all_results();
-
-        return $count > 0;
     }
 
     public function cleanup(): void

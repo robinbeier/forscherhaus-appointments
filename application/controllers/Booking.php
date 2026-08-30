@@ -339,6 +339,7 @@ class Booking extends EA_Controller
     public function register(): void
     {
         $transaction_open = false;
+        $creation_identity_lock = null;
 
         try {
             $disable_booking = setting('disable_booking');
@@ -382,8 +383,14 @@ class Booking extends EA_Controller
 
             $existing_customer_id = null;
 
-            if (!($authority_claim instanceof RescheduleAuthorityClaim) && $this->customers_model->exists($customer)) {
-                $existing_customer_id = $this->customers_model->find_record_id($customer);
+            if (!($authority_claim instanceof RescheduleAuthorityClaim)) {
+                $creation_identity_lock = $this->rescheduleAuthority()->acquireCreationIdentityLock(
+                    $customer['email'] ?? null,
+                );
+
+                if ($this->customers_model->exists($customer)) {
+                    $existing_customer_id = $this->customers_model->find_record_id($customer);
+                }
             }
 
             // Resolve ANY_PROVIDER or reject an unavailable concrete target.
@@ -528,6 +535,10 @@ class Booking extends EA_Controller
             }
 
             $transaction_open = false;
+            if ($creation_identity_lock !== null) {
+                $this->rescheduleAuthority()->releaseCreationIdentityLock($creation_identity_lock);
+            }
+            $creation_identity_lock = null;
 
             $company_color = setting('company_color');
 
@@ -578,6 +589,10 @@ class Booking extends EA_Controller
             }
 
             json_exception($e);
+        } finally {
+            if ($creation_identity_lock !== null) {
+                $this->rescheduleAuthority()->releaseCreationIdentityLock($creation_identity_lock);
+            }
         }
     }
 

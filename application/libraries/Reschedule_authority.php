@@ -46,6 +46,10 @@ class Reschedule_authority
 
     private const LIFETIME_SECONDS = 600;
 
+    private const CREATION_IDENTITY_LOCK_PREFIX = 'ea:public-create:';
+
+    private const CREATION_IDENTITY_LOCK_TIMEOUT_SECONDS = 10;
+
     /**
      * Conservative, versioned fail-closed snapshot contract. These lists are
      * intentionally centralized because adding or removing a field changes
@@ -321,6 +325,49 @@ class Reschedule_authority
 
         if (!$this->providerOffersService($provider_id, $service_id)) {
             throw new RescheduleAuthorityException('Public booking target rejected.');
+        }
+    }
+
+    /**
+     * Serialize normal public creates for the same customer identity before
+     * the customer lookup. The opaque lock name never contains the email.
+     */
+    public function acquireCreationIdentityLock(?string $email): ?string
+    {
+        $normalized_email = strtolower(trim((string) $email));
+
+        if ($normalized_email === '') {
+            return null;
+        }
+
+        $database_name = (string) ($this->db->database ?? '');
+        $identity_digest = hash('sha256', $database_name . "\0" . $normalized_email);
+        $lock_name = self::CREATION_IDENTITY_LOCK_PREFIX . substr($identity_digest, 0, 40);
+        $row = $this->db
+            ->query('SELECT GET_LOCK(?, ?) AS acquired', [$lock_name, self::CREATION_IDENTITY_LOCK_TIMEOUT_SECONDS])
+            ->row_array();
+
+        if ((int) ($row['acquired'] ?? 0) !== 1) {
+            throw new RuntimeException('Public booking identity lock could not be acquired.');
+        }
+
+        return $lock_name;
+    }
+
+    /**
+     * Release a normal-create identity lock without masking the booking result.
+     * Non-persistent DB connections also release any remaining lock on close.
+     */
+    public function releaseCreationIdentityLock(?string $lock_name): void
+    {
+        if ($lock_name === null) {
+            return;
+        }
+
+        try {
+            $this->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+        } catch (Throwable) {
+            // The non-persistent connection closing also releases the lock.
         }
     }
 

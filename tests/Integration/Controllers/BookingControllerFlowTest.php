@@ -112,6 +112,173 @@ class BookingControllerFlowTest extends TestCase
         $this->assertTrue($this->fixtures->customerExistsByEmail($customerEmail));
     }
 
+    public function testCreationIdentityLockSerializesAcrossDatabaseConnections(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $email = 'identity-lock-' . bin2hex(random_bytes(4)) . '@example.invalid';
+        $lockName = $controller->reschedule_authority->acquireCreationIdentityLock($email);
+        $secondaryDatabase = get_instance()->load->database('', true);
+        $secondaryAcquired = false;
+
+        $this->assertNotNull($lockName);
+        $contendedLock = $lockName;
+
+        try {
+            $primaryConnection = get_instance()->db->query('SELECT CONNECTION_ID() AS id')->row_array();
+            $secondaryConnection = $secondaryDatabase->query('SELECT CONNECTION_ID() AS id')->row_array();
+            $this->assertNotSame((int) $primaryConnection['id'], (int) $secondaryConnection['id']);
+
+            $contended = $secondaryDatabase->query('SELECT GET_LOCK(?, 0) AS acquired', [$lockName])->row_array();
+            $this->assertSame(0, (int) ($contended['acquired'] ?? -1));
+
+            $controller->reschedule_authority->releaseCreationIdentityLock($lockName);
+            $lockName = null;
+
+            $acquired = $secondaryDatabase->query('SELECT GET_LOCK(?, 0) AS acquired', [$contendedLock])->row_array();
+            $secondaryAcquired = (int) ($acquired['acquired'] ?? 0) === 1;
+
+            $this->assertTrue($secondaryAcquired);
+        } finally {
+            if ($lockName !== null) {
+                $controller->reschedule_authority->releaseCreationIdentityLock($lockName);
+            }
+
+            if ($secondaryAcquired) {
+                $secondaryDatabase->query('SELECT RELEASE_LOCK(?)', [$contendedLock]);
+            }
+
+            $secondaryDatabase->close();
+        }
+    }
+
+    public function testNormalCreationResolvesCustomerAfterIdentityLockAndRejectsLateOverlap(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerEmail = 'late-customer-' . bin2hex(random_bytes(4)) . '@example.invalid';
+        $startAt = new DateTimeImmutable('+5 days 10:00:00');
+        $service = get_instance()
+            ->db->get_where('services', ['id' => $pair['service_id']])
+            ->row_array();
+        $serviceDuration = max(EVENT_MINIMUM_DURATION, (int) ($service['duration'] ?? EVENT_MINIMUM_DURATION));
+        $endAt = $startAt->add(new DateInterval('PT' . $serviceDuration . 'M'));
+
+        $_POST['post_data'] = [
+            'appointment' => [
+                'start_datetime' => $startAt->format('Y-m-d H:i:s'),
+                'end_datetime' => $endAt->format('Y-m-d H:i:s'),
+                'id_services' => $pair['service_id'],
+                'id_users_provider' => $pair['provider_id'],
+                'location' => '',
+                'notes' => 'Late customer identity race',
+                'color' => '',
+            ],
+            'customer' => [
+                'first_name' => 'Late',
+                'last_name' => 'Rejected',
+                'email' => $customerEmail,
+                'phone_number' => '+49123456789',
+                'address' => 'Teststrasse 1',
+                'city' => 'Berlin',
+                'zip_code' => '10115',
+                'timezone' => setting('default_timezone') ?: 'UTC',
+                'notes' => '',
+            ],
+            'manage_mode' => false,
+        ];
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $delegate = $controller->reschedule_authority;
+        $winningCustomer = null;
+        $winningAppointment = null;
+        $controller->reschedule_authority = new class ($delegate, function () use (
+            &$winningCustomer,
+            &$winningAppointment,
+            $customerEmail,
+            $pair,
+            $startAt,
+            $endAt,
+        ): void {
+            $customerId = $this->fixtures->createCustomer([
+                'first_name' => 'Concurrent',
+                'last_name' => 'Winner',
+                'email' => $customerEmail,
+            ]);
+            $appointmentId = $this->fixtures->createAppointment(
+                $pair['provider_id'],
+                $customerId,
+                $pair['service_id'],
+                $startAt,
+                $endAt,
+                'Concurrent winner',
+            );
+            $winningCustomer = $this->fixtures->findCustomerById($customerId);
+            $winningAppointment = $this->fixtures->findAppointmentById($appointmentId);
+        }) extends \Reschedule_authority {
+            public bool $acquired = false;
+
+            public bool $released = false;
+
+            public function __construct(
+                private readonly \Reschedule_authority $delegate,
+                private readonly \Closure $afterAcquire,
+            ) {}
+
+            public function acquireCreationIdentityLock(?string $email): ?string
+            {
+                $lockName = $this->delegate->acquireCreationIdentityLock($email);
+                $this->acquired = true;
+                ($this->afterAcquire)();
+
+                return $lockName;
+            }
+
+            public function releaseCreationIdentityLock(?string $lock_name): void
+            {
+                $this->delegate->releaseCreationIdentityLock($lock_name);
+                $this->released = true;
+            }
+
+            public function lockCreationTarget(int $provider_id, int $service_id, ?int $customer_id = null): void
+            {
+                $this->delegate->lockCreationTarget($provider_id, $service_id, $customer_id);
+            }
+
+            public function customerHasOverlap(
+                int $customer_id,
+                string $start_datetime,
+                string $end_datetime,
+                ?int $exclude_appointment_id,
+            ): bool {
+                return $this->delegate->customerHasOverlap(
+                    $customer_id,
+                    $start_datetime,
+                    $end_datetime,
+                    $exclude_appointment_id,
+                );
+            }
+        };
+
+        $controller->register();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success'] ?? true);
+        $this->assertSame(lang('customer_is_already_booked'), $response['message'] ?? null);
+        $this->assertTrue($controller->reschedule_authority->acquired);
+        $this->assertTrue($controller->reschedule_authority->released);
+        $this->assertSame(1, $this->fixtures->countCustomersByEmail($customerEmail));
+        $this->assertNotNull($winningCustomer);
+        $this->assertNotNull($winningAppointment);
+        $this->assertSame($winningCustomer, $this->fixtures->findCustomerById((int) $winningCustomer['id']));
+        $this->assertSame($winningAppointment, $this->fixtures->findAppointmentById((int) $winningAppointment['id']));
+        $this->assertSame(1, $this->fixtures->countAppointmentsForCustomer((int) $winningCustomer['id']));
+        $this->assertSame(0, $controller->synchronization->savedCalls);
+        $this->assertSame(0, $controller->notifications->savedCalls);
+        $this->assertSame(0, $controller->webhooks_client->calls);
+    }
+
     public function testRegisterManageModeUpdatesExistingAppointment(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

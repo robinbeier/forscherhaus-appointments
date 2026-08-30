@@ -106,10 +106,18 @@ and locks the canonical appointment, its customer, original provider and
 service, and the requested target scheduling context. It then recomputes the
 fingerprint and reruns the existing availability and overlap checks. Public
 register writes for the same target provider serialize before their final
-availability check. Normal creation resolves an existing customer before the
-transaction and locks that customer together with the provider in the same
-ascending user-ID order used by reschedules, preventing provider/customer lock
-inversion between the two public write paths.
+availability check. Normal creation first acquires a bounded database advisory
+lock derived from the database name and a one-way digest of the normalized
+customer email; neither the email nor another personal value appears in the
+lock name. Customer lookup happens only after this identity lock, so a request
+that waited behind a concurrent creation observes the committed customer and
+reruns the customer-wide overlap guard even when the requests target different
+providers. It then locks the existing customer together with the provider in
+the same ascending user-ID order used by reschedules, preventing
+provider/customer lock inversion between the two public write paths. The
+identity lock is released immediately after commit and by the controller's
+final cleanup on every reject or exception; the configured non-persistent DB
+connection is the final release boundary.
 
 Consent, customer, appointment, and generated buffer writes happen inside that
 outer transaction. Any exception or failed check rolls the transaction back.
