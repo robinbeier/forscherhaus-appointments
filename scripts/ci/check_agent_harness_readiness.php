@@ -1569,6 +1569,8 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         !is_array($ci['blocking_failure_controls'] ?? null) ||
         !is_string($ci['blocking_execution_sha256'] ?? null) ||
         preg_match('/^[a-f0-9]{64}$/D', $ci['blocking_execution_sha256']) !== 1 ||
+        !is_array($ci['required_exact_execution_jobs'] ?? null) ||
+        $ci['required_exact_execution_jobs'] === [] ||
         !is_array($ci['condition_grammar'] ?? null) ||
         ($ci['job_inventory_is_exhaustive'] ?? null) !== true ||
         !is_array($ci['advisory_jobs'] ?? null) ||
@@ -1579,7 +1581,7 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         $surfaces === []
     ) {
         throw new RuntimeException(
-            'Workflow contract must define surfaces, a CI workflow, failure controls, an execution fingerprint, grammar, advisory jobs, and blocking jobs.',
+            'Workflow contract must define surfaces, a CI workflow, failure controls, an execution fingerprint, exact-execution anchors, grammar, advisory jobs, and blocking jobs.',
         );
     }
 
@@ -1596,16 +1598,36 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         }
     }
 
+    $exactExecutionJobs = [];
     foreach ($ci['blocking_jobs'] as $jobName => $job) {
         if (!is_string($jobName) || !is_array($job)) {
             throw new RuntimeException('Workflow contract blocking jobs must be a map of job objects.');
         }
         if (($job['kind'] ?? null) === 'exact_execution') {
+            $exactExecutionJobs[] = $jobName;
             continue;
         }
         if (($job['kind'] ?? null) !== 'fingerprinted_execution') {
             throw new RuntimeException('Workflow contract blocking jobs must declare a supported kind.');
         }
+    }
+
+    $requiredExactExecutionJobs = $ci['required_exact_execution_jobs'];
+    foreach ($requiredExactExecutionJobs as $jobName) {
+        if (!is_string($jobName) || trim($jobName) === '') {
+            throw new RuntimeException('Workflow contract exact-execution anchors must be non-empty job names.');
+        }
+    }
+    if (count(array_unique($requiredExactExecutionJobs)) !== count($requiredExactExecutionJobs)) {
+        throw new RuntimeException('Workflow contract exact-execution anchors must be unique.');
+    }
+
+    sort($exactExecutionJobs, SORT_STRING);
+    sort($requiredExactExecutionJobs, SORT_STRING);
+    if ($exactExecutionJobs !== $requiredExactExecutionJobs) {
+        throw new RuntimeException(
+            'Workflow contract exact-execution anchors must list every exact-execution blocking job.',
+        );
     }
 
     return $contract;

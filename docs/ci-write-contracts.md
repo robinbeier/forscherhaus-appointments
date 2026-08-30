@@ -133,6 +133,10 @@ Jede explizite `continue-on-error`-Deklaration sowie
 jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
 unabhaengig davon fehlschlagen. Advisory-Signal-Jobs sind im Inventar separat
 klassifiziert und gehoeren nicht zu diesem Blocking-Vertrag.
+Die maschinenlesbare Liste `required_exact_execution_jobs` haelt zusaetzlich
+mindestens einen benannten, strukturiert vergleichbaren Anker fest und muss
+exakt alle `exact_execution`-Jobs enthalten. Dadurch bleibt der Vertrag auch
+bei einem globalen Fingerprint review- und diagnosefreundlich.
 Bei einer beabsichtigten Aenderung einer Blocking-Ausfuehrung nennt der
 Readiness-Report erwarteten und aktuellen Fingerprint. Der Vertragswert wird
 erst nach Review der zugehoerigen Workflow-Aenderung aktualisiert; der Hash ist

@@ -92,6 +92,7 @@
             "forbidden_step_keys": ["continue-on-error", "shell"]
         },
         "blocking_execution_sha256": "09bdc30ac40754d7ee5f21f5e1db2fc0b42bcf09fa0404d75b999a7c151050ad",
+        "required_exact_execution_jobs": ["write-contract-booking", "write-contract-api"],
         "condition_grammar": {
             "version": 1,
             "operators": {

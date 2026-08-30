@@ -83,6 +83,10 @@ class AgentWorkflowContractTest extends TestCase
             (string) ($contract['ci']['blocking_execution_sha256'] ?? ''),
         );
         self::assertSame(
+            ['write-contract-booking', 'write-contract-api'],
+            $contract['ci']['required_exact_execution_jobs'] ?? null,
+        );
+        self::assertSame(
             [
                 'version' => 1,
                 'operators' => [

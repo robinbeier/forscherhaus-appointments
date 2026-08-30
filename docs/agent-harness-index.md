@@ -68,7 +68,8 @@ This file stays intentionally short. It is a map, not a second runbook.
     and order-insensitive `needs` lists are normalized. Any workflow/job/step
     shell override or explicit `continue-on-error` fails the readiness check
     independently. Advisory signal jobs are classified separately and remain
-    outside this blocking contract.
+    outside this blocking contract. The contract also names at least one
+    structured exact-execution anchor for readable review and diagnostics.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:
