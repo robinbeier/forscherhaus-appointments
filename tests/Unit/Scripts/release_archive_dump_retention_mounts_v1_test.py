@@ -124,6 +124,31 @@ class RetentionMountInfoTest(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "mount_state_unknown")
         self.assertEqual(capture.call_count, helper.PROC_SNAPSHOT_ATTEMPTS)
 
+    def test_proc_snapshot_retries_and_rejects_cgroup_or_namespace_drift(self) -> None:
+        for name, field, changed_value in (
+            ("cgroup", "cgroup_after", "/system.slice/other.service\n"),
+            ("self namespace", "self_namespace_after", "mnt:[4026531842]"),
+            ("pid1 namespace", "pid1_namespace_after", "mnt:[4026531842]"),
+        ):
+            changed = self.proc_snapshot()
+            changed[field] = changed_value
+            with self.subTest(name=name, outcome="retry"), mock.patch.object(
+                helper,
+                "capture_proc_mount_snapshot",
+                side_effect=[changed, self.proc_snapshot()],
+            ) as capture:
+                self.assertEqual(helper.stable_proc_mount_snapshot(object()), self.proc_snapshot())
+                self.assertEqual(capture.call_count, 2)
+
+            with self.subTest(name=name, outcome="reject"), mock.patch.object(
+                helper,
+                "capture_proc_mount_snapshot",
+                side_effect=[changed] * helper.PROC_SNAPSHOT_ATTEMPTS,
+            ) as capture, self.assertRaises(helper.RetentionError) as caught:
+                helper.stable_proc_mount_snapshot(object())
+            self.assertEqual(caught.exception.reason, "mount_state_unknown")
+            self.assertEqual(capture.call_count, helper.PROC_SNAPSHOT_ATTEMPTS)
+
     def test_proc_snapshot_rejects_malformed_capture_state(self) -> None:
         with mock.patch.object(helper, "capture_proc_mount_snapshot", return_value={}):
             with self.assertRaises(helper.RetentionError) as caught:
