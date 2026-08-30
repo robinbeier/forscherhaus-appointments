@@ -116,6 +116,7 @@ class Booking extends EA_Controller
         $matomo_analytics_url = setting('matomo_analytics_url');
         $matomo_analytics_site_id = setting('matomo_analytics_site_id');
         $no_slot_fallback_enabled = config('no_slot_fallback_enabled', true) ? '1' : '0';
+        $webmcp_booking_pilot_enabled = config('webmcp_booking_pilot_enabled', false) ? '1' : '0';
 
         if ($disable_booking) {
             $disable_booking_message = setting('disable_booking_message');
@@ -274,6 +275,7 @@ class Booking extends EA_Controller
             'default_language' => setting('default_language'),
             'default_timezone' => setting('default_timezone'),
             'no_slot_fallback_enabled' => $no_slot_fallback_enabled,
+            'webmcp_booking_pilot_enabled' => $webmcp_booking_pilot_enabled,
         ]);
 
         html_vars([
@@ -284,6 +286,7 @@ class Booking extends EA_Controller
             'company_logo' => $company_logo,
             'company_color' => $company_color === '#ffffff' ? '' : $company_color,
             'no_slot_fallback_enabled' => $no_slot_fallback_enabled,
+            'webmcp_booking_pilot_enabled' => $webmcp_booking_pilot_enabled,
             'date_format' => $date_format,
             'time_format' => $time_format,
             'first_weekday' => $first_weekday,

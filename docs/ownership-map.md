@@ -87,13 +87,17 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Key files:
   - `application/controllers/Booking.php`
   - `application/views/pages/booking.php`
+  - `assets/js/http/booking_http_client.js`
   - `application/libraries/Email_messages.php`
   - `assets/js/pages/booking.js`
+  - `assets/js/pages/booking_webmcp.js`
 - Path prefixes:
   - `application/controllers/Booking.php`
   - `application/views/pages/booking.php`
   - `application/views/components/booking_`
+  - `assets/js/http/booking_http_client.js`
   - `assets/js/pages/booking.js`
+  - `assets/js/pages/booking_webmcp.js`
   - `application/libraries/Availability.php`
   - `application/libraries/Email_messages.php`
   - `application/libraries/Booking_request_dto_factory.php`

@@ -441,5 +441,18 @@ $config['rate_limiting'] = defined('Config::RATE_LIMITING') ? Config::RATE_LIMIT
 */
 $config['no_slot_fallback_enabled'] = true;
 
+/*
+|--------------------------------------------------------------------------
+| WebMCP Booking Pilot
+|--------------------------------------------------------------------------
+|
+| Expose the bounded public booking tools to supported browser agents.
+| Keep this disabled unless the repository-only pilot is being tested.
+|
+*/
+$config['webmcp_booking_pilot_enabled'] = defined('Config::WEBMCP_BOOKING_PILOT_ENABLED')
+    ? Config::WEBMCP_BOOKING_PILOT_ENABLED
+    : false;
+
 /* End of file config.php */
 /* Location: ./application/config/config.php */

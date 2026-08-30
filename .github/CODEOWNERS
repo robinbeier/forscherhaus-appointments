@@ -117,12 +117,14 @@
 /application/views/pages/webhooks.php @robinbeier
 /assets/js/components/appointments_modal.js @robinbeier
 /assets/js/components/unavailabilities_modal.js @robinbeier
+/assets/js/http/booking_http_client.js @robinbeier
 /assets/js/pages/account.js @robinbeier
 /assets/js/pages/admins.js @robinbeier
 /assets/js/pages/api_settings.js @robinbeier
 /assets/js/pages/blocked_periods.js @robinbeier
 /assets/js/pages/booking.js @robinbeier
 /assets/js/pages/booking_settings.js @robinbeier
+/assets/js/pages/booking_webmcp.js @robinbeier
 /assets/js/pages/business_settings.js @robinbeier
 /assets/js/pages/calendar.js @robinbeier
 /assets/js/pages/customers.js @robinbeier

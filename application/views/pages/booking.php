@@ -55,5 +55,8 @@
 <script src="<?= asset_url('assets/js/utils/ui.js') ?>"></script>
 <script src="<?= asset_url('assets/js/http/booking_http_client.js') ?>"></script>
 <script src="<?= asset_url('assets/js/pages/booking.js') ?>"></script>
+<?php if (vars('webmcp_booking_pilot_enabled') === '1'): ?>
+    <script src="<?= asset_url('assets/js/pages/booking_webmcp.js') ?>"></script>
+<?php endif; ?>
 
 <?php end_section('scripts'); ?>

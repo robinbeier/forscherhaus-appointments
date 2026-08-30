@@ -10,7 +10,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 4 | 3 |
-| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 7 | 4 |
+| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 18 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
@@ -88,7 +88,9 @@ Path prefixes:
 - `application/controllers/Booking.php`
 - `application/views/pages/booking.php`
 - `application/views/components/booking_`
+- `assets/js/http/booking_http_client.js`
 - `assets/js/pages/booking.js`
+- `assets/js/pages/booking_webmcp.js`
 - `application/libraries/Availability.php`
 - `application/libraries/Email_messages.php`
 - `application/libraries/Booking_request_dto_factory.php`
@@ -96,8 +98,10 @@ Path prefixes:
 Key files:
 - `application/controllers/Booking.php`
 - `application/views/pages/booking.php`
+- `assets/js/http/booking_http_client.js`
 - `application/libraries/Email_messages.php`
 - `assets/js/pages/booking.js`
+- `assets/js/pages/booking_webmcp.js`
 
 ### `booking-lifecycle` - Booking Confirmation/Cancellation
 

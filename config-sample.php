@@ -34,6 +34,7 @@ class Config
     const LANGUAGE = 'english';
     const DEBUG_MODE = false;
     const RATE_LIMITING = true;
+    const WEBMCP_BOOKING_PILOT_ENABLED = false;
 
     // ------------------------------------------------------------------------
     // DATABASE SETTINGS
