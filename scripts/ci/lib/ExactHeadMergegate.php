@@ -223,7 +223,7 @@ final class ExactHeadMergegate
                 $gates,
                 'fail',
                 'workflow_missing_or_stale',
-                'No successful pull-request workflow run is bound to this pull request and SHA.',
+                'No completed pull-request workflow run is bound to this pull request and SHA.',
             );
         } else {
             self::addGate($gates, 'pass', 'workflow', 'Required workflow run is bound to the reviewed head.');
@@ -301,11 +301,7 @@ final class ExactHeadMergegate
         );
 
         $latest = $matches[0] ?? null;
-        if (
-            !is_array($latest) ||
-            ($latest['status'] ?? null) !== 'completed' ||
-            ($latest['conclusion'] ?? null) !== 'success'
-        ) {
+        if (!is_array($latest) || ($latest['status'] ?? null) !== 'completed') {
             return null;
         }
 
@@ -619,13 +615,7 @@ final class ExactHeadMergegate
             if (!in_array($comment['author_association'], $policy['blocking_feedback_associations'], true)) {
                 continue;
             }
-            if (strcmp($updatedAt, $attestation['attested_at']) > 0) {
-                return true;
-            }
-            if ($updatedAt !== $attestation['attested_at']) {
-                continue;
-            }
-            if ($createdAt !== $updatedAt || (int) ($comment['id'] ?? 0) > (int) $attestation['comment_id']) {
+            if (strcmp($updatedAt, $attestation['attested_at']) >= 0) {
                 return true;
             }
         }

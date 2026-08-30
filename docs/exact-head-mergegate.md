@@ -58,9 +58,12 @@ the same pull request and reviewed SHA:
    comment edit, added feedback, deleted evidence, or other drift between those
    observations blocks the merge.
 4. GitHub's commit-to-PR association binds that SHA to the pull request, and a
-   completed successful pull_request run of the canonical CI workflow binds the
-   same SHA, head branch, head repository, pull request number, and check
-   suite. A workflow run without that exact PR association is stale evidence.
+   completed pull_request run of the canonical CI workflow binds the same SHA,
+   head branch, head repository, pull request number, and check suite. The
+   modeled blocking checks in that suite decide success individually, so a
+   workflow-level failure caused only by an advisory job does not become an
+   implicit blocking gate. A workflow run without the exact PR association is
+   stale evidence.
 5. Every always-on blocking check exists exactly once in that suite and
    completed with success.
 6. Every diff-conditional blocking check exists exactly once and completed
@@ -81,8 +84,8 @@ the same pull request and reviewed SHA:
    after the attestation timestamp is blocking.
 
 Missing, pending, cancelled, neutral, failed, timed-out, stale, duplicated,
-wrong-suite, wrong-SHA, edited, or malformed evidence blocks the merge.
-Advisory jobs remain outside this decision. The check classification is
+wrong-suite, wrong-SHA, edited, or malformed blocking evidence blocks the
+merge. Advisory jobs remain outside this decision. The check classification is
 exhaustive against ci.blocking_jobs; contract drift fails before GitHub state
 is evaluated.
 

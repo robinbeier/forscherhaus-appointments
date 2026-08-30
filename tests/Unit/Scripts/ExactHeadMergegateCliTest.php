@@ -753,6 +753,13 @@ final class ExactHeadMergegateCliTest extends TestCase
     public function testVerifiedPolicyRejectsWeakenedFingerprintedAndExactExecution(): void
     {
         $cases = [
+            'conditional applicability' => static function (string $workflow): string {
+                $needle = "      needs.changes.outputs.write_contract_api == 'true' &&";
+                $mutated = str_replace($needle, '      false &&', $workflow, $replacementCount);
+                self::assertSame(1, $replacementCount);
+
+                return $mutated;
+            },
             'fingerprinted execution' => static function (string $workflow): string {
                 $needle =
                     'run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=integration-smoke';
