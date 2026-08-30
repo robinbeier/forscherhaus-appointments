@@ -283,21 +283,24 @@ read-only verifier:
 composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<40-character-sha>
 ```
 
-The verifier uses GitHub GET requests only. It observes all review evidence
-twice. It reads PR identity before the first evidence observation, after it,
-and once more immediately before the second. All three PR reads and both
-normalized evidence observations must remain equal. It requires the open
+The verifier uses GitHub GET requests only. It must run from the exact reviewed
+`HEAD`, loads its policy from that committed tree, and rejects local changes to
+the contract or mergegate implementation. It observes all normalized CI and
+review evidence twice. It reads PR identity before, between, and after those
+bounded observations. All three PR reads and both complete evidence
+observations must remain equal. It requires the open
 non-draft PR, clean mergeability, the canonical successful CI run and every
 blocking check to bind to that PR and SHA. Always-on checks must succeed;
 diff-conditional checks must be either successful or explicitly skipped. It
 also requires the three distinct review lenses from the machine contract in
 one new, unedited, SHA-bound owner attestation with exact review-activity
-watermarks. A still-active `CHANGES_REQUESTED` review,
-watermark drift, edited inline feedback, newer trusted review feedback, or a
-newer invalid attestation marker invalidates that evidence. Missing, pending,
-duplicated, malformed, stale, or wrong-suite evidence fails closed. The report
-contains no raw comment body, reviewer identity, token, capability, or personal
-data. See `docs/exact-head-mergegate.md`.
+watermarks and a privacy-safe formal-review payload digest. A still-active
+`CHANGES_REQUESTED` review, watermark or payload drift, edited inline feedback,
+newer trusted review feedback, or a newer invalid attestation marker
+invalidates that evidence. Missing, pending, duplicated, malformed, stale, or
+wrong-suite evidence fails closed. The report contains no raw comment body,
+reviewer identity, token, capability, or personal data. See
+`docs/exact-head-mergegate.md`.
 
 An exit `0` is required before `Ready to Merge`, but it does not perform the
 merge. Use the compare-and-swap merge command from

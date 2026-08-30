@@ -95,6 +95,7 @@ final class ExactHeadMergegateCliTest extends TestCase
             $request,
             static fn(): string => self::REPOSITORY,
             dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_SUCCESS, $exitCode);
@@ -110,16 +111,25 @@ final class ExactHeadMergegateCliTest extends TestCase
                 '/repos/acme/app/pulls/12/reviews?per_page=100&page=1',
                 '/repos/acme/app/pulls/12/comments?per_page=100&page=1',
                 '/repos/acme/app/pulls/12',
-                '/repos/acme/app/pulls/12',
+                '/repos/acme/app/actions/workflows/ci.yml/runs?event=pull_request&head_sha=' .
+                self::SHA .
+                '&per_page=100&page=1',
+                '/repos/acme/app/commits/' . self::SHA . '/check-runs?filter=latest&per_page=100&page=1',
+                '/repos/acme/app/commits/' . self::SHA . '/pulls?per_page=100&page=1',
                 '/repos/acme/app/issues/12/comments?per_page=100&page=1',
                 '/repos/acme/app/pulls/12/reviews?per_page=100&page=1',
                 '/repos/acme/app/pulls/12/comments?per_page=100&page=1',
+                '/repos/acme/app/pulls/12',
             ],
             $requestedPaths,
         );
 
         $report = (string) file_get_contents($reportPath);
         self::assertStringContainsString('"status": "pass"', $report);
+        self::assertStringContainsString('"review_activity_watermark"', $report);
+        self::assertStringContainsString('"review_payload_digest"', $report);
+        self::assertStringNotContainsString('actor_ref', $report);
+        self::assertStringNotContainsString('content_digest', $report);
         self::assertStringNotContainsString('reviewer_ref', $report);
         self::assertStringNotContainsString('secret', strtolower($report));
         self::assertStringNotContainsString('token', strtolower($report));
@@ -186,6 +196,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                 $request,
                 static fn(): string => self::REPOSITORY,
                 dirname(__DIR__, 3),
+                $this->mockPolicyLoader(),
             );
 
             self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode, $field);
@@ -234,10 +245,174 @@ final class ExactHeadMergegateCliTest extends TestCase
             $request,
             static fn(): string => self::REPOSITORY,
             dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
         self::assertSame(2, $reviewCommentReads);
+        self::assertStringContainsString(
+            'review_evidence_drift_during_evaluation',
+            (string) file_get_contents($reportPath),
+        );
+    }
+
+    public function testCliFailsClosedWhenCiEvidenceDriftsOnSecondObservation(): void
+    {
+        $requestedPaths = [];
+        $workflowReads = 0;
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest, &$workflowReads): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/actions/workflows/ci.yml/runs?')) {
+                $workflowReads++;
+                if ($workflowReads === 2) {
+                    $payload['workflow_runs'][0]['status'] = 'in_progress';
+                    $payload['workflow_runs'][0]['conclusion'] = null;
+                }
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
+        self::assertSame(2, $workflowReads);
+        self::assertStringContainsString(
+            'ci_evidence_drift_during_evaluation',
+            (string) file_get_contents($reportPath),
+        );
+    }
+
+    public function testCliCanonicalizesReorderedCheckRunsAcrossObservations(): void
+    {
+        $requestedPaths = [];
+        $checkRunReads = 0;
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest, &$checkRunReads): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/check-runs?')) {
+                $checkRunReads++;
+                if ($checkRunReads === 2) {
+                    $payload['check_runs'] = array_reverse($payload['check_runs']);
+                }
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_SUCCESS, $exitCode);
+        self::assertSame(2, $checkRunReads);
+    }
+
+    public function testCliFailsClosedWhenIssueCommentDriftsOnSecondObservation(): void
+    {
+        $requestedPaths = [];
+        $commentReads = 0;
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest, &$commentReads): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/issues/12/comments?')) {
+                $commentReads++;
+                if ($commentReads === 2) {
+                    $payload[] = [
+                        'id' => 501,
+                        'author_association' => 'MEMBER',
+                        'created_at' => '2026-08-30T20:00:01Z',
+                        'updated_at' => '2026-08-30T20:00:01Z',
+                        'body' => 'later feedback',
+                    ];
+                }
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
+        self::assertSame(2, $commentReads);
+        self::assertStringContainsString(
+            'review_evidence_drift_during_evaluation',
+            (string) file_get_contents($reportPath),
+        );
+    }
+
+    public function testCliFailsClosedWhenFormalReviewDriftsOnSecondObservation(): void
+    {
+        $requestedPaths = [];
+        $reviewReads = 0;
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest, &$reviewReads): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/pulls/12/reviews?')) {
+                $reviewReads++;
+                if ($reviewReads === 2) {
+                    $payload[] = [
+                        'id' => 701,
+                        'user' => ['id' => 42],
+                        'author_association' => 'MEMBER',
+                        'state' => 'COMMENTED',
+                        'commit_id' => self::SHA,
+                        'submitted_at' => '2026-08-30T20:00:01Z',
+                        'body' => 'later review edit',
+                    ];
+                }
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
+        self::assertSame(2, $reviewReads);
         self::assertStringContainsString(
             'review_evidence_drift_during_evaluation',
             (string) file_get_contents($reportPath),
@@ -259,6 +434,7 @@ final class ExactHeadMergegateCliTest extends TestCase
             $request,
             static fn(): string => self::REPOSITORY,
             dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
@@ -281,6 +457,7 @@ final class ExactHeadMergegateCliTest extends TestCase
             $request,
             static fn(): string => self::REPOSITORY,
             dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode);
@@ -311,6 +488,7 @@ final class ExactHeadMergegateCliTest extends TestCase
             $request,
             static fn(): string => self::REPOSITORY,
             dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode);
@@ -340,6 +518,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                 $request,
                 static fn(): string => self::REPOSITORY,
                 dirname(__DIR__, 3),
+                $this->mockPolicyLoader(),
             );
 
             self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode, $malformedEndpoint);
@@ -426,6 +605,99 @@ final class ExactHeadMergegateCliTest extends TestCase
         }
     }
 
+    public function testVerifiedPolicyRequiresExactReviewedHeadAndUsesCommittedContractBlob(): void
+    {
+        $commands = [];
+        $policy = loadExactHeadMergegateVerifiedPolicy(
+            dirname(__DIR__, 3),
+            dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json',
+            self::SHA,
+            static function (array $command, ?string $workingDirectory) use (&$commands): string {
+                $commands[] = ['command' => $command, 'working_directory' => $workingDirectory];
+                if ($command === ['git', 'rev-parse', 'HEAD']) {
+                    return self::SHA . PHP_EOL;
+                }
+                if (
+                    $command === [
+                        'git',
+                        'diff',
+                        '--quiet',
+                        'HEAD',
+                        '--',
+                        '.codex/contracts/agent-workflow.json',
+                        'scripts/ci/check_exact_head_mergegate.php',
+                        'scripts/ci/lib/ExactHeadMergegate.php',
+                    ]
+                ) {
+                    return '';
+                }
+                if ($command === ['git', 'show', self::SHA . ':.codex/contracts/agent-workflow.json']) {
+                    return (string) file_get_contents(dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json');
+                }
+
+                self::fail('Unexpected command: ' . json_encode($command, JSON_THROW_ON_ERROR));
+            },
+        );
+
+        self::assertSame('main', $policy['base_ref']);
+        self::assertSame(['git', 'rev-parse', 'HEAD'], $commands[0]['command']);
+        self::assertSame(['git', 'show', self::SHA . ':.codex/contracts/agent-workflow.json'], $commands[2]['command']);
+    }
+
+    public function testVerifiedPolicyRejectsHeadMismatch(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('exact reviewed HEAD');
+        loadExactHeadMergegateVerifiedPolicy(
+            dirname(__DIR__, 3),
+            dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json',
+            self::SHA,
+            static function (array $command, ?string $workingDirectory): string {
+                return str_repeat('f', 40) . PHP_EOL;
+            },
+        );
+    }
+
+    public function testVerifiedPolicyRejectsDirtySecurityCriticalFiles(): void
+    {
+        $commands = [];
+        $exception = null;
+        try {
+            loadExactHeadMergegateVerifiedPolicy(
+                dirname(__DIR__, 3),
+                dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json',
+                self::SHA,
+                static function (array $command, ?string $workingDirectory) use (&$commands): string {
+                    $commands[] = ['command' => $command, 'working_directory' => $workingDirectory];
+                    if ($command === ['git', 'rev-parse', 'HEAD']) {
+                        return self::SHA . PHP_EOL;
+                    }
+
+                    throw new RuntimeException('simulated dirty tree');
+                },
+            );
+        } catch (RuntimeException $caught) {
+            $exception = $caught;
+        }
+
+        self::assertInstanceOf(RuntimeException::class, $exception);
+        self::assertSame('Exact-head mergegate security-critical files must be clean.', $exception->getMessage());
+
+        self::assertSame(
+            [
+                'git',
+                'diff',
+                '--quiet',
+                'HEAD',
+                '--',
+                '.codex/contracts/agent-workflow.json',
+                'scripts/ci/check_exact_head_mergegate.php',
+                'scripts/ci/lib/ExactHeadMergegate.php',
+            ],
+            $commands[1]['command'],
+        );
+    }
+
     /**
      * @param array<int, string> $requestedPaths
      * @return Closure(string): array<string, mixed>
@@ -472,8 +744,9 @@ final class ExactHeadMergegateCliTest extends TestCase
             if (str_contains($path, '/check-runs?')) {
                 $policy = loadExactHeadMergegatePolicy(dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json');
                 $runs = [];
-                foreach (array_merge($policy['required_checks'], $policy['conditional_checks']) as $name) {
+                foreach (array_merge($policy['required_checks'], $policy['conditional_checks']) as $index => $name) {
                     $runs[] = [
+                        'id' => 1_000 + $index,
                         'name' => $name,
                         'check_suite' => ['id' => 202],
                         'head_sha' => self::SHA,
@@ -533,16 +806,28 @@ final class ExactHeadMergegateCliTest extends TestCase
             ];
         }
 
-        return "<!-- exact-head-review-attestation:v1\n" .
+        return "<!-- exact-head-review-attestation:v2\n" .
             json_encode(
                 [
                     'head_sha' => self::SHA,
-                    'review_activity_watermark' => ['review_id' => 0, 'review_comment_id' => 0],
+                    'review_activity_watermark' => [
+                        'review_id' => 0,
+                        'review_comment_id' => 0,
+                        'review_payload_digest' => hash('sha256', json_encode([], JSON_THROW_ON_ERROR)),
+                    ],
                     'reviews' => $reviews,
                 ],
                 JSON_UNESCAPED_SLASHES,
             ) .
             "\n-->";
+    }
+
+    /** @return Closure(string, string, string): array<string, mixed> */
+    private function mockPolicyLoader(): Closure
+    {
+        return static function (string $root, string $contractPath, string $reviewedSha): array {
+            return loadExactHeadMergegatePolicy($contractPath);
+        };
     }
 
     private function temporaryPath(): string

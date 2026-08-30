@@ -32,37 +32,52 @@ or duplicate input fails closed.
 The command uses authenticated GitHub GET requests and binds all evidence to
 the same pull request and reviewed SHA:
 
-1. The pull request is read before the first review-evidence observation,
-   after it, and once more immediately before the second review-evidence
-   observation. Its number, state, draft flag, base, head SHA, head branch, and
-   head repository must remain identical across all three reads. The third PR
-   read must be open, non-draft, target main, have the reviewed SHA as its
-   current head, and report mergeable=true with a clean mergeability state.
-2. GitHub's commit-to-PR association binds that SHA to the pull request, and a
-   completed successful pull_request run of the canonical CI workflow binds
-   the same SHA, head branch, head repository, pull request number, and check
+1. The command must run from the reviewed branch worktree on the exact reviewed
+   `HEAD`. The merge policy is loaded from the reviewed commit's own
+   `.codex/contracts/agent-workflow.json`, not from mutable working-tree files.
+   A mismatched local `HEAD`, missing contract blob, or local change to the
+   contract or either mergegate implementation file fails closed before GitHub
+   evidence is evaluated.
+2. The pull request is read before the first bounded evidence observation,
+   between the two observations, and once more after the second observation.
+   Its number, state, draft flag, base, head SHA, head branch, and head
+   repository must remain identical across all three reads. The third PR read
+   must be open, non-draft, target main, have the reviewed SHA as its current
+   head, and report mergeable=true with a clean mergeability state.
+3. Each bounded evidence observation contains the normalized commit-to-PR
+   association, workflow runs, check runs, issue comments, formal reviews, and
+   inline review comments for the reviewed SHA and target pull request. The two
+   observations must be strictly identical. Any CI rerun, review edit, review
+   comment edit, added feedback, deleted evidence, or other drift between those
+   observations blocks the merge.
+4. GitHub's commit-to-PR association binds that SHA to the pull request, and a
+   completed successful pull_request run of the canonical CI workflow binds the
+   same SHA, head branch, head repository, pull request number, and check
    suite. A workflow run without that exact PR association is stale evidence.
-3. Every always-on blocking check exists exactly once in that suite and
+5. Every always-on blocking check exists exactly once in that suite and
    completed with success.
-4. Every diff-conditional blocking check exists exactly once and completed
+6. Every diff-conditional blocking check exists exactly once and completed
    with either success or skipped. Here skipped means the repository-owned CI
    condition classified it as not applicable. A required check may never use
    skipped as success.
-5. One new, unedited owner-authored PR comment contains a complete, canonical
+7. One new, unedited owner-authored PR comment contains a complete, canonical
    review attestation for the reviewed SHA and the exact formal-review and
-   inline-review-comment watermarks observed when it was published. The newest
+   inline-review-comment watermarks plus the privacy-safe digest of the current
+   exact-SHA formal review payloads observed when it was published. The newest
    owner comment carrying the attestation marker must itself be valid; a newer
    malformed, edited, or wrong-SHA marker comment invalidates older evidence.
-6. No still-active CHANGES_REQUESTED review targets that SHA, no trusted issue
-   comment is newer than the selected attestation, and the current formal
-   review and inline review comment maxima still equal the attested
-   watermarks. The normalized issue comments, formal reviews, and inline review
-   comments must also be strictly identical across the two bounded observations.
+8. No still-active CHANGES_REQUESTED review targets that SHA, no trusted issue
+   comment is newer than the selected attestation, the current formal review
+   and inline review comment maxima still equal the attested watermarks, and
+   the attested formal-review payload digest still matches the current exact-SHA
+   formal reviews. An inline review comment whose update timestamp is at or
+   after the attestation timestamp is blocking.
 
 Missing, pending, cancelled, neutral, failed, timed-out, stale, duplicated,
-wrong-suite, wrong-SHA, or malformed evidence blocks the merge. Advisory jobs
-remain outside this decision. The check classification is exhaustive against
-ci.blocking_jobs; contract drift fails before GitHub state is evaluated.
+wrong-suite, wrong-SHA, edited, or malformed evidence blocks the merge.
+Advisory jobs remain outside this decision. The check classification is
+exhaustive against ci.blocking_jobs; contract drift fails before GitHub state
+is evaluated.
 
 ## Review Attestation
 
@@ -78,8 +93,8 @@ the reviews complete, the primary agent records their result in one PR comment
 with this exact shape:
 
 ~~~text
-<!-- exact-head-review-attestation:v1
-{"head_sha":"<40-lowercase-hex>","review_activity_watermark":{"review_id":<latest-review-id-or-0>,"review_comment_id":<latest-inline-review-comment-id-or-0>},"reviews":[{"lens":"correctness_security","reviewer_ref":"<64-lowercase-hex>","verdict":"no_findings"},{"lens":"design_maintainability","reviewer_ref":"<64-lowercase-hex>","verdict":"no_findings"},{"lens":"tests_regression_flake","reviewer_ref":"<64-lowercase-hex>","verdict":"no_findings"}]}
+<!-- exact-head-review-attestation:v2
+{"head_sha":"<40-lowercase-hex>","review_activity_watermark":{"review_id":<latest-review-id-or-0>,"review_comment_id":<latest-inline-review-comment-id-or-0>,"review_payload_digest":"<64-lowercase-hex>"},"reviews":[{"lens":"correctness_security","reviewer_ref":"<64-lowercase-hex>","verdict":"no_findings"},{"lens":"design_maintainability","reviewer_ref":"<64-lowercase-hex>","verdict":"no_findings"},{"lens":"tests_regression_flake","reviewer_ref":"<64-lowercase-hex>","verdict":"no_findings"}]}
 -->
 ~~~
 
@@ -89,11 +104,22 @@ comment whose GitHub author association is OWNER can be the attestation.
 Extra lenses, duplicate lenses, duplicate reviewer references, non-canonical
 keys, a different verdict, or a different SHA are rejected.
 
-The two watermarks are the largest current numeric IDs returned by the formal
+The numeric watermarks are the largest current IDs returned by the formal
 review and inline review comment collections, or 0 when that collection is
-empty. They make later activity detectable without guessing cross-endpoint
-ordering from second-precision timestamps. A higher, lower, deleted, or
-otherwise different current maximum invalidates the attestation.
+empty. The payload digest is the privacy-safe hash of the normalized exact-SHA
+formal review payloads currently visible on the pull request. Together they
+make later activity and later formal-review body edits detectable without
+writing review text or identities into the report. A higher, lower, deleted,
+or otherwise different current maximum or payload digest invalidates the
+attestation.
+
+After CI and the three reviews are final, run the mergegate once before
+publishing the attestation. It will still exit non-zero because the attestation
+is absent, but its sanitized JSON report provides the exact
+`review_activity_watermark` object without review text or actor identifiers.
+Copy that object unchanged into the new attestation, publish the comment, then
+rerun the full gate. Any activity between those steps makes the second run fail
+closed and requires fresh evidence.
 
 Publishing the attestation is a separate, explicit PR write performed only
 after the reviews actually exist. The mergegate itself never publishes or
@@ -103,14 +129,15 @@ later push requires a new comment after fresh final reviews.
 
 The gate also reads formal reviews and inline review comments. A current-SHA
 CHANGES_REQUESTED state remains blocking until the same reviewer has a later
-non-blocking review state. Any review watermark drift, or a newer
-owner/member/collaborator issue comment, makes the attestation stale and
-requires a fresh finding-free review decision plus a fresh attestation. This
-closes later-feedback drift without writing reviewer identity or comment
-contents to the report. An inline review comment whose update timestamp is at
-or after the attestation timestamp is also blocking. Equality is deliberately
-fail-closed because GitHub timestamps have only second precision; publish a
-fresh attestation in a later second instead of guessing event order.
+non-blocking review state. Any review watermark drift, formal-review payload
+digest drift, or a newer owner/member/collaborator issue comment makes the
+attestation stale and requires a fresh finding-free review decision plus a
+fresh attestation. This closes later-feedback drift without writing reviewer
+identity or comment contents to the report. An inline review comment whose
+update timestamp is at or after the attestation timestamp is also blocking. A
+same-second edit to an older trusted issue comment is blocking as well because
+GitHub timestamps have only second precision; publish a fresh attestation in a
+later second instead of guessing event order.
 
 ## Result and Landing
 
@@ -131,10 +158,9 @@ Exit codes:
 - 1: GitHub state was read successfully but the pull request is not ready
 - 2: input, contract, API, pagination, or report publication failed
 
-Only an exit 0 after the final PR-head and review-evidence revalidations permits
-the Linear transition to Ready to Merge. The final evidence collection ends on
-review state; the contract's compare-and-swap merge command is the final
-head-SHA race boundary:
+Only an exit 0 after the final PR-head and bounded evidence revalidations
+permits the Linear transition to Ready to Merge. The contract's compare-and-swap
+merge command is the final head-SHA race boundary:
 
 ~~~bash
 gh pr merge --merge --match-head-commit <current_head_sha>

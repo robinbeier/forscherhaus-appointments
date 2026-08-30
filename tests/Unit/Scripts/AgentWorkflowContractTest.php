@@ -62,8 +62,12 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('ci.yml', $contract['land']['exact_head_mergegate']['workflow_file'] ?? null);
         self::assertSame('CI', $contract['land']['exact_head_mergegate']['workflow_name'] ?? null);
         self::assertSame(
-            'before_between_and_immediately_before_final_review_observation',
+            'before_between_and_after_bounded_evidence_observations',
             $contract['land']['exact_head_mergegate']['pr_revalidation'] ?? null,
+        );
+        self::assertSame(
+            'two_identical_bounded_observations',
+            $contract['land']['exact_head_mergegate']['ci_evidence_revalidation'] ?? null,
         );
         self::assertSame(
             'two_identical_bounded_observations',
@@ -74,7 +78,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['land']['exact_head_mergegate']['review_lens_source'] ?? null,
         );
         self::assertSame(
-            'exact-head-review-attestation:v1',
+            'exact-head-review-attestation:v2',
             $contract['land']['exact_head_mergegate']['review_attestation']['marker'] ?? null,
         );
         self::assertSame(
@@ -97,7 +101,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['land']['exact_head_mergegate']['review_attestation']['requires_unedited_comment'] ?? null,
         );
         self::assertSame(
-            ['review_id', 'review_comment_id'],
+            ['review_id', 'review_comment_id', 'review_payload_digest'],
             $contract['land']['exact_head_mergegate']['review_attestation']['activity_watermarks'] ?? null,
         );
         self::assertSame(

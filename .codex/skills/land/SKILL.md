@@ -50,12 +50,13 @@ contract.
     - return to the watcher only after that new-head evidence is available
 6. Once the PR is green, review-clean, and mergeable:
     - publish a new, unedited privacy-safe final-review attestation with the
-      current formal-review and inline-review-comment watermarks described in
-      `docs/exact-head-mergegate.md`
+      current formal-review and inline-review-comment watermarks plus the
+      formal-review payload digest described in `docs/exact-head-mergegate.md`
     - run
       `composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<current_head_sha>`
-    - require its bounded PR-identity and repeated review-evidence observations
-      to remain unchanged through the final read
+    - require its bounded PR-identity and repeated CI-and-review evidence
+      observations to remain unchanged through the final read; run it from the
+      exact reviewed `HEAD` with the contract and mergegate files clean
     - only after exit `0`, move the Linear issue to `Ready to Merge`
     - confirm the current PR head still matches that exact reviewed,
       CI-green, mergegate-approved head

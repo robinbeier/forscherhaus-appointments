@@ -20,12 +20,14 @@ if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
  * @param array<int, string> $argv
  * @param Closure(string): array<string, mixed>|null $request
  * @param Closure(): string|null $repositoryResolver
+ * @param Closure(string, string, string): array<string, mixed>|null $policyLoader
  */
 function runExactHeadMergegateCli(
     array $argv,
     ?Closure $request = null,
     ?Closure $repositoryResolver = null,
     ?string $repoRoot = null,
+    ?Closure $policyLoader = null,
 ): int {
     $root = $repoRoot ?? dirname(__DIR__, 2);
     $config = exactHeadMergegateDefaultConfig($root);
@@ -50,7 +52,10 @@ function runExactHeadMergegateCli(
         $repository = $repositoryResolver !== null ? $repositoryResolver() : resolveExactHeadMergegateRepository($root);
         $prNumber = ExactHeadMergegate::parseTarget($config['pr'], $repository);
         $reviewedSha = ExactHeadMergegate::normalizeSha($config['reviewed_sha']);
-        $policy = loadExactHeadMergegatePolicy($config['contract']);
+        $policy =
+            $policyLoader !== null
+                ? $policyLoader($root, $config['contract'], $reviewedSha)
+                : loadExactHeadMergegateVerifiedPolicy($root, $config['contract'], $reviewedSha);
         $githubGet = $request ?? buildExactHeadMergegateGitHubGetClosure();
         $snapshot = fetchExactHeadMergegateSnapshot(
             $githubGet,
@@ -211,11 +216,89 @@ function requireExactHeadMergegateCliValue(string $argument, string $prefix): st
  */
 function loadExactHeadMergegatePolicy(string $contractPath): array
 {
+    return decodeExactHeadMergegatePolicy(readExactHeadMergegatePolicyContents($contractPath));
+}
+
+/**
+ * @param Closure(array<int, string>, ?string): string $processRunner
+ */
+function loadExactHeadMergegateVerifiedPolicy(
+    string $root,
+    string $contractPath,
+    string $reviewedSha,
+    ?Closure $processRunner = null,
+): array {
+    $runProcess =
+        $processRunner ??
+        static fn(array $command, ?string $workingDirectory): string => runExactHeadMergegateProcess(
+            $command,
+            $workingDirectory,
+        );
+    $normalizedReviewedSha = ExactHeadMergegate::normalizeSha($reviewedSha);
+    $currentHead = ExactHeadMergegate::normalizeSha(trim($runProcess(['git', 'rev-parse', 'HEAD'], $root)));
+    if ($currentHead !== $normalizedReviewedSha) {
+        throw new RuntimeException('Exact-head mergegate must run from the exact reviewed HEAD.');
+    }
+
+    $resolvedRoot = realpath($root);
+    $resolvedContract = realpath($contractPath);
+    if ($resolvedRoot === false || $resolvedContract === false) {
+        throw new RuntimeException('Exact-head mergegate contract path could not be resolved.');
+    }
+
+    $rootPrefix = rtrim(str_replace('\\', '/', $resolvedRoot), '/') . '/';
+    $contractNormalized = str_replace('\\', '/', $resolvedContract);
+    if (!str_starts_with($contractNormalized, $rootPrefix)) {
+        throw new RuntimeException('Exact-head mergegate contract must live inside the repository root.');
+    }
+
+    $contractRelativePath = substr($contractNormalized, strlen($rootPrefix));
+    if (!is_string($contractRelativePath) || $contractRelativePath === '') {
+        throw new RuntimeException('Exact-head mergegate contract path is invalid.');
+    }
+
+    $criticalPaths = [
+        $contractRelativePath,
+        'scripts/ci/check_exact_head_mergegate.php',
+        'scripts/ci/lib/ExactHeadMergegate.php',
+    ];
+    try {
+        $runProcess(array_merge(['git', 'diff', '--quiet', 'HEAD', '--'], $criticalPaths), $root);
+    } catch (Throwable) {
+        throw new RuntimeException('Exact-head mergegate security-critical files must be clean.');
+    }
+
+    return decodeExactHeadMergegatePolicy(
+        $runProcess(['git', 'show', $normalizedReviewedSha . ':' . $contractRelativePath], $root),
+    );
+}
+
+function readExactHeadMergegatePolicyContents(string $contractPath): string
+{
     $contents = file_get_contents($contractPath);
     if ($contents === false) {
         throw new RuntimeException('Exact-head mergegate contract could not be read.');
     }
 
+    return $contents;
+}
+
+/**
+ * @return array{
+ *     base_ref:string,
+ *     workflow_file:string,
+ *     workflow_name:string,
+ *     required_checks:array<int, string>,
+ *     conditional_checks:array<int, string>,
+ *     required_review_lenses:array<int, string>,
+ *     trusted_associations:array<int, string>,
+ *     blocking_feedback_associations:array<int, string>,
+ *     attestation_marker:string,
+ *     attestation_verdict:string
+ * }
+ */
+function decodeExactHeadMergegatePolicy(string $contents): array
+{
     try {
         $contract = json_decode($contents, true, 128, JSON_THROW_ON_ERROR);
     } catch (JsonException) {
@@ -228,7 +311,8 @@ function loadExactHeadMergegatePolicy(string $contractPath): array
     if (
         !is_array($mergegate) ||
         ($mergegate['schema_version'] ?? null) !== 1 ||
-        ($mergegate['pr_revalidation'] ?? null) !== 'before_between_and_immediately_before_final_review_observation' ||
+        ($mergegate['pr_revalidation'] ?? null) !== 'before_between_and_after_bounded_evidence_observations' ||
+        ($mergegate['ci_evidence_revalidation'] ?? null) !== 'two_identical_bounded_observations' ||
         ($mergegate['review_evidence_revalidation'] ?? null) !== 'two_identical_bounded_observations' ||
         ($mergegate['review_lens_source'] ?? null) !== 'review.sensitive_change_lenses' ||
         !is_array($review) ||
@@ -260,7 +344,7 @@ function loadExactHeadMergegatePolicy(string $contractPath): array
         ($attestation['cryptographic_agent_execution_proof'] ?? null) !== false ||
         ($attestation['malicious_repository_owner_in_scope'] ?? null) !== false ||
         ($attestation['requires_unedited_comment'] ?? null) !== true ||
-        ($attestation['activity_watermarks'] ?? null) !== ['review_id', 'review_comment_id']
+        ($attestation['activity_watermarks'] ?? null) !== ['review_id', 'review_comment_id', 'review_payload_digest']
     ) {
         throw new RuntimeException('Exact-head mergegate review authority model is malformed.');
     }
@@ -447,6 +531,71 @@ function fetchExactHeadMergegateSnapshot(
 ): array {
     $prefix = '/repos/' . $repository;
     $initialPullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
+    $initialEvidence = fetchExactHeadMergegateEvidenceObservation(
+        $request,
+        $prefix,
+        $prNumber,
+        $reviewedSha,
+        $workflowFile,
+    );
+    $middlePullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
+    $finalEvidence = fetchExactHeadMergegateEvidenceObservation(
+        $request,
+        $prefix,
+        $prNumber,
+        $reviewedSha,
+        $workflowFile,
+    );
+    $finalPullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
+
+    $identityFields = ['number', 'state', 'draft', 'base_ref', 'head_sha', 'head_ref', 'head_repository'];
+    $prHeadRevalidated = true;
+    foreach ($identityFields as $field) {
+        if (
+            ($initialPullRequest[$field] ?? null) !== ($middlePullRequest[$field] ?? null) ||
+            ($middlePullRequest[$field] ?? null) !== ($finalPullRequest[$field] ?? null)
+        ) {
+            $prHeadRevalidated = false;
+            break;
+        }
+    }
+
+    return [
+        'pr' => $finalPullRequest,
+        'pr_head_revalidated' => $prHeadRevalidated,
+        'ci_evidence_revalidated' =>
+            $initialEvidence['workflow_runs'] === $finalEvidence['workflow_runs'] &&
+            $initialEvidence['check_runs'] === $finalEvidence['check_runs'] &&
+            $initialEvidence['associated_pr_numbers'] === $finalEvidence['associated_pr_numbers'],
+        'ci_evidence_observation_count' => 2,
+        'review_evidence_revalidated' =>
+            $initialEvidence['comments'] === $finalEvidence['comments'] &&
+            $initialEvidence['review_activity'] === $finalEvidence['review_activity'],
+        'workflow_runs' => $finalEvidence['workflow_runs'],
+        'check_runs' => $finalEvidence['check_runs'],
+        'associated_pr_numbers' => $finalEvidence['associated_pr_numbers'],
+        'comments' => $finalEvidence['comments'],
+        'review_activity' => $finalEvidence['review_activity'],
+    ];
+}
+
+/**
+ * @param Closure(string): array<string, mixed> $request
+ * @return array{
+ *     workflow_runs:array<int, array<string, mixed>>,
+ *     check_runs:array<int, array<string, mixed>>,
+ *     associated_pr_numbers:array<int, int>,
+ *     comments:array<int, array<string, mixed>>,
+ *     review_activity:array<int, array<string, mixed>>
+ * }
+ */
+function fetchExactHeadMergegateEvidenceObservation(
+    Closure $request,
+    string $prefix,
+    int $prNumber,
+    string $reviewedSha,
+    string $workflowFile,
+): array {
     $workflowRuns = fetchExactHeadMergegateCollection(
         $request,
         $prefix .
@@ -469,63 +618,73 @@ function fetchExactHeadMergegateSnapshot(
         $prefix . '/commits/' . $reviewedSha . '/pulls',
         null,
     );
-    $initialReviewEvidence = fetchExactHeadMergegateReviewEvidence($request, $prefix, $prNumber);
-    $middlePullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
-    $finalPullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
-    $finalReviewEvidence = fetchExactHeadMergegateReviewEvidence($request, $prefix, $prNumber);
-
-    $identityFields = ['number', 'state', 'draft', 'base_ref', 'head_sha', 'head_ref', 'head_repository'];
-    $prHeadRevalidated = true;
-    foreach ($identityFields as $field) {
-        if (
-            ($initialPullRequest[$field] ?? null) !== ($middlePullRequest[$field] ?? null) ||
-            ($middlePullRequest[$field] ?? null) !== ($finalPullRequest[$field] ?? null)
-        ) {
-            $prHeadRevalidated = false;
-            break;
-        }
-    }
-
-    return [
-        'pr' => $finalPullRequest,
-        'pr_head_revalidated' => $prHeadRevalidated,
-        'review_evidence_revalidated' => $initialReviewEvidence === $finalReviewEvidence,
-        'workflow_runs' => array_map(
-            static fn(mixed $run): array => normalizeExactHeadMergegateWorkflowRun($run),
-            $workflowRuns,
-        ),
-        'check_runs' => array_map(
-            static fn(mixed $run): array => normalizeExactHeadMergegateCheckRun($run),
-            $checkRuns,
-        ),
-        'associated_pr_numbers' => normalizeExactHeadMergegateAssociatedPullRequests($associatedPullRequests),
-        'comments' => $finalReviewEvidence['comments'],
-        'review_activity' => $finalReviewEvidence['review_activity'],
-    ];
-}
-
-/**
- * @param Closure(string): array<string, mixed> $request
- * @return array{comments:array<int, array<string, mixed>>,review_activity:array<int, array<string, mixed>>}
- */
-function fetchExactHeadMergegateReviewEvidence(Closure $request, string $prefix, int $prNumber): array
-{
     $comments = fetchExactHeadMergegateCollection($request, $prefix . '/issues/' . $prNumber . '/comments', null);
     $reviews = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/reviews', null);
     $reviewComments = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/comments', null);
 
+    $normalizedWorkflowRuns = array_map(
+        static fn(mixed $run): array => normalizeExactHeadMergegateWorkflowRun($run),
+        $workflowRuns,
+    );
+    usort(
+        $normalizedWorkflowRuns,
+        static fn(array $left, array $right): int => ((int) ($left['id'] ?? 0)) <=> ((int) ($right['id'] ?? 0)),
+    );
+    $normalizedCheckRuns = array_map(
+        static fn(mixed $run): array => normalizeExactHeadMergegateCheckRun($run),
+        $checkRuns,
+    );
+    usort(
+        $normalizedCheckRuns,
+        static fn(array $left, array $right): int => [
+            $left['id'] ?? 0,
+            $left['name'] ?? null,
+            $left['check_suite_id'] ?? 0,
+            $left['head_sha'] ?? null,
+            $left['status'] ?? null,
+            $left['conclusion'] ?? null,
+        ] <=> [
+            $right['id'] ?? 0,
+            $right['name'] ?? null,
+            $right['check_suite_id'] ?? 0,
+            $right['head_sha'] ?? null,
+            $right['status'] ?? null,
+            $right['conclusion'] ?? null,
+        ],
+    );
+    $normalizedAssociatedPrNumbers = normalizeExactHeadMergegateAssociatedPullRequests($associatedPullRequests);
+    sort($normalizedAssociatedPrNumbers, SORT_NUMERIC);
+    $normalizedComments = array_map(
+        static fn(mixed $comment): array => normalizeExactHeadMergegateComment($comment),
+        $comments,
+    );
+    usort(
+        $normalizedComments,
+        static fn(array $left, array $right): int => ((int) ($left['id'] ?? 0)) <=> ((int) ($right['id'] ?? 0)),
+    );
+    $normalizedReviews = array_map(
+        static fn(mixed $review): array => normalizeExactHeadMergegateReview($review),
+        $reviews,
+    );
+    usort(
+        $normalizedReviews,
+        static fn(array $left, array $right): int => ((int) ($left['id'] ?? 0)) <=> ((int) ($right['id'] ?? 0)),
+    );
+    $normalizedReviewComments = array_map(
+        static fn(mixed $comment): array => normalizeExactHeadMergegateReviewComment($comment),
+        $reviewComments,
+    );
+    usort(
+        $normalizedReviewComments,
+        static fn(array $left, array $right): int => ((int) ($left['id'] ?? 0)) <=> ((int) ($right['id'] ?? 0)),
+    );
+
     return [
-        'comments' => array_map(
-            static fn(mixed $comment): array => normalizeExactHeadMergegateComment($comment),
-            $comments,
-        ),
-        'review_activity' => array_merge(
-            array_map(static fn(mixed $review): array => normalizeExactHeadMergegateReview($review), $reviews),
-            array_map(
-                static fn(mixed $comment): array => normalizeExactHeadMergegateReviewComment($comment),
-                $reviewComments,
-            ),
-        ),
+        'workflow_runs' => $normalizedWorkflowRuns,
+        'check_runs' => $normalizedCheckRuns,
+        'associated_pr_numbers' => $normalizedAssociatedPrNumbers,
+        'comments' => $normalizedComments,
+        'review_activity' => array_merge($normalizedReviews, $normalizedReviewComments),
     ];
 }
 
@@ -637,15 +796,25 @@ function normalizeExactHeadMergegateAssociatedPullRequests(array $pullRequests):
  */
 function normalizeExactHeadMergegateCheckRun(mixed $run): array
 {
-    if (!is_array($run)) {
-        return [];
+    if (
+        !is_array($run) ||
+        !is_int($run['id'] ?? null) ||
+        !is_string($run['name'] ?? null) ||
+        !is_array($run['check_suite'] ?? null) ||
+        !is_int($run['check_suite']['id'] ?? null) ||
+        !is_string($run['head_sha'] ?? null) ||
+        !is_string($run['status'] ?? null) ||
+        (!is_string($run['conclusion'] ?? null) && ($run['conclusion'] ?? null) !== null)
+    ) {
+        throw new RuntimeException('GitHub check run had an invalid shape.');
     }
 
     return [
-        'name' => $run['name'] ?? null,
-        'check_suite_id' => is_array($run['check_suite'] ?? null) ? $run['check_suite']['id'] ?? null : null,
-        'head_sha' => $run['head_sha'] ?? null,
-        'status' => $run['status'] ?? null,
+        'id' => $run['id'],
+        'name' => $run['name'],
+        'check_suite_id' => $run['check_suite']['id'],
+        'head_sha' => $run['head_sha'],
+        'status' => $run['status'],
         'conclusion' => $run['conclusion'] ?? null,
     ];
 }
@@ -686,7 +855,8 @@ function normalizeExactHeadMergegateReview(mixed $review): array
         !is_string($review['author_association'] ?? null) ||
         !is_string($review['state'] ?? null) ||
         !is_string($review['commit_id'] ?? null) ||
-        !is_string($review['submitted_at'] ?? null)
+        !is_string($review['submitted_at'] ?? null) ||
+        !is_string($review['body'] ?? null)
     ) {
         throw new RuntimeException('GitHub review had an invalid shape.');
     }
@@ -699,6 +869,7 @@ function normalizeExactHeadMergegateReview(mixed $review): array
         'state' => $review['state'] ?? null,
         'commit_sha' => $review['commit_id'] ?? null,
         'occurred_at' => $review['submitted_at'] ?? null,
+        'content_digest' => hash('sha256', $review['body']),
     ];
 }
 

@@ -14,7 +14,8 @@
             "base_ref": "main",
             "workflow_file": "ci.yml",
             "workflow_name": "CI",
-            "pr_revalidation": "before_between_and_immediately_before_final_review_observation",
+            "pr_revalidation": "before_between_and_after_bounded_evidence_observations",
+            "ci_evidence_revalidation": "two_identical_bounded_observations",
             "review_evidence_revalidation": "two_identical_bounded_observations",
             "review_lens_source": "review.sensitive_change_lenses",
             "required_checks": [
@@ -41,13 +42,13 @@
                 "integration-smoke"
             ],
             "review_attestation": {
-                "marker": "exact-head-review-attestation:v1",
+                "marker": "exact-head-review-attestation:v2",
                 "verdict": "no_findings",
                 "authority_model": "owner_accountable_assertion",
                 "cryptographic_agent_execution_proof": false,
                 "malicious_repository_owner_in_scope": false,
                 "requires_unedited_comment": true,
-                "activity_watermarks": ["review_id", "review_comment_id"],
+                "activity_watermarks": ["review_id", "review_comment_id", "review_payload_digest"],
                 "trusted_author_associations": ["OWNER"],
                 "blocking_feedback_author_associations": ["OWNER", "MEMBER", "COLLABORATOR"]
             }
@@ -102,7 +103,7 @@
             "required_sections": {
                 "## Evidence Contract": ["The command uses authenticated GitHub GET requests and binds all evidence"],
                 "## Review Attestation": ["The three final reviews remain independent review work."],
-                "## Result and Landing": ["Only an exit 0 after the final PR-head and review-evidence revalidations"]
+                "## Result and Landing": ["Only an exit 0 after the final PR-head and bounded evidence revalidations"]
             }
         },
         "docs/ci-write-contracts.md": {

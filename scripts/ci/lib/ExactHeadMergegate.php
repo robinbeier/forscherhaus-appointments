@@ -49,6 +49,77 @@ final class ExactHeadMergegate
     }
 
     /**
+     * @return array{review_id:int,review_comment_id:int,review_payload_digest:string}|null
+     */
+    public static function reviewActivityWatermark(mixed $reviewActivity, string $reviewedSha): ?array
+    {
+        if (!is_array($reviewActivity)) {
+            return null;
+        }
+
+        $sha = self::normalizeSha($reviewedSha);
+        $watermark = [
+            'review_id' => 0,
+            'review_comment_id' => 0,
+            'review_payload_digest' => hash('sha256', json_encode([], JSON_THROW_ON_ERROR)),
+        ];
+        $reviewPayloadEntries = [];
+
+        foreach ($reviewActivity as $activity) {
+            if (
+                !is_array($activity) ||
+                !is_string($activity['author_association'] ?? null) ||
+                !is_string($activity['kind'] ?? null) ||
+                !in_array($activity['kind'], ['review', 'review_comment'], true) ||
+                !is_int($activity['id'] ?? null) ||
+                ($activity['id'] ?? 0) < 1 ||
+                !is_string($activity['actor_ref'] ?? null) ||
+                preg_match('/^[0-9a-f]{64}$/D', $activity['actor_ref']) !== 1 ||
+                self::normalizeGitHubTimestamp($activity['occurred_at'] ?? null) === null
+            ) {
+                return null;
+            }
+
+            $watermarkKey = $activity['kind'] === 'review' ? 'review_id' : 'review_comment_id';
+            $watermark[$watermarkKey] = max($watermark[$watermarkKey], $activity['id']);
+
+            if ($activity['kind'] !== 'review' || ($activity['commit_sha'] ?? null) !== $sha) {
+                continue;
+            }
+            if (
+                !is_string($activity['state'] ?? null) ||
+                !is_string($activity['content_digest'] ?? null) ||
+                preg_match('/^[0-9a-f]{64}$/D', $activity['content_digest']) !== 1
+            ) {
+                return null;
+            }
+
+            $reviewPayloadEntries[] = [
+                'id' => $activity['id'],
+                'actor_ref' => $activity['actor_ref'],
+                'state' => $activity['state'],
+                'commit_sha' => $sha,
+                'occurred_at' => self::normalizeGitHubTimestamp($activity['occurred_at']),
+                'content_digest' => $activity['content_digest'],
+            ];
+        }
+
+        usort(
+            $reviewPayloadEntries,
+            static fn(array $left, array $right): int => [$left['id'], $left['occurred_at']] <=> [
+                $right['id'],
+                $right['occurred_at'],
+            ],
+        );
+        $watermark['review_payload_digest'] = hash(
+            'sha256',
+            json_encode($reviewPayloadEntries, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+        );
+
+        return $watermark;
+    }
+
+    /**
      * @param array<string, mixed> $policy
      * @param array<string, mixed> $snapshot
      * @return array<string, mixed>
@@ -67,6 +138,18 @@ final class ExactHeadMergegate
             $prHeadRevalidated
                 ? 'Pull request identity remained stable across evidence collection.'
                 : 'Pull request identity changed or was not revalidated after evidence collection.',
+        );
+
+        $ciEvidenceRevalidated =
+            ($snapshot['ci_evidence_revalidated'] ?? null) === true &&
+            ($snapshot['ci_evidence_observation_count'] ?? null) === 2;
+        self::addGate(
+            $gates,
+            $ciEvidenceRevalidated ? 'pass' : 'fail',
+            $ciEvidenceRevalidated ? 'ci_evidence_revalidated' : 'ci_evidence_drift_during_evaluation',
+            $ciEvidenceRevalidated
+                ? 'Blocking CI evidence remained stable across bounded repeated observations.'
+                : 'Blocking CI evidence changed or was not revalidated during evaluation.',
         );
 
         $reviewEvidenceRevalidated = ($snapshot['review_evidence_revalidated'] ?? null) === true;
@@ -159,6 +242,7 @@ final class ExactHeadMergegate
             'reviewed_sha' => $sha,
             'workflow_run_id' => self::normalizeReportIdentifier($workflow['id'] ?? null),
             'check_suite_id' => is_int($suiteId) ? $suiteId : null,
+            'review_activity_watermark' => self::reviewActivityWatermark($snapshot['review_activity'] ?? null, $sha),
             'gates' => $gates,
         ];
     }
@@ -378,7 +462,7 @@ final class ExactHeadMergegate
      * @return array{
      *     comment_id:int|string,
      *     attested_at:string,
-     *     review_watermarks:array{review_id:int,review_comment_id:int},
+     *     review_watermarks:array{review_id:int,review_comment_id:int,review_payload_digest:string},
      *     reviews:array<string, string>
      * }|null
      */
@@ -417,11 +501,17 @@ final class ExactHeadMergegate
             array_keys($attestation) !== ['head_sha', 'review_activity_watermark', 'reviews'] ||
             ($attestation['head_sha'] ?? null) !== $sha ||
             !is_array($attestation['review_activity_watermark'] ?? null) ||
-            array_keys($attestation['review_activity_watermark']) !== ['review_id', 'review_comment_id'] ||
+            array_keys($attestation['review_activity_watermark']) !== [
+                'review_id',
+                'review_comment_id',
+                'review_payload_digest',
+            ] ||
             !is_int($attestation['review_activity_watermark']['review_id'] ?? null) ||
             ($attestation['review_activity_watermark']['review_id'] ?? -1) < 0 ||
             !is_int($attestation['review_activity_watermark']['review_comment_id'] ?? null) ||
             ($attestation['review_activity_watermark']['review_comment_id'] ?? -1) < 0 ||
+            !is_string($attestation['review_activity_watermark']['review_payload_digest'] ?? null) ||
+            preg_match('/^[0-9a-f]{64}$/D', $attestation['review_activity_watermark']['review_payload_digest']) !== 1 ||
             !is_array($attestation['reviews'] ?? null)
         ) {
             return null;
@@ -469,7 +559,7 @@ final class ExactHeadMergegate
      * @param array{
      *     comment_id:int|string,
      *     attested_at:string,
-     *     review_watermarks:array{review_id:int,review_comment_id:int},
+     *     review_watermarks:array{review_id:int,review_comment_id:int,review_payload_digest:string},
      *     reviews:array<string, string>
      * } $attestation
      */
@@ -492,18 +582,30 @@ final class ExactHeadMergegate
             if ($updatedAt === null || (!is_int($comment['id'] ?? null) && !is_string($comment['id'] ?? null))) {
                 return true;
             }
-            if (
-                in_array($comment['author_association'], $policy['blocking_feedback_associations'], true) &&
-                (strcmp($updatedAt, $attestation['attested_at']) > 0 ||
-                    ($updatedAt === $attestation['attested_at'] &&
-                        (int) ($comment['id'] ?? 0) > (int) $attestation['comment_id']))
-            ) {
+            $createdAt = self::normalizeGitHubTimestamp($comment['created_at'] ?? null);
+            if ($createdAt === null) {
+                return true;
+            }
+            if (!in_array($comment['author_association'], $policy['blocking_feedback_associations'], true)) {
+                continue;
+            }
+            if (strcmp($updatedAt, $attestation['attested_at']) > 0) {
+                return true;
+            }
+            if ($updatedAt !== $attestation['attested_at']) {
+                continue;
+            }
+            if ($createdAt !== $updatedAt || (int) ($comment['id'] ?? 0) > (int) $attestation['comment_id']) {
                 return true;
             }
         }
 
+        $observedWatermarks = self::reviewActivityWatermark($reviewActivity, $sha);
+        if ($observedWatermarks === null) {
+            return true;
+        }
+
         $reviewTransitions = [];
-        $observedWatermarks = ['review_id' => 0, 'review_comment_id' => 0];
         foreach ($reviewActivity as $activity) {
             if (
                 !is_array($activity) ||
@@ -521,9 +623,6 @@ final class ExactHeadMergegate
             if ($occurredAt === null) {
                 return true;
             }
-
-            $watermarkKey = $activity['kind'] === 'review' ? 'review_id' : 'review_comment_id';
-            $observedWatermarks[$watermarkKey] = max($observedWatermarks[$watermarkKey], $activity['id']);
 
             if ($activity['kind'] === 'review_comment' && strcmp($occurredAt, $attestation['attested_at']) >= 0) {
                 return true;
