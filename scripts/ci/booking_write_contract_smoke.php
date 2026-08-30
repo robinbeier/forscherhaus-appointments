@@ -261,7 +261,6 @@ function runBookingContractsAttempt(
                         'http_status' => $response->statusCode,
                         'url' => $response->url,
                         'appointment_id' => $appointmentId,
-                        'appointment_hash' => $appointmentHash,
                         'customer_id' => $customerId,
                     ];
                 },
@@ -287,6 +286,13 @@ function runBookingContractsAttempt(
                     if (!is_array($customerPayload)) {
                         throw new ContractAssertionException('manage_update requires primary customer payload state.');
                     }
+
+                    $customerPayload['id'] = toPositiveInt(
+                        $state['primary_customer_id'] ?? null,
+                        'manage_update.customer_id',
+                    );
+
+                    bootstrapRescheduleAuthority($client, $config, $factory, $state);
 
                     $updatedNotes = 'run:' . $state['run_id'] . ':manage-update';
                     $appointmentPayload = $factory->createBookingAppointmentPayload(
@@ -430,53 +436,7 @@ function runBookingContractsAttempt(
             runCheck(
                 'booking_reschedule_manage_mode_contract',
                 static function () use ($client, $config, $factory, &$state): array {
-                    $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
-                    if ($appointmentHash === '') {
-                        throw new ContractAssertionException(
-                            'reschedule_manage_mode requires primary appointment hash.',
-                        );
-                    }
-
-                    $response = $client->get(
-                        'booking/reschedule/' . rawurlencode($appointmentHash),
-                        [],
-                        $config['http_timeout'],
-                    );
-                    GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking/reschedule/{hash}');
-
-                    $bootstrap = $factory->extractBookingBootstrap($response->body);
-                    $manageMode = $bootstrap['manage_mode'] ?? null;
-
-                    if ($manageMode !== true) {
-                        throw new ContractAssertionException('reschedule view must expose manage_mode=true.');
-                    }
-
-                    $appointmentData = $bootstrap['appointment_data'] ?? null;
-                    if (!is_array($appointmentData)) {
-                        throw new ContractAssertionException('reschedule view must include appointment_data object.');
-                    }
-
-                    $appointmentId = toPositiveInt(
-                        $state['primary_appointment_id'] ?? null,
-                        'reschedule.primary_appointment_id',
-                    );
-                    $resolvedId = toPositiveInt($appointmentData['id'] ?? null, 'reschedule.appointment_data.id');
-                    if ($resolvedId !== $appointmentId) {
-                        throw new ContractAssertionException(
-                            sprintf(
-                                'reschedule appointment id mismatch: expected %d, got %d.',
-                                $appointmentId,
-                                $resolvedId,
-                            ),
-                        );
-                    }
-
-                    return [
-                        'http_status' => $response->statusCode,
-                        'url' => $response->url,
-                        'appointment_id' => $resolvedId,
-                        'manage_mode' => true,
-                    ];
+                    return bootstrapRescheduleAuthority($client, $config, $factory, $state);
                 },
                 $checks,
                 selectionReasonForCheck($config, 'booking_reschedule_manage_mode_contract'),
@@ -608,6 +568,51 @@ function runBookingContractsAttempt(
         $cleanupSummary = $cleanup->cleanup();
         $state['cleanup'] = $cleanupSummary;
     }
+}
+
+/**
+ * Establish the canonical, session-bound reschedule authority without
+ * returning the route capability in check details or reports.
+ *
+ * @param array<string, mixed> $config
+ * @param array<string, mixed> $state
+ * @return array{http_status:int,appointment_id:int,manage_mode:bool}
+ */
+function bootstrapRescheduleAuthority(
+    GateHttpClient $client,
+    array $config,
+    DeterministicFixtureFactory $factory,
+    array $state,
+): array {
+    $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
+    if ($appointmentHash === '') {
+        throw new ContractAssertionException('reschedule bootstrap requires primary appointment capability state.');
+    }
+
+    $response = $client->get('booking/reschedule/' . rawurlencode($appointmentHash), [], $config['http_timeout']);
+    GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking/reschedule/{hash}');
+
+    $bootstrap = $factory->extractBookingBootstrap($response->body);
+    if (($bootstrap['manage_mode'] ?? null) !== true) {
+        throw new ContractAssertionException('reschedule view must expose manage_mode=true.');
+    }
+
+    $appointmentData = $bootstrap['appointment_data'] ?? null;
+    if (!is_array($appointmentData)) {
+        throw new ContractAssertionException('reschedule view must include appointment_data object.');
+    }
+
+    $appointmentId = toPositiveInt($state['primary_appointment_id'] ?? null, 'reschedule.primary_appointment_id');
+    $resolvedId = toPositiveInt($appointmentData['id'] ?? null, 'reschedule.appointment_data.id');
+    if ($resolvedId !== $appointmentId) {
+        throw new ContractAssertionException('reschedule appointment identity mismatch.');
+    }
+
+    return [
+        'http_status' => $response->statusCode,
+        'appointment_id' => $resolvedId,
+        'manage_mode' => true,
+    ];
 }
 
 /**
@@ -1145,6 +1150,9 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
 
     $passed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'pass'));
     $failed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'fail'));
+    $reportState = sanitizeBookingWriteReportValue($state);
+    $reportChecks = sanitizeBookingWriteReportValue($checks);
+    $reportFailure = sanitizeBookingWriteReportValue($failure);
 
     $report = [
         'generated_at_utc' => gmdate('c'),
@@ -1158,16 +1166,72 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
             'failed' => $failed,
         ],
         'retry' => $retryMetadata,
-        'state' => $state,
-        'checks' => $checks,
-        'cleanup' => $state['cleanup'] ?? null,
-        'failure' => $failure,
+        'state' => $reportState,
+        'checks' => $reportChecks,
+        'cleanup' => is_array($reportState) ? $reportState['cleanup'] ?? null : null,
+        'failure' => $reportFailure,
     ];
 
     $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     file_put_contents($outputPath, $json . PHP_EOL);
 
     return $outputPath;
+}
+
+/**
+ * Remove capability, authority, credential, and personal payload values before
+ * contract state becomes a CI artifact. Runtime state remains available only
+ * in process for cleanup and subsequent checks.
+ */
+function sanitizeBookingWriteReportValue(mixed $value, ?string $key = null): mixed
+{
+    $normalizedKey = strtolower((string) $key);
+    $sensitiveKeys = [
+        'primary_customer',
+        'customer_id',
+        'primary_customer_id',
+        'appointment_hash',
+        'primary_appointment_hash',
+        'authority',
+        'token',
+        'password',
+        'secret',
+        'cookie',
+        'first_name',
+        'last_name',
+        'email',
+        'mobile_number',
+        'phone_number',
+        'address',
+        'city',
+        'state',
+        'zip_code',
+        'custom_field_1',
+        'custom_field_2',
+        'custom_field_3',
+        'custom_field_4',
+        'custom_field_5',
+    ];
+
+    if (in_array($normalizedKey, $sensitiveKeys, true)) {
+        return '[redacted]';
+    }
+
+    if (is_array($value)) {
+        $sanitized = [];
+
+        foreach ($value as $childKey => $childValue) {
+            $sanitized[$childKey] = sanitizeBookingWriteReportValue($childValue, (string) $childKey);
+        }
+
+        return $sanitized;
+    }
+
+    if (!is_string($value)) {
+        return $value;
+    }
+
+    return preg_replace('#(booking/reschedule|booking_cancellation/of)/[^/?\s"]+#', '$1/[redacted]', $value);
 }
 
 function printHelpAndExit(): void

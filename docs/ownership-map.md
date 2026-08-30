@@ -89,6 +89,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/views/pages/booking.php`
   - `assets/js/http/booking_http_client.js`
   - `application/libraries/Email_messages.php`
+  - `application/libraries/Reschedule_authority.php`
   - `assets/js/pages/booking.js`
   - `assets/js/pages/booking_webmcp.js`
 - Path prefixes:
@@ -101,6 +102,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/libraries/Availability.php`
   - `application/libraries/Email_messages.php`
   - `application/libraries/Booking_request_dto_factory.php`
+  - `application/libraries/Reschedule_authority.php`
 
 ### `booking-lifecycle`
 

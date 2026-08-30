@@ -20,6 +20,22 @@ Additionally you can configure your own API key in the settings page and pass it
 
 The API follows the REST structure which means that the client can use various HTTP verbs in order to perform various operations to the resources. For example you should use a GET request for fetching resources, a POST for creating new and PUT for updating existing ones in the database. Finally a DELETE request will remove a resource from the system.
 
+### Public Booking Boundary
+
+The public `POST /booking/register` route is not part of the authenticated REST
+API. A request without existing appointment IDs can continue to create a new
+public appointment. Updating an existing appointment through that route first
+requires the canonical `GET /booking/reschedule/{hash}` flow in the same
+server-side session. The issued authority is short-lived, one-time, and bound
+to the exact appointment, customer, and canonical scheduling state.
+
+Client-provided `manage_mode`, appointment/customer IDs, hashes, paths, or
+token-shaped values never grant update authority by themselves. REST API
+clients remain governed exclusively by Basic/Bearer authentication and should
+use `PUT /api/v1/appointments/:id` for authenticated updates. See
+[Public Reschedule Authority](security/public-reschedule-authority.md) for the
+public write-boundary contract.
+
 GET requests accept some parameter helpers that enable the sort, search, pagination and minification of the responses information. Take a look in the following examples:
 
 ### Search

@@ -20,6 +20,11 @@ class BookingFlowFixtures
      */
     private array $settingSnapshots = [];
 
+    /**
+     * @var array<int, array{table:string,id:int,values:array<string,mixed>}>
+     */
+    private array $rowRestorations = [];
+
     public function __construct()
     {
         $this->CI = &\get_instance();
@@ -187,9 +192,65 @@ class BookingFlowFixtures
         return empty($row) ? null : $row;
     }
 
+    public function findCustomerById(int $customerId): ?array
+    {
+        $row = $this->CI->db->get_where('users', ['id' => $customerId])->row_array();
+
+        return empty($row) ? null : $row;
+    }
+
+    /**
+     * @param array<string, mixed> $changes
+     */
+    public function updateAppointment(int $appointmentId, array $changes): void
+    {
+        $this->CI->db->update('appointments', $changes, ['id' => $appointmentId]);
+    }
+
+    /**
+     * @param array<string, mixed> $changes
+     */
+    public function updateCustomer(int $customerId, array $changes): void
+    {
+        $this->CI->db->update('users', $changes, ['id' => $customerId]);
+    }
+
+    /**
+     * @param array<string, mixed> $changes
+     */
+    public function updateSharedProvider(int $providerId, array $changes): void
+    {
+        $this->updateSharedRow('users', $providerId, $changes);
+    }
+
+    /**
+     * @param array<string, mixed> $changes
+     */
+    public function updateSharedService(int $serviceId, array $changes): void
+    {
+        $this->updateSharedRow('services', $serviceId, $changes);
+    }
+
+    public function expireRescheduleAuthority(int $appointmentId): void
+    {
+        $this->CI->db->update(
+            'reschedule_authorities',
+            [
+                'expires_at' => date('Y-m-d H:i:s', time() - 60),
+                'update_datetime' => date('Y-m-d H:i:s'),
+            ],
+            ['appointment_id' => $appointmentId],
+        );
+    }
+
     public function countAppointmentsByHash(string $hash): int
     {
         return (int) $this->CI->db->from('appointments')->where('hash', $hash)->count_all_results();
+    }
+
+    public function countAppointmentsForCustomer(int $customerId): int
+    {
+        return (int) $this->CI->db->from('appointments')->where('id_users_customer', $customerId)->count_all_results();
     }
 
     public function customerExistsByEmail(string $email): bool
@@ -206,6 +267,13 @@ class BookingFlowFixtures
 
     public function cleanup(): void
     {
+        for ($index = count($this->rowRestorations) - 1; $index >= 0; $index--) {
+            $restoration = $this->rowRestorations[$index];
+            $this->CI->db->update($restoration['table'], $restoration['values'], ['id' => $restoration['id']]);
+        }
+
+        $this->rowRestorations = [];
+
         for ($index = count($this->cleanupRegistry) - 1; $index >= 0; $index--) {
             $entry = $this->cleanupRegistry[$index];
             $this->CI->db->delete($entry['table'], ['id' => $entry['id']]);
@@ -217,7 +285,12 @@ class BookingFlowFixtures
     public static function createNoopSynchronization(): object
     {
         return new class {
-            public function sync_appointment_saved(...$args): void {}
+            public int $savedCalls = 0;
+
+            public function sync_appointment_saved(...$args): void
+            {
+                $this->savedCalls++;
+            }
 
             public function sync_appointment_deleted(...$args): void {}
         };
@@ -226,7 +299,12 @@ class BookingFlowFixtures
     public static function createNoopNotifications(): object
     {
         return new class {
-            public function notify_appointment_saved(...$args): void {}
+            public int $savedCalls = 0;
+
+            public function notify_appointment_saved(...$args): void
+            {
+                $this->savedCalls++;
+            }
 
             public function notify_appointment_deleted(...$args): void {}
         };
@@ -235,7 +313,12 @@ class BookingFlowFixtures
     public static function createNoopWebhooksClient(): object
     {
         return new class {
-            public function trigger(...$args): void {}
+            public int $calls = 0;
+
+            public function trigger(...$args): void
+            {
+                $this->calls++;
+            }
         };
     }
 
@@ -249,5 +332,25 @@ class BookingFlowFixtures
             'table' => $table,
             'id' => $id,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $changes
+     */
+    private function updateSharedRow(string $table, int $id, array $changes): void
+    {
+        $row = $this->CI->db->get_where($table, ['id' => $id])->row_array();
+
+        if (empty($row)) {
+            throw new RuntimeException('Shared booking fixture row was not found.');
+        }
+
+        $this->rowRestorations[] = [
+            'table' => $table,
+            'id' => $id,
+            'values' => array_intersect_key($row, $changes),
+        ];
+
+        $this->CI->db->update($table, $changes, ['id' => $id]);
     }
 }

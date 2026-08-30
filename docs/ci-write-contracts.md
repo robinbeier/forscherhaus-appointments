@@ -6,7 +6,14 @@ Mutation-kritische Contract-Smokes fuer Booking- und API-Write-Pfade.
 
 - Booking write-path contracts (`POST /booking/register`, `GET /booking/reschedule/{hash}`, `POST /booking_cancellation/of/{hash}`)
 - API OpenAPI write contracts (`POST/PUT/DELETE` auf `customers` + `appointments`)
-- Keine produktiven Route-/Runtime-Verhaltensaenderungen; nur Qualitaets-/CI-Layer
+
+Der Booking-Contract legt einen normalen Termin weiterhin mit
+`manage_mode=false` und ohne bestehende IDs an. Vor einem bestehenden
+Termin-Update ruft derselbe HTTP-Client dagegen die kanonische
+Reschedule-Route auf. Nur die dabei serverseitig und sitzungsgebunden erzeugte
+Einmal-Authority darf das anschliessende Update freigeben. `manage_mode`, IDs
+oder der Route-Hash allein reichen nicht. Der vollstaendige Sicherheitsvertrag
+steht in [Public Reschedule Authority](security/public-reschedule-authority.md).
 
 ## Local Repro (Docker CI-Parity)
 
@@ -51,6 +58,10 @@ Jeder Report enthaelt:
 - check status + `duration_ms`
 - retry metadata (`max_retries`, `attempts`, retry events)
 - cleanup summary (`created`, `deleted`, `failures`)
+
+Booking-Reports redigieren Route-Hashes, serverseitige Authority-/Tokenwerte,
+Customer-Payloads und personenbezogene Felder. Diese Werte bleiben nur fuer die
+laufende In-Process-Pruefung und das Cleanup verfuegbar.
 
 ## Flake Control
 

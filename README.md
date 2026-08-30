@@ -66,6 +66,8 @@ PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 For optional smoke tests, write-path contracts, deep runtime suites, release
 gates, and CI-only signals, use [Agent Harness Index](docs/agent-harness-index.md)
 as the routing map and [AGENTS.md](AGENTS.md) as the compact command-and-guardrail hub.
+The public existing-appointment write boundary is documented in
+[Public Reschedule Authority](docs/security/public-reschedule-authority.md).
 
 ## Release Gates
 
