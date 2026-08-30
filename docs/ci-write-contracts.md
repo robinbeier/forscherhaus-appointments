@@ -46,6 +46,9 @@ docker compose exec -T php-fpm composer contract-test:write-path -- \
   --retry-count=1 --booking-search-days=14
 ```
 
+Cross-document write-path and evidence invariants are machine-readable in the
+[agent workflow contract](../.codex/contracts/agent-workflow.json).
+
 ## Allgemeiner Mutation-Vertrag
 
 Jeder mutation-kritische öffentliche Write folgt derselben festen Reihenfolge:

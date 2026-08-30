@@ -1,5 +1,5 @@
 {
-    "schema_version": 1,
+    "schema_version": 2,
     "publish": {
         "linear_state": "In Review",
         "may_set_ready_to_merge": false,
@@ -9,5 +9,99 @@
         "requires_exact_head": true,
         "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
         "push_after_ready_linear_state": "In Review"
+    },
+    "review": {
+        "sensitive_changes_require_independent_final_reviews": true,
+        "sensitive_change_lenses": ["correctness_security", "design_maintainability", "tests_regression_flake"]
+    },
+    "public_write": {
+        "caller_supplied_values_create_authority": false,
+        "requires_authority_bound_to_target": true,
+        "requires_null_mutation_on_rejection": true,
+        "requires_race_validation_before_mutation": true
+    },
+    "evidence_privacy": {
+        "allow_secrets": false,
+        "allow_capability_values": false,
+        "allow_personal_data": false
+    },
+    "ci": {
+        "workflow": ".github/workflows/ci.yml",
+        "blocking_jobs": {
+            "write-contract-booking": {
+                "needs": ["changes", "deep-runtime-suite"],
+                "condition": {
+                    "all": [
+                        {"call": "always"},
+                        {
+                            "equals": ["needs.changes.outputs.write_contract_booking", "true"]
+                        },
+                        {
+                            "any": [
+                                {
+                                    "equals": ["github.event_name", "push"]
+                                },
+                                {
+                                    "all": [
+                                        {
+                                            "equals": ["github.event_name", "pull_request"]
+                                        },
+                                        {
+                                            "equals": ["github.event.pull_request.draft", false]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "evidence": {
+                    "checkout_action": "actions/checkout@v6",
+                    "download_action": "actions/download-artifact@v8",
+                    "artifact": "deep-runtime-suite-artifacts",
+                    "path": "storage/logs/ci/deep-runtime-suite"
+                },
+                "assertion": {
+                    "run": "php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-booking"
+                }
+            },
+            "write-contract-api": {
+                "needs": ["changes", "deep-runtime-suite"],
+                "condition": {
+                    "all": [
+                        {"call": "always"},
+                        {
+                            "equals": ["needs.changes.outputs.write_contract_api", "true"]
+                        },
+                        {
+                            "any": [
+                                {
+                                    "equals": ["github.event_name", "push"]
+                                },
+                                {
+                                    "all": [
+                                        {
+                                            "equals": ["github.event_name", "pull_request"]
+                                        },
+                                        {
+                                            "equals": ["github.event.pull_request.draft", false]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "evidence": {
+                    "checkout_action": "actions/checkout@v6",
+                    "download_action": "actions/download-artifact@v8",
+                    "artifact": "deep-runtime-suite-artifacts",
+                    "path": "storage/logs/ci/deep-runtime-suite"
+                },
+                "assertion": {
+                    "run": "php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-api"
+                }
+            }
+        }
     }
 }

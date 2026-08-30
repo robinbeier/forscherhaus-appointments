@@ -16,22 +16,27 @@ class AgentWorkflowContractTest extends TestCase
         $this->repoRoot = dirname(__DIR__, 3);
     }
 
-    public function testReadyToMergeRequiresUnchangedExactHead(): void
+    public function testCanonicalWorkflowSurfacesReferenceMachineContract(): void
     {
-        $workflow = $this->readRepoFile('WORKFLOW.md');
-        $template = $this->readRepoFile('.github/pull_request_template.md');
-        $pushSkill = $this->readRepoFile('.codex/skills/push/SKILL.md');
-        $landSkill = $this->readRepoFile('.codex/skills/land/SKILL.md');
+        $references = [
+            'WORKFLOW.md' => '.codex/contracts/agent-workflow.json',
+            'code_review.md' => '.codex/contracts/agent-workflow.json',
+            'docs/agent-harness-index.md' => '.codex/contracts/agent-workflow.json',
+            'docs/ci-write-contracts.md' => '../.codex/contracts/agent-workflow.json',
+            '.codex/skills/push/SKILL.md' => '../../contracts/agent-workflow.json',
+            '.codex/skills/land/SKILL.md' => '../../contracts/agent-workflow.json',
+        ];
+
+        foreach ($references as $path => $contractReference) {
+            self::assertStringContainsString($contractReference, $this->readRepoFile($path), $path);
+        }
+    }
+
+    public function testStructuredContractDefinesExactHeadAndHighRiskInvariants(): void
+    {
         $contract = $this->readRepoJson('.codex/contracts/agent-workflow.json');
 
-        self::assertStringContainsString('same unchanged exact commit', $workflow);
-        self::assertStringContainsString('Any new push returns the issue to `In Review`', $workflow);
-        self::assertStringContainsString('reviewed head, CI head, and current PR head are identical', $workflow);
-        self::assertStringContainsString('PR-Head, CI-Head und final reviewter Head sind identisch', $template);
-
-        self::assertStringContainsString('../../contracts/agent-workflow.json', $pushSkill);
-        self::assertStringContainsString('../../contracts/agent-workflow.json', $landSkill);
-        self::assertSame(1, $contract['schema_version'] ?? null);
+        self::assertSame(2, $contract['schema_version'] ?? null);
         self::assertSame('In Review', $contract['publish']['linear_state'] ?? null);
         self::assertFalse($contract['publish']['may_set_ready_to_merge'] ?? null);
         self::assertTrue($contract['publish']['push_invalidates_exact_head_evidence'] ?? null);
@@ -41,35 +46,37 @@ class AgentWorkflowContractTest extends TestCase
             $contract['land']['merge_command'] ?? null,
         );
         self::assertSame('In Review', $contract['land']['push_after_ready_linear_state'] ?? null);
-    }
-
-    public function testSensitiveChangesRequireThreeIndependentReviewLenses(): void
-    {
-        $workflow = $this->readRepoFile('WORKFLOW.md');
-        $reviewGuide = $this->readRepoFile('code_review.md');
-        $template = $this->readRepoFile('.github/pull_request_template.md');
-
-        self::assertStringContainsString('Reviewer A: bugs, regressions, security, edge cases', $workflow);
-        self::assertStringContainsString('Reviewer B: architecture, readability, maintainability', $workflow);
-        self::assertStringContainsString('Reviewer C: tests, regression coverage, and flake risk', $workflow);
-        self::assertStringContainsString('three independent final reviews', $reviewGuide);
-        self::assertStringContainsString('## Reviewer C (Tests/Regression/Flake-Risiko)', $template);
-    }
-
-    public function testPublicWriteAndEvidenceContractsStayFailClosed(): void
-    {
-        $agents = $this->readRepoFile('AGENTS.md');
-        $writeContracts = $this->readRepoFile('docs/ci-write-contracts.md');
-
-        self::assertStringContainsString(
-            'Caller-supplied flags, IDs, hashes, tokens, or paths never create public',
-            $agents,
+        self::assertTrue($contract['review']['sensitive_changes_require_independent_final_reviews'] ?? null);
+        self::assertSame(
+            ['correctness_security', 'design_maintainability', 'tests_regression_flake'],
+            $contract['review']['sensitive_change_lenses'] ?? null,
         );
-        self::assertStringContainsString('## Allgemeiner Mutation-Vertrag', $writeContracts);
-        self::assertStringContainsString('## Evidence-Privacy-Vertrag', $writeContracts);
-        self::assertStringContainsString('`write-contract-booking` ist aktuell blockierend', $writeContracts);
-        self::assertStringContainsString('`write-contract-api` ist aktuell blockierend', $writeContracts);
-        self::assertStringNotContainsString('warn-only', $writeContracts);
+        self::assertFalse($contract['public_write']['caller_supplied_values_create_authority'] ?? null);
+        self::assertTrue($contract['public_write']['requires_authority_bound_to_target'] ?? null);
+        self::assertTrue($contract['public_write']['requires_null_mutation_on_rejection'] ?? null);
+        self::assertTrue($contract['public_write']['requires_race_validation_before_mutation'] ?? null);
+        self::assertFalse($contract['evidence_privacy']['allow_secrets'] ?? null);
+        self::assertFalse($contract['evidence_privacy']['allow_capability_values'] ?? null);
+        self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
+    }
+
+    public function testStructuredContractOwnsBothBlockingWriteJobs(): void
+    {
+        $contract = $this->readRepoJson('.codex/contracts/agent-workflow.json');
+        $ci = $contract['ci'] ?? null;
+
+        self::assertIsArray($ci);
+        self::assertSame('.github/workflows/ci.yml', $ci['workflow'] ?? null);
+        self::assertIsArray($ci['blocking_jobs'] ?? null);
+        $jobNames = array_keys($ci['blocking_jobs']);
+        sort($jobNames, SORT_STRING);
+        self::assertSame(['write-contract-api', 'write-contract-booking'], $jobNames);
+        foreach ($ci['blocking_jobs'] as $jobName => $job) {
+            self::assertSame(['changes', 'deep-runtime-suite'], $job['needs'] ?? null, $jobName);
+            self::assertSame('deep-runtime-suite-artifacts', $job['evidence']['artifact'] ?? null, $jobName);
+            self::assertSame('storage/logs/ci/deep-runtime-suite', $job['evidence']['path'] ?? null, $jobName);
+            self::assertStringEndsWith('--suite=' . $jobName, (string) ($job['assertion']['run'] ?? ''), $jobName);
+        }
     }
 
     public function testHarnessEntryPointsAndGeneratedCachesStayAligned(): void
@@ -77,7 +84,7 @@ class AgentWorkflowContractTest extends TestCase
         $index = $this->readRepoFile('docs/agent-harness-index.md');
         $gitignore = $this->readRepoFile('.gitignore');
 
-        self::assertStringNotContainsString('extended local/CI command matrix', $index);
+        self::assertStringContainsString('docs/ci-write-contracts.md', $index);
         self::assertStringContainsString('/.deptrac.cache', $gitignore);
         self::assertStringContainsString('/.playwright-cli/', $gitignore);
         self::assertStringNotContainsString('/.playwright-mcp/', $gitignore);

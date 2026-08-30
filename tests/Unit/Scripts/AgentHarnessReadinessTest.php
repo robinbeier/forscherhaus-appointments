@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/../../../scripts/ci/check_agent_harness_readiness.php';
@@ -57,71 +58,148 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertSame('fail', $checks[1]['status']);
     }
 
-    public function testEvaluateBlockingJobContractsChecksScopeAndAssertionStep(): void
-    {
-        $command = 'php scripts/ci/assert_deep_runtime_suite.php --manifest=manifest.json --suite=write-contract-api';
-        $contract = [
-            'write-contract-api' => [
-                'needs' => ['changes', 'deep-runtime-suite'],
-                'condition_fragments' => [
-                    'always()',
-                    "needs.changes.outputs.write_contract_api == 'true'",
-                    "github.event_name == 'push'",
-                    'github.event.pull_request.draft == false',
-                ],
-                'run' => $command,
-            ],
-        ];
-        $workflow = [
-            'jobs' => [
-                'write-contract-api' => [
-                    'needs' => ['changes', 'deep-runtime-suite'],
-                    'if' =>
-                        "always() && needs.changes.outputs.write_contract_api == 'true' && (github.event_name == 'push' || github.event.pull_request.draft == false)",
-                    'steps' => [['run' => $command]],
-                ],
-            ],
-        ];
+    #[DataProvider('blockingJobProvider')]
+    public function testEvaluateBlockingJobContractsAcceptsCanonicalAndEquivalentConditions(
+        string $jobName,
+        string $changeOutput,
+    ): void {
+        [$workflow, $contracts] = $this->blockingJobFixture($jobName, $changeOutput);
 
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
-
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
         self::assertSame('pass', $checks[0]['status']);
 
-        $workflow['jobs']['write-contract-api']['if'] =
-            "always() && needs.changes.outputs.write_contract_api == 'true'";
-        $workflow['jobs']['write-contract-api']['steps'][0]['continue-on-error'] = true;
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+        $workflow['jobs'][$jobName]['if'] = sprintf(
+            "(needs.changes.outputs.%s == 'true') && always() && ((github.event.pull_request.draft == false && github.event_name == 'pull_request') || github.event_name == 'push')",
+            $changeOutput,
+        );
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
 
-        self::assertSame('fail', $checks[0]['status']);
-        self::assertStringContainsString('github.event_name', (string) $checks[0]['message']);
-        self::assertStringContainsString('pull_request.draft', (string) $checks[0]['message']);
-        self::assertStringContainsString('assertion step is non-blocking', (string) $checks[0]['message']);
+        self::assertSame('pass', $checks[0]['status']);
+    }
 
-        $workflow['jobs']['write-contract-api']['if'] =
-            "always() && needs.changes.outputs.write_contract_api == 'true' && (github.event_name == 'push' || github.event.pull_request.draft == false)";
-        $workflow['jobs']['write-contract-api']['needs'] = ['changes'];
-        $workflow['jobs']['write-contract-api']['steps'][0] = [
-            'run' => $command,
-            'if' => 'success()',
+    #[DataProvider('blockingJobProvider')]
+    public function testEvaluateBlockingJobContractsRejectsDisabledOrMisgroupedConditions(
+        string $jobName,
+        string $changeOutput,
+    ): void {
+        [$canonicalWorkflow, $contracts] = $this->blockingJobFixture($jobName, $changeOutput);
+        $conditions = [
+            'forced false' => $canonicalWorkflow['jobs'][$jobName]['if'] . ' && false',
+            'missing pull-request branch' => sprintf(
+                "always() && needs.changes.outputs.%s == 'true' && github.event_name == 'push'",
+                $changeOutput,
+            ),
+            'misgrouped event branches' => sprintf(
+                "always() && needs.changes.outputs.%s == 'true' && github.event_name == 'push' && github.event_name == 'pull_request' && github.event.pull_request.draft == false",
+                $changeOutput,
+            ),
+            'wrong change output' =>
+                "always() && needs.changes.outputs.other == 'true' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false))",
         ];
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
 
-        self::assertSame('fail', $checks[0]['status']);
-        self::assertStringContainsString('missing need deep-runtime-suite', (string) $checks[0]['message']);
-        self::assertStringContainsString('assertion step is conditional', (string) $checks[0]['message']);
+        foreach ($conditions as $case => $condition) {
+            $workflow = $canonicalWorkflow;
+            $workflow['jobs'][$jobName]['if'] = $condition;
+            $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
 
-        $workflow['jobs']['write-contract-api']['steps'] = 'invalid';
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+            self::assertSame('fail', $checks[0]['status'], $case);
+            self::assertStringContainsString('condition', (string) $checks[0]['message'], $case);
+        }
+    }
 
-        self::assertSame('fail', $checks[0]['status']);
-        self::assertStringContainsString('steps are invalid', (string) $checks[0]['message']);
+    #[DataProvider('blockingJobProvider')]
+    public function testEvaluateBlockingJobContractsRejectsEvidenceAndBlockingBypasses(
+        string $jobName,
+        string $changeOutput,
+    ): void {
+        [$canonicalWorkflow, $contracts, $assertionRun] = $this->blockingJobFixture($jobName, $changeOutput);
+        $mutations = [
+            'missing dependency' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['needs'] = ['changes'];
+            },
+            'unexpected dependency' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['needs'][] = 'untrusted-job';
+            },
+            'duplicated dependency' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['needs'][] = 'changes';
+            },
+            'non-blocking job' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['continue-on-error'] = true;
+            },
+            'manifest rewrite before assertion' => static function (array &$workflow) use ($jobName): void {
+                array_splice($workflow['jobs'][$jobName]['steps'], 2, 0, [
+                    [
+                        'name' => 'Rewrite evidence',
+                        'run' => 'printf invalid > storage/logs/ci/deep-runtime-suite/manifest.json',
+                    ],
+                ]);
+            },
+            'untrusted action before assertion' => static function (array &$workflow) use ($jobName): void {
+                array_splice($workflow['jobs'][$jobName]['steps'], 2, 0, [
+                    [
+                        'name' => 'Rewrite evidence through an action',
+                        'uses' => 'example/untrusted-action@v1',
+                    ],
+                ]);
+            },
+            'wrong checkout action' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][0]['uses'] = 'example/untrusted-checkout@v1';
+            },
+            'wrong artifact path' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][1]['with']['path'] = '/tmp/untrusted';
+            },
+            'wrong artifact name' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][1]['with']['name'] = 'other-artifact';
+            },
+            'conditional assertion' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][2]['if'] = 'success()';
+            },
+            'non-blocking assertion' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][2]['continue-on-error'] = true;
+            },
+            'altered assertion' => static function (array &$workflow) use ($jobName, $assertionRun): void {
+                $workflow['jobs'][$jobName]['steps'][2]['run'] = $assertionRun . ' || true';
+            },
+            'duplicated assertion' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][] = $workflow['jobs'][$jobName]['steps'][2];
+            },
+            'invalid steps' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'] = 'invalid';
+            },
+        ];
 
-        $workflow['jobs']['write-contract-api']['needs'][] = 'deep-runtime-suite';
-        $workflow['jobs']['write-contract-api']['steps'] = [['run' => $command . ' || true']];
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+        foreach ($mutations as $case => $mutate) {
+            $workflow = $canonicalWorkflow;
+            $mutate($workflow);
+            $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
 
-        self::assertSame('fail', $checks[0]['status']);
-        self::assertStringContainsString('expected exactly one assertion step', (string) $checks[0]['message']);
+            self::assertSame('fail', $checks[0]['status'], $case);
+        }
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function blockingJobProvider(): array
+    {
+        return [
+            'booking write contract' => ['write-contract-booking', 'write_contract_booking'],
+            'API write contract' => ['write-contract-api', 'write_contract_api'],
+        ];
+    }
+
+    public function testWorkflowContractLoaderRejectsUnsupportedSchema(): void
+    {
+        $path = $this->tmpDir . '/agent-workflow.json';
+        file_put_contents(
+            $path,
+            json_encode(['schema_version' => 1, 'ci' => ['workflow' => 'ci.yml', 'blocking_jobs' => []]]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('schema version 2');
+
+        agentHarnessReadinessLoadWorkflowContract($path);
     }
 
     public function testEvaluateHygieneWorkflowRequiresDispatchScheduleAndSteps(): void
@@ -177,6 +255,84 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertSame(AGENT_HARNESS_READINESS_EXIT_RUNTIME_ERROR, $exitCode);
         self::assertSame('error', $report['status']);
         self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
+    }
+
+    /**
+     * @return array{array<string, mixed>, array<string, mixed>, string}
+     */
+    private function blockingJobFixture(string $jobName, string $changeOutput): array
+    {
+        $artifactPath = 'storage/logs/ci/deep-runtime-suite';
+        $assertionRun = sprintf(
+            'php scripts/ci/assert_deep_runtime_suite.php --manifest=%s/manifest.json --suite=%s',
+            $artifactPath,
+            $jobName,
+        );
+        $contracts = [
+            $jobName => [
+                'needs' => ['changes', 'deep-runtime-suite'],
+                'condition' => [
+                    'all' => [
+                        ['call' => 'always'],
+                        ['equals' => ['needs.changes.outputs.' . $changeOutput, 'true']],
+                        [
+                            'any' => [
+                                ['equals' => ['github.event_name', 'push']],
+                                [
+                                    'all' => [
+                                        ['equals' => ['github.event_name', 'pull_request']],
+                                        ['equals' => ['github.event.pull_request.draft', false]],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'evidence' => [
+                    'checkout_action' => 'actions/checkout@v6',
+                    'download_action' => 'actions/download-artifact@v8',
+                    'artifact' => 'deep-runtime-suite-artifacts',
+                    'path' => $artifactPath,
+                ],
+                'assertion' => ['run' => $assertionRun],
+            ],
+        ];
+        $workflow = [
+            'jobs' => [
+                $jobName => [
+                    'needs' => ['changes', 'deep-runtime-suite'],
+                    'if' => sprintf(
+                        "always() && needs.changes.outputs.%s == 'true' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false))",
+                        $changeOutput,
+                    ),
+                    'steps' => [
+                        [
+                            'name' => 'Git clone',
+                            'uses' => 'actions/checkout@v6',
+                        ],
+                        [
+                            'name' => 'Download deep runtime suite artifacts',
+                            'uses' => 'actions/download-artifact@v8',
+                            'with' => [
+                                'name' => 'deep-runtime-suite-artifacts',
+                                'path' => $artifactPath,
+                            ],
+                        ],
+                        [
+                            'name' => 'Assert suite result',
+                            'run' => $assertionRun,
+                        ],
+                        [
+                            'name' => 'Diagnostics',
+                            'if' => 'failure()',
+                            'run' => 'cat report.json || true',
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        return [$workflow, $contracts, $assertionRun];
     }
 
     /**
