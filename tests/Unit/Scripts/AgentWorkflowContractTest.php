@@ -106,7 +106,7 @@ class AgentWorkflowContractTest extends TestCase
                         'false' => false,
                     ],
                 ],
-                'zero_argument_calls' => ['always'],
+                'zero_argument_calls' => ['always', 'failure'],
                 'unsupported_syntax_fails_closed' => true,
             ],
             $contract['ci']['condition_grammar'] ?? null,
@@ -209,6 +209,7 @@ class AgentWorkflowContractTest extends TestCase
             agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
                 $ciWorkflow,
                 array_keys($ci['blocking_jobs']),
+                $ci['condition_grammar'],
                 $ci['blocking_execution_sha256'],
             ),
             agentHarnessReadinessEvaluateBlockingJobContracts(

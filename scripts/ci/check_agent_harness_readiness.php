@@ -234,6 +234,7 @@ function evaluateAgentHarnessReadiness(
     $advisoryJobContracts = $workflowContract['ci']['advisory_jobs'];
     $blockingFailureControls = $workflowContract['ci']['blocking_failure_controls'];
     $blockingExecutionSha256 = $workflowContract['ci']['blocking_execution_sha256'];
+    $conditionGrammar = $workflowContract['ci']['condition_grammar'];
     $classifiedJobNames = array_merge(array_keys($blockingJobContracts), array_keys($advisoryJobContracts));
     $blockingGateChecks = array_merge(
         agentHarnessReadinessEvaluateWorkflowFailureMasks($ciWorkflow, $blockingFailureControls),
@@ -246,6 +247,7 @@ function evaluateAgentHarnessReadiness(
         agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
             $ciWorkflow,
             array_keys($blockingJobContracts),
+            $conditionGrammar,
             $blockingExecutionSha256,
         ),
     );
@@ -254,7 +256,7 @@ function evaluateAgentHarnessReadiness(
         agentHarnessReadinessEvaluateBlockingJobContracts(
             $ciWorkflow,
             $blockingJobContracts,
-            $workflowContract['ci']['condition_grammar'],
+            $conditionGrammar,
             $blockingFailureControls,
         ),
     );
@@ -595,13 +597,18 @@ function agentHarnessReadinessEvaluateJobInventory(array $ciWorkflow, array $cla
 function agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
     array $ciWorkflow,
     array $blockingJobs,
+    array $conditionGrammar,
     string $expectedSha256,
 ): array {
     if (preg_match('/^[a-f0-9]{64}$/D', $expectedSha256) !== 1) {
         throw new RuntimeException('Workflow contract blocking execution SHA-256 is invalid.');
     }
 
-    $actualSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($ciWorkflow, $blockingJobs);
+    $actualSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256(
+        $ciWorkflow,
+        $blockingJobs,
+        $conditionGrammar,
+    );
 
     return [
         [
@@ -622,9 +629,15 @@ function agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
 /**
  * @param array<string, mixed> $ciWorkflow
  * @param array<int, string> $blockingJobs
+ * @param array<string, mixed> $conditionGrammar
  */
-function agentHarnessReadinessCalculateBlockingExecutionSha256(array $ciWorkflow, array $blockingJobs): string
-{
+function agentHarnessReadinessCalculateBlockingExecutionSha256(
+    array $ciWorkflow,
+    array $blockingJobs,
+    array $conditionGrammar,
+): string {
+    agentHarnessReadinessValidateConditionGrammar($conditionGrammar);
+
     $jobs = $ciWorkflow['jobs'] ?? null;
     if (!is_array($jobs)) {
         throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
@@ -635,7 +648,7 @@ function agentHarnessReadinessCalculateBlockingExecutionSha256(array $ciWorkflow
     foreach ($blockingJobs as $jobName) {
         $job = $jobs[$jobName] ?? null;
         $blockingDefinitions[$jobName] = is_array($job)
-            ? agentHarnessReadinessNormalizeBlockingJobExecution($job)
+            ? agentHarnessReadinessNormalizeBlockingJobExecution($job, $conditionGrammar)
             : $job;
     }
 
@@ -700,11 +713,19 @@ function agentHarnessReadinessNormalizeWorkflowTriggers(mixed $triggers): mixed
  * step order and all other lists remain untouched.
  *
  * @param array<string, mixed> $job
+ * @param array<string, mixed> $conditionGrammar
  * @return array<string, mixed>
  */
-function agentHarnessReadinessNormalizeBlockingJobExecution(array $job): array
+function agentHarnessReadinessNormalizeBlockingJobExecution(array $job, array $conditionGrammar): array
 {
     unset($job['name']);
+
+    if (array_key_exists('if', $job)) {
+        if (!is_string($job['if'])) {
+            throw new RuntimeException('Blocking job conditions must be strings.');
+        }
+        $job['if'] = agentHarnessReadinessParseCondition($job['if'], $conditionGrammar);
+    }
 
     if (array_key_exists('needs', $job)) {
         $normalizedNeeds = agentHarnessReadinessNormalizeNeeds($job['needs']);
@@ -716,13 +737,32 @@ function agentHarnessReadinessNormalizeBlockingJobExecution(array $job): array
     if (isset($job['steps']) && is_array($job['steps'])) {
         $job['steps'] = array_map(
             static fn(mixed $step): mixed => is_array($step)
-                ? agentHarnessReadinessNormalizeWorkflowStep($step)
+                ? agentHarnessReadinessNormalizeBlockingExecutionStep($step, $conditionGrammar)
                 : $step,
             $job['steps'],
         );
     }
 
     return agentHarnessReadinessCanonicalizeMap($job);
+}
+
+/**
+ * @param array<string, mixed> $step
+ * @param array<string, mixed> $conditionGrammar
+ * @return array<string, mixed>
+ */
+function agentHarnessReadinessNormalizeBlockingExecutionStep(array $step, array $conditionGrammar): array
+{
+    unset($step['name']);
+
+    if (array_key_exists('if', $step)) {
+        if (!is_string($step['if'])) {
+            throw new RuntimeException('Blocking step conditions must be strings.');
+        }
+        $step['if'] = agentHarnessReadinessParseCondition($step['if'], $conditionGrammar);
+    }
+
+    return agentHarnessReadinessCanonicalizeMap($step);
 }
 
 /**

@@ -133,7 +133,9 @@ einen kanonischen SHA-256-Fingerprint gebunden. Job- und Step-Anzeigenamen sowie
 die Reihenfolge in `needs`, der Event-Kurzform, Trigger-`types` und
 `workflows` werden dabei als nicht ausfuehrungsrelevant normalisiert.
 Glob-Filter behalten wegen reihenfolgeabhaengiger Negationen ihre Reihenfolge;
-ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
+Job- und Step-`if`-Ausdruecke werden ueber die versionierte Grammatik in eine
+kanonische semantische Form gebracht. Nicht unterstuetzte Ausdruecke schlagen
+fail-closed fehl; ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
 Jede explizite `continue-on-error`-Deklaration sowie
 jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
 unabhaengig davon fehlschlagen. Advisory-Signal-Jobs sind im Inventar separat

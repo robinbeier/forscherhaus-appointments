@@ -184,17 +184,36 @@ class AgentHarnessReadinessTest extends TestCase
             ],
         ];
         $blockingJobs = ['build-test'];
-        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($workflow, $blockingJobs);
-        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+        );
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+            $expectedSha256,
+        );
         self::assertSame('pass', $checks[0]['status']);
 
         $workflow['jobs']['build-test']['steps'][0]['run'] = 'composer test || true';
-        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+            $expectedSha256,
+        );
         self::assertSame('fail', $checks[0]['status']);
 
         $workflow['jobs']['build-test']['steps'][0]['run'] = 'composer test';
         $workflow['defaults']['run']['working-directory'] = 'application';
-        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+            $expectedSha256,
+        );
         self::assertSame('fail', $checks[0]['status']);
     }
 
@@ -211,7 +230,11 @@ class AgentHarnessReadinessTest extends TestCase
             ],
         ];
         $blockingJobs = ['build-test'];
-        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($workflow, $blockingJobs);
+        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+        );
 
         $mutations = [
             'trigger' => static function (array &$mutated): void {
@@ -237,6 +260,7 @@ class AgentHarnessReadinessTest extends TestCase
             $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
                 $mutated,
                 $blockingJobs,
+                $this->conditionGrammar(),
                 $expectedSha256,
             );
 
@@ -252,28 +276,61 @@ class AgentHarnessReadinessTest extends TestCase
                     'branches' => ['main', '!legacy'],
                     'types' => ['synchronize', 'opened'],
                 ],
+                'workflow_run' => [
+                    'workflows' => ['Hygiene', 'CI'],
+                    'types' => ['completed'],
+                ],
             ],
             'jobs' => [
                 'build-test' => [
                     'name' => 'Build and test',
                     'needs' => ['seed', 'changes'],
-                    'steps' => [['name' => 'Run tests', 'run' => 'composer test']],
+                    'if' => "needs.changes.outputs.run == 'true' && (github.event_name == 'push' || always())",
+                    'steps' => [['name' => 'Run tests', 'if' => 'failure()', 'run' => 'composer test']],
                 ],
             ],
         ];
         $blockingJobs = ['build-test'];
-        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($workflow, $blockingJobs);
+        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+        );
 
         $workflow['jobs']['build-test']['name'] = 'Display-only rename';
         $workflow['jobs']['build-test']['needs'] = ['changes', 'seed'];
         $workflow['jobs']['build-test']['steps'][0]['name'] = 'Another display-only rename';
+        $workflow['jobs']['build-test']['if'] =
+            "( always ( ) || github.event_name == 'push' ) && needs.changes.outputs.run == 'true'";
+        $workflow['jobs']['build-test']['steps'][0]['if'] = ' failure ( ) ';
         $workflow['on']['pull_request']['types'] = ['opened', 'synchronize'];
-        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        $workflow['on']['workflow_run']['workflows'] = ['CI', 'Hygiene'];
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+            $expectedSha256,
+        );
 
         self::assertSame('pass', $checks[0]['status']);
 
         $workflow['on']['pull_request']['branches'] = ['!legacy', 'main'];
-        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+            $expectedSha256,
+        );
+        self::assertSame('fail', $checks[0]['status']);
+
+        $workflow['on']['pull_request']['branches'] = ['main', '!legacy'];
+        $workflow['jobs']['build-test']['if'] = "needs.changes.outputs.run == 'false'";
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+            $workflow,
+            $blockingJobs,
+            $this->conditionGrammar(),
+            $expectedSha256,
+        );
         self::assertSame('fail', $checks[0]['status']);
     }
 
@@ -723,7 +780,7 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
     }
 
-    public function testEvaluateAgentHarnessReadinessWiresBlockingFailureControls(): void
+    public function testEvaluateAgentHarnessReadinessWiresFingerprintAndWorkflowFailureControls(): void
     {
         $contractDirectory = $this->tmpDir . '/.codex/contracts';
         $workflowDirectory = $this->tmpDir . '/.github/workflows';
@@ -751,6 +808,7 @@ class AgentHarnessReadinessTest extends TestCase
         $contract['ci']['blocking_execution_sha256'] = agentHarnessReadinessCalculateBlockingExecutionSha256(
             agentHarnessReadinessLoadWorkflowYaml($ciWorkflowPath),
             array_keys($contract['ci']['blocking_jobs']),
+            $contract['ci']['condition_grammar'],
         );
         self::assertNotFalse(file_put_contents($contractPath, json_encode($contract, JSON_THROW_ON_ERROR)));
 
@@ -824,6 +882,35 @@ class AgentHarnessReadinessTest extends TestCase
             array_filter(
                 $blockingGates[0]['checks'],
                 static fn(array $check): bool => ($check['id'] ?? null) === 'blocking_execution_fingerprint' &&
+                    ($check['status'] ?? null) === 'fail',
+            ) !== [],
+        );
+
+        self::assertNotFalse(file_put_contents($ciWorkflowPath, $ciWorkflow));
+        $failureMaskedWorkflow = agentHarnessReadinessLoadWorkflowYaml($ciWorkflowPath);
+        $failureMaskedWorkflow['defaults']['run']['shell'] = 'bash {0}';
+        self::assertNotFalse(
+            file_put_contents($ciWorkflowPath, \Symfony\Component\Yaml\Yaml::dump($failureMaskedWorkflow, 20, 2)),
+        );
+
+        $failureMaskReport = evaluateAgentHarnessReadiness(
+            $this->tmpDir,
+            $policy,
+            new \DateTimeImmutable('2026-08-30', new \DateTimeZone('UTC')),
+            0,
+        );
+        $failureMaskBlockingGates = array_values(
+            array_filter(
+                $failureMaskReport['dimensions'],
+                static fn(array $dimension): bool => ($dimension['id'] ?? null) === 'blocking_gates',
+            ),
+        );
+        self::assertCount(1, $failureMaskBlockingGates);
+        self::assertSame('fail', $failureMaskBlockingGates[0]['status']);
+        self::assertTrue(
+            array_filter(
+                $failureMaskBlockingGates[0]['checks'],
+                static fn(array $check): bool => ($check['id'] ?? null) === 'workflow_failure_controls' &&
                     ($check['status'] ?? null) === 'fail',
             ) !== [],
         );
@@ -932,7 +1019,7 @@ class AgentHarnessReadinessTest extends TestCase
                 'string_delimiter' => "'",
                 'booleans' => ['true' => true, 'false' => false],
             ],
-            'zero_argument_calls' => ['always'],
+            'zero_argument_calls' => ['always', 'failure'],
             'unsupported_syntax_fails_closed' => true,
         ];
     }

@@ -91,7 +91,7 @@
             "forbidden_job_run_default_keys": ["shell"],
             "forbidden_step_keys": ["continue-on-error", "shell"]
         },
-        "blocking_execution_sha256": "c0905ddaad439fb8eb99d01ba794b69aab380508d0f670e65f0490c70535f964",
+        "blocking_execution_sha256": "73be2299de0239e7c74d52e57aa6c3cc8097288ff0a0e3d683f0977a24c40b24",
         "required_exact_execution_jobs": ["write-contract-booking", "write-contract-api"],
         "condition_grammar": {
             "version": 1,
@@ -112,7 +112,7 @@
                     "false": false
                 }
             },
-            "zero_argument_calls": ["always"],
+            "zero_argument_calls": ["always", "failure"],
             "unsupported_syntax_fails_closed": true
         },
         "job_inventory_is_exhaustive": true,
