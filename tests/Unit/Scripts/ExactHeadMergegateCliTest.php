@@ -65,7 +65,7 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertNotContains('Command/LintCommand.php', $policy['workflow_yaml_runtime_files']);
     }
 
-    public function testIsolatedWorkflowParserPinsYamlRuntimeAndIgnoresAmbientLoadedClass(): void
+    public function testIsolatedWorkflowParserPinsYamlRuntimeIgnoresAmbientClassAndUsesPortableDigits(): void
     {
         $root = dirname(__DIR__, 3);
         $policy = loadExactHeadMergegatePolicy($root . '/.codex/contracts/agent-workflow.json');

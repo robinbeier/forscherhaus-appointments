@@ -414,6 +414,26 @@ function parseExactHeadMergegateWorkflowYamlIsolated(
     ) {
         exit(2);
     }
+    // Keep the no-INI parser independent of whether the runner exposes ctype.
+    // PHP 8 removes disabled functions before compiling this script, so this
+    // deliberately small ASCII-compatible replacement is deterministic.
+    function ctype_digit(mixed $value): bool
+    {
+        if (!is_string($value) || $value === '') {
+            return false;
+        }
+        for ($index = 0, $length = strlen($value); $index < $length; $index++) {
+            if ($value[$index] < '0' || $value[$index] > '9') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+    $ctypeDigit = new ReflectionFunction('ctype_digit');
+    if ($ctypeDigit->isInternal() || !ctype_digit('0123456789') || ctype_digit('12a')) {
+        exit(5);
+    }
     $allowedPaths = array_fill_keys($runtimeFiles, true);
     $packagePrefix = rtrim(str_replace('\\', '/', $packagePath), '/') . '/';
     spl_autoload_register(
@@ -439,13 +459,18 @@ function parseExactHeadMergegateWorkflowYamlIsolated(
     if (!is_array($parsed)) {
         exit(3);
     }
-    echo json_encode($parsed, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    echo json_encode(
+        ['workflow' => $parsed, 'ctype_digit_fallback' => true],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+    );
     PHP;
 
     $output = runExactHeadMergegateProcess(
         [
             PHP_BINARY,
             '-n',
+            '-d',
+            'disable_functions=ctype_digit',
             '-d',
             'auto_prepend_file=',
             '-d',
@@ -463,11 +488,15 @@ function parseExactHeadMergegateWorkflowYamlIsolated(
     } catch (JsonException) {
         throw new RuntimeException('Exact-head mergegate isolated workflow parser returned invalid JSON.');
     }
-    if (!is_array($parsed)) {
+    if (
+        !is_array($parsed) ||
+        ($parsed['ctype_digit_fallback'] ?? null) !== true ||
+        !is_array($parsed['workflow'] ?? null)
+    ) {
         throw new RuntimeException('Exact-head mergegate isolated workflow parser returned an invalid shape.');
     }
 
-    return $parsed;
+    return $parsed['workflow'];
 }
 
 /**
