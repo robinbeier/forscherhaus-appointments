@@ -114,25 +114,50 @@ class AgentHarnessReadinessTest extends TestCase
         ]);
     }
 
-    public function testEvaluateBlockingJobsFailsForContinueOnError(): void
+    public function testEvaluateBlockingJobsRejectsAllForbiddenFailureControls(): void
     {
-        $workflow = [
-            'jobs' => [
-                'coverage-delta' => [
-                    'continue-on-error' => true,
-                ],
-                'phpstan-application' => [],
-            ],
+        $mutations = [
+            'literal job continue-on-error' => static function (array &$job): void {
+                $job['continue-on-error'] = true;
+            },
+            'expression job continue-on-error' => static function (array &$job): void {
+                $job['continue-on-error'] = '${{ true }}';
+            },
+            'job default shell' => static function (array &$job): void {
+                $job['defaults']['run']['shell'] = 'bash {0} || true';
+            },
+            'literal step continue-on-error' => static function (array &$job): void {
+                $job['steps'][0]['continue-on-error'] = true;
+            },
+            'expression step continue-on-error' => static function (array &$job): void {
+                $job['steps'][0]['continue-on-error'] = '${{ true }}';
+            },
+            'step shell' => static function (array &$job): void {
+                $job['steps'][0]['shell'] = 'bash {0} || true';
+            },
         ];
 
-        $checks = agentHarnessReadinessEvaluateBlockingJobs($workflow, ['phpstan-application', 'coverage-delta']);
+        foreach ($mutations as $case => $mutate) {
+            $workflow = [
+                'jobs' => [
+                    'phpstan-application' => ['steps' => [['run' => 'exit 0']]],
+                    'coverage-delta' => ['steps' => [['run' => 'exit 0']]],
+                ],
+            ];
+            $mutate($workflow['jobs']['coverage-delta']);
+            $checks = agentHarnessReadinessEvaluateBlockingJobs(
+                $workflow,
+                ['phpstan-application', 'coverage-delta'],
+                $this->blockingFailureControls(),
+            );
 
-        self::assertSame('pass', $checks[0]['status']);
-        self::assertSame('fail', $checks[1]['status']);
-        self::assertSame('pass', $checks[2]['status']);
+            self::assertSame('pass', $checks[0]['status'], $case);
+            self::assertSame('fail', $checks[1]['status'], $case);
+            self::assertStringContainsString('forbidden', (string) $checks[1]['message'], $case);
+        }
     }
 
-    public function testEvaluateBlockingJobsRejectsUnclassifiedWorkflowJob(): void
+    public function testEvaluateJobInventoryRejectsUnclassifiedWorkflowJob(): void
     {
         $workflow = [
             'jobs' => [
@@ -141,11 +166,10 @@ class AgentHarnessReadinessTest extends TestCase
             ],
         ];
 
-        $checks = agentHarnessReadinessEvaluateBlockingJobs($workflow, ['coverage-delta']);
+        $checks = agentHarnessReadinessEvaluateJobInventory($workflow, ['coverage-delta']);
 
-        self::assertSame('pass', $checks[0]['status']);
-        self::assertSame('fail', $checks[1]['status']);
-        self::assertSame('job_inventory', $checks[1]['id']);
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertSame('job_inventory', $checks[0]['id']);
     }
 
     #[DataProvider('blockingJobProvider')]
@@ -155,14 +179,24 @@ class AgentHarnessReadinessTest extends TestCase
     ): void {
         [$workflow, $contracts] = $this->blockingJobFixture($jobName, $changeOutput);
 
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts, $this->conditionGrammar());
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts(
+            $workflow,
+            $contracts,
+            $this->conditionGrammar(),
+            $this->blockingFailureControls(),
+        );
         self::assertSame('pass', $checks[0]['status']);
 
         $workflow['jobs'][$jobName]['if'] = sprintf(
             "(needs.changes.outputs.%s == 'true') && always() && ((github.event.pull_request.draft == false && github.event_name == 'pull_request') || github.event_name == 'push')",
             $changeOutput,
         );
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts, $this->conditionGrammar());
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts(
+            $workflow,
+            $contracts,
+            $this->conditionGrammar(),
+            $this->blockingFailureControls(),
+        );
 
         self::assertSame('pass', $checks[0]['status']);
     }
@@ -194,6 +228,7 @@ class AgentHarnessReadinessTest extends TestCase
                 $workflow,
                 $contracts,
                 $this->conditionGrammar(),
+                $this->blockingFailureControls(),
             );
 
             self::assertSame('fail', $checks[0]['status'], $case);
@@ -218,7 +253,10 @@ class AgentHarnessReadinessTest extends TestCase
                 $workflow['jobs'][$jobName]['needs'][] = 'changes';
             },
             'non-blocking job' => static function (array &$workflow) use ($jobName): void {
-                $workflow['jobs'][$jobName]['continue-on-error'] = true;
+                $workflow['jobs'][$jobName]['continue-on-error'] = '${{ true }}';
+            },
+            'job default shell' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['defaults']['run']['shell'] = 'bash {0} || true';
             },
             'manifest rewrite before assertion' => static function (array &$workflow) use ($jobName): void {
                 array_splice($workflow['jobs'][$jobName]['steps'], 2, 0, [
@@ -249,7 +287,10 @@ class AgentHarnessReadinessTest extends TestCase
                 $workflow['jobs'][$jobName]['steps'][2]['if'] = 'success()';
             },
             'non-blocking assertion' => static function (array &$workflow) use ($jobName): void {
-                $workflow['jobs'][$jobName]['steps'][2]['continue-on-error'] = true;
+                $workflow['jobs'][$jobName]['steps'][2]['continue-on-error'] = '${{ true }}';
+            },
+            'assertion shell override' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][2]['shell'] = 'bash {0} || true';
             },
             'altered assertion' => static function (array &$workflow) use ($jobName, $assertionRun): void {
                 $workflow['jobs'][$jobName]['steps'][2]['run'] = $assertionRun . ' || true';
@@ -285,6 +326,7 @@ class AgentHarnessReadinessTest extends TestCase
                 $workflow,
                 $contracts,
                 $this->conditionGrammar(),
+                $this->blockingFailureControls(),
             );
 
             self::assertSame('fail', $checks[0]['status'], $case);
@@ -351,8 +393,10 @@ class AgentHarnessReadinessTest extends TestCase
                 'surfaces' => ['WORKFLOW.md' => []],
                 'ci' => [
                     'workflow' => 'ci.yml',
+                    'blocking_failure_controls' => $this->blockingFailureControls(),
                     'condition_grammar' => $grammar,
                     'job_inventory_is_exhaustive' => true,
+                    'advisory_jobs' => ['signal' => ['kind' => 'advisory_signal']],
                     'blocking_jobs' => ['write-contract-api' => ['kind' => 'exact_execution']],
                 ],
             ]),
@@ -360,6 +404,58 @@ class AgentHarnessReadinessTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('condition grammar is invalid');
+
+        agentHarnessReadinessLoadWorkflowContract($path);
+    }
+
+    public function testWorkflowContractLoaderRejectsWeakenedFailureControls(): void
+    {
+        $path = $this->tmpDir . '/agent-workflow.json';
+        $failureControls = $this->blockingFailureControls();
+        $failureControls['forbidden_step_keys'] = ['continue-on-error'];
+        file_put_contents(
+            $path,
+            json_encode([
+                'schema_version' => 2,
+                'surfaces' => ['WORKFLOW.md' => []],
+                'ci' => [
+                    'workflow' => 'ci.yml',
+                    'blocking_failure_controls' => $failureControls,
+                    'condition_grammar' => $this->conditionGrammar(),
+                    'job_inventory_is_exhaustive' => true,
+                    'advisory_jobs' => ['signal' => ['kind' => 'advisory_signal']],
+                    'blocking_jobs' => ['write-contract-api' => ['kind' => 'exact_execution']],
+                ],
+            ]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('blocking failure controls are invalid');
+
+        agentHarnessReadinessLoadWorkflowContract($path);
+    }
+
+    public function testWorkflowContractLoaderRejectsJobWithAdvisoryAndBlockingClassification(): void
+    {
+        $path = $this->tmpDir . '/agent-workflow.json';
+        file_put_contents(
+            $path,
+            json_encode([
+                'schema_version' => 2,
+                'surfaces' => ['WORKFLOW.md' => []],
+                'ci' => [
+                    'workflow' => 'ci.yml',
+                    'blocking_failure_controls' => $this->blockingFailureControls(),
+                    'condition_grammar' => $this->conditionGrammar(),
+                    'job_inventory_is_exhaustive' => true,
+                    'advisory_jobs' => ['write-contract-api' => ['kind' => 'advisory_signal']],
+                    'blocking_jobs' => ['write-contract-api' => ['kind' => 'exact_execution']],
+                ],
+            ]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('both advisory and blocking');
 
         agentHarnessReadinessLoadWorkflowContract($path);
     }
@@ -540,6 +636,18 @@ class AgentHarnessReadinessTest extends TestCase
             ],
             'zero_argument_calls' => ['always'],
             'unsupported_syntax_fails_closed' => true,
+        ];
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    private function blockingFailureControls(): array
+    {
+        return [
+            'forbidden_job_keys' => ['continue-on-error'],
+            'forbidden_job_run_default_keys' => ['shell'],
+            'forbidden_step_keys' => ['continue-on-error', 'shell'],
         ];
     }
 

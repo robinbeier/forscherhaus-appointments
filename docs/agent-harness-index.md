@@ -63,6 +63,10 @@ This file stays intentionally short. It is a map, not a second runbook.
     critical cross-document clauses to named Markdown sections; the checker
     fails closed on invalid grammar, missing sections, misplaced clauses, or
     duplicate clauses.
+  - Every contract-classified blocking job and step must fail closed: any
+    explicit `continue-on-error` or job/step `shell` override fails the readiness
+    check. Advisory signal jobs are classified separately and remain outside
+    this blocking contract.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:

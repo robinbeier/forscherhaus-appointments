@@ -231,13 +231,24 @@ function evaluateAgentHarnessReadiness(
         $root . '/' . ltrim((string) $workflowContract['ci']['workflow'], '/'),
     );
     $blockingJobContracts = $workflowContract['ci']['blocking_jobs'];
-    $blockingGateChecks = agentHarnessReadinessEvaluateBlockingJobs($ciWorkflow, array_keys($blockingJobContracts));
+    $advisoryJobContracts = $workflowContract['ci']['advisory_jobs'];
+    $blockingFailureControls = $workflowContract['ci']['blocking_failure_controls'];
+    $classifiedJobNames = array_merge(array_keys($blockingJobContracts), array_keys($advisoryJobContracts));
+    $blockingGateChecks = array_merge(
+        agentHarnessReadinessEvaluateBlockingJobs(
+            $ciWorkflow,
+            array_keys($blockingJobContracts),
+            $blockingFailureControls,
+        ),
+        agentHarnessReadinessEvaluateJobInventory($ciWorkflow, $classifiedJobNames),
+    );
     $blockingGateChecks = array_merge(
         $blockingGateChecks,
         agentHarnessReadinessEvaluateBlockingJobContracts(
             $ciWorkflow,
             $blockingJobContracts,
             $workflowContract['ci']['condition_grammar'],
+            $blockingFailureControls,
         ),
     );
     $blockingGatesDimension = agentHarnessReadinessScoreDimension($policy, 'blocking_gates', $blockingGateChecks);
@@ -470,10 +481,14 @@ function agentHarnessReadinessExtractMarkdownSection(string $content, string $he
 /**
  * @param array<string, mixed> $ciWorkflow
  * @param array<int, string> $blockingJobs
+ * @param array<string, mixed> $failureControls
  * @return array<int, array<string, mixed>>
  */
-function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blockingJobs): array
-{
+function agentHarnessReadinessEvaluateBlockingJobs(
+    array $ciWorkflow,
+    array $blockingJobs,
+    array $failureControls,
+): array {
     $jobs = $ciWorkflow['jobs'] ?? [];
     if (!is_array($jobs)) {
         throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
@@ -483,7 +498,10 @@ function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blo
     foreach ($blockingJobs as $jobName) {
         $jobConfig = $jobs[$jobName] ?? null;
         $exists = is_array($jobConfig);
-        $isBlocking = $exists && ($jobConfig['continue-on-error'] ?? false) !== true;
+        $failureMasks = $exists
+            ? agentHarnessReadinessEvaluateBlockingJobFailureMasks($jobConfig, $jobName, $failureControls)
+            : [];
+        $isBlocking = $exists && $failureMasks === [];
 
         $checks[] = [
             'id' => 'job_' . $jobName,
@@ -492,38 +510,55 @@ function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blo
             'message' => !$exists
                 ? 'Required blocking CI job is missing.'
                 : ($isBlocking
-                    ? 'Job exists without top-level continue-on-error.'
-                    : 'Job is configured as non-blocking.'),
+                    ? 'Job exists without forbidden failure controls.'
+                    : implode('; ', $failureMasks)),
         ];
     }
-
-    $expectedJobNames = $blockingJobs;
-    $actualJobNames = array_keys($jobs);
-    sort($expectedJobNames, SORT_STRING);
-    sort($actualJobNames, SORT_STRING);
-    $checks[] = [
-        'id' => 'job_inventory',
-        'label' => 'CI job inventory matches the exhaustive workflow contract',
-        'status' => $actualJobNames === $expectedJobNames ? 'pass' : 'fail',
-        'message' =>
-            $actualJobNames === $expectedJobNames
-                ? 'Every CI job is classified by the workflow contract.'
-                : 'CI jobs are missing from or unexpectedly retained in the workflow contract.',
-    ];
 
     return $checks;
 }
 
 /**
  * @param array<string, mixed> $ciWorkflow
+ * @param array<int, string> $classifiedJobs
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateJobInventory(array $ciWorkflow, array $classifiedJobs): array
+{
+    $jobs = $ciWorkflow['jobs'] ?? [];
+    if (!is_array($jobs)) {
+        throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
+    }
+
+    $expectedJobNames = $classifiedJobs;
+    $actualJobNames = array_keys($jobs);
+    sort($expectedJobNames, SORT_STRING);
+    sort($actualJobNames, SORT_STRING);
+    return [
+        [
+            'id' => 'job_inventory',
+            'label' => 'CI job inventory matches the exhaustive workflow contract',
+            'status' => $actualJobNames === $expectedJobNames ? 'pass' : 'fail',
+            'message' =>
+                $actualJobNames === $expectedJobNames
+                    ? 'Every CI job is classified by the workflow contract.'
+                    : 'CI jobs are missing from or unexpectedly retained in the workflow contract.',
+        ],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
  * @param array<string, mixed> $contracts
  * @param array<string, mixed> $conditionGrammar
+ * @param array<string, mixed> $failureControls
  * @return array<int, array<string, mixed>>
  */
 function agentHarnessReadinessEvaluateBlockingJobContracts(
     array $ciWorkflow,
     array $contracts,
     array $conditionGrammar,
+    array $failureControls,
 ): array {
     $jobs = $ciWorkflow['jobs'] ?? [];
     if (!is_array($jobs)) {
@@ -595,9 +630,10 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
         if (!is_array($job)) {
             $failures[] = 'job is missing';
         } else {
-            if (array_key_exists('continue-on-error', $job)) {
-                $failures[] = 'job declares continue-on-error';
-            }
+            $failures = array_merge(
+                $failures,
+                agentHarnessReadinessEvaluateBlockingJobFailureMasks($job, $jobName, $failureControls),
+            );
 
             $actualNeeds = agentHarnessReadinessNormalizeNeeds($job['needs'] ?? null);
             if ($actualNeeds === null || $actualNeeds !== $expectedNeeds) {
@@ -685,6 +721,67 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
     }
 
     return $checks;
+}
+
+/**
+ * @param array<string, mixed> $job
+ * @param array<string, mixed> $failureControls
+ * @return array<int, string>
+ */
+function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+    array $job,
+    string $jobName,
+    array $failureControls,
+): array {
+    agentHarnessReadinessValidateBlockingFailureControls($failureControls);
+
+    $failures = [];
+    foreach ($failureControls['forbidden_job_keys'] as $key) {
+        if (array_key_exists($key, $job)) {
+            $failures[] = 'job declares forbidden ' . $key;
+        }
+    }
+
+    $defaults = $job['defaults'] ?? null;
+    $runDefaults = is_array($defaults) ? $defaults['run'] ?? null : null;
+    if (is_array($runDefaults)) {
+        foreach ($failureControls['forbidden_job_run_default_keys'] as $key) {
+            if (array_key_exists($key, $runDefaults)) {
+                $failures[] = 'job declares forbidden defaults.run.' . $key;
+            }
+        }
+    }
+
+    $steps = $job['steps'] ?? null;
+    if (is_array($steps)) {
+        foreach ($steps as $stepIndex => $step) {
+            if (!is_array($step)) {
+                continue;
+            }
+            foreach ($failureControls['forbidden_step_keys'] as $key) {
+                if (array_key_exists($key, $step)) {
+                    $failures[] = sprintf('step %s declares forbidden %s', (string) $stepIndex, $key);
+                }
+            }
+        }
+    }
+
+    return array_map(static fn(string $failure): string => $jobName . ': ' . $failure, $failures);
+}
+
+/**
+ * @param array<string, mixed> $failureControls
+ */
+function agentHarnessReadinessValidateBlockingFailureControls(array $failureControls): void
+{
+    $expected = [
+        'forbidden_job_keys' => ['continue-on-error'],
+        'forbidden_job_run_default_keys' => ['shell'],
+        'forbidden_step_keys' => ['continue-on-error', 'shell'],
+    ];
+    if ($failureControls !== $expected) {
+        throw new RuntimeException('Workflow contract blocking failure controls are invalid.');
+    }
 }
 
 /**
@@ -1311,20 +1408,33 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         !is_array($ci) ||
         !is_string($ci['workflow'] ?? null) ||
         trim($ci['workflow']) === '' ||
+        !is_array($ci['blocking_failure_controls'] ?? null) ||
         !is_array($ci['condition_grammar'] ?? null) ||
         ($ci['job_inventory_is_exhaustive'] ?? null) !== true ||
+        !is_array($ci['advisory_jobs'] ?? null) ||
+        $ci['advisory_jobs'] === [] ||
         !is_array($ci['blocking_jobs'] ?? null) ||
         $ci['blocking_jobs'] === [] ||
         !is_array($surfaces) ||
         $surfaces === []
     ) {
         throw new RuntimeException(
-            'Workflow contract must define surfaces, a CI workflow, grammar, and blocking jobs.',
+            'Workflow contract must define surfaces, a CI workflow, failure controls, grammar, advisory jobs, and blocking jobs.',
         );
     }
 
+    agentHarnessReadinessValidateBlockingFailureControls($ci['blocking_failure_controls']);
     agentHarnessReadinessValidateConditionGrammar($ci['condition_grammar']);
     agentHarnessReadinessRequireRepoRelativePath($ci['workflow'], 'ci.workflow');
+
+    foreach ($ci['advisory_jobs'] as $jobName => $job) {
+        if (!is_string($jobName) || !is_array($job) || ($job['kind'] ?? null) !== 'advisory_signal') {
+            throw new RuntimeException('Workflow contract advisory jobs must be a map of advisory-signal objects.');
+        }
+        if (array_key_exists($jobName, $ci['blocking_jobs'])) {
+            throw new RuntimeException('Workflow contract jobs cannot be both advisory and blocking.');
+        }
+    }
 
     $exactExecutionJobs = 0;
     foreach ($ci['blocking_jobs'] as $jobName => $job) {

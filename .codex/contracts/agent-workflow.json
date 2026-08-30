@@ -85,6 +85,11 @@
     },
     "ci": {
         "workflow": ".github/workflows/ci.yml",
+        "blocking_failure_controls": {
+            "forbidden_job_keys": ["continue-on-error"],
+            "forbidden_job_run_default_keys": ["shell"],
+            "forbidden_step_keys": ["continue-on-error", "shell"]
+        },
         "condition_grammar": {
             "version": 1,
             "operators": {
@@ -108,6 +113,14 @@
             "unsupported_syntax_fails_closed": true
         },
         "job_inventory_is_exhaustive": true,
+        "advisory_jobs": {
+            "heavy-job-duration-trends": {
+                "kind": "advisory_signal"
+            },
+            "pdf-renderer-latency": {
+                "kind": "advisory_signal"
+            }
+        },
         "blocking_jobs": {
             "changes": {
                 "kind": "presence_only"
@@ -155,12 +168,6 @@
                 "kind": "presence_only"
             },
             "coverage-delta": {
-                "kind": "presence_only"
-            },
-            "heavy-job-duration-trends": {
-                "kind": "presence_only"
-            },
-            "pdf-renderer-latency": {
                 "kind": "presence_only"
             },
             "write-contract-booking": {

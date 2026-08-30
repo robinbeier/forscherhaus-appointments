@@ -71,6 +71,14 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
         self::assertSame(
             [
+                'forbidden_job_keys' => ['continue-on-error'],
+                'forbidden_job_run_default_keys' => ['shell'],
+                'forbidden_step_keys' => ['continue-on-error', 'shell'],
+            ],
+            $contract['ci']['blocking_failure_controls'] ?? null,
+        );
+        self::assertSame(
+            [
                 'version' => 1,
                 'operators' => [
                     'and' => '&&',
@@ -104,6 +112,13 @@ class AgentWorkflowContractTest extends TestCase
         self::assertIsArray($ci);
         self::assertSame('.github/workflows/ci.yml', $ci['workflow'] ?? null);
         self::assertTrue($ci['job_inventory_is_exhaustive'] ?? null);
+        self::assertSame(
+            [
+                'heavy-job-duration-trends' => ['kind' => 'advisory_signal'],
+                'pdf-renderer-latency' => ['kind' => 'advisory_signal'],
+            ],
+            $ci['advisory_jobs'] ?? null,
+        );
         self::assertIsArray($ci['blocking_jobs'] ?? null);
         $jobNames = array_keys($ci['blocking_jobs']);
         sort($jobNames, SORT_STRING);
@@ -121,10 +136,8 @@ class AgentWorkflowContractTest extends TestCase
                 'deep-check-bootstrap',
                 'deep-check-seed-snapshot',
                 'deep-runtime-suite',
-                'heavy-job-duration-trends',
                 'integration-smoke',
                 'js-lint-changed',
-                'pdf-renderer-latency',
                 'phpstan-application',
                 'typed-request-contracts',
                 'typed-request-dto',
@@ -138,7 +151,7 @@ class AgentWorkflowContractTest extends TestCase
             $ci['blocking_jobs'],
             static fn(array $job): bool => ($job['kind'] ?? null) === 'presence_only',
         );
-        self::assertCount(19, $presenceOnlyJobs);
+        self::assertCount(17, $presenceOnlyJobs);
 
         foreach (['write-contract-booking', 'write-contract-api'] as $jobName) {
             $job = $ci['blocking_jobs'][$jobName];
@@ -170,6 +183,28 @@ class AgentWorkflowContractTest extends TestCase
                 $job['post_assertion_steps'] ?? null,
                 $jobName,
             );
+        }
+
+        $ciWorkflow = agentHarnessReadinessLoadWorkflowYaml(
+            $this->repoRoot . '/' . ltrim((string) $ci['workflow'], '/'),
+        );
+        $classifiedJobs = array_merge(array_keys($ci['blocking_jobs']), array_keys($ci['advisory_jobs']));
+        $checks = array_merge(
+            agentHarnessReadinessEvaluateJobInventory($ciWorkflow, $classifiedJobs),
+            agentHarnessReadinessEvaluateBlockingJobs(
+                $ciWorkflow,
+                array_keys($ci['blocking_jobs']),
+                $ci['blocking_failure_controls'],
+            ),
+            agentHarnessReadinessEvaluateBlockingJobContracts(
+                $ciWorkflow,
+                $ci['blocking_jobs'],
+                $ci['condition_grammar'],
+                $ci['blocking_failure_controls'],
+            ),
+        );
+        foreach ($checks as $check) {
+            self::assertSame('pass', $check['status'], $check['id'] . ': ' . ($check['message'] ?? ''));
         }
 
         $policy = require $this->repoRoot . '/scripts/ci/config/agent_harness_readiness_policy.php';
