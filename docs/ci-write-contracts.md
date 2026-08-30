@@ -123,11 +123,16 @@ ist bewusst eng; nicht unterstützte Syntax wird fail-closed abgelehnt und
 erfordert eine gemeinsame Änderung von Vertrag, Parser und Regressionstests.
 Auch die Schritte nach dem Assertion-Gate sind exakt festgelegt, damit keine
 ungeprüfte Evidence-Ausgabe oder nachgelagerte Aktion ergänzt werden kann.
-Alle im Vertrag klassifizierten Blocking-Jobs und -Steps arbeiten fail-closed:
-Jede explizite `continue-on-error`-Deklaration sowie jeder Job-/Step-`shell`-
-Override laesst die Readiness-Pruefung fehlschlagen. Advisory-Signal-Jobs sind
-im Inventar separat klassifiziert und gehoeren nicht zu diesem Blocking-
-Vertrag.
+Alle im Vertrag klassifizierten Blocking-Jobs sind mit ihren vollstaendigen
+Ausfuehrungsdefinitionen und Workflow-Defaults an einen kanonischen SHA-256-
+Fingerprint gebunden. Jede explizite `continue-on-error`-Deklaration sowie
+jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
+unabhaengig davon fehlschlagen. Advisory-Signal-Jobs sind im Inventar separat
+klassifiziert und gehoeren nicht zu diesem Blocking-Vertrag.
+Bei einer beabsichtigten Aenderung einer Blocking-Ausfuehrung nennt der
+Readiness-Report erwarteten und aktuellen Fingerprint. Der Vertragswert wird
+erst nach Review der zugehoerigen Workflow-Aenderung aktualisiert; der Hash ist
+keine alternative Freigabequelle.
 
 ## Rollback Policy
 

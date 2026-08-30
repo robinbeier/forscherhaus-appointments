@@ -157,6 +157,59 @@ class AgentHarnessReadinessTest extends TestCase
         }
     }
 
+    public function testEvaluateWorkflowFailureMasksRejectsRootShellOverride(): void
+    {
+        $checks = agentHarnessReadinessEvaluateWorkflowFailureMasks(
+            [
+                'defaults' => [
+                    'run' => [
+                        'shell' => 'bash {0} || true',
+                    ],
+                ],
+            ],
+            $this->blockingFailureControls(),
+        );
+
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('defaults.run.shell', (string) $checks[0]['message']);
+    }
+
+    public function testBlockingExecutionFingerprintRejectsCommandAndWorkflowDefaultDrift(): void
+    {
+        $workflow = [
+            'jobs' => [
+                'build-test' => [
+                    'steps' => [['name' => 'Run tests', 'run' => 'composer test']],
+                ],
+            ],
+        ];
+        $blockingJobs = ['build-test'];
+        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($workflow, $blockingJobs);
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        self::assertSame('pass', $checks[0]['status']);
+
+        $workflow['jobs']['build-test']['steps'][0]['run'] = 'composer test || true';
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        self::assertSame('fail', $checks[0]['status']);
+
+        $workflow['jobs']['build-test']['steps'][0]['run'] = 'composer test';
+        $workflow['defaults']['run']['working-directory'] = 'application';
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        self::assertSame('fail', $checks[0]['status']);
+    }
+
+    public function testFailureControlValidationAcceptsReorderingAndAdditionalForbiddenKeys(): void
+    {
+        agentHarnessReadinessValidateBlockingFailureControls([
+            'forbidden_step_keys' => ['shell', 'continue-on-error', 'timeout-minutes'],
+            'forbidden_job_run_default_keys' => ['shell', 'working-directory'],
+            'forbidden_job_keys' => ['continue-on-error', 'strategy'],
+            'forbidden_workflow_run_default_keys' => ['shell', 'working-directory'],
+        ]);
+
+        self::addToAssertionCount(1);
+    }
+
     public function testEvaluateJobInventoryRejectsUnclassifiedWorkflowJob(): void
     {
         $workflow = [
@@ -394,6 +447,7 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_controls' => $this->blockingFailureControls(),
+                    'blocking_execution_sha256' => str_repeat('a', 64),
                     'condition_grammar' => $grammar,
                     'job_inventory_is_exhaustive' => true,
                     'advisory_jobs' => ['signal' => ['kind' => 'advisory_signal']],
@@ -421,6 +475,7 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_controls' => $failureControls,
+                    'blocking_execution_sha256' => str_repeat('a', 64),
                     'condition_grammar' => $this->conditionGrammar(),
                     'job_inventory_is_exhaustive' => true,
                     'advisory_jobs' => ['signal' => ['kind' => 'advisory_signal']],
@@ -446,6 +501,7 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_controls' => $this->blockingFailureControls(),
+                    'blocking_execution_sha256' => str_repeat('a', 64),
                     'condition_grammar' => $this->conditionGrammar(),
                     'job_inventory_is_exhaustive' => true,
                     'advisory_jobs' => ['write-contract-api' => ['kind' => 'advisory_signal']],
@@ -456,6 +512,32 @@ class AgentHarnessReadinessTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('both advisory and blocking');
+
+        agentHarnessReadinessLoadWorkflowContract($path);
+    }
+
+    public function testWorkflowContractLoaderRejectsInvalidBlockingExecutionFingerprint(): void
+    {
+        $path = $this->tmpDir . '/agent-workflow.json';
+        file_put_contents(
+            $path,
+            json_encode([
+                'schema_version' => 2,
+                'surfaces' => ['WORKFLOW.md' => []],
+                'ci' => [
+                    'workflow' => 'ci.yml',
+                    'blocking_failure_controls' => $this->blockingFailureControls(),
+                    'blocking_execution_sha256' => 'invalid',
+                    'condition_grammar' => $this->conditionGrammar(),
+                    'job_inventory_is_exhaustive' => true,
+                    'advisory_jobs' => ['signal' => ['kind' => 'advisory_signal']],
+                    'blocking_jobs' => ['write-contract-api' => ['kind' => 'exact_execution']],
+                ],
+            ]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('failure controls, an execution fingerprint, grammar');
 
         agentHarnessReadinessLoadWorkflowContract($path);
     }
@@ -645,6 +727,7 @@ class AgentHarnessReadinessTest extends TestCase
     private function blockingFailureControls(): array
     {
         return [
+            'forbidden_workflow_run_default_keys' => ['shell'],
             'forbidden_job_keys' => ['continue-on-error'],
             'forbidden_job_run_default_keys' => ['shell'],
             'forbidden_step_keys' => ['continue-on-error', 'shell'],

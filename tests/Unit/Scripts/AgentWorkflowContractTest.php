@@ -71,11 +71,16 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
         self::assertSame(
             [
+                'forbidden_workflow_run_default_keys' => ['shell'],
                 'forbidden_job_keys' => ['continue-on-error'],
                 'forbidden_job_run_default_keys' => ['shell'],
                 'forbidden_step_keys' => ['continue-on-error', 'shell'],
             ],
             $contract['ci']['blocking_failure_controls'] ?? null,
+        );
+        self::assertMatchesRegularExpression(
+            '/^[a-f0-9]{64}$/D',
+            (string) ($contract['ci']['blocking_execution_sha256'] ?? ''),
         );
         self::assertSame(
             [
@@ -147,11 +152,11 @@ class AgentWorkflowContractTest extends TestCase
             $jobNames,
         );
 
-        $presenceOnlyJobs = array_filter(
+        $fingerprintedJobs = array_filter(
             $ci['blocking_jobs'],
-            static fn(array $job): bool => ($job['kind'] ?? null) === 'presence_only',
+            static fn(array $job): bool => ($job['kind'] ?? null) === 'fingerprinted_execution',
         );
-        self::assertCount(17, $presenceOnlyJobs);
+        self::assertCount(17, $fingerprintedJobs);
 
         foreach (['write-contract-booking', 'write-contract-api'] as $jobName) {
             $job = $ci['blocking_jobs'][$jobName];
@@ -191,10 +196,16 @@ class AgentWorkflowContractTest extends TestCase
         $classifiedJobs = array_merge(array_keys($ci['blocking_jobs']), array_keys($ci['advisory_jobs']));
         $checks = array_merge(
             agentHarnessReadinessEvaluateJobInventory($ciWorkflow, $classifiedJobs),
+            agentHarnessReadinessEvaluateWorkflowFailureMasks($ciWorkflow, $ci['blocking_failure_controls']),
             agentHarnessReadinessEvaluateBlockingJobs(
                 $ciWorkflow,
                 array_keys($ci['blocking_jobs']),
                 $ci['blocking_failure_controls'],
+            ),
+            agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+                $ciWorkflow,
+                array_keys($ci['blocking_jobs']),
+                $ci['blocking_execution_sha256'],
             ),
             agentHarnessReadinessEvaluateBlockingJobContracts(
                 $ciWorkflow,

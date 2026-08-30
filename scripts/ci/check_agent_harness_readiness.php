@@ -233,14 +233,21 @@ function evaluateAgentHarnessReadiness(
     $blockingJobContracts = $workflowContract['ci']['blocking_jobs'];
     $advisoryJobContracts = $workflowContract['ci']['advisory_jobs'];
     $blockingFailureControls = $workflowContract['ci']['blocking_failure_controls'];
+    $blockingExecutionSha256 = $workflowContract['ci']['blocking_execution_sha256'];
     $classifiedJobNames = array_merge(array_keys($blockingJobContracts), array_keys($advisoryJobContracts));
     $blockingGateChecks = array_merge(
+        agentHarnessReadinessEvaluateWorkflowFailureMasks($ciWorkflow, $blockingFailureControls),
         agentHarnessReadinessEvaluateBlockingJobs(
             $ciWorkflow,
             array_keys($blockingJobContracts),
             $blockingFailureControls,
         ),
         agentHarnessReadinessEvaluateJobInventory($ciWorkflow, $classifiedJobNames),
+        agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+            $ciWorkflow,
+            array_keys($blockingJobContracts),
+            $blockingExecutionSha256,
+        ),
     );
     $blockingGateChecks = array_merge(
         $blockingGateChecks,
@@ -520,6 +527,39 @@ function agentHarnessReadinessEvaluateBlockingJobs(
 
 /**
  * @param array<string, mixed> $ciWorkflow
+ * @param array<string, mixed> $failureControls
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateWorkflowFailureMasks(array $ciWorkflow, array $failureControls): array
+{
+    agentHarnessReadinessValidateBlockingFailureControls($failureControls);
+
+    $failures = [];
+    $defaults = $ciWorkflow['defaults'] ?? null;
+    $runDefaults = is_array($defaults) ? $defaults['run'] ?? null : null;
+    if (is_array($runDefaults)) {
+        foreach ($failureControls['forbidden_workflow_run_default_keys'] as $key) {
+            if (array_key_exists($key, $runDefaults)) {
+                $failures[] = 'workflow declares forbidden defaults.run.' . $key;
+            }
+        }
+    }
+
+    return [
+        [
+            'id' => 'workflow_failure_controls',
+            'label' => 'CI workflow defaults preserve blocking failure semantics',
+            'status' => $failures === [] ? 'pass' : 'fail',
+            'message' =>
+                $failures === []
+                    ? 'Workflow defaults contain no forbidden failure controls.'
+                    : implode('; ', $failures),
+        ],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
  * @param array<int, string> $classifiedJobs
  * @return array<int, array<string, mixed>>
  */
@@ -549,6 +589,62 @@ function agentHarnessReadinessEvaluateJobInventory(array $ciWorkflow, array $cla
 
 /**
  * @param array<string, mixed> $ciWorkflow
+ * @param array<int, string> $blockingJobs
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+    array $ciWorkflow,
+    array $blockingJobs,
+    string $expectedSha256,
+): array {
+    if (preg_match('/^[a-f0-9]{64}$/D', $expectedSha256) !== 1) {
+        throw new RuntimeException('Workflow contract blocking execution SHA-256 is invalid.');
+    }
+
+    $actualSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($ciWorkflow, $blockingJobs);
+
+    return [
+        [
+            'id' => 'blocking_execution_fingerprint',
+            'label' => 'Blocking CI execution definitions match the canonical fingerprint',
+            'status' => hash_equals($expectedSha256, $actualSha256) ? 'pass' : 'fail',
+            'message' => hash_equals($expectedSha256, $actualSha256)
+                ? 'Every blocking job command and workflow default matches the reviewed contract.'
+                : sprintf(
+                    'Blocking job commands or workflow defaults changed without a matching reviewed contract fingerprint (expected %s, actual %s).',
+                    $expectedSha256,
+                    $actualSha256,
+                ),
+        ],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
+ * @param array<int, string> $blockingJobs
+ */
+function agentHarnessReadinessCalculateBlockingExecutionSha256(array $ciWorkflow, array $blockingJobs): string
+{
+    $jobs = $ciWorkflow['jobs'] ?? null;
+    if (!is_array($jobs)) {
+        throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
+    }
+
+    sort($blockingJobs, SORT_STRING);
+    $blockingDefinitions = [];
+    foreach ($blockingJobs as $jobName) {
+        $blockingDefinitions[$jobName] = $jobs[$jobName] ?? null;
+    }
+    $executionDefinition = agentHarnessReadinessCanonicalizeMap([
+        'workflow_defaults' => $ciWorkflow['defaults'] ?? [],
+        'blocking_jobs' => $blockingDefinitions,
+    ]);
+
+    return hash('sha256', json_encode($executionDefinition, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
  * @param array<string, mixed> $contracts
  * @param array<string, mixed> $conditionGrammar
  * @param array<string, mixed> $failureControls
@@ -572,7 +668,7 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
         }
 
         $kind = $contract['kind'] ?? null;
-        if ($kind === 'presence_only') {
+        if ($kind === 'fingerprinted_execution') {
             continue;
         }
         if ($kind !== 'exact_execution') {
@@ -774,13 +870,33 @@ function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
  */
 function agentHarnessReadinessValidateBlockingFailureControls(array $failureControls): void
 {
-    $expected = [
+    $required = [
+        'forbidden_workflow_run_default_keys' => ['shell'],
         'forbidden_job_keys' => ['continue-on-error'],
         'forbidden_job_run_default_keys' => ['shell'],
         'forbidden_step_keys' => ['continue-on-error', 'shell'],
     ];
-    if ($failureControls !== $expected) {
+    $unknownCategories = array_diff(array_keys($failureControls), array_keys($required));
+    if ($unknownCategories !== []) {
         throw new RuntimeException('Workflow contract blocking failure controls are invalid.');
+    }
+
+    foreach ($required as $category => $requiredKeys) {
+        $configuredKeys = $failureControls[$category] ?? null;
+        if (!is_array($configuredKeys) || $configuredKeys === [] || !array_is_list($configuredKeys)) {
+            throw new RuntimeException('Workflow contract blocking failure controls are invalid.');
+        }
+        foreach ($configuredKeys as $configuredKey) {
+            if (!is_string($configuredKey) || trim($configuredKey) === '') {
+                throw new RuntimeException('Workflow contract blocking failure controls are invalid.');
+            }
+        }
+        if (
+            count(array_unique($configuredKeys)) !== count($configuredKeys) ||
+            array_diff($requiredKeys, $configuredKeys) !== []
+        ) {
+            throw new RuntimeException('Workflow contract blocking failure controls are invalid.');
+        }
     }
 }
 
@@ -1409,6 +1525,8 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         !is_string($ci['workflow'] ?? null) ||
         trim($ci['workflow']) === '' ||
         !is_array($ci['blocking_failure_controls'] ?? null) ||
+        !is_string($ci['blocking_execution_sha256'] ?? null) ||
+        preg_match('/^[a-f0-9]{64}$/D', $ci['blocking_execution_sha256']) !== 1 ||
         !is_array($ci['condition_grammar'] ?? null) ||
         ($ci['job_inventory_is_exhaustive'] ?? null) !== true ||
         !is_array($ci['advisory_jobs'] ?? null) ||
@@ -1419,7 +1537,7 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         $surfaces === []
     ) {
         throw new RuntimeException(
-            'Workflow contract must define surfaces, a CI workflow, failure controls, grammar, advisory jobs, and blocking jobs.',
+            'Workflow contract must define surfaces, a CI workflow, failure controls, an execution fingerprint, grammar, advisory jobs, and blocking jobs.',
         );
     }
 
@@ -1445,7 +1563,7 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
             $exactExecutionJobs++;
             continue;
         }
-        if (($job['kind'] ?? null) !== 'presence_only') {
+        if (($job['kind'] ?? null) !== 'fingerprinted_execution') {
             throw new RuntimeException('Workflow contract blocking jobs must declare a supported kind.');
         }
     }
