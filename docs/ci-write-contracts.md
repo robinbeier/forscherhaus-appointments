@@ -116,38 +116,44 @@ Die ausführbare CI-Konfiguration steht in
 [agent workflow contract](../.codex/contracts/agent-workflow.json) ist die
 kanonische Prüfquelle für die erwarteten Blocking-Jobs sowie die exakte
 Ausführung der beiden Write-Contract-Gates. Der Readiness-Check verlangt, dass
-beide Quellen übereinstimmen. Das Job-Inventar ist vollständig: Jeder neue,
-umbenannte oder entfernte CI-Job muss im Vertrag zugleich klassifiziert werden.
-Seine versionierte Actions-Expression-Grammatik
-ist bewusst eng; nicht unterstützte Syntax wird fail-closed abgelehnt und
+beide Quellen übereinstimmen. Jeder vertraglich blockierende Job muss im
+Workflow vorhanden sein. Zusätzliche, nicht im Blocking-Vertrag genannte Jobs
+gelten für diesen Check als nicht blockierend; ein neuer Blocking-Job muss vor
+seiner Freigabe ausdrücklich in den Vertrag aufgenommen werden. Die
+versionierte Actions-Expression-Grammatik des Vertrags ist bewusst eng; nicht
+unterstützte Syntax wird fail-closed abgelehnt und
 erfordert eine gemeinsame Änderung von Vertrag, Parser und Regressionstests.
-Neue Failure-Control-Kategorien oder Job-Klassen sind ebenso bewusst keine
-reinen Contract-Erweiterungspunkte, sondern verlangen die koordinierte
-Aenderung von Vertrag, Checker und Regressionstests.
+Die strikte Failure-Control-Policy ist im Checker versioniert. Der Vertrag
+referenziert nur ihre Policy-ID; unbekannte IDs schlagen fail-closed fehl. Eine
+neue Policy-Version verlangt eine bewusste Checker- und Regressionstest-
+Aenderung, nicht die parallele Pflege derselben Keylisten an mehreren Stellen.
 Auch die Schritte nach dem Assertion-Gate sind exakt festgelegt, damit keine
 ungeprüfte Evidence-Ausgabe oder nachgelagerte Aktion ergänzt werden kann.
-Alle im Vertrag klassifizierten Blocking-Jobs sind mit ihren vollstaendigen
-Ausfuehrungsdefinitionen sowie dem aus Triggern, Berechtigungen, globaler
-Umgebung, Defaults und Concurrency bestehenden Workflow-Ausfuehrungsrahmen an
-einen kanonischen SHA-256-Fingerprint gebunden. Job- und Step-Anzeigenamen sowie
-die Reihenfolge in `needs`, der Event-Kurzform, Trigger-`types` und
-`workflows` werden dabei als nicht ausfuehrungsrelevant normalisiert.
+Der aus Triggern, Berechtigungen, globaler Umgebung, Defaults und Concurrency
+bestehende Workflow-Ausfuehrungsrahmen sowie jeder
+`fingerprinted_execution`-Job besitzen einen eigenen kanonischen SHA-256-
+Nachweis. Dadurch nennt eine Abweichung genau den betroffenen Rahmen oder Job.
+`exact_execution`-Jobs werden stattdessen direkt aus ihrer Job-Klasse abgeleitet
+und vollstaendig gegen ihren strukturierten Vertrag geprueft; eine parallele
+Ankerliste oder ein zusaetzlicher Hash ist nicht erforderlich. Dieser Vertrag
+bindet Abhaengigkeiten, Condition, Runner, Timeout und die vollstaendige
+Step-Folge; zusaetzliche ausfuehrungsrelevante Job-Keys werden abgewiesen. Job-
+und Step-Anzeigenamen sowie die Reihenfolge in `needs`, der Event-Kurzform,
+Trigger-`types` und `workflows` werden als nicht ausfuehrungsrelevant
+normalisiert.
 Glob-Filter behalten wegen reihenfolgeabhaengiger Negationen ihre Reihenfolge;
 Job- und Step-`if`-Ausdruecke werden ueber die versionierte Grammatik in eine
 kanonische semantische Form gebracht. Nicht unterstuetzte Ausdruecke schlagen
 fail-closed fehl; ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
 Jede explizite `continue-on-error`-Deklaration sowie
 jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
-unabhaengig davon fehlschlagen. Advisory-Signal-Jobs sind im Inventar separat
-klassifiziert und gehoeren nicht zu diesem Blocking-Vertrag.
-Die maschinenlesbare Liste `required_exact_execution_jobs` haelt zusaetzlich
-mindestens einen benannten, strukturiert vergleichbaren Anker fest und muss
-exakt alle `exact_execution`-Jobs enthalten. Dadurch bleibt der Vertrag auch
-bei einem globalen Fingerprint review- und diagnosefreundlich.
-Bei einer beabsichtigten Aenderung einer Blocking-Ausfuehrung nennt der
-Readiness-Report erwarteten und aktuellen Fingerprint. Der Vertragswert wird
-erst nach Review der zugehoerigen Workflow-Aenderung aktualisiert; der Hash ist
-keine alternative Freigabequelle.
+unabhaengig davon fehlschlagen. Advisory-Signal-Jobs gehoeren nicht zu diesem
+Blocking-Vertrag und duerfen ohne Blocking-Contract-Churn ergaenzt oder
+umbenannt werden.
+Bei einer beabsichtigten Aenderung einer fingerprinted Blocking-Ausfuehrung
+nennt der Readiness-Report die abweichenden Komponenten samt erwartetem und
+aktuellem Nachweis. Vertragswerte werden erst nach Review der zugehoerigen
+Workflow-Aenderung aktualisiert; Hashes sind keine alternative Freigabequelle.
 
 ## Rollback Policy
 

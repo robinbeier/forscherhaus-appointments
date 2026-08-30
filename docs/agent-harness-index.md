@@ -63,17 +63,17 @@ This file stays intentionally short. It is a map, not a second runbook.
     critical cross-document clauses to named Markdown sections; the checker
     fails closed on invalid grammar, missing sections, misplaced clauses, or
     duplicate clauses.
-  - The workflow execution envelope and every contract-classified blocking job
-    are bound to an exact execution fingerprint; display-only job/step names
-    and order-insensitive `needs` and trigger-type lists are normalized, while
-    order-sensitive glob filters are preserved. Job/step conditions are parsed
-    into a canonical semantic form with the contract grammar. Any
-    workflow/job/step shell override or explicit `continue-on-error` fails the
-    readiness check independently. New control categories fail closed until
-    contract, checker, and tests change together. Advisory signal jobs are
-    classified separately and remain outside this blocking contract. The
-    contract also names at least one structured exact-execution anchor for
-    readable review and diagnostics.
+  - The workflow execution envelope and every `fingerprinted_execution` job
+    have separate canonical fingerprints, so drift reports identify the
+    affected component. Display-only job/step names and order-insensitive
+    `needs` and trigger-type lists are normalized, while order-sensitive glob
+    filters are preserved. `exact_execution` jobs are derived from their class
+    and checked directly against their structured contracts. Job/step
+    conditions are parsed into a canonical semantic form with the contract
+    grammar. The contract selects a versioned strict failure-control policy;
+    unknown policy IDs, workflow/job/step shell overrides, and explicit
+    `continue-on-error` fail closed. Unlisted jobs stay outside the blocking
+    contract, while every listed blocking job must exist.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:
