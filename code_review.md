@@ -93,11 +93,23 @@ Use the reviewer roles with this split:
 - `pr_explorer`, `reviewer_tests`, and `reviewer_design` are bounded support reviewers that should return distilled evidence for the parent reviewer to synthesize.
 - An `implementation_worker` must never be the sole reviewer of its own diff; preserve an independent reviewer role and primary-agent synthesis.
 
+Authority-, secret-, identity-, transaction-, and concurrency-sensitive diffs
+require three independent final reviews on the same unchanged exact head:
+
+- `reviewer_correctness` for correctness and security
+- `reviewer_design` for architecture and maintainability
+- `reviewer_tests` for regression coverage and flake risk
+
+Any later push invalidates those final reviews and requires exact-head review
+again.
+
 Default reviewer depth should match the change:
 
 - For small scoped product/UI changes, start with `pr_explorer` plus `reviewer_correctness`.
 - Add `reviewer_tests` only when validation adequacy is genuinely uncertain for the changed behavior.
 - Add `reviewer_design` only when the diff materially affects long-lived seams, architecture, or reuse boundaries.
+- Apply the mandatory three-lens rule above instead of these defaults for
+  security-sensitive write and authority changes.
 - Use `docs_researcher` only when framework, library, platform, or external API assumptions matter.
 
 When a change depends on framework, library, or external API behavior, verify the assumption against primary documentation instead of guessing.

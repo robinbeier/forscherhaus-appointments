@@ -2,7 +2,7 @@
 
 - Issue: <!-- z. B. ROB-24 -->
 - Status vor PR: `In Progress`
-- Status nach PR-Erstellung: `In Review` oder `Ready to Merge`
+- Status nach PR-Erstellung: `In Review`
 - Status vor Merge: `Ready to Merge`
 
 ## Summary
@@ -41,17 +41,27 @@ PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 - [ ] Keine offensichtliche Security-Regression
 - [ ] Findings dokumentiert oder explizit: keine Findings
 
-## Reviewer B (Architektur/Lesbarkeit/Tests/Wartbarkeit)
+## Reviewer B (Architektur/Lesbarkeit/Wartbarkeit)
 
 - [ ] Architekturgrenzen und Struktur passen
 - [ ] Code ist nachvollziehbar und wartbar
-- [ ] Testabdeckung fuer Aenderung ausreichend
 - [ ] Findings dokumentiert oder explizit: keine Findings
+
+## Reviewer C (Tests/Regression/Flake-Risiko)
+
+<!-- Pflicht fuer Authority-, Secret-, Identitaets-, Transaktions- und
+Concurrency-Aenderungen; sonst N/A mit kurzer Begruendung. -->
+
+- [ ] Positive, negative und Race-Pfade angemessen abgedeckt
+- [ ] Nullmutation und Side-Effect-Grenzen bei Ablehnung geprueft
+- [ ] Flake-Risiko und Aussagekraft der ausgefuehrten Tests geprueft
+- [ ] Findings dokumentiert, explizit keine Findings oder begruendet N/A
 
 ## Merge Readiness
 
 - [ ] Blocking CI ist gruen
 - [ ] Keine offenen Review-Findings
+- [ ] PR-Head, CI-Head und final reviewter Head sind identisch
 - [ ] PR ist mergeable
 - [ ] Noetige Docs/Migrationshinweise sind enthalten
 

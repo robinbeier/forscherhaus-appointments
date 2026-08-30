@@ -9,8 +9,8 @@ This file stays intentionally short. It is a map, not a second runbook.
 
 - If you need local setup or service endpoints: read `README.md`.
 - If you are an agent executing an issue end-to-end: read `WORKFLOW.md`.
-- If you need the compact repo guardrails and the extended local/CI command
-  matrix: read `AGENTS.md`.
+- If you need compact repo guardrails and command entry points: read
+  `AGENTS.md`.
 - If you need architecture and ownership scope: read `docs/architecture-map.md`
   and `docs/ownership-map.md`.
 
@@ -21,7 +21,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Local onboarding and quickstart | `README.md` | Operator-first entry point. |
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
-| Extended local command matrix + compact guardrails | `AGENTS.md` | Cross-topic command hub without duplicating specialist docs. |
+| Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
 | Local/CI root-host test prerequisites | `docs/root-host-test-harness.md` | Docker Desktop skip boundaries, required Linux-root failures, and security invariants. |
@@ -49,10 +49,13 @@ This file stays intentionally short. It is a map, not a second runbook.
 
 - Small local confidence check:
   - `docker compose run --rm php-fpm composer test`
-- Fast pre-push gate:
+- Fast developer-feedback gate; not merge authorization:
   - `bash ./scripts/ci/pre_pr_quick.sh`
-- Full review-ready gate:
+- Full local review-ready gate; not merge authorization:
   - `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
+- Exact-head landing evidence:
+  - follow `WORKFLOW.md`; blocking CI and required final reviews must target the
+    same unchanged current PR head
 - Harness readiness score:
   - `composer check:agent-harness-readiness`
 - Report date sanity:
@@ -83,8 +86,8 @@ This file stays intentionally short. It is a map, not a second runbook.
   usage changes.
 - Change `WORKFLOW.md` when the agent state machine, workpad policy, or
   ticket-to-merge or model-aware delegation behavior changes.
-- Change `AGENTS.md` when the compact repo guardrails, command entry points, or
-  extended local/CI command matrix change.
+- Change `AGENTS.md` when compact repo guardrails or command entry points
+  change.
 - Change `.github/workflows/ci.yml` when CI truth changes; then update
   summaries in `README.md` or `AGENTS.md` only as needed.
 - Change `docs/maps/component_ownership_map.json` when architecture or

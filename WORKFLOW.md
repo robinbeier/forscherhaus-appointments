@@ -122,8 +122,10 @@ Use the states as follows:
   explicit merge intent.
 - `Rework`: active response to PR review feedback, CI failures, or requested
   follow-up on the same PR.
-- `Ready to Merge`: final landing phase.
-- `Done`: merged and complete.
+- `Ready to Merge`: final landing phase after the required reviews are
+  finding-free and blocking CI is green on the same unchanged exact commit.
+  Any new push returns the issue to `In Review`.
+- `Done`: the merge commit and updated `origin/main` have been verified.
 
 ## Codex Workpad
 
@@ -175,6 +177,10 @@ Rules:
 - Read the issue, current state, branch, PR context, and existing workpad.
 - If the current branch already exists, sync it before editing.
 - Reproduce the problem or gather concrete evidence before changing code.
+- For authority-, secret-, identity-, transaction-, or concurrency-sensitive
+  writes, record the complete path before editing:
+  `route -> request classification -> server-side authority -> locks and
+transaction -> mutation -> post-commit effects`.
 - Record the current understanding in the workpad when Linear is involved.
 - Keep milestones tight, but once a local diff exists continue toward
   validation and commit rather than re-planning the same change.
@@ -192,7 +198,15 @@ Rules:
 ### 3. Validate locally
 
 Use the narrowest relevant validation early, then the stronger gate before the
-PR is treated as ready.
+PR is treated as ready. These evidence levels are deliberately distinct:
+
+- focused tests and the quick hook provide early developer feedback
+- the full local pre-PR gate establishes review readiness
+- blocking GitHub CI plus final reviews on the unchanged exact PR head establish
+  merge readiness
+
+A successful quick hook or local full gate is never merge authorization by
+itself.
 
 Minimum expectation for merge-sensitive changes:
 
@@ -216,9 +230,9 @@ When the branch is ready to publish:
 - create or update the PR from the current branch
 - fill the PR template completely
 - attach the PR to the Linear issue when applicable
-- move the Linear issue to `In Review` by default
-- if the PR should stay agent-owned through review and merge, move it directly
-  to `Ready to Merge`
+- move the Linear issue to `In Review`
+- move it to `Ready to Merge` only after the required final reviews are
+  finding-free and blocking CI is green on the same unchanged exact head
 - update the workpad with validation status, merge/review posture, and what
   would reactivate the issue
 
@@ -236,15 +250,27 @@ When the issue is moved to `Rework`:
 - move it directly to `Ready to Merge` only when the PR is truly in the
   landing phase
 
+Every push after review or CI evidence was collected invalidates that landing
+evidence. Return the issue to `In Review`, rerun the required exact-head CI and
+reviews, and only then restore `Ready to Merge`.
+
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
 
 ## PR and Review Expectations
 
-Every PR must cover two review lenses:
+Every PR must cover at least two independent review lenses:
 
 - Reviewer A: bugs, regressions, security, edge cases
-- Reviewer B: architecture, readability, test coverage, maintainability
+- Reviewer B: architecture, readability, maintainability
+
+Authority-, secret-, identity-, transaction-, and concurrency-sensitive
+changes require a third independent lens:
+
+- Reviewer C: tests, regression coverage, and flake risk
+
+Final reviews and blocking CI must all target the current unchanged exact PR
+head. A later push makes the earlier evidence stale.
 
 The PR is not done until:
 
@@ -252,6 +278,7 @@ The PR is not done until:
 - no open review findings remain
 - the PR is mergeable
 - required docs or migration notes are included
+- the reviewed head, CI head, and current PR head are identical
 - the issue is moved to `Done`
 
 ## Stop and Escalate

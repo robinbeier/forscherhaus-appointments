@@ -46,6 +46,35 @@ docker compose exec -T php-fpm composer contract-test:write-path -- \
   --retry-count=1 --booking-search-days=14
 ```
 
+## Allgemeiner Mutation-Vertrag
+
+Jeder mutation-kritische öffentliche Write folgt derselben festen Reihenfolge:
+
+`Route -> Request-Klassifikation -> serverseitige Authority -> feste Lock-/Transaktionsgrenze -> Mutation -> Post-Commit-Effekte`.
+
+Die Route klassifiziert den Request; die Autorisierung wird serverseitig aus
+kanonischer Authority und aktuellem Datenbankzustand entschieden. Caller-
+supplied Flags, IDs, Hashes, Tokens oder Pfade reichen dafür nie aus. Lock und
+Transaktion grenzen die Prüfung und die anschließende Mutation gegen
+konkurrierende Writes ab. Erst nach erfolgreichem Commit dürfen Nebenwirkungen
+wie Events, Benachrichtigungen oder Cleanup ausgelöst werden. Wird ein Contract
+verletzt, wird atomar abgelehnt: Es gibt keine Teilmutation und keine Post-
+Commit-Effekte. Bei konkurrierenden Prüfungen sind eine zweite DB-Verbindung
+und eine globale Lock-Reihenfolge ausdrücklich mitzudenken, damit keine
+Prüfung ihre eigene uncommitted Sicht als Authority verwendet oder ein
+Deadlock entsteht.
+
+## Evidence-Privacy-Vertrag
+
+Logs, Reports, Tests, PR-Evidenz und Linear-Einträge enthalten weder Secrets
+noch Capability-, Authority- oder Tokenwerte, request- oder
+personenbezogene Hashes oder personenbezogene Daten. Technische Commit-, Run-
+und anonymisierte Fixture-IDs bleiben für Exact-Head- und CI-Evidenz zulässig.
+Nachweise beschreiben nur Status, Typen, Zeitpunkte und redigierte
+Fehlerklassen. Retries sind ausschließlich für transiente Laufzeitfehler
+zulässig; bei einem Contract-Mismatch wird weder automatisch wiederholt noch
+die Evidenz durch weitere Mutation vergrößert.
+
 ## Reports / Artifacts
 
 - Booking write report: `storage/logs/ci/booking-write-contract-<UTC>.json`
@@ -71,31 +100,22 @@ laufende In-Process-Pruefung und das Cleanup verfuegbar.
   - connection reset/refused, failed/could-not-connect
 - Kein Retry bei Contract-Mismatch (Status-/Schema-/Typverletzung)
 
-## CI Jobs / Rollout
+## CI Jobs
 
-- `write-contract-booking` (warn-only in Rollout: `continue-on-error: true`)
-- `write-contract-api` (warn-only in Rollout: `continue-on-error: true`)
+- `write-contract-booking` ist aktuell blockierend.
+- `write-contract-api` ist aktuell blockierend.
 - Beide changed-file gated via `changes` outputs:
   - `write_contract_booking`
   - `write_contract_api`
 
-Blocking-Switch:
-
-- Nach 7 non-cancelled, aufeinanderfolgenden `success`-PR-Runs je Job `continue-on-error` entfernen.
-
-Tracking:
-
-```bash
-for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
-  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="write-contract-booking") | .conclusion'
-done | awk '$1 != "cancelled"' | head -n 7
-
-for run_id in $(gh run list --workflow CI --event pull_request --limit 40 --json databaseId -q '.[].databaseId'); do
-  gh run view "$run_id" --json jobs -q '.jobs[] | select(.name=="write-contract-api") | .conclusion'
-done | awk '$1 != "cancelled"' | head -n 7
-```
+Die verbindliche CI-Konfiguration und die tatsächlichen Gate-Bedingungen
+stehen ausschließlich in [.github/workflows/ci.yml](../.github/workflows/ci.yml).
 
 ## Rollback Policy
 
-- Nur den betroffenen Job temporaer auf `continue-on-error: true` zurueckstellen.
-- Follow-up-Issue mit Rueckkehrfrist <= 14 Tage zum Blocking-Modus.
+Ein Rollback der Blocking-Eigenschaft ist nur als ausdrücklich begründete,
+zeitlich begrenzte CI-Änderung zulässig; dabei bleibt
+`.github/workflows/ci.yml` die alleinige CI-Quelle. Diese Dokumentation
+schwächt kein Gate ab und beschreibt keine alternative Warnphase. Die in
+[WORKFLOW.md](../WORKFLOW.md) geforderte Rückkehrfrist und das Follow-up-Issue
+bleiben verbindlich.
