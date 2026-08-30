@@ -198,6 +198,74 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertSame('fail', $checks[0]['status']);
     }
 
+    public function testBlockingExecutionFingerprintCoversWorkflowExecutionEnvelope(): void
+    {
+        $workflow = [
+            'on' => ['pull_request' => ['branches' => ['main']]],
+            'permissions' => ['contents' => 'read'],
+            'env' => ['CI_MODE' => 'strict'],
+            'defaults' => ['run' => ['working-directory' => 'application']],
+            'concurrency' => ['group' => 'ci-${{ github.ref }}', 'cancel-in-progress' => true],
+            'jobs' => [
+                'build-test' => ['steps' => [['run' => 'composer test']]],
+            ],
+        ];
+        $blockingJobs = ['build-test'];
+        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($workflow, $blockingJobs);
+
+        $mutations = [
+            'trigger' => static function (array &$mutated): void {
+                unset($mutated['on']['pull_request']);
+            },
+            'permissions' => static function (array &$mutated): void {
+                $mutated['permissions']['contents'] = 'write';
+            },
+            'environment' => static function (array &$mutated): void {
+                $mutated['env']['CI_MODE'] = 'permissive';
+            },
+            'defaults' => static function (array &$mutated): void {
+                $mutated['defaults']['run']['working-directory'] = '.';
+            },
+            'concurrency' => static function (array &$mutated): void {
+                $mutated['concurrency']['cancel-in-progress'] = false;
+            },
+        ];
+
+        foreach ($mutations as $case => $mutate) {
+            $mutated = $workflow;
+            $mutate($mutated);
+            $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
+                $mutated,
+                $blockingJobs,
+                $expectedSha256,
+            );
+
+            self::assertSame('fail', $checks[0]['status'], $case);
+        }
+    }
+
+    public function testBlockingExecutionFingerprintNormalizesDisplayNamesAndNeedsOrder(): void
+    {
+        $workflow = [
+            'jobs' => [
+                'build-test' => [
+                    'name' => 'Build and test',
+                    'needs' => ['seed', 'changes'],
+                    'steps' => [['name' => 'Run tests', 'run' => 'composer test']],
+                ],
+            ],
+        ];
+        $blockingJobs = ['build-test'];
+        $expectedSha256 = agentHarnessReadinessCalculateBlockingExecutionSha256($workflow, $blockingJobs);
+
+        $workflow['jobs']['build-test']['name'] = 'Display-only rename';
+        $workflow['jobs']['build-test']['needs'] = ['changes', 'seed'];
+        $workflow['jobs']['build-test']['steps'][0]['name'] = 'Another display-only rename';
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+
+        self::assertSame('pass', $checks[0]['status']);
+    }
+
     public function testFailureControlValidationAcceptsReorderingAndAdditionalForbiddenKeys(): void
     {
         agentHarnessReadinessValidateBlockingFailureControls([
@@ -542,6 +610,31 @@ class AgentHarnessReadinessTest extends TestCase
         agentHarnessReadinessLoadWorkflowContract($path);
     }
 
+    public function testWorkflowContractLoaderAcceptsFullyFingerprintedBlockingSet(): void
+    {
+        $path = $this->tmpDir . '/agent-workflow.json';
+        file_put_contents(
+            $path,
+            json_encode([
+                'schema_version' => 2,
+                'surfaces' => ['WORKFLOW.md' => []],
+                'ci' => [
+                    'workflow' => 'ci.yml',
+                    'blocking_failure_controls' => $this->blockingFailureControls(),
+                    'blocking_execution_sha256' => str_repeat('a', 64),
+                    'condition_grammar' => $this->conditionGrammar(),
+                    'job_inventory_is_exhaustive' => true,
+                    'advisory_jobs' => ['signal' => ['kind' => 'advisory_signal']],
+                    'blocking_jobs' => ['build-test' => ['kind' => 'fingerprinted_execution']],
+                ],
+            ]),
+        );
+
+        $contract = agentHarnessReadinessLoadWorkflowContract($path);
+
+        self::assertSame('fingerprinted_execution', $contract['ci']['blocking_jobs']['build-test']['kind'] ?? null);
+    }
+
     public function testConditionParserUsesContractDefinedTokens(): void
     {
         $grammar = $this->conditionGrammar();
@@ -611,6 +704,110 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertSame(AGENT_HARNESS_READINESS_EXIT_RUNTIME_ERROR, $exitCode);
         self::assertSame('error', $report['status']);
         self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
+    }
+
+    public function testEvaluateAgentHarnessReadinessWiresBlockingFailureControls(): void
+    {
+        $contractDirectory = $this->tmpDir . '/.codex/contracts';
+        $workflowDirectory = $this->tmpDir . '/.github/workflows';
+        self::assertTrue(mkdir($contractDirectory, 0777, true));
+        self::assertTrue(mkdir($workflowDirectory, 0777, true));
+
+        $contractPath = $contractDirectory . '/agent-workflow.json';
+        self::assertTrue(copy(dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json', $contractPath));
+        $contract = json_decode((string) file_get_contents($contractPath), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($contract);
+        $contract['surfaces'] = [
+            '.codex/contracts/agent-workflow.json' => [
+                'contract_reference' => '.codex/contracts/agent-workflow.json',
+                'required_sections' => [],
+            ],
+        ];
+        self::assertNotFalse(file_put_contents($contractPath, json_encode($contract, JSON_THROW_ON_ERROR)));
+        $ciWorkflow = file_get_contents(dirname(__DIR__, 3) . '/.github/workflows/ci.yml');
+        self::assertNotFalse($ciWorkflow);
+        self::assertTrue(
+            copy(dirname(__DIR__, 3) . '/.github/workflows/hygiene.yml', $workflowDirectory . '/hygiene.yml'),
+        );
+        $ciWorkflowPath = $workflowDirectory . '/ci.yml';
+        self::assertNotFalse(file_put_contents($ciWorkflowPath, $ciWorkflow));
+        $contract['ci']['blocking_execution_sha256'] = agentHarnessReadinessCalculateBlockingExecutionSha256(
+            agentHarnessReadinessLoadWorkflowYaml($ciWorkflowPath),
+            array_keys($contract['ci']['blocking_jobs']),
+        );
+        self::assertNotFalse(file_put_contents($contractPath, json_encode($contract, JSON_THROW_ON_ERROR)));
+
+        $policyPath = $this->tmpDir . '/policy.php';
+        $policy = [
+            'target_score' => 4.5,
+            'dimensions' => [
+                'steering_sources' => ['label' => 'Steering sources', 'weight' => 20],
+                'blocking_gates' => ['label' => 'Blocking gates', 'weight' => 30],
+                'generated_topology' => ['label' => 'Generated topology', 'weight' => 20],
+                'report_sanity' => ['label' => 'Report sanity', 'weight' => 15],
+                'scheduled_hygiene' => ['label' => 'Scheduled hygiene', 'weight' => 15],
+            ],
+            'required_sources' => [],
+            'generated_topology_commands' => [],
+            'hygiene_workflow' => [
+                'path' => '.github/workflows/hygiene.yml',
+                'job' => 'harness-hygiene',
+                'required_steps' => [
+                    'Generate harness readiness report',
+                    'Run report date sanity check',
+                    'Check generated architecture/ownership docs',
+                    'Validate architecture/ownership map',
+                    'Check generated CODEOWNERS',
+                    'Upload hygiene artifacts',
+                ],
+            ],
+        ];
+        self::assertNotFalse(file_put_contents($policyPath, "<?php\n\nreturn " . var_export($policy, true) . ";\n"));
+
+        $policy = loadAgentHarnessReadinessPolicy($policyPath);
+        $baselineReport = evaluateAgentHarnessReadiness(
+            $this->tmpDir,
+            $policy,
+            new \DateTimeImmutable('2026-08-30', new \DateTimeZone('UTC')),
+            0,
+        );
+        $baselineBlockingGates = array_values(
+            array_filter(
+                $baselineReport['dimensions'],
+                static fn(array $dimension): bool => ($dimension['id'] ?? null) === 'blocking_gates',
+            ),
+        );
+        self::assertCount(1, $baselineBlockingGates);
+        self::assertSame('pass', $baselineBlockingGates[0]['status']);
+
+        $assertion = "  coverage-delta:\n";
+        self::assertSame(1, substr_count($ciWorkflow, $assertion));
+        $mutatedWorkflow = str_replace($assertion, "  coverage-delta:\n    continue-on-error: true\n", $ciWorkflow);
+        self::assertNotFalse(file_put_contents($ciWorkflowPath, $mutatedWorkflow));
+
+        $report = evaluateAgentHarnessReadiness(
+            $this->tmpDir,
+            $policy,
+            new \DateTimeImmutable('2026-08-30', new \DateTimeZone('UTC')),
+            0,
+        );
+
+        self::assertSame('fail', $report['status']);
+        $blockingGates = array_values(
+            array_filter(
+                $report['dimensions'],
+                static fn(array $dimension): bool => ($dimension['id'] ?? null) === 'blocking_gates',
+            ),
+        );
+        self::assertCount(1, $blockingGates);
+        self::assertSame('fail', $blockingGates[0]['status']);
+        self::assertTrue(
+            array_filter(
+                $blockingGates[0]['checks'],
+                static fn(array $check): bool => ($check['id'] ?? null) === 'job_coverage-delta' &&
+                    ($check['status'] ?? null) === 'fail',
+            ) !== [],
+        );
     }
 
     /**

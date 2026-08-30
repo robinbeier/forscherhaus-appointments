@@ -609,9 +609,9 @@ function agentHarnessReadinessEvaluateBlockingExecutionFingerprint(
             'label' => 'Blocking CI execution definitions match the canonical fingerprint',
             'status' => hash_equals($expectedSha256, $actualSha256) ? 'pass' : 'fail',
             'message' => hash_equals($expectedSha256, $actualSha256)
-                ? 'Every blocking job command and workflow default matches the reviewed contract.'
+                ? 'The workflow execution envelope and every blocking job definition match the reviewed contract.'
                 : sprintf(
-                    'Blocking job commands or workflow defaults changed without a matching reviewed contract fingerprint (expected %s, actual %s).',
+                    'The workflow execution envelope or a blocking job definition changed without a matching reviewed contract fingerprint (expected %s, actual %s).',
                     $expectedSha256,
                     $actualSha256,
                 ),
@@ -633,14 +633,56 @@ function agentHarnessReadinessCalculateBlockingExecutionSha256(array $ciWorkflow
     sort($blockingJobs, SORT_STRING);
     $blockingDefinitions = [];
     foreach ($blockingJobs as $jobName) {
-        $blockingDefinitions[$jobName] = $jobs[$jobName] ?? null;
+        $job = $jobs[$jobName] ?? null;
+        $blockingDefinitions[$jobName] = is_array($job)
+            ? agentHarnessReadinessNormalizeBlockingJobExecution($job)
+            : $job;
     }
+
+    $workflowExecutionEnvelope = [];
+    foreach (['on', 'permissions', 'env', 'defaults', 'concurrency'] as $key) {
+        if (array_key_exists($key, $ciWorkflow)) {
+            $workflowExecutionEnvelope[$key] = $ciWorkflow[$key];
+        }
+    }
+
     $executionDefinition = agentHarnessReadinessCanonicalizeMap([
-        'workflow_defaults' => $ciWorkflow['defaults'] ?? [],
+        'workflow_execution_envelope' => $workflowExecutionEnvelope,
         'blocking_jobs' => $blockingDefinitions,
     ]);
 
     return hash('sha256', json_encode($executionDefinition, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+}
+
+/**
+ * Remove display-only metadata while retaining every value that can change
+ * whether or how a blocking job executes. Only `needs` is order-insensitive;
+ * step order and all other lists remain untouched.
+ *
+ * @param array<string, mixed> $job
+ * @return array<string, mixed>
+ */
+function agentHarnessReadinessNormalizeBlockingJobExecution(array $job): array
+{
+    unset($job['name']);
+
+    if (array_key_exists('needs', $job)) {
+        $normalizedNeeds = agentHarnessReadinessNormalizeNeeds($job['needs']);
+        if ($normalizedNeeds !== null) {
+            $job['needs'] = $normalizedNeeds;
+        }
+    }
+
+    if (isset($job['steps']) && is_array($job['steps'])) {
+        $job['steps'] = array_map(
+            static fn(mixed $step): mixed => is_array($step)
+                ? agentHarnessReadinessNormalizeWorkflowStep($step)
+                : $step,
+            $job['steps'],
+        );
+    }
+
+    return agentHarnessReadinessCanonicalizeMap($job);
 }
 
 /**
@@ -1554,21 +1596,16 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         }
     }
 
-    $exactExecutionJobs = 0;
     foreach ($ci['blocking_jobs'] as $jobName => $job) {
         if (!is_string($jobName) || !is_array($job)) {
             throw new RuntimeException('Workflow contract blocking jobs must be a map of job objects.');
         }
         if (($job['kind'] ?? null) === 'exact_execution') {
-            $exactExecutionJobs++;
             continue;
         }
         if (($job['kind'] ?? null) !== 'fingerprinted_execution') {
             throw new RuntimeException('Workflow contract blocking jobs must declare a supported kind.');
         }
-    }
-    if ($exactExecutionJobs === 0) {
-        throw new RuntimeException('Workflow contract must define at least one exact-execution blocking job.');
     }
 
     return $contract;

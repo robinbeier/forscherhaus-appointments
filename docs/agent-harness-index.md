@@ -63,10 +63,12 @@ This file stays intentionally short. It is a map, not a second runbook.
     critical cross-document clauses to named Markdown sections; the checker
     fails closed on invalid grammar, missing sections, misplaced clauses, or
     duplicate clauses.
-  - Every contract-classified blocking job is bound to an exact execution
-    fingerprint. Any workflow/job/step shell override or explicit
-    `continue-on-error` fails the readiness check independently. Advisory signal
-    jobs are classified separately and remain outside this blocking contract.
+  - The workflow execution envelope and every contract-classified blocking job
+    are bound to an exact execution fingerprint; display-only job/step names
+    and order-insensitive `needs` lists are normalized. Any workflow/job/step
+    shell override or explicit `continue-on-error` fails the readiness check
+    independently. Advisory signal jobs are classified separately and remain
+    outside this blocking contract.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:
