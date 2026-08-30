@@ -73,8 +73,18 @@ class AgentWorkflowContractTest extends TestCase
         self::assertStringNotContainsString('warn-only', $writeContracts);
         self::assertIsArray($ciWorkflow);
         self::assertIsArray($ciWorkflow['jobs'] ?? null);
-        $this->assertBlockingWorkflowJob($ciWorkflow['jobs'], 'write-contract-booking');
-        $this->assertBlockingWorkflowJob($ciWorkflow['jobs'], 'write-contract-api');
+        $this->assertBlockingWorkflowJob(
+            $ciWorkflow['jobs'],
+            'write-contract-booking',
+            'write_contract_booking',
+            'write-contract-booking',
+        );
+        $this->assertBlockingWorkflowJob(
+            $ciWorkflow['jobs'],
+            'write-contract-api',
+            'write_contract_api',
+            'write-contract-api',
+        );
     }
 
     public function testHarnessEntryPointsAndGeneratedCachesStayAligned(): void
@@ -112,10 +122,43 @@ class AgentWorkflowContractTest extends TestCase
     /**
      * @param array<string, mixed> $jobs
      */
-    private function assertBlockingWorkflowJob(array $jobs, string $jobName): void
-    {
+    private function assertBlockingWorkflowJob(
+        array $jobs,
+        string $jobName,
+        string $changeOutput,
+        string $suiteName,
+    ): void {
         self::assertArrayHasKey($jobName, $jobs, 'Missing CI workflow job: ' . $jobName);
-        self::assertIsArray($jobs[$jobName]);
-        self::assertArrayNotHasKey('continue-on-error', $jobs[$jobName]);
+
+        $job = $jobs[$jobName];
+        self::assertIsArray($job);
+        self::assertArrayNotHasKey('continue-on-error', $job);
+
+        $needs = $job['needs'] ?? null;
+        self::assertIsArray($needs);
+        self::assertContains('changes', $needs);
+        self::assertContains('deep-runtime-suite', $needs);
+
+        $condition = $job['if'] ?? null;
+        self::assertIsString($condition);
+        self::assertStringContainsString('always()', $condition);
+        self::assertStringContainsString("needs.changes.outputs.{$changeOutput} == 'true'", $condition);
+
+        $steps = $job['steps'] ?? null;
+        self::assertIsArray($steps);
+        $expectedCommand = sprintf(
+            'php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=%s',
+            $suiteName,
+        );
+        $gateSteps = array_values(
+            array_filter(
+                $steps,
+                static fn(mixed $step): bool => is_array($step) && ($step['run'] ?? null) === $expectedCommand,
+            ),
+        );
+
+        self::assertCount(1, $gateSteps, 'Missing or duplicated fail-closed assertion step for ' . $jobName);
+        self::assertArrayNotHasKey('if', $gateSteps[0]);
+        self::assertArrayNotHasKey('continue-on-error', $gateSteps[0]);
     }
 }
