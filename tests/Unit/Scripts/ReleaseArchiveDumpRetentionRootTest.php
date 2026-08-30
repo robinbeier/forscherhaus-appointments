@@ -799,6 +799,29 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 
+    public function testExecuteRejectsMountDriftBeforeMarkerTempCleanup(): void
+    {
+        mkdir(self::STATE, 0700, true);
+        $temp = self::STATE . '/.last-success.json.tmp-' . str_repeat('e', 32);
+        file_put_contents($temp, "temporary marker\n");
+        chmod($temp, 0600);
+
+        $result = $this->runPatchedHelper(
+            "def assert_no_nested_mounts(web_names, orchestrator):\n    snapshot = stable_proc_mount_snapshot(orchestrator)",
+            "def assert_no_nested_mounts(web_names, orchestrator):\n    reject('nested_mount_boundary')\n    snapshot = stable_proc_mount_snapshot(orchestrator)",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('nested_mount_boundary', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertFileExists($temp);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
     public function testArchiveOnlyCrashPrefixWithoutPermanentHoldFailsClosedAndSidecarOnlyRejects(): void
     {
         unlink(self::RELEASES . '/old.build-provenance.json');

@@ -124,6 +124,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'def parse_mountinfo(lines):',
                 'def validate_nested_mount_records(',
                 'def trusted_lock_device(orchestrator):',
+                'def assert_pre_mutation_mount_safety():',
                 'PROC_SNAPSHOT_ATTEMPTS = 5',
                 'def stable_proc_mount_snapshot(orchestrator):',
                 "snapshot['mountinfo_before'] == snapshot['mountinfo_after']",
@@ -144,6 +145,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'regular, empty, root-owned',
                 'kernel handle `net:[inode]`',
                 'grants no protected-path exception',
+                'preparation or cleanup mutation',
                 'zero-mutation ledger',
                 'change the service capability set',
             ]
@@ -155,6 +157,16 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
             'CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE',
             $service,
         );
+        $executeStart = strpos($helper, 'def execute():');
+        $markerStart = strpos($helper, 'def marker_status(');
+        self::assertIsInt($executeStart);
+        self::assertIsInt($markerStart);
+        $execute = substr($helper, $executeStart, $markerStart - $executeStart);
+        $mountPreflight = strpos($execute, 'assert_pre_mutation_mount_safety()');
+        $statePreparation = strpos($execute, 'state = prepare_state_directory()');
+        self::assertIsInt($mountPreflight);
+        self::assertIsInt($statePreparation);
+        self::assertTrue($mountPreflight < $statePreparation);
         self::assertSame(3, preg_match_all('/\bCAP_[A-Z0-9_]+\b/', $service));
     }
 

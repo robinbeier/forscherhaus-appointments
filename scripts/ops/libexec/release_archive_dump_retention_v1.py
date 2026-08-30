@@ -1866,6 +1866,18 @@ def revalidate_recovery_sidecar(state, recovery):
         reject('candidate_changed', 75)
 
 
+def assert_pre_mutation_mount_safety():
+    web = open_absolute_directory(WEB_ROOT)
+    try:
+        orchestrator = open_absolute_directory(ORCHESTRATOR_ROOT, exact_mode=0o700)
+        try:
+            assert_no_nested_mounts(os.listdir(web), orchestrator)
+        finally:
+            os.close(orchestrator)
+    finally:
+        os.close(web)
+
+
 def cleanup_recovery_sidecar(state, recovery, mutations):
     revalidate_recovery_sidecar(state, recovery)
     mutations.begin()
@@ -2255,6 +2267,7 @@ def unlink_dump(backups, state, record, mutations):
 
 
 def execute():
+    assert_pre_mutation_mount_safety()
     state = prepare_state_directory()
     global_lock = None
     first = None

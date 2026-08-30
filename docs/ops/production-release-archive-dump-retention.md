@@ -81,6 +81,8 @@ that closed positive-inode form when both filesystem type and mount source are
 exactly `nsfs`; mount points remain absolute.
 The parser compatibility grants no protected-path exception. Any such mount at
 or below a protected tree is still an additional nested boundary and is rejected.
+Execute performs the same strict mount preflight before state-directory
+preparation or cleanup mutation, then repeats it during the locked inventory.
 Any Symlink, Hardlink, race, malformed state, additional protected mount,
 different source/device/root/parent, non-service context, or changing namespace
 remains fail-closed as `unsafe_global_lock`, `mount_state_unknown`, or
