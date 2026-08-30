@@ -149,6 +149,47 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         module = importlib.util.module_from_spec(spec)
         loader.exec_module(module)
 
+        def parser_diagnostic(value):
+            failures = []
+            mount_ids = []
+            for index, line in enumerate(value.splitlines(keepends=True)):
+                fields = line.rstrip('\n').split(' ')
+                separators = [position for position, field in enumerate(fields) if field == '-']
+                separator = separators[0] if len(separators) == 1 else None
+                try:
+                    module.parse_mountinfo([line])
+                except Exception as error:
+                    item = {
+                        'error': type(error).__name__,
+                        'field_count': len(fields),
+                        'has_empty_field': '' in fields,
+                        'index': index,
+                        'separator_count': len(separators),
+                        'separator_index': separator,
+                    }
+                    if separator is not None:
+                        item.update({
+                            'fields_after_separator': len(fields) - separator - 1,
+                            'filesystem_nonempty': bool(fields[separator + 1]) if len(fields) > separator + 1 else False,
+                            'source_nonempty': bool(fields[separator + 2]) if len(fields) > separator + 2 else False,
+                            'super_options_nonempty': bool(fields[separator + 3]) if len(fields) > separator + 3 else False,
+                        })
+                    if len(fields) >= 6:
+                        item.update({
+                            'major_minor_shape': bool(__import__('re').fullmatch(r'[0-9]+:[0-9]+', fields[2])),
+                            'mount_id_numeric': fields[0].isdigit(),
+                            'mount_point_absolute': fields[4].startswith('/'),
+                            'parent_id_numeric': fields[1].isdigit(),
+                            'root_absolute': fields[3].startswith('/'),
+                        })
+                    failures.append(item)
+                if fields and fields[0].isdigit():
+                    mount_ids.append(int(fields[0]))
+            return {
+                'duplicate_mount_id_count': len(mount_ids) - len(set(mount_ids)),
+                'individual_line_failures': failures,
+            }
+
         root = module.open_absolute_directory(module.ORCHESTRATOR_ROOT, exact_mode=0o700)
         observations = []
         try:
@@ -183,6 +224,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
                             result[name + '_records'] = len(module.parse_mountinfo(lines))
                         except Exception as error:
                             result[name + '_parse'] = type(error).__name__
+                            result[name + '_parser_diagnostic'] = parser_diagnostic(value)
                 for name in ('mountinfo', 'cgroup', 'self_namespace', 'pid1_namespace'):
                     before = values.get(name + '_before')
                     after = values.get(name + '_after')
