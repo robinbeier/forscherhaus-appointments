@@ -85,6 +85,29 @@
     },
     "ci": {
         "workflow": ".github/workflows/ci.yml",
+        "blocking_failure_control_policy": "strict-v1",
+        "job_classification_policy": "explicit-v1",
+        "advisory_jobs": ["heavy-job-duration-trends", "pdf-renderer-latency"],
+        "blocking_execution_fingerprints": {
+            "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
+            "changes": "c8cf92dad576b88662c08d394a763d56e595e58aa87de2b021cec8d8ef424a65",
+            "build-test": "45788327f8b649ea5fce541761d7b4cf013dde2a9c50bb8169d50f03ce2fa5b2",
+            "phpstan-application": "4234ce0b646e5de64081c41446abf75432faec8ec30639f7a1c7271c1ae86db7",
+            "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",
+            "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
+            "architecture-boundaries": "00625dfc8a980b19c6347413721c10cb57abd73d80f2e4ce5cccf80e8e05333f",
+            "typed-request-dto": "79ff1f34a75be0f5dc86fc8fd4a31747eacf93b74aa6a53d1ac791d0afe754c2",
+            "typed-request-contracts": "3f24dd994f4a7065af3882077f3916f214b18abd2ad35cf501a5a648c82b2966",
+            "deep-check-bootstrap": "28092b98e7676f35338cde15c7781c92b782fa8941fcc74559a28eff3b63f21f",
+            "deep-check-seed-snapshot": "90664b0f6efa617ada3e6071c8db2cdbc2409cb8a333450df9a34a692fdf1daa",
+            "deep-runtime-suite": "18fdb6d1f9861a456e69bf27f0c7bcd205ee255d6c83bb341d4eef97b74b30a8",
+            "coverage-shard-unit": "86c089bdc0a9c907c8ababc2d48515db82f619f44a59951eb1ba6283c2fe060c",
+            "coverage-shard-integration": "346e0d427863aa88762d2f070582f8b1eae235f593332aa2981f39eafba1d208",
+            "api-contract-openapi": "6e224d3eec1b26fa2eb1e4c3d62f45524253a5e5468cff7e029f9d8b4e2ce069",
+            "booking-controller-flows": "cc7be7cb392f2e57805c331b68019a719996bc4fcc32f744ac6461b0e64b3b69",
+            "coverage-delta": "16fe2e04d53fe11b5c1e0c2f6d8724582dc1d891cb229d67343f04d9c9310915",
+            "integration-smoke": "17de4f0907f27bed9f71f40547041109e8877d8f9ba2643821372dd2cf56b88a"
+        },
         "condition_grammar": {
             "version": 1,
             "operators": {
@@ -104,68 +127,63 @@
                     "false": false
                 }
             },
-            "zero_argument_calls": ["always"],
+            "zero_argument_calls": ["always", "failure"],
             "unsupported_syntax_fails_closed": true
         },
-        "job_inventory_is_exhaustive": true,
         "blocking_jobs": {
             "changes": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "build-test": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "phpstan-application": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "js-lint-changed": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "architecture-ownership-map": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "architecture-boundaries": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "typed-request-dto": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "typed-request-contracts": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "deep-check-bootstrap": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "deep-check-seed-snapshot": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "deep-runtime-suite": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "coverage-shard-unit": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "coverage-shard-integration": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "api-contract-openapi": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "booking-controller-flows": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "coverage-delta": {
-                "kind": "presence_only"
-            },
-            "heavy-job-duration-trends": {
-                "kind": "presence_only"
-            },
-            "pdf-renderer-latency": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             },
             "write-contract-booking": {
                 "kind": "exact_execution",
                 "needs": ["changes", "deep-runtime-suite"],
+                "runs_on": "ubuntu-latest",
+                "timeout_minutes": 35,
                 "condition": {
                     "all": [
                         {"call": "always"},
@@ -210,6 +228,8 @@
             "write-contract-api": {
                 "kind": "exact_execution",
                 "needs": ["changes", "deep-runtime-suite"],
+                "runs_on": "ubuntu-latest",
+                "timeout_minutes": 35,
                 "condition": {
                     "all": [
                         {"call": "always"},
@@ -252,7 +272,7 @@
                 ]
             },
             "integration-smoke": {
-                "kind": "presence_only"
+                "kind": "fingerprinted_execution"
             }
         }
     }

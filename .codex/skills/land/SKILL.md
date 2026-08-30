@@ -44,7 +44,10 @@ contract.
     - acknowledge them in GitHub where appropriate
     - move the Linear issue to `Rework` with [$linear](../linear/SKILL.md)
     - update the workpad
-    - fix the code, commit, push, and return to the watcher
+    - fix the code, commit, and push; after any fix/commit/push, return the
+      issue to `In Review` and rerun exact-head CI plus all required final
+      reviews on the new head before restoring `Ready to Merge`
+    - return to the watcher only after that new-head evidence is available
 6. Once the PR is green and mergeable, merge it explicitly:
     - confirm the current PR head still matches the exact reviewed and CI-green
       head

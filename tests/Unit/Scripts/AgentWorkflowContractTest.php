@@ -69,6 +69,21 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['evidence_privacy']['allow_secrets'] ?? null);
         self::assertFalse($contract['evidence_privacy']['allow_capability_values'] ?? null);
         self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
+        self::assertSame('strict-v1', $contract['ci']['blocking_failure_control_policy'] ?? null);
+        self::assertSame('explicit-v1', $contract['ci']['job_classification_policy'] ?? null);
+        self::assertSame(
+            ['heavy-job-duration-trends', 'pdf-renderer-latency'],
+            $contract['ci']['advisory_jobs'] ?? null,
+        );
+        self::assertArrayNotHasKey('unclassified_job_policy', $contract['ci']);
+        self::assertArrayNotHasKey('blocking_failure_controls', $contract['ci']);
+        self::assertArrayNotHasKey('blocking_execution_sha256', $contract['ci']);
+        self::assertArrayNotHasKey('required_exact_execution_jobs', $contract['ci']);
+        self::assertArrayNotHasKey('job_inventory_is_exhaustive', $contract['ci']);
+        self::assertIsArray($contract['ci']['blocking_execution_fingerprints'] ?? null);
+        foreach ($contract['ci']['blocking_execution_fingerprints'] as $fingerprint) {
+            self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', (string) $fingerprint);
+        }
         self::assertSame(
             [
                 'version' => 1,
@@ -89,7 +104,7 @@ class AgentWorkflowContractTest extends TestCase
                         'false' => false,
                     ],
                 ],
-                'zero_argument_calls' => ['always'],
+                'zero_argument_calls' => ['always', 'failure'],
                 'unsupported_syntax_fails_closed' => true,
             ],
             $contract['ci']['condition_grammar'] ?? null,
@@ -103,7 +118,6 @@ class AgentWorkflowContractTest extends TestCase
 
         self::assertIsArray($ci);
         self::assertSame('.github/workflows/ci.yml', $ci['workflow'] ?? null);
-        self::assertTrue($ci['job_inventory_is_exhaustive'] ?? null);
         self::assertIsArray($ci['blocking_jobs'] ?? null);
         $jobNames = array_keys($ci['blocking_jobs']);
         sort($jobNames, SORT_STRING);
@@ -121,10 +135,8 @@ class AgentWorkflowContractTest extends TestCase
                 'deep-check-bootstrap',
                 'deep-check-seed-snapshot',
                 'deep-runtime-suite',
-                'heavy-job-duration-trends',
                 'integration-smoke',
                 'js-lint-changed',
-                'pdf-renderer-latency',
                 'phpstan-application',
                 'typed-request-contracts',
                 'typed-request-dto',
@@ -134,16 +146,23 @@ class AgentWorkflowContractTest extends TestCase
             $jobNames,
         );
 
-        $presenceOnlyJobs = array_filter(
+        $fingerprintedJobs = array_filter(
             $ci['blocking_jobs'],
-            static fn(array $job): bool => ($job['kind'] ?? null) === 'presence_only',
+            static fn(array $job): bool => ($job['kind'] ?? null) === 'fingerprinted_execution',
         );
-        self::assertCount(19, $presenceOnlyJobs);
+        self::assertCount(17, $fingerprintedJobs);
+        $expectedFingerprintComponents = array_merge(['workflow_execution_envelope'], array_keys($fingerprintedJobs));
+        $actualFingerprintComponents = array_keys($ci['blocking_execution_fingerprints']);
+        sort($expectedFingerprintComponents, SORT_STRING);
+        sort($actualFingerprintComponents, SORT_STRING);
+        self::assertSame($expectedFingerprintComponents, $actualFingerprintComponents);
 
         foreach (['write-contract-booking', 'write-contract-api'] as $jobName) {
             $job = $ci['blocking_jobs'][$jobName];
             self::assertSame('exact_execution', $job['kind'] ?? null, $jobName);
             self::assertSame(['changes', 'deep-runtime-suite'], $job['needs'] ?? null, $jobName);
+            self::assertSame('ubuntu-latest', $job['runs_on'] ?? null, $jobName);
+            self::assertSame(35, $job['timeout_minutes'] ?? null, $jobName);
             self::assertSame('deep-runtime-suite-artifacts', $job['evidence']['artifact'] ?? null, $jobName);
             self::assertSame('storage/logs/ci/deep-runtime-suite', $job['evidence']['path'] ?? null, $jobName);
             self::assertSame(
@@ -170,6 +189,38 @@ class AgentWorkflowContractTest extends TestCase
                 $job['post_assertion_steps'] ?? null,
                 $jobName,
             );
+        }
+
+        $ciWorkflow = agentHarnessReadinessLoadWorkflowYaml(
+            $this->repoRoot . '/' . ltrim((string) $ci['workflow'], '/'),
+        );
+        $checks = array_merge(
+            agentHarnessReadinessEvaluateClassifiedJobInventory(
+                $ciWorkflow,
+                array_keys($ci['blocking_jobs']),
+                $ci['advisory_jobs'],
+            ),
+            agentHarnessReadinessEvaluateWorkflowFailureMasks($ciWorkflow, $ci['blocking_failure_control_policy']),
+            agentHarnessReadinessEvaluateBlockingJobs(
+                $ciWorkflow,
+                array_keys($ci['blocking_jobs']),
+                $ci['blocking_failure_control_policy'],
+            ),
+            agentHarnessReadinessEvaluateBlockingExecutionFingerprints(
+                $ciWorkflow,
+                array_keys($fingerprintedJobs),
+                $ci['condition_grammar'],
+                $ci['blocking_execution_fingerprints'],
+            ),
+            agentHarnessReadinessEvaluateBlockingJobContracts(
+                $ciWorkflow,
+                $ci['blocking_jobs'],
+                $ci['condition_grammar'],
+                $ci['blocking_failure_control_policy'],
+            ),
+        );
+        foreach ($checks as $check) {
+            self::assertSame('pass', $check['status'], $check['id'] . ': ' . ($check['message'] ?? ''));
         }
 
         $policy = require $this->repoRoot . '/scripts/ci/config/agent_harness_readiness_policy.php';

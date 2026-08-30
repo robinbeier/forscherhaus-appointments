@@ -116,13 +116,46 @@ Die ausführbare CI-Konfiguration steht in
 [agent workflow contract](../.codex/contracts/agent-workflow.json) ist die
 kanonische Prüfquelle für die erwarteten Blocking-Jobs sowie die exakte
 Ausführung der beiden Write-Contract-Gates. Der Readiness-Check verlangt, dass
-beide Quellen übereinstimmen. Das Job-Inventar ist vollständig: Jeder neue,
-umbenannte oder entfernte CI-Job muss im Vertrag zugleich klassifiziert werden.
-Seine versionierte Actions-Expression-Grammatik
-ist bewusst eng; nicht unterstützte Syntax wird fail-closed abgelehnt und
+beide Quellen übereinstimmen. Jeder vertraglich blockierende Job muss im
+Workflow vorhanden sein. Jeder Workflow-Job muss im Maschinenvertrag genau
+einmal als blockierend oder advisory klassifiziert sein. Neue oder umbenannte
+Jobs schlagen bis zu dieser bewussten Einordnung fail-closed fehl; die
+Advisory-Klassifikation erzeugt dabei weder Blocking-Authority noch einen
+Ausfuehrungs-Fingerprint. Die
+versionierte Actions-Expression-Grammatik des Vertrags ist bewusst eng; nicht
+unterstützte Syntax wird fail-closed abgelehnt und
 erfordert eine gemeinsame Änderung von Vertrag, Parser und Regressionstests.
+Die strikte Failure-Control-Policy ist im Checker versioniert. Der Vertrag
+referenziert nur ihre Policy-ID; unbekannte IDs schlagen fail-closed fehl. Eine
+neue Policy-Version verlangt eine bewusste Checker- und Regressionstest-
+Aenderung, nicht die parallele Pflege derselben Keylisten an mehreren Stellen.
 Auch die Schritte nach dem Assertion-Gate sind exakt festgelegt, damit keine
 ungeprüfte Evidence-Ausgabe oder nachgelagerte Aktion ergänzt werden kann.
+Der aus Triggern, Berechtigungen, globaler Umgebung, Defaults und Concurrency
+bestehende Workflow-Ausfuehrungsrahmen sowie jeder
+`fingerprinted_execution`-Job besitzen einen eigenen kanonischen SHA-256-
+Nachweis. Dadurch nennt eine Abweichung genau den betroffenen Rahmen oder Job.
+`exact_execution`-Jobs werden stattdessen direkt aus ihrer Job-Klasse abgeleitet
+und vollstaendig gegen ihren strukturierten Vertrag geprueft; eine parallele
+Ankerliste oder ein zusaetzlicher Hash ist nicht erforderlich. Dieser Vertrag
+bindet Abhaengigkeiten, Condition, Runner, Timeout und die vollstaendige
+Step-Folge; zusaetzliche ausfuehrungsrelevante Job-Keys werden abgewiesen. Job-
+und Step-Anzeigenamen sowie die Reihenfolge in `needs`, der Event-Kurzform,
+Trigger-`types` und `workflows` werden als nicht ausfuehrungsrelevant
+normalisiert.
+Glob-Filter behalten wegen reihenfolgeabhaengiger Negationen ihre Reihenfolge;
+Job- und Step-`if`-Ausdruecke werden ueber die versionierte Grammatik in eine
+kanonische semantische Form gebracht. Nicht unterstuetzte Ausdruecke schlagen
+fail-closed fehl; ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
+Jede explizite `continue-on-error`-Deklaration sowie
+jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
+unabhaengig davon fehlschlagen. Advisory-Signal-Jobs gehoeren nicht zum
+Blocking-Vertrag, bleiben aber namentlich klassifiziert, damit kein neuer
+Blocking-Job versehentlich ausserhalb des Vertrags landet.
+Bei einer beabsichtigten Aenderung einer fingerprinted Blocking-Ausfuehrung
+nennt der Readiness-Report die abweichenden Komponenten samt erwartetem und
+aktuellem Nachweis. Vertragswerte werden erst nach Review der zugehoerigen
+Workflow-Aenderung aktualisiert; Hashes sind keine alternative Freigabequelle.
 
 ## Rollback Policy
 

@@ -231,13 +231,39 @@ function evaluateAgentHarnessReadiness(
         $root . '/' . ltrim((string) $workflowContract['ci']['workflow'], '/'),
     );
     $blockingJobContracts = $workflowContract['ci']['blocking_jobs'];
-    $blockingGateChecks = agentHarnessReadinessEvaluateBlockingJobs($ciWorkflow, array_keys($blockingJobContracts));
+    $blockingFailureControlPolicy = $workflowContract['ci']['blocking_failure_control_policy'];
+    $conditionGrammar = $workflowContract['ci']['condition_grammar'];
+    $blockingGateChecks = array_merge(
+        agentHarnessReadinessEvaluateWorkflowFailureMasks($ciWorkflow, $blockingFailureControlPolicy),
+        agentHarnessReadinessEvaluateBlockingJobs(
+            $ciWorkflow,
+            array_keys($blockingJobContracts),
+            $blockingFailureControlPolicy,
+        ),
+        agentHarnessReadinessEvaluateClassifiedJobInventory(
+            $ciWorkflow,
+            array_keys($blockingJobContracts),
+            $workflowContract['ci']['advisory_jobs'],
+        ),
+        agentHarnessReadinessEvaluateBlockingExecutionFingerprints(
+            $ciWorkflow,
+            array_keys(
+                array_filter(
+                    $blockingJobContracts,
+                    static fn(array $job): bool => ($job['kind'] ?? null) === 'fingerprinted_execution',
+                ),
+            ),
+            $conditionGrammar,
+            $workflowContract['ci']['blocking_execution_fingerprints'],
+        ),
+    );
     $blockingGateChecks = array_merge(
         $blockingGateChecks,
         agentHarnessReadinessEvaluateBlockingJobContracts(
             $ciWorkflow,
             $blockingJobContracts,
-            $workflowContract['ci']['condition_grammar'],
+            $conditionGrammar,
+            $blockingFailureControlPolicy,
         ),
     );
     $blockingGatesDimension = agentHarnessReadinessScoreDimension($policy, 'blocking_gates', $blockingGateChecks);
@@ -470,10 +496,15 @@ function agentHarnessReadinessExtractMarkdownSection(string $content, string $he
 /**
  * @param array<string, mixed> $ciWorkflow
  * @param array<int, string> $blockingJobs
+ * @param string $failureControlPolicy
  * @return array<int, array<string, mixed>>
  */
-function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blockingJobs): array
-{
+function agentHarnessReadinessEvaluateBlockingJobs(
+    array $ciWorkflow,
+    array $blockingJobs,
+    string $failureControlPolicy,
+): array {
+    $failureControls = agentHarnessReadinessFailureControlsForPolicy($failureControlPolicy);
     $jobs = $ciWorkflow['jobs'] ?? [];
     if (!is_array($jobs)) {
         throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
@@ -483,7 +514,10 @@ function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blo
     foreach ($blockingJobs as $jobName) {
         $jobConfig = $jobs[$jobName] ?? null;
         $exists = is_array($jobConfig);
-        $isBlocking = $exists && ($jobConfig['continue-on-error'] ?? false) !== true;
+        $failureMasks = $exists
+            ? agentHarnessReadinessEvaluateBlockingJobFailureMasks($jobConfig, $jobName, $failureControls)
+            : [];
+        $isBlocking = $exists && $failureMasks === [];
 
         $checks[] = [
             'id' => 'job_' . $jobName,
@@ -492,39 +526,300 @@ function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blo
             'message' => !$exists
                 ? 'Required blocking CI job is missing.'
                 : ($isBlocking
-                    ? 'Job exists without top-level continue-on-error.'
-                    : 'Job is configured as non-blocking.'),
+                    ? 'Job exists without forbidden failure controls.'
+                    : implode('; ', $failureMasks)),
         ];
     }
-
-    $expectedJobNames = $blockingJobs;
-    $actualJobNames = array_keys($jobs);
-    sort($expectedJobNames, SORT_STRING);
-    sort($actualJobNames, SORT_STRING);
-    $checks[] = [
-        'id' => 'job_inventory',
-        'label' => 'CI job inventory matches the exhaustive workflow contract',
-        'status' => $actualJobNames === $expectedJobNames ? 'pass' : 'fail',
-        'message' =>
-            $actualJobNames === $expectedJobNames
-                ? 'Every CI job is classified by the workflow contract.'
-                : 'CI jobs are missing from or unexpectedly retained in the workflow contract.',
-    ];
 
     return $checks;
 }
 
 /**
  * @param array<string, mixed> $ciWorkflow
+ * @param string $failureControlPolicy
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateWorkflowFailureMasks(array $ciWorkflow, string $failureControlPolicy): array
+{
+    $failureControls = agentHarnessReadinessFailureControlsForPolicy($failureControlPolicy);
+
+    $failures = [];
+    $defaults = $ciWorkflow['defaults'] ?? null;
+    $runDefaults = is_array($defaults) ? $defaults['run'] ?? null : null;
+    if (is_array($runDefaults)) {
+        foreach ($failureControls['forbidden_workflow_run_default_keys'] as $key) {
+            if (array_key_exists($key, $runDefaults)) {
+                $failures[] = 'workflow declares forbidden defaults.run.' . $key;
+            }
+        }
+    }
+
+    return [
+        [
+            'id' => 'workflow_failure_controls',
+            'label' => 'CI workflow defaults preserve blocking failure semantics',
+            'status' => $failures === [] ? 'pass' : 'fail',
+            'message' =>
+                $failures === []
+                    ? 'Workflow defaults contain no forbidden failure controls.'
+                    : implode('; ', $failures),
+        ],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
+ * @param array<int, string> $blockingJobs
+ * @param array<int, string> $advisoryJobs
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateClassifiedJobInventory(
+    array $ciWorkflow,
+    array $blockingJobs,
+    array $advisoryJobs,
+): array {
+    $jobs = $ciWorkflow['jobs'] ?? [];
+    if (!is_array($jobs)) {
+        throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
+    }
+
+    $classifiedJobs = array_merge($blockingJobs, $advisoryJobs);
+    $workflowJobs = array_keys($jobs);
+    $missingJobNames = array_values(array_diff($classifiedJobs, $workflowJobs));
+    $unclassifiedJobNames = array_values(array_diff($workflowJobs, $classifiedJobs));
+    $overlappingJobNames = array_values(array_intersect($blockingJobs, $advisoryJobs));
+    sort($missingJobNames, SORT_STRING);
+    sort($unclassifiedJobNames, SORT_STRING);
+    sort($overlappingJobNames, SORT_STRING);
+
+    $failures = [];
+    if ($missingJobNames !== []) {
+        $failures[] = 'Classified CI jobs are missing: ' . implode(', ', $missingJobNames) . '.';
+    }
+    if ($unclassifiedJobNames !== []) {
+        $failures[] =
+            'CI jobs require an explicit blocking or advisory classification: ' .
+            implode(', ', $unclassifiedJobNames) .
+            '.';
+    }
+    if ($overlappingJobNames !== []) {
+        $failures[] = 'CI jobs cannot be both blocking and advisory: ' . implode(', ', $overlappingJobNames) . '.';
+    }
+
+    return [
+        [
+            'id' => 'job_classification_inventory',
+            'label' => 'Every CI job has exactly one explicit contract classification',
+            'status' => $failures === [] ? 'pass' : 'fail',
+            'message' =>
+                $failures === []
+                    ? 'Every CI job is classified exactly once as blocking or advisory.'
+                    : implode(' ', $failures),
+        ],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
+ * @param array<int, string> $blockingJobs
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateBlockingExecutionFingerprints(
+    array $ciWorkflow,
+    array $blockingJobs,
+    array $conditionGrammar,
+    array $expectedFingerprints,
+): array {
+    $actualFingerprints = agentHarnessReadinessCalculateBlockingExecutionFingerprints(
+        $ciWorkflow,
+        $blockingJobs,
+        $conditionGrammar,
+    );
+
+    $checks = [];
+    foreach ($actualFingerprints as $component => $actualSha256) {
+        $expectedSha256 = $expectedFingerprints[$component] ?? null;
+        $matches =
+            is_string($expectedSha256) &&
+            preg_match('/^[a-f0-9]{64}$/D', $expectedSha256) === 1 &&
+            hash_equals($expectedSha256, $actualSha256);
+        $checks[] = [
+            'id' => 'blocking_execution_fingerprint_' . $component,
+            'label' => 'Blocking CI execution component ' . $component . ' matches its canonical fingerprint',
+            'status' => $matches ? 'pass' : 'fail',
+            'message' => $matches
+                ? 'Execution component matches the reviewed contract.'
+                : sprintf(
+                    'Execution component %s changed without a matching reviewed contract fingerprint (expected %s, actual %s).',
+                    $component,
+                    is_string($expectedSha256) ? $expectedSha256 : 'missing',
+                    $actualSha256,
+                ),
+        ];
+    }
+    foreach (array_diff(array_keys($expectedFingerprints), array_keys($actualFingerprints)) as $component) {
+        $checks[] = [
+            'id' => 'blocking_execution_fingerprint_' . $component,
+            'label' => 'Blocking CI execution component ' . $component . ' matches its canonical fingerprint',
+            'status' => 'fail',
+            'message' => 'Contract fingerprint names a component that is not present in the workflow.',
+        ];
+    }
+    return $checks;
+}
+
+/** @return array<string, string> */
+function agentHarnessReadinessCalculateBlockingExecutionFingerprints(
+    array $ciWorkflow,
+    array $blockingJobs,
+    array $conditionGrammar,
+): array {
+    agentHarnessReadinessValidateConditionGrammar($conditionGrammar);
+    $jobs = $ciWorkflow['jobs'] ?? null;
+    if (!is_array($jobs)) {
+        throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
+    }
+    $envelope = [];
+    foreach (['on', 'permissions', 'env', 'defaults', 'concurrency'] as $key) {
+        if (array_key_exists($key, $ciWorkflow)) {
+            $envelope[$key] =
+                $key === 'on' ? agentHarnessReadinessNormalizeWorkflowTriggers($ciWorkflow[$key]) : $ciWorkflow[$key];
+        }
+    }
+    $fingerprints = [
+        'workflow_execution_envelope' => hash(
+            'sha256',
+            json_encode(agentHarnessReadinessCanonicalizeMap($envelope), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+        ),
+    ];
+    sort($blockingJobs, SORT_STRING);
+    foreach ($blockingJobs as $jobName) {
+        $job = $jobs[$jobName] ?? null;
+        if (!is_array($job)) {
+            continue;
+        }
+        $fingerprints[$jobName] = hash(
+            'sha256',
+            json_encode(
+                agentHarnessReadinessNormalizeBlockingJobExecution($job, $conditionGrammar),
+                JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ),
+        );
+    }
+    return $fingerprints;
+}
+
+/**
+ * Normalize trigger lists whose order cannot affect execution. Glob filters
+ * deliberately retain their order because negated patterns are order-sensitive.
+ */
+function agentHarnessReadinessNormalizeWorkflowTriggers(mixed $triggers): mixed
+{
+    if (!is_array($triggers)) {
+        return $triggers;
+    }
+
+    if (array_is_list($triggers)) {
+        if (array_all($triggers, static fn(mixed $event): bool => is_string($event))) {
+            sort($triggers, SORT_STRING);
+        }
+
+        return $triggers;
+    }
+
+    foreach ($triggers as $event => $configuration) {
+        if (!is_array($configuration)) {
+            continue;
+        }
+        foreach (['types', 'workflows'] as $orderInsensitiveKey) {
+            $values = $configuration[$orderInsensitiveKey] ?? null;
+            if (!is_array($values) || !array_is_list($values)) {
+                continue;
+            }
+            if (!array_all($values, static fn(mixed $value): bool => is_string($value))) {
+                continue;
+            }
+            sort($values, SORT_STRING);
+            $configuration[$orderInsensitiveKey] = $values;
+        }
+        $triggers[$event] = $configuration;
+    }
+
+    return agentHarnessReadinessCanonicalizeMap($triggers);
+}
+
+/**
+ * Remove display-only metadata while retaining every value that can change
+ * whether or how a blocking job executes. Only `needs` is order-insensitive;
+ * step order and all other lists remain untouched.
+ *
+ * @param array<string, mixed> $job
+ * @param array<string, mixed> $conditionGrammar
+ * @return array<string, mixed>
+ */
+function agentHarnessReadinessNormalizeBlockingJobExecution(array $job, array $conditionGrammar): array
+{
+    unset($job['name']);
+
+    if (array_key_exists('if', $job)) {
+        if (!is_string($job['if'])) {
+            throw new RuntimeException('Blocking job conditions must be strings.');
+        }
+        $job['if'] = agentHarnessReadinessParseCondition($job['if'], $conditionGrammar);
+    }
+
+    if (array_key_exists('needs', $job)) {
+        $normalizedNeeds = agentHarnessReadinessNormalizeNeeds($job['needs']);
+        if ($normalizedNeeds !== null) {
+            $job['needs'] = $normalizedNeeds;
+        }
+    }
+
+    if (isset($job['steps']) && is_array($job['steps'])) {
+        $job['steps'] = array_map(
+            static fn(mixed $step): mixed => is_array($step)
+                ? agentHarnessReadinessNormalizeBlockingExecutionStep($step, $conditionGrammar)
+                : $step,
+            $job['steps'],
+        );
+    }
+
+    return agentHarnessReadinessCanonicalizeMap($job);
+}
+
+/**
+ * @param array<string, mixed> $step
+ * @param array<string, mixed> $conditionGrammar
+ * @return array<string, mixed>
+ */
+function agentHarnessReadinessNormalizeBlockingExecutionStep(array $step, array $conditionGrammar): array
+{
+    unset($step['name']);
+
+    if (array_key_exists('if', $step)) {
+        if (!is_string($step['if'])) {
+            throw new RuntimeException('Blocking step conditions must be strings.');
+        }
+        $step['if'] = agentHarnessReadinessParseCondition($step['if'], $conditionGrammar);
+    }
+
+    return agentHarnessReadinessCanonicalizeMap($step);
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
  * @param array<string, mixed> $contracts
  * @param array<string, mixed> $conditionGrammar
+ * @param string $failureControlPolicy
  * @return array<int, array<string, mixed>>
  */
 function agentHarnessReadinessEvaluateBlockingJobContracts(
     array $ciWorkflow,
     array $contracts,
     array $conditionGrammar,
+    string $failureControlPolicy,
 ): array {
+    $failureControls = agentHarnessReadinessFailureControlsForPolicy($failureControlPolicy);
     $jobs = $ciWorkflow['jobs'] ?? [];
     if (!is_array($jobs)) {
         throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
@@ -537,7 +832,7 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
         }
 
         $kind = $contract['kind'] ?? null;
-        if ($kind === 'presence_only') {
+        if ($kind === 'fingerprinted_execution') {
             continue;
         }
         if ($kind !== 'exact_execution') {
@@ -545,12 +840,18 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
         }
 
         $expectedNeeds = agentHarnessReadinessNormalizeNeeds($contract['needs'] ?? null);
+        $expectedRunsOn = $contract['runs_on'] ?? null;
+        $expectedTimeoutMinutes = $contract['timeout_minutes'] ?? null;
         $expectedCondition = $contract['condition'] ?? null;
         $evidence = $contract['evidence'] ?? null;
         $assertion = $contract['assertion'] ?? null;
         $postAssertionSteps = $contract['post_assertion_steps'] ?? null;
         if (
             $expectedNeeds === null ||
+            !is_string($expectedRunsOn) ||
+            trim($expectedRunsOn) === '' ||
+            !is_int($expectedTimeoutMinutes) ||
+            $expectedTimeoutMinutes < 1 ||
             !is_array($expectedCondition) ||
             !is_array($evidence) ||
             !is_array($assertion) ||
@@ -595,13 +896,32 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
         if (!is_array($job)) {
             $failures[] = 'job is missing';
         } else {
-            if (array_key_exists('continue-on-error', $job)) {
-                $failures[] = 'job declares continue-on-error';
+            $failures = array_merge(
+                $failures,
+                agentHarnessReadinessEvaluateBlockingJobFailureMasks($job, $jobName, $failureControls),
+            );
+
+            $unexpectedJobKeys = array_diff(array_keys($job), [
+                'name',
+                'needs',
+                'if',
+                'runs-on',
+                'timeout-minutes',
+                'steps',
+            ]);
+            if ($unexpectedJobKeys !== []) {
+                $failures[] = 'unexpected job keys: ' . implode(', ', $unexpectedJobKeys);
             }
 
             $actualNeeds = agentHarnessReadinessNormalizeNeeds($job['needs'] ?? null);
             if ($actualNeeds === null || $actualNeeds !== $expectedNeeds) {
                 $failures[] = 'needs do not match contract';
+            }
+            if (($job['runs-on'] ?? null) !== $expectedRunsOn) {
+                $failures[] = 'runs-on does not match contract';
+            }
+            if (($job['timeout-minutes'] ?? null) !== $expectedTimeoutMinutes) {
+                $failures[] = 'timeout-minutes does not match contract';
             }
 
             $condition = $job['if'] ?? null;
@@ -685,6 +1005,64 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
     }
 
     return $checks;
+}
+
+/**
+ * @param array<string, mixed> $job
+ * @param array<string, array<int, string>> $failureControls
+ * @return array<int, string>
+ */
+function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+    array $job,
+    string $jobName,
+    array $failureControls,
+): array {
+    $failures = [];
+    foreach ($failureControls['forbidden_job_keys'] as $key) {
+        if (array_key_exists($key, $job)) {
+            $failures[] = 'job declares forbidden ' . $key;
+        }
+    }
+
+    $defaults = $job['defaults'] ?? null;
+    $runDefaults = is_array($defaults) ? $defaults['run'] ?? null : null;
+    if (is_array($runDefaults)) {
+        foreach ($failureControls['forbidden_job_run_default_keys'] as $key) {
+            if (array_key_exists($key, $runDefaults)) {
+                $failures[] = 'job declares forbidden defaults.run.' . $key;
+            }
+        }
+    }
+
+    $steps = $job['steps'] ?? null;
+    if (is_array($steps)) {
+        foreach ($steps as $stepIndex => $step) {
+            if (!is_array($step)) {
+                continue;
+            }
+            foreach ($failureControls['forbidden_step_keys'] as $key) {
+                if (array_key_exists($key, $step)) {
+                    $failures[] = sprintf('step %s declares forbidden %s', (string) $stepIndex, $key);
+                }
+            }
+        }
+    }
+
+    return array_map(static fn(string $failure): string => $jobName . ': ' . $failure, $failures);
+}
+
+/** @return array<string, array<int, string>> */
+function agentHarnessReadinessFailureControlsForPolicy(string $policy): array
+{
+    if ($policy !== 'strict-v1') {
+        throw new RuntimeException('Unknown workflow contract blocking failure-control policy.');
+    }
+    return [
+        'forbidden_workflow_run_default_keys' => ['shell'],
+        'forbidden_job_keys' => ['continue-on-error'],
+        'forbidden_job_run_default_keys' => ['shell'],
+        'forbidden_step_keys' => ['continue-on-error', 'shell'],
+    ];
 }
 
 /**
@@ -1311,36 +1689,93 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         !is_array($ci) ||
         !is_string($ci['workflow'] ?? null) ||
         trim($ci['workflow']) === '' ||
+        !is_string($ci['blocking_failure_control_policy'] ?? null) ||
+        ($ci['job_classification_policy'] ?? null) !== 'explicit-v1' ||
+        !is_array($ci['advisory_jobs'] ?? null) ||
+        !is_array($ci['blocking_execution_fingerprints'] ?? null) ||
+        $ci['blocking_execution_fingerprints'] === [] ||
         !is_array($ci['condition_grammar'] ?? null) ||
-        ($ci['job_inventory_is_exhaustive'] ?? null) !== true ||
         !is_array($ci['blocking_jobs'] ?? null) ||
         $ci['blocking_jobs'] === [] ||
         !is_array($surfaces) ||
         $surfaces === []
     ) {
         throw new RuntimeException(
-            'Workflow contract must define surfaces, a CI workflow, grammar, and blocking jobs.',
+            'Workflow contract must define surfaces, a CI workflow, a failure-control policy, component execution fingerprints, grammar, an explicit job-classification policy, advisory jobs, and blocking jobs.',
         );
     }
 
+    agentHarnessReadinessFailureControlsForPolicy($ci['blocking_failure_control_policy']);
+    $fingerprints = $ci['blocking_execution_fingerprints'];
+    foreach ($fingerprints as $component => $fingerprint) {
+        if (
+            !is_string($component) ||
+            trim($component) === '' ||
+            !is_string($fingerprint) ||
+            preg_match('/^[a-f0-9]{64}$/D', $fingerprint) !== 1
+        ) {
+            throw new RuntimeException('Workflow contract execution fingerprints are invalid.');
+        }
+    }
     agentHarnessReadinessValidateConditionGrammar($ci['condition_grammar']);
     agentHarnessReadinessRequireRepoRelativePath($ci['workflow'], 'ci.workflow');
 
-    $exactExecutionJobs = 0;
+    $advisoryJobs = $ci['advisory_jobs'];
+    if ($advisoryJobs !== [] && array_keys($advisoryJobs) !== range(0, count($advisoryJobs) - 1)) {
+        throw new RuntimeException('Workflow contract advisory jobs must be a list.');
+    }
+    foreach ($advisoryJobs as $jobName) {
+        if (!is_string($jobName) || trim($jobName) === '') {
+            throw new RuntimeException('Workflow contract advisory jobs must be non-empty strings.');
+        }
+    }
+    if (count(array_unique($advisoryJobs)) !== count($advisoryJobs)) {
+        throw new RuntimeException('Workflow contract advisory jobs must be unique.');
+    }
+
+    $fingerprintedExecutionJobs = [];
     foreach ($ci['blocking_jobs'] as $jobName => $job) {
         if (!is_string($jobName) || !is_array($job)) {
             throw new RuntimeException('Workflow contract blocking jobs must be a map of job objects.');
         }
         if (($job['kind'] ?? null) === 'exact_execution') {
-            $exactExecutionJobs++;
+            if (
+                agentHarnessReadinessNormalizeNeeds($job['needs'] ?? null) === null ||
+                !is_string($job['runs_on'] ?? null) ||
+                trim($job['runs_on']) === '' ||
+                !is_int($job['timeout_minutes'] ?? null) ||
+                $job['timeout_minutes'] < 1 ||
+                !is_array($job['condition'] ?? null) ||
+                !is_array($job['evidence'] ?? null) ||
+                !is_array($job['assertion'] ?? null) ||
+                !is_array($job['post_assertion_steps'] ?? null)
+            ) {
+                throw new RuntimeException('Workflow contract exact-execution job "' . $jobName . '" is malformed.');
+            }
             continue;
         }
-        if (($job['kind'] ?? null) !== 'presence_only') {
+        if (($job['kind'] ?? null) !== 'fingerprinted_execution') {
             throw new RuntimeException('Workflow contract blocking jobs must declare a supported kind.');
         }
+        if (array_keys($job) !== ['kind']) {
+            throw new RuntimeException('Workflow contract fingerprinted-execution jobs may only declare their kind.');
+        }
+        $fingerprintedExecutionJobs[] = $jobName;
     }
-    if ($exactExecutionJobs === 0) {
-        throw new RuntimeException('Workflow contract must define at least one exact-execution blocking job.');
+
+    $overlappingJobs = array_intersect(array_keys($ci['blocking_jobs']), $advisoryJobs);
+    if ($overlappingJobs !== []) {
+        throw new RuntimeException('Workflow contract jobs cannot be both blocking and advisory.');
+    }
+
+    $expectedFingerprintComponents = array_merge(['workflow_execution_envelope'], $fingerprintedExecutionJobs);
+    $actualFingerprintComponents = array_keys($fingerprints);
+    sort($expectedFingerprintComponents, SORT_STRING);
+    sort($actualFingerprintComponents, SORT_STRING);
+    if ($expectedFingerprintComponents !== $actualFingerprintComponents) {
+        throw new RuntimeException(
+            'Workflow contract execution fingerprints must match every fingerprinted-execution component exactly.',
+        );
     }
 
     return $contract;
