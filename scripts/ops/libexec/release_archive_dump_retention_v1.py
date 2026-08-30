@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import posixpath
 import pwd
 import re
 import secrets
@@ -102,6 +103,9 @@ RESTORE_IMAGE = 'mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15d
 STATE_ROOT = '/var/lib/fh-release-retention'
 ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator'
 GLOBAL_LOCK_LEAF = 'fh-production-change.lock'
+GLOBAL_LOCK_PATH = ORCHESTRATOR_ROOT + '/locks/' + GLOBAL_LOCK_LEAF
+RETENTION_SERVICE_CGROUP = '/system.slice/fh-release-archive-dump-retention.service'
+PROC_STATE_MAX_BYTES = 1_048_576
 MARKER_LEAF = 'last-success.json'
 MARKER_MAX_BYTES = 4096
 RELEASE_DIR_MIN_AGE = 7 * 86_400
@@ -742,17 +746,84 @@ def require_pending_restore_fresh(backup_id, now_ns):
 
 
 def decode_mount_field(value):
+    if (
+        not isinstance(value, str)
+        or '\x00' in value
+        or re.search(r'\\(?![0-7]{3})', value) is not None
+    ):
+        reject('mount_state_unknown')
     try:
-        return re.sub(
+        decoded = re.sub(
             r'\\([0-7]{3})',
             lambda match: chr(int(match.group(1), 8)),
             value,
         )
     except (TypeError, ValueError):
         reject('mount_state_unknown')
+    if '\x00' in decoded:
+        reject('mount_state_unknown')
+    return decoded
 
 
-def assert_no_nested_mounts(web_names):
+def parse_mountinfo(lines):
+    records = []
+    mount_ids = set()
+    for line in lines:
+        if not isinstance(line, str) or len(line.encode('utf-8')) > 16_384:
+            reject('mount_state_unknown')
+        fields = line.rstrip('\n').split(' ')
+        if '' in fields or fields.count('-') != 1:
+            reject('mount_state_unknown')
+        separator = fields.index('-')
+        if separator < 6 or len(fields) != separator + 4:
+            reject('mount_state_unknown')
+        try:
+            mount_id = int(fields[0])
+            parent_id = int(fields[1])
+        except ValueError:
+            reject('mount_state_unknown')
+        if (
+            mount_id <= 0
+            or parent_id <= 0
+            or mount_id in mount_ids
+            or re.fullmatch(r'[0-9]+:[0-9]+', fields[2]) is None
+            or not fields[5]
+            or not fields[separator + 1]
+            or not fields[separator + 3]
+        ):
+            reject('mount_state_unknown')
+        root = decode_mount_field(fields[3])
+        mount_point = decode_mount_field(fields[4])
+        mount_source = decode_mount_field(fields[separator + 2])
+        if not root.startswith('/') or not mount_point.startswith('/'):
+            reject('mount_state_unknown')
+        mount_ids.add(mount_id)
+        records.append({
+            'mount_id': mount_id,
+            'parent_id': parent_id,
+            'major_minor': fields[2],
+            'root': root,
+            'mount_point': mount_point,
+            'mount_options': frozenset(fields[5].split(',')),
+            'optional_fields': tuple(fields[6:separator]),
+            'filesystem_type': fields[separator + 1],
+            'mount_source': mount_source,
+            'super_options': tuple(fields[separator + 3].split(',')),
+        })
+    if not records:
+        reject('mount_state_unknown')
+    return records
+
+
+def validate_nested_mount_records(
+    records,
+    web_names,
+    lock_device,
+    cgroup_text,
+    invocation_id,
+    self_mount_namespace,
+    pid1_mount_namespace,
+):
     protected_prefixes = (
         APP_ROOT + '/',
         RELEASES_ROOT + '/',
@@ -765,22 +836,164 @@ def assert_no_nested_mounts(web_names):
         for name in web_names
         if name.startswith('easyappointments_')
     }
+    nested = []
+    by_id = {}
     try:
-        with open('/proc/self/mountinfo', 'r', encoding='utf-8') as handle:
-            for line in handle:
-                fields = line.rstrip('\n').split(' ')
-                if len(fields) < 7 or '-' not in fields:
-                    reject('mount_state_unknown')
-                mount_point = decode_mount_field(fields[4])
-                if any(mount_point.startswith(prefix) for prefix in protected_prefixes):
-                    reject('nested_mount_boundary')
-                if any(
-                    mount_point == path or mount_point.startswith(path + '/')
-                    for path in protected_release_paths
-                ):
-                    reject('nested_mount_boundary')
+        lock_major_minor = f'{os.major(lock_device)}:{os.minor(lock_device)}'
+        for record in records:
+            mount_id = record['mount_id']
+            mount_point = record['mount_point']
+            if mount_id in by_id:
+                reject('mount_state_unknown')
+            by_id[mount_id] = record
+            if any(mount_point.startswith(prefix) for prefix in protected_prefixes) or any(
+                mount_point == path or mount_point.startswith(path + '/')
+                for path in protected_release_paths
+            ):
+                nested.append(record)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        reject('mount_state_unknown')
+    if not nested:
+        return
+    if len(nested) != 1 or nested[0].get('mount_point') != GLOBAL_LOCK_PATH:
+        reject('nested_mount_boundary')
+
+    namespace_pattern = re.compile(r'mnt:\[[1-9][0-9]*\]\Z')
+    if (
+        cgroup_text != '0::' + RETENTION_SERVICE_CGROUP + '\n'
+        or not isinstance(invocation_id, str)
+        or re.fullmatch(r'[0-9a-f]{32}', invocation_id) is None
+        or not isinstance(self_mount_namespace, str)
+        or not isinstance(pid1_mount_namespace, str)
+        or namespace_pattern.fullmatch(self_mount_namespace) is None
+        or namespace_pattern.fullmatch(pid1_mount_namespace) is None
+        or self_mount_namespace == pid1_mount_namespace
+    ):
+        reject('nested_mount_boundary')
+
+    expected = nested[0]
+    parent = by_id.get(expected.get('parent_id'))
+    if parent is None:
+        reject('nested_mount_boundary')
+    containing = [
+        record
+        for record in records
+        if record is not expected
+        and (
+            record.get('mount_point') == '/'
+            or GLOBAL_LOCK_PATH.startswith(str(record.get('mount_point')).rstrip('/') + '/')
+        )
+    ]
+    if not containing:
+        reject('nested_mount_boundary')
+    closest = max(containing, key=lambda record: len(str(record.get('mount_point'))))
+    parent_point = parent.get('mount_point')
+    parent_root = parent.get('root')
+    if not isinstance(parent_point, str) or not isinstance(parent_root, str):
+        reject('nested_mount_boundary')
+    relative = posixpath.relpath(GLOBAL_LOCK_PATH, parent_point)
+    expected_root = posixpath.normpath(posixpath.join(parent_root, relative))
+    child_options = expected.get('mount_options')
+    parent_options = parent.get('mount_options')
+    if (
+        closest is not parent
+        or relative == '..'
+        or relative.startswith('../')
+        or not expected_root.startswith('/')
+        or expected.get('root') != expected_root
+        or not isinstance(child_options, (set, frozenset))
+        or not isinstance(parent_options, (set, frozenset))
+        or 'rw' not in child_options
+        or 'ro' in child_options
+        or 'ro' not in parent_options
+        or 'rw' in parent_options
+        or expected.get('major_minor') != parent.get('major_minor')
+        or expected.get('major_minor') != lock_major_minor
+        or expected.get('filesystem_type') != parent.get('filesystem_type')
+        or expected.get('mount_source') != parent.get('mount_source')
+        or expected.get('super_options') != parent.get('super_options')
+    ):
+        reject('nested_mount_boundary')
+
+
+def read_proc_text(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            value = handle.read(PROC_STATE_MAX_BYTES + 1)
     except (OSError, UnicodeError):
         reject('mount_state_unknown')
+    if len(value.encode('utf-8')) > PROC_STATE_MAX_BYTES:
+        reject('mount_state_unknown')
+    return value
+
+
+def trusted_lock_device(orchestrator):
+    locks = open_child_directory(orchestrator, 'locks', exact_mode=0o700)
+    try:
+        try:
+            before = os.stat(GLOBAL_LOCK_LEAF, dir_fd=locks, follow_symlinks=False)
+            descriptor = os.open(
+                GLOBAL_LOCK_LEAF,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=locks,
+            )
+        except OSError:
+            reject('unsafe_global_lock')
+        try:
+            try:
+                opened = os.fstat(descriptor)
+                after = os.stat(GLOBAL_LOCK_LEAF, dir_fd=locks, follow_symlinks=False)
+            except OSError:
+                reject('unsafe_global_lock')
+            if (
+                file_identity(before) != file_identity(opened)
+                or file_identity(opened) != file_identity(after)
+                or not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != 0
+                or opened.st_gid != 0
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or opened.st_nlink != 1
+                or opened.st_size != 0
+            ):
+                reject('unsafe_global_lock')
+            return opened.st_dev
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(locks)
+
+
+def assert_no_nested_mounts(web_names, orchestrator):
+    try:
+        self_namespace_before = os.readlink('/proc/self/ns/mnt')
+        pid1_namespace_before = os.readlink('/proc/1/ns/mnt')
+        mountinfo_before = read_proc_text('/proc/self/mountinfo')
+        cgroup_before = read_proc_text('/proc/self/cgroup')
+        lock_device = trusted_lock_device(orchestrator)
+        mountinfo_after = read_proc_text('/proc/self/mountinfo')
+        cgroup_after = read_proc_text('/proc/self/cgroup')
+        self_namespace_after = os.readlink('/proc/self/ns/mnt')
+        pid1_namespace_after = os.readlink('/proc/1/ns/mnt')
+    except OSError:
+        reject('mount_state_unknown')
+    if (
+        mountinfo_before != mountinfo_after
+        or cgroup_before != cgroup_after
+        or self_namespace_before != self_namespace_after
+        or pid1_namespace_before != pid1_namespace_after
+    ):
+        reject('mount_state_unknown')
+    validate_nested_mount_records(
+        parse_mountinfo(mountinfo_before.splitlines(keepends=True)),
+        web_names,
+        lock_device,
+        cgroup_before,
+        os.environ.get('INVOCATION_ID'),
+        self_namespace_before,
+        pid1_namespace_before,
+    )
+
+
 def open_global_lock():
     root = open_absolute_directory(ORCHESTRATOR_ROOT, exact_mode=0o700)
     try:
@@ -1638,7 +1851,7 @@ def gather():
         descriptors.append(state)
     try:
         device = os.fstat(web).st_dev
-        assert_no_nested_mounts(os.listdir(web))
+        assert_no_nested_mounts(os.listdir(web), orchestrator)
         current_release = read_release_marker(current)
         exact_rollback = open_child_directory(web, 'easyappointments_prev_' + current_release)
         try:

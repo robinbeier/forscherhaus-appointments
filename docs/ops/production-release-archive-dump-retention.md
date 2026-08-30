@@ -42,6 +42,37 @@ set before its restore attestation is published. It remains separately counted
 as pending and forces `execution_ready=false`; it is never a verified retention
 candidate or an unclassified foreign object.
 
+### Service mount boundary
+
+Protected release, archive, dump, evidence, and orchestrator trees still reject
+every nested mount by default. The hardened systemd service has one narrower
+requirement: `ProtectSystem=strict` and the read-only orchestrator tree cause
+systemd to expose the already trusted global production-change lock through a
+writable bind mount at
+`/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock`. A direct
+helper invocation has no such boundary and receives no exception.
+
+The helper accepts at most that one service-created lock boundary. A pathname
+match alone is never sufficient. The process must have the exact
+`/system.slice/fh-release-archive-dump-retention.service` cgroup, a closed
+systemd invocation ID, and a stable mount namespace distinct from PID 1. The
+lock mount must be the writable child of the immediately containing read-only
+mount; child and parent must have the same filesystem, source, superblock
+device and super options, and the child's mount root must be derived exactly
+from the parent root and target path. The observed device must also equal the
+device of the open lock file.
+
+Before accepting the boundary, the helper opens the lock through already
+trusted root-owned `0700` parents and pins a regular, empty, root-owned
+`0600`, single-link identity. It compares path and descriptor identity and
+reads mountinfo, cgroup, and namespace identity before and after that check.
+Any Symlink, Hardlink, race, malformed state, additional protected mount,
+different source/device/root/parent, non-service context, or changing namespace
+remains fail-closed as `unsafe_global_lock`, `mount_state_unknown`, or
+`nested_mount_boundary` with a zero-mutation ledger. This exception does not
+change the service capability set or any activity, open-file, lock, capacity,
+hold, continuity, handoff, admission, parent-death, Docker, or socket check.
+
 Every `prod_release_archive_dump_retention.v3` result also carries
 `mutation_outcome` and fixed aggregate `mutation_counts`. `none` means no
 marker-temp cleanup, pending cleanup, or candidate was removed and

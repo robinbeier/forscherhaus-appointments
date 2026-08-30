@@ -6,6 +6,7 @@ namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RootHostTestPrerequisites;
 
 final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 {
@@ -135,6 +136,70 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertDirectoryExists(self::BACKUPS . '/' . $this->dumpLeaf('old'));
         self::assertFileDoesNotExist(self::STATE . '/last-success.json');
         self::assertStringNotContainsString('dump-old', $result['stdout'] . $result['stderr']);
+    }
+
+    public function testDryRunPassesInExactSystemdSandboxWithZeroMutationLedger(): void
+    {
+        $unit = 'fh-release-archive-dump-retention';
+        $this->requireSystemdTestUnitAvailable($unit);
+        $result = $this->runInSystemdSandbox($unit);
+
+        self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('pass', $value['status']);
+        self::assertTrue($value['execution_ready']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+    }
+
+    public function testDryRunRejectsRealSystemdLockBoundaryOutsideExactServiceCgroup(): void
+    {
+        $unit = 'fh-release-archive-dump-retention-foreign';
+        $this->requireSystemdTestUnitAvailable($unit);
+        $result = $this->runInSystemdSandbox($unit);
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('nested_mount_boundary', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+    }
+
+    public function testDryRunRejectsUnsafeGlobalLockIdentitiesBeforeRetentionMutation(): void
+    {
+        $lock = self::ORCHESTRATOR . '/locks/fh-production-change.lock';
+        unlink($lock);
+        symlink('/dev/null', $lock);
+        $symlink = $this->runHelper('dry-run');
+        self::assertSame(70, $symlink['exit'], $symlink['stdout'] . $symlink['stderr']);
+        self::assertSame('unsafe_global_lock', $this->decode($symlink)['reason']);
+
+        unlink($lock);
+        touch($lock);
+        chmod($lock, 0600);
+        link($lock, self::ORCHESTRATOR . '/locks/foreign-hardlink');
+        $hardlink = $this->runHelper('dry-run');
+        self::assertSame(70, $hardlink['exit'], $hardlink['stdout'] . $hardlink['stderr']);
+        self::assertSame('unsafe_global_lock', $this->decode($hardlink)['reason']);
+        self::assertSame(0, array_sum($this->decode($hardlink)['mutation_counts']));
+    }
+
+    public function testDryRunRejectsGlobalLockIdentityRaceBeforeRetentionMutation(): void
+    {
+        $result = $this->runPatchedHelper(
+            "                opened = os.fstat(descriptor)\n                after = os.stat(GLOBAL_LOCK_LEAF, dir_fd=locks, follow_symlinks=False)",
+            "                opened = os.fstat(descriptor)\n                os.unlink(GLOBAL_LOCK_LEAF, dir_fd=locks)\n                replacement = os.open(GLOBAL_LOCK_LEAF, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=locks)\n                os.close(replacement)\n                after = os.stat(GLOBAL_LOCK_LEAF, dir_fd=locks, follow_symlinks=False)",
+            'dry-run',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('unsafe_global_lock', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
     }
 
     public function testExecuteDeletesOnlyEligibleClassesRetainsAttestationsAndPublishesMarker(): void
@@ -1543,6 +1608,91 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         fclose($pipes[1]);
         fclose($pipes[2]);
         return ['exit' => proc_close($process), 'stdout' => $stdout ?: '', 'stderr' => $stderr ?: ''];
+    }
+
+    /** @param list<string> $command @return array{exit:int,stdout:string,stderr:string} */
+    private function runProcess(array $command): array
+    {
+        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        return ['exit' => proc_close($process), 'stdout' => $stdout ?: '', 'stderr' => $stderr ?: ''];
+    }
+
+    private function requireSystemdTestUnitAvailable(string $unit): void
+    {
+        RootHostTestPrerequisites::enforce(
+            $this,
+            RootHostTestPrerequisites::classify(
+                is_executable('/usr/bin/systemd-run') && is_dir('/run/systemd/system'),
+                'systemd_runtime_available',
+                'An active systemd runtime with /usr/bin/systemd-run is required.',
+            ),
+        );
+        $loaded = $this->runProcess([
+            '/usr/bin/systemctl',
+            'show',
+            $unit . '.service',
+            '--property=LoadState',
+            '--value',
+        ]);
+        RootHostTestPrerequisites::enforce(
+            $this,
+            RootHostTestPrerequisites::classify(
+                $loaded['exit'] === 0 && trim($loaded['stdout']) === 'not-found',
+                'systemd_test_unit_available',
+                'The retention root-test unit name must be unused by the host.',
+            ),
+        );
+    }
+
+    /** @return array{exit:int,stdout:string,stderr:string} */
+    private function runInSystemdSandbox(string $unit): array
+    {
+        return $this->runProcess([
+            '/usr/bin/systemd-run',
+            '--quiet',
+            '--wait',
+            '--pipe',
+            '--collect',
+            '--unit=' . $unit,
+            '--property=Type=oneshot',
+            '--property=User=root',
+            '--property=Group=root',
+            '--property=UMask=0077',
+            '--property=StateDirectory=fh-release-retention',
+            '--property=StateDirectoryMode=0700',
+            '--property=NoNewPrivileges=yes',
+            '--property=PrivateTmp=yes',
+            '--property=PrivateDevices=yes',
+            '--property=ProtectSystem=strict',
+            '--property=ProtectHome=read-only',
+            '--property=ReadOnlyPaths=' .
+            $this->helper .
+            ' /var/lib/fh-deploy-evidence /var/lib/fh-deploy-orchestrator -/etc/fh/legacy-release-hold.v1.json',
+            '--property=ReadWritePaths=/var/www/html /root/releases /root/backups/easyappointments /var/lib/fh-release-retention /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
+            '--property=ProtectKernelTunables=yes',
+            '--property=ProtectKernelModules=yes',
+            '--property=ProtectKernelLogs=yes',
+            '--property=ProtectControlGroups=yes',
+            '--property=ProtectClock=yes',
+            '--property=RestrictRealtime=yes',
+            '--property=RestrictSUIDSGID=yes',
+            '--property=LockPersonality=yes',
+            '--property=MemoryDenyWriteExecute=yes',
+            '--property=SystemCallArchitectures=native',
+            '--property=CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE',
+            '--property=AmbientCapabilities=',
+            '/usr/bin/python3',
+            '-I',
+            '-B',
+            $this->helper,
+            'dry-run',
+        ]);
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */

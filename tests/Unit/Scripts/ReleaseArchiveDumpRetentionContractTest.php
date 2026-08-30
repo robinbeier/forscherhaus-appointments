@@ -110,6 +110,64 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringNotContainsString("'dump_sha':", substr($helper, strpos($helper, 'def result_payload')));
     }
 
+    public function testServiceMountBoundaryIsNarrowDocumentedAndCoveredInCi(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $helper = (string) file_get_contents($root . '/scripts/ops/libexec/release_archive_dump_retention_v1.py');
+        $docs = (string) file_get_contents($root . '/docs/ops/production-release-archive-dump-retention.md');
+        $service = (string) file_get_contents($root . '/scripts/ops/systemd/fh-release-archive-dump-retention.service');
+
+        foreach (
+            [
+                "GLOBAL_LOCK_PATH = ORCHESTRATOR_ROOT + '/locks/' + GLOBAL_LOCK_LEAF",
+                "RETENTION_SERVICE_CGROUP = '/system.slice/fh-release-archive-dump-retention.service'",
+                'def parse_mountinfo(lines):',
+                'def validate_nested_mount_records(',
+                'def trusted_lock_device(orchestrator):',
+                'mountinfo_before != mountinfo_after',
+                'file_identity(before) != file_identity(opened)',
+            ]
+            as $contract
+        ) {
+            self::assertStringContainsString($contract, $helper);
+        }
+        foreach (
+            [
+                'match alone is never sufficient.',
+                'same filesystem, source, superblock',
+                'regular, empty, root-owned',
+                'zero-mutation ledger',
+                'change the service capability set',
+            ]
+            as $contract
+        ) {
+            self::assertStringContainsString($contract, $docs);
+        }
+        self::assertStringContainsString(
+            'CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE',
+            $service,
+        );
+        self::assertSame(3, preg_match_all('/\bCAP_[A-Z0-9_]+\b/', $service));
+    }
+
+    public function testSyntheticMountGraphRegressionSuitePasses(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $process = proc_open(
+            ['/usr/bin/python3', '-m', 'unittest', 'tests.Unit.Scripts.release_archive_dump_retention_mounts_v1_test'],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $root,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), ($stdout ?: '') . ($stderr ?: ''));
+    }
+
     public function testMutationOutcomeCannotClaimNoDeletionAfterAnIrreversibleBoundary(): void
     {
         $helper = (string) file_get_contents(
