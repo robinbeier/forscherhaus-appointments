@@ -797,8 +797,17 @@ def parse_mountinfo(lines):
             reject('mount_state_unknown')
         root = decode_mount_field(fields[3])
         mount_point = decode_mount_field(fields[4])
+        filesystem_type = fields[separator + 1]
         mount_source = decode_mount_field(fields[separator + 2])
-        if not root.startswith('/') or not mount_point.startswith('/'):
+        kernel_network_namespace_root = (
+            filesystem_type == 'nsfs'
+            and mount_source == 'nsfs'
+            and re.fullmatch(r'net:\[[1-9][0-9]*\]', root) is not None
+        )
+        if (
+            (not root.startswith('/') and not kernel_network_namespace_root)
+            or not mount_point.startswith('/')
+        ):
             reject('mount_state_unknown')
         mount_ids.add(mount_id)
         records.append({
@@ -809,7 +818,7 @@ def parse_mountinfo(lines):
             'mount_point': mount_point,
             'mount_options': frozenset(fields[5].split(',')),
             'optional_fields': tuple(fields[6:separator]),
-            'filesystem_type': fields[separator + 1],
+            'filesystem_type': filesystem_type,
             'mount_source': mount_source,
             'super_options': tuple(fields[separator + 3].split(',')),
         })

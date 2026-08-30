@@ -127,6 +127,8 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'PROC_SNAPSHOT_ATTEMPTS = 5',
                 'def stable_proc_mount_snapshot(orchestrator):',
                 "snapshot['mountinfo_before'] == snapshot['mountinfo_after']",
+                "filesystem_type == 'nsfs'",
+                "re.fullmatch(r'net:\\[[1-9][0-9]*\\]', root)",
                 'file_identity(before) != file_identity(opened)',
             ]
             as $contract
@@ -140,6 +142,8 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'namespace-root mount (mount point `/`, root `/`)',
                 'same filesystem, source, superblock',
                 'regular, empty, root-owned',
+                'kernel handle `net:[inode]`',
+                'grants no protected-path exception',
                 'zero-mutation ledger',
                 'change the service capability set',
             ]

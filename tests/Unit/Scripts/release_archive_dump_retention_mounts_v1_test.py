@@ -224,6 +224,42 @@ class RetentionMountInfoTest(unittest.TestCase):
         self.assertEqual(records[0]["root"], "/mnt/my root")
         self.assertEqual(records[0]["mount_point"], "/mnt/my root\ttab\\slash")
 
+    def test_parser_accepts_only_kernel_network_namespace_roots_without_a_slash(self) -> None:
+        record = helper.parse_mountinfo([
+            mount_line(
+                41,
+                30,
+                "net:[4026531841]",
+                "/run/docker/netns/0123456789ab",
+                "rw,nosuid,nodev,noexec,relatime",
+                filesystem="nsfs",
+                source="nsfs",
+            )
+        ])[0]
+        self.assertEqual(record["root"], "net:[4026531841]")
+        self.assertEqual(record["filesystem_type"], "nsfs")
+
+        for name, root, filesystem, source in (
+            ("wrong filesystem", "net:[4026531841]", "tmpfs", "nsfs"),
+            ("wrong source", "net:[4026531841]", "nsfs", "none"),
+            ("zero inode", "net:[0]", "nsfs", "nsfs"),
+            ("wrong namespace", "mnt:[4026531841]", "nsfs", "nsfs"),
+            ("malformed handle", "net:4026531841", "nsfs", "nsfs"),
+        ):
+            with self.subTest(name=name), self.assertRaises(helper.RetentionError) as caught:
+                helper.parse_mountinfo([
+                    mount_line(
+                        41,
+                        30,
+                        root,
+                        "/run/docker/netns/0123456789ab",
+                        "rw,nosuid,nodev,noexec,relatime",
+                        filesystem=filesystem,
+                        source=source,
+                    )
+                ])
+            self.assertEqual(caught.exception.reason, "mount_state_unknown")
+
     def test_parser_accepts_kernel_mountinfo_lines_larger_than_legacy_ci_bound(self) -> None:
         long_super_options = "rw,lowerdir=" + ":".join(
             f"/var/lib/runner/snapshots/{index:04d}/fs" for index in range(512)
