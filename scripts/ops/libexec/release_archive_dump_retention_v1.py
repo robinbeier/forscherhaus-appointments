@@ -854,6 +854,8 @@ def validate_nested_mount_records(
     except (KeyError, TypeError, ValueError, OverflowError):
         reject('mount_state_unknown')
     if not nested:
+        if cgroup_text == '0::' + RETENTION_SERVICE_CGROUP + '\n':
+            reject('nested_mount_boundary')
         return
     if len(nested) != 1 or nested[0].get('mount_point') != GLOBAL_LOCK_PATH:
         reject('nested_mount_boundary')

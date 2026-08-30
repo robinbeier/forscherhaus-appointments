@@ -134,6 +134,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         foreach (
             [
                 'match alone is never sufficient.',
+                'absence is treated as sandbox drift',
                 'same filesystem, source, superblock',
                 'regular, empty, root-owned',
                 'zero-mutation ledger',

@@ -51,6 +51,8 @@ systemd to expose the already trusted global production-change lock through a
 writable bind mount at
 `/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock`. A direct
 helper invocation has no such boundary and receives no exception.
+Conversely, the exact retention-service cgroup must expose this boundary; its
+absence is treated as sandbox drift and fails closed.
 
 The helper accepts at most that one service-created lock boundary. A pathname
 match alone is never sufficient. The process must have the exact

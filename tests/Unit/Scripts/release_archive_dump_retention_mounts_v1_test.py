@@ -82,6 +82,10 @@ class RetentionMountInfoTest(unittest.TestCase):
             ["easyappointments_20260830"], LOCK_DEVICE, "", "", "mnt:[4026531840]", "mnt:[4026531840]",
         )
 
+    def test_exact_service_context_requires_lock_boundary(self) -> None:
+        records = helper.parse_mountinfo([mount_line(41, 30, "/", "/", "rw,relatime", super_options="rw")])
+        self.assert_reason("nested_mount_boundary", records)
+
     def test_exact_lock_bind_passes(self) -> None:
         self.validate()
 
@@ -155,7 +159,7 @@ class RetentionMountInfoTest(unittest.TestCase):
             mount_line(51, 30, "/", "/mnt/unrelated", "rw", device="8:2"),
         ])
         self.assert_reason("nested_mount_boundary", records)
-        self.validate([records[1]])
+        self.validate([records[1]], cgroup_text="")
 
     def test_parser_decodes_escaped_fields(self) -> None:
         records = helper.parse_mountinfo([mount_line(41, 30, "/mnt/my\\040root", "/mnt/my\\040root\\011tab\\134slash", "ro")])
