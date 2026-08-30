@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 class AgentWorkflowContractTest extends TestCase
 {
@@ -27,13 +28,19 @@ class AgentWorkflowContractTest extends TestCase
         self::assertStringContainsString('Any new push returns the issue to `In Review`', $workflow);
         self::assertStringContainsString('reviewed head, CI head, and current PR head are identical', $workflow);
         self::assertStringContainsString('PR-Head, CI-Head und final reviewter Head sind identisch', $template);
-        self::assertStringContainsString('do not move it to `Ready to Merge` during publish', $pushSkill);
-        self::assertStringContainsString('Any push after review or CI evidence was collected', $pushSkill);
-        self::assertStringContainsString(
-            'Any push after `Ready to Merge` immediately invalidates the landing',
-            $landSkill,
+
+        $pushContract = $this->readContractMarkers($pushSkill);
+        self::assertSame('In Review', $pushContract['publish_linear_state'] ?? null);
+        self::assertSame('false', $pushContract['publish_may_set_ready_to_merge'] ?? null);
+        self::assertSame('true', $pushContract['push_invalidates_exact_head_evidence'] ?? null);
+
+        $landContract = $this->readContractMarkers($landSkill);
+        self::assertSame('true', $landContract['merge_requires_exact_head'] ?? null);
+        self::assertSame(
+            'gh pr merge --merge --match-head-commit <current_head_sha>',
+            $landContract['merge_command'] ?? null,
         );
-        self::assertStringContainsString('gh pr merge --merge --match-head-commit <current_head_sha>', $landSkill);
+        self::assertSame('In Review', $landContract['push_after_ready_linear_state'] ?? null);
     }
 
     public function testSensitiveChangesRequireThreeIndependentReviewLenses(): void
@@ -53,7 +60,7 @@ class AgentWorkflowContractTest extends TestCase
     {
         $agents = $this->readRepoFile('AGENTS.md');
         $writeContracts = $this->readRepoFile('docs/ci-write-contracts.md');
-        $ciWorkflow = $this->readRepoFile('.github/workflows/ci.yml');
+        $ciWorkflow = Yaml::parseFile($this->repoRoot . '/.github/workflows/ci.yml');
 
         self::assertStringContainsString(
             'Caller-supplied flags, IDs, hashes, tokens, or paths never create public',
@@ -64,14 +71,10 @@ class AgentWorkflowContractTest extends TestCase
         self::assertStringContainsString('`write-contract-booking` ist aktuell blockierend', $writeContracts);
         self::assertStringContainsString('`write-contract-api` ist aktuell blockierend', $writeContracts);
         self::assertStringNotContainsString('warn-only', $writeContracts);
-        self::assertStringNotContainsString(
-            'continue-on-error:',
-            $this->readWorkflowJob($ciWorkflow, 'write-contract-booking'),
-        );
-        self::assertStringNotContainsString(
-            'continue-on-error:',
-            $this->readWorkflowJob($ciWorkflow, 'write-contract-api'),
-        );
+        self::assertIsArray($ciWorkflow);
+        self::assertIsArray($ciWorkflow['jobs'] ?? null);
+        $this->assertBlockingWorkflowJob($ciWorkflow['jobs'], 'write-contract-booking');
+        $this->assertBlockingWorkflowJob($ciWorkflow['jobs'], 'write-contract-api');
     }
 
     public function testHarnessEntryPointsAndGeneratedCachesStayAligned(): void
@@ -94,13 +97,25 @@ class AgentWorkflowContractTest extends TestCase
         return $contents;
     }
 
-    private function readWorkflowJob(string $workflow, string $jobName): string
+    /**
+     * @return array<string, string>
+     */
+    private function readContractMarkers(string $skill): array
     {
-        $pattern = '/^  ' . preg_quote($jobName, '/') . ':\R.*?(?=^  [a-zA-Z0-9_-]+:\R|\z)/ms';
-        $matched = preg_match($pattern, $workflow, $matches);
+        $markerCount = preg_match_all('/^- `(?<key>[a-z0-9_]+)`: `(?<value>[^`]+)`$/m', $skill, $matches);
 
-        self::assertSame(1, $matched, 'Missing CI workflow job: ' . $jobName);
+        self::assertGreaterThan(0, $markerCount, 'Missing contract markers');
 
-        return $matches[0];
+        return array_combine($matches['key'], $matches['value']);
+    }
+
+    /**
+     * @param array<string, mixed> $jobs
+     */
+    private function assertBlockingWorkflowJob(array $jobs, string $jobName): void
+    {
+        self::assertArrayHasKey($jobName, $jobs, 'Missing CI workflow job: ' . $jobName);
+        self::assertIsArray($jobs[$jobName]);
+        self::assertArrayNotHasKey('continue-on-error', $jobs[$jobName]);
     }
 }

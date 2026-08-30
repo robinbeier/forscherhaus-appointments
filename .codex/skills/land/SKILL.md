@@ -17,6 +17,12 @@ merge.
 - Process CI and review feedback until no blocking issues remain.
 - Merge the PR and move the Linear issue to `Done`.
 
+## Contract Markers
+
+- `merge_requires_exact_head`: `true`
+- `merge_command`: `gh pr merge --merge --match-head-commit <current_head_sha>`
+- `push_after_ready_linear_state`: `In Review`
+
 ## Workflow
 
 1. Confirm the current branch has an open PR and the worktree is clean.

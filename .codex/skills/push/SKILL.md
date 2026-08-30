@@ -16,6 +16,12 @@ must be pushed to an existing PR.
 - Attach the PR to the Linear issue and move the issue to the correct next
   Linear state.
 
+## Contract Markers
+
+- `publish_linear_state`: `In Review`
+- `publish_may_set_ready_to_merge`: `false`
+- `push_invalidates_exact_head_evidence`: `true`
+
 ## Steps
 
 1. Identify the current branch and confirm the worktree is clean.
