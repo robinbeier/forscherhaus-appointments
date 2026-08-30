@@ -71,7 +71,7 @@
     {
       "component_id": "booking-public",
       "role": "Public Booking",
-      "summary": "Public booking wizard read/write path up to booking completion handoff.",
+      "summary": "Public booking wizard read/write path, including server-side reschedule authority, up to booking completion handoff.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -88,13 +88,15 @@
         "assets/js/pages/booking_webmcp.js",
         "application/libraries/Availability.php",
         "application/libraries/Email_messages.php",
-        "application/libraries/Booking_request_dto_factory.php"
+        "application/libraries/Booking_request_dto_factory.php",
+        "application/libraries/Reschedule_authority.php"
       ],
       "key_files": [
         "application/controllers/Booking.php",
         "application/views/pages/booking.php",
         "assets/js/http/booking_http_client.js",
         "application/libraries/Email_messages.php",
+        "application/libraries/Reschedule_authority.php",
         "assets/js/pages/booking.js",
         "assets/js/pages/booking_webmcp.js"
       ],

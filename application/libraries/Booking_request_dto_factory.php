@@ -25,7 +25,14 @@ final class BookingRegisterRequestDto
         public readonly array $customer,
         public readonly bool $manageMode,
         public readonly ?string $captcha,
-    ) {
+        public readonly ?int $appointmentId,
+        public readonly ?int $customerId,
+        public readonly bool $hasIdentitySignal,
+    ) {}
+
+    public function isExistingAppointmentAttempt(): bool
+    {
+        return $this->manageMode || $this->hasIdentitySignal;
     }
 }
 
@@ -40,8 +47,7 @@ final class BookingAvailableHoursRequestDto
         public readonly string $selectedDate,
         public readonly bool $manageMode,
         public readonly ?int $appointmentId,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -55,8 +61,7 @@ final class BookingUnavailableDatesRequestDto
         public readonly ?int $appointmentId,
         public readonly bool $manageMode,
         public readonly string $selectedDate,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -64,9 +69,7 @@ final class BookingUnavailableDatesRequestDto
  */
 final class BookingThemeRequestDto
 {
-    public function __construct(public readonly string $theme)
-    {
-    }
+    public function __construct(public readonly string $theme) {}
 }
 
 /**
@@ -74,9 +77,7 @@ final class BookingThemeRequestDto
  */
 final class BookingCancellationRequestDto
 {
-    public function __construct(public readonly mixed $cancellationReason)
-    {
-    }
+    public function __construct(public readonly mixed $cancellationReason) {}
 }
 
 /**
@@ -158,7 +159,15 @@ class Booking_request_dto_factory
         $manage_mode = $this->request_normalizer->normalizeBool($normalized_post_data['manage_mode'] ?? false, false);
         $normalized_captcha = $this->request_normalizer->normalizeString($captcha, null, true);
 
-        return new BookingRegisterRequestDto($appointment, $customer, $manage_mode, $normalized_captcha);
+        return new BookingRegisterRequestDto(
+            $appointment,
+            $customer,
+            $manage_mode,
+            $normalized_captcha,
+            $this->request_normalizer->normalizePositiveInt($appointment['id'] ?? null, null),
+            $this->request_normalizer->normalizePositiveInt($customer['id'] ?? null, null),
+            array_key_exists('id', $appointment) || array_key_exists('id', $customer),
+        );
     }
 
     public function fromAvailableHoursPayload(

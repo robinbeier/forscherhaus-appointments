@@ -9,12 +9,14 @@ require_once __DIR__ . '/lib/OpenApiContractValidator.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/BookedSlotMatcher.php';
 require_once __DIR__ . '/lib/BookingWriteContractState.php';
+require_once __DIR__ . '/lib/BookingWriteReportSanitizer.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
 use CiContract\BookedSlotMatcher;
 use CiContract\BookingWriteContractState;
+use CiContract\BookingWriteReportSanitizer;
 use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
 use CiContract\DeterministicFixtureFactory;
@@ -261,7 +263,6 @@ function runBookingContractsAttempt(
                         'http_status' => $response->statusCode,
                         'url' => $response->url,
                         'appointment_id' => $appointmentId,
-                        'appointment_hash' => $appointmentHash,
                         'customer_id' => $customerId,
                     ];
                 },
@@ -287,6 +288,13 @@ function runBookingContractsAttempt(
                     if (!is_array($customerPayload)) {
                         throw new ContractAssertionException('manage_update requires primary customer payload state.');
                     }
+
+                    $customerPayload['id'] = toPositiveInt(
+                        $state['primary_customer_id'] ?? null,
+                        'manage_update.customer_id',
+                    );
+
+                    bootstrapRescheduleAuthority($client, $config, $factory, $state);
 
                     $updatedNotes = 'run:' . $state['run_id'] . ':manage-update';
                     $appointmentPayload = $factory->createBookingAppointmentPayload(
@@ -430,53 +438,7 @@ function runBookingContractsAttempt(
             runCheck(
                 'booking_reschedule_manage_mode_contract',
                 static function () use ($client, $config, $factory, &$state): array {
-                    $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
-                    if ($appointmentHash === '') {
-                        throw new ContractAssertionException(
-                            'reschedule_manage_mode requires primary appointment hash.',
-                        );
-                    }
-
-                    $response = $client->get(
-                        'booking/reschedule/' . rawurlencode($appointmentHash),
-                        [],
-                        $config['http_timeout'],
-                    );
-                    GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking/reschedule/{hash}');
-
-                    $bootstrap = $factory->extractBookingBootstrap($response->body);
-                    $manageMode = $bootstrap['manage_mode'] ?? null;
-
-                    if ($manageMode !== true) {
-                        throw new ContractAssertionException('reschedule view must expose manage_mode=true.');
-                    }
-
-                    $appointmentData = $bootstrap['appointment_data'] ?? null;
-                    if (!is_array($appointmentData)) {
-                        throw new ContractAssertionException('reschedule view must include appointment_data object.');
-                    }
-
-                    $appointmentId = toPositiveInt(
-                        $state['primary_appointment_id'] ?? null,
-                        'reschedule.primary_appointment_id',
-                    );
-                    $resolvedId = toPositiveInt($appointmentData['id'] ?? null, 'reschedule.appointment_data.id');
-                    if ($resolvedId !== $appointmentId) {
-                        throw new ContractAssertionException(
-                            sprintf(
-                                'reschedule appointment id mismatch: expected %d, got %d.',
-                                $appointmentId,
-                                $resolvedId,
-                            ),
-                        );
-                    }
-
-                    return [
-                        'http_status' => $response->statusCode,
-                        'url' => $response->url,
-                        'appointment_id' => $resolvedId,
-                        'manage_mode' => true,
-                    ];
+                    return bootstrapRescheduleAuthority($client, $config, $factory, $state);
                 },
                 $checks,
                 selectionReasonForCheck($config, 'booking_reschedule_manage_mode_contract'),
@@ -608,6 +570,51 @@ function runBookingContractsAttempt(
         $cleanupSummary = $cleanup->cleanup();
         $state['cleanup'] = $cleanupSummary;
     }
+}
+
+/**
+ * Establish the canonical, session-bound reschedule authority without
+ * returning the route capability in check details or reports.
+ *
+ * @param array<string, mixed> $config
+ * @param array<string, mixed> $state
+ * @return array{http_status:int,appointment_id:int,manage_mode:bool}
+ */
+function bootstrapRescheduleAuthority(
+    GateHttpClient $client,
+    array $config,
+    DeterministicFixtureFactory $factory,
+    array $state,
+): array {
+    $appointmentHash = trim((string) ($state['primary_appointment_hash'] ?? ''));
+    if ($appointmentHash === '') {
+        throw new ContractAssertionException('reschedule bootstrap requires primary appointment capability state.');
+    }
+
+    $response = $client->get('booking/reschedule/' . rawurlencode($appointmentHash), [], $config['http_timeout']);
+    GateAssertions::assertStatus($response->statusCode, 200, 'GET /booking/reschedule/{hash}');
+
+    $bootstrap = $factory->extractBookingBootstrap($response->body);
+    if (($bootstrap['manage_mode'] ?? null) !== true) {
+        throw new ContractAssertionException('reschedule view must expose manage_mode=true.');
+    }
+
+    $appointmentData = $bootstrap['appointment_data'] ?? null;
+    if (!is_array($appointmentData)) {
+        throw new ContractAssertionException('reschedule view must include appointment_data object.');
+    }
+
+    $appointmentId = toPositiveInt($state['primary_appointment_id'] ?? null, 'reschedule.primary_appointment_id');
+    $resolvedId = toPositiveInt($appointmentData['id'] ?? null, 'reschedule.appointment_data.id');
+    if ($resolvedId !== $appointmentId) {
+        throw new ContractAssertionException('reschedule appointment identity mismatch.');
+    }
+
+    return [
+        'http_status' => $response->statusCode,
+        'appointment_id' => $resolvedId,
+        'manage_mode' => true,
+    ];
 }
 
 /**
@@ -1145,6 +1152,9 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
 
     $passed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'pass'));
     $failed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'fail'));
+    $reportState = BookingWriteReportSanitizer::sanitize($state);
+    $reportChecks = BookingWriteReportSanitizer::sanitize($checks);
+    $reportFailure = BookingWriteReportSanitizer::sanitize($failure);
 
     $report = [
         'generated_at_utc' => gmdate('c'),
@@ -1158,10 +1168,10 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
             'failed' => $failed,
         ],
         'retry' => $retryMetadata,
-        'state' => $state,
-        'checks' => $checks,
-        'cleanup' => $state['cleanup'] ?? null,
-        'failure' => $failure,
+        'state' => $reportState,
+        'checks' => $reportChecks,
+        'cleanup' => is_array($reportState) ? $reportState['cleanup'] ?? null : null,
+        'failure' => $reportFailure,
     ];
 
     $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);

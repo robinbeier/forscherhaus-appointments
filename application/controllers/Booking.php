@@ -23,6 +23,8 @@
  */
 class Booking extends EA_Controller
 {
+    public Reschedule_authority $reschedule_authority;
+
     public array $allowed_customer_fields = [
         'id',
         'first_name',
@@ -79,6 +81,7 @@ class Booking extends EA_Controller
         $this->load->library('availability');
         $this->load->library('webhooks_client');
         $this->load->library('booking_request_dto_factory');
+        $this->load->library('reschedule_authority');
     }
 
     /**
@@ -249,6 +252,7 @@ class Booking extends EA_Controller
             $appointment = $results[0];
             $provider = $this->providers_model->find($appointment['id_users_provider']);
             $customer = $this->customers_model->find($appointment['id_users_customer']);
+            $this->rescheduleAuthority()->issue((int) $appointment['id']);
             $customer_token = $this->createCustomerToken((int) $customer['id']);
         } else {
             $manage_mode = false;
@@ -334,6 +338,9 @@ class Booking extends EA_Controller
      */
     public function register(): void
     {
+        $transaction_open = false;
+        $creation_identity_lock = null;
+
         try {
             $disable_booking = setting('disable_booking');
 
@@ -344,11 +351,51 @@ class Booking extends EA_Controller
             $request_dto = $this->bookingRequestDtoFactory()->buildRegisterRequest();
             $appointment = $request_dto->appointment;
             $customer = $request_dto->customer;
-            $manage_mode = $request_dto->manageMode;
             $captcha = $request_dto->captcha;
 
-            // Check appointment availability before registering it to the database.
-            $appointment['id_users_provider'] = $this->check_datetime_availability($request_dto);
+            $require_captcha = (bool) setting('require_captcha');
+            $captcha_phrase = session('captcha_phrase');
+
+            // CAPTCHA remains a prerequisite and is checked before a one-time
+            // authority can be consumed.
+            if ($require_captcha && strtoupper((string) $captcha_phrase) !== strtoupper((string) $captcha)) {
+                json_response([
+                    'captcha_verification' => false,
+                ]);
+
+                return;
+            }
+
+            $authority_claim = null;
+
+            if ($request_dto->isExistingAppointmentAttempt()) {
+                $authority_claim = $this->rescheduleAuthority()->claim(
+                    $request_dto->appointmentId,
+                    $request_dto->customerId,
+                );
+                $appointment['id'] = $authority_claim->appointmentId;
+                $customer['id'] = $authority_claim->customerId;
+            } else {
+                // IDs supplied outside the canonical authority flow must never
+                // turn a normal public creation into an update.
+                unset($appointment['id'], $customer['id']);
+            }
+
+            $existing_customer_id = null;
+
+            if (!($authority_claim instanceof RescheduleAuthorityClaim)) {
+                $creation_identity_lock = $this->rescheduleAuthority()->acquireCreationIdentityLock(
+                    $customer['email'] ?? null,
+                );
+
+                if ($this->customers_model->exists($customer)) {
+                    $existing_customer_id = $this->customers_model->find_record_id($customer);
+                }
+            }
+
+            // Resolve ANY_PROVIDER or reject an unavailable concrete target.
+            // Availability is checked again under the provider lock below.
+            $appointment['id_users_provider'] = $this->check_datetime_availability($appointment);
 
             if (!$appointment['id_users_provider']) {
                 json_response(
@@ -362,35 +409,72 @@ class Booking extends EA_Controller
                 return;
             }
 
-            $provider = $this->providers_model->find($appointment['id_users_provider']);
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start public booking transaction.');
+            }
 
-            $service = $this->services_model->find($appointment['id_services']);
+            $transaction_open = true;
 
-            $require_captcha = (bool) setting('require_captcha');
+            $target_provider_id = (int) $appointment['id_users_provider'];
+            $target_service_id = (int) $appointment['id_services'];
 
-            $captcha_phrase = session('captcha_phrase');
+            if ($authority_claim instanceof RescheduleAuthorityClaim) {
+                $this->rescheduleAuthority()->verifyLockedState(
+                    $authority_claim,
+                    $target_provider_id,
+                    $target_service_id,
+                );
+            } else {
+                $this->rescheduleAuthority()->lockCreationTarget(
+                    $target_provider_id,
+                    $target_service_id,
+                    $existing_customer_id,
+                );
+            }
 
-            // Validate the CAPTCHA string.
+            // The provider row lock serializes public writes for this target;
+            // rerun the existing availability boundary after acquiring it.
+            $locked_provider_id = $this->check_datetime_availability($appointment);
 
-            if ($require_captcha && strtoupper((string) $captcha_phrase) !== strtoupper((string) $captcha)) {
-                json_response([
-                    'captcha_verification' => false,
-                ]);
+            if ($locked_provider_id !== $target_provider_id) {
+                $this->db->trans_rollback();
+                $transaction_open = false;
+
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
 
                 return;
             }
 
-            if ($this->customers_model->exists($customer)) {
-                $customer['id'] = $this->customers_model->find_record_id($customer);
+            $provider = $this->providers_model->find($target_provider_id);
 
-                $existing_appointments = $this->appointments_model->get([
-                    'id !=' => $manage_mode ? $appointment['id'] : null,
-                    'id_users_customer' => $customer['id'],
-                    'start_datetime <=' => $appointment['start_datetime'],
-                    'end_datetime >=' => $appointment['end_datetime'],
-                ]);
+            $service = $this->services_model->find($target_service_id);
 
-                if (count($existing_appointments)) {
+            if ($authority_claim instanceof RescheduleAuthorityClaim) {
+                $customer['id'] = $authority_claim->customerId;
+            } elseif ($existing_customer_id !== null) {
+                $customer['id'] = $existing_customer_id;
+            }
+
+            $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);
+
+            if (!empty($customer['id'])) {
+                $exclude_appointment_id =
+                    $authority_claim instanceof RescheduleAuthorityClaim ? (int) $appointment['id'] : null;
+
+                if (
+                    $this->rescheduleAuthority()->customerHasOverlap(
+                        (int) $customer['id'],
+                        (string) $appointment['start_datetime'],
+                        (string) $appointment['end_datetime'],
+                        $exclude_appointment_id,
+                    )
+                ) {
                     throw new RuntimeException(lang('customer_is_already_booked'));
                 }
             }
@@ -440,12 +524,21 @@ class Booking extends EA_Controller
             $appointment_status_options_json = setting('appointment_status_options', '[]');
             $appointment_status_options = json_decode($appointment_status_options_json, true) ?? [];
             $appointment['status'] = $appointment_status_options[0] ?? null;
-            $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);
 
             $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
 
             $appointment_id = $this->appointments_model->save($appointment);
             $appointment = $this->appointments_model->find($appointment_id);
+
+            if (!$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit public booking transaction.');
+            }
+
+            $transaction_open = false;
+            if ($creation_identity_lock !== null) {
+                $this->rescheduleAuthority()->releaseCreationIdentityLock($creation_identity_lock);
+            }
+            $creation_identity_lock = null;
 
             $company_color = setting('company_color');
 
@@ -467,7 +560,7 @@ class Booking extends EA_Controller
                 $provider,
                 $customer,
                 $settings,
-                $manage_mode,
+                $authority_claim instanceof RescheduleAuthorityClaim,
             );
 
             $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_SAVE, $appointment);
@@ -478,8 +571,28 @@ class Booking extends EA_Controller
             ];
 
             json_response($response);
+        } catch (RescheduleAuthorityException $e) {
+            if ($transaction_open) {
+                $this->db->trans_rollback();
+            }
+
+            json_response(
+                [
+                    'success' => false,
+                    'message' => lang('appointment_not_found'),
+                ],
+                403,
+            );
         } catch (Throwable $e) {
+            if ($transaction_open) {
+                $this->db->trans_rollback();
+            }
+
             json_exception($e);
+        } finally {
+            if ($creation_identity_lock !== null) {
+                $this->rescheduleAuthority()->releaseCreationIdentityLock($creation_identity_lock);
+            }
         }
     }
 
@@ -545,14 +658,14 @@ class Booking extends EA_Controller
      * Use this method just before the customer confirms the appointment registration. If the selected date was reserved
      * in the meanwhile, the customer must be prompted to select another time.
      *
+     * @param array<string, mixed> $appointment
+     *
      * @return int|null Returns the ID of the provider that is available for the appointment.
      *
      * @throws Exception
      */
-    protected function check_datetime_availability(BookingRegisterRequestDto $register_request): ?int
+    protected function check_datetime_availability(array $appointment): ?int
     {
-        $appointment = $register_request->appointment;
-
         $this->assertNotProviderUiSmokeBookingTarget(
             (int) $appointment['id_users_provider'],
             (int) $appointment['id_services'],
@@ -914,5 +1027,23 @@ class Booking extends EA_Controller
         $this->booking_request_dto_factory = $CI->booking_request_dto_factory;
 
         return $this->booking_request_dto_factory;
+    }
+
+    protected function rescheduleAuthority(): Reschedule_authority
+    {
+        if (isset($this->reschedule_authority) && $this->reschedule_authority instanceof Reschedule_authority) {
+            return $this->reschedule_authority;
+        }
+
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+
+        if (!isset($CI->reschedule_authority) || !$CI->reschedule_authority instanceof Reschedule_authority) {
+            $CI->load->library('reschedule_authority');
+        }
+
+        $this->reschedule_authority = $CI->reschedule_authority;
+
+        return $this->reschedule_authority;
     }
 }

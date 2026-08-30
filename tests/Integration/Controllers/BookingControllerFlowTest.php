@@ -41,12 +41,20 @@ class BookingControllerFlowTest extends TestCase
         $this->fixtures->setSetting('appointment_status_options', json_encode(['Booked', 'Cancelled']));
         $this->fixtures->setSetting('book_advance_timeout', '60');
 
+        session([
+            'public_reschedule_authority' => null,
+            'public_reschedule_authority_context' => null,
+        ]);
         $this->resetRuntimeState('POST');
     }
 
     protected function tearDown(): void
     {
         $this->resetRuntimeState('POST');
+        session([
+            'public_reschedule_authority' => null,
+            'public_reschedule_authority_context' => null,
+        ]);
         $this->fixtures->restoreSettings();
         $this->fixtures->cleanup();
 
@@ -104,6 +112,173 @@ class BookingControllerFlowTest extends TestCase
         $this->assertTrue($this->fixtures->customerExistsByEmail($customerEmail));
     }
 
+    public function testCreationIdentityLockSerializesAcrossDatabaseConnections(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $email = 'identity-lock-' . bin2hex(random_bytes(4)) . '@example.invalid';
+        $lockName = $controller->reschedule_authority->acquireCreationIdentityLock($email);
+        $secondaryDatabase = get_instance()->load->database('', true);
+        $secondaryAcquired = false;
+
+        $this->assertNotNull($lockName);
+        $contendedLock = $lockName;
+
+        try {
+            $primaryConnection = get_instance()->db->query('SELECT CONNECTION_ID() AS id')->row_array();
+            $secondaryConnection = $secondaryDatabase->query('SELECT CONNECTION_ID() AS id')->row_array();
+            $this->assertNotSame((int) $primaryConnection['id'], (int) $secondaryConnection['id']);
+
+            $contended = $secondaryDatabase->query('SELECT GET_LOCK(?, 0) AS acquired', [$lockName])->row_array();
+            $this->assertSame(0, (int) ($contended['acquired'] ?? -1));
+
+            $controller->reschedule_authority->releaseCreationIdentityLock($lockName);
+            $lockName = null;
+
+            $acquired = $secondaryDatabase->query('SELECT GET_LOCK(?, 0) AS acquired', [$contendedLock])->row_array();
+            $secondaryAcquired = (int) ($acquired['acquired'] ?? 0) === 1;
+
+            $this->assertTrue($secondaryAcquired);
+        } finally {
+            if ($lockName !== null) {
+                $controller->reschedule_authority->releaseCreationIdentityLock($lockName);
+            }
+
+            if ($secondaryAcquired) {
+                $secondaryDatabase->query('SELECT RELEASE_LOCK(?)', [$contendedLock]);
+            }
+
+            $secondaryDatabase->close();
+        }
+    }
+
+    public function testNormalCreationResolvesCustomerAfterIdentityLockAndRejectsLateOverlap(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerEmail = 'late-customer-' . bin2hex(random_bytes(4)) . '@example.invalid';
+        $startAt = new DateTimeImmutable('+5 days 10:00:00');
+        $service = get_instance()
+            ->db->get_where('services', ['id' => $pair['service_id']])
+            ->row_array();
+        $serviceDuration = max(EVENT_MINIMUM_DURATION, (int) ($service['duration'] ?? EVENT_MINIMUM_DURATION));
+        $endAt = $startAt->add(new DateInterval('PT' . $serviceDuration . 'M'));
+
+        $_POST['post_data'] = [
+            'appointment' => [
+                'start_datetime' => $startAt->format('Y-m-d H:i:s'),
+                'end_datetime' => $endAt->format('Y-m-d H:i:s'),
+                'id_services' => $pair['service_id'],
+                'id_users_provider' => $pair['provider_id'],
+                'location' => '',
+                'notes' => 'Late customer identity race',
+                'color' => '',
+            ],
+            'customer' => [
+                'first_name' => 'Late',
+                'last_name' => 'Rejected',
+                'email' => $customerEmail,
+                'phone_number' => '+49123456789',
+                'address' => 'Teststrasse 1',
+                'city' => 'Berlin',
+                'zip_code' => '10115',
+                'timezone' => setting('default_timezone') ?: 'UTC',
+                'notes' => '',
+            ],
+            'manage_mode' => false,
+        ];
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $delegate = $controller->reschedule_authority;
+        $winningCustomer = null;
+        $winningAppointment = null;
+        $controller->reschedule_authority = new class ($delegate, function () use (
+            &$winningCustomer,
+            &$winningAppointment,
+            $customerEmail,
+            $pair,
+            $startAt,
+            $endAt,
+        ): void {
+            $customerId = $this->fixtures->createCustomer([
+                'first_name' => 'Concurrent',
+                'last_name' => 'Winner',
+                'email' => $customerEmail,
+            ]);
+            $appointmentId = $this->fixtures->createAppointment(
+                $pair['provider_id'],
+                $customerId,
+                $pair['service_id'],
+                $startAt,
+                $endAt,
+                'Concurrent winner',
+            );
+            $winningCustomer = $this->fixtures->findCustomerById($customerId);
+            $winningAppointment = $this->fixtures->findAppointmentById($appointmentId);
+        }) extends \Reschedule_authority {
+            public bool $acquired = false;
+
+            public bool $released = false;
+
+            public function __construct(
+                private readonly \Reschedule_authority $delegate,
+                private readonly \Closure $afterAcquire,
+            ) {}
+
+            public function acquireCreationIdentityLock(?string $email): ?string
+            {
+                $lockName = $this->delegate->acquireCreationIdentityLock($email);
+                $this->acquired = true;
+                ($this->afterAcquire)();
+
+                return $lockName;
+            }
+
+            public function releaseCreationIdentityLock(?string $lock_name): void
+            {
+                $this->delegate->releaseCreationIdentityLock($lock_name);
+                $this->released = true;
+            }
+
+            public function lockCreationTarget(int $provider_id, int $service_id, ?int $customer_id = null): void
+            {
+                $this->delegate->lockCreationTarget($provider_id, $service_id, $customer_id);
+            }
+
+            public function customerHasOverlap(
+                int $customer_id,
+                string $start_datetime,
+                string $end_datetime,
+                ?int $exclude_appointment_id,
+            ): bool {
+                return $this->delegate->customerHasOverlap(
+                    $customer_id,
+                    $start_datetime,
+                    $end_datetime,
+                    $exclude_appointment_id,
+                );
+            }
+        };
+
+        $controller->register();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success'] ?? true);
+        $this->assertSame(lang('customer_is_already_booked'), $response['message'] ?? null);
+        $this->assertTrue($controller->reschedule_authority->acquired);
+        $this->assertTrue($controller->reschedule_authority->released);
+        $this->assertSame(1, $this->fixtures->countCustomersByEmail($customerEmail));
+        $this->assertNotNull($winningCustomer);
+        $this->assertNotNull($winningAppointment);
+        $this->assertSame($winningCustomer, $this->fixtures->findCustomerById((int) $winningCustomer['id']));
+        $this->assertSame($winningAppointment, $this->fixtures->findAppointmentById((int) $winningAppointment['id']));
+        $this->assertSame(1, $this->fixtures->countAppointmentsForCustomer((int) $winningCustomer['id']));
+        $this->assertSame(0, $controller->synchronization->savedCalls);
+        $this->assertSame(0, $controller->notifications->savedCalls);
+        $this->assertSame(0, $controller->webhooks_client->calls);
+    }
+
     public function testRegisterManageModeUpdatesExistingAppointment(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -126,6 +301,8 @@ class BookingControllerFlowTest extends TestCase
 
         $existing = $this->fixtures->findAppointmentById($appointmentId);
         $this->assertNotNull($existing);
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $this->issueRescheduleAuthority($controller, (string) $existing['hash']);
 
         $updatedStart = new DateTimeImmutable('+2 days 11:00:00');
         $updatedEnd = $updatedStart->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
@@ -142,8 +319,9 @@ class BookingControllerFlowTest extends TestCase
                 'color' => '',
             ],
             'customer' => [
+                'id' => $customerId,
                 'first_name' => 'Manage',
-                'last_name' => 'Mode',
+                'last_name' => 'Mode Updated',
                 'email' => $customerEmail,
                 'phone_number' => '+49123456789',
                 'address' => 'Teststrasse 1',
@@ -155,13 +333,12 @@ class BookingControllerFlowTest extends TestCase
             'manage_mode' => true,
         ];
 
-        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
-
         $controller->register();
 
         $response = json_decode(get_instance()->output->get_output(), true);
 
         $this->assertIsArray($response);
+        $this->assertArrayHasKey('appointment_id', $response);
         $this->assertSame($appointmentId, (int) $response['appointment_id']);
 
         $updated = $this->fixtures->findAppointmentById($appointmentId);
@@ -170,6 +347,412 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($existing['hash'], $updated['hash']);
         $this->assertSame($updatedStart->format('Y-m-d H:i:s'), $updated['start_datetime']);
         $this->assertSame(1, $this->fixtures->countAppointmentsByHash($existing['hash']));
+
+        $updatedCustomer = $this->fixtures->findCustomerById($customerId);
+        $this->assertNotNull($updatedCustomer);
+        $this->assertSame('Mode Updated', $updatedCustomer['last_name']);
+    }
+
+    public function testCanonicalAuthorityCanBeClaimedAndVerifiedDirectly(): void
+    {
+        $scenario = $this->createRescheduleScenario(8);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+
+        $claim = $controller->reschedule_authority->claim($scenario['appointment_id'], $scenario['customer_id']);
+
+        $this->assertTrue(get_instance()->db->trans_begin());
+
+        try {
+            $state = $controller->reschedule_authority->verifyLockedState(
+                $claim,
+                $scenario['provider_id'],
+                $scenario['service_id'],
+            );
+
+            $this->assertSame($scenario['appointment_id'], $state->appointmentId);
+            $this->assertSame($scenario['customer_id'], $state->customerId);
+        } finally {
+            get_instance()->db->trans_rollback();
+        }
+    }
+
+    public function testForgedManageModeWithoutAuthorityRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(9);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+
+        $this->setReschedulePayload($scenario, true, $scenario['appointment_id'], $scenario['customer_id'], [
+            'first_name' => 'Forged mutation',
+        ]);
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testAppointmentIdWithoutManageModeStillRequiresAuthority(): void
+    {
+        $scenario = $this->createRescheduleScenario(10);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+
+        $this->setReschedulePayload($scenario, false, $scenario['appointment_id'], $scenario['customer_id'], [
+            'last_name' => 'ID-only mutation',
+        ]);
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testCustomerIdWithoutManageModeStillRequiresAuthority(): void
+    {
+        $scenario = $this->createRescheduleScenario(10);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $beforeCount = $this->fixtures->countAppointmentsForCustomer($scenario['customer_id']);
+
+        $this->setReschedulePayload($scenario, false, null, $scenario['customer_id'], [
+            'last_name' => 'Customer-ID-only mutation',
+        ]);
+        unset($_POST['post_data']['appointment']['id']);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+        $this->assertSame($beforeCount, $this->fixtures->countAppointmentsForCustomer($scenario['customer_id']));
+    }
+
+    public function testMalformedAppointmentIdCannotFallBackToNormalCreation(): void
+    {
+        $scenario = $this->createRescheduleScenario(10);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $beforeCount = $this->fixtures->countAppointmentsForCustomer($scenario['customer_id']);
+        $this->setReschedulePayload($scenario, false);
+        $_POST['post_data']['appointment']['id'] = 'not-an-id';
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+        $this->assertSame($beforeCount, $this->fixtures->countAppointmentsForCustomer($scenario['customer_id']));
+    }
+
+    public function testAuthorityRejectsForeignAppointmentAndCustomerIdsWithoutMutation(): void
+    {
+        $canonical = $this->createRescheduleScenario(11);
+        $foreign = $this->createRescheduleScenario(12);
+        $controller = $this->createBookingControllerWithForcedAvailability($canonical['provider_id']);
+        $this->issueRescheduleAuthority($controller, $canonical['hash']);
+
+        $canonicalAppointment = $this->fixtures->findAppointmentById($canonical['appointment_id']);
+        $canonicalCustomer = $this->fixtures->findCustomerById($canonical['customer_id']);
+        $foreignAppointment = $this->fixtures->findAppointmentById($foreign['appointment_id']);
+        $foreignCustomer = $this->fixtures->findCustomerById($foreign['customer_id']);
+
+        $this->setReschedulePayload($canonical, true, $foreign['appointment_id'], $foreign['customer_id'], [
+            'first_name' => 'Foreign mutation',
+        ]);
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $canonical['appointment_id'],
+            $canonical['customer_id'],
+            $canonicalAppointment,
+            $canonicalCustomer,
+        );
+        $this->assertSame($foreignAppointment, $this->fixtures->findAppointmentById($foreign['appointment_id']));
+        $this->assertSame($foreignCustomer, $this->fixtures->findCustomerById($foreign['customer_id']));
+    }
+
+    public function testExpiredAuthorityRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(13);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $this->fixtures->expireRescheduleAuthority($scenario['appointment_id']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+
+        $this->setReschedulePayload($scenario);
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testSessionContextMismatchRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(13);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        session([
+            'public_reschedule_authority_context' => rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='),
+        ]);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testConsumedAuthorityCannotBeReplayed(): void
+    {
+        $scenario = $this->createRescheduleScenario(14);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+        $firstResponse = json_decode(get_instance()->output->get_output(), true);
+        $this->assertSame($scenario['appointment_id'], (int) ($firstResponse['appointment_id'] ?? 0));
+
+        $afterAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $afterCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $replayController = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->resetRuntimeState('POST');
+        $this->setReschedulePayload($scenario, true, $scenario['appointment_id'], $scenario['customer_id'], [], 4);
+
+        $replayController->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $replayController,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $afterAppointment,
+            $afterCustomer,
+        );
+    }
+
+    public function testHashDriftAfterIssuanceRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(15);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $this->fixtures->updateAppointment($scenario['appointment_id'], [
+            'hash' => 'drift-' . bin2hex(random_bytes(6)),
+            'update_datetime' => date('Y-m-d H:i:s'),
+        ]);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testCustomerIdentityDriftAfterIssuanceRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(16);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $this->fixtures->updateCustomer($scenario['customer_id'], [
+            'last_name' => 'Canonical identity drift',
+            'update_datetime' => date('Y-m-d H:i:s'),
+        ]);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario, true, null, null, ['last_name' => 'Attempted overwrite']);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testProviderDriftAfterIssuanceRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(7);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $this->fixtures->updateSharedProvider($scenario['provider_id'], [
+            'room' => 'authority-drift-' . bin2hex(random_bytes(4)),
+            'update_datetime' => date('Y-m-d H:i:s'),
+        ]);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testServiceDriftAfterIssuanceRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(6);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $service = get_instance()
+            ->db->get_where('services', ['id' => $scenario['service_id']])
+            ->row_array();
+        $this->assertNotEmpty($service);
+        $this->fixtures->updateSharedService($scenario['service_id'], [
+            'duration' => (int) $service['duration'] + EVENT_MINIMUM_DURATION,
+            'update_datetime' => date('Y-m-d H:i:s'),
+        ]);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testCustomerOverlapProtectionRemainsAtomicForAuthorizedReschedule(): void
+    {
+        $scenario = $this->createRescheduleScenario(5);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $conflictStart = new DateTimeImmutable('+4 days 07:00:00');
+        $this->fixtures->createAppointment(
+            $scenario['provider_id'],
+            $scenario['customer_id'],
+            $scenario['service_id'],
+            $conflictStart,
+            $conflictStart->add(new DateInterval('PT4H')),
+            'Customer overlap guard',
+        );
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success'] ?? true);
+        $this->assertSame(lang('customer_is_already_booked'), $response['message'] ?? null);
+        $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
+        $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
+        $this->assertSame(0, $controller->synchronization->savedCalls);
+        $this->assertSame(0, $controller->notifications->savedCalls);
+        $this->assertSame(0, $controller->webhooks_client->calls);
+    }
+
+    public function testAppointmentRaceDriftAfterIssuanceRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(17);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $driftedStart = new DateTimeImmutable('+4 days 17:30:00');
+        $this->fixtures->updateAppointment($scenario['appointment_id'], [
+            'start_datetime' => $driftedStart->format('Y-m-d H:i:s'),
+            'end_datetime' => $driftedStart
+                ->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'))
+                ->format('Y-m-d H:i:s'),
+            'update_datetime' => date('Y-m-d H:i:s'),
+        ]);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
+    public function testCaptchaRejectionDoesNotMutateOrConsumeValidAuthority(): void
+    {
+        $scenario = $this->createRescheduleScenario(18);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->fixtures->setSetting('require_captcha', '1');
+        session(['captcha_phrase' => 'CORRECT']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+        $_POST['captcha'] = 'wrong';
+
+        $controller->register();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+        $this->assertFalse($response['captcha_verification'] ?? true);
+        $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
+        $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
+        $this->assertSame(0, $controller->synchronization->savedCalls);
+        $this->assertSame(0, $controller->notifications->savedCalls);
+        $this->assertSame(0, $controller->webhooks_client->calls);
+
+        $this->resetRuntimeState('POST');
+        $this->setReschedulePayload($scenario);
+        $_POST['captcha'] = 'CORRECT';
+        $controller->register();
+        $success = json_decode(get_instance()->output->get_output(), true);
+        $this->assertSame($scenario['appointment_id'], (int) ($success['appointment_id'] ?? 0));
     }
 
     public function testRegisterReturnsErrorWhenDateTimeUnavailable(): void
@@ -309,7 +892,7 @@ class BookingControllerFlowTest extends TestCase
                 $this->forcedProviderId = $forcedProviderId;
             }
 
-            protected function check_datetime_availability(\BookingRegisterRequestDto $register_request): ?int
+            protected function check_datetime_availability(array $appointment): ?int
             {
                 return $this->forcedProviderId;
             }
@@ -322,6 +905,110 @@ class BookingControllerFlowTest extends TestCase
         $controller->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
 
         return $controller;
+    }
+
+    /**
+     * @return array{provider_id:int,service_id:int,customer_id:int,appointment_id:int,hash:string,hour:int}
+     */
+    private function createRescheduleScenario(int $hour): array
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer([
+            'first_name' => 'Authority',
+            'last_name' => 'Scenario-' . $hour,
+        ]);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable(sprintf('+4 days %02d:00:00', $hour)),
+        );
+        $appointment = $this->fixtures->findAppointmentById($appointmentId);
+
+        $this->assertNotNull($appointment);
+
+        return [
+            'provider_id' => $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+            'customer_id' => $customerId,
+            'appointment_id' => $appointmentId,
+            'hash' => (string) $appointment['hash'],
+            'hour' => $hour,
+        ];
+    }
+
+    /**
+     * @param array{provider_id:int,service_id:int,customer_id:int,appointment_id:int,hash:string,hour:int} $scenario
+     * @param array<string, mixed> $customerOverrides
+     */
+    private function setReschedulePayload(
+        array $scenario,
+        bool $manageMode = true,
+        ?int $appointmentId = null,
+        ?int $customerId = null,
+        array $customerOverrides = [],
+        int $hourOffset = 2,
+    ): void {
+        $canonicalCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->assertNotNull($canonicalCustomer);
+        $startAt = new DateTimeImmutable(sprintf('+4 days %02d:00:00', ($scenario['hour'] + $hourOffset) % 24));
+        $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+        $customer = array_merge(
+            [
+                'id' => $customerId ?? $scenario['customer_id'],
+                'first_name' => $canonicalCustomer['first_name'],
+                'last_name' => $canonicalCustomer['last_name'],
+                'email' => $canonicalCustomer['email'],
+                'phone_number' => $canonicalCustomer['phone_number'] ?: '+49123456789',
+                'address' => $canonicalCustomer['address'] ?: 'Teststrasse 1',
+                'city' => $canonicalCustomer['city'] ?: 'Berlin',
+                'zip_code' => $canonicalCustomer['zip_code'] ?: '10115',
+                'timezone' => $canonicalCustomer['timezone'] ?? (setting('default_timezone') ?: 'UTC'),
+                'notes' => $canonicalCustomer['notes'] ?? '',
+            ],
+            $customerOverrides,
+        );
+
+        $_POST['post_data'] = [
+            'appointment' => [
+                'id' => $appointmentId ?? $scenario['appointment_id'],
+                'start_datetime' => $startAt->format('Y-m-d H:i:s'),
+                'end_datetime' => $endAt->format('Y-m-d H:i:s'),
+                'id_services' => $scenario['service_id'],
+                'id_users_provider' => $scenario['provider_id'],
+                'location' => '',
+                'notes' => 'Authority-gated reschedule',
+                'color' => '',
+            ],
+            'customer' => $customer,
+            'manage_mode' => $manageMode,
+        ];
+    }
+
+    private function issueRescheduleAuthority(Booking $controller, string $appointmentHash): void
+    {
+        $this->resetRuntimeState('GET');
+        $controller->reschedule($appointmentHash);
+        $this->resetRuntimeState('POST');
+    }
+
+    private function assertAuthorityRejectedWithoutMutation(
+        Booking $controller,
+        int $appointmentId,
+        int $customerId,
+        ?array $expectedAppointment,
+        ?array $expectedCustomer,
+    ): void {
+        $response = json_decode(get_instance()->output->get_output(), true);
+
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success'] ?? true);
+        $this->assertSame(lang('appointment_not_found'), $response['message'] ?? null);
+        $this->assertSame($expectedAppointment, $this->fixtures->findAppointmentById($appointmentId));
+        $this->assertSame($expectedCustomer, $this->fixtures->findCustomerById($customerId));
+        $this->assertSame(0, $controller->synchronization->savedCalls);
+        $this->assertSame(0, $controller->notifications->savedCalls);
+        $this->assertSame(0, $controller->webhooks_client->calls);
     }
 
     private function wireBookingDependencies(Booking $controller, bool $injectCache = true): void
@@ -338,6 +1025,7 @@ class BookingControllerFlowTest extends TestCase
         $CI->load->model('consents_model');
         $CI->load->library('timezones');
         $CI->load->library('availability');
+        $CI->load->library('reschedule_authority');
 
         $controller->load = $CI->load;
         $controller->db = $CI->db;
@@ -362,6 +1050,7 @@ class BookingControllerFlowTest extends TestCase
         $controller->consents_model = $CI->consents_model;
         $controller->timezones = $CI->timezones;
         $controller->availability = $CI->availability;
+        $controller->reschedule_authority = $CI->reschedule_authority;
     }
 
     private function resetRuntimeState(string $requestMethod): void
