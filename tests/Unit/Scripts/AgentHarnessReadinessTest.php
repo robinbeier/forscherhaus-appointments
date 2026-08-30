@@ -41,6 +41,41 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertSame('fail', $checks[1]['status']);
     }
 
+    public function testEvaluateContractSurfacesRequiresReferenceAndCriticalClauses(): void
+    {
+        file_put_contents(
+            $this->tmpDir . '/WORKFLOW.md',
+            "See .codex/contracts/agent-workflow.json.\nExact-head reviews are required.\n",
+        );
+        $surfaces = [
+            'WORKFLOW.md' => [
+                'contract_reference' => '.codex/contracts/agent-workflow.json',
+                'required_clauses' => ['Exact-head reviews are required.'],
+            ],
+        ];
+
+        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
+        self::assertSame('pass', $checks[0]['status']);
+
+        $surfaces['WORKFLOW.md']['required_clauses'][] = 'Blocking CI must use the reviewed head.';
+        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('1 required', (string) $checks[0]['message']);
+    }
+
+    public function testEvaluateContractSurfacesRejectsPathsOutsideRepository(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('must stay inside the repository');
+
+        agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, [
+            '../outside.md' => [
+                'contract_reference' => 'contract.json',
+                'required_clauses' => [],
+            ],
+        ]);
+    }
+
     public function testEvaluateBlockingJobsFailsForContinueOnError(): void
     {
         $workflow = [
@@ -65,14 +100,14 @@ class AgentHarnessReadinessTest extends TestCase
     ): void {
         [$workflow, $contracts] = $this->blockingJobFixture($jobName, $changeOutput);
 
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts, $this->conditionGrammar());
         self::assertSame('pass', $checks[0]['status']);
 
         $workflow['jobs'][$jobName]['if'] = sprintf(
             "(needs.changes.outputs.%s == 'true') && always() && ((github.event.pull_request.draft == false && github.event_name == 'pull_request') || github.event_name == 'push')",
             $changeOutput,
         );
-        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts, $this->conditionGrammar());
 
         self::assertSame('pass', $checks[0]['status']);
     }
@@ -100,7 +135,11 @@ class AgentHarnessReadinessTest extends TestCase
         foreach ($conditions as $case => $condition) {
             $workflow = $canonicalWorkflow;
             $workflow['jobs'][$jobName]['if'] = $condition;
-            $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
+            $checks = agentHarnessReadinessEvaluateBlockingJobContracts(
+                $workflow,
+                $contracts,
+                $this->conditionGrammar(),
+            );
 
             self::assertSame('fail', $checks[0]['status'], $case);
             self::assertStringContainsString('condition', (string) $checks[0]['message'], $case);
@@ -163,6 +202,22 @@ class AgentHarnessReadinessTest extends TestCase
             'duplicated assertion' => static function (array &$workflow) use ($jobName): void {
                 $workflow['jobs'][$jobName]['steps'][] = $workflow['jobs'][$jobName]['steps'][2];
             },
+            'unexpected post-assertion command' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][] = [
+                    'name' => 'Leak evidence',
+                    'if' => 'always()',
+                    'run' => 'cat storage/logs/ci/deep-runtime-suite/manifest.json',
+                ];
+            },
+            'altered diagnostics condition' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][3]['if'] = 'always()';
+            },
+            'altered diagnostics command' => static function (array &$workflow) use ($jobName): void {
+                $workflow['jobs'][$jobName]['steps'][3]['run'] .= 'cat untrusted.txt';
+            },
+            'missing diagnostics' => static function (array &$workflow) use ($jobName): void {
+                array_pop($workflow['jobs'][$jobName]['steps']);
+            },
             'invalid steps' => static function (array &$workflow) use ($jobName): void {
                 $workflow['jobs'][$jobName]['steps'] = 'invalid';
             },
@@ -171,7 +226,11 @@ class AgentHarnessReadinessTest extends TestCase
         foreach ($mutations as $case => $mutate) {
             $workflow = $canonicalWorkflow;
             $mutate($workflow);
-            $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contracts);
+            $checks = agentHarnessReadinessEvaluateBlockingJobContracts(
+                $workflow,
+                $contracts,
+                $this->conditionGrammar(),
+            );
 
             self::assertSame('fail', $checks[0]['status'], $case);
         }
@@ -188,6 +247,29 @@ class AgentHarnessReadinessTest extends TestCase
         ];
     }
 
+    #[DataProvider('unsupportedConditionProvider')]
+    public function testConditionParserFailsClosedForSyntaxOutsideContract(string $condition): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        agentHarnessReadinessParseCondition($condition, $this->conditionGrammar());
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function unsupportedConditionProvider(): array
+    {
+        return [
+            'unary operator' => ['! github.event.pull_request.draft'],
+            'inequality' => ["github.event_name != 'push'"],
+            'call arguments' => ["contains(github.ref, 'main')"],
+            'unsupported zero-argument call' => ['success()'],
+            'double-quoted literal' => ['github.event_name == "push"'],
+            'numeric literal' => ['github.run_attempt == 1'],
+        ];
+    }
+
     public function testWorkflowContractLoaderRejectsUnsupportedSchema(): void
     {
         $path = $this->tmpDir . '/agent-workflow.json';
@@ -198,6 +280,30 @@ class AgentHarnessReadinessTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('schema version 2');
+
+        agentHarnessReadinessLoadWorkflowContract($path);
+    }
+
+    public function testWorkflowContractLoaderRejectsUnsupportedConditionGrammar(): void
+    {
+        $path = $this->tmpDir . '/agent-workflow.json';
+        $grammar = $this->conditionGrammar();
+        $grammar['operators'][] = '!=';
+        file_put_contents(
+            $path,
+            json_encode([
+                'schema_version' => 2,
+                'surfaces' => ['WORKFLOW.md' => []],
+                'ci' => [
+                    'workflow' => 'ci.yml',
+                    'condition_grammar' => $grammar,
+                    'blocking_jobs' => ['write-contract-api' => ['kind' => 'exact_execution']],
+                ],
+            ]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('condition grammar is unsupported');
 
         agentHarnessReadinessLoadWorkflowContract($path);
     }
@@ -268,8 +374,13 @@ class AgentHarnessReadinessTest extends TestCase
             $artifactPath,
             $jobName,
         );
+        $diagnosticsRun =
+            "cat {$artifactPath}/manifest.json || true\n" .
+            "cat {$artifactPath}/{$jobName}.log || true\n" .
+            "cat {$artifactPath}/{$jobName}.json || true\n";
         $contracts = [
             $jobName => [
+                'kind' => 'exact_execution',
                 'needs' => ['changes', 'deep-runtime-suite'],
                 'condition' => [
                     'all' => [
@@ -295,6 +406,12 @@ class AgentHarnessReadinessTest extends TestCase
                     'path' => $artifactPath,
                 ],
                 'assertion' => ['run' => $assertionRun],
+                'post_assertion_steps' => [
+                    [
+                        'if' => 'failure()',
+                        'run' => $diagnosticsRun,
+                    ],
+                ],
             ],
         ];
         $workflow = [
@@ -325,7 +442,7 @@ class AgentHarnessReadinessTest extends TestCase
                         [
                             'name' => 'Diagnostics',
                             'if' => 'failure()',
-                            'run' => 'cat report.json || true',
+                            'run' => $diagnosticsRun,
                         ],
                     ],
                 ],
@@ -333,6 +450,22 @@ class AgentHarnessReadinessTest extends TestCase
         ];
 
         return [$workflow, $contracts, $assertionRun];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function conditionGrammar(): array
+    {
+        return [
+            'version' => 1,
+            'operators' => ['&&', '||', '=='],
+            'grouping' => 'parentheses',
+            'identifier_pattern' => '^[A-Za-z_][A-Za-z0-9_.-]*$',
+            'literals' => ['single_quoted_string', 'boolean'],
+            'zero_argument_calls' => ['always'],
+            'unsupported_syntax_fails_closed' => true,
+        ];
     }
 
     /**

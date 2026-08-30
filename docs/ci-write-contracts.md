@@ -111,8 +111,16 @@ laufende In-Process-Pruefung und das Cleanup verfuegbar.
   - `write_contract_booking`
   - `write_contract_api`
 
-Die verbindliche CI-Konfiguration und die tatsächlichen Gate-Bedingungen
-stehen ausschließlich in [.github/workflows/ci.yml](../.github/workflows/ci.yml).
+Die ausführbare CI-Konfiguration steht in
+[.github/workflows/ci.yml](../.github/workflows/ci.yml). Der
+[agent workflow contract](../.codex/contracts/agent-workflow.json) ist die
+kanonische Prüfquelle für die erwarteten Blocking-Jobs sowie die exakte
+Ausführung der beiden Write-Contract-Gates. Der Readiness-Check verlangt, dass
+beide Quellen übereinstimmen. Seine versionierte Actions-Expression-Grammatik
+ist bewusst eng; nicht unterstützte Syntax wird fail-closed abgelehnt und
+erfordert eine gemeinsame Änderung von Vertrag, Parser und Regressionstests.
+Auch die Schritte nach dem Assertion-Gate sind exakt festgelegt, damit keine
+ungeprüfte Evidence-Ausgabe oder nachgelagerte Aktion ergänzt werden kann.
 
 ## Rollback Policy
 

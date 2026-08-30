@@ -25,10 +25,93 @@
         "allow_capability_values": false,
         "allow_personal_data": false
     },
+    "surfaces": {
+        "WORKFLOW.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_clauses": [
+                "blocking GitHub CI plus final reviews on the unchanged exact PR head establish",
+                "changes require a third independent lens:",
+                "Final reviews and blocking CI must all target the current unchanged exact PR",
+                "Every push after review or CI evidence was collected invalidates that landing"
+            ]
+        },
+        "code_review.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_clauses": [
+                "require three independent final reviews on the same unchanged exact head",
+                "Any later push invalidates those final reviews and requires exact-head review"
+            ]
+        },
+        "docs/agent-harness-index.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_clauses": []
+        },
+        "docs/ci-write-contracts.md": {
+            "contract_reference": "../.codex/contracts/agent-workflow.json",
+            "required_clauses": []
+        },
+        ".codex/skills/push/SKILL.md": {
+            "contract_reference": "../../contracts/agent-workflow.json",
+            "required_clauses": []
+        },
+        ".codex/skills/land/SKILL.md": {
+            "contract_reference": "../../contracts/agent-workflow.json",
+            "required_clauses": []
+        },
+        ".github/pull_request_template.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_clauses": [
+                "## Reviewer A (Bugs/Regression/Security/Edge Cases)",
+                "## Reviewer B (Architektur/Lesbarkeit/Wartbarkeit)",
+                "## Reviewer C (Tests/Regression/Flake-Risiko)",
+                "- [ ] Blocking CI ist gruen",
+                "- [ ] Keine offenen Review-Findings",
+                "- [ ] PR-Head, CI-Head und final reviewter Head sind identisch",
+                "- [ ] PR ist mergeable"
+            ]
+        }
+    },
     "ci": {
         "workflow": ".github/workflows/ci.yml",
+        "condition_grammar": {
+            "version": 1,
+            "operators": ["&&", "||", "=="],
+            "grouping": "parentheses",
+            "identifier_pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "literals": ["single_quoted_string", "boolean"],
+            "zero_argument_calls": ["always"],
+            "unsupported_syntax_fails_closed": true
+        },
         "blocking_jobs": {
+            "phpstan-application": {
+                "kind": "presence_only"
+            },
+            "js-lint-changed": {
+                "kind": "presence_only"
+            },
+            "architecture-ownership-map": {
+                "kind": "presence_only"
+            },
+            "architecture-boundaries": {
+                "kind": "presence_only"
+            },
+            "typed-request-dto": {
+                "kind": "presence_only"
+            },
+            "typed-request-contracts": {
+                "kind": "presence_only"
+            },
+            "api-contract-openapi": {
+                "kind": "presence_only"
+            },
+            "booking-controller-flows": {
+                "kind": "presence_only"
+            },
+            "coverage-delta": {
+                "kind": "presence_only"
+            },
             "write-contract-booking": {
+                "kind": "exact_execution",
                 "needs": ["changes", "deep-runtime-suite"],
                 "condition": {
                     "all": [
@@ -63,9 +146,16 @@
                 },
                 "assertion": {
                     "run": "php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-booking"
-                }
+                },
+                "post_assertion_steps": [
+                    {
+                        "if": "failure()",
+                        "run": "cat storage/logs/ci/deep-runtime-suite/manifest.json || true\ncat storage/logs/ci/deep-runtime-suite/write-contract-booking.log || true\ncat storage/logs/ci/deep-runtime-suite/write-contract-booking.json || true\n"
+                    }
+                ]
             },
             "write-contract-api": {
+                "kind": "exact_execution",
                 "needs": ["changes", "deep-runtime-suite"],
                 "condition": {
                     "all": [
@@ -100,7 +190,13 @@
                 },
                 "assertion": {
                     "run": "php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-api"
-                }
+                },
+                "post_assertion_steps": [
+                    {
+                        "if": "failure()",
+                        "run": "cat storage/logs/ci/deep-runtime-suite/manifest.json || true\ncat storage/logs/ci/deep-runtime-suite/write-contract-api.log || true\ncat storage/logs/ci/deep-runtime-suite/write-contract-api.json || true\n"
+                    }
+                ]
             }
         }
     }

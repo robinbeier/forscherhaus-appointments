@@ -18,17 +18,19 @@ class AgentWorkflowContractTest extends TestCase
 
     public function testCanonicalWorkflowSurfacesReferenceMachineContract(): void
     {
-        $references = [
-            'WORKFLOW.md' => '.codex/contracts/agent-workflow.json',
-            'code_review.md' => '.codex/contracts/agent-workflow.json',
-            'docs/agent-harness-index.md' => '.codex/contracts/agent-workflow.json',
-            'docs/ci-write-contracts.md' => '../.codex/contracts/agent-workflow.json',
-            '.codex/skills/push/SKILL.md' => '../../contracts/agent-workflow.json',
-            '.codex/skills/land/SKILL.md' => '../../contracts/agent-workflow.json',
-        ];
+        $contract = $this->readRepoJson('.codex/contracts/agent-workflow.json');
+        $surfaces = $contract['surfaces'] ?? null;
+        self::assertIsArray($surfaces);
 
-        foreach ($references as $path => $contractReference) {
-            self::assertStringContainsString($contractReference, $this->readRepoFile($path), $path);
+        foreach ($surfaces as $path => $requirements) {
+            self::assertIsString($path);
+            self::assertIsArray($requirements);
+            $content = $this->readRepoFile($path);
+            self::assertStringContainsString($requirements['contract_reference'], $content, $path);
+            self::assertIsArray($requirements['required_clauses'] ?? null, $path);
+            foreach ($requirements['required_clauses'] as $requiredClause) {
+                self::assertStringContainsString($requiredClause, $content, $path);
+            }
         }
     }
 
@@ -58,9 +60,21 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['evidence_privacy']['allow_secrets'] ?? null);
         self::assertFalse($contract['evidence_privacy']['allow_capability_values'] ?? null);
         self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
+        self::assertSame(
+            [
+                'version' => 1,
+                'operators' => ['&&', '||', '=='],
+                'grouping' => 'parentheses',
+                'identifier_pattern' => '^[A-Za-z_][A-Za-z0-9_.-]*$',
+                'literals' => ['single_quoted_string', 'boolean'],
+                'zero_argument_calls' => ['always'],
+                'unsupported_syntax_fails_closed' => true,
+            ],
+            $contract['ci']['condition_grammar'] ?? null,
+        );
     }
 
-    public function testStructuredContractOwnsBothBlockingWriteJobs(): void
+    public function testStructuredContractOwnsEveryBlockingJob(): void
     {
         $contract = $this->readRepoJson('.codex/contracts/agent-workflow.json');
         $ci = $contract['ci'] ?? null;
@@ -70,13 +84,64 @@ class AgentWorkflowContractTest extends TestCase
         self::assertIsArray($ci['blocking_jobs'] ?? null);
         $jobNames = array_keys($ci['blocking_jobs']);
         sort($jobNames, SORT_STRING);
-        self::assertSame(['write-contract-api', 'write-contract-booking'], $jobNames);
-        foreach ($ci['blocking_jobs'] as $jobName => $job) {
+        self::assertSame(
+            [
+                'api-contract-openapi',
+                'architecture-boundaries',
+                'architecture-ownership-map',
+                'booking-controller-flows',
+                'coverage-delta',
+                'js-lint-changed',
+                'phpstan-application',
+                'typed-request-contracts',
+                'typed-request-dto',
+                'write-contract-api',
+                'write-contract-booking',
+            ],
+            $jobNames,
+        );
+
+        $presenceOnlyJobs = array_filter(
+            $ci['blocking_jobs'],
+            static fn(array $job): bool => ($job['kind'] ?? null) === 'presence_only',
+        );
+        self::assertCount(9, $presenceOnlyJobs);
+
+        foreach (['write-contract-booking', 'write-contract-api'] as $jobName) {
+            $job = $ci['blocking_jobs'][$jobName];
+            self::assertSame('exact_execution', $job['kind'] ?? null, $jobName);
             self::assertSame(['changes', 'deep-runtime-suite'], $job['needs'] ?? null, $jobName);
             self::assertSame('deep-runtime-suite-artifacts', $job['evidence']['artifact'] ?? null, $jobName);
             self::assertSame('storage/logs/ci/deep-runtime-suite', $job['evidence']['path'] ?? null, $jobName);
-            self::assertStringEndsWith('--suite=' . $jobName, (string) ($job['assertion']['run'] ?? ''), $jobName);
+            self::assertSame(
+                'php scripts/ci/assert_deep_runtime_suite.php ' .
+                    '--manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=' .
+                    $jobName,
+                $job['assertion']['run'] ?? null,
+                $jobName,
+            );
+            self::assertSame(
+                [
+                    [
+                        'if' => 'failure()',
+                        'run' =>
+                            "cat storage/logs/ci/deep-runtime-suite/manifest.json || true\n" .
+                            'cat storage/logs/ci/deep-runtime-suite/' .
+                            $jobName .
+                            ".log || true\n" .
+                            'cat storage/logs/ci/deep-runtime-suite/' .
+                            $jobName .
+                            ".json || true\n",
+                    ],
+                ],
+                $job['post_assertion_steps'] ?? null,
+                $jobName,
+            );
         }
+
+        $policy = require $this->repoRoot . '/scripts/ci/config/agent_harness_readiness_policy.php';
+        self::assertIsArray($policy);
+        self::assertArrayNotHasKey('blocking_jobs', $policy);
     }
 
     public function testHarnessEntryPointsAndGeneratedCachesStayAligned(): void

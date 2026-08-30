@@ -217,20 +217,28 @@ function evaluateAgentHarnessReadiness(
     DateTimeImmutable $today,
     int $reportDateMaxFutureDays,
 ): array {
+    $workflowContract = agentHarnessReadinessLoadWorkflowContract($root . '/.codex/contracts/agent-workflow.json');
     $steeringDimension = agentHarnessReadinessScoreDimension(
         $policy,
         'steering_sources',
-        agentHarnessReadinessEvaluateSteeringSources($root, $policy['required_sources']),
+        array_merge(
+            agentHarnessReadinessEvaluateSteeringSources($root, $policy['required_sources']),
+            agentHarnessReadinessEvaluateContractSurfaces($root, $workflowContract['surfaces']),
+        ),
     );
 
-    $workflowContract = agentHarnessReadinessLoadWorkflowContract($root . '/.codex/contracts/agent-workflow.json');
     $ciWorkflow = agentHarnessReadinessLoadWorkflowYaml(
         $root . '/' . ltrim((string) $workflowContract['ci']['workflow'], '/'),
     );
-    $blockingGateChecks = agentHarnessReadinessEvaluateBlockingJobs($ciWorkflow, $policy['blocking_jobs']);
+    $blockingJobContracts = $workflowContract['ci']['blocking_jobs'];
+    $blockingGateChecks = agentHarnessReadinessEvaluateBlockingJobs($ciWorkflow, array_keys($blockingJobContracts));
     $blockingGateChecks = array_merge(
         $blockingGateChecks,
-        agentHarnessReadinessEvaluateBlockingJobContracts($ciWorkflow, $workflowContract['ci']['blocking_jobs']),
+        agentHarnessReadinessEvaluateBlockingJobContracts(
+            $ciWorkflow,
+            $blockingJobContracts,
+            $workflowContract['ci']['condition_grammar'],
+        ),
     );
     $blockingGatesDimension = agentHarnessReadinessScoreDimension($policy, 'blocking_gates', $blockingGateChecks);
 
@@ -350,6 +358,64 @@ function agentHarnessReadinessEvaluateSteeringSources(string $root, array $requi
 }
 
 /**
+ * @param array<string, mixed> $surfaces
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateContractSurfaces(string $root, array $surfaces): array
+{
+    $checks = [];
+    foreach ($surfaces as $path => $requirements) {
+        if (!is_string($path) || !is_array($requirements)) {
+            throw new RuntimeException('Workflow contract surfaces must map repository paths to requirements.');
+        }
+
+        $path = agentHarnessReadinessRequireRepoRelativePath($path, 'surfaces path');
+        $absolutePath = $root . '/' . $path;
+        $content = is_file($absolutePath) ? file_get_contents($absolutePath) : false;
+        if ($content === false) {
+            $checks[] = [
+                'id' => 'contract_surface_' . md5($path),
+                'label' => $path . ' satisfies the workflow contract',
+                'status' => 'fail',
+                'message' => 'Required workflow contract surface is missing or unreadable.',
+            ];
+            continue;
+        }
+
+        $contractReference = agentHarnessReadinessRequireContractString(
+            $requirements['contract_reference'] ?? null,
+            'surfaces.' . $path . '.contract_reference',
+        );
+        $requiredClauses = $requirements['required_clauses'] ?? null;
+        if (!is_array($requiredClauses)) {
+            throw new RuntimeException('Workflow contract surface clauses must be lists.');
+        }
+
+        $missing = [];
+        foreach (array_merge([$contractReference], $requiredClauses) as $requiredText) {
+            if (!is_string($requiredText) || $requiredText === '') {
+                throw new RuntimeException('Workflow contract surface requirements must be non-empty strings.');
+            }
+            if (!str_contains($content, $requiredText)) {
+                $missing[] = $requiredText;
+            }
+        }
+
+        $checks[] = [
+            'id' => 'contract_surface_' . md5($path),
+            'label' => $path . ' satisfies the workflow contract',
+            'status' => $missing === [] ? 'pass' : 'fail',
+            'message' =>
+                $missing === []
+                    ? 'Canonical reference and required workflow clauses are present.'
+                    : sprintf('%d required workflow contract clause(s) are missing.', count($missing)),
+        ];
+    }
+
+    return $checks;
+}
+
+/**
  * @param array<string, mixed> $ciWorkflow
  * @param array<int, string> $blockingJobs
  * @return array<int, array<string, mixed>>
@@ -385,10 +451,14 @@ function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blo
 /**
  * @param array<string, mixed> $ciWorkflow
  * @param array<string, mixed> $contracts
+ * @param array<string, mixed> $conditionGrammar
  * @return array<int, array<string, mixed>>
  */
-function agentHarnessReadinessEvaluateBlockingJobContracts(array $ciWorkflow, array $contracts): array
-{
+function agentHarnessReadinessEvaluateBlockingJobContracts(
+    array $ciWorkflow,
+    array $contracts,
+    array $conditionGrammar,
+): array {
     $jobs = $ciWorkflow['jobs'] ?? [];
     if (!is_array($jobs)) {
         throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
@@ -400,11 +470,26 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(array $ciWorkflow, ar
             throw new RuntimeException('Blocking job contracts must be a map of job names to contract objects.');
         }
 
+        $kind = $contract['kind'] ?? null;
+        if ($kind === 'presence_only') {
+            continue;
+        }
+        if ($kind !== 'exact_execution') {
+            throw new RuntimeException('Blocking job contract "' . $jobName . '" has an unsupported kind.');
+        }
+
         $expectedNeeds = agentHarnessReadinessNormalizeNeeds($contract['needs'] ?? null);
         $expectedCondition = $contract['condition'] ?? null;
         $evidence = $contract['evidence'] ?? null;
         $assertion = $contract['assertion'] ?? null;
-        if ($expectedNeeds === null || !is_array($expectedCondition) || !is_array($evidence) || !is_array($assertion)) {
+        $postAssertionSteps = $contract['post_assertion_steps'] ?? null;
+        if (
+            $expectedNeeds === null ||
+            !is_array($expectedCondition) ||
+            !is_array($evidence) ||
+            !is_array($assertion) ||
+            !is_array($postAssertionSteps)
+        ) {
             throw new RuntimeException('Blocking job contract "' . $jobName . '" is malformed.');
         }
 
@@ -429,6 +514,15 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(array $ciWorkflow, ar
             $assertion['run'] ?? null,
             $jobName . '.assertion.run',
         );
+        $expectedPostAssertionSteps = array_map(static function (mixed $step) use ($jobName): array {
+            if (!is_array($step)) {
+                throw new RuntimeException(
+                    'Blocking job contract "' . $jobName . '" post-assertion steps must be objects.',
+                );
+            }
+
+            return agentHarnessReadinessNormalizeWorkflowStep($step);
+        }, $postAssertionSteps);
 
         $failures = [];
         $job = $jobs[$jobName] ?? null;
@@ -449,7 +543,7 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(array $ciWorkflow, ar
                 $failures[] = 'condition is missing';
             } else {
                 try {
-                    $actualCondition = agentHarnessReadinessParseCondition($condition);
+                    $actualCondition = agentHarnessReadinessParseCondition($condition, $conditionGrammar);
                     if ($actualCondition !== $expectedCondition) {
                         $failures[] = 'condition does not match contract';
                     }
@@ -501,6 +595,16 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(array $ciWorkflow, ar
                     agentHarnessReadinessNormalizeWorkflowStep($gateStep) !== ['run' => $assertionRun]
                 ) {
                     $failures[] = 'assertion step does not match contract';
+                }
+
+                $actualPostAssertionSteps = array_map(
+                    static fn(mixed $step): array => is_array($step)
+                        ? agentHarnessReadinessNormalizeWorkflowStep($step)
+                        : ['invalid_step' => get_debug_type($step)],
+                    array_slice($steps, $assertionIndex + 1),
+                );
+                if ($actualPostAssertionSteps !== $expectedPostAssertionSteps) {
+                    $failures[] = 'post-assertion steps do not match contract';
                 }
             }
         }
@@ -587,6 +691,16 @@ function agentHarnessReadinessRequireContractString(mixed $value, string $path):
     return $value;
 }
 
+function agentHarnessReadinessRequireRepoRelativePath(mixed $value, string $path): string
+{
+    $value = agentHarnessReadinessRequireContractString($value, $path);
+    if (str_starts_with($value, '/') || preg_match('#(?:^|/)\.\.(?:/|$)#', $value) === 1) {
+        throw new RuntimeException('Workflow contract path "' . $path . '" must stay inside the repository.');
+    }
+
+    return $value;
+}
+
 /**
  * @param array<string, mixed> $node
  * @return array<string, mixed>
@@ -654,13 +768,39 @@ function agentHarnessReadinessNormalizeConditionAst(array $node): array
 }
 
 /**
+ * This fail-closed grammar is intentionally narrower than the full GitHub
+ * Actions expression language. Expanding it requires an explicit contract and
+ * parser change together.
+ *
+ * @param array<string, mixed> $grammar
+ */
+function agentHarnessReadinessValidateConditionGrammar(array $grammar): void
+{
+    $supportedGrammar = [
+        'version' => 1,
+        'operators' => ['&&', '||', '=='],
+        'grouping' => 'parentheses',
+        'identifier_pattern' => '^[A-Za-z_][A-Za-z0-9_.-]*$',
+        'literals' => ['single_quoted_string', 'boolean'],
+        'zero_argument_calls' => ['always'],
+        'unsupported_syntax_fails_closed' => true,
+    ];
+
+    if ($grammar !== $supportedGrammar) {
+        throw new RuntimeException('Workflow condition grammar is unsupported by this checker.');
+    }
+}
+
+/**
+ * @param array<string, mixed> $grammar
  * @return array<string, mixed>
  */
-function agentHarnessReadinessParseCondition(string $expression): array
+function agentHarnessReadinessParseCondition(string $expression, array $grammar): array
 {
-    $tokens = agentHarnessReadinessTokenizeCondition($expression);
+    agentHarnessReadinessValidateConditionGrammar($grammar);
+    $tokens = agentHarnessReadinessTokenizeCondition($expression, $grammar);
     $cursor = 0;
-    $condition = agentHarnessReadinessParseConditionOr($tokens, $cursor);
+    $condition = agentHarnessReadinessParseConditionOr($tokens, $cursor, $grammar);
     if ($cursor !== count($tokens)) {
         throw new InvalidArgumentException('unexpected token "' . $tokens[$cursor]['value'] . '"');
     }
@@ -669,9 +809,10 @@ function agentHarnessReadinessParseCondition(string $expression): array
 }
 
 /**
+ * @param array<string, mixed> $grammar
  * @return array<int, array{type:string,value:mixed}>
  */
-function agentHarnessReadinessTokenizeCondition(string $expression): array
+function agentHarnessReadinessTokenizeCondition(string $expression, array $grammar): array
 {
     $tokens = [];
     $offset = 0;
@@ -730,13 +871,14 @@ function agentHarnessReadinessTokenizeCondition(string $expression): array
 
 /**
  * @param array<int, array{type:string,value:mixed}> $tokens
+ * @param array<string, mixed> $grammar
  * @return array<string, mixed>
  */
-function agentHarnessReadinessParseConditionOr(array $tokens, int &$cursor): array
+function agentHarnessReadinessParseConditionOr(array $tokens, int &$cursor, array $grammar): array
 {
-    $left = agentHarnessReadinessParseConditionAnd($tokens, $cursor);
+    $left = agentHarnessReadinessParseConditionAnd($tokens, $cursor, $grammar);
     while (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', '||')) {
-        $right = agentHarnessReadinessParseConditionAnd($tokens, $cursor);
+        $right = agentHarnessReadinessParseConditionAnd($tokens, $cursor, $grammar);
         $left = ['any' => [$left, $right]];
     }
 
@@ -745,13 +887,14 @@ function agentHarnessReadinessParseConditionOr(array $tokens, int &$cursor): arr
 
 /**
  * @param array<int, array{type:string,value:mixed}> $tokens
+ * @param array<string, mixed> $grammar
  * @return array<string, mixed>
  */
-function agentHarnessReadinessParseConditionAnd(array $tokens, int &$cursor): array
+function agentHarnessReadinessParseConditionAnd(array $tokens, int &$cursor, array $grammar): array
 {
-    $left = agentHarnessReadinessParseConditionPrimary($tokens, $cursor);
+    $left = agentHarnessReadinessParseConditionPrimary($tokens, $cursor, $grammar);
     while (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', '&&')) {
-        $right = agentHarnessReadinessParseConditionPrimary($tokens, $cursor);
+        $right = agentHarnessReadinessParseConditionPrimary($tokens, $cursor, $grammar);
         $left = ['all' => [$left, $right]];
     }
 
@@ -760,12 +903,13 @@ function agentHarnessReadinessParseConditionAnd(array $tokens, int &$cursor): ar
 
 /**
  * @param array<int, array{type:string,value:mixed}> $tokens
+ * @param array<string, mixed> $grammar
  * @return array<string, mixed>
  */
-function agentHarnessReadinessParseConditionPrimary(array $tokens, int &$cursor): array
+function agentHarnessReadinessParseConditionPrimary(array $tokens, int &$cursor, array $grammar): array
 {
     if (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', '(')) {
-        $condition = agentHarnessReadinessParseConditionOr($tokens, $cursor);
+        $condition = agentHarnessReadinessParseConditionOr($tokens, $cursor, $grammar);
         if (!agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', ')')) {
             throw new InvalidArgumentException('missing closing parenthesis');
         }
@@ -782,6 +926,9 @@ function agentHarnessReadinessParseConditionPrimary(array $tokens, int &$cursor)
     if (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', '(')) {
         if (!agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', ')')) {
             throw new InvalidArgumentException('condition calls must not contain arguments');
+        }
+        if (!in_array($identifier['value'], $grammar['zero_argument_calls'], true)) {
+            throw new InvalidArgumentException('unsupported zero-argument call');
         }
 
         return ['call' => $identifier['value']];
@@ -1028,14 +1175,40 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
     }
 
     $ci = $contract['ci'] ?? null;
+    $surfaces = $contract['surfaces'] ?? null;
     if (
         !is_array($ci) ||
         !is_string($ci['workflow'] ?? null) ||
         trim($ci['workflow']) === '' ||
+        !is_array($ci['condition_grammar'] ?? null) ||
         !is_array($ci['blocking_jobs'] ?? null) ||
-        $ci['blocking_jobs'] === []
+        $ci['blocking_jobs'] === [] ||
+        !is_array($surfaces) ||
+        $surfaces === []
     ) {
-        throw new RuntimeException('Workflow contract must define a CI workflow and blocking jobs.');
+        throw new RuntimeException(
+            'Workflow contract must define surfaces, a CI workflow, grammar, and blocking jobs.',
+        );
+    }
+
+    agentHarnessReadinessValidateConditionGrammar($ci['condition_grammar']);
+    agentHarnessReadinessRequireRepoRelativePath($ci['workflow'], 'ci.workflow');
+
+    $exactExecutionJobs = 0;
+    foreach ($ci['blocking_jobs'] as $jobName => $job) {
+        if (!is_string($jobName) || !is_array($job)) {
+            throw new RuntimeException('Workflow contract blocking jobs must be a map of job objects.');
+        }
+        if (($job['kind'] ?? null) === 'exact_execution') {
+            $exactExecutionJobs++;
+            continue;
+        }
+        if (($job['kind'] ?? null) !== 'presence_only') {
+            throw new RuntimeException('Workflow contract blocking jobs must declare a supported kind.');
+        }
+    }
+    if ($exactExecutionJobs === 0) {
+        throw new RuntimeException('Workflow contract must define at least one exact-execution blocking job.');
     }
 
     return $contract;
