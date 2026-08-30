@@ -225,9 +225,10 @@ function createHttpClientHarness() {
     return {api: context.App.Http.Booking, request};
 }
 
-function createUnavailableDatesHarness() {
+function createUnavailableDatesHarness(options = {}) {
     const disabledDates = [];
     let ajaxCalls = 0;
+    let selectedDateValue = null;
     let settleRequest;
     const requestPromise = new Promise((resolve, reject) => {
         settleRequest = {resolve, reject};
@@ -283,7 +284,17 @@ function createUnavailableDatesHarness() {
         App: {
             Http: {},
             Pages: {Booking: {manageMode: false}},
-            Utils: {Url: {siteUrl: (value) => value, queryParam: () => null}},
+            Utils: {
+                Url: {
+                    siteUrl: (value) => value,
+                    queryParam: (key) => (key === 'date' ? (options.dateQueryParam ?? null) : null),
+                },
+                UI: {
+                    setDateTimePickerValue(unusedTarget, value) {
+                        selectedDateValue = moment(value).format('YYYY-MM-DD');
+                    },
+                },
+            },
         },
         $: jquery,
         lang: (value) => value,
@@ -302,6 +313,9 @@ function createUnavailableDatesHarness() {
             return ajaxCalls;
         },
         disabledDates,
+        get selectedDateValue() {
+            return selectedDateValue;
+        },
         request,
         resolveRequest(response) {
             request.doneCallback?.(response);
@@ -311,7 +325,7 @@ function createUnavailableDatesHarness() {
     };
 }
 
-function createBookingSelectionHarness() {
+function createBookingSelectionHarness(options = {}) {
     const service = {value: '11', options: [{value: '11'}]};
     const provider = {value: '71', options: [{value: '71'}, {value: '72'}]};
     const date = {};
@@ -411,9 +425,19 @@ function createBookingSelectionHarness() {
         });
     }
     markRendered(available);
-    resolveUnavailable = (value) => unavailableRequests.at(-1).resolve(value);
+    resolveUnavailable = (value) => {
+        if (options.driftPreparedDateTo) {
+            date.value = options.driftPreparedDateTo;
+        }
+        unavailableRequests.at(-1).resolve(value);
+    };
     resolveAvailable = (value) => availableRequests.at(-1).resolve(value);
-    const resolveUnavailableRequest = (index, value) => unavailableRequests[index].resolve(value);
+    const resolveUnavailableRequest = (index, value) => {
+        if (options.driftPreparedDateTo) {
+            date.value = options.driftPreparedDateTo;
+        }
+        unavailableRequests[index].resolve(value);
+    };
     const resolveAvailableRequest = (index, value) => availableRequests[index].resolve(value);
 
     function control(state) {
@@ -1670,6 +1694,18 @@ test('preserveSelection marks the requested unavailable month without a forward 
     assert.equal(moment(harness.disabledDates.at(-1)).format('YYYY-MM-DD'), '2026-09-30');
 });
 
+test('preserveSelection ignores a same-month booking URL date override', async () => {
+    const harness = createUnavailableDatesHarness({dateQueryParam: '2026-09-20'});
+    const completion = harness.api.getUnavailableDates(71, 11, '2026-09-15', 1, {
+        preserveSelection: true,
+    });
+
+    harness.resolveRequest(['2026-09-01']);
+    await completion;
+
+    assert.equal(harness.selectedDateValue, null);
+});
+
 test('unavailable-date forward search routes recursive child requests through the exported seam', async () => {
     const harness = createRecursiveUnavailableDatesHarness();
     const completion = harness.api.getUnavailableDates(71, 11, '2026-09-15');
@@ -1775,6 +1811,23 @@ test('preparation rejects when the requested date was not accepted by the date p
         signal: new AbortController().signal,
     });
 
+    await assert.rejects(preparation, /date is no longer available/);
+    assert.equal(harness.availableStarted, false);
+    assert.equal(harness.wizardFrame3Shown, false);
+});
+
+test('preparation rejects when the unavailable-date refresh changes the selected date', async () => {
+    const harness = createBookingSelectionHarness({driftPreparedDateTo: '2026-09-02'});
+
+    const preparation = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-05',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+
+    harness.resolveUnavailable([]);
     await assert.rejects(preparation, /date is no longer available/);
     assert.equal(harness.availableStarted, false);
     assert.equal(harness.wizardFrame3Shown, false);

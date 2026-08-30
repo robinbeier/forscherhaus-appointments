@@ -463,7 +463,9 @@ App.Http.Booking = (function () {
 
                         // Assisted preparation must not search forward: doing so starts another request whose
                         // late response can mutate the calendar after the visible selection has changed.
-                        applyUnavailableDates(unavailableDates, selectedDateString, false);
+                        applyUnavailableDates(unavailableDates, selectedDateString, false, {
+                            preserveSelection: true,
+                        });
                         return;
                     }
 
@@ -483,7 +485,9 @@ App.Http.Booking = (function () {
                             startOfMonthMoment.add(Math.abs(monthChangeStep), 'days'); // Move to the next day
                         }
 
-                        applyUnavailableDates(unavailableDates, searchedMonthStart, !options.preserveSelection);
+                        applyUnavailableDates(unavailableDates, searchedMonthStart, !options.preserveSelection, {
+                            preserveSelection: options.preserveSelection,
+                        });
                         searchedMonthStart = undefined;
                         searchedMonthCounter = 0;
 
@@ -511,7 +515,9 @@ App.Http.Booking = (function () {
 
                 unavailableDatesBackup = response;
                 selectedDateStringBackup = selectedDateString;
-                applyUnavailableDates(response, selectedDateString, !options.preserveSelection);
+                applyUnavailableDates(response, selectedDateString, !options.preserveSelection, {
+                    preserveSelection: options.preserveSelection,
+                });
             })
             .fail(() => {
                 $selectDate.parent().fadeTo(400, 1);
@@ -524,7 +530,7 @@ App.Http.Booking = (function () {
         applyUnavailableDates(unavailableDatesBackup, selectedDateStringBackup);
     }
 
-    function applyUnavailableDates(unavailableDates, selectedDateString, setDate) {
+    function applyUnavailableDates(unavailableDates, selectedDateString, setDate, options = {}) {
         setDate = setDate || false;
 
         $selectDate.parent().fadeTo(400, 1);
@@ -561,7 +567,7 @@ App.Http.Booking = (function () {
 
         const dateQueryParam = App.Utils.Url.queryParam('date');
 
-        if (dateQueryParam) {
+        if (dateQueryParam && !options.preserveSelection) {
             const dateQueryParamMoment = moment(dateQueryParam);
 
             if (

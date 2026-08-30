@@ -1320,6 +1320,15 @@ App.Pages.Booking = (function () {
         }
     }
 
+    function assertPreparedDateSelection(selectedDate) {
+        const acceptedDateObject = App.Utils.UI.getDateTimePickerValue($selectDate);
+        const acceptedDate = acceptedDateObject ? moment(acceptedDateObject).format('YYYY-MM-DD') : '';
+
+        if (acceptedDate !== selectedDate) {
+            throw new Error('The requested date is no longer available.');
+        }
+    }
+
     function applyBookingPreparationSelection(serviceId, providerId, selectedDateMoment) {
         suppressPreparationInvalidation = true;
         suppressServiceAvailabilityRefresh = true;
@@ -1345,12 +1354,7 @@ App.Pages.Booking = (function () {
             suppressPreparationInvalidation = false;
         }
 
-        const acceptedDateObject = App.Utils.UI.getDateTimePickerValue($selectDate);
-        const acceptedDate = acceptedDateObject ? moment(acceptedDateObject).format('YYYY-MM-DD') : '';
-
-        if (acceptedDate !== selectedDateMoment.format('YYYY-MM-DD')) {
-            throw new Error('The requested date is no longer available.');
-        }
+        assertPreparedDateSelection(selectedDateMoment.format('YYYY-MM-DD'));
     }
 
     async function refreshBookingPreparationAvailability(providerId, serviceId, selectedDate, preparationSignal) {
@@ -1364,6 +1368,7 @@ App.Pages.Booking = (function () {
         if (unavailableDatesRequest) {
             await unavailableDatesRequest;
         }
+        assertPreparedDateSelection(selectedDate);
         await App.Http.Booking.getAvailableHours(selectedDate, preparationSignal);
     }
 
