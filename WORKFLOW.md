@@ -13,6 +13,8 @@ conflict, follow `AGENTS.md`.
   routing.
 - Use `WORKFLOW.md` for active agent behavior, Linear state handling, workpad
   discipline, and the ticket-to-merge loop.
+- Use [`.codex/contracts/agent-workflow.json`](.codex/contracts/agent-workflow.json)
+  as the machine-readable source for cross-document workflow invariants.
 
 ## Non-Negotiables
 

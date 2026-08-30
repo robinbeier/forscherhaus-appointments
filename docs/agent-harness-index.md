@@ -20,6 +20,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | --- | --- | --- |
 | Local onboarding and quickstart | `README.md` | Operator-first entry point. |
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
+| Machine-readable cross-document workflow invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
 | Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
@@ -58,6 +59,10 @@ This file stays intentionally short. It is a map, not a second runbook.
     same unchanged current PR head
 - Harness readiness score:
   - `composer check:agent-harness-readiness`
+  - The machine contract owns the supported CI-condition tokens and binds
+    critical cross-document clauses to named Markdown sections; the checker
+    fails closed on invalid grammar, missing sections, misplaced clauses, or
+    duplicate clauses.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:
@@ -86,6 +91,8 @@ This file stays intentionally short. It is a map, not a second runbook.
   usage changes.
 - Change `WORKFLOW.md` when the agent state machine, workpad policy, or
   ticket-to-merge or model-aware delegation behavior changes.
+- Change `.codex/contracts/agent-workflow.json` when a machine-checked
+  cross-document workflow invariant changes.
 - Change `AGENTS.md` when compact repo guardrails or command entry points
   change.
 - Change `.github/workflows/ci.yml` when CI truth changes; then update

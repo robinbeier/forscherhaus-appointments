@@ -67,5 +67,6 @@ Concurrency-Aenderungen; sonst N/A mit kurzer Begruendung. -->
 
 ## Workflow References
 
+- `.codex/contracts/agent-workflow.json`
 - `WORKFLOW.md`
 - `AGENTS.md`

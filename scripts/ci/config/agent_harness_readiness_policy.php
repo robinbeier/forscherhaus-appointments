@@ -36,19 +36,6 @@ return [
             'docs/ownership-map.md',
         ],
     ],
-    'blocking_jobs' => [
-        'phpstan-application',
-        'js-lint-changed',
-        'architecture-ownership-map',
-        'architecture-boundaries',
-        'typed-request-dto',
-        'typed-request-contracts',
-        'api-contract-openapi',
-        'write-contract-booking',
-        'write-contract-api',
-        'booking-controller-flows',
-        'coverage-delta',
-    ],
     'generated_topology_commands' => [
         [
             'id' => 'architecture_docs',
