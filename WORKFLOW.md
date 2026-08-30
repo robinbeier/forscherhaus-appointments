@@ -283,16 +283,17 @@ read-only verifier:
 composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<40-character-sha>
 ```
 
-The verifier uses GitHub GET requests only. It requires the open non-draft PR,
-clean mergeability, the canonical successful CI run and every blocking check
-to bind to that PR and SHA. Always-on checks must succeed; diff-conditional
-checks must be either successful or explicitly skipped. It also requires the
-three distinct review lenses from the machine contract in one trusted,
-SHA-bound owner attestation. A still-active `CHANGES_REQUESTED` review or
-newer trusted review feedback invalidates that attestation. Missing, pending,
-duplicated, malformed, stale, or wrong-suite evidence fails closed. The report
-contains no raw comment body, reviewer identity, token, capability, or
-personal data. See
+The verifier uses GitHub GET requests only and re-reads PR identity after all
+other evidence. It requires the open non-draft PR, clean mergeability, the
+canonical successful CI run and every blocking check to bind to that PR and
+SHA. Always-on checks must succeed; diff-conditional checks must be either
+successful or explicitly skipped. It also requires the three distinct review
+lenses from the machine contract in one new, unedited, SHA-bound owner
+attestation with exact review-activity watermarks. A still-active
+`CHANGES_REQUESTED` review, watermark drift, or newer trusted review feedback
+invalidates that attestation. Missing, pending, duplicated, malformed, stale,
+or wrong-suite evidence fails closed. The report contains no raw comment body,
+reviewer identity, token, capability, or personal data. See
 `docs/exact-head-mergegate.md`.
 
 An exit `0` is required before `Ready to Merge`, but it does not perform the

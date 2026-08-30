@@ -98,10 +98,21 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_SUCCESS, $exitCode);
-        self::assertCount(7, $requestedPaths);
-        foreach ($requestedPaths as $path) {
-            self::assertStringStartsWith('/repos/' . self::REPOSITORY . '/', $path);
-        }
+        self::assertSame(
+            [
+                '/repos/acme/app/pulls/12',
+                '/repos/acme/app/actions/workflows/ci.yml/runs?event=pull_request&head_sha=' .
+                self::SHA .
+                '&per_page=100&page=1',
+                '/repos/acme/app/commits/' . self::SHA . '/check-runs?filter=latest&per_page=100&page=1',
+                '/repos/acme/app/commits/' . self::SHA . '/pulls?per_page=100&page=1',
+                '/repos/acme/app/issues/12/comments?per_page=100&page=1',
+                '/repos/acme/app/pulls/12/reviews?per_page=100&page=1',
+                '/repos/acme/app/pulls/12/comments?per_page=100&page=1',
+                '/repos/acme/app/pulls/12',
+            ],
+            $requestedPaths,
+        );
 
         $report = (string) file_get_contents($reportPath);
         self::assertStringContainsString('"status": "pass"', $report);
@@ -110,6 +121,40 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertStringNotContainsString('token', strtolower($report));
         self::assertStringNotContainsString('login', strtolower($report));
         self::assertStringNotContainsString($this->attestation(), $report);
+    }
+
+    public function testCliFailsClosedWhenPullRequestHeadChangesDuringEvidenceCollection(): void
+    {
+        $requestedPaths = [];
+        $pullRequestReads = 0;
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest, &$pullRequestReads): array {
+            $payload = $validRequest($path);
+            if ($path === '/repos/' . self::REPOSITORY . '/pulls/12') {
+                $pullRequestReads++;
+                if ($pullRequestReads === 2) {
+                    $payload['head']['sha'] = str_repeat('f', 40);
+                }
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
+        self::assertSame(2, $pullRequestReads);
+        self::assertStringContainsString('pr_head_drift_during_evaluation', (string) file_get_contents($reportPath));
     }
 
     public function testCliFailsClosedWhenAttestationIsMissing(): void
@@ -185,6 +230,40 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertStringContainsString('invalid shape', (string) file_get_contents($reportPath));
     }
 
+    public function testMalformedAttestationCollectionsFailClosed(): void
+    {
+        foreach (['/issues/12/comments?', '/pulls/12/comments?'] as $malformedEndpoint) {
+            $requestedPaths = [];
+            $validRequest = $this->validRequest($requestedPaths);
+            $request = static function (string $path) use ($validRequest, $malformedEndpoint): array {
+                if (str_contains($path, $malformedEndpoint)) {
+                    return ['not' => 'a list'];
+                }
+
+                return $validRequest($path);
+            };
+            $reportPath = $this->temporaryPath();
+            $exitCode = runExactHeadMergegateCli(
+                [
+                    'check_exact_head_mergegate.php',
+                    '--pr=12',
+                    '--reviewed-sha=' . self::SHA,
+                    '--output-json=' . $reportPath,
+                ],
+                $request,
+                static fn(): string => self::REPOSITORY,
+                dirname(__DIR__, 3),
+            );
+
+            self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode, $malformedEndpoint);
+            self::assertStringContainsString(
+                'invalid shape',
+                (string) file_get_contents($reportPath),
+                $malformedEndpoint,
+            );
+        }
+    }
+
     public function testPaginationIsCompleteAndBounded(): void
     {
         $paths = [];
@@ -206,13 +285,29 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertStringContainsString('page=2', $paths[1]);
     }
 
-    public function testGitHubAdapterContainsOnlyExplicitGetMethod(): void
+    public function testGitHubAdapterInvokesOnlyExplicitGetMethodAtRuntime(): void
     {
-        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/scripts/ci/check_exact_head_mergegate.php');
+        $commands = [];
+        $request = buildExactHeadMergegateGitHubGetClosure(static function (
+            array $command,
+            ?string $workingDirectory,
+        ) use (&$commands): string {
+            $commands[] = ['command' => $command, 'working_directory' => $workingDirectory];
 
-        self::assertStringContainsString("'--method',\n                'GET'", $source);
+            return '{"ok":true}';
+        });
+
+        self::assertSame(['ok' => true], $request('/repos/acme/app/pulls/12'));
+        self::assertCount(1, $commands);
+        self::assertNull($commands[0]['working_directory']);
+        $command = $commands[0]['command'];
+        self::assertSame('gh', $command[0] ?? null);
+        $methodIndex = array_search('--method', $command, true);
+        self::assertIsInt($methodIndex);
+        self::assertSame('GET', $command[$methodIndex + 1] ?? null);
+        self::assertSame('/repos/acme/app/pulls/12', $command[array_key_last($command)] ?? null);
         foreach (['POST', 'PUT', 'PATCH', 'DELETE'] as $mutationMethod) {
-            self::assertStringNotContainsString("'" . $mutationMethod . "'", $source);
+            self::assertNotContains($mutationMethod, $command);
         }
     }
 
@@ -313,6 +408,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                         [
                             'id' => 500,
                             'author_association' => 'OWNER',
+                            'created_at' => '2026-08-30T20:00:00Z',
                             'updated_at' => '2026-08-30T20:00:00Z',
                             'body' => $this->attestation(),
                         ],
@@ -351,7 +447,14 @@ final class ExactHeadMergegateCliTest extends TestCase
         }
 
         return "<!-- exact-head-review-attestation:v1\n" .
-            json_encode(['head_sha' => self::SHA, 'reviews' => $reviews], JSON_UNESCAPED_SLASHES) .
+            json_encode(
+                [
+                    'head_sha' => self::SHA,
+                    'review_activity_watermark' => ['review_id' => 0, 'review_comment_id' => 0],
+                    'reviews' => $reviews,
+                ],
+                JSON_UNESCAPED_SLASHES,
+            ) .
             "\n-->";
     }
 

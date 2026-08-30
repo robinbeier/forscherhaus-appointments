@@ -63,6 +63,19 @@ final class ExactHeadMergegateTest extends TestCase
         self::assertContains('review_attestation_invalid', array_column($report['gates'], 'code'));
     }
 
+    public function testMissingOrChangedFinalPullRequestObservationFailsClosed(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment()];
+        unset($snapshot['pr_head_revalidated']);
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('pr_head_drift_during_evaluation', array_column($report['gates'], 'code'));
+
+        $snapshot['pr_head_revalidated'] = false;
+        self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+    }
+
     public function testWorkflowMustBindExactPullRequestShaAndCheckSuite(): void
     {
         $snapshot = $this->snapshot();
@@ -147,6 +160,9 @@ final class ExactHeadMergegateTest extends TestCase
         $duplicateLens = str_replace('"lens":"design"', '"lens":"correctness"', $this->attestation());
         $snapshot['comments'] = [[...$this->attestationComment(), 'body' => $duplicateLens]];
         self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+
+        $snapshot['comments'] = [[...$this->attestationComment(), 'updated_at' => '2026-08-30T20:00:01Z']];
+        self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
     }
 
     public function testNewerTrustedFeedbackAndOutstandingChangesRequestedInvalidateAttestation(): void
@@ -180,7 +196,12 @@ final class ExactHeadMergegateTest extends TestCase
         $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
         self::assertSame('fail', $report['status']);
         self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+    }
 
+    public function testMatchingWatermarkStillBlocksOutstandingChangesRequested(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment('OWNER', 700, 0)];
         $snapshot['review_activity'] = [
             [
                 'kind' => 'review',
@@ -195,17 +216,56 @@ final class ExactHeadMergegateTest extends TestCase
         $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
         self::assertSame('fail', $report['status']);
         self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+    }
 
-        $snapshot['review_activity'][] = [
-            'kind' => 'review',
-            'id' => 701,
-            'author_association' => 'MEMBER',
-            'actor_ref' => str_repeat('d', 64),
-            'state' => 'APPROVED',
-            'commit_sha' => self::SHA,
-            'occurred_at' => '2026-08-30T19:59:30Z',
+    public function testLaterNonBlockingReviewPassesWithFreshMatchingWatermark(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review',
+                'id' => 700,
+                'author_association' => 'MEMBER',
+                'actor_ref' => str_repeat('d', 64),
+                'state' => 'CHANGES_REQUESTED',
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T19:59:00Z',
+            ],
+            [
+                'kind' => 'review',
+                'id' => 701,
+                'author_association' => 'MEMBER',
+                'actor_ref' => str_repeat('d', 64),
+                'state' => 'APPROVED',
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T19:59:30Z',
+            ],
         ];
+        $snapshot['comments'] = [$this->attestationComment('OWNER', 701, 0)];
         self::assertSame('pass', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+    }
+
+    public function testReviewActivityWatermarksOrderSameSecondEvidenceWithoutTimestampGuessing(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review_comment',
+                'id' => 650,
+                'author_association' => 'NONE',
+                'actor_ref' => str_repeat('e', 64),
+                'state' => null,
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T20:00:00Z',
+            ],
+        ];
+        $snapshot['comments'] = [$this->attestationComment('OWNER', 0, 650)];
+        self::assertSame('pass', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+
+        $snapshot['review_activity'][] = [...$snapshot['review_activity'][0], 'id' => 651];
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
     }
 
     /** @return array<string,mixed> */
@@ -228,6 +288,7 @@ final class ExactHeadMergegateTest extends TestCase
     private function snapshot(): array
     {
         return [
+            'pr_head_revalidated' => true,
             'pr' => [
                 'number' => 12,
                 'state' => 'open',
@@ -275,7 +336,7 @@ final class ExactHeadMergegateTest extends TestCase
         ];
     }
 
-    private function attestation(): string
+    private function attestation(int $reviewId = 0, int $reviewCommentId = 0): string
     {
         $reviews = [];
         foreach (['correctness' => 'a', 'design' => 'b', 'tests' => 'c'] as $lens => $prefix) {
@@ -287,18 +348,32 @@ final class ExactHeadMergegateTest extends TestCase
         }
 
         return "<!-- exact-head-review-attestation:v1\n" .
-            json_encode(['head_sha' => self::SHA, 'reviews' => $reviews], JSON_UNESCAPED_SLASHES) .
+            json_encode(
+                [
+                    'head_sha' => self::SHA,
+                    'review_activity_watermark' => [
+                        'review_id' => $reviewId,
+                        'review_comment_id' => $reviewCommentId,
+                    ],
+                    'reviews' => $reviews,
+                ],
+                JSON_UNESCAPED_SLASHES,
+            ) .
             "\n-->";
     }
 
     /** @return array<string, mixed> */
-    private function attestationComment(string $association = 'OWNER'): array
-    {
+    private function attestationComment(
+        string $association = 'OWNER',
+        int $reviewId = 0,
+        int $reviewCommentId = 0,
+    ): array {
         return [
             'id' => 500,
             'author_association' => $association,
+            'created_at' => '2026-08-30T20:00:00Z',
             'updated_at' => '2026-08-30T20:00:00Z',
-            'body' => $this->attestation(),
+            'body' => $this->attestation($reviewId, $reviewCommentId),
         ];
     }
 }

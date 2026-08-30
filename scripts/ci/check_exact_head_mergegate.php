@@ -228,6 +228,7 @@ function loadExactHeadMergegatePolicy(string $contractPath): array
     if (
         !is_array($mergegate) ||
         ($mergegate['schema_version'] ?? null) !== 1 ||
+        ($mergegate['pr_revalidation'] ?? null) !== 'before_and_after_evidence_collection' ||
         ($mergegate['review_lens_source'] ?? null) !== 'review.sensitive_change_lenses' ||
         !is_array($review) ||
         !is_array($ci) ||
@@ -256,7 +257,9 @@ function loadExactHeadMergegatePolicy(string $contractPath): array
     if (
         ($attestation['authority_model'] ?? null) !== 'owner_accountable_assertion' ||
         ($attestation['cryptographic_agent_execution_proof'] ?? null) !== false ||
-        ($attestation['malicious_repository_owner_in_scope'] ?? null) !== false
+        ($attestation['malicious_repository_owner_in_scope'] ?? null) !== false ||
+        ($attestation['requires_unedited_comment'] ?? null) !== true ||
+        ($attestation['activity_watermarks'] ?? null) !== ['review_id', 'review_comment_id']
     ) {
         throw new RuntimeException('Exact-head mergegate review authority model is malformed.');
     }
@@ -346,16 +349,24 @@ function resolveExactHeadMergegateRepository(string $root, ?string $originRemote
 }
 
 /**
+ * @param Closure(array<int, string>, ?string): string|null $processRunner
  * @return Closure(string): array<string, mixed>
  */
-function buildExactHeadMergegateGitHubGetClosure(): Closure
+function buildExactHeadMergegateGitHubGetClosure(?Closure $processRunner = null): Closure
 {
-    return static function (string $path): array {
+    $runProcess =
+        $processRunner ??
+        static fn(array $command, ?string $workingDirectory): string => runExactHeadMergegateProcess(
+            $command,
+            $workingDirectory,
+        );
+
+    return static function (string $path) use ($runProcess): array {
         if (!str_starts_with($path, '/repos/')) {
             throw new RuntimeException('GitHub GET path is outside the repository API.');
         }
 
-        $output = runExactHeadMergegateProcess(
+        $output = $runProcess(
             [
                 'gh',
                 'api',
@@ -434,7 +445,7 @@ function fetchExactHeadMergegateSnapshot(
     string $workflowFile,
 ): array {
     $prefix = '/repos/' . $repository;
-    $pullRequest = $request($prefix . '/pulls/' . $prNumber);
+    $initialPullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
     $workflowRuns = fetchExactHeadMergegateCollection(
         $request,
         $prefix .
@@ -460,9 +471,20 @@ function fetchExactHeadMergegateSnapshot(
     $comments = fetchExactHeadMergegateCollection($request, $prefix . '/issues/' . $prNumber . '/comments', null);
     $reviews = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/reviews', null);
     $reviewComments = fetchExactHeadMergegateCollection($request, $prefix . '/pulls/' . $prNumber . '/comments', null);
+    $finalPullRequest = normalizeExactHeadMergegatePullRequest($request($prefix . '/pulls/' . $prNumber));
+
+    $identityFields = ['number', 'state', 'draft', 'base_ref', 'head_sha', 'head_ref', 'head_repository'];
+    $prHeadRevalidated = true;
+    foreach ($identityFields as $field) {
+        if (($initialPullRequest[$field] ?? null) !== ($finalPullRequest[$field] ?? null)) {
+            $prHeadRevalidated = false;
+            break;
+        }
+    }
 
     return [
-        'pr' => normalizeExactHeadMergegatePullRequest($pullRequest),
+        'pr' => $finalPullRequest,
+        'pr_head_revalidated' => $prHeadRevalidated,
         'workflow_runs' => array_map(
             static fn(mixed $run): array => normalizeExactHeadMergegateWorkflowRun($run),
             $workflowRuns,
@@ -616,6 +638,7 @@ function normalizeExactHeadMergegateComment(mixed $comment): array
         !is_array($comment) ||
         !is_int($comment['id'] ?? null) ||
         !is_string($comment['author_association'] ?? null) ||
+        !is_string($comment['created_at'] ?? null) ||
         !is_string($comment['updated_at'] ?? null) ||
         !is_string($comment['body'] ?? null)
     ) {
@@ -625,6 +648,7 @@ function normalizeExactHeadMergegateComment(mixed $comment): array
     return [
         'id' => $comment['id'] ?? null,
         'author_association' => $comment['author_association'] ?? null,
+        'created_at' => $comment['created_at'] ?? null,
         'updated_at' => $comment['updated_at'] ?? null,
         'body' => $comment['body'] ?? null,
     ];

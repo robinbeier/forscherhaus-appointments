@@ -62,6 +62,10 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('ci.yml', $contract['land']['exact_head_mergegate']['workflow_file'] ?? null);
         self::assertSame('CI', $contract['land']['exact_head_mergegate']['workflow_name'] ?? null);
         self::assertSame(
+            'before_and_after_evidence_collection',
+            $contract['land']['exact_head_mergegate']['pr_revalidation'] ?? null,
+        );
+        self::assertSame(
             'review.sensitive_change_lenses',
             $contract['land']['exact_head_mergegate']['review_lens_source'] ?? null,
         );
@@ -84,6 +88,13 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse(
             $contract['land']['exact_head_mergegate']['review_attestation']['malicious_repository_owner_in_scope'] ??
                 null,
+        );
+        self::assertTrue(
+            $contract['land']['exact_head_mergegate']['review_attestation']['requires_unedited_comment'] ?? null,
+        );
+        self::assertSame(
+            ['review_id', 'review_comment_id'],
+            $contract['land']['exact_head_mergegate']['review_attestation']['activity_watermarks'] ?? null,
         );
         self::assertSame(
             ['OWNER'],

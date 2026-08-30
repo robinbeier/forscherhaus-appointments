@@ -59,6 +59,16 @@ final class ExactHeadMergegate
         $sha = self::normalizeSha($reviewedSha);
         $gates = [];
 
+        $prHeadRevalidated = ($snapshot['pr_head_revalidated'] ?? null) === true;
+        self::addGate(
+            $gates,
+            $prHeadRevalidated ? 'pass' : 'fail',
+            $prHeadRevalidated ? 'pr_head_revalidated' : 'pr_head_drift_during_evaluation',
+            $prHeadRevalidated
+                ? 'Pull request identity remained stable across evidence collection.'
+                : 'Pull request identity changed or was not revalidated after evidence collection.',
+        );
+
         $pr = $snapshot['pr'] ?? null;
         if (!is_array($pr)) {
             self::addGate($gates, 'fail', 'pr_snapshot', 'Pull request snapshot is missing.');
@@ -334,7 +344,12 @@ final class ExactHeadMergegate
     /**
      * @param array<string, mixed> $policy
      * @param mixed $comment
-     * @return array{comment_id:int|string,attested_at:string,reviews:array<string, string>}|null
+     * @return array{
+     *     comment_id:int|string,
+     *     attested_at:string,
+     *     review_watermarks:array{review_id:int,review_comment_id:int},
+     *     reviews:array<string, string>
+     * }|null
      */
     private static function parseReviewAttestation(array $policy, mixed $comment, string $sha): ?array
     {
@@ -346,8 +361,9 @@ final class ExactHeadMergegate
         ) {
             return null;
         }
-        $attestedAt = self::normalizeGitHubTimestamp($comment['updated_at'] ?? null);
-        if ($attestedAt === null) {
+        $createdAt = self::normalizeGitHubTimestamp($comment['created_at'] ?? null);
+        $updatedAt = self::normalizeGitHubTimestamp($comment['updated_at'] ?? null);
+        if ($createdAt === null || $updatedAt === null || $createdAt !== $updatedAt) {
             return null;
         }
 
@@ -367,8 +383,14 @@ final class ExactHeadMergegate
 
         if (
             !is_array($attestation) ||
-            array_keys($attestation) !== ['head_sha', 'reviews'] ||
+            array_keys($attestation) !== ['head_sha', 'review_activity_watermark', 'reviews'] ||
             ($attestation['head_sha'] ?? null) !== $sha ||
+            !is_array($attestation['review_activity_watermark'] ?? null) ||
+            array_keys($attestation['review_activity_watermark']) !== ['review_id', 'review_comment_id'] ||
+            !is_int($attestation['review_activity_watermark']['review_id'] ?? null) ||
+            ($attestation['review_activity_watermark']['review_id'] ?? -1) < 0 ||
+            !is_int($attestation['review_activity_watermark']['review_comment_id'] ?? null) ||
+            ($attestation['review_activity_watermark']['review_comment_id'] ?? -1) < 0 ||
             !is_array($attestation['reviews'] ?? null)
         ) {
             return null;
@@ -403,7 +425,8 @@ final class ExactHeadMergegate
 
         return [
             'comment_id' => $comment['id'],
-            'attested_at' => $attestedAt,
+            'attested_at' => $createdAt,
+            'review_watermarks' => $attestation['review_activity_watermark'],
             'reviews' => $reviews,
         ];
     }
@@ -412,7 +435,12 @@ final class ExactHeadMergegate
      * @param array<string, mixed> $policy
      * @param array<int, mixed> $comments
      * @param array<int, mixed> $reviewActivity
-     * @param array{comment_id:int|string,attested_at:string,reviews:array<string, string>} $attestation
+     * @param array{
+     *     comment_id:int|string,
+     *     attested_at:string,
+     *     review_watermarks:array{review_id:int,review_comment_id:int},
+     *     reviews:array<string, string>
+     * } $attestation
      */
     private static function hasBlockingReviewFeedbackAfterAttestation(
         array $policy,
@@ -444,11 +472,15 @@ final class ExactHeadMergegate
         }
 
         $latestReviewByActor = [];
+        $observedWatermarks = ['review_id' => 0, 'review_comment_id' => 0];
         foreach ($reviewActivity as $activity) {
             if (
                 !is_array($activity) ||
                 !is_string($activity['author_association'] ?? null) ||
                 !is_string($activity['kind'] ?? null) ||
+                !in_array($activity['kind'], ['review', 'review_comment'], true) ||
+                !is_int($activity['id'] ?? null) ||
+                ($activity['id'] ?? 0) < 1 ||
                 !is_string($activity['actor_ref'] ?? null)
             ) {
                 return true;
@@ -458,9 +490,9 @@ final class ExactHeadMergegate
             if ($occurredAt === null) {
                 return true;
             }
-            if (strcmp($occurredAt, $attestation['attested_at']) >= 0) {
-                return true;
-            }
+
+            $watermarkKey = $activity['kind'] === 'review' ? 'review_id' : 'review_comment_id';
+            $observedWatermarks[$watermarkKey] = max($observedWatermarks[$watermarkKey], $activity['id']);
 
             if (($activity['kind'] ?? null) === 'review' && ($activity['commit_sha'] ?? null) === $sha) {
                 $actor = $activity['actor_ref'];
@@ -478,6 +510,10 @@ final class ExactHeadMergegate
                     ];
                 }
             }
+        }
+
+        if ($observedWatermarks !== $attestation['review_watermarks']) {
+            return true;
         }
 
         foreach ($latestReviewByActor as $review) {

@@ -49,7 +49,8 @@ contract.
       reviews on the new head before restoring `Ready to Merge`
     - return to the watcher only after that new-head evidence is available
 6. Once the PR is green, review-clean, and mergeable:
-    - publish the privacy-safe final-review attestation described in
+    - publish a new, unedited privacy-safe final-review attestation with the
+      current formal-review and inline-review-comment watermarks described in
       `docs/exact-head-mergegate.md`
     - run
       `composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<current_head_sha>`

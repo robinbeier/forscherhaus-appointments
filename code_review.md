@@ -107,12 +107,13 @@ again.
 
 The read-only exact-head mergegate does not replace reviewer judgment. After
 the three final reviews are finding-free, the primary agent records one
-owner-authored, privacy-safe attestation for their unchanged head as described
-in `docs/exact-head-mergegate.md`. The gate checks that attestation, actual
-GitHub review activity, blocking CI, mergeability, and PR/head identity
-together. A still-active `CHANGES_REQUESTED` review or newer trusted review
-feedback invalidates the attestation; close or resolve the finding and publish
-a fresh attestation before rerunning the gate.
+new, unedited, owner-authored, privacy-safe attestation for their unchanged
+head as described in `docs/exact-head-mergegate.md`. The gate checks that
+attestation, exact review-activity watermarks, blocking CI, mergeability, and
+the PR identity observed both before and after evidence collection together.
+A still-active `CHANGES_REQUESTED` review, watermark drift, or newer trusted
+review feedback invalidates the attestation; close or resolve the finding and
+publish a fresh attestation comment before rerunning the gate.
 
 The attestation is an accountable owner assertion, not cryptographic proof of
 agent execution. The repository-local gate is designed to prevent accidental
