@@ -110,6 +110,97 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertStringNotContainsString("'dump_sha':", substr($helper, strpos($helper, 'def result_payload')));
     }
 
+    public function testServiceMountBoundaryIsNarrowDocumentedAndCoveredInCi(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $helper = (string) file_get_contents($root . '/scripts/ops/libexec/release_archive_dump_retention_v1.py');
+        $docs = (string) file_get_contents($root . '/docs/ops/production-release-archive-dump-retention.md');
+        $service = (string) file_get_contents($root . '/scripts/ops/systemd/fh-release-archive-dump-retention.service');
+
+        foreach (
+            [
+                "GLOBAL_LOCK_PATH = ORCHESTRATOR_ROOT + '/locks/' + GLOBAL_LOCK_LEAF",
+                "RETENTION_SERVICE_CGROUP = '/system.slice/fh-release-archive-dump-retention.service'",
+                'def parse_mountinfo(lines):',
+                'def validate_nested_mount_records(',
+                'def trusted_lock_device(orchestrator):',
+                'def assert_pre_mutation_mount_safety():',
+                'def revalidate_pre_mutation_mount_safety(mount_safety):',
+                'def close_pre_mutation_mount_safety(mount_safety):',
+                'PROC_SNAPSHOT_ATTEMPTS = 5',
+                'def stable_proc_mount_snapshot(orchestrator):',
+                "snapshot['mountinfo_before'] == snapshot['mountinfo_after']",
+                "filesystem_type == 'nsfs'",
+                "re.fullmatch(r'net:\\[[1-9][0-9]*\\]', root)",
+                'file_identity(before) != file_identity(opened)',
+            ]
+            as $contract
+        ) {
+            self::assertStringContainsString($contract, $helper);
+        }
+        foreach (
+            [
+                'match alone is never sufficient.',
+                'absence is treated as sandbox drift',
+                'namespace-root mount (mount point `/`, root `/`)',
+                'same filesystem, source, superblock',
+                'regular, empty, root-owned',
+                'kernel handle `net:[inode]`',
+                'grants no protected-path exception',
+                'keeps the validated web-root, orchestrator-root, `/var/lib`',
+                'existing state path and descriptor identities must still match',
+                'immediately before the first cleanup mutation',
+                'zero-mutation ledger',
+                'change the service capability set',
+            ]
+            as $contract
+        ) {
+            self::assertStringContainsString($contract, $docs);
+        }
+        self::assertStringContainsString(
+            'CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE',
+            $service,
+        );
+        $executeStart = strpos($helper, 'def execute():');
+        $markerStart = strpos($helper, 'def marker_status(');
+        self::assertIsInt($executeStart);
+        self::assertIsInt($markerStart);
+        $execute = substr($helper, $executeStart, $markerStart - $executeStart);
+        $mountPreflight = strpos($execute, 'mount_safety = assert_pre_mutation_mount_safety()');
+        $statePreparation = strpos($execute, 'state = prepare_state_directory(mount_safety)');
+        $mountRevalidation = strpos($execute, 'revalidate_pre_mutation_mount_safety(mount_safety)', $statePreparation);
+        $markerCleanup = strpos($execute, 'clean_marker_temps(state, MUTATIONS)');
+        $mountClose = strrpos($execute, 'close_pre_mutation_mount_safety(mount_safety)');
+        self::assertIsInt($mountPreflight);
+        self::assertIsInt($statePreparation);
+        self::assertIsInt($mountRevalidation);
+        self::assertIsInt($markerCleanup);
+        self::assertIsInt($mountClose);
+        self::assertTrue($mountPreflight < $statePreparation);
+        self::assertTrue($statePreparation < $mountRevalidation);
+        self::assertTrue($mountRevalidation < $markerCleanup);
+        self::assertTrue($markerCleanup < $mountClose);
+        self::assertSame(3, preg_match_all('/\bCAP_[A-Z0-9_]+\b/', $service));
+    }
+
+    public function testSyntheticMountGraphRegressionSuitePasses(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $process = proc_open(
+            ['/usr/bin/python3', '-m', 'unittest', 'tests.Unit.Scripts.release_archive_dump_retention_mounts_v1_test'],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $root,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), ($stdout ?: '') . ($stderr ?: ''));
+    }
+
     public function testMutationOutcomeCannotClaimNoDeletionAfterAnIrreversibleBoundary(): void
     {
         $helper = (string) file_get_contents(

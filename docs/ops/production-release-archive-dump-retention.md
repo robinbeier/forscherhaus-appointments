@@ -42,6 +42,78 @@ set before its restore attestation is published. It remains separately counted
 as pending and forces `execution_ready=false`; it is never a verified retention
 candidate or an unclassified foreign object.
 
+### Service mount boundary
+
+Protected release, archive, dump, evidence, and orchestrator trees still reject
+every nested mount by default. The hardened systemd service has one narrower
+requirement: `ProtectSystem=strict` and the read-only orchestrator tree cause
+systemd to expose the already trusted global production-change lock through a
+writable bind mount at
+`/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock`. A direct
+helper invocation has no such boundary and receives no exception.
+Conversely, the exact retention-service cgroup must expose this boundary; its
+absence is treated as sandbox drift and fails closed.
+
+The helper accepts at most that one service-created lock boundary. A pathname
+match alone is never sufficient. The process must have the exact
+`/system.slice/fh-release-archive-dump-retention.service` cgroup, a closed
+systemd invocation ID, and a stable mount namespace distinct from PID 1. The
+lock mount must be the writable child of the immediately containing read-only
+namespace-root mount (mount point `/`, root `/`); child and parent must have the
+same filesystem, source, superblock
+device and super options, and the child's mount root must be derived exactly
+from the parent root and target path. The observed device must also equal the
+device of the open lock file.
+
+Before accepting the boundary, the helper opens the lock through already
+trusted root-owned `0700` parents and pins a regular, empty, root-owned
+`0600`, single-link identity. It compares path and descriptor identity and
+reads mountinfo, cgroup, and namespace identity before and after that check.
+The complete observation may be attempted at most five times to tolerate a
+concurrently settling host mount table; only one internally identical
+before/after pair is ever validated, observations are never combined, and five
+changing pairs still fail closed. Kernel-generated mountinfo has a separate
+bounded 16 MiB snapshot allowance (1 MiB per line) so legitimate runner or
+container overlay graphs are not confused with malformed state.
+Linux `nsfs` network-namespace mounts can expose their filesystem root as the
+kernel handle `net:[inode]` rather than as a slash path. The parser accepts only
+that closed positive-inode form when both filesystem type and mount source are
+exactly `nsfs`; mount points remain absolute.
+The parser compatibility grants no protected-path exception. Any such mount at
+or below a protected tree is still an additional nested boundary and is rejected.
+Execute acquires the same strict mount preflight before state-directory
+preparation and keeps the validated web-root, orchestrator-root, `/var/lib`
+parent, and any existing state-directory descriptors open through marker-temp
+cleanup. The existing state path and descriptor identities must still match at
+the immediate pre-cleanup revalidation; the path is not reopened by name. If
+systemd did not already create the state directory, the complete
+pinned-boundary observation is repeated immediately before that directory is
+created through the pinned parent. That controlled creation is accepted only
+when the parent device, inode, mode, owner and group remain identical, the
+directory inventory gains exactly `fh-release-retention`, and the parent link
+count follows either native Linux directory semantics (`+1`) or the supported
+overlay semantics (unchanged). The post-creation parent identity becomes the
+new pinned baseline; any pre-existing target, additional name, removal, larger
+link-count change, or other parent drift still fails closed. After acquiring
+the state lock, descriptor and path identities and the complete
+mount/cgroup/namespace observation are
+repeated again immediately before the first cleanup mutation. Cleanup itself
+uses the already open, validated state-directory descriptor, so a later
+pathname mount cannot redirect the operation. The locked inventory then
+performs the full mount check again with its own pinned target descriptors.
+
+Any Symlink, Hardlink, detected race, malformed state, additional protected
+mount, different source/device/root/parent, non-service context, or changing
+namespace remains fail-closed as `unsafe_global_lock`, `mount_state_unknown`,
+or `nested_mount_boundary`. Drift at acquisition or the immediate pre-mutation
+revalidation retains the zero-mutation ledger. Non-cooperating privileged host
+mount changes after that last observation are outside the service authority;
+the helper has no `CAP_SYS_ADMIN`, continues to operate only through pinned
+descriptors, and rejects drift on the next bounded observation. This exception
+does not change the service capability set or any activity, open-file, lock,
+capacity, hold, continuity, handoff, admission, parent-death, Docker, or socket
+check.
+
 Every `prod_release_archive_dump_retention.v3` result also carries
 `mutation_outcome` and fixed aggregate `mutation_counts`. `none` means no
 marker-temp cleanup, pending cleanup, or candidate was removed and
