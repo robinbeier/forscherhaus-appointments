@@ -34,6 +34,7 @@ final class ExactHeadMergegateCliTest extends TestCase
     {
         $root = dirname(__DIR__, 3);
         $policy = loadExactHeadMergegatePolicy($root . '/.codex/contracts/agent-workflow.json');
+        self::assertFalse($policy['ci_execution_contract_verified']);
         $contract = json_decode(
             (string) file_get_contents($root . '/.codex/contracts/agent-workflow.json'),
             true,
@@ -740,36 +741,57 @@ final class ExactHeadMergegateCliTest extends TestCase
             dirname(__DIR__, 3),
             dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json',
             self::SHA,
-            static function (array $command, ?string $workingDirectory) use (&$commands): string {
-                $commands[] = ['command' => $command, 'working_directory' => $workingDirectory];
-                if ($command === ['git', 'rev-parse', 'HEAD']) {
-                    return self::SHA . PHP_EOL;
-                }
-                if (
-                    $command === [
-                        'git',
-                        'diff',
-                        '--quiet',
-                        'HEAD',
-                        '--',
-                        '.codex/contracts/agent-workflow.json',
-                        'scripts/ci/check_exact_head_mergegate.php',
-                        'scripts/ci/lib/ExactHeadMergegate.php',
-                    ]
-                ) {
-                    return '';
-                }
-                if ($command === ['git', 'show', self::SHA . ':.codex/contracts/agent-workflow.json']) {
-                    return (string) file_get_contents(dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json');
-                }
-
-                self::fail('Unexpected command: ' . json_encode($command, JSON_THROW_ON_ERROR));
-            },
+            $this->verifiedPolicyProcessRunner($commands),
         );
 
         self::assertSame('main', $policy['base_ref']);
+        self::assertTrue($policy['ci_execution_contract_verified']);
         self::assertSame(['git', 'rev-parse', 'HEAD'], $commands[0]['command']);
         self::assertSame(['git', 'show', self::SHA . ':.codex/contracts/agent-workflow.json'], $commands[2]['command']);
+    }
+
+    public function testVerifiedPolicyRejectsWeakenedFingerprintedAndExactExecution(): void
+    {
+        $cases = [
+            'fingerprinted execution' => static function (string $workflow): string {
+                $needle =
+                    'run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=integration-smoke';
+                $mutated = str_replace($needle, "run: ':'", $workflow, $replacementCount);
+                self::assertSame(1, $replacementCount);
+
+                return $mutated;
+            },
+            'exact execution' => static function (string $workflow): string {
+                $needle =
+                    'run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-api';
+                $mutated = str_replace($needle, "run: ':'", $workflow, $replacementCount);
+                self::assertSame(1, $replacementCount);
+
+                return $mutated;
+            },
+        ];
+
+        foreach ($cases as $case => $mutateWorkflow) {
+            $commands = [];
+            $exception = null;
+            try {
+                loadExactHeadMergegateVerifiedPolicy(
+                    dirname(__DIR__, 3),
+                    dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json',
+                    self::SHA,
+                    $this->verifiedPolicyProcessRunner($commands, $mutateWorkflow),
+                );
+            } catch (RuntimeException $caught) {
+                $exception = $caught;
+            }
+
+            self::assertInstanceOf(RuntimeException::class, $exception, $case);
+            self::assertSame(
+                'Exact-head mergegate reviewed CI execution contract is invalid.',
+                $exception->getMessage(),
+                $case,
+            );
+        }
     }
 
     public function testVerifiedPolicyRejectsHeadMismatch(): void
@@ -821,6 +843,8 @@ final class ExactHeadMergegateCliTest extends TestCase
                 '.codex/contracts/agent-workflow.json',
                 'scripts/ci/check_exact_head_mergegate.php',
                 'scripts/ci/lib/ExactHeadMergegate.php',
+                'scripts/ci/check_agent_harness_readiness.php',
+                'scripts/ci/check_harness_report_dates.php',
             ],
             $commands[1]['command'],
         );
@@ -954,7 +978,62 @@ final class ExactHeadMergegateCliTest extends TestCase
     private function mockPolicyLoader(): Closure
     {
         return static function (string $root, string $contractPath, string $reviewedSha): array {
-            return loadExactHeadMergegatePolicy($contractPath);
+            $policy = loadExactHeadMergegatePolicy($contractPath);
+            $policy['ci_execution_contract_verified'] = true;
+
+            return $policy;
+        };
+    }
+
+    /**
+     * @param array<int, array{command: array<int, string>, working_directory: ?string}> $commands
+     * @param null|Closure(string): string $mutateWorkflow
+     * @return Closure(array<int, string>, ?string): string
+     */
+    private function verifiedPolicyProcessRunner(array &$commands, ?Closure $mutateWorkflow = null): Closure
+    {
+        return static function (array $command, ?string $workingDirectory) use (&$commands, $mutateWorkflow): string {
+            $commands[] = ['command' => $command, 'working_directory' => $workingDirectory];
+            if ($command === ['git', 'rev-parse', 'HEAD']) {
+                return self::SHA . PHP_EOL;
+            }
+            if (
+                $command === [
+                    'git',
+                    'diff',
+                    '--quiet',
+                    'HEAD',
+                    '--',
+                    '.codex/contracts/agent-workflow.json',
+                    'scripts/ci/check_exact_head_mergegate.php',
+                    'scripts/ci/lib/ExactHeadMergegate.php',
+                    'scripts/ci/check_agent_harness_readiness.php',
+                    'scripts/ci/check_harness_report_dates.php',
+                ]
+            ) {
+                return '';
+            }
+
+            $blobs = [
+                '.codex/contracts/agent-workflow.json' => '.codex/contracts/agent-workflow.json',
+                'scripts/ci/check_agent_harness_readiness.php' => 'scripts/ci/check_agent_harness_readiness.php',
+                'scripts/ci/check_harness_report_dates.php' => 'scripts/ci/check_harness_report_dates.php',
+                '.github/workflows/ci.yml' => '.github/workflows/ci.yml',
+            ];
+            foreach ($blobs as $suffix => $relativePath) {
+                if ($command !== ['git', 'show', self::SHA . ':' . $suffix]) {
+                    continue;
+                }
+
+                $contents = (string) file_get_contents(dirname(__DIR__, 3) . '/' . $relativePath);
+                if ($suffix === '.github/workflows/ci.yml' && $mutateWorkflow !== null) {
+                    return $mutateWorkflow($contents);
+                }
+
+                return $contents;
+            }
+
+            self::fail('Unexpected command: ' . json_encode($command, JSON_THROW_ON_ERROR));
         };
     }
 

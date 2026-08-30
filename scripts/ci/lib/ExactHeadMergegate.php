@@ -130,6 +130,16 @@ final class ExactHeadMergegate
         $sha = self::normalizeSha($reviewedSha);
         $gates = [];
 
+        $ciExecutionContractVerified = $policy['ci_execution_contract_verified'] === true;
+        self::addGate(
+            $gates,
+            $ciExecutionContractVerified ? 'pass' : 'fail',
+            $ciExecutionContractVerified ? 'ci_execution_contract_verified' : 'ci_execution_contract_unverified',
+            $ciExecutionContractVerified
+                ? 'Reviewed CI execution contract was verified from the reviewed commit.'
+                : 'Reviewed CI execution contract was not verified from the reviewed commit.',
+        );
+
         $prHeadRevalidated = ($snapshot['pr_head_revalidated'] ?? null) === true;
         self::addGate(
             $gates,
@@ -225,7 +235,14 @@ final class ExactHeadMergegate
             $suiteId = null;
         }
 
-        self::evaluateCheckRuns($policy, $snapshot['check_runs'] ?? null, $sha, $suiteId, $gates);
+        self::evaluateCheckRuns(
+            $policy,
+            $snapshot['check_runs'] ?? null,
+            $sha,
+            $suiteId,
+            $ciExecutionContractVerified,
+            $gates,
+        );
         self::evaluateReviewAttestations(
             $policy,
             $snapshot['comments'] ?? null,
@@ -308,6 +325,7 @@ final class ExactHeadMergegate
      * @param array<string, mixed> $policy
      * @param mixed $checkRuns
      * @param int|null $suiteId
+     * @param bool $ciExecutionContractVerified
      * @param array<int, array<string, mixed>> $gates
      */
     private static function evaluateCheckRuns(
@@ -315,6 +333,7 @@ final class ExactHeadMergegate
         mixed $checkRuns,
         string $sha,
         ?int $suiteId,
+        bool $ciExecutionContractVerified,
         array &$gates,
     ): void {
         $runsByName = [];
@@ -356,6 +375,17 @@ final class ExactHeadMergegate
                         'fail',
                         $conditional ? 'conditional_check_invalid' : 'required_check_invalid',
                         'Policy check is not in an allowed terminal state.',
+                        $name,
+                    );
+                    continue;
+                }
+
+                if ($notApplicable && !$ciExecutionContractVerified) {
+                    self::addGate(
+                        $gates,
+                        'fail',
+                        'conditional_check_unverified',
+                        'Conditional policy check cannot be accepted without a verified CI execution contract.',
                         $name,
                     );
                     continue;
@@ -704,6 +734,7 @@ final class ExactHeadMergegate
                 'blocking_feedback_associations',
                 'attestation_marker',
                 'attestation_verdict',
+                'ci_execution_contract_verified',
             ]
             as $key
         ) {
@@ -716,6 +747,10 @@ final class ExactHeadMergegate
             if (!is_string($policy[$key]) || $policy[$key] === '' || str_contains($policy[$key], "\n")) {
                 throw new InvalidArgumentException('Malformed mergegate policy.');
             }
+        }
+
+        if (!is_bool($policy['ci_execution_contract_verified'])) {
+            throw new InvalidArgumentException('Malformed mergegate policy.');
         }
 
         foreach (

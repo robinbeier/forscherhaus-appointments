@@ -211,12 +211,16 @@ function requireExactHeadMergegateCliValue(string $argument, string $prefix): st
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
  *     attestation_marker:string,
- *     attestation_verdict:string
+ *     attestation_verdict:string,
+ *     ci_execution_contract_verified:bool
  * }
  */
 function loadExactHeadMergegatePolicy(string $contractPath): array
 {
-    return decodeExactHeadMergegatePolicy(readExactHeadMergegatePolicyContents($contractPath));
+    $policy = decodeExactHeadMergegatePolicy(readExactHeadMergegatePolicyContents($contractPath));
+    $policy['ci_execution_contract_verified'] = false;
+
+    return $policy;
 }
 
 /**
@@ -261,6 +265,8 @@ function loadExactHeadMergegateVerifiedPolicy(
         $contractRelativePath,
         'scripts/ci/check_exact_head_mergegate.php',
         'scripts/ci/lib/ExactHeadMergegate.php',
+        'scripts/ci/check_agent_harness_readiness.php',
+        'scripts/ci/check_harness_report_dates.php',
     ];
     try {
         $runProcess(array_merge(['git', 'diff', '--quiet', 'HEAD', '--'], $criticalPaths), $root);
@@ -268,9 +274,101 @@ function loadExactHeadMergegateVerifiedPolicy(
         throw new RuntimeException('Exact-head mergegate security-critical files must be clean.');
     }
 
-    return decodeExactHeadMergegatePolicy(
-        $runProcess(['git', 'show', $normalizedReviewedSha . ':' . $contractRelativePath], $root),
-    );
+    $reviewedContract = $runProcess(['git', 'show', $normalizedReviewedSha . ':' . $contractRelativePath], $root);
+    $policy = decodeExactHeadMergegatePolicy($reviewedContract);
+
+    $harnessPath = $root . '/scripts/ci/check_agent_harness_readiness.php';
+    $dateHelperPath = $root . '/scripts/ci/check_harness_report_dates.php';
+    foreach ([$harnessPath, $dateHelperPath] as $path) {
+        if (!is_file($path)) {
+            throw new RuntimeException('Exact-head mergegate canonical harness support is unavailable.');
+        }
+    }
+    foreach (
+        [
+            [$harnessPath, 'scripts/ci/check_agent_harness_readiness.php'],
+            [$dateHelperPath, 'scripts/ci/check_harness_report_dates.php'],
+        ]
+        as [$path, $relativePath]
+    ) {
+        $localContents = file_get_contents($path);
+        if (
+            $localContents === false ||
+            !hash_equals(
+                hash('sha256', $localContents),
+                hash('sha256', $runProcess(['git', 'show', $normalizedReviewedSha . ':' . $relativePath], $root)),
+            )
+        ) {
+            throw new RuntimeException('Exact-head mergegate canonical harness support is not bound to reviewed HEAD.');
+        }
+    }
+
+    require_once $harnessPath;
+    $temporaryDirectory = sys_get_temp_dir() . '/exact-head-mergegate-' . bin2hex(random_bytes(12));
+    if (!mkdir($temporaryDirectory, 0700, true)) {
+        throw new RuntimeException('Exact-head mergegate could not prepare verified workflow input.');
+    }
+    try {
+        $workflowContract = agentHarnessReadinessLoadWorkflowContract(
+            writeExactHeadMergegateTemporaryInput($temporaryDirectory, 'contract.json', $reviewedContract),
+        );
+        $contractWorkflow = $workflowContract['ci']['workflow'] ?? null;
+        $expectedWorkflowPath = '.github/workflows/' . $policy['workflow_file'];
+        if (!is_string($contractWorkflow) || $contractWorkflow !== $expectedWorkflowPath) {
+            throw new RuntimeException('Exact-head mergegate workflow path is not aligned with the reviewed contract.');
+        }
+        $reviewedWorkflow = $runProcess(['git', 'show', $normalizedReviewedSha . ':' . $contractWorkflow], $root);
+        $workflowPath = writeExactHeadMergegateTemporaryInput($temporaryDirectory, 'ci.yml', $reviewedWorkflow);
+        $ciWorkflow = agentHarnessReadinessLoadWorkflowYaml($workflowPath);
+        $blockingJobs = $workflowContract['ci']['blocking_jobs'];
+        $failurePolicy = $workflowContract['ci']['blocking_failure_control_policy'];
+        $grammar = $workflowContract['ci']['condition_grammar'];
+        $checks = array_merge(
+            agentHarnessReadinessEvaluateWorkflowFailureMasks($ciWorkflow, $failurePolicy),
+            agentHarnessReadinessEvaluateBlockingJobs($ciWorkflow, array_keys($blockingJobs), $failurePolicy),
+            agentHarnessReadinessEvaluateClassifiedJobInventory(
+                $ciWorkflow,
+                array_keys($blockingJobs),
+                $workflowContract['ci']['advisory_jobs'],
+            ),
+            agentHarnessReadinessEvaluateBlockingExecutionFingerprints(
+                $ciWorkflow,
+                array_keys(
+                    array_filter(
+                        $blockingJobs,
+                        static fn(array $job): bool => ($job['kind'] ?? null) === 'fingerprinted_execution',
+                    ),
+                ),
+                $grammar,
+                $workflowContract['ci']['blocking_execution_fingerprints'],
+            ),
+            agentHarnessReadinessEvaluateBlockingJobContracts($ciWorkflow, $blockingJobs, $grammar, $failurePolicy),
+        );
+        foreach ($checks as $check) {
+            if (($check['status'] ?? null) !== 'pass') {
+                throw new RuntimeException('Exact-head mergegate reviewed CI execution contract is invalid.');
+            }
+        }
+    } finally {
+        foreach (glob($temporaryDirectory . '/*') ?: [] as $temporaryFile) {
+            unlink($temporaryFile);
+        }
+        rmdir($temporaryDirectory);
+    }
+
+    $policy['ci_execution_contract_verified'] = true;
+
+    return $policy;
+}
+
+function writeExactHeadMergegateTemporaryInput(string $directory, string $name, string $contents): string
+{
+    $path = $directory . '/' . $name;
+    if (file_put_contents($path, $contents, LOCK_EX) !== strlen($contents)) {
+        throw new RuntimeException('Exact-head mergegate could not prepare verified input.');
+    }
+
+    return $path;
 }
 
 function readExactHeadMergegatePolicyContents(string $contractPath): string
@@ -294,7 +392,8 @@ function readExactHeadMergegatePolicyContents(string $contractPath): string
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
  *     attestation_marker:string,
- *     attestation_verdict:string
+ *     attestation_verdict:string,
+ *     ci_execution_contract_verified:bool
  * }
  */
 function decodeExactHeadMergegatePolicy(string $contents): array
@@ -364,6 +463,7 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         ),
         'attestation_marker' => requireExactHeadMergegatePolicyString($attestation, 'marker'),
         'attestation_verdict' => requireExactHeadMergegatePolicyString($attestation, 'verdict'),
+        'ci_execution_contract_verified' => false,
     ];
 }
 

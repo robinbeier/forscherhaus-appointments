@@ -38,6 +38,13 @@ the same pull request and reviewed SHA:
    A mismatched local `HEAD`, missing contract blob, or local change to the
    contract or either mergegate implementation file fails closed before GitHub
    evidence is evaluated.
+   The reviewed contract's workflow path and CI execution model are then
+   loaded from that same commit. The canonical Agent Harness evaluators verify
+   failure controls, applicability conditions, blocking-job inventory,
+   execution fingerprints, and exact-execution assertions before any CI
+   evidence is trusted. A changed, weakened, noop, or unconditionally skipped
+   blocking job therefore fails closed; skipped evidence is accepted only
+   behind this verified execution-contract invariant.
 2. The pull request is read before the first bounded evidence observation,
    between the two observations, and once more after the second observation.
    Its number, state, draft flag, base, head SHA, head branch, and head

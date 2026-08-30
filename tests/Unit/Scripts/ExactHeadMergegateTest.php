@@ -53,6 +53,22 @@ final class ExactHeadMergegateTest extends TestCase
         self::assertStringNotContainsString('login', json_encode($report, JSON_THROW_ON_ERROR));
     }
 
+    public function testUnverifiedCiExecutionContractFailsClosedIncludingSkippedConditionalChecks(): void
+    {
+        $policy = $this->policy();
+        $policy['ci_execution_contract_verified'] = false;
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment()];
+        $snapshot['check_runs'][1]['conclusion'] = 'skipped';
+
+        $report = ExactHeadMergegate::evaluate($policy, $snapshot, 12, self::SHA);
+
+        self::assertSame('fail', $report['status']);
+        self::assertContains('ci_execution_contract_unverified', array_column($report['gates'], 'code'));
+        self::assertContains('conditional_check_unverified', array_column($report['gates'], 'code'));
+        self::assertNotContains('conditional_check_skipped', array_column($report['gates'], 'code'));
+    }
+
     public function testReportProvidesOnlyPrivacySafeReviewActivityWatermarks(): void
     {
         $snapshot = $this->snapshot();
@@ -130,6 +146,66 @@ final class ExactHeadMergegateTest extends TestCase
 
         $snapshot['ci_evidence_revalidated'] = false;
         self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+    }
+
+    public function testCiEvidenceObservationCountMustBeExactlyTwo(): void
+    {
+        foreach ([null, 1, 3] as $observationCount) {
+            $snapshot = $this->snapshot();
+            $snapshot['comments'] = [$this->attestationComment()];
+            if ($observationCount === null) {
+                unset($snapshot['ci_evidence_observation_count']);
+            } else {
+                $snapshot['ci_evidence_observation_count'] = $observationCount;
+            }
+
+            $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+            self::assertSame('fail', $report['status'], (string) ($observationCount ?? 'missing'));
+            self::assertContains(
+                'ci_evidence_drift_during_evaluation',
+                array_column($report['gates'], 'code'),
+                (string) ($observationCount ?? 'missing'),
+            );
+        }
+    }
+
+    public function testCommitPullRequestBindingIsRequiredIndependently(): void
+    {
+        foreach ([null, [99]] as $associatedPullRequests) {
+            $snapshot = $this->snapshot();
+            $snapshot['comments'] = [$this->attestationComment()];
+            if ($associatedPullRequests === null) {
+                unset($snapshot['associated_pr_numbers']);
+            } else {
+                $snapshot['associated_pr_numbers'] = $associatedPullRequests;
+            }
+
+            $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+            self::assertSame('fail', $report['status']);
+            self::assertContains('pr_commit_binding_missing', array_column($report['gates'], 'code'));
+            self::assertContains('workflow', array_column($report['gates'], 'code'));
+        }
+    }
+
+    public function testSelectedWorkflowRequiresAValidCheckSuiteIndependently(): void
+    {
+        foreach ([null, 0, '202'] as $checkSuiteId) {
+            $snapshot = $this->snapshot();
+            $snapshot['comments'] = [$this->attestationComment()];
+            if ($checkSuiteId === null) {
+                unset($snapshot['workflow_runs'][0]['check_suite_id']);
+            } else {
+                $snapshot['workflow_runs'][0]['check_suite_id'] = $checkSuiteId;
+            }
+
+            $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+            self::assertSame('fail', $report['status']);
+            self::assertContains('check_suite_missing', array_column($report['gates'], 'code'));
+            self::assertContains('workflow', array_column($report['gates'], 'code'));
+        }
     }
 
     public function testWorkflowMustBindExactPullRequestShaAndCheckSuite(): void
@@ -534,6 +610,7 @@ final class ExactHeadMergegateTest extends TestCase
             'blocking_feedback_associations' => ['OWNER', 'MEMBER', 'COLLABORATOR'],
             'attestation_marker' => 'exact-head-review-attestation:v2',
             'attestation_verdict' => 'no_findings',
+            'ci_execution_contract_verified' => true,
         ];
     }
 
