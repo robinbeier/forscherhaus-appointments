@@ -45,6 +45,35 @@ class BookingRequestDtoFactoryTest extends TestCase
         $this->assertSame('', $dto->customer['phone_number']);
         $this->assertTrue($dto->manageMode);
         $this->assertSame('captcha-value', $dto->captcha);
+        $this->assertSame(12, $dto->appointmentId);
+        $this->assertNull($dto->customerId);
+        $this->assertTrue($dto->hasIdentitySignal);
+        $this->assertTrue($dto->isExistingAppointmentAttempt());
+    }
+
+    public function testRegisterDtoTreatsCustomerIdAloneAsExistingAppointmentAttempt(): void
+    {
+        $dto = $this->factory->fromRegisterPayload(
+            [
+                'appointment' => [
+                    'start_datetime' => '2026-03-10 10:00:00',
+                    'id_services' => 3,
+                ],
+                'customer' => [
+                    'id' => '34',
+                    'first_name' => 'Ada',
+                    'last_name' => 'Lovelace',
+                    'email' => 'ada@example.test',
+                ],
+                'manage_mode' => false,
+            ],
+            null,
+        );
+
+        $this->assertNull($dto->appointmentId);
+        $this->assertSame(34, $dto->customerId);
+        $this->assertTrue($dto->hasIdentitySignal);
+        $this->assertTrue($dto->isExistingAppointmentAttempt());
     }
 
     public function testAvailableHoursDtoPreservesAnyProviderCompatibility(): void

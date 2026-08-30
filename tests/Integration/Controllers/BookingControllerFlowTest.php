@@ -154,7 +154,7 @@ class BookingControllerFlowTest extends TestCase
             'customer' => [
                 'id' => $customerId,
                 'first_name' => 'Manage',
-                'last_name' => 'Mode',
+                'last_name' => 'Mode Updated',
                 'email' => $customerEmail,
                 'phone_number' => '+49123456789',
                 'address' => 'Teststrasse 1',
@@ -180,6 +180,10 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($existing['hash'], $updated['hash']);
         $this->assertSame($updatedStart->format('Y-m-d H:i:s'), $updated['start_datetime']);
         $this->assertSame(1, $this->fixtures->countAppointmentsByHash($existing['hash']));
+
+        $updatedCustomer = $this->fixtures->findCustomerById($customerId);
+        $this->assertNotNull($updatedCustomer);
+        $this->assertSame('Mode Updated', $updatedCustomer['last_name']);
     }
 
     public function testCanonicalAuthorityCanBeClaimedAndVerifiedDirectly(): void
@@ -246,6 +250,31 @@ class BookingControllerFlowTest extends TestCase
             $beforeAppointment,
             $beforeCustomer,
         );
+    }
+
+    public function testCustomerIdWithoutManageModeStillRequiresAuthority(): void
+    {
+        $scenario = $this->createRescheduleScenario(10);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $beforeCount = $this->fixtures->countAppointmentsForCustomer($scenario['customer_id']);
+
+        $this->setReschedulePayload($scenario, false, null, $scenario['customer_id'], [
+            'last_name' => 'Customer-ID-only mutation',
+        ]);
+        unset($_POST['post_data']['appointment']['id']);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+        $this->assertSame($beforeCount, $this->fixtures->countAppointmentsForCustomer($scenario['customer_id']));
     }
 
     public function testMalformedAppointmentIdCannotFallBackToNormalCreation(): void
@@ -673,7 +702,7 @@ class BookingControllerFlowTest extends TestCase
                 $this->forcedProviderId = $forcedProviderId;
             }
 
-            protected function check_datetime_availability(\BookingRegisterRequestDto $register_request): ?int
+            protected function check_datetime_availability(array $appointment): ?int
             {
                 return $this->forcedProviderId;
             }

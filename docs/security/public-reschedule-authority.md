@@ -62,7 +62,7 @@ fail closed unless all of these hold:
 - the authority is unused and unexpired;
 - the server-side session context matches;
 - the caller's appointment ID equals the authority's appointment ID;
-- the caller's customer ID, when present, equals the authority's customer ID;
+- the caller's customer ID is present and equals the authority's customer ID;
 - the canonical appointment still has the same customer, provider, service,
   hash, content, and scheduling state captured at issuance;
 - the canonical customer, provider availability state, provider-service
@@ -93,6 +93,13 @@ The issuance fingerprint is a deterministic digest of mutation-relevant
 appointment and customer state plus provider availability/service assignment
 and service scheduling state. Raw personal or capability data is not stored in
 the authority row.
+
+The snapshot field contract is versioned and centralized in
+`Reschedule_authority`. It is deliberately conservative: identity/profile,
+scheduling-content, assignment, and row-version changes invalidate the pending
+ten-minute authority even when a particular edit would not alter the requested
+slot. This fail-closed trade-off prevents a stale page from overwriting a
+concurrent edit; the user can reload the canonical reschedule link to continue.
 
 After a successful claim, the write path starts one outer database transaction
 and locks the canonical appointment, its customer, original provider and

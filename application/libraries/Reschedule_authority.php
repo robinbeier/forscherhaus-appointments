@@ -46,6 +46,81 @@ class Reschedule_authority
 
     private const LIFETIME_SECONDS = 600;
 
+    /**
+     * Conservative, versioned fail-closed snapshot contract. These lists are
+     * intentionally centralized because adding or removing a field changes
+     * which concurrent edits invalidate a pending reschedule authority.
+     */
+    private const SNAPSHOT_CONTRACT_VERSION = 1;
+
+    private const APPOINTMENT_SNAPSHOT_FIELDS = [
+        'id',
+        'hash',
+        'start_datetime',
+        'end_datetime',
+        'location',
+        'notes',
+        'color',
+        'status',
+        'is_unavailability',
+        'id_users_provider',
+        'id_users_customer',
+        'id_services',
+        'update_datetime',
+    ];
+
+    private const CUSTOMER_SNAPSHOT_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'mobile_number',
+        'phone_number',
+        'address',
+        'city',
+        'state',
+        'zip_code',
+        'notes',
+        'timezone',
+        'language',
+        'custom_field_1',
+        'custom_field_2',
+        'custom_field_3',
+        'custom_field_4',
+        'custom_field_5',
+        'id_roles',
+        'update_datetime',
+    ];
+
+    private const PROVIDER_SNAPSHOT_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'phone_number',
+        'timezone',
+        'language',
+        'room',
+        'class_size_default',
+        'id_roles',
+        'update_datetime',
+    ];
+
+    private const SERVICE_SNAPSHOT_FIELDS = [
+        'id',
+        'name',
+        'duration',
+        'location',
+        'color',
+        'availabilities_type',
+        'attendants_number',
+        'buffer_before',
+        'buffer_after',
+        'is_private',
+        'id_service_categories',
+        'update_datetime',
+    ];
+
     private object $db;
 
     public function __construct()
@@ -324,56 +399,10 @@ class Reschedule_authority
         }
 
         $snapshot = [
-            'appointment' => $this->only($appointment, [
-                'id',
-                'hash',
-                'start_datetime',
-                'end_datetime',
-                'location',
-                'notes',
-                'color',
-                'status',
-                'is_unavailability',
-                'id_users_provider',
-                'id_users_customer',
-                'id_services',
-                'update_datetime',
-            ]),
-            'customer' => $this->only($customer, [
-                'id',
-                'first_name',
-                'last_name',
-                'email',
-                'mobile_number',
-                'phone_number',
-                'address',
-                'city',
-                'state',
-                'zip_code',
-                'notes',
-                'timezone',
-                'language',
-                'custom_field_1',
-                'custom_field_2',
-                'custom_field_3',
-                'custom_field_4',
-                'custom_field_5',
-                'id_roles',
-                'update_datetime',
-            ]),
-            'provider' => $this->only($provider, [
-                'id',
-                'first_name',
-                'last_name',
-                'email',
-                'phone_number',
-                'timezone',
-                'language',
-                'room',
-                'class_size_default',
-                'id_roles',
-                'update_datetime',
-            ]),
+            'contract_version' => self::SNAPSHOT_CONTRACT_VERSION,
+            'appointment' => $this->only($appointment, self::APPOINTMENT_SNAPSHOT_FIELDS),
+            'customer' => $this->only($customer, self::CUSTOMER_SNAPSHOT_FIELDS),
+            'provider' => $this->only($provider, self::PROVIDER_SNAPSHOT_FIELDS),
             'provider_schedule' => [
                 'working_plan' => $this->decodeJsonValue($provider_settings['working_plan'] ?? null),
                 'working_plan_exceptions' => $this->decodeJsonValue(
@@ -381,20 +410,7 @@ class Reschedule_authority
                 ),
                 'service_ids' => $this->providerServiceIds($provider_id),
             ],
-            'service' => $this->only($service, [
-                'id',
-                'name',
-                'duration',
-                'location',
-                'color',
-                'availabilities_type',
-                'attendants_number',
-                'buffer_before',
-                'buffer_after',
-                'is_private',
-                'id_service_categories',
-                'update_datetime',
-            ]),
+            'service' => $this->only($service, self::SERVICE_SNAPSHOT_FIELDS),
         ];
 
         $canonical_snapshot = $this->canonicalize($snapshot);

@@ -351,10 +351,6 @@ class Booking extends EA_Controller
             $appointment = $request_dto->appointment;
             $customer = $request_dto->customer;
             $captcha = $request_dto->captcha;
-            $requested_appointment_id = $this->positiveRequestId($appointment['id'] ?? null);
-            $requested_customer_id = $this->positiveRequestId($customer['id'] ?? null);
-            $has_identity_signal = array_key_exists('id', $appointment) || array_key_exists('id', $customer);
-            $is_reschedule_attempt = $request_dto->manageMode || $has_identity_signal;
 
             $require_captcha = (bool) setting('require_captcha');
             $captcha_phrase = session('captcha_phrase');
@@ -371,10 +367,10 @@ class Booking extends EA_Controller
 
             $authority_claim = null;
 
-            if ($is_reschedule_attempt) {
+            if ($request_dto->isExistingAppointmentAttempt()) {
                 $authority_claim = $this->rescheduleAuthority()->claim(
-                    $requested_appointment_id,
-                    $requested_customer_id,
+                    $request_dto->appointmentId,
+                    $request_dto->customerId,
                 );
                 $appointment['id'] = $authority_claim->appointmentId;
                 $customer['id'] = $authority_claim->customerId;
@@ -384,16 +380,9 @@ class Booking extends EA_Controller
                 unset($appointment['id'], $customer['id']);
             }
 
-            $server_request = new BookingRegisterRequestDto(
-                $appointment,
-                $customer,
-                $authority_claim instanceof RescheduleAuthorityClaim,
-                $captcha,
-            );
-
             // Resolve ANY_PROVIDER or reject an unavailable concrete target.
             // Availability is checked again under the provider lock below.
-            $appointment['id_users_provider'] = $this->check_datetime_availability($server_request);
+            $appointment['id_users_provider'] = $this->check_datetime_availability($appointment);
 
             if (!$appointment['id_users_provider']) {
                 json_response(
@@ -406,13 +395,6 @@ class Booking extends EA_Controller
 
                 return;
             }
-
-            $server_request = new BookingRegisterRequestDto(
-                $appointment,
-                $customer,
-                $authority_claim instanceof RescheduleAuthorityClaim,
-                $captcha,
-            );
 
             if (!$this->db->trans_begin()) {
                 throw new RuntimeException('Could not start public booking transaction.');
@@ -435,7 +417,7 @@ class Booking extends EA_Controller
 
             // The provider row lock serializes public writes for this target;
             // rerun the existing availability boundary after acquiring it.
-            $locked_provider_id = $this->check_datetime_availability($server_request);
+            $locked_provider_id = $this->check_datetime_availability($appointment);
 
             if ($locked_provider_id !== $target_provider_id) {
                 $this->db->trans_rollback();
@@ -652,14 +634,14 @@ class Booking extends EA_Controller
      * Use this method just before the customer confirms the appointment registration. If the selected date was reserved
      * in the meanwhile, the customer must be prompted to select another time.
      *
+     * @param array<string, mixed> $appointment
+     *
      * @return int|null Returns the ID of the provider that is available for the appointment.
      *
      * @throws Exception
      */
-    protected function check_datetime_availability(BookingRegisterRequestDto $register_request): ?int
+    protected function check_datetime_availability(array $appointment): ?int
     {
-        $appointment = $register_request->appointment;
-
         $this->assertNotProviderUiSmokeBookingTarget(
             (int) $appointment['id_users_provider'],
             (int) $appointment['id_services'],
@@ -1039,14 +1021,5 @@ class Booking extends EA_Controller
         $this->reschedule_authority = $CI->reschedule_authority;
 
         return $this->reschedule_authority;
-    }
-
-    private function positiveRequestId(mixed $value): ?int
-    {
-        $normalized = filter_var($value, FILTER_VALIDATE_INT, [
-            'options' => ['min_range' => 1],
-        ]);
-
-        return $normalized === false ? null : (int) $normalized;
     }
 }
