@@ -57,9 +57,12 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertSame(['OWNER'], $policy['trusted_associations']);
         self::assertSame(['OWNER', 'MEMBER', 'COLLABORATOR'], $policy['blocking_feedback_associations']);
         self::assertSame(
-            $policy['workflow_yaml_tree_sha256'],
-            exactHeadMergegateTreeSha256($root . '/vendor/symfony/yaml'),
+            $policy['workflow_yaml_runtime_sha256'],
+            exactHeadMergegateRuntimeSha256($root . '/vendor/symfony/yaml', $policy['workflow_yaml_runtime_files']),
         );
+        self::assertNotContains('README.md', $policy['workflow_yaml_runtime_files']);
+        self::assertNotContains('Dumper.php', $policy['workflow_yaml_runtime_files']);
+        self::assertNotContains('Command/LintCommand.php', $policy['workflow_yaml_runtime_files']);
     }
 
     public function testIsolatedWorkflowParserPinsYamlRuntimeAndIgnoresAmbientLoadedClass(): void
@@ -71,13 +74,19 @@ final class ExactHeadMergegateCliTest extends TestCase
         $workflow = parseExactHeadMergegateWorkflowYamlIsolated(
             $root,
             $root . '/.github/workflows/ci.yml',
-            $policy['workflow_yaml_tree_sha256'],
+            $policy['workflow_yaml_runtime_files'],
+            $policy['workflow_yaml_runtime_sha256'],
         );
         self::assertIsArray($workflow['jobs'] ?? null);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('YAML runtime is not bound to reviewed HEAD');
-        parseExactHeadMergegateWorkflowYamlIsolated($root, $root . '/.github/workflows/ci.yml', str_repeat('0', 64));
+        parseExactHeadMergegateWorkflowYamlIsolated(
+            $root,
+            $root . '/.github/workflows/ci.yml',
+            $policy['workflow_yaml_runtime_files'],
+            str_repeat('0', 64),
+        );
     }
 
     public function testCheckClassificationAndNamesMatchWorkflowApplicability(): void

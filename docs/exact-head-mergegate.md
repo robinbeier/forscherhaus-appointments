@@ -45,10 +45,12 @@ the same pull request and reviewed SHA:
    evidence is trusted. A changed, weakened, noop, or unconditionally skipped
    blocking job therefore fails closed; skipped evidence is accepted only
    behind this verified execution-contract invariant. Workflow YAML is parsed
-   in a fresh no-ini PHP process with a package-scoped autoloader. The complete
-   Symfony YAML package tree must match the SHA-256 digest pinned by the
-   reviewed contract, so ambient preloaded classes or modified local vendor
-   code cannot define the verified CI execution contract.
+   in a fresh no-ini PHP process with a package-scoped autoloader. Only the
+   explicit parser runtime file manifest is loadable, and those files must
+   match the aggregate SHA-256 digest pinned by the reviewed contract. Ambient
+   preloaded classes, modified local vendor code, and unrelated package docs or
+   dump/console helpers therefore cannot define or churn the verified CI
+   execution contract.
 2. The pull request is read before the first bounded evidence observation,
    between the two observations, and once more after the second observation.
    Its number, state, draft flag, base, head SHA, head branch, and head

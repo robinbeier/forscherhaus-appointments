@@ -210,7 +210,8 @@ function requireExactHeadMergegateCliValue(string $argument, string $prefix): st
  *     required_review_lenses:array<int, string>,
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
- *     workflow_yaml_tree_sha256:string,
+ *     workflow_yaml_runtime_files:array<int, string>,
+ *     workflow_yaml_runtime_sha256:string,
  *     attestation_marker:string,
  *     attestation_verdict:string,
  *     ci_execution_contract_verified:bool
@@ -323,7 +324,8 @@ function loadExactHeadMergegateVerifiedPolicy(
         $ciWorkflow = parseExactHeadMergegateWorkflowYamlIsolated(
             $root,
             $workflowPath,
-            $policy['workflow_yaml_tree_sha256'],
+            $policy['workflow_yaml_runtime_files'],
+            $policy['workflow_yaml_runtime_sha256'],
         );
         $blockingJobs = $workflowContract['ci']['blocking_jobs'];
         $failurePolicy = $workflowContract['ci']['blocking_failure_control_policy'];
@@ -385,32 +387,45 @@ function writeExactHeadMergegateTemporaryInput(string $directory, string $name, 
 function parseExactHeadMergegateWorkflowYamlIsolated(
     string $root,
     string $workflowPath,
-    string $expectedTreeSha256,
+    array $runtimeFiles,
+    string $expectedRuntimeSha256,
 ): array {
-    if (preg_match('/^[0-9a-f]{64}$/D', $expectedTreeSha256) !== 1) {
+    if (preg_match('/^[0-9a-f]{64}$/D', $expectedRuntimeSha256) !== 1) {
         throw new RuntimeException('Exact-head mergegate YAML runtime digest is malformed.');
     }
 
     $packagePath = $root . '/vendor/symfony/yaml';
-    $actualTreeSha256 = exactHeadMergegateTreeSha256($packagePath);
-    if (!hash_equals($expectedTreeSha256, $actualTreeSha256)) {
+    $actualRuntimeSha256 = exactHeadMergegateRuntimeSha256($packagePath, $runtimeFiles);
+    if (!hash_equals($expectedRuntimeSha256, $actualRuntimeSha256)) {
         throw new RuntimeException('Exact-head mergegate YAML runtime is not bound to reviewed HEAD.');
     }
+    $encodedRuntimeFiles = json_encode($runtimeFiles, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
     $parserScript = <<<'PHP'
     $packagePath = realpath($argv[1] ?? '');
     $workflowPath = realpath($argv[2] ?? '');
-    if ($packagePath === false || $workflowPath === false || class_exists('Symfony\\Component\\Yaml\\Yaml', false)) {
+    $runtimeFiles = json_decode($argv[3] ?? '', true);
+    if (
+        $packagePath === false ||
+        $workflowPath === false ||
+        !is_array($runtimeFiles) ||
+        !array_is_list($runtimeFiles) ||
+        class_exists('Symfony\\Component\\Yaml\\Yaml', false)
+    ) {
         exit(2);
     }
+    $allowedPaths = array_fill_keys($runtimeFiles, true);
     $packagePrefix = rtrim(str_replace('\\', '/', $packagePath), '/') . '/';
     spl_autoload_register(
-        static function (string $class) use ($packagePath, $packagePrefix): void {
+        static function (string $class) use ($allowedPaths, $packagePath, $packagePrefix): void {
             $namespace = 'Symfony\\Component\\Yaml\\';
             if (!str_starts_with($class, $namespace)) {
                 return;
             }
             $relativePath = str_replace('\\', '/', substr($class, strlen($namespace))) . '.php';
+            if (!isset($allowedPaths[$relativePath])) {
+                throw new RuntimeException('YAML class is outside the reviewed runtime manifest.');
+            }
             $candidate = realpath($packagePath . '/' . $relativePath);
             if ($candidate === false || !str_starts_with(str_replace('\\', '/', $candidate), $packagePrefix)) {
                 throw new RuntimeException('YAML class escaped the verified package tree.');
@@ -439,6 +454,7 @@ function parseExactHeadMergegateWorkflowYamlIsolated(
             $parserScript,
             $packagePath,
             $workflowPath,
+            $encodedRuntimeFiles,
         ],
         $root,
     );
@@ -454,46 +470,44 @@ function parseExactHeadMergegateWorkflowYamlIsolated(
     return $parsed;
 }
 
-function exactHeadMergegateTreeSha256(string $root): string
+/**
+ * @param array<int, string> $runtimeFiles
+ */
+function exactHeadMergegateRuntimeSha256(string $root, array $runtimeFiles): string
 {
     $resolvedRoot = realpath($root);
     if ($resolvedRoot === false || !is_dir($resolvedRoot) || is_link($root)) {
         throw new RuntimeException('Exact-head mergegate YAML runtime is unavailable.');
     }
 
-    $files = [];
-    $walk = static function (string $directory, string $prefix) use (&$walk, &$files): void {
-        $entries = scandir($directory);
-        if ($entries === false) {
-            throw new RuntimeException('Exact-head mergegate YAML runtime could not be inspected.');
-        }
-        foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
-            }
-            $path = $directory . '/' . $entry;
-            $relativePath = $prefix === '' ? $entry : $prefix . '/' . $entry;
-            if (is_link($path)) {
-                throw new RuntimeException('Exact-head mergegate YAML runtime contains a symbolic link.');
-            }
-            if (is_dir($path)) {
-                $walk($path, $relativePath);
-                continue;
-            }
-            if (!is_file($path)) {
-                throw new RuntimeException('Exact-head mergegate YAML runtime contains an unsupported entry.');
-            }
-            $files[$relativePath] = $path;
-        }
-    };
-    $walk($resolvedRoot, '');
-    if ($files === []) {
-        throw new RuntimeException('Exact-head mergegate YAML runtime is empty.');
+    if ($runtimeFiles === [] || count($runtimeFiles) !== count(array_unique($runtimeFiles))) {
+        throw new RuntimeException('Exact-head mergegate YAML runtime manifest is malformed.');
     }
-    ksort($files, SORT_STRING);
+    $sortedRuntimeFiles = $runtimeFiles;
+    sort($sortedRuntimeFiles, SORT_STRING);
+    if ($runtimeFiles !== $sortedRuntimeFiles) {
+        throw new RuntimeException('Exact-head mergegate YAML runtime manifest is not canonical.');
+    }
 
     $hash = hash_init('sha256');
-    foreach ($files as $relativePath => $path) {
+    $rootPrefix = rtrim(str_replace('\\', '/', $resolvedRoot), '/') . '/';
+    foreach ($runtimeFiles as $relativePath) {
+        if (
+            !is_string($relativePath) ||
+            preg_match('~^(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\\.php$~D', $relativePath) !== 1
+        ) {
+            throw new RuntimeException('Exact-head mergegate YAML runtime manifest contains an invalid path.');
+        }
+        $path = $resolvedRoot . '/' . $relativePath;
+        $resolvedPath = realpath($path);
+        if (
+            $resolvedPath === false ||
+            is_link($path) ||
+            !is_file($resolvedPath) ||
+            !str_starts_with(str_replace('\\', '/', $resolvedPath), $rootPrefix)
+        ) {
+            throw new RuntimeException('Exact-head mergegate YAML runtime manifest entry is unavailable.');
+        }
         $contents = file_get_contents($path);
         if ($contents === false) {
             throw new RuntimeException('Exact-head mergegate YAML runtime could not be read.');
@@ -524,7 +538,8 @@ function readExactHeadMergegatePolicyContents(string $contractPath): string
  *     required_review_lenses:array<int, string>,
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
- *     workflow_yaml_tree_sha256:string,
+ *     workflow_yaml_runtime_files:array<int, string>,
+ *     workflow_yaml_runtime_sha256:string,
  *     attestation_marker:string,
  *     attestation_verdict:string,
  *     ci_execution_contract_verified:bool
@@ -574,11 +589,21 @@ function decodeExactHeadMergegatePolicy(string $contents): array
 
     $attestation = $mergegate['review_attestation'];
     $workflowParser = $mergegate['workflow_parser'];
+    $runtimeFiles = normalizeExactHeadMergegateStringList($workflowParser['runtime_files'] ?? null);
+    $sortedRuntimeFiles = $runtimeFiles;
+    sort($sortedRuntimeFiles, SORT_STRING);
+    $invalidRuntimeFiles = array_filter(
+        $runtimeFiles,
+        static fn(string $path): bool => preg_match('~^(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\.php$~D', $path) !== 1,
+    );
     if (
         ($workflowParser['isolation'] ?? null) !== 'php_no_ini_scoped_autoloader' ||
         ($workflowParser['package_path'] ?? null) !== 'vendor/symfony/yaml' ||
-        !is_string($workflowParser['tree_sha256'] ?? null) ||
-        preg_match('/^[0-9a-f]{64}$/D', $workflowParser['tree_sha256']) !== 1
+        $runtimeFiles !== $sortedRuntimeFiles ||
+        $invalidRuntimeFiles !== [] ||
+        !in_array('Yaml.php', $runtimeFiles, true) ||
+        !is_string($workflowParser['runtime_files_sha256'] ?? null) ||
+        preg_match('/^[0-9a-f]{64}$/D', $workflowParser['runtime_files_sha256']) !== 1
     ) {
         throw new RuntimeException('Exact-head mergegate workflow parser contract is malformed.');
     }
@@ -605,7 +630,8 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         'blocking_feedback_associations' => normalizeExactHeadMergegateStringList(
             $attestation['blocking_feedback_author_associations'] ?? null,
         ),
-        'workflow_yaml_tree_sha256' => $workflowParser['tree_sha256'],
+        'workflow_yaml_runtime_files' => $runtimeFiles,
+        'workflow_yaml_runtime_sha256' => $workflowParser['runtime_files_sha256'],
         'attestation_marker' => requireExactHeadMergegatePolicyString($attestation, 'marker'),
         'attestation_verdict' => requireExactHeadMergegatePolicyString($attestation, 'verdict'),
         'ci_execution_contract_verified' => false,

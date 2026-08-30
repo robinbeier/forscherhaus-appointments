@@ -21,7 +21,17 @@
             "workflow_parser": {
                 "isolation": "php_no_ini_scoped_autoloader",
                 "package_path": "vendor/symfony/yaml",
-                "tree_sha256": "e3f7419e526ba455fb4a3a1f3f268b1b682f748dee33a6e24cfa055348604208"
+                "runtime_files": [
+                    "Exception/ExceptionInterface.php",
+                    "Exception/ParseException.php",
+                    "Exception/RuntimeException.php",
+                    "Inline.php",
+                    "Parser.php",
+                    "Tag/TaggedValue.php",
+                    "Unescaper.php",
+                    "Yaml.php"
+                ],
+                "runtime_files_sha256": "ea0f1c3a176b9a34fa2cada62ff1c331a7ff96cf077febf3a753fd29652584e6"
             },
             "required_checks": [
                 "changes",

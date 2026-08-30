@@ -286,7 +286,8 @@ composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed
 The verifier uses GitHub GET requests only. It must run from the exact reviewed
 `HEAD`, loads its policy from that committed tree, and rejects local changes to
 the contract or mergegate implementation. Its workflow parser runs isolated
-and accepts only the YAML package tree digest pinned by that reviewed policy.
+and accepts only the YAML runtime file manifest and digest pinned by that
+reviewed policy.
 It observes all normalized CI and review evidence twice. It reads PR identity
 before, between, and after those bounded observations. All three PR reads and
 both complete evidence observations must remain equal. It requires the open
