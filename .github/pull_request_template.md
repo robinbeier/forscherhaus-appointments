@@ -63,6 +63,7 @@ Concurrency-Aenderungen; sonst N/A mit kurzer Begruendung. -->
 - [ ] Keine offenen Review-Findings
 - [ ] PR-Head, CI-Head und final reviewter Head sind identisch
 - [ ] PR ist mergeable
+- [ ] Read-only Exact-Head-Mergegate ist fuer diesen unveraenderten Head gruen
 - [ ] Noetige Docs/Migrationshinweise sind enthalten
 
 ## Workflow References

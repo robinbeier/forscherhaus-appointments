@@ -1,0 +1,304 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Scripts;
+
+use CiContract\ExactHeadMergegate;
+use InvalidArgumentException;
+use PHPUnit\Framework\TestCase;
+
+require_once __DIR__ . '/../../../scripts/ci/lib/ExactHeadMergegate.php';
+
+final class ExactHeadMergegateTest extends TestCase
+{
+    private const SHA = '0123456789abcdef0123456789abcdef01234567';
+
+    public function testParsesOnlyCanonicalTargetsAndNormalizesUppercaseSha(): void
+    {
+        self::assertSame(12, ExactHeadMergegate::parseTarget(12, 'acme/app'));
+        self::assertSame(12, ExactHeadMergegate::parseTarget('12', 'acme/app'));
+        self::assertSame(12, ExactHeadMergegate::parseTarget('https://github.com/acme/app/pull/12', 'acme/app'));
+        self::assertSame(self::SHA, ExactHeadMergegate::normalizeSha(strtoupper(self::SHA)));
+        foreach (
+            [
+                '0',
+                '012',
+                'https://gitlab.com/acme/app/pull/12',
+                'https://github.com/acme/app/pull/12?x=1',
+                'https://github.com/acme/other/pull/12',
+            ]
+            as $target
+        ) {
+            try {
+                ExactHeadMergegate::parseTarget($target, 'acme/app');
+                self::fail('Target accepted.');
+            } catch (InvalidArgumentException) {
+                self::assertTrue(true);
+            }
+        }
+        $this->expectException(InvalidArgumentException::class);
+        ExactHeadMergegate::normalizeSha('bad');
+    }
+
+    public function testValidSnapshotPassesWithThreeIndependentReviewers(): void
+    {
+        $policy = $this->policy();
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment()];
+        $report = ExactHeadMergegate::evaluate($policy, $snapshot, 12, self::SHA);
+        self::assertSame('pass', $report['status']);
+        self::assertSame(101, $report['workflow_run_id']);
+        self::assertSame(202, $report['check_suite_id']);
+        self::assertStringNotContainsString('login', json_encode($report, JSON_THROW_ON_ERROR));
+    }
+
+    public function testMissingWorkflowChecksAndAttestationFailClosed(): void
+    {
+        $snapshot = $this->snapshot();
+        unset($snapshot['workflow_runs']);
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('workflow_missing_or_stale', array_column($report['gates'], 'code'));
+        self::assertContains('review_attestation_invalid', array_column($report['gates'], 'code'));
+    }
+
+    public function testWorkflowMustBindExactPullRequestShaAndCheckSuite(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['workflow_runs'][0]['pr_numbers'] = [99];
+        $snapshot['check_runs'][0]['check_suite_id'] = 999;
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('fail', $report['status']);
+        self::assertContains('workflow_missing_or_stale', array_column($report['gates'], 'code'));
+        self::assertContains('required_check_missing_or_duplicate', array_column($report['gates'], 'code'));
+    }
+
+    public function testWrongHeadBaseDraftMergeabilityAndCheckConclusionsFail(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['pr']['head_sha'] = str_repeat('a', 40);
+        $snapshot['pr']['base_ref'] = 'release';
+        $snapshot['pr']['draft'] = true;
+        $snapshot['pr']['mergeable'] = false;
+        $snapshot['pr']['mergeable_state'] = 'blocked';
+        $snapshot['check_runs'][0]['conclusion'] = 'failure';
+        $snapshot['check_runs'][1]['conclusion'] = 'skipped';
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertGreaterThanOrEqual(5, count($report['gates']));
+    }
+
+    public function testConditionalSkippedIsAllowedButRequiredSkippedIsNot(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['check_runs'][0]['conclusion'] = 'skipped';
+        $snapshot['check_runs'][1]['conclusion'] = 'skipped';
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('required_check_invalid', array_column($report['gates'], 'code'));
+        self::assertContains('conditional_check_skipped', array_column($report['gates'], 'code'));
+    }
+
+    public function testDuplicateCheckRunFailsClosed(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['check_runs'][] = $snapshot['check_runs'][0];
+        $snapshot['comments'] = [$this->attestationComment()];
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('fail', $report['status']);
+        self::assertContains('required_check_missing_or_duplicate', array_column($report['gates'], 'code'));
+    }
+
+    public function testLatestMatchingWorkflowRunMustBeSuccessful(): void
+    {
+        $snapshot = $this->snapshot();
+        $latest = $snapshot['workflow_runs'][0];
+        $latest['id'] = 102;
+        $latest['status'] = 'in_progress';
+        $latest['conclusion'] = null;
+        $snapshot['workflow_runs'][] = $latest;
+        $snapshot['comments'] = [$this->attestationComment()];
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('fail', $report['status']);
+        self::assertContains('workflow_missing_or_stale', array_column($report['gates'], 'code'));
+    }
+
+    public function testAttestationIsRejectedWhenStaleMalformedUntrustedOrDuplicated(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment('NONE')];
+        self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+        $snapshot['comments'] = [
+            [
+                ...$this->attestationComment(),
+                'body' => str_replace(self::SHA, str_repeat('f', 40), $this->attestation()),
+            ],
+        ];
+        self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+
+        $duplicateReviewer = str_replace(str_repeat('b', 64), str_repeat('a', 64), $this->attestation());
+        $snapshot['comments'] = [[...$this->attestationComment(), 'body' => $duplicateReviewer]];
+        self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+
+        $duplicateLens = str_replace('"lens":"design"', '"lens":"correctness"', $this->attestation());
+        $snapshot['comments'] = [[...$this->attestationComment(), 'body' => $duplicateLens]];
+        self::assertSame('fail', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+    }
+
+    public function testNewerTrustedFeedbackAndOutstandingChangesRequestedInvalidateAttestation(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [
+            $this->attestationComment(),
+            [
+                'id' => 501,
+                'author_association' => 'COLLABORATOR',
+                'updated_at' => '2026-08-30T20:00:01Z',
+                'body' => 'A later finding.',
+            ],
+        ];
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+
+        $snapshot['comments'] = [$this->attestationComment()];
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review_comment',
+                'id' => 650,
+                'author_association' => 'NONE',
+                'actor_ref' => str_repeat('e', 64),
+                'state' => null,
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T20:00:01Z',
+            ],
+        ];
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review',
+                'id' => 700,
+                'author_association' => 'MEMBER',
+                'actor_ref' => str_repeat('d', 64),
+                'state' => 'CHANGES_REQUESTED',
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T19:59:00Z',
+            ],
+        ];
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+
+        $snapshot['review_activity'][] = [
+            'kind' => 'review',
+            'id' => 701,
+            'author_association' => 'MEMBER',
+            'actor_ref' => str_repeat('d', 64),
+            'state' => 'APPROVED',
+            'commit_sha' => self::SHA,
+            'occurred_at' => '2026-08-30T19:59:30Z',
+        ];
+        self::assertSame('pass', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+    }
+
+    /** @return array<string,mixed> */
+    private function policy(): array
+    {
+        return [
+            'base_ref' => 'main',
+            'workflow_name' => 'CI',
+            'required_checks' => ['unit'],
+            'conditional_checks' => ['integration'],
+            'required_review_lenses' => ['correctness', 'design', 'tests'],
+            'trusted_associations' => ['OWNER'],
+            'blocking_feedback_associations' => ['OWNER', 'MEMBER', 'COLLABORATOR'],
+            'attestation_marker' => 'exact-head-review-attestation:v1',
+            'attestation_verdict' => 'no_findings',
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function snapshot(): array
+    {
+        return [
+            'pr' => [
+                'number' => 12,
+                'state' => 'open',
+                'draft' => false,
+                'base_ref' => 'main',
+                'head_sha' => self::SHA,
+                'mergeable' => true,
+                'mergeable_state' => 'clean',
+                'head_ref' => 'feature',
+                'head_repository' => 'acme/app',
+            ],
+            'workflow_runs' => [
+                [
+                    'id' => 101,
+                    'name' => 'CI',
+                    'event' => 'pull_request',
+                    'status' => 'completed',
+                    'conclusion' => 'success',
+                    'head_sha' => self::SHA,
+                    'head_branch' => 'feature',
+                    'head_repository' => 'acme/app',
+                    'pr_numbers' => [12],
+                    'check_suite_id' => 202,
+                ],
+            ],
+            'check_runs' => [
+                [
+                    'name' => 'unit',
+                    'check_suite_id' => 202,
+                    'head_sha' => self::SHA,
+                    'status' => 'completed',
+                    'conclusion' => 'success',
+                ],
+                [
+                    'name' => 'integration',
+                    'check_suite_id' => 202,
+                    'head_sha' => self::SHA,
+                    'status' => 'completed',
+                    'conclusion' => 'success',
+                ],
+            ],
+            'associated_pr_numbers' => [12],
+            'comments' => [],
+            'review_activity' => [],
+        ];
+    }
+
+    private function attestation(): string
+    {
+        $reviews = [];
+        foreach (['correctness' => 'a', 'design' => 'b', 'tests' => 'c'] as $lens => $prefix) {
+            $reviews[] = [
+                'lens' => $lens,
+                'reviewer_ref' => str_repeat($prefix, 64),
+                'verdict' => 'no_findings',
+            ];
+        }
+
+        return "<!-- exact-head-review-attestation:v1\n" .
+            json_encode(['head_sha' => self::SHA, 'reviews' => $reviews], JSON_UNESCAPED_SLASHES) .
+            "\n-->";
+    }
+
+    /** @return array<string, mixed> */
+    private function attestationComment(string $association = 'OWNER'): array
+    {
+        return [
+            'id' => 500,
+            'author_association' => $association,
+            'updated_at' => '2026-08-30T20:00:00Z',
+            'body' => $this->attestation(),
+        ];
+    }
+}

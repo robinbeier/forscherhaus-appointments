@@ -8,7 +8,46 @@
     "land": {
         "requires_exact_head": true,
         "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
-        "push_after_ready_linear_state": "In Review"
+        "push_after_ready_linear_state": "In Review",
+        "exact_head_mergegate": {
+            "schema_version": 1,
+            "base_ref": "main",
+            "workflow_file": "ci.yml",
+            "workflow_name": "CI",
+            "review_lens_source": "review.sensitive_change_lenses",
+            "required_checks": [
+                "changes",
+                "build-test",
+                "js-lint-changed",
+                "phpstan-application",
+                "typed-request-dto",
+                "architecture-ownership-map",
+                "architecture-boundaries"
+            ],
+            "conditional_checks": [
+                "typed-request-contracts",
+                "deep-check-bootstrap",
+                "deep-check-seed-snapshot",
+                "deep-runtime-suite",
+                "coverage-shard-unit",
+                "coverage-shard-integration",
+                "coverage-delta",
+                "api-contract-openapi",
+                "write-contract-booking",
+                "write-contract-api",
+                "booking-controller-flows",
+                "integration-smoke"
+            ],
+            "review_attestation": {
+                "marker": "exact-head-review-attestation:v1",
+                "verdict": "no_findings",
+                "authority_model": "owner_accountable_assertion",
+                "cryptographic_agent_execution_proof": false,
+                "malicious_repository_owner_in_scope": false,
+                "trusted_author_associations": ["OWNER"],
+                "blocking_feedback_author_associations": ["OWNER", "MEMBER", "COLLABORATOR"]
+            }
+        }
     },
     "review": {
         "sensitive_changes_require_independent_final_reviews": true,
@@ -35,7 +74,8 @@
                 "### 5. Rework loop": ["Every push after review or CI evidence was collected invalidates that landing"],
                 "## PR and Review Expectations": [
                     "changes require a third independent lens:",
-                    "Final reviews and blocking CI must all target the current unchanged exact PR"
+                    "Final reviews and blocking CI must all target the current unchanged exact PR",
+                    "An exit `0` is required before `Ready to Merge`"
                 ]
             }
         },
@@ -44,13 +84,24 @@
             "required_sections": {
                 "## Review Process": [
                     "require three independent final reviews on the same unchanged exact head",
-                    "Any later push invalidates those final reviews and requires exact-head review"
+                    "Any later push invalidates those final reviews and requires exact-head review",
+                    "The read-only exact-head mergegate does not replace reviewer judgment."
                 ]
             }
         },
         "docs/agent-harness-index.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {}
+        },
+        "docs/exact-head-mergegate.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_sections": {
+                "## Evidence Contract": ["The command uses authenticated GitHub GET requests and binds all evidence"],
+                "## Review Attestation": ["The three final reviews remain independent review work."],
+                "## Result and Landing": [
+                    "Only an exit 0 on the still-current SHA permits the Linear transition to Ready"
+                ]
+            }
         },
         "docs/ci-write-contracts.md": {
             "contract_reference": "../.codex/contracts/agent-workflow.json",
@@ -78,7 +129,8 @@
                     "- [ ] Blocking CI ist gruen",
                     "- [ ] Keine offenen Review-Findings",
                     "- [ ] PR-Head, CI-Head und final reviewter Head sind identisch",
-                    "- [ ] PR ist mergeable"
+                    "- [ ] PR ist mergeable",
+                    "- [ ] Read-only Exact-Head-Mergegate ist fuer diesen unveraenderten Head gruen"
                 ]
             }
         }

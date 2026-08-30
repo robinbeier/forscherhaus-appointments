@@ -57,6 +57,38 @@ class AgentWorkflowContractTest extends TestCase
             $contract['land']['merge_command'] ?? null,
         );
         self::assertSame('In Review', $contract['land']['push_after_ready_linear_state'] ?? null);
+        self::assertSame(1, $contract['land']['exact_head_mergegate']['schema_version'] ?? null);
+        self::assertSame('main', $contract['land']['exact_head_mergegate']['base_ref'] ?? null);
+        self::assertSame('ci.yml', $contract['land']['exact_head_mergegate']['workflow_file'] ?? null);
+        self::assertSame('CI', $contract['land']['exact_head_mergegate']['workflow_name'] ?? null);
+        self::assertSame(
+            'review.sensitive_change_lenses',
+            $contract['land']['exact_head_mergegate']['review_lens_source'] ?? null,
+        );
+        self::assertSame(
+            'exact-head-review-attestation:v1',
+            $contract['land']['exact_head_mergegate']['review_attestation']['marker'] ?? null,
+        );
+        self::assertSame(
+            'no_findings',
+            $contract['land']['exact_head_mergegate']['review_attestation']['verdict'] ?? null,
+        );
+        self::assertSame(
+            'owner_accountable_assertion',
+            $contract['land']['exact_head_mergegate']['review_attestation']['authority_model'] ?? null,
+        );
+        self::assertFalse(
+            $contract['land']['exact_head_mergegate']['review_attestation']['cryptographic_agent_execution_proof'] ??
+                null,
+        );
+        self::assertFalse(
+            $contract['land']['exact_head_mergegate']['review_attestation']['malicious_repository_owner_in_scope'] ??
+                null,
+        );
+        self::assertSame(
+            ['OWNER'],
+            $contract['land']['exact_head_mergegate']['review_attestation']['trusted_author_associations'] ?? null,
+        );
         self::assertTrue($contract['review']['sensitive_changes_require_independent_final_reviews'] ?? null);
         self::assertSame(
             ['correctness_security', 'design_maintainability', 'tests_regression_flake'],
@@ -232,8 +264,14 @@ class AgentWorkflowContractTest extends TestCase
     {
         $index = $this->readRepoFile('docs/agent-harness-index.md');
         $gitignore = $this->readRepoFile('.gitignore');
+        $composer = $this->readRepoJson('composer.json');
 
         self::assertStringContainsString('docs/ci-write-contracts.md', $index);
+        self::assertStringContainsString('docs/exact-head-mergegate.md', $index);
+        self::assertSame(
+            'php scripts/ci/check_exact_head_mergegate.php',
+            $composer['scripts']['check:exact-head-mergegate'] ?? null,
+        );
         self::assertStringContainsString('/.deptrac.cache', $gitignore);
         self::assertStringContainsString('/.playwright-cli/', $gitignore);
         self::assertStringNotContainsString('/.playwright-mcp/', $gitignore);

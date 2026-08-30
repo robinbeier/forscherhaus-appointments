@@ -7,9 +7,9 @@ description: Drive an open PR from merge prep through merge by syncing the branc
 
 # Land
 
-Use this skill when the Linear issue is in `Ready to Merge`, the PR head is
-already exact-head review-clean, and the PR should be shepherded to an actual
-merge.
+Use this skill when the PR head is already exact-head review-clean and should
+be shepherded through the repository mergegate, `Ready to Merge`, and the
+actual merge.
 
 ## Goals
 
@@ -48,14 +48,20 @@ contract.
       issue to `In Review` and rerun exact-head CI plus all required final
       reviews on the new head before restoring `Ready to Merge`
     - return to the watcher only after that new-head evidence is available
-6. Once the PR is green and mergeable, merge it explicitly:
-    - confirm the current PR head still matches the exact reviewed and CI-green
-      head
+6. Once the PR is green, review-clean, and mergeable:
+    - publish the privacy-safe final-review attestation described in
+      `docs/exact-head-mergegate.md`
+    - run
+      `composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<current_head_sha>`
+    - only after exit `0`, move the Linear issue to `Ready to Merge`
+    - confirm the current PR head still matches that exact reviewed,
+      CI-green, mergegate-approved head
+7. Merge it explicitly:
     - `gh pr merge --merge --match-head-commit <current_head_sha>`
     - do not force `--delete-branch` from inside the worker worktree; local
       workspace cleanup handles branch removal separately and avoids false
       non-zero exits after a successful merge
-7. After merge:
+8. After merge:
     - verify the merge commit and refreshed `origin/main`
     - move the Linear issue to `Done`
     - update the `## Codex Workpad` comment with merge result and final
@@ -66,6 +72,6 @@ contract.
 - Do not enable auto-merge just to wait silently.
 - Do not merge with unresolved review feedback.
 - Do not merge a later head than the one that was reviewed and passed
-  blocking CI.
+  blocking CI and the exact-head mergegate.
 - If the watcher surfaces a real blocker, stop and report it clearly.
 - Keep the workpad compact and do not duplicate the PR URL there.

@@ -234,7 +234,8 @@ When the branch is ready to publish:
 - attach the PR to the Linear issue when applicable
 - move the Linear issue to `In Review`
 - move it to `Ready to Merge` only after the required final reviews are
-  finding-free and blocking CI is green on the same unchanged exact head
+  finding-free, blocking CI is green on the same unchanged exact head, and the
+  repository exact-head mergegate exits `0` for that PR and SHA
 - update the workpad with validation status, merge/review posture, and what
   would reactivate the issue
 
@@ -274,11 +275,36 @@ changes require a third independent lens:
 Final reviews and blocking CI must all target the current unchanged exact PR
 head. A later push makes the earlier evidence stale.
 
+After the final reviews are finding-free, record their canonical,
+privacy-safe exact-head attestation on the PR and run the repository-owned
+read-only verifier:
+
+```bash
+composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<40-character-sha>
+```
+
+The verifier uses GitHub GET requests only. It requires the open non-draft PR,
+clean mergeability, the canonical successful CI run and every blocking check
+to bind to that PR and SHA. Always-on checks must succeed; diff-conditional
+checks must be either successful or explicitly skipped. It also requires the
+three distinct review lenses from the machine contract in one trusted,
+SHA-bound owner attestation. A still-active `CHANGES_REQUESTED` review or
+newer trusted review feedback invalidates that attestation. Missing, pending,
+duplicated, malformed, stale, or wrong-suite evidence fails closed. The report
+contains no raw comment body, reviewer identity, token, capability, or
+personal data. See
+`docs/exact-head-mergegate.md`.
+
+An exit `0` is required before `Ready to Merge`, but it does not perform the
+merge. Use the compare-and-swap merge command from
+`.codex/contracts/agent-workflow.json` on the same still-current SHA.
+
 The PR is not done until:
 
 - required blocking CI is green
 - no open review findings remain
 - the PR is mergeable
+- the read-only exact-head mergegate passes on the current reviewed SHA
 - required docs or migration notes are included
 - the reviewed head, CI head, and current PR head are identical
 - the issue is moved to `Done`
