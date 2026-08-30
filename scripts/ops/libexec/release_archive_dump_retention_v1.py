@@ -302,6 +302,29 @@ def directory_identity(value):
     return value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid, value.st_nlink
 
 
+def validate_state_directory_creation_transition(before_identity, after_identity, before_names, after_names):
+    try:
+        before_names = frozenset(before_names)
+        after_names = frozenset(after_names)
+        valid = (
+            isinstance(before_identity, tuple)
+            and isinstance(after_identity, tuple)
+            and len(before_identity) == 6
+            and len(after_identity) == 6
+            and before_identity[:5] == after_identity[:5]
+            and isinstance(before_identity[5], int)
+            and isinstance(after_identity[5], int)
+            and before_identity[5] > 0
+            and after_identity[5] - before_identity[5] in {0, 1}
+            and 'fh-release-retention' not in before_names
+            and after_names == before_names | {'fh-release-retention'}
+        )
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        reject('nested_mount_boundary')
+
+
 def file_identity(value):
     return (
         value.st_dev,
@@ -375,14 +398,31 @@ def prepare_state_directory(mount_safety):
     # the pinned service-boundary check immediately before the first namespace
     # mutation rather than relying only on the earlier acquisition snapshot.
     revalidate_pre_mutation_mount_safety(mount_safety)
+    parent_identity_before = directory_identity(os.fstat(parent))
+    parent_names_before = frozenset(os.listdir(parent))
+    if (
+        parent_identity_before != mount_safety['state_parent_identity']
+        or len(parent_names_before) > MAX_CLASS_SCAN
+        or 'fh-release-retention' in parent_names_before
+    ):
+        reject('nested_mount_boundary')
     try:
         os.mkdir('fh-release-retention', 0o700, dir_fd=parent)
         os.fsync(parent)
     except FileExistsError:
-        pass
+        reject('nested_mount_boundary')
     state = open_child_directory(parent, 'fh-release-retention', exact_mode=0o700)
     mount_safety['state'] = state
     mount_safety['state_identity'] = directory_identity(os.fstat(state))
+    parent_identity_after = directory_identity(os.fstat(parent))
+    parent_names_after = frozenset(os.listdir(parent))
+    validate_state_directory_creation_transition(
+        parent_identity_before,
+        parent_identity_after,
+        parent_names_before,
+        parent_names_after,
+    )
+    mount_safety['state_parent_identity'] = parent_identity_after
     return state
 
 

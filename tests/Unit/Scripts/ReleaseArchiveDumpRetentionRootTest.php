@@ -204,6 +204,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
     public function testExecuteDeletesOnlyEligibleClassesRetainsAttestationsAndPublishesMarker(): void
     {
+        self::assertDirectoryDoesNotExist(self::STATE);
         $result = $this->runHelper('execute');
 
         self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
@@ -875,6 +876,24 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame('none', $value['mutation_outcome']);
         self::assertSame(0, array_sum($value['mutation_counts']));
         self::assertFileExists($temp);
+        self::assertFileExists(self::RELEASES . '/old.tar.gz');
+    }
+
+    public function testExecuteRejectsConcurrentStateDirectoryCreationBeforeCleanup(): void
+    {
+        self::assertDirectoryDoesNotExist(self::STATE);
+        $result = $this->runPatchedHelper(
+            "        os.mkdir('fh-release-retention', 0o700, dir_fd=parent)\n        os.fsync(parent)",
+            "        os.mkdir('fh-release-retention', 0o700, dir_fd=parent)\n        os.mkdir('fh-release-retention', 0o700, dir_fd=parent)\n        os.fsync(parent)",
+            'execute',
+        );
+
+        self::assertSame(70, $result['exit'], $result['stdout'] . $result['stderr']);
+        $value = $this->decode($result);
+        self::assertSame('nested_mount_boundary', $value['reason']);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 

@@ -88,8 +88,15 @@ cleanup. The existing state path and descriptor identities must still match at
 the immediate pre-cleanup revalidation; the path is not reopened by name. If
 systemd did not already create the state directory, the complete
 pinned-boundary observation is repeated immediately before that directory is
-created through the pinned parent. After acquiring the state lock, descriptor
-and path identities and the complete mount/cgroup/namespace observation are
+created through the pinned parent. That controlled creation is accepted only
+when the parent device, inode, mode, owner and group remain identical, the
+directory inventory gains exactly `fh-release-retention`, and the parent link
+count follows either native Linux directory semantics (`+1`) or the supported
+overlay semantics (unchanged). The post-creation parent identity becomes the
+new pinned baseline; any pre-existing target, additional name, removal, larger
+link-count change, or other parent drift still fails closed. After acquiring
+the state lock, descriptor and path identities and the complete
+mount/cgroup/namespace observation are
 repeated again immediately before the first cleanup mutation. Cleanup itself
 uses the already open, validated state-directory descriptor, so a later
 pathname mount cannot redirect the operation. The locked inventory then

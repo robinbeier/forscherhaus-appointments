@@ -155,6 +155,43 @@ class RetentionMountInfoTest(unittest.TestCase):
                 helper.stable_proc_mount_snapshot(object())
         self.assertEqual(caught.exception.reason, "mount_state_unknown")
 
+    def test_state_creation_accepts_only_exact_parent_transition(self) -> None:
+        before = (2049, 42, 0o40755, 0, 0, 17)
+        names = {"docker", "systemd"}
+        for name, after in {
+            "native directory links": before[:5] + (18,),
+            "overlay constant links": before,
+        }.items():
+            with self.subTest(name=name):
+                helper.validate_state_directory_creation_transition(
+                    before,
+                    after,
+                    names,
+                    names | {"fh-release-retention"},
+                )
+
+    def test_state_creation_rejects_parent_or_namespace_drift(self) -> None:
+        before = (2049, 42, 0o40755, 0, 0, 17)
+        names = {"docker", "systemd"}
+        cases = {
+            "device": ((2050, *before[1:]), names, names | {"fh-release-retention"}),
+            "inode": ((before[0], 43, *before[2:]), names, names | {"fh-release-retention"}),
+            "mode": ((before[0], before[1], 0o40777, *before[3:]), names, names | {"fh-release-retention"}),
+            "link delta": (before[:5] + (19,), names, names | {"fh-release-retention"}),
+            "preexisting state": (before, names | {"fh-release-retention"}, names | {"fh-release-retention"}),
+            "foreign addition": (before[:5] + (18,), names, names | {"fh-release-retention", "foreign"}),
+            "foreign removal": (before[:5] + (18,), names, {"fh-release-retention", "docker"}),
+        }
+        for name, (after, before_names, after_names) in cases.items():
+            with self.subTest(name=name), self.assertRaises(helper.RetentionError) as caught:
+                helper.validate_state_directory_creation_transition(
+                    before,
+                    after,
+                    before_names,
+                    after_names,
+                )
+            self.assertEqual(caught.exception.reason, "nested_mount_boundary")
+
     def test_exact_lock_bind_requires_expected_context(self) -> None:
         cases = {
             "missing cgroup": {"cgroup_text": ""},
