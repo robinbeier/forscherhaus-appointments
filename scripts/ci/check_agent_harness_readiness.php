@@ -386,18 +386,33 @@ function agentHarnessReadinessEvaluateContractSurfaces(string $root, array $surf
             $requirements['contract_reference'] ?? null,
             'surfaces.' . $path . '.contract_reference',
         );
-        $requiredClauses = $requirements['required_clauses'] ?? null;
-        if (!is_array($requiredClauses)) {
-            throw new RuntimeException('Workflow contract surface clauses must be lists.');
+        $requiredSections = $requirements['required_sections'] ?? null;
+        if (!is_array($requiredSections)) {
+            throw new RuntimeException('Workflow contract surface sections must be maps.');
         }
 
         $missing = [];
-        foreach (array_merge([$contractReference], $requiredClauses) as $requiredText) {
-            if (!is_string($requiredText) || $requiredText === '') {
-                throw new RuntimeException('Workflow contract surface requirements must be non-empty strings.');
+        if (!str_contains($content, $contractReference)) {
+            $missing[] = $contractReference;
+        }
+        foreach ($requiredSections as $heading => $requiredClauses) {
+            if (!is_string($heading) || !is_array($requiredClauses)) {
+                throw new RuntimeException('Workflow contract surface sections must map headings to clause lists.');
             }
-            if (!str_contains($content, $requiredText)) {
-                $missing[] = $requiredText;
+
+            $section = agentHarnessReadinessExtractMarkdownSection($content, $heading);
+            if ($section === null) {
+                $missing[] = $heading;
+                continue;
+            }
+
+            foreach ($requiredClauses as $requiredText) {
+                if (!is_string($requiredText) || $requiredText === '') {
+                    throw new RuntimeException('Workflow contract surface requirements must be non-empty strings.');
+                }
+                if (substr_count($section, $requiredText) !== 1 || substr_count($content, $requiredText) !== 1) {
+                    $missing[] = $heading . ': ' . $requiredText;
+                }
             }
         }
 
@@ -407,12 +422,49 @@ function agentHarnessReadinessEvaluateContractSurfaces(string $root, array $surf
             'status' => $missing === [] ? 'pass' : 'fail',
             'message' =>
                 $missing === []
-                    ? 'Canonical reference and required workflow clauses are present.'
-                    : sprintf('%d required workflow contract clause(s) are missing.', count($missing)),
+                    ? 'Canonical reference and section-bound workflow clauses are present exactly once.'
+                    : sprintf(
+                        '%d required workflow contract item(s) are missing, duplicated, or misplaced.',
+                        count($missing),
+                    ),
         ];
     }
 
     return $checks;
+}
+
+function agentHarnessReadinessExtractMarkdownSection(string $content, string $heading): ?string
+{
+    if (preg_match('/^(#{1,6}) [^\r\n]+$/', $heading, $headingMatch) !== 1) {
+        throw new RuntimeException('Workflow contract surface section keys must be Markdown headings.');
+    }
+
+    $lines = preg_split('/\R/', $content);
+    if (!is_array($lines)) {
+        return null;
+    }
+
+    $headingIndexes = [];
+    foreach ($lines as $index => $line) {
+        if ($line === $heading) {
+            $headingIndexes[] = $index;
+        }
+    }
+    if (count($headingIndexes) !== 1) {
+        return null;
+    }
+
+    $start = $headingIndexes[0];
+    $level = strlen($headingMatch[1]);
+    $end = count($lines);
+    for ($index = $start + 1; $index < count($lines); ++$index) {
+        if (preg_match('/^(#{1,6}) /', $lines[$index], $candidate) === 1 && strlen($candidate[1]) <= $level) {
+            $end = $index;
+            break;
+        }
+    }
+
+    return implode("\n", array_slice($lines, $start, $end - $start));
 }
 
 /**
@@ -783,25 +835,67 @@ function agentHarnessReadinessNormalizeConditionAst(array $node): array
 
 /**
  * This fail-closed grammar is intentionally narrower than the full GitHub
- * Actions expression language. Expanding it requires an explicit contract and
- * parser change together.
+ * Actions expression language. Its tokens come from the canonical contract;
+ * this validator only enforces the parser's structural schema.
  *
  * @param array<string, mixed> $grammar
  */
 function agentHarnessReadinessValidateConditionGrammar(array $grammar): void
 {
-    $supportedGrammar = [
-        'version' => 1,
-        'operators' => ['&&', '||', '=='],
-        'grouping' => 'parentheses',
-        'identifier_pattern' => '^[A-Za-z_][A-Za-z0-9_.-]*$',
-        'literals' => ['single_quoted_string', 'boolean'],
-        'zero_argument_calls' => ['always'],
-        'unsupported_syntax_fails_closed' => true,
-    ];
+    $version = $grammar['version'] ?? null;
+    $operators = $grammar['operators'] ?? null;
+    $grouping = $grammar['grouping'] ?? null;
+    $identifierPattern = $grammar['identifier_pattern'] ?? null;
+    $literals = $grammar['literals'] ?? null;
+    $zeroArgumentCalls = $grammar['zero_argument_calls'] ?? null;
 
-    if ($grammar !== $supportedGrammar) {
-        throw new RuntimeException('Workflow condition grammar is unsupported by this checker.');
+    if (!is_int($version) || $version < 1 || ($grammar['unsupported_syntax_fails_closed'] ?? null) !== true) {
+        throw new RuntimeException('Workflow condition grammar is invalid.');
+    }
+    if (!is_array($operators) || array_keys($operators) !== ['and', 'or', 'equals']) {
+        throw new RuntimeException('Workflow condition grammar is invalid.');
+    }
+    if (!is_array($grouping) || array_keys($grouping) !== ['open', 'close']) {
+        throw new RuntimeException('Workflow condition grammar is invalid.');
+    }
+    foreach (array_merge(array_values($operators), array_values($grouping)) as $token) {
+        if (!is_string($token) || $token === '' || preg_match('/\s/', $token) === 1) {
+            throw new RuntimeException('Workflow condition grammar is invalid.');
+        }
+    }
+    if (count(array_unique(array_merge(array_values($operators), array_values($grouping)))) !== 5) {
+        throw new RuntimeException('Workflow condition grammar is invalid.');
+    }
+    if (
+        !is_string($identifierPattern) ||
+        $identifierPattern === '' ||
+        str_contains($identifierPattern, '~') ||
+        @preg_match('~^(?:' . $identifierPattern . ')$~D', 'identifier') === false
+    ) {
+        throw new RuntimeException('Workflow condition grammar is invalid.');
+    }
+    if (
+        !is_array($literals) ||
+        array_keys($literals) !== ['string_delimiter', 'booleans'] ||
+        !is_string($literals['string_delimiter']) ||
+        strlen($literals['string_delimiter']) !== 1 ||
+        !is_array($literals['booleans']) ||
+        $literals['booleans'] === []
+    ) {
+        throw new RuntimeException('Workflow condition grammar is invalid.');
+    }
+    foreach ($literals['booleans'] as $token => $value) {
+        if (!is_string($token) || preg_match('~^(?:' . $identifierPattern . ')$~D', $token) !== 1 || !is_bool($value)) {
+            throw new RuntimeException('Workflow condition grammar is invalid.');
+        }
+    }
+    if (!is_array($zeroArgumentCalls) || count(array_unique($zeroArgumentCalls)) !== count($zeroArgumentCalls)) {
+        throw new RuntimeException('Workflow condition grammar is invalid.');
+    }
+    foreach ($zeroArgumentCalls as $call) {
+        if (!is_string($call) || preg_match('~^(?:' . $identifierPattern . ')$~D', $call) !== 1) {
+            throw new RuntimeException('Workflow condition grammar is invalid.');
+        }
     }
 }
 
@@ -828,6 +922,14 @@ function agentHarnessReadinessParseCondition(string $expression, array $grammar)
  */
 function agentHarnessReadinessTokenizeCondition(string $expression, array $grammar): array
 {
+    $operators = array_values($grammar['operators']);
+    usort($operators, static fn(string $left, string $right): int => strlen($right) <=> strlen($left));
+    $grouping = array_values($grammar['grouping']);
+    usort($grouping, static fn(string $left, string $right): int => strlen($right) <=> strlen($left));
+    $stringDelimiter = $grammar['literals']['string_delimiter'];
+    $booleans = $grammar['literals']['booleans'];
+    $identifierRegex = '~\G(?:' . $grammar['identifier_pattern'] . ')~A';
+
     $tokens = [];
     $offset = 0;
     $length = strlen($expression);
@@ -837,22 +939,33 @@ function agentHarnessReadinessTokenizeCondition(string $expression, array $gramm
             continue;
         }
 
-        $operator = substr($expression, $offset, 2);
-        if (in_array($operator, ['&&', '||', '=='], true)) {
-            $tokens[] = ['type' => 'operator', 'value' => $operator];
-            $offset += 2;
+        $matchedToken = false;
+        foreach ($operators as $operator) {
+            if (substr($expression, $offset, strlen($operator)) === $operator) {
+                $tokens[] = ['type' => 'operator', 'value' => $operator];
+                $offset += strlen($operator);
+                $matchedToken = true;
+                break;
+            }
+        }
+        if ($matchedToken) {
             continue;
         }
 
-        $character = $expression[$offset];
-        if ($character === '(' || $character === ')') {
-            $tokens[] = ['type' => 'parenthesis', 'value' => $character];
-            ++$offset;
+        foreach ($grouping as $groupingToken) {
+            if (substr($expression, $offset, strlen($groupingToken)) === $groupingToken) {
+                $tokens[] = ['type' => 'parenthesis', 'value' => $groupingToken];
+                $offset += strlen($groupingToken);
+                $matchedToken = true;
+                break;
+            }
+        }
+        if ($matchedToken) {
             continue;
         }
 
-        if ($character === "'") {
-            $end = strpos($expression, "'", $offset + 1);
+        if ($expression[$offset] === $stringDelimiter) {
+            $end = strpos($expression, $stringDelimiter, $offset + 1);
             if ($end === false) {
                 throw new InvalidArgumentException('unterminated string literal');
             }
@@ -864,10 +977,10 @@ function agentHarnessReadinessTokenizeCondition(string $expression, array $gramm
             continue;
         }
 
-        if (preg_match('/\G[A-Za-z_][A-Za-z0-9_.-]*/A', $expression, $match, 0, $offset) === 1) {
+        if (preg_match($identifierRegex, $expression, $match, 0, $offset) === 1) {
             $value = $match[0];
-            $tokens[] = in_array($value, ['true', 'false'], true)
-                ? ['type' => 'literal', 'value' => $value === 'true']
+            $tokens[] = array_key_exists($value, $booleans)
+                ? ['type' => 'literal', 'value' => $booleans[$value]]
                 : ['type' => 'identifier', 'value' => $value];
             $offset += strlen($value);
             continue;
@@ -891,7 +1004,7 @@ function agentHarnessReadinessTokenizeCondition(string $expression, array $gramm
 function agentHarnessReadinessParseConditionOr(array $tokens, int &$cursor, array $grammar): array
 {
     $left = agentHarnessReadinessParseConditionAnd($tokens, $cursor, $grammar);
-    while (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', '||')) {
+    while (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', $grammar['operators']['or'])) {
         $right = agentHarnessReadinessParseConditionAnd($tokens, $cursor, $grammar);
         $left = ['any' => [$left, $right]];
     }
@@ -907,7 +1020,7 @@ function agentHarnessReadinessParseConditionOr(array $tokens, int &$cursor, arra
 function agentHarnessReadinessParseConditionAnd(array $tokens, int &$cursor, array $grammar): array
 {
     $left = agentHarnessReadinessParseConditionPrimary($tokens, $cursor, $grammar);
-    while (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', '&&')) {
+    while (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', $grammar['operators']['and'])) {
         $right = agentHarnessReadinessParseConditionPrimary($tokens, $cursor, $grammar);
         $left = ['all' => [$left, $right]];
     }
@@ -922,9 +1035,11 @@ function agentHarnessReadinessParseConditionAnd(array $tokens, int &$cursor, arr
  */
 function agentHarnessReadinessParseConditionPrimary(array $tokens, int &$cursor, array $grammar): array
 {
-    if (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', '(')) {
+    if (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', $grammar['grouping']['open'])) {
         $condition = agentHarnessReadinessParseConditionOr($tokens, $cursor, $grammar);
-        if (!agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', ')')) {
+        if (
+            !agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', $grammar['grouping']['close'])
+        ) {
             throw new InvalidArgumentException('missing closing parenthesis');
         }
 
@@ -937,8 +1052,10 @@ function agentHarnessReadinessParseConditionPrimary(array $tokens, int &$cursor,
     }
     ++$cursor;
 
-    if (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', '(')) {
-        if (!agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', ')')) {
+    if (agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', $grammar['grouping']['open'])) {
+        if (
+            !agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'parenthesis', $grammar['grouping']['close'])
+        ) {
             throw new InvalidArgumentException('condition calls must not contain arguments');
         }
         if (!in_array($identifier['value'], $grammar['zero_argument_calls'], true)) {
@@ -948,7 +1065,7 @@ function agentHarnessReadinessParseConditionPrimary(array $tokens, int &$cursor,
         return ['call' => $identifier['value']];
     }
 
-    if (!agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', '==')) {
+    if (!agentHarnessReadinessConsumeConditionToken($tokens, $cursor, 'operator', $grammar['operators']['equals'])) {
         throw new InvalidArgumentException('expected equality operator');
     }
     $literal = $tokens[$cursor] ?? null;

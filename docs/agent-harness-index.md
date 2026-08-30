@@ -59,6 +59,10 @@ This file stays intentionally short. It is a map, not a second runbook.
     same unchanged current PR head
 - Harness readiness score:
   - `composer check:agent-harness-readiness`
+  - The machine contract owns the supported CI-condition tokens and binds
+    critical cross-document clauses to named Markdown sections; the checker
+    fails closed on invalid grammar, missing sections, misplaced clauses, or
+    duplicate clauses.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:

@@ -6,6 +6,8 @@ namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/../../../scripts/ci/check_agent_harness_readiness.php';
+
 class AgentWorkflowContractTest extends TestCase
 {
     private string $repoRoot;
@@ -27,9 +29,16 @@ class AgentWorkflowContractTest extends TestCase
             self::assertIsArray($requirements);
             $content = $this->readRepoFile($path);
             self::assertStringContainsString($requirements['contract_reference'], $content, $path);
-            self::assertIsArray($requirements['required_clauses'] ?? null, $path);
-            foreach ($requirements['required_clauses'] as $requiredClause) {
-                self::assertStringContainsString($requiredClause, $content, $path);
+            self::assertIsArray($requirements['required_sections'] ?? null, $path);
+            foreach ($requirements['required_sections'] as $heading => $requiredClauses) {
+                self::assertIsString($heading, $path);
+                self::assertIsArray($requiredClauses, $path);
+                $section = agentHarnessReadinessExtractMarkdownSection($content, $heading);
+                self::assertNotNull($section, $path . ': ' . $heading);
+                foreach ($requiredClauses as $requiredClause) {
+                    self::assertSame(1, substr_count($section, $requiredClause), $path . ': ' . $heading);
+                    self::assertSame(1, substr_count($content, $requiredClause), $path . ': ' . $requiredClause);
+                }
             }
         }
     }
@@ -63,10 +72,23 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame(
             [
                 'version' => 1,
-                'operators' => ['&&', '||', '=='],
-                'grouping' => 'parentheses',
-                'identifier_pattern' => '^[A-Za-z_][A-Za-z0-9_.-]*$',
-                'literals' => ['single_quoted_string', 'boolean'],
+                'operators' => [
+                    'and' => '&&',
+                    'or' => '||',
+                    'equals' => '==',
+                ],
+                'grouping' => [
+                    'open' => '(',
+                    'close' => ')',
+                ],
+                'identifier_pattern' => '[A-Za-z_][A-Za-z0-9_.-]*',
+                'literals' => [
+                    'string_delimiter' => "'",
+                    'booleans' => [
+                        'true' => true,
+                        'false' => false,
+                    ],
+                ],
                 'zero_argument_calls' => ['always'],
                 'unsupported_syntax_fails_closed' => true,
             ],

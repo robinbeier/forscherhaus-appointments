@@ -28,57 +28,82 @@
     "surfaces": {
         "WORKFLOW.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_clauses": [
-                "blocking GitHub CI plus final reviews on the unchanged exact PR head establish",
-                "changes require a third independent lens:",
-                "Final reviews and blocking CI must all target the current unchanged exact PR",
-                "Every push after review or CI evidence was collected invalidates that landing"
-            ]
+            "required_sections": {
+                "### 3. Validate locally": [
+                    "blocking GitHub CI plus final reviews on the unchanged exact PR head establish"
+                ],
+                "### 5. Rework loop": ["Every push after review or CI evidence was collected invalidates that landing"],
+                "## PR and Review Expectations": [
+                    "changes require a third independent lens:",
+                    "Final reviews and blocking CI must all target the current unchanged exact PR"
+                ]
+            }
         },
         "code_review.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_clauses": [
-                "require three independent final reviews on the same unchanged exact head",
-                "Any later push invalidates those final reviews and requires exact-head review"
-            ]
+            "required_sections": {
+                "## Review Process": [
+                    "require three independent final reviews on the same unchanged exact head",
+                    "Any later push invalidates those final reviews and requires exact-head review"
+                ]
+            }
         },
         "docs/agent-harness-index.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_clauses": []
+            "required_sections": {}
         },
         "docs/ci-write-contracts.md": {
             "contract_reference": "../.codex/contracts/agent-workflow.json",
-            "required_clauses": []
+            "required_sections": {}
         },
         ".codex/skills/push/SKILL.md": {
             "contract_reference": "../../contracts/agent-workflow.json",
-            "required_clauses": []
+            "required_sections": {}
         },
         ".codex/skills/land/SKILL.md": {
             "contract_reference": "../../contracts/agent-workflow.json",
-            "required_clauses": []
+            "required_sections": {}
         },
         ".github/pull_request_template.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_clauses": [
-                "## Reviewer A (Bugs/Regression/Security/Edge Cases)",
-                "## Reviewer B (Architektur/Lesbarkeit/Wartbarkeit)",
-                "## Reviewer C (Tests/Regression/Flake-Risiko)",
-                "- [ ] Blocking CI ist gruen",
-                "- [ ] Keine offenen Review-Findings",
-                "- [ ] PR-Head, CI-Head und final reviewter Head sind identisch",
-                "- [ ] PR ist mergeable"
-            ]
+            "required_sections": {
+                "## Reviewer A (Bugs/Regression/Security/Edge Cases)": [
+                    "- [ ] Keine offensichtliche Security-Regression"
+                ],
+                "## Reviewer B (Architektur/Lesbarkeit/Wartbarkeit)": ["- [ ] Architekturgrenzen und Struktur passen"],
+                "## Reviewer C (Tests/Regression/Flake-Risiko)": [
+                    "- [ ] Nullmutation und Side-Effect-Grenzen bei Ablehnung geprueft"
+                ],
+                "## Merge Readiness": [
+                    "- [ ] Blocking CI ist gruen",
+                    "- [ ] Keine offenen Review-Findings",
+                    "- [ ] PR-Head, CI-Head und final reviewter Head sind identisch",
+                    "- [ ] PR ist mergeable"
+                ]
+            }
         }
     },
     "ci": {
         "workflow": ".github/workflows/ci.yml",
         "condition_grammar": {
             "version": 1,
-            "operators": ["&&", "||", "=="],
-            "grouping": "parentheses",
-            "identifier_pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
-            "literals": ["single_quoted_string", "boolean"],
+            "operators": {
+                "and": "&&",
+                "or": "||",
+                "equals": "=="
+            },
+            "grouping": {
+                "open": "(",
+                "close": ")"
+            },
+            "identifier_pattern": "[A-Za-z_][A-Za-z0-9_.-]*",
+            "literals": {
+                "string_delimiter": "'",
+                "booleans": {
+                    "true": true,
+                    "false": false
+                }
+            },
             "zero_argument_calls": ["always"],
             "unsupported_syntax_fails_closed": true
         },

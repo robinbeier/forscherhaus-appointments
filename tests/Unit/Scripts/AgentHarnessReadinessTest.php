@@ -45,28 +45,60 @@ class AgentHarnessReadinessTest extends TestCase
     {
         file_put_contents(
             $this->tmpDir . '/WORKFLOW.md',
-            "See .codex/contracts/agent-workflow.json.\nExact-head reviews are required.\n",
+            "# Workflow\n\nSee .codex/contracts/agent-workflow.json.\n\n## Review Process\n\nExact-head reviews are required.\n",
         );
         $surfaces = [
             'WORKFLOW.md' => [
                 'contract_reference' => '.codex/contracts/agent-workflow.json',
-                'required_clauses' => ['Exact-head reviews are required.'],
+                'required_sections' => [
+                    '## Review Process' => ['Exact-head reviews are required.'],
+                ],
             ],
         ];
 
         $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
         self::assertSame('pass', $checks[0]['status']);
 
-        $surfaces['WORKFLOW.md']['required_clauses'][] = 'Blocking CI must use the reviewed head.';
+        $surfaces['WORKFLOW.md']['required_sections']['## Review Process'][] =
+            'Blocking CI must use the reviewed head.';
         $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
         self::assertSame('fail', $checks[0]['status']);
         self::assertStringContainsString('1 required', (string) $checks[0]['message']);
 
-        $surfaces['WORKFLOW.md']['required_clauses'] = ['Exact-head reviews are required.'];
-        file_put_contents($this->tmpDir . '/WORKFLOW.md', "Exact-head reviews are required.\n");
+        $surfaces['WORKFLOW.md']['required_sections']['## Review Process'] = ['Exact-head reviews are required.'];
+        file_put_contents(
+            $this->tmpDir . '/WORKFLOW.md',
+            "# Workflow\n\n## Review Process\n\nExact-head reviews are required.\n",
+        );
         $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
         self::assertSame('fail', $checks[0]['status']);
         self::assertStringContainsString('1 required', (string) $checks[0]['message']);
+    }
+
+    public function testEvaluateContractSurfacesRejectsMisplacedOrDuplicatedClauses(): void
+    {
+        $surfaces = [
+            'WORKFLOW.md' => [
+                'contract_reference' => '.codex/contracts/agent-workflow.json',
+                'required_sections' => [
+                    '## Review Process' => ['Exact-head reviews are required.'],
+                ],
+            ],
+        ];
+        file_put_contents(
+            $this->tmpDir . '/WORKFLOW.md',
+            "# Workflow\n\n.codex/contracts/agent-workflow.json\n\n## Review Process\n\nNo invariant.\n\n## Notes\n\nExact-head reviews are required.\n",
+        );
+
+        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
+        self::assertSame('fail', $checks[0]['status']);
+
+        file_put_contents(
+            $this->tmpDir . '/WORKFLOW.md',
+            "# Workflow\n\n.codex/contracts/agent-workflow.json\n\n## Review Process\n\nExact-head reviews are required. Exact-head reviews are required.\n",
+        );
+        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
+        self::assertSame('fail', $checks[0]['status']);
     }
 
     public function testEvaluateContractSurfacesRejectsPathsOutsideRepository(): void
@@ -77,7 +109,7 @@ class AgentHarnessReadinessTest extends TestCase
         agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, [
             '../outside.md' => [
                 'contract_reference' => 'contract.json',
-                'required_clauses' => [],
+                'required_sections' => [],
             ],
         ]);
     }
@@ -307,11 +339,11 @@ class AgentHarnessReadinessTest extends TestCase
         agentHarnessReadinessLoadWorkflowContract($path);
     }
 
-    public function testWorkflowContractLoaderRejectsUnsupportedConditionGrammar(): void
+    public function testWorkflowContractLoaderRejectsInvalidConditionGrammar(): void
     {
         $path = $this->tmpDir . '/agent-workflow.json';
         $grammar = $this->conditionGrammar();
-        $grammar['operators'][] = '!=';
+        $grammar['operators']['equals'] = $grammar['operators']['and'];
         file_put_contents(
             $path,
             json_encode([
@@ -327,9 +359,25 @@ class AgentHarnessReadinessTest extends TestCase
         );
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('condition grammar is unsupported');
+        $this->expectExceptionMessage('condition grammar is invalid');
 
         agentHarnessReadinessLoadWorkflowContract($path);
+    }
+
+    public function testConditionParserUsesContractDefinedTokens(): void
+    {
+        $grammar = $this->conditionGrammar();
+        $grammar['operators'] = ['and' => '&', 'or' => '|', 'equals' => '='];
+        $grammar['grouping'] = ['open' => '[', 'close' => ']'];
+        $grammar['literals']['string_delimiter'] = '"';
+        $grammar['zero_argument_calls'] = ['guard'];
+
+        self::assertSame(
+            [
+                'all' => [['call' => 'guard'], ['equals' => ['github.event_name', 'push']]],
+            ],
+            agentHarnessReadinessParseCondition('guard[] & github.event_name = "push"', $grammar),
+        );
     }
 
     public function testEvaluateHygieneWorkflowRequiresDispatchScheduleAndSteps(): void
@@ -483,10 +531,13 @@ class AgentHarnessReadinessTest extends TestCase
     {
         return [
             'version' => 1,
-            'operators' => ['&&', '||', '=='],
-            'grouping' => 'parentheses',
-            'identifier_pattern' => '^[A-Za-z_][A-Za-z0-9_.-]*$',
-            'literals' => ['single_quoted_string', 'boolean'],
+            'operators' => ['and' => '&&', 'or' => '||', 'equals' => '=='],
+            'grouping' => ['open' => '(', 'close' => ')'],
+            'identifier_pattern' => '[A-Za-z_][A-Za-z0-9_.-]*',
+            'literals' => [
+                'string_delimiter' => "'",
+                'booleans' => ['true' => true, 'false' => false],
+            ],
             'zero_argument_calls' => ['always'],
             'unsupported_syntax_fails_closed' => true,
         ];
