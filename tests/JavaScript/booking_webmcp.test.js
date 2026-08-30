@@ -1622,6 +1622,9 @@ test('a failed preparation after confirmation returns the visible wizard to step
         selectedTime: '10:30',
         signal: new AbortController().signal,
     });
+    assert.equal(harness.wizardFrame3Shown, false);
+    assert.equal(harness.wizardFrame2Shown, true);
+    assert.equal(harness.step2Active, true);
     harness.resolveUnavailable([]);
     while (harness.availableCalls < 2) await new Promise((resolve) => setImmediate(resolve));
     harness.resolveAvailable([]);
@@ -1655,6 +1658,9 @@ test('a failed preparation from the final confirmation step returns to slot sele
         selectedTime: '10:30',
         signal: new AbortController().signal,
     });
+    assert.equal(harness.wizardFrame4Shown, false);
+    assert.equal(harness.wizardFrame2Shown, true);
+    assert.equal(harness.step2Active, true);
     harness.resolveUnavailable([]);
     while (harness.availableCalls < 2) await new Promise((resolve) => setImmediate(resolve));
     harness.resolveAvailable([]);

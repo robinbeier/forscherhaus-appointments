@@ -86,7 +86,7 @@ App.Pages.Booking = (function () {
         cancelPendingCalendarRefresh();
     }
 
-    function returnToAvailableStepAfterPreparationFailure(preparationSequence) {
+    function returnToAvailableStepForPreparation(preparationSequence) {
         if (preparationSequence !== bookingPreparationSequence) {
             return;
         }
@@ -1399,6 +1399,7 @@ App.Pages.Booking = (function () {
 
         // Clear the old service/provider's hours before any selection mutation. If a later
         // availability request fails or is aborted, stale hours cannot remain actionable.
+        returnToAvailableStepForPreparation(preparationSequence);
         clearStalePreparationAvailability(preparationSequence, serviceId, providerId, true);
         try {
             applyBookingPreparationSelection(serviceId, providerId, selectedDateMoment);
@@ -1414,7 +1415,7 @@ App.Pages.Booking = (function () {
             };
         } catch (error) {
             clearStalePreparationAvailability(preparationSequence, serviceId, providerId);
-            returnToAvailableStepAfterPreparationFailure(preparationSequence);
+            returnToAvailableStepForPreparation(preparationSequence);
             throw error;
         } finally {
             if (signal && preparation.abortListener) {
