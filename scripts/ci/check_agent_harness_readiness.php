@@ -240,7 +240,11 @@ function evaluateAgentHarnessReadiness(
             array_keys($blockingJobContracts),
             $blockingFailureControlPolicy,
         ),
-        agentHarnessReadinessEvaluateBlockingJobInventory($ciWorkflow, array_keys($blockingJobContracts)),
+        agentHarnessReadinessEvaluateClassifiedJobInventory(
+            $ciWorkflow,
+            array_keys($blockingJobContracts),
+            $workflowContract['ci']['advisory_jobs'],
+        ),
         agentHarnessReadinessEvaluateBlockingExecutionFingerprints(
             $ciWorkflow,
             array_keys(
@@ -566,27 +570,51 @@ function agentHarnessReadinessEvaluateWorkflowFailureMasks(array $ciWorkflow, st
 /**
  * @param array<string, mixed> $ciWorkflow
  * @param array<int, string> $blockingJobs
+ * @param array<int, string> $advisoryJobs
  * @return array<int, array<string, mixed>>
  */
-function agentHarnessReadinessEvaluateBlockingJobInventory(array $ciWorkflow, array $blockingJobs): array
-{
+function agentHarnessReadinessEvaluateClassifiedJobInventory(
+    array $ciWorkflow,
+    array $blockingJobs,
+    array $advisoryJobs,
+): array {
     $jobs = $ciWorkflow['jobs'] ?? [];
     if (!is_array($jobs)) {
         throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
     }
 
-    $missingJobNames = array_values(array_diff($blockingJobs, array_keys($jobs)));
+    $classifiedJobs = array_merge($blockingJobs, $advisoryJobs);
+    $workflowJobs = array_keys($jobs);
+    $missingJobNames = array_values(array_diff($classifiedJobs, $workflowJobs));
+    $unclassifiedJobNames = array_values(array_diff($workflowJobs, $classifiedJobs));
+    $overlappingJobNames = array_values(array_intersect($blockingJobs, $advisoryJobs));
     sort($missingJobNames, SORT_STRING);
+    sort($unclassifiedJobNames, SORT_STRING);
+    sort($overlappingJobNames, SORT_STRING);
+
+    $failures = [];
+    if ($missingJobNames !== []) {
+        $failures[] = 'Classified CI jobs are missing: ' . implode(', ', $missingJobNames) . '.';
+    }
+    if ($unclassifiedJobNames !== []) {
+        $failures[] =
+            'CI jobs require an explicit blocking or advisory classification: ' .
+            implode(', ', $unclassifiedJobNames) .
+            '.';
+    }
+    if ($overlappingJobNames !== []) {
+        $failures[] = 'CI jobs cannot be both blocking and advisory: ' . implode(', ', $overlappingJobNames) . '.';
+    }
 
     return [
         [
-            'id' => 'blocking_job_inventory',
-            'label' => 'Every contract-classified blocking CI job exists',
-            'status' => $missingJobNames === [] ? 'pass' : 'fail',
+            'id' => 'job_classification_inventory',
+            'label' => 'Every CI job has exactly one explicit contract classification',
+            'status' => $failures === [] ? 'pass' : 'fail',
             'message' =>
-                $missingJobNames === []
-                    ? 'Every blocking job is present; unclassified jobs remain outside the blocking contract.'
-                    : 'Required blocking CI jobs are missing: ' . implode(', ', $missingJobNames) . '.',
+                $failures === []
+                    ? 'Every CI job is classified exactly once as blocking or advisory.'
+                    : implode(' ', $failures),
         ],
     ];
 }
@@ -1662,7 +1690,8 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         !is_string($ci['workflow'] ?? null) ||
         trim($ci['workflow']) === '' ||
         !is_string($ci['blocking_failure_control_policy'] ?? null) ||
-        ($ci['unclassified_job_policy'] ?? null) !== 'non_blocking' ||
+        ($ci['job_classification_policy'] ?? null) !== 'explicit-v1' ||
+        !is_array($ci['advisory_jobs'] ?? null) ||
         !is_array($ci['blocking_execution_fingerprints'] ?? null) ||
         $ci['blocking_execution_fingerprints'] === [] ||
         !is_array($ci['condition_grammar'] ?? null) ||
@@ -1672,7 +1701,7 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         $surfaces === []
     ) {
         throw new RuntimeException(
-            'Workflow contract must define surfaces, a CI workflow, a failure-control policy, component execution fingerprints, grammar, an unclassified-job policy, and blocking jobs.',
+            'Workflow contract must define surfaces, a CI workflow, a failure-control policy, component execution fingerprints, grammar, an explicit job-classification policy, advisory jobs, and blocking jobs.',
         );
     }
 
@@ -1690,6 +1719,19 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
     }
     agentHarnessReadinessValidateConditionGrammar($ci['condition_grammar']);
     agentHarnessReadinessRequireRepoRelativePath($ci['workflow'], 'ci.workflow');
+
+    $advisoryJobs = $ci['advisory_jobs'];
+    if ($advisoryJobs !== [] && array_keys($advisoryJobs) !== range(0, count($advisoryJobs) - 1)) {
+        throw new RuntimeException('Workflow contract advisory jobs must be a list.');
+    }
+    foreach ($advisoryJobs as $jobName) {
+        if (!is_string($jobName) || trim($jobName) === '') {
+            throw new RuntimeException('Workflow contract advisory jobs must be non-empty strings.');
+        }
+    }
+    if (count(array_unique($advisoryJobs)) !== count($advisoryJobs)) {
+        throw new RuntimeException('Workflow contract advisory jobs must be unique.');
+    }
 
     $fingerprintedExecutionJobs = [];
     foreach ($ci['blocking_jobs'] as $jobName => $job) {
@@ -1719,6 +1761,11 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
             throw new RuntimeException('Workflow contract fingerprinted-execution jobs may only declare their kind.');
         }
         $fingerprintedExecutionJobs[] = $jobName;
+    }
+
+    $overlappingJobs = array_intersect(array_keys($ci['blocking_jobs']), $advisoryJobs);
+    if ($overlappingJobs !== []) {
+        throw new RuntimeException('Workflow contract jobs cannot be both blocking and advisory.');
     }
 
     $expectedFingerprintComponents = array_merge(['workflow_execution_envelope'], $fingerprintedExecutionJobs);

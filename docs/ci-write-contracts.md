@@ -117,9 +117,11 @@ Die ausführbare CI-Konfiguration steht in
 kanonische Prüfquelle für die erwarteten Blocking-Jobs sowie die exakte
 Ausführung der beiden Write-Contract-Gates. Der Readiness-Check verlangt, dass
 beide Quellen übereinstimmen. Jeder vertraglich blockierende Job muss im
-Workflow vorhanden sein. Zusätzliche, nicht im Blocking-Vertrag genannte Jobs
-gelten für diesen Check als nicht blockierend; ein neuer Blocking-Job muss vor
-seiner Freigabe ausdrücklich in den Vertrag aufgenommen werden. Die
+Workflow vorhanden sein. Jeder Workflow-Job muss im Maschinenvertrag genau
+einmal als blockierend oder advisory klassifiziert sein. Neue oder umbenannte
+Jobs schlagen bis zu dieser bewussten Einordnung fail-closed fehl; die
+Advisory-Klassifikation erzeugt dabei weder Blocking-Authority noch einen
+Ausfuehrungs-Fingerprint. Die
 versionierte Actions-Expression-Grammatik des Vertrags ist bewusst eng; nicht
 unterstützte Syntax wird fail-closed abgelehnt und
 erfordert eine gemeinsame Änderung von Vertrag, Parser und Regressionstests.
@@ -147,9 +149,9 @@ kanonische semantische Form gebracht. Nicht unterstuetzte Ausdruecke schlagen
 fail-closed fehl; ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
 Jede explizite `continue-on-error`-Deklaration sowie
 jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
-unabhaengig davon fehlschlagen. Advisory-Signal-Jobs gehoeren nicht zu diesem
-Blocking-Vertrag und duerfen ohne Blocking-Contract-Churn ergaenzt oder
-umbenannt werden.
+unabhaengig davon fehlschlagen. Advisory-Signal-Jobs gehoeren nicht zum
+Blocking-Vertrag, bleiben aber namentlich klassifiziert, damit kein neuer
+Blocking-Job versehentlich ausserhalb des Vertrags landet.
 Bei einer beabsichtigten Aenderung einer fingerprinted Blocking-Ausfuehrung
 nennt der Readiness-Report die abweichenden Komponenten samt erwartetem und
 aktuellem Nachweis. Vertragswerte werden erst nach Review der zugehoerigen

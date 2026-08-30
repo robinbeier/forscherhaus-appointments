@@ -86,7 +86,8 @@
     "ci": {
         "workflow": ".github/workflows/ci.yml",
         "blocking_failure_control_policy": "strict-v1",
-        "unclassified_job_policy": "non_blocking",
+        "job_classification_policy": "explicit-v1",
+        "advisory_jobs": ["heavy-job-duration-trends", "pdf-renderer-latency"],
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
             "changes": "c8cf92dad576b88662c08d394a763d56e595e58aa87de2b021cec8d8ef424a65",

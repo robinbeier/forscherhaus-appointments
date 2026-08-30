@@ -72,8 +72,9 @@ This file stays intentionally short. It is a map, not a second runbook.
     conditions are parsed into a canonical semantic form with the contract
     grammar. The contract selects a versioned strict failure-control policy;
     unknown policy IDs, workflow/job/step shell overrides, and explicit
-    `continue-on-error` fail closed. Unlisted jobs stay outside the blocking
-    contract, while every listed blocking job must exist.
+    `continue-on-error` fail closed. Every workflow job must be classified
+    exactly once as blocking or advisory; advisory jobs remain outside
+    blocking execution checks, while missing or unclassified jobs fail closed.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:

@@ -70,12 +70,16 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['evidence_privacy']['allow_capability_values'] ?? null);
         self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
         self::assertSame('strict-v1', $contract['ci']['blocking_failure_control_policy'] ?? null);
-        self::assertSame('non_blocking', $contract['ci']['unclassified_job_policy'] ?? null);
+        self::assertSame('explicit-v1', $contract['ci']['job_classification_policy'] ?? null);
+        self::assertSame(
+            ['heavy-job-duration-trends', 'pdf-renderer-latency'],
+            $contract['ci']['advisory_jobs'] ?? null,
+        );
+        self::assertArrayNotHasKey('unclassified_job_policy', $contract['ci']);
         self::assertArrayNotHasKey('blocking_failure_controls', $contract['ci']);
         self::assertArrayNotHasKey('blocking_execution_sha256', $contract['ci']);
         self::assertArrayNotHasKey('required_exact_execution_jobs', $contract['ci']);
         self::assertArrayNotHasKey('job_inventory_is_exhaustive', $contract['ci']);
-        self::assertArrayNotHasKey('advisory_jobs', $contract['ci']);
         self::assertIsArray($contract['ci']['blocking_execution_fingerprints'] ?? null);
         foreach ($contract['ci']['blocking_execution_fingerprints'] as $fingerprint) {
             self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', (string) $fingerprint);
@@ -191,7 +195,11 @@ class AgentWorkflowContractTest extends TestCase
             $this->repoRoot . '/' . ltrim((string) $ci['workflow'], '/'),
         );
         $checks = array_merge(
-            agentHarnessReadinessEvaluateBlockingJobInventory($ciWorkflow, array_keys($ci['blocking_jobs'])),
+            agentHarnessReadinessEvaluateClassifiedJobInventory(
+                $ciWorkflow,
+                array_keys($ci['blocking_jobs']),
+                $ci['advisory_jobs'],
+            ),
             agentHarnessReadinessEvaluateWorkflowFailureMasks($ciWorkflow, $ci['blocking_failure_control_policy']),
             agentHarnessReadinessEvaluateBlockingJobs(
                 $ciWorkflow,

@@ -375,27 +375,67 @@ class AgentHarnessReadinessTest extends TestCase
         agentHarnessReadinessFailureControlsForPolicy('strict-v2');
     }
 
-    public function testEvaluateBlockingJobInventoryAllowsUnclassifiedJobsButRejectsMissingBlockingJob(): void
+    public function testEvaluateClassifiedJobInventoryRejectsUnclassifiedAndMissingJobs(): void
     {
         $workflow = [
             'jobs' => [
                 'coverage-delta' => [],
-                'new-blocking-job' => [],
+                'pdf-renderer-latency' => [],
+                'new-job' => [],
             ],
         ];
 
-        $checks = agentHarnessReadinessEvaluateBlockingJobInventory($workflow, ['coverage-delta']);
+        $checks = agentHarnessReadinessEvaluateClassifiedJobInventory(
+            $workflow,
+            ['coverage-delta'],
+            ['pdf-renderer-latency'],
+        );
 
-        self::assertSame('pass', $checks[0]['status']);
-        self::assertSame('blocking_job_inventory', $checks[0]['id']);
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertSame('job_classification_inventory', $checks[0]['id']);
+        self::assertStringContainsString('new-job', $checks[0]['message']);
 
-        $checks = agentHarnessReadinessEvaluateBlockingJobInventory($workflow, [
-            'coverage-delta',
-            'write-contract-api',
-        ]);
+        unset($workflow['jobs']['new-job']);
+        $checks = agentHarnessReadinessEvaluateClassifiedJobInventory(
+            $workflow,
+            ['coverage-delta', 'write-contract-api'],
+            ['pdf-renderer-latency'],
+        );
 
         self::assertSame('fail', $checks[0]['status']);
         self::assertStringContainsString('write-contract-api', $checks[0]['message']);
+    }
+
+    public function testEvaluateClassifiedJobInventoryAcceptsExplicitBlockingAndAdvisoryJobs(): void
+    {
+        $workflow = [
+            'jobs' => [
+                'coverage-delta' => [],
+                'pdf-renderer-latency' => [],
+            ],
+        ];
+
+        $checks = agentHarnessReadinessEvaluateClassifiedJobInventory(
+            $workflow,
+            ['coverage-delta'],
+            ['pdf-renderer-latency'],
+        );
+
+        self::assertSame('pass', $checks[0]['status']);
+    }
+
+    public function testEvaluateClassifiedJobInventoryRejectsOverlappingClassifications(): void
+    {
+        $workflow = ['jobs' => ['coverage-delta' => []]];
+
+        $checks = agentHarnessReadinessEvaluateClassifiedJobInventory(
+            $workflow,
+            ['coverage-delta'],
+            ['coverage-delta'],
+        );
+
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('both blocking and advisory', $checks[0]['message']);
     }
 
     #[DataProvider('blockingJobProvider')]
@@ -629,7 +669,8 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
-                    'unclassified_job_policy' => 'non_blocking',
+                    'job_classification_policy' => 'explicit-v1',
+                    'advisory_jobs' => [],
                     'blocking_execution_fingerprints' => [
                         'workflow_execution_envelope' => str_repeat('a', 64),
                         'build-test' => str_repeat('b', 64),
@@ -657,7 +698,8 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v2',
-                    'unclassified_job_policy' => 'non_blocking',
+                    'job_classification_policy' => 'explicit-v1',
+                    'advisory_jobs' => [],
                     'blocking_execution_fingerprints' => [
                         'workflow_execution_envelope' => str_repeat('a', 64),
                         'build-test' => str_repeat('b', 64),
@@ -674,7 +716,7 @@ class AgentHarnessReadinessTest extends TestCase
         agentHarnessReadinessLoadWorkflowContract($path);
     }
 
-    public function testWorkflowContractLoaderRejectsUnsupportedUnclassifiedJobPolicy(): void
+    public function testWorkflowContractLoaderRejectsUnsupportedJobClassificationPolicy(): void
     {
         $path = $this->tmpDir . '/agent-workflow.json';
         file_put_contents(
@@ -685,7 +727,8 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
-                    'unclassified_job_policy' => 'exhaustive',
+                    'job_classification_policy' => 'open-v1',
+                    'advisory_jobs' => [],
                     'blocking_execution_fingerprints' => [
                         'workflow_execution_envelope' => str_repeat('a', 64),
                         'build-test' => str_repeat('b', 64),
@@ -697,7 +740,7 @@ class AgentHarnessReadinessTest extends TestCase
         );
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('unclassified-job policy');
+        $this->expectExceptionMessage('explicit job-classification policy');
 
         agentHarnessReadinessLoadWorkflowContract($path);
     }
@@ -713,7 +756,8 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
-                    'unclassified_job_policy' => 'non_blocking',
+                    'job_classification_policy' => 'explicit-v1',
+                    'advisory_jobs' => [],
                     'blocking_execution_fingerprints' => [
                         'workflow_execution_envelope' => str_repeat('a', 64),
                         'build-test' => 'invalid',
@@ -730,6 +774,51 @@ class AgentHarnessReadinessTest extends TestCase
         agentHarnessReadinessLoadWorkflowContract($path);
     }
 
+    public function testWorkflowContractLoaderRejectsMissingOrExtraFingerprintComponents(): void
+    {
+        $cases = [
+            'missing fingerprinted job' => [
+                'workflow_execution_envelope' => str_repeat('a', 64),
+            ],
+            'extra fingerprint component' => [
+                'workflow_execution_envelope' => str_repeat('a', 64),
+                'build-test' => str_repeat('b', 64),
+                'unclassified-component' => str_repeat('c', 64),
+            ],
+        ];
+
+        foreach ($cases as $case => $fingerprints) {
+            $path = $this->tmpDir . '/agent-workflow-' . str_replace(' ', '-', $case) . '.json';
+            file_put_contents(
+                $path,
+                json_encode([
+                    'schema_version' => 2,
+                    'surfaces' => ['WORKFLOW.md' => []],
+                    'ci' => [
+                        'workflow' => 'ci.yml',
+                        'blocking_failure_control_policy' => 'strict-v1',
+                        'job_classification_policy' => 'explicit-v1',
+                        'advisory_jobs' => [],
+                        'blocking_execution_fingerprints' => $fingerprints,
+                        'condition_grammar' => $this->conditionGrammar(),
+                        'blocking_jobs' => ['build-test' => ['kind' => 'fingerprinted_execution']],
+                    ],
+                ]),
+            );
+
+            try {
+                agentHarnessReadinessLoadWorkflowContract($path);
+                self::fail('Expected mismatched execution fingerprint components to be rejected: ' . $case);
+            } catch (\RuntimeException $exception) {
+                self::assertStringContainsString(
+                    'execution fingerprints must match every fingerprinted-execution component exactly',
+                    $exception->getMessage(),
+                    $case,
+                );
+            }
+        }
+    }
+
     public function testWorkflowContractLoaderRejectsMalformedExactExecutionContract(): void
     {
         $path = $this->tmpDir . '/agent-workflow.json';
@@ -741,7 +830,8 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
-                    'unclassified_job_policy' => 'non_blocking',
+                    'job_classification_policy' => 'explicit-v1',
+                    'advisory_jobs' => [],
                     'blocking_execution_fingerprints' => [
                         'workflow_execution_envelope' => str_repeat('a', 64),
                     ],
@@ -769,7 +859,8 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
-                    'unclassified_job_policy' => 'non_blocking',
+                    'job_classification_policy' => 'explicit-v1',
+                    'advisory_jobs' => [],
                     'blocking_execution_fingerprints' => [
                         'workflow_execution_envelope' => str_repeat('a', 64),
                     ],
