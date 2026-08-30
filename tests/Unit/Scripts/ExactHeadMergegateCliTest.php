@@ -340,6 +340,8 @@ final class ExactHeadMergegateCliTest extends TestCase
         $request = static function (string $path) use ($validRequest): array {
             $payload = $validRequest($path);
             if (str_contains($path, '/actions/workflows/ci.yml/runs?')) {
+                parse_str((string) parse_url($path, PHP_URL_QUERY), $query);
+                $page = (int) ($query['page'] ?? 0);
                 $run = [
                     'id' => 101,
                     'name' => 'CI',
@@ -353,7 +355,12 @@ final class ExactHeadMergegateCliTest extends TestCase
                     'check_suite_id' => 202,
                 ];
 
-                return ['workflow_runs' => array_fill(0, EXACT_HEAD_MERGEGATE_PAGE_SIZE, $run)];
+                return [
+                    'workflow_runs' =>
+                        $page === EXACT_HEAD_MERGEGATE_MAX_PAGES + 1
+                            ? [$run]
+                            : array_fill(0, EXACT_HEAD_MERGEGATE_PAGE_SIZE, $run),
+                ];
             }
 
             return $payload;
@@ -373,6 +380,15 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
 
         self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertSame(
+            EXACT_HEAD_MERGEGATE_MAX_PAGES + 1,
+            count(
+                array_filter(
+                    $requestedPaths,
+                    static fn(string $path): bool => str_contains($path, '/actions/workflows/ci.yml/runs?'),
+                ),
+            ),
+        );
         self::assertStringContainsString('runtime_error', (string) file_get_contents($reportPath));
         self::assertStringNotContainsString('reviewer_ref', (string) file_get_contents($reportPath));
     }
@@ -631,6 +647,36 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertCount(2, $paths);
         self::assertStringContainsString('page=1', $paths[0]);
         self::assertStringContainsString('page=2', $paths[1]);
+    }
+
+    public function testPaginationAcceptsExactlyTheBoundedNumberOfFullPages(): void
+    {
+        $paths = [];
+        $request = static function (string $path) use (&$paths): array {
+            $paths[] = $path;
+            parse_str((string) parse_url($path, PHP_URL_QUERY), $query);
+            $page = (int) ($query['page'] ?? 0);
+
+            return [
+                'items' =>
+                    $page === EXACT_HEAD_MERGEGATE_MAX_PAGES + 1
+                        ? []
+                        : array_fill(0, EXACT_HEAD_MERGEGATE_PAGE_SIZE, ['id' => $page]),
+            ];
+        };
+
+        $items = fetchExactHeadMergegateCollection($request, '/repos/acme/app/items', 'items');
+
+        self::assertCount(EXACT_HEAD_MERGEGATE_MAX_PAGES * EXACT_HEAD_MERGEGATE_PAGE_SIZE, $items);
+        self::assertCount(EXACT_HEAD_MERGEGATE_MAX_PAGES + 1, $paths);
+        self::assertStringContainsString(
+            'page=' . EXACT_HEAD_MERGEGATE_MAX_PAGES,
+            $paths[EXACT_HEAD_MERGEGATE_MAX_PAGES - 1],
+        );
+        self::assertStringContainsString(
+            'page=' . (EXACT_HEAD_MERGEGATE_MAX_PAGES + 1),
+            $paths[EXACT_HEAD_MERGEGATE_MAX_PAGES],
+        );
     }
 
     public function testGitHubAdapterInvokesOnlyExplicitGetMethodAtRuntime(): void

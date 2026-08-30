@@ -716,7 +716,24 @@ function fetchExactHeadMergegateCollection(Closure $request, string $path, ?stri
         }
     }
 
-    throw new RuntimeException('GitHub GET collection exceeded the bounded pagination window.');
+    $separator = str_contains($path, '?') ? '&' : '?';
+    $sentinelPayload = $request(
+        $path .
+            $separator .
+            http_build_query([
+                'per_page' => EXACT_HEAD_MERGEGATE_PAGE_SIZE,
+                'page' => EXACT_HEAD_MERGEGATE_MAX_PAGES + 1,
+            ]),
+    );
+    $sentinelItems = $collectionKey === null ? $sentinelPayload : $sentinelPayload[$collectionKey] ?? null;
+    if (!is_array($sentinelItems) || !array_is_list($sentinelItems)) {
+        throw new RuntimeException('GitHub GET collection had an invalid shape.');
+    }
+    if ($sentinelItems !== []) {
+        throw new RuntimeException('GitHub GET collection exceeded the bounded pagination window.');
+    }
+
+    return $items;
 }
 
 /**
