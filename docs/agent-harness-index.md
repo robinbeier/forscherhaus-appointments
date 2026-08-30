@@ -65,11 +65,13 @@ This file stays intentionally short. It is a map, not a second runbook.
     duplicate clauses.
   - The workflow execution envelope and every contract-classified blocking job
     are bound to an exact execution fingerprint; display-only job/step names
-    and order-insensitive `needs` lists are normalized. Any workflow/job/step
-    shell override or explicit `continue-on-error` fails the readiness check
-    independently. Advisory signal jobs are classified separately and remain
-    outside this blocking contract. The contract also names at least one
-    structured exact-execution anchor for readable review and diagnostics.
+    and order-insensitive `needs` and trigger-type lists are normalized, while
+    order-sensitive glob filters are preserved. Any workflow/job/step shell
+    override or explicit `continue-on-error` fails the readiness check
+    independently. New control categories fail closed until contract, checker,
+    and tests change together. Advisory signal jobs are classified separately
+    and remain outside this blocking contract. The contract also names at least
+    one structured exact-execution anchor for readable review and diagnostics.
 - Report date sanity:
   - `composer check:harness-report-dates`
 - Scope-specific checks:

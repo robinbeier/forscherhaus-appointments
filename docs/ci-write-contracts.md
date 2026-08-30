@@ -121,14 +121,19 @@ umbenannte oder entfernte CI-Job muss im Vertrag zugleich klassifiziert werden.
 Seine versionierte Actions-Expression-Grammatik
 ist bewusst eng; nicht unterstützte Syntax wird fail-closed abgelehnt und
 erfordert eine gemeinsame Änderung von Vertrag, Parser und Regressionstests.
+Neue Failure-Control-Kategorien oder Job-Klassen sind ebenso bewusst keine
+reinen Contract-Erweiterungspunkte, sondern verlangen die koordinierte
+Aenderung von Vertrag, Checker und Regressionstests.
 Auch die Schritte nach dem Assertion-Gate sind exakt festgelegt, damit keine
 ungeprüfte Evidence-Ausgabe oder nachgelagerte Aktion ergänzt werden kann.
 Alle im Vertrag klassifizierten Blocking-Jobs sind mit ihren vollstaendigen
 Ausfuehrungsdefinitionen sowie dem aus Triggern, Berechtigungen, globaler
 Umgebung, Defaults und Concurrency bestehenden Workflow-Ausfuehrungsrahmen an
 einen kanonischen SHA-256-Fingerprint gebunden. Job- und Step-Anzeigenamen sowie
-die Reihenfolge in `needs` werden dabei als nicht ausfuehrungsrelevant
-normalisiert; ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
+die Reihenfolge in `needs`, der Event-Kurzform, Trigger-`types` und
+`workflows` werden dabei als nicht ausfuehrungsrelevant normalisiert.
+Glob-Filter behalten wegen reihenfolgeabhaengiger Negationen ihre Reihenfolge;
+ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
 Jede explizite `continue-on-error`-Deklaration sowie
 jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
 unabhaengig davon fehlschlagen. Advisory-Signal-Jobs sind im Inventar separat

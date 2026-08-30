@@ -244,9 +244,15 @@ class AgentHarnessReadinessTest extends TestCase
         }
     }
 
-    public function testBlockingExecutionFingerprintNormalizesDisplayNamesAndNeedsOrder(): void
+    public function testBlockingExecutionFingerprintNormalizesDisplayNamesAndOrderInsensitiveLists(): void
     {
         $workflow = [
+            'on' => [
+                'pull_request' => [
+                    'branches' => ['main', '!legacy'],
+                    'types' => ['synchronize', 'opened'],
+                ],
+            ],
             'jobs' => [
                 'build-test' => [
                     'name' => 'Build and test',
@@ -261,9 +267,14 @@ class AgentHarnessReadinessTest extends TestCase
         $workflow['jobs']['build-test']['name'] = 'Display-only rename';
         $workflow['jobs']['build-test']['needs'] = ['changes', 'seed'];
         $workflow['jobs']['build-test']['steps'][0]['name'] = 'Another display-only rename';
+        $workflow['on']['pull_request']['types'] = ['opened', 'synchronize'];
         $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
 
         self::assertSame('pass', $checks[0]['status']);
+
+        $workflow['on']['pull_request']['branches'] = ['!legacy', 'main'];
+        $checks = agentHarnessReadinessEvaluateBlockingExecutionFingerprint($workflow, $blockingJobs, $expectedSha256);
+        self::assertSame('fail', $checks[0]['status']);
     }
 
     public function testFailureControlValidationAcceptsReorderingAndAdditionalForbiddenKeys(): void

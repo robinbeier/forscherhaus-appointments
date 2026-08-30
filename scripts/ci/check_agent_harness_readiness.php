@@ -642,7 +642,8 @@ function agentHarnessReadinessCalculateBlockingExecutionSha256(array $ciWorkflow
     $workflowExecutionEnvelope = [];
     foreach (['on', 'permissions', 'env', 'defaults', 'concurrency'] as $key) {
         if (array_key_exists($key, $ciWorkflow)) {
-            $workflowExecutionEnvelope[$key] = $ciWorkflow[$key];
+            $workflowExecutionEnvelope[$key] =
+                $key === 'on' ? agentHarnessReadinessNormalizeWorkflowTriggers($ciWorkflow[$key]) : $ciWorkflow[$key];
         }
     }
 
@@ -652,6 +653,45 @@ function agentHarnessReadinessCalculateBlockingExecutionSha256(array $ciWorkflow
     ]);
 
     return hash('sha256', json_encode($executionDefinition, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+}
+
+/**
+ * Normalize trigger lists whose order cannot affect execution. Glob filters
+ * deliberately retain their order because negated patterns are order-sensitive.
+ */
+function agentHarnessReadinessNormalizeWorkflowTriggers(mixed $triggers): mixed
+{
+    if (!is_array($triggers)) {
+        return $triggers;
+    }
+
+    if (array_is_list($triggers)) {
+        if (array_all($triggers, static fn(mixed $event): bool => is_string($event))) {
+            sort($triggers, SORT_STRING);
+        }
+
+        return $triggers;
+    }
+
+    foreach ($triggers as $event => $configuration) {
+        if (!is_array($configuration)) {
+            continue;
+        }
+        foreach (['types', 'workflows'] as $orderInsensitiveKey) {
+            $values = $configuration[$orderInsensitiveKey] ?? null;
+            if (!is_array($values) || !array_is_list($values)) {
+                continue;
+            }
+            if (!array_all($values, static fn(mixed $value): bool => is_string($value))) {
+                continue;
+            }
+            sort($values, SORT_STRING);
+            $configuration[$orderInsensitiveKey] = $values;
+        }
+        $triggers[$event] = $configuration;
+    }
+
+    return agentHarnessReadinessCanonicalizeMap($triggers);
 }
 
 /**
