@@ -9,12 +9,14 @@ require_once __DIR__ . '/lib/OpenApiContractValidator.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/BookedSlotMatcher.php';
 require_once __DIR__ . '/lib/BookingWriteContractState.php';
+require_once __DIR__ . '/lib/BookingWriteReportSanitizer.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
 use CiContract\BookedSlotMatcher;
 use CiContract\BookingWriteContractState;
+use CiContract\BookingWriteReportSanitizer;
 use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
 use CiContract\DeterministicFixtureFactory;
@@ -1150,9 +1152,9 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
 
     $passed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'pass'));
     $failed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'fail'));
-    $reportState = sanitizeBookingWriteReportValue($state);
-    $reportChecks = sanitizeBookingWriteReportValue($checks);
-    $reportFailure = sanitizeBookingWriteReportValue($failure);
+    $reportState = BookingWriteReportSanitizer::sanitize($state);
+    $reportChecks = BookingWriteReportSanitizer::sanitize($checks);
+    $reportFailure = BookingWriteReportSanitizer::sanitize($failure);
 
     $report = [
         'generated_at_utc' => gmdate('c'),
@@ -1176,62 +1178,6 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
     file_put_contents($outputPath, $json . PHP_EOL);
 
     return $outputPath;
-}
-
-/**
- * Remove capability, authority, credential, and personal payload values before
- * contract state becomes a CI artifact. Runtime state remains available only
- * in process for cleanup and subsequent checks.
- */
-function sanitizeBookingWriteReportValue(mixed $value, ?string $key = null): mixed
-{
-    $normalizedKey = strtolower((string) $key);
-    $sensitiveKeys = [
-        'primary_customer',
-        'customer_id',
-        'primary_customer_id',
-        'appointment_hash',
-        'primary_appointment_hash',
-        'authority',
-        'token',
-        'password',
-        'secret',
-        'cookie',
-        'first_name',
-        'last_name',
-        'email',
-        'mobile_number',
-        'phone_number',
-        'address',
-        'city',
-        'state',
-        'zip_code',
-        'custom_field_1',
-        'custom_field_2',
-        'custom_field_3',
-        'custom_field_4',
-        'custom_field_5',
-    ];
-
-    if (in_array($normalizedKey, $sensitiveKeys, true)) {
-        return '[redacted]';
-    }
-
-    if (is_array($value)) {
-        $sanitized = [];
-
-        foreach ($value as $childKey => $childValue) {
-            $sanitized[$childKey] = sanitizeBookingWriteReportValue($childValue, (string) $childKey);
-        }
-
-        return $sanitized;
-    }
-
-    if (!is_string($value)) {
-        return $value;
-    }
-
-    return preg_replace('#(booking/reschedule|booking_cancellation/of)/[^/?\s"]+#', '$1/[redacted]', $value);
 }
 
 function printHelpAndExit(): void

@@ -303,9 +303,18 @@ class Reschedule_authority
      * Serialize a normal public creation against other public writes for the
      * same target provider and verify the provider-service assignment.
      */
-    public function lockCreationTarget(int $provider_id, int $service_id): void
+    public function lockCreationTarget(int $provider_id, int $service_id, ?int $customer_id = null): void
     {
-        $this->lockRowsByIds('users', 'id', [$provider_id]);
+        $user_ids = [$provider_id];
+
+        if ($customer_id !== null) {
+            $user_ids[] = $customer_id;
+        }
+
+        $user_ids = array_values(array_unique($user_ids));
+        sort($user_ids, SORT_NUMERIC);
+
+        $this->lockRowsByIds('users', 'id', $user_ids);
         $this->lockRowsByIds('services', 'id', [$service_id]);
         $this->lockRowsByIds('user_settings', 'id_users', [$provider_id]);
         $this->lockProviderServiceAssignments($provider_id);
@@ -313,15 +322,6 @@ class Reschedule_authority
         if (!$this->providerOffersService($provider_id, $service_id)) {
             throw new RescheduleAuthorityException('Public booking target rejected.');
         }
-    }
-
-    /**
-     * Lock an existing customer selected by the normal creation path before it
-     * can be updated inside the same transaction.
-     */
-    public function lockCustomer(int $customer_id): void
-    {
-        $this->lockRowsByIds('users', 'id', [$customer_id]);
     }
 
     /**

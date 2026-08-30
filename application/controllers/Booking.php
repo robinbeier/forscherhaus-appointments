@@ -380,6 +380,12 @@ class Booking extends EA_Controller
                 unset($appointment['id'], $customer['id']);
             }
 
+            $existing_customer_id = null;
+
+            if (!($authority_claim instanceof RescheduleAuthorityClaim) && $this->customers_model->exists($customer)) {
+                $existing_customer_id = $this->customers_model->find_record_id($customer);
+            }
+
             // Resolve ANY_PROVIDER or reject an unavailable concrete target.
             // Availability is checked again under the provider lock below.
             $appointment['id_users_provider'] = $this->check_datetime_availability($appointment);
@@ -412,7 +418,11 @@ class Booking extends EA_Controller
                     $target_service_id,
                 );
             } else {
-                $this->rescheduleAuthority()->lockCreationTarget($target_provider_id, $target_service_id);
+                $this->rescheduleAuthority()->lockCreationTarget(
+                    $target_provider_id,
+                    $target_service_id,
+                    $existing_customer_id,
+                );
             }
 
             // The provider row lock serializes public writes for this target;
@@ -440,9 +450,8 @@ class Booking extends EA_Controller
 
             if ($authority_claim instanceof RescheduleAuthorityClaim) {
                 $customer['id'] = $authority_claim->customerId;
-            } elseif ($this->customers_model->exists($customer)) {
-                $customer['id'] = $this->customers_model->find_record_id($customer);
-                $this->rescheduleAuthority()->lockCustomer((int) $customer['id']);
+            } elseif ($existing_customer_id !== null) {
+                $customer['id'] = $existing_customer_id;
             }
 
             $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);

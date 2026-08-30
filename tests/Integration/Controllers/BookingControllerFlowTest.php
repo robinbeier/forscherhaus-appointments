@@ -348,6 +348,29 @@ class BookingControllerFlowTest extends TestCase
         );
     }
 
+    public function testSessionContextMismatchRejectsWithoutMutation(): void
+    {
+        $scenario = $this->createRescheduleScenario(13);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        session([
+            'public_reschedule_authority_context' => rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='),
+        ]);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $this->setReschedulePayload($scenario);
+
+        $controller->register();
+
+        $this->assertAuthorityRejectedWithoutMutation(
+            $controller,
+            $scenario['appointment_id'],
+            $scenario['customer_id'],
+            $beforeAppointment,
+            $beforeCustomer,
+        );
+    }
+
     public function testConsumedAuthorityCannotBeReplayed(): void
     {
         $scenario = $this->createRescheduleScenario(14);

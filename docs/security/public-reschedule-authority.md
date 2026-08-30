@@ -106,7 +106,10 @@ and locks the canonical appointment, its customer, original provider and
 service, and the requested target scheduling context. It then recomputes the
 fingerprint and reruns the existing availability and overlap checks. Public
 register writes for the same target provider serialize before their final
-availability check.
+availability check. Normal creation resolves an existing customer before the
+transaction and locks that customer together with the provider in the same
+ascending user-ID order used by reschedules, preventing provider/customer lock
+inversion between the two public write paths.
 
 Consent, customer, appointment, and generated buffer writes happen inside that
 outer transaction. Any exception or failed check rolls the transaction back.
