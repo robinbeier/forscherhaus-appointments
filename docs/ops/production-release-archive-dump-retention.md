@@ -59,7 +59,8 @@ match alone is never sufficient. The process must have the exact
 `/system.slice/fh-release-archive-dump-retention.service` cgroup, a closed
 systemd invocation ID, and a stable mount namespace distinct from PID 1. The
 lock mount must be the writable child of the immediately containing read-only
-mount; child and parent must have the same filesystem, source, superblock
+namespace-root mount (mount point `/`, root `/`); child and parent must have the
+same filesystem, source, superblock
 device and super options, and the child's mount root must be derived exactly
 from the parent root and target path. The observed device must also equal the
 device of the open lock file.

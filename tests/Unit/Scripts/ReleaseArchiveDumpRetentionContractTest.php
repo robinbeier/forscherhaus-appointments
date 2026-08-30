@@ -135,6 +135,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
             [
                 'match alone is never sufficient.',
                 'absence is treated as sandbox drift',
+                'namespace-root mount (mount point `/`, root `/`)',
                 'same filesystem, source, superblock',
                 'regular, empty, root-owned',
                 'zero-mutation ledger',

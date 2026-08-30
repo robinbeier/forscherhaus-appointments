@@ -899,6 +899,8 @@ def validate_nested_mount_records(
     parent_options = parent.get('mount_options')
     if (
         closest is not parent
+        or parent_point != '/'
+        or parent_root != '/'
         or relative == '..'
         or relative.startswith('../')
         or not expected_root.startswith('/')

@@ -20,7 +20,7 @@ loader.exec_module(helper)
 
 
 LOCK_POINT = "/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock"
-PARENT_POINT = "/var/lib/fh-deploy-orchestrator"
+PARENT_POINT = "/"
 LOCK_DEVICE = os.makedev(8, 1)
 SERVICE_CGROUP = "0::/system.slice/fh-release-archive-dump-retention.service\n"
 INVOCATION_ID = "0123456789abcdef0123456789abcdef"
@@ -47,7 +47,7 @@ def mount_line(
 def trusted_lines() -> list[str]:
     return [
         mount_line(41, 30, "/", PARENT_POINT, "ro,relatime"),
-        mount_line(42, 41, "/locks/fh-production-change.lock", LOCK_POINT, "rw,relatime"),
+        mount_line(42, 41, LOCK_POINT, LOCK_POINT, "rw,relatime"),
     ]
 
 
@@ -131,12 +131,29 @@ class RetentionMountInfoTest(unittest.TestCase):
                 self.assert_reason("nested_mount_boundary", candidate)
 
     def test_rejects_wrong_parent_or_computed_root(self) -> None:
-        for name, root, parent in (("wrong parent", "/locks/fh-production-change.lock", 30), ("wrong root", "/", 41)):
+        for name, root, parent in (("wrong parent", LOCK_POINT, 30), ("wrong root", "/", 41)):
             with self.subTest(name=name):
                 candidate = trusted_records()
                 candidate[1]["root"] = root
                 candidate[1]["parent_id"] = parent
                 self.assert_reason("nested_mount_boundary", candidate)
+
+    def test_rejects_extra_mount_at_protected_orchestrator_root(self) -> None:
+        candidate = trusted_records()
+        candidate.insert(
+            1,
+            helper.parse_mountinfo([
+                mount_line(
+                    43,
+                    41,
+                    "/var/lib/fh-deploy-orchestrator",
+                    "/var/lib/fh-deploy-orchestrator",
+                    "ro,relatime",
+                )
+            ])[0],
+        )
+        candidate[2]["parent_id"] = 43
+        self.assert_reason("nested_mount_boundary", candidate)
 
     def test_rejects_read_only_child_or_writable_parent(self) -> None:
         for name, index, options in (
