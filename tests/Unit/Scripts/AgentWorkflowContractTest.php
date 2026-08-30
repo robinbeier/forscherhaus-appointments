@@ -53,6 +53,7 @@ class AgentWorkflowContractTest extends TestCase
     {
         $agents = $this->readRepoFile('AGENTS.md');
         $writeContracts = $this->readRepoFile('docs/ci-write-contracts.md');
+        $ciWorkflow = $this->readRepoFile('.github/workflows/ci.yml');
 
         self::assertStringContainsString(
             'Caller-supplied flags, IDs, hashes, tokens, or paths never create public',
@@ -63,6 +64,14 @@ class AgentWorkflowContractTest extends TestCase
         self::assertStringContainsString('`write-contract-booking` ist aktuell blockierend', $writeContracts);
         self::assertStringContainsString('`write-contract-api` ist aktuell blockierend', $writeContracts);
         self::assertStringNotContainsString('warn-only', $writeContracts);
+        self::assertStringNotContainsString(
+            'continue-on-error:',
+            $this->readWorkflowJob($ciWorkflow, 'write-contract-booking'),
+        );
+        self::assertStringNotContainsString(
+            'continue-on-error:',
+            $this->readWorkflowJob($ciWorkflow, 'write-contract-api'),
+        );
     }
 
     public function testHarnessEntryPointsAndGeneratedCachesStayAligned(): void
@@ -83,5 +92,15 @@ class AgentWorkflowContractTest extends TestCase
         self::assertNotFalse($contents, 'Failed to read ' . $relativePath);
 
         return $contents;
+    }
+
+    private function readWorkflowJob(string $workflow, string $jobName): string
+    {
+        $pattern = '/^  ' . preg_quote($jobName, '/') . ':\R.*?(?=^  [a-zA-Z0-9_-]+:\R|\z)/ms';
+        $matched = preg_match($pattern, $workflow, $matches);
+
+        self::assertSame(1, $matched, 'Missing CI workflow job: ' . $jobName);
+
+        return $matches[0];
     }
 }
