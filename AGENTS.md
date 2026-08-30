@@ -16,10 +16,18 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 - Do not edit `system/` unless applying an explicit upstream patch.
 - Use CodeIgniter migrations for DB schema changes, including rollback.
 - Never commit secrets or local credentials; keep `config.php` local.
+- Caller-supplied flags, IDs, hashes, tokens, or paths never create public
+  update authority; verify authority server-side and fail closed before any
+  mutation. Keep the detailed contract in `docs/ci-write-contracts.md`.
 - Treat `services.attendants_number` as fixed to `1` unless product scope changes explicitly.
 - If `docs/maps/component_ownership_map.json` marks a component as `single-owner` or `manual_approval_required`, keep changes narrow and conservative.
 - Prefer small, mergeable, low-risk diffs over broad rewrites, speculative cleanup, or wide refactors.
-- Delegate concrete, bounded, independently verifiable implementation, test, and documentation slices to the Luna-backed `implementation_worker` contract by default. The project-wide subagent defaults keep legacy generic spawns on Luna/medium; current runtimes should select the registered role. The primary agent retains coordination, integration, review, merge, and production authority; follow `WORKFLOW.md` for the full model-aware delegation contract.
+- Delegate concrete, bounded, independently verifiable implementation, test,
+  and documentation slices to the registered
+  `implementation_worker` contract by default. The primary agent retains
+  architecture, integration, review,
+  Git, Linear, merge, and production authority; `WORKFLOW.md` is canonical for
+  runtime and model details.
 
 ## Default Path
 
