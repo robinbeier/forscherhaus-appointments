@@ -44,7 +44,11 @@ the same pull request and reviewed SHA:
    execution fingerprints, and exact-execution assertions before any CI
    evidence is trusted. A changed, weakened, noop, or unconditionally skipped
    blocking job therefore fails closed; skipped evidence is accepted only
-   behind this verified execution-contract invariant.
+   behind this verified execution-contract invariant. Workflow YAML is parsed
+   in a fresh no-ini PHP process with a package-scoped autoloader. The complete
+   Symfony YAML package tree must match the SHA-256 digest pinned by the
+   reviewed contract, so ambient preloaded classes or modified local vendor
+   code cannot define the verified CI execution contract.
 2. The pull request is read before the first bounded evidence observation,
    between the two observations, and once more after the second observation.
    Its number, state, draft flag, base, head SHA, head branch, and head
@@ -114,15 +118,17 @@ comment whose GitHub author association is OWNER can be the attestation.
 Extra lenses, duplicate lenses, duplicate reviewer references, non-canonical
 keys, a different verdict, or a different SHA are rejected.
 
-The numeric watermarks are the largest current IDs returned by the formal
-review and inline review comment collections, or 0 when that collection is
-empty. The payload digest is the privacy-safe hash of the normalized exact-SHA
-formal review payloads plus the normalized inline review comment evidence set
-currently visible on the pull request. Together they make later activity,
-inline-comment deletion, and formal-review body edits detectable without
-writing review text or identities into the report. A higher, lower, deleted,
-or otherwise different current maximum or payload digest invalidates the
-attestation.
+The numeric watermarks are the largest current IDs returned for formal reviews
+and inline review comments from the contract's blocking feedback associations,
+or 0 when that trusted evidence set is empty. The payload digest is the
+privacy-safe hash of the normalized exact-SHA formal review payloads plus the
+normalized inline review comment evidence from those same associations.
+Together they make later trusted activity, trusted inline-comment deletion,
+and trusted formal-review body edits detectable without writing review text or
+identities into the report. A higher, lower, deleted, or otherwise different
+trusted maximum or payload digest invalidates the attestation. Activity from
+associations outside that authority set is observed by GitHub but cannot grant
+authority or veto a landing decision.
 
 After CI and the three reviews are final, run the mergegate once before
 publishing the attestation. It will still exit non-zero because the attestation
@@ -135,20 +141,23 @@ closed and requires fresh evidence.
 Publishing the attestation is a separate, explicit PR write performed only
 after the reviews actually exist. The mergegate itself never publishes or
 updates it. The attestation comment must have identical creation and update
-timestamps; do not edit or reuse it. Any correction, later review activity, or
-later push requires a new comment after fresh final reviews.
+timestamps; do not edit or reuse it. Any correction, later trusted review
+activity, or later push requires a new comment after fresh final reviews.
 
-The gate also reads formal reviews and inline review comments. A current-SHA
-CHANGES_REQUESTED state remains blocking until the same reviewer has a later
-non-blocking review state. Any review watermark drift, formal-review payload
-digest drift, inline-review evidence drift, or a newer owner/member/collaborator
-issue comment makes the attestation stale and requires a fresh finding-free
-review decision plus a fresh attestation. This closes later-feedback drift
-without writing reviewer identity or comment contents to the report. An inline
-review comment whose update timestamp is at or after the attestation timestamp
-is also blocking. A same-second edit to an older trusted issue comment is
-blocking as well because GitHub timestamps have only second precision; publish
-a fresh attestation in a later second instead of guessing event order.
+The gate also reads formal reviews and inline review comments from the
+contract's owner/member/collaborator feedback set. A current-SHA
+CHANGES_REQUESTED state from that set remains blocking until the same reviewer
+has a later non-blocking review state. Any trusted review watermark drift,
+trusted formal-review payload digest drift, trusted inline-review evidence
+drift, or a newer owner/member/collaborator issue comment makes the attestation
+stale and requires a fresh finding-free review decision plus a fresh
+attestation. This closes later-feedback drift without letting an untrusted
+drive-by actor veto landing and without writing reviewer identity or comment
+contents to the report. A trusted inline review comment whose update timestamp
+is at or after the attestation timestamp is also blocking. A same-second edit
+to an older trusted issue comment is blocking as well because GitHub timestamps
+have only second precision; publish a fresh attestation in a later second
+instead of guessing event order.
 
 ## Result and Landing
 

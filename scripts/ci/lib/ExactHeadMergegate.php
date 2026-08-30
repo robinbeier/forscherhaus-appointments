@@ -51,9 +51,16 @@ final class ExactHeadMergegate
     /**
      * @return array{review_id:int,review_comment_id:int,review_payload_digest:string}|null
      */
-    public static function reviewActivityWatermark(mixed $reviewActivity, string $reviewedSha): ?array
-    {
-        if (!is_array($reviewActivity)) {
+    public static function reviewActivityWatermark(
+        mixed $reviewActivity,
+        string $reviewedSha,
+        array $blockingFeedbackAssociations,
+    ): ?array {
+        if (
+            !is_array($reviewActivity) ||
+            $blockingFeedbackAssociations === [] ||
+            array_filter($blockingFeedbackAssociations, static fn(mixed $value): bool => !is_string($value)) !== []
+        ) {
             return null;
         }
 
@@ -66,9 +73,13 @@ final class ExactHeadMergegate
         $reviewPayloadEntries = [];
 
         foreach ($reviewActivity as $activity) {
+            if (!is_array($activity) || !is_string($activity['author_association'] ?? null)) {
+                return null;
+            }
+            if (!in_array($activity['author_association'], $blockingFeedbackAssociations, true)) {
+                continue;
+            }
             if (
-                !is_array($activity) ||
-                !is_string($activity['author_association'] ?? null) ||
                 !is_string($activity['kind'] ?? null) ||
                 !in_array($activity['kind'], ['review', 'review_comment'], true) ||
                 !is_int($activity['id'] ?? null) ||
@@ -275,7 +286,11 @@ final class ExactHeadMergegate
             'reviewed_sha' => $sha,
             'workflow_run_id' => self::normalizeReportIdentifier($workflow['id'] ?? null),
             'check_suite_id' => is_int($suiteId) ? $suiteId : null,
-            'review_activity_watermark' => self::reviewActivityWatermark($snapshot['review_activity'] ?? null, $sha),
+            'review_activity_watermark' => self::reviewActivityWatermark(
+                $snapshot['review_activity'] ?? null,
+                $sha,
+                $policy['blocking_feedback_associations'],
+            ),
             'gates' => $gates,
         ];
     }
@@ -636,13 +651,22 @@ final class ExactHeadMergegate
             }
         }
 
-        $observedWatermarks = self::reviewActivityWatermark($reviewActivity, $sha);
+        $observedWatermarks = self::reviewActivityWatermark(
+            $reviewActivity,
+            $sha,
+            $policy['blocking_feedback_associations'],
+        );
         if ($observedWatermarks === null) {
             return true;
         }
 
         $reviewTransitions = [];
         foreach ($reviewActivity as $activity) {
+            if (is_array($activity) && is_string($activity['author_association'] ?? null)) {
+                if (!in_array($activity['author_association'], $policy['blocking_feedback_associations'], true)) {
+                    continue;
+                }
+            }
             if (
                 !is_array($activity) ||
                 !is_string($activity['author_association'] ?? null) ||

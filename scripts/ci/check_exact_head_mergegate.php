@@ -210,6 +210,7 @@ function requireExactHeadMergegateCliValue(string $argument, string $prefix): st
  *     required_review_lenses:array<int, string>,
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
+ *     workflow_yaml_tree_sha256:string,
  *     attestation_marker:string,
  *     attestation_verdict:string,
  *     ci_execution_contract_verified:bool
@@ -319,7 +320,11 @@ function loadExactHeadMergegateVerifiedPolicy(
         }
         $reviewedWorkflow = $runProcess(['git', 'show', $normalizedReviewedSha . ':' . $contractWorkflow], $root);
         $workflowPath = writeExactHeadMergegateTemporaryInput($temporaryDirectory, 'ci.yml', $reviewedWorkflow);
-        $ciWorkflow = agentHarnessReadinessLoadWorkflowYaml($workflowPath);
+        $ciWorkflow = parseExactHeadMergegateWorkflowYamlIsolated(
+            $root,
+            $workflowPath,
+            $policy['workflow_yaml_tree_sha256'],
+        );
         $blockingJobs = $workflowContract['ci']['blocking_jobs'];
         $failurePolicy = $workflowContract['ci']['blocking_failure_control_policy'];
         $grammar = $workflowContract['ci']['condition_grammar'];
@@ -371,6 +376,134 @@ function writeExactHeadMergegateTemporaryInput(string $directory, string $name, 
     return $path;
 }
 
+/**
+ * Parse the reviewed workflow in a fresh no-ini PHP process whose only YAML
+ * autoloader is scoped to a package tree pinned by the reviewed contract.
+ *
+ * @return array<string, mixed>
+ */
+function parseExactHeadMergegateWorkflowYamlIsolated(
+    string $root,
+    string $workflowPath,
+    string $expectedTreeSha256,
+): array {
+    if (preg_match('/^[0-9a-f]{64}$/D', $expectedTreeSha256) !== 1) {
+        throw new RuntimeException('Exact-head mergegate YAML runtime digest is malformed.');
+    }
+
+    $packagePath = $root . '/vendor/symfony/yaml';
+    $actualTreeSha256 = exactHeadMergegateTreeSha256($packagePath);
+    if (!hash_equals($expectedTreeSha256, $actualTreeSha256)) {
+        throw new RuntimeException('Exact-head mergegate YAML runtime is not bound to reviewed HEAD.');
+    }
+
+    $parserScript = <<<'PHP'
+    $packagePath = realpath($argv[1] ?? '');
+    $workflowPath = realpath($argv[2] ?? '');
+    if ($packagePath === false || $workflowPath === false || class_exists('Symfony\\Component\\Yaml\\Yaml', false)) {
+        exit(2);
+    }
+    $packagePrefix = rtrim(str_replace('\\', '/', $packagePath), '/') . '/';
+    spl_autoload_register(
+        static function (string $class) use ($packagePath, $packagePrefix): void {
+            $namespace = 'Symfony\\Component\\Yaml\\';
+            if (!str_starts_with($class, $namespace)) {
+                return;
+            }
+            $relativePath = str_replace('\\', '/', substr($class, strlen($namespace))) . '.php';
+            $candidate = realpath($packagePath . '/' . $relativePath);
+            if ($candidate === false || !str_starts_with(str_replace('\\', '/', $candidate), $packagePrefix)) {
+                throw new RuntimeException('YAML class escaped the verified package tree.');
+            }
+            require $candidate;
+        },
+        true,
+        true,
+    );
+    $parsed = Symfony\Component\Yaml\Yaml::parseFile($workflowPath);
+    if (!is_array($parsed)) {
+        exit(3);
+    }
+    echo json_encode($parsed, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    PHP;
+
+    $output = runExactHeadMergegateProcess(
+        [
+            PHP_BINARY,
+            '-n',
+            '-d',
+            'auto_prepend_file=',
+            '-d',
+            'auto_append_file=',
+            '-r',
+            $parserScript,
+            $packagePath,
+            $workflowPath,
+        ],
+        $root,
+    );
+    try {
+        $parsed = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        throw new RuntimeException('Exact-head mergegate isolated workflow parser returned invalid JSON.');
+    }
+    if (!is_array($parsed)) {
+        throw new RuntimeException('Exact-head mergegate isolated workflow parser returned an invalid shape.');
+    }
+
+    return $parsed;
+}
+
+function exactHeadMergegateTreeSha256(string $root): string
+{
+    $resolvedRoot = realpath($root);
+    if ($resolvedRoot === false || !is_dir($resolvedRoot) || is_link($root)) {
+        throw new RuntimeException('Exact-head mergegate YAML runtime is unavailable.');
+    }
+
+    $files = [];
+    $walk = static function (string $directory, string $prefix) use (&$walk, &$files): void {
+        $entries = scandir($directory);
+        if ($entries === false) {
+            throw new RuntimeException('Exact-head mergegate YAML runtime could not be inspected.');
+        }
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $directory . '/' . $entry;
+            $relativePath = $prefix === '' ? $entry : $prefix . '/' . $entry;
+            if (is_link($path)) {
+                throw new RuntimeException('Exact-head mergegate YAML runtime contains a symbolic link.');
+            }
+            if (is_dir($path)) {
+                $walk($path, $relativePath);
+                continue;
+            }
+            if (!is_file($path)) {
+                throw new RuntimeException('Exact-head mergegate YAML runtime contains an unsupported entry.');
+            }
+            $files[$relativePath] = $path;
+        }
+    };
+    $walk($resolvedRoot, '');
+    if ($files === []) {
+        throw new RuntimeException('Exact-head mergegate YAML runtime is empty.');
+    }
+    ksort($files, SORT_STRING);
+
+    $hash = hash_init('sha256');
+    foreach ($files as $relativePath => $path) {
+        $contents = file_get_contents($path);
+        if ($contents === false) {
+            throw new RuntimeException('Exact-head mergegate YAML runtime could not be read.');
+        }
+        hash_update($hash, $relativePath . "\0" . hash('sha256', $contents) . "\n");
+    }
+
+    return hash_final($hash);
+}
+
 function readExactHeadMergegatePolicyContents(string $contractPath): string
 {
     $contents = file_get_contents($contractPath);
@@ -391,6 +524,7 @@ function readExactHeadMergegatePolicyContents(string $contractPath): string
  *     required_review_lenses:array<int, string>,
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
+ *     workflow_yaml_tree_sha256:string,
  *     attestation_marker:string,
  *     attestation_verdict:string,
  *     ci_execution_contract_verified:bool
@@ -417,6 +551,7 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         !is_array($review) ||
         !is_array($ci) ||
         !is_array($mergegate['review_attestation'] ?? null) ||
+        !is_array($mergegate['workflow_parser'] ?? null) ||
         !is_array($ci['blocking_jobs'] ?? null)
     ) {
         throw new RuntimeException('Exact-head mergegate contract is malformed.');
@@ -438,6 +573,15 @@ function decodeExactHeadMergegatePolicy(string $contents): array
     }
 
     $attestation = $mergegate['review_attestation'];
+    $workflowParser = $mergegate['workflow_parser'];
+    if (
+        ($workflowParser['isolation'] ?? null) !== 'php_no_ini_scoped_autoloader' ||
+        ($workflowParser['package_path'] ?? null) !== 'vendor/symfony/yaml' ||
+        !is_string($workflowParser['tree_sha256'] ?? null) ||
+        preg_match('/^[0-9a-f]{64}$/D', $workflowParser['tree_sha256']) !== 1
+    ) {
+        throw new RuntimeException('Exact-head mergegate workflow parser contract is malformed.');
+    }
     if (
         ($attestation['authority_model'] ?? null) !== 'owner_accountable_assertion' ||
         ($attestation['cryptographic_agent_execution_proof'] ?? null) !== false ||
@@ -461,6 +605,7 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         'blocking_feedback_associations' => normalizeExactHeadMergegateStringList(
             $attestation['blocking_feedback_author_associations'] ?? null,
         ),
+        'workflow_yaml_tree_sha256' => $workflowParser['tree_sha256'],
         'attestation_marker' => requireExactHeadMergegatePolicyString($attestation, 'marker'),
         'attestation_verdict' => requireExactHeadMergegatePolicyString($attestation, 'verdict'),
         'ci_execution_contract_verified' => false,

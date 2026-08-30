@@ -376,7 +376,7 @@ final class ExactHeadMergegateTest extends TestCase
             [
                 'kind' => 'review_comment',
                 'id' => 650,
-                'author_association' => 'NONE',
+                'author_association' => 'MEMBER',
                 'actor_ref' => str_repeat('e', 64),
                 'state' => null,
                 'commit_sha' => self::SHA,
@@ -386,6 +386,45 @@ final class ExactHeadMergegateTest extends TestCase
         $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
         self::assertSame('fail', $report['status']);
         self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+    }
+
+    public function testUntrustedReviewActivityCannotVetoAttestation(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment()];
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review_comment',
+                'id' => 650,
+                'author_association' => 'NONE',
+                'actor_ref' => str_repeat('e', 64),
+                'state' => null,
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T20:00:01Z',
+            ],
+            [
+                'kind' => 'review',
+                'id' => 700,
+                'author_association' => 'NONE',
+                'actor_ref' => str_repeat('f', 64),
+                'state' => 'CHANGES_REQUESTED',
+                'commit_sha' => self::SHA,
+                'occurred_at' => '2026-08-30T20:00:01Z',
+                'content_digest' => hash('sha256', 'drive-by review'),
+            ],
+        ];
+
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('pass', $report['status']);
+        self::assertSame(
+            [
+                'review_id' => 0,
+                'review_comment_id' => 0,
+                'review_payload_digest' => hash('sha256', json_encode([], JSON_THROW_ON_ERROR)),
+            ],
+            $report['review_activity_watermark'],
+        );
     }
 
     public function testMatchingWatermarkStillBlocksOutstandingChangesRequested(): void
@@ -512,7 +551,7 @@ final class ExactHeadMergegateTest extends TestCase
             [
                 'kind' => 'review_comment',
                 'id' => 650,
-                'author_association' => 'NONE',
+                'author_association' => 'MEMBER',
                 'actor_ref' => str_repeat('e', 64),
                 'state' => null,
                 'commit_sha' => self::SHA,
@@ -537,7 +576,7 @@ final class ExactHeadMergegateTest extends TestCase
             [
                 'kind' => 'review_comment',
                 'id' => 649,
-                'author_association' => 'NONE',
+                'author_association' => 'MEMBER',
                 'actor_ref' => str_repeat('e', 64),
                 'state' => null,
                 'commit_sha' => self::SHA,
@@ -546,7 +585,7 @@ final class ExactHeadMergegateTest extends TestCase
             [
                 'kind' => 'review_comment',
                 'id' => 650,
-                'author_association' => 'NONE',
+                'author_association' => 'MEMBER',
                 'actor_ref' => str_repeat('f', 64),
                 'state' => null,
                 'commit_sha' => self::SHA,
@@ -796,6 +835,9 @@ final class ExactHeadMergegateTest extends TestCase
     {
         $payloadEntries = [];
         foreach ($entries as $entry) {
+            if (!in_array($entry['author_association'] ?? null, ['OWNER', 'MEMBER', 'COLLABORATOR'], true)) {
+                continue;
+            }
             if (($entry['kind'] ?? null) === 'review') {
                 if (($entry['commit_sha'] ?? null) !== self::SHA) {
                     continue;

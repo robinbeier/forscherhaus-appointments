@@ -18,6 +18,11 @@
             "ci_evidence_revalidation": "two_identical_bounded_observations",
             "review_evidence_revalidation": "two_identical_bounded_observations",
             "review_lens_source": "review.sensitive_change_lenses",
+            "workflow_parser": {
+                "isolation": "php_no_ini_scoped_autoloader",
+                "package_path": "vendor/symfony/yaml",
+                "tree_sha256": "e3f7419e526ba455fb4a3a1f3f268b1b682f748dee33a6e24cfa055348604208"
+            },
             "required_checks": [
                 "changes",
                 "build-test",
