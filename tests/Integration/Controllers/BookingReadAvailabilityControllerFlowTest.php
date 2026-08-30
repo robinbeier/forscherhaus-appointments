@@ -56,6 +56,30 @@ class BookingReadAvailabilityControllerFlowTest extends TestCase
         $this->assertFalse((bool) html_vars('manage_mode'));
     }
 
+    public function testIndexDoesNotRenderWebMcpAdapterWhenPilotIsDisabled(): void
+    {
+        config(['webmcp_booking_pilot_enabled' => false]);
+
+        $controller = $this->createBookingController();
+
+        $controller->index();
+
+        $this->assertSame('0', script_vars('webmcp_booking_pilot_enabled'));
+        $this->assertStringNotContainsString('assets/js/pages/booking_webmcp', $this->renderedBookingScripts());
+    }
+
+    public function testIndexRendersWebMcpAdapterOnlyWhenPilotIsEnabled(): void
+    {
+        config(['webmcp_booking_pilot_enabled' => true]);
+
+        $controller = $this->createBookingController();
+
+        $controller->index();
+
+        $this->assertSame('1', script_vars('webmcp_booking_pilot_enabled'));
+        $this->assertStringContainsString('assets/js/pages/booking_webmcp', $this->renderedBookingScripts());
+    }
+
     public function testGetAvailableHoursReturnsArrayForSpecificProvider(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -221,6 +245,16 @@ class BookingReadAvailabilityControllerFlowTest extends TestCase
             $this->assertIsString($slot);
             $this->assertMatchesRegularExpression('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $slot);
         }
+    }
+
+    private function renderedBookingScripts(): string
+    {
+        $layout = config('layout');
+
+        $this->assertIsArray($layout);
+        $this->assertIsArray($layout['sections']['scripts'] ?? null);
+
+        return implode('', $layout['sections']['scripts']);
     }
 
     private function resetRuntimeState(string $requestMethod): void

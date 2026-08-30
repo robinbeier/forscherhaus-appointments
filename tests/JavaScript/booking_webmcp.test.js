@@ -327,6 +327,7 @@ function createBookingSelectionHarness() {
     let resolveUnavailable;
     let resolveAvailable;
     let wizardFrame3Shown = false;
+    let wizardFrame4Shown = false;
     let wizardFrame2Shown = false;
     let step2Active = false;
     let availableStarted = false;
@@ -336,10 +337,12 @@ function createBookingSelectionHarness() {
     let availableCalls = 0;
     const unavailableRequests = [];
     const availableRequests = [];
+    const trackedAvailabilityRequests = new Set();
     let datePickerOptions = null;
     let domReadyCallback = null;
     let nextTimerId = 1;
     const timers = new Map();
+    let rejectDateSelection = false;
     function createRequest() {
         let resolvePromise;
         let rejectPromise;
@@ -577,6 +580,8 @@ function createBookingSelectionHarness() {
                         const request = unavailableRequests[unavailableCalls - 1] || createRequest();
                         unavailableRequests[unavailableCalls - 1] = request;
                         options.signal?.addEventListener('abort', () => request.abort(), {once: true});
+                        trackedAvailabilityRequests.add(request);
+                        request.always(() => trackedAvailabilityRequests.delete(request));
                         return request;
                     },
                     getAvailableHours(selectedDate, signal) {
@@ -595,7 +600,13 @@ function createBookingSelectionHarness() {
                         if (signal) {
                             signal.addEventListener('abort', () => request.abort(), {once: true});
                         }
+                        trackedAvailabilityRequests.add(request);
+                        request.always(() => trackedAvailabilityRequests.delete(request));
                         return request;
+                    },
+                    abortTrackedAvailabilityRequests() {
+                        [...trackedAvailabilityRequests].forEach((request) => request.abort());
+                        trackedAvailabilityRequests.clear();
                     },
                 },
             },
@@ -611,7 +622,14 @@ function createBookingSelectionHarness() {
                     },
                 },
                 UI: {
-                    setDateTimePickerValue() {},
+                    setDateTimePickerValue(unusedTarget, value) {
+                        if (rejectDateSelection) {
+                            rejectDateSelection = false;
+                            return;
+                        }
+
+                        date.value = moment(value).format('YYYY-MM-DD');
+                    },
                     getDateTimePickerValue() {
                         return date.value ? new Date(date.value) : new Date('2026-09-01');
                     },
@@ -659,9 +677,22 @@ function createBookingSelectionHarness() {
                     ...genericControl,
                     show() {
                         wizardFrame3Shown = true;
+                        wizardFrame4Shown = false;
                     },
                     is() {
                         return wizardFrame3Shown;
+                    },
+                };
+            }
+            if (selector === '#wizard-frame-4') {
+                return {
+                    ...genericControl,
+                    show() {
+                        wizardFrame3Shown = false;
+                        wizardFrame4Shown = true;
+                    },
+                    is() {
+                        return wizardFrame4Shown;
                     },
                 };
             }
@@ -670,6 +701,7 @@ function createBookingSelectionHarness() {
                     ...genericControl,
                     show() {
                         wizardFrame3Shown = false;
+                        wizardFrame4Shown = false;
                         wizardFrame2Shown = true;
                     },
                 };
@@ -708,6 +740,9 @@ function createBookingSelectionHarness() {
         get wizardFrame3Shown() {
             return wizardFrame3Shown;
         },
+        get wizardFrame4Shown() {
+            return wizardFrame4Shown;
+        },
         get wizardFrame2Shown() {
             return wizardFrame2Shown;
         },
@@ -738,8 +773,16 @@ function createBookingSelectionHarness() {
             date.value = value;
             datePickerOptions.onChange([new Date(value)]);
         },
+        rejectNextDateSelection() {
+            rejectDateSelection = true;
+        },
         userChangeTimezone() {
             timezoneControl.userChange('America/Los_Angeles');
+        },
+        showConfirmationFrame() {
+            wizardFrame3Shown = false;
+            wizardFrame4Shown = true;
+            wizardFrame2Shown = false;
         },
         startOrdinaryAvailability() {
             ordinaryRequest = createRequest();
@@ -840,6 +883,16 @@ function createRecursiveUnavailableDatesHarness() {
             return {fadeTo() {}};
         },
     };
+    const selectService = {
+        val() {
+            return '11';
+        },
+    };
+    const selectProvider = {
+        val() {
+            return '71';
+        },
+    };
     const availableHours = {empty() {}, text() {}};
     const hoursRequest = createRequest();
     let renderedHours = 0;
@@ -849,10 +902,13 @@ function createRecursiveUnavailableDatesHarness() {
     const jquery = (selector) => {
         if (selector === '#select-date') return selectDate;
         if (selector === '#available-hours') return availableHours;
+        if (selector === '#select-service') return selectService;
+        if (selector === '#select-provider') return selectProvider;
         return {fadeTo() {}};
     };
-    jquery.ajax = () => {
+    jquery.ajax = ({url} = {}) => {
         ajaxCalls += 1;
+        if (url === 'booking/get_available_hours') return hoursRequest;
         return createRequest();
     };
     const context = {
@@ -869,29 +925,15 @@ function createRecursiveUnavailableDatesHarness() {
         },
         lang: (value) => value,
         vars(key) {
-            return key === 'no_slot_fallback_enabled' ? '0' : null;
+            if (key === 'no_slot_fallback_enabled') return '0';
+            if (key === 'available_services') return [{id: 11, duration: 15}];
+            return null;
         },
         window: {moment},
     };
     context.$ = jquery;
     vm.createContext(context);
     vm.runInContext(httpClientSource, context, {filename: 'booking_http_client.js'});
-
-    const tracked = new Set();
-    const original = context.App.Http.Booking.getUnavailableDates;
-    context.App.Http.Booking.getUnavailableDates = (...args) => {
-        const request = original(...args);
-        if (request?.abort && request?.always) {
-            tracked.add(request);
-            request.always(() => tracked.delete(request));
-        }
-        return request;
-    };
-    context.App.Http.Booking.getAvailableHours = () => {
-        tracked.add(hoursRequest);
-        hoursRequest.always(() => tracked.delete(hoursRequest));
-        return hoursRequest;
-    };
 
     return {
         api: context.App.Http.Booking,
@@ -903,7 +945,7 @@ function createRecursiveUnavailableDatesHarness() {
             return renderedHours;
         },
         abortTracked() {
-            [...tracked].forEach((request) => request.abort());
+            context.App.Http.Booking.abortTrackedAvailabilityRequests();
         },
     };
 }
@@ -1449,6 +1491,39 @@ test('a failed preparation after confirmation returns the visible wizard to step
     assert.equal(harness.step2Active, true);
 });
 
+test('a failed preparation from the final confirmation step returns to slot selection', async () => {
+    const harness = createBookingSelectionHarness();
+    harness.setSelectionAvailable(true);
+    const successfulPreparation = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-01',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+    harness.resolveUnavailable([]);
+    while (!harness.availableStarted) await new Promise((resolve) => setImmediate(resolve));
+    harness.resolveAvailable([]);
+    await successfulPreparation;
+    harness.showConfirmationFrame();
+
+    harness.setSelectionAvailable(false);
+    const failedPreparation = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-01',
+        selectedTime: '10:30',
+        signal: new AbortController().signal,
+    });
+    harness.resolveUnavailable([]);
+    while (harness.availableCalls < 2) await new Promise((resolve) => setImmediate(resolve));
+    harness.resolveAvailable([]);
+    await assert.rejects(failedPreparation, /no longer available/);
+    assert.equal(harness.wizardFrame4Shown, false);
+    assert.equal(harness.wizardFrame2Shown, true);
+    assert.equal(harness.step2Active, true);
+});
+
 test('an older failed preparation cannot hide a newer successful confirmation', async () => {
     const harness = createBookingSelectionHarness();
     harness.setSelectionAvailable(true);
@@ -1670,6 +1745,39 @@ test('calendar month and year refresh timers are cancelled before preparation', 
     while (!harness.availableStarted) await new Promise((resolve) => setImmediate(resolve));
     harness.resolveAvailable([]);
     await assert.rejects(preparation, /no longer available/);
+});
+
+test('ordinary date selection preserves the pending month refresh debounce', () => {
+    const harness = createBookingSelectionHarness();
+    const callbacks = harness.datePickerOptions;
+    const initialUnavailableCalls = harness.unavailableCalls;
+
+    callbacks.onMonthChange([], '', {
+        selectedDates: [new Date('2026-08-27')],
+        currentYearElement: {value: '2026'},
+        monthsDropdownContainer: {value: '8'},
+    });
+    harness.userChangeDate('2026-09-02');
+    harness.runTimers();
+
+    assert.equal(harness.unavailableCalls, initialUnavailableCalls + 1);
+});
+
+test('preparation rejects when the requested date was not accepted by the date picker', async () => {
+    const harness = createBookingSelectionHarness();
+    harness.rejectNextDateSelection();
+
+    const preparation = harness.api.prepareBookingSelection({
+        serviceId: 11,
+        providerId: 71,
+        selectedDate: '2026-09-05',
+        selectedTime: '09:00',
+        signal: new AbortController().signal,
+    });
+
+    await assert.rejects(preparation, /date is no longer available/);
+    assert.equal(harness.availableStarted, false);
+    assert.equal(harness.wizardFrame3Shown, false);
 });
 
 test('registration is idempotent, abort-controlled and recovers from partial failure', async () => {

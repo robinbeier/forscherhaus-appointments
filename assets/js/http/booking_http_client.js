@@ -33,6 +33,26 @@ App.Http.Booking = (function () {
     let processingUnavailableDates = false;
     let searchedMonthStart;
     let searchedMonthCounter = 0;
+    const activeAvailabilityRequests = new Set();
+
+    function trackAvailabilityRequest(request) {
+        if (!request?.abort || !request?.always) {
+            return request;
+        }
+
+        activeAvailabilityRequests.add(request);
+        request.always(() => activeAvailabilityRequests.delete(request));
+        return request;
+    }
+
+    /**
+     * Abort availability requests started by this client (including recursive searches).
+     * This is intentionally narrow: callers cannot cancel unrelated HTTP requests.
+     */
+    function abortTrackedAvailabilityRequests() {
+        [...activeAvailabilityRequests].forEach((request) => request.abort());
+        activeAvailabilityRequests.clear();
+    }
 
     function isNoSlotFallbackEnabled() {
         const fallbackState = vars('no_slot_fallback_enabled');
@@ -167,7 +187,7 @@ App.Http.Booking = (function () {
             dataType: 'json',
         });
 
-        return bindAbortSignal(request, signal);
+        return trackAvailabilityRequest(bindAbortSignal(request, signal));
     }
 
     function bindAbortSignal(request, signal) {
@@ -497,7 +517,7 @@ App.Http.Booking = (function () {
                 $selectDate.parent().fadeTo(400, 1);
             });
 
-        return bindAbortSignal(request, options.signal);
+        return trackAvailabilityRequest(bindAbortSignal(request, options.signal));
     }
 
     function applyPreviousUnavailableDates() {
@@ -580,6 +600,7 @@ App.Http.Booking = (function () {
         registerAppointment,
         getAvailableHours,
         queryAvailableHours,
+        abortTrackedAvailabilityRequests,
         projectAvailableHour,
         getUnavailableDates,
         applyPreviousUnavailableDates,
