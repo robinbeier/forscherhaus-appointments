@@ -295,6 +295,88 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
     }
 
+    public function testCliFailsClosedWhenCommitPullRequestAssociationDriftsOnSecondObservation(): void
+    {
+        $requestedPaths = [];
+        $associationReads = 0;
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest, &$associationReads): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/commits/' . self::SHA . '/pulls?')) {
+                $associationReads++;
+                if ($associationReads === 2) {
+                    return [['number' => 99]];
+                }
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
+        self::assertSame(2, $associationReads);
+        self::assertStringContainsString(
+            'ci_evidence_drift_during_evaluation',
+            (string) file_get_contents($reportPath),
+        );
+    }
+
+    public function testCliFailsClosedWhenEvidencePaginationExceedsBoundedWindow(): void
+    {
+        $requestedPaths = [];
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/actions/workflows/ci.yml/runs?')) {
+                $run = [
+                    'id' => 101,
+                    'name' => 'CI',
+                    'event' => 'pull_request',
+                    'status' => 'completed',
+                    'conclusion' => 'success',
+                    'head_sha' => self::SHA,
+                    'head_branch' => 'feature',
+                    'head_repository' => ['full_name' => self::REPOSITORY],
+                    'pull_requests' => [['number' => 12]],
+                    'check_suite_id' => 202,
+                ];
+
+                return ['workflow_runs' => array_fill(0, EXACT_HEAD_MERGEGATE_PAGE_SIZE, $run)];
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertStringContainsString('runtime_error', (string) file_get_contents($reportPath));
+        self::assertStringNotContainsString('reviewer_ref', (string) file_get_contents($reportPath));
+    }
+
     public function testCliCanonicalizesReorderedCheckRunsAcrossObservations(): void
     {
         $requestedPaths = [];
