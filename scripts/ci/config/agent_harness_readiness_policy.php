@@ -49,6 +49,32 @@ return [
         'booking-controller-flows',
         'coverage-delta',
     ],
+    'blocking_job_contracts' => [
+        'write-contract-booking' => [
+            'needs' => ['changes', 'deep-runtime-suite'],
+            'condition_fragments' => [
+                'always()',
+                "needs.changes.outputs.write_contract_booking == 'true'",
+                "github.event_name == 'push'",
+                "github.event_name == 'pull_request'",
+                'github.event.pull_request.draft == false',
+            ],
+            'run' =>
+                'php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-booking',
+        ],
+        'write-contract-api' => [
+            'needs' => ['changes', 'deep-runtime-suite'],
+            'condition_fragments' => [
+                'always()',
+                "needs.changes.outputs.write_contract_api == 'true'",
+                "github.event_name == 'push'",
+                "github.event_name == 'pull_request'",
+                'github.event.pull_request.draft == false',
+            ],
+            'run' =>
+                'php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-api',
+        ],
+    ],
     'generated_topology_commands' => [
         [
             'id' => 'architecture_docs',

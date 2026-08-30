@@ -1,0 +1,13 @@
+{
+    "schema_version": 1,
+    "publish": {
+        "linear_state": "In Review",
+        "may_set_ready_to_merge": false,
+        "push_invalidates_exact_head_evidence": true
+    },
+    "land": {
+        "requires_exact_head": true,
+        "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
+        "push_after_ready_linear_state": "In Review"
+    }
+}

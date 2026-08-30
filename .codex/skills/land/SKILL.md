@@ -17,11 +17,12 @@ merge.
 - Process CI and review feedback until no blocking issues remain.
 - Merge the PR and move the Linear issue to `Done`.
 
-## Contract Markers
+## Authoritative Contract
 
-- `merge_requires_exact_head`: `true`
-- `merge_command`: `gh pr merge --merge --match-head-commit <current_head_sha>`
-- `push_after_ready_linear_state`: `In Review`
+The state and exact-head invariants in the
+[agent workflow contract](../../contracts/agent-workflow.json) are
+machine-checked and authoritative. Keep the prose below consistent with that
+contract.
 
 ## Workflow
 

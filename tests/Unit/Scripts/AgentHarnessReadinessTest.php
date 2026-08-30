@@ -57,6 +57,73 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertSame('fail', $checks[1]['status']);
     }
 
+    public function testEvaluateBlockingJobContractsChecksScopeAndAssertionStep(): void
+    {
+        $command = 'php scripts/ci/assert_deep_runtime_suite.php --manifest=manifest.json --suite=write-contract-api';
+        $contract = [
+            'write-contract-api' => [
+                'needs' => ['changes', 'deep-runtime-suite'],
+                'condition_fragments' => [
+                    'always()',
+                    "needs.changes.outputs.write_contract_api == 'true'",
+                    "github.event_name == 'push'",
+                    'github.event.pull_request.draft == false',
+                ],
+                'run' => $command,
+            ],
+        ];
+        $workflow = [
+            'jobs' => [
+                'write-contract-api' => [
+                    'needs' => ['changes', 'deep-runtime-suite'],
+                    'if' =>
+                        "always() && needs.changes.outputs.write_contract_api == 'true' && (github.event_name == 'push' || github.event.pull_request.draft == false)",
+                    'steps' => [['run' => $command]],
+                ],
+            ],
+        ];
+
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+
+        self::assertSame('pass', $checks[0]['status']);
+
+        $workflow['jobs']['write-contract-api']['if'] =
+            "always() && needs.changes.outputs.write_contract_api == 'true'";
+        $workflow['jobs']['write-contract-api']['steps'][0]['continue-on-error'] = true;
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('github.event_name', (string) $checks[0]['message']);
+        self::assertStringContainsString('pull_request.draft', (string) $checks[0]['message']);
+        self::assertStringContainsString('assertion step is non-blocking', (string) $checks[0]['message']);
+
+        $workflow['jobs']['write-contract-api']['if'] =
+            "always() && needs.changes.outputs.write_contract_api == 'true' && (github.event_name == 'push' || github.event.pull_request.draft == false)";
+        $workflow['jobs']['write-contract-api']['needs'] = ['changes'];
+        $workflow['jobs']['write-contract-api']['steps'][0] = [
+            'run' => $command,
+            'if' => 'success()',
+        ];
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('missing need deep-runtime-suite', (string) $checks[0]['message']);
+        self::assertStringContainsString('assertion step is conditional', (string) $checks[0]['message']);
+
+        $workflow['jobs']['write-contract-api']['steps'] = 'invalid';
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('steps are invalid', (string) $checks[0]['message']);
+
+        $workflow['jobs']['write-contract-api']['needs'][] = 'deep-runtime-suite';
+        $workflow['jobs']['write-contract-api']['steps'] = [['run' => $command . ' || true']];
+        $checks = agentHarnessReadinessEvaluateBlockingJobContracts($workflow, $contract);
+
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('expected exactly one assertion step', (string) $checks[0]['message']);
+    }
+
     public function testEvaluateHygieneWorkflowRequiresDispatchScheduleAndSteps(): void
     {
         $workflow = [

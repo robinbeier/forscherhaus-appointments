@@ -16,11 +16,12 @@ must be pushed to an existing PR.
 - Attach the PR to the Linear issue and move the issue to the correct next
   Linear state.
 
-## Contract Markers
+## Authoritative Contract
 
-- `publish_linear_state`: `In Review`
-- `publish_may_set_ready_to_merge`: `false`
-- `push_invalidates_exact_head_evidence`: `true`
+The state and exact-head invariants in the
+[agent workflow contract](../../contracts/agent-workflow.json) are
+machine-checked and authoritative. Keep the prose below consistent with that
+contract.
 
 ## Steps
 

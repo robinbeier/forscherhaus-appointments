@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Yaml\Yaml;
 
 class AgentWorkflowContractTest extends TestCase
 {
@@ -23,24 +22,25 @@ class AgentWorkflowContractTest extends TestCase
         $template = $this->readRepoFile('.github/pull_request_template.md');
         $pushSkill = $this->readRepoFile('.codex/skills/push/SKILL.md');
         $landSkill = $this->readRepoFile('.codex/skills/land/SKILL.md');
+        $contract = $this->readRepoJson('.codex/contracts/agent-workflow.json');
 
         self::assertStringContainsString('same unchanged exact commit', $workflow);
         self::assertStringContainsString('Any new push returns the issue to `In Review`', $workflow);
         self::assertStringContainsString('reviewed head, CI head, and current PR head are identical', $workflow);
         self::assertStringContainsString('PR-Head, CI-Head und final reviewter Head sind identisch', $template);
 
-        $pushContract = $this->readContractMarkers($pushSkill);
-        self::assertSame('In Review', $pushContract['publish_linear_state'] ?? null);
-        self::assertSame('false', $pushContract['publish_may_set_ready_to_merge'] ?? null);
-        self::assertSame('true', $pushContract['push_invalidates_exact_head_evidence'] ?? null);
-
-        $landContract = $this->readContractMarkers($landSkill);
-        self::assertSame('true', $landContract['merge_requires_exact_head'] ?? null);
+        self::assertStringContainsString('../../contracts/agent-workflow.json', $pushSkill);
+        self::assertStringContainsString('../../contracts/agent-workflow.json', $landSkill);
+        self::assertSame(1, $contract['schema_version'] ?? null);
+        self::assertSame('In Review', $contract['publish']['linear_state'] ?? null);
+        self::assertFalse($contract['publish']['may_set_ready_to_merge'] ?? null);
+        self::assertTrue($contract['publish']['push_invalidates_exact_head_evidence'] ?? null);
+        self::assertTrue($contract['land']['requires_exact_head'] ?? null);
         self::assertSame(
             'gh pr merge --merge --match-head-commit <current_head_sha>',
-            $landContract['merge_command'] ?? null,
+            $contract['land']['merge_command'] ?? null,
         );
-        self::assertSame('In Review', $landContract['push_after_ready_linear_state'] ?? null);
+        self::assertSame('In Review', $contract['land']['push_after_ready_linear_state'] ?? null);
     }
 
     public function testSensitiveChangesRequireThreeIndependentReviewLenses(): void
@@ -60,7 +60,6 @@ class AgentWorkflowContractTest extends TestCase
     {
         $agents = $this->readRepoFile('AGENTS.md');
         $writeContracts = $this->readRepoFile('docs/ci-write-contracts.md');
-        $ciWorkflow = Yaml::parseFile($this->repoRoot . '/.github/workflows/ci.yml');
 
         self::assertStringContainsString(
             'Caller-supplied flags, IDs, hashes, tokens, or paths never create public',
@@ -71,20 +70,6 @@ class AgentWorkflowContractTest extends TestCase
         self::assertStringContainsString('`write-contract-booking` ist aktuell blockierend', $writeContracts);
         self::assertStringContainsString('`write-contract-api` ist aktuell blockierend', $writeContracts);
         self::assertStringNotContainsString('warn-only', $writeContracts);
-        self::assertIsArray($ciWorkflow);
-        self::assertIsArray($ciWorkflow['jobs'] ?? null);
-        $this->assertBlockingWorkflowJob(
-            $ciWorkflow['jobs'],
-            'write-contract-booking',
-            'write_contract_booking',
-            'write-contract-booking',
-        );
-        $this->assertBlockingWorkflowJob(
-            $ciWorkflow['jobs'],
-            'write-contract-api',
-            'write_contract_api',
-            'write-contract-api',
-        );
     }
 
     public function testHarnessEntryPointsAndGeneratedCachesStayAligned(): void
@@ -108,57 +93,13 @@ class AgentWorkflowContractTest extends TestCase
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
-    private function readContractMarkers(string $skill): array
+    private function readRepoJson(string $relativePath): array
     {
-        $markerCount = preg_match_all('/^- `(?<key>[a-z0-9_]+)`: `(?<value>[^`]+)`$/m', $skill, $matches);
+        $decoded = json_decode($this->readRepoFile($relativePath), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded);
 
-        self::assertGreaterThan(0, $markerCount, 'Missing contract markers');
-
-        return array_combine($matches['key'], $matches['value']);
-    }
-
-    /**
-     * @param array<string, mixed> $jobs
-     */
-    private function assertBlockingWorkflowJob(
-        array $jobs,
-        string $jobName,
-        string $changeOutput,
-        string $suiteName,
-    ): void {
-        self::assertArrayHasKey($jobName, $jobs, 'Missing CI workflow job: ' . $jobName);
-
-        $job = $jobs[$jobName];
-        self::assertIsArray($job);
-        self::assertArrayNotHasKey('continue-on-error', $job);
-
-        $needs = $job['needs'] ?? null;
-        self::assertIsArray($needs);
-        self::assertContains('changes', $needs);
-        self::assertContains('deep-runtime-suite', $needs);
-
-        $condition = $job['if'] ?? null;
-        self::assertIsString($condition);
-        self::assertStringContainsString('always()', $condition);
-        self::assertStringContainsString("needs.changes.outputs.{$changeOutput} == 'true'", $condition);
-
-        $steps = $job['steps'] ?? null;
-        self::assertIsArray($steps);
-        $expectedCommand = sprintf(
-            'php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=%s',
-            $suiteName,
-        );
-        $gateSteps = array_values(
-            array_filter(
-                $steps,
-                static fn(mixed $step): bool => is_array($step) && ($step['run'] ?? null) === $expectedCommand,
-            ),
-        );
-
-        self::assertCount(1, $gateSteps, 'Missing or duplicated fail-closed assertion step for ' . $jobName);
-        self::assertArrayNotHasKey('if', $gateSteps[0]);
-        self::assertArrayNotHasKey('continue-on-error', $gateSteps[0]);
+        return $decoded;
     }
 }

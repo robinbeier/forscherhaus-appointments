@@ -224,11 +224,12 @@ function evaluateAgentHarnessReadiness(
     );
 
     $ciWorkflow = agentHarnessReadinessLoadWorkflowYaml($root . '/.github/workflows/ci.yml');
-    $blockingGatesDimension = agentHarnessReadinessScoreDimension(
-        $policy,
-        'blocking_gates',
-        agentHarnessReadinessEvaluateBlockingJobs($ciWorkflow, $policy['blocking_jobs']),
+    $blockingGateChecks = agentHarnessReadinessEvaluateBlockingJobs($ciWorkflow, $policy['blocking_jobs']);
+    $blockingGateChecks = array_merge(
+        $blockingGateChecks,
+        agentHarnessReadinessEvaluateBlockingJobContracts($ciWorkflow, $policy['blocking_job_contracts'] ?? []),
     );
+    $blockingGatesDimension = agentHarnessReadinessScoreDimension($policy, 'blocking_gates', $blockingGateChecks);
 
     $generatedTopologyDimension = agentHarnessReadinessScoreDimension(
         $policy,
@@ -372,6 +373,84 @@ function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blo
                 : ($isBlocking
                     ? 'Job exists without top-level continue-on-error.'
                     : 'Job is configured as non-blocking.'),
+        ];
+    }
+
+    return $checks;
+}
+
+/**
+ * @param array<string, mixed> $ciWorkflow
+ * @param array<string, array{needs:array<int, string>,condition_fragments:array<int, string>,run:string}> $contracts
+ * @return array<int, array<string, mixed>>
+ */
+function agentHarnessReadinessEvaluateBlockingJobContracts(array $ciWorkflow, array $contracts): array
+{
+    $jobs = $ciWorkflow['jobs'] ?? [];
+    if (!is_array($jobs)) {
+        throw new RuntimeException('CI workflow does not contain a valid top-level "jobs" map.');
+    }
+
+    $checks = [];
+    foreach ($contracts as $jobName => $contract) {
+        $failures = [];
+        $job = $jobs[$jobName] ?? null;
+        if (!is_array($job)) {
+            $failures[] = 'job is missing';
+        } else {
+            if (($job['continue-on-error'] ?? false) === true) {
+                $failures[] = 'job is non-blocking';
+            }
+
+            $needs = $job['needs'] ?? [];
+            if (!is_array($needs)) {
+                $needs = [$needs];
+            }
+            foreach ($contract['needs'] as $requiredNeed) {
+                if (!in_array($requiredNeed, $needs, true)) {
+                    $failures[] = 'missing need ' . $requiredNeed;
+                }
+            }
+
+            $condition = $job['if'] ?? null;
+            foreach ($contract['condition_fragments'] as $fragment) {
+                if (!is_string($condition) || !str_contains($condition, $fragment)) {
+                    $failures[] = 'missing condition fragment ' . $fragment;
+                }
+            }
+
+            $steps = $job['steps'] ?? [];
+            if (!is_array($steps)) {
+                $failures[] = 'steps are invalid';
+                $steps = [];
+            }
+
+            $matchingSteps = [];
+            foreach ($steps as $step) {
+                if (is_array($step) && ($step['run'] ?? null) === $contract['run']) {
+                    $matchingSteps[] = $step;
+                }
+            }
+
+            if (count($matchingSteps) !== 1) {
+                $failures[] = 'expected exactly one assertion step';
+            } else {
+                $gateStep = $matchingSteps[0];
+                if (array_key_exists('if', $gateStep)) {
+                    $failures[] = 'assertion step is conditional';
+                }
+                if (($gateStep['continue-on-error'] ?? false) === true) {
+                    $failures[] = 'assertion step is non-blocking';
+                }
+            }
+        }
+
+        $checks[] = [
+            'id' => 'job_contract_' . $jobName,
+            'label' => $jobName . ' preserves its fail-closed execution contract',
+            'status' => $failures === [] ? 'pass' : 'fail',
+            'message' =>
+                $failures === [] ? 'Required job scope and assertion step are intact.' : implode('; ', $failures),
         ];
     }
 
