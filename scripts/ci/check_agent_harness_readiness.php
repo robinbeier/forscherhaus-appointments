@@ -445,6 +445,20 @@ function agentHarnessReadinessEvaluateBlockingJobs(array $ciWorkflow, array $blo
         ];
     }
 
+    $expectedJobNames = $blockingJobs;
+    $actualJobNames = array_keys($jobs);
+    sort($expectedJobNames, SORT_STRING);
+    sort($actualJobNames, SORT_STRING);
+    $checks[] = [
+        'id' => 'job_inventory',
+        'label' => 'CI job inventory matches the exhaustive workflow contract',
+        'status' => $actualJobNames === $expectedJobNames ? 'pass' : 'fail',
+        'message' =>
+            $actualJobNames === $expectedJobNames
+                ? 'Every CI job is classified by the workflow contract.'
+                : 'CI jobs are missing from or unexpectedly retained in the workflow contract.',
+    ];
+
     return $checks;
 }
 
@@ -1181,6 +1195,7 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         !is_string($ci['workflow'] ?? null) ||
         trim($ci['workflow']) === '' ||
         !is_array($ci['condition_grammar'] ?? null) ||
+        ($ci['job_inventory_is_exhaustive'] ?? null) !== true ||
         !is_array($ci['blocking_jobs'] ?? null) ||
         $ci['blocking_jobs'] === [] ||
         !is_array($surfaces) ||

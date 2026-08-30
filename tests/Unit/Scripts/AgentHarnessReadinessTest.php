@@ -61,6 +61,12 @@ class AgentHarnessReadinessTest extends TestCase
         $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
         self::assertSame('fail', $checks[0]['status']);
         self::assertStringContainsString('1 required', (string) $checks[0]['message']);
+
+        $surfaces['WORKFLOW.md']['required_clauses'] = ['Exact-head reviews are required.'];
+        file_put_contents($this->tmpDir . '/WORKFLOW.md', "Exact-head reviews are required.\n");
+        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
+        self::assertSame('fail', $checks[0]['status']);
+        self::assertStringContainsString('1 required', (string) $checks[0]['message']);
     }
 
     public function testEvaluateContractSurfacesRejectsPathsOutsideRepository(): void
@@ -91,6 +97,23 @@ class AgentHarnessReadinessTest extends TestCase
 
         self::assertSame('pass', $checks[0]['status']);
         self::assertSame('fail', $checks[1]['status']);
+        self::assertSame('pass', $checks[2]['status']);
+    }
+
+    public function testEvaluateBlockingJobsRejectsUnclassifiedWorkflowJob(): void
+    {
+        $workflow = [
+            'jobs' => [
+                'coverage-delta' => [],
+                'new-blocking-job' => [],
+            ],
+        ];
+
+        $checks = agentHarnessReadinessEvaluateBlockingJobs($workflow, ['coverage-delta']);
+
+        self::assertSame('pass', $checks[0]['status']);
+        self::assertSame('fail', $checks[1]['status']);
+        self::assertSame('job_inventory', $checks[1]['id']);
     }
 
     #[DataProvider('blockingJobProvider')]
@@ -297,6 +320,7 @@ class AgentHarnessReadinessTest extends TestCase
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'condition_grammar' => $grammar,
+                    'job_inventory_is_exhaustive' => true,
                     'blocking_jobs' => ['write-contract-api' => ['kind' => 'exact_execution']],
                 ],
             ]),

@@ -81,6 +81,7 @@ class AgentWorkflowContractTest extends TestCase
 
         self::assertIsArray($ci);
         self::assertSame('.github/workflows/ci.yml', $ci['workflow'] ?? null);
+        self::assertTrue($ci['job_inventory_is_exhaustive'] ?? null);
         self::assertIsArray($ci['blocking_jobs'] ?? null);
         $jobNames = array_keys($ci['blocking_jobs']);
         sort($jobNames, SORT_STRING);
@@ -90,8 +91,18 @@ class AgentWorkflowContractTest extends TestCase
                 'architecture-boundaries',
                 'architecture-ownership-map',
                 'booking-controller-flows',
+                'build-test',
+                'changes',
                 'coverage-delta',
+                'coverage-shard-integration',
+                'coverage-shard-unit',
+                'deep-check-bootstrap',
+                'deep-check-seed-snapshot',
+                'deep-runtime-suite',
+                'heavy-job-duration-trends',
+                'integration-smoke',
                 'js-lint-changed',
+                'pdf-renderer-latency',
                 'phpstan-application',
                 'typed-request-contracts',
                 'typed-request-dto',
@@ -105,7 +116,7 @@ class AgentWorkflowContractTest extends TestCase
             $ci['blocking_jobs'],
             static fn(array $job): bool => ($job['kind'] ?? null) === 'presence_only',
         );
-        self::assertCount(9, $presenceOnlyJobs);
+        self::assertCount(19, $presenceOnlyJobs);
 
         foreach (['write-contract-booking', 'write-contract-api'] as $jobName) {
             $job = $ci['blocking_jobs'][$jobName];

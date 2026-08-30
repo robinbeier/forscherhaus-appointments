@@ -116,7 +116,9 @@ Die ausführbare CI-Konfiguration steht in
 [agent workflow contract](../.codex/contracts/agent-workflow.json) ist die
 kanonische Prüfquelle für die erwarteten Blocking-Jobs sowie die exakte
 Ausführung der beiden Write-Contract-Gates. Der Readiness-Check verlangt, dass
-beide Quellen übereinstimmen. Seine versionierte Actions-Expression-Grammatik
+beide Quellen übereinstimmen. Das Job-Inventar ist vollständig: Jeder neue,
+umbenannte oder entfernte CI-Job muss im Vertrag zugleich klassifiziert werden.
+Seine versionierte Actions-Expression-Grammatik
 ist bewusst eng; nicht unterstützte Syntax wird fail-closed abgelehnt und
 erfordert eine gemeinsame Änderung von Vertrag, Parser und Regressionstests.
 Auch die Schritte nach dem Assertion-Gate sind exakt festgelegt, damit keine

@@ -82,7 +82,14 @@
             "zero_argument_calls": ["always"],
             "unsupported_syntax_fails_closed": true
         },
+        "job_inventory_is_exhaustive": true,
         "blocking_jobs": {
+            "changes": {
+                "kind": "presence_only"
+            },
+            "build-test": {
+                "kind": "presence_only"
+            },
             "phpstan-application": {
                 "kind": "presence_only"
             },
@@ -101,6 +108,21 @@
             "typed-request-contracts": {
                 "kind": "presence_only"
             },
+            "deep-check-bootstrap": {
+                "kind": "presence_only"
+            },
+            "deep-check-seed-snapshot": {
+                "kind": "presence_only"
+            },
+            "deep-runtime-suite": {
+                "kind": "presence_only"
+            },
+            "coverage-shard-unit": {
+                "kind": "presence_only"
+            },
+            "coverage-shard-integration": {
+                "kind": "presence_only"
+            },
             "api-contract-openapi": {
                 "kind": "presence_only"
             },
@@ -108,6 +130,12 @@
                 "kind": "presence_only"
             },
             "coverage-delta": {
+                "kind": "presence_only"
+            },
+            "heavy-job-duration-trends": {
+                "kind": "presence_only"
+            },
+            "pdf-renderer-latency": {
                 "kind": "presence_only"
             },
             "write-contract-booking": {
@@ -197,6 +225,9 @@
                         "run": "cat storage/logs/ci/deep-runtime-suite/manifest.json || true\ncat storage/logs/ci/deep-runtime-suite/write-contract-api.log || true\ncat storage/logs/ci/deep-runtime-suite/write-contract-api.json || true\n"
                     }
                 ]
+            },
+            "integration-smoke": {
+                "kind": "presence_only"
             }
         }
     }
