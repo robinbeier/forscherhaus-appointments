@@ -138,6 +138,71 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertStringNotContainsString('dump-old', $result['stdout'] . $result['stderr']);
     }
 
+    public function testRootRunnerProcMountDiagnosticIsBoundedAndSecretFree(): void
+    {
+        $script = <<<'PY'
+        import hashlib, importlib.machinery, importlib.util, json, os, sys
+
+        path = sys.argv[1]
+        loader = importlib.machinery.SourceFileLoader('rob493_diagnostic_helper', path)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+
+        root = module.open_absolute_directory(module.ORCHESTRATOR_ROOT, exact_mode=0o700)
+        observations = []
+        try:
+            for _ in range(module.PROC_SNAPSHOT_ATTEMPTS):
+                result = {}
+                values = {}
+                for name, operation in (
+                    ('self_namespace_before', lambda: os.readlink('/proc/self/ns/mnt')),
+                    ('pid1_namespace_before', lambda: os.readlink('/proc/1/ns/mnt')),
+                    ('mountinfo_before', lambda: module.read_proc_text('/proc/self/mountinfo', module.MOUNTINFO_MAX_BYTES)),
+                    ('cgroup_before', lambda: module.read_proc_text('/proc/self/cgroup')),
+                    ('lock_device', lambda: module.trusted_lock_device(root)),
+                    ('mountinfo_after', lambda: module.read_proc_text('/proc/self/mountinfo', module.MOUNTINFO_MAX_BYTES)),
+                    ('cgroup_after', lambda: module.read_proc_text('/proc/self/cgroup')),
+                    ('self_namespace_after', lambda: os.readlink('/proc/self/ns/mnt')),
+                    ('pid1_namespace_after', lambda: os.readlink('/proc/1/ns/mnt')),
+                ):
+                    try:
+                        values[name] = operation()
+                        result[name + '_status'] = 'ok'
+                    except Exception as error:
+                        result[name + '_status'] = type(error).__name__
+                for name in ('mountinfo_before', 'mountinfo_after'):
+                    value = values.get(name)
+                    if isinstance(value, str):
+                        lines = value.splitlines(keepends=True)
+                        result[name + '_bytes'] = len(value.encode('utf-8'))
+                        result[name + '_lines'] = len(lines)
+                        result[name + '_max_line_bytes'] = max((len(line.encode('utf-8')) for line in lines), default=0)
+                        result[name + '_sha256'] = hashlib.sha256(value.encode('utf-8')).hexdigest()
+                        try:
+                            result[name + '_records'] = len(module.parse_mountinfo(lines))
+                        except Exception as error:
+                            result[name + '_parse'] = type(error).__name__
+                for name in ('mountinfo', 'cgroup', 'self_namespace', 'pid1_namespace'):
+                    before = values.get(name + '_before')
+                    after = values.get(name + '_after')
+                    result[name + '_equal'] = before is not None and before == after
+                before_lines = set(values.get('mountinfo_before', '').splitlines())
+                after_lines = set(values.get('mountinfo_after', '').splitlines())
+                result['mountinfo_symmetric_difference_lines'] = len(before_lines ^ after_lines)
+                observations.append(result)
+        finally:
+            os.close(root)
+        print(json.dumps({'schema': 'rob493_root_runner_proc_diagnostic.v1', 'observations': observations}, sort_keys=True))
+        PY;
+        $result = $this->runProcess(['/usr/bin/python3', '-I', '-B', '-c', $script, $this->helper]);
+        self::assertSame(0, $result['exit'], $result['stdout'] . $result['stderr']);
+        $diagnostic = json_decode(trim($result['stdout']), true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($diagnostic);
+        self::assertSame('rob493_root_runner_proc_diagnostic.v1', $diagnostic['schema'] ?? null);
+        fwrite(STDERR, 'ROB493_ROOT_RUNNER_DIAGNOSTIC ' . trim($result['stdout']) . "\n");
+    }
+
     public function testDryRunPassesInExactSystemdSandboxWithZeroMutationLedger(): void
     {
         $unit = 'fh-release-archive-dump-retention';
