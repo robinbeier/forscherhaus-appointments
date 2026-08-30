@@ -69,6 +69,12 @@ Before accepting the boundary, the helper opens the lock through already
 trusted root-owned `0700` parents and pins a regular, empty, root-owned
 `0600`, single-link identity. It compares path and descriptor identity and
 reads mountinfo, cgroup, and namespace identity before and after that check.
+The complete observation may be attempted at most five times to tolerate a
+concurrently settling host mount table; only one internally identical
+before/after pair is ever validated, observations are never combined, and five
+changing pairs still fail closed. Kernel-generated mountinfo has a separate
+bounded 16 MiB snapshot allowance (1 MiB per line) so legitimate runner or
+container overlay graphs are not confused with malformed state.
 Any Symlink, Hardlink, race, malformed state, additional protected mount,
 different source/device/root/parent, non-service context, or changing namespace
 remains fail-closed as `unsafe_global_lock`, `mount_state_unknown`, or

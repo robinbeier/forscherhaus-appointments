@@ -8,7 +8,9 @@ import importlib.machinery
 import importlib.util
 import os
 import pathlib
+import tempfile
 import unittest
+from unittest import mock
 
 
 HELPER_PATH = pathlib.Path(__file__).parents[3] / "scripts" / "ops" / "libexec" / "release_archive_dump_retention_v1.py"
@@ -76,6 +78,20 @@ class RetentionMountInfoTest(unittest.TestCase):
     def validate(self, records: list[dict[str, object]] | None = None, **kwargs: object) -> None:
         helper.validate_nested_mount_records(records=records or trusted_records(), **self.parameters(**kwargs))
 
+    @staticmethod
+    def proc_snapshot(*, changed: bool = False) -> dict[str, object]:
+        return {
+            "cgroup_after": SERVICE_CGROUP,
+            "cgroup_before": SERVICE_CGROUP,
+            "lock_device": LOCK_DEVICE,
+            "mountinfo_after": "after" if changed else "stable",
+            "mountinfo_before": "before" if changed else "stable",
+            "pid1_namespace_after": "mnt:[4026531840]",
+            "pid1_namespace_before": "mnt:[4026531840]",
+            "self_namespace_after": "mnt:[4026531841]",
+            "self_namespace_before": "mnt:[4026531841]",
+        }
+
     def test_direct_context_without_protected_nested_mount_passes(self) -> None:
         helper.validate_nested_mount_records(
             helper.parse_mountinfo([mount_line(41, 30, "/", "/", "rw,relatime", super_options="rw")]),
@@ -88,6 +104,31 @@ class RetentionMountInfoTest(unittest.TestCase):
 
     def test_exact_lock_bind_passes(self) -> None:
         self.validate()
+
+    def test_proc_snapshot_retries_a_changed_pair_but_accepts_only_a_stable_pair(self) -> None:
+        with mock.patch.object(
+            helper,
+            "capture_proc_mount_snapshot",
+            side_effect=[self.proc_snapshot(changed=True), self.proc_snapshot()],
+        ) as capture:
+            self.assertEqual(helper.stable_proc_mount_snapshot(object()), self.proc_snapshot())
+        self.assertEqual(capture.call_count, 2)
+
+    def test_proc_snapshot_rejects_when_every_bounded_pair_changes(self) -> None:
+        with mock.patch.object(
+            helper,
+            "capture_proc_mount_snapshot",
+            side_effect=[self.proc_snapshot(changed=True)] * helper.PROC_SNAPSHOT_ATTEMPTS,
+        ) as capture, self.assertRaises(helper.RetentionError) as caught:
+            helper.stable_proc_mount_snapshot(object())
+        self.assertEqual(caught.exception.reason, "mount_state_unknown")
+        self.assertEqual(capture.call_count, helper.PROC_SNAPSHOT_ATTEMPTS)
+
+    def test_proc_snapshot_rejects_malformed_capture_state(self) -> None:
+        with mock.patch.object(helper, "capture_proc_mount_snapshot", return_value={}):
+            with self.assertRaises(helper.RetentionError) as caught:
+                helper.stable_proc_mount_snapshot(object())
+        self.assertEqual(caught.exception.reason, "mount_state_unknown")
 
     def test_exact_lock_bind_requires_expected_context(self) -> None:
         cases = {
@@ -182,6 +223,38 @@ class RetentionMountInfoTest(unittest.TestCase):
         records = helper.parse_mountinfo([mount_line(41, 30, "/mnt/my\\040root", "/mnt/my\\040root\\011tab\\134slash", "ro")])
         self.assertEqual(records[0]["root"], "/mnt/my root")
         self.assertEqual(records[0]["mount_point"], "/mnt/my root\ttab\\slash")
+
+    def test_parser_accepts_kernel_mountinfo_lines_larger_than_legacy_ci_bound(self) -> None:
+        long_super_options = "rw,lowerdir=" + ":".join(
+            f"/var/lib/runner/snapshots/{index:04d}/fs" for index in range(512)
+        )
+        line = mount_line(
+            41,
+            30,
+            "/",
+            "/",
+            "rw,relatime",
+            filesystem="overlay",
+            source="overlay",
+            super_options=long_super_options,
+        )
+        self.assertGreater(len(line.encode("utf-8")), 16_384)
+        records = helper.parse_mountinfo([line])
+        self.assertEqual(records[0]["mount_point"], "/")
+        self.assertEqual(records[0]["filesystem_type"], "overlay")
+
+    def test_mountinfo_snapshot_has_a_separate_bounded_capacity(self) -> None:
+        value = "x" * (helper.PROC_STATE_MAX_BYTES + 1)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as handle:
+            handle.write(value)
+            handle.flush()
+            self.assertEqual(
+                helper.read_proc_text(handle.name, helper.MOUNTINFO_MAX_BYTES),
+                value,
+            )
+            with self.assertRaises(helper.RetentionError) as caught:
+                helper.read_proc_text(handle.name)
+        self.assertEqual(caught.exception.reason, "mount_state_unknown")
 
     def test_parser_rejects_malformed_state_fail_closed(self) -> None:
         for name, line in {

@@ -106,6 +106,9 @@ GLOBAL_LOCK_LEAF = 'fh-production-change.lock'
 GLOBAL_LOCK_PATH = ORCHESTRATOR_ROOT + '/locks/' + GLOBAL_LOCK_LEAF
 RETENTION_SERVICE_CGROUP = '/system.slice/fh-release-archive-dump-retention.service'
 PROC_STATE_MAX_BYTES = 1_048_576
+MOUNTINFO_MAX_BYTES = 16_777_216
+MOUNTINFO_LINE_MAX_BYTES = 1_048_576
+PROC_SNAPSHOT_ATTEMPTS = 5
 MARKER_LEAF = 'last-success.json'
 MARKER_MAX_BYTES = 4096
 RELEASE_DIR_MIN_AGE = 7 * 86_400
@@ -769,7 +772,7 @@ def parse_mountinfo(lines):
     records = []
     mount_ids = set()
     for line in lines:
-        if not isinstance(line, str) or len(line.encode('utf-8')) > 16_384:
+        if not isinstance(line, str) or len(line.encode('utf-8')) > MOUNTINFO_LINE_MAX_BYTES:
             reject('mount_state_unknown')
         fields = line.rstrip('\n').split(' ')
         if '' in fields or fields.count('-') != 1:
@@ -920,13 +923,15 @@ def validate_nested_mount_records(
         reject('nested_mount_boundary')
 
 
-def read_proc_text(path):
+def read_proc_text(path, max_bytes=PROC_STATE_MAX_BYTES):
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
+        reject('mount_state_unknown')
     try:
         with open(path, 'r', encoding='utf-8') as handle:
-            value = handle.read(PROC_STATE_MAX_BYTES + 1)
+            value = handle.read(max_bytes + 1)
     except (OSError, UnicodeError):
         reject('mount_state_unknown')
-    if len(value.encode('utf-8')) > PROC_STATE_MAX_BYTES:
+    if len(value.encode('utf-8')) > max_bytes:
         reject('mount_state_unknown')
     return value
 
@@ -967,34 +972,66 @@ def trusted_lock_device(orchestrator):
         os.close(locks)
 
 
-def assert_no_nested_mounts(web_names, orchestrator):
+def capture_proc_mount_snapshot(orchestrator):
     try:
         self_namespace_before = os.readlink('/proc/self/ns/mnt')
         pid1_namespace_before = os.readlink('/proc/1/ns/mnt')
-        mountinfo_before = read_proc_text('/proc/self/mountinfo')
+        mountinfo_before = read_proc_text('/proc/self/mountinfo', MOUNTINFO_MAX_BYTES)
         cgroup_before = read_proc_text('/proc/self/cgroup')
         lock_device = trusted_lock_device(orchestrator)
-        mountinfo_after = read_proc_text('/proc/self/mountinfo')
+        mountinfo_after = read_proc_text('/proc/self/mountinfo', MOUNTINFO_MAX_BYTES)
         cgroup_after = read_proc_text('/proc/self/cgroup')
         self_namespace_after = os.readlink('/proc/self/ns/mnt')
         pid1_namespace_after = os.readlink('/proc/1/ns/mnt')
     except OSError:
         reject('mount_state_unknown')
-    if (
-        mountinfo_before != mountinfo_after
-        or cgroup_before != cgroup_after
-        or self_namespace_before != self_namespace_after
-        or pid1_namespace_before != pid1_namespace_after
-    ):
+    return {
+        'cgroup_after': cgroup_after,
+        'cgroup_before': cgroup_before,
+        'lock_device': lock_device,
+        'mountinfo_after': mountinfo_after,
+        'mountinfo_before': mountinfo_before,
+        'pid1_namespace_after': pid1_namespace_after,
+        'pid1_namespace_before': pid1_namespace_before,
+        'self_namespace_after': self_namespace_after,
+        'self_namespace_before': self_namespace_before,
+    }
+
+
+def stable_proc_mount_snapshot(orchestrator):
+    for _attempt in range(PROC_SNAPSHOT_ATTEMPTS):
+        snapshot = capture_proc_mount_snapshot(orchestrator)
+        try:
+            if (
+                snapshot['mountinfo_before'] == snapshot['mountinfo_after']
+                and snapshot['cgroup_before'] == snapshot['cgroup_after']
+                and snapshot['self_namespace_before'] == snapshot['self_namespace_after']
+                and snapshot['pid1_namespace_before'] == snapshot['pid1_namespace_after']
+            ):
+                return snapshot
+        except (KeyError, TypeError):
+            reject('mount_state_unknown')
+    reject('mount_state_unknown')
+
+
+def assert_no_nested_mounts(web_names, orchestrator):
+    snapshot = stable_proc_mount_snapshot(orchestrator)
+    try:
+        mountinfo = snapshot['mountinfo_before']
+        cgroup = snapshot['cgroup_before']
+        self_namespace = snapshot['self_namespace_before']
+        pid1_namespace = snapshot['pid1_namespace_before']
+        lock_device = snapshot['lock_device']
+    except (KeyError, TypeError):
         reject('mount_state_unknown')
     validate_nested_mount_records(
-        parse_mountinfo(mountinfo_before.splitlines(keepends=True)),
+        parse_mountinfo(mountinfo.splitlines(keepends=True)),
         web_names,
         lock_device,
-        cgroup_before,
+        cgroup,
         os.environ.get('INVOCATION_ID'),
-        self_namespace_before,
-        pid1_namespace_before,
+        self_namespace,
+        pid1_namespace,
     )
 
 

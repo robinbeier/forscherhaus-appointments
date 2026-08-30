@@ -124,7 +124,9 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'def parse_mountinfo(lines):',
                 'def validate_nested_mount_records(',
                 'def trusted_lock_device(orchestrator):',
-                'mountinfo_before != mountinfo_after',
+                'PROC_SNAPSHOT_ATTEMPTS = 5',
+                'def stable_proc_mount_snapshot(orchestrator):',
+                "snapshot['mountinfo_before'] == snapshot['mountinfo_after']",
                 'file_identity(before) != file_identity(opened)',
             ]
             as $contract
