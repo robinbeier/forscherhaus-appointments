@@ -136,6 +136,7 @@ App.Http.Booking = (function () {
             manageMode: Number(vars('manage_mode') || 0),
             appointmentId,
             signal,
+            trackRequest: true,
         });
 
         request.done((response) => {
@@ -156,6 +157,7 @@ App.Http.Booking = (function () {
      * @param {Number} [options.manageMode]
      * @param {Number|null} [options.appointmentId]
      * @param {AbortSignal} [options.signal]
+     * @param {Boolean} [options.trackRequest] Whether assisted-preparation aborts may cancel this request.
      *
      * @return {JQuery.jqXHR}
      */
@@ -167,6 +169,7 @@ App.Http.Booking = (function () {
         manageMode = 0,
         appointmentId = null,
         signal,
+        trackRequest = false,
     }) {
         const url = App.Utils.Url.siteUrl('booking/get_available_hours');
 
@@ -187,7 +190,8 @@ App.Http.Booking = (function () {
             dataType: 'json',
         });
 
-        return trackAvailabilityRequest(bindAbortSignal(request, signal));
+        const abortBoundRequest = bindAbortSignal(request, signal);
+        return trackRequest ? trackAvailabilityRequest(abortBoundRequest) : abortBoundRequest;
     }
 
     function bindAbortSignal(request, signal) {

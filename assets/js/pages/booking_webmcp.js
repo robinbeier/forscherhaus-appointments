@@ -340,8 +340,7 @@ App.Pages.BookingWebMcp = (function () {
     function toolDefinitions() {
         const serviceKeys = [...catalog.serviceByKey.keys()];
         const providerKeys = [...catalog.providerByKey.keys()];
-
-        return [
+        const tools = [
             {
                 name: 'list_services',
                 title: 'List public appointment services',
@@ -357,6 +356,13 @@ App.Pages.BookingWebMcp = (function () {
                 },
                 execute: listServices,
             },
+        ];
+
+        if (serviceKeys.length === 0 || providerKeys.length === 0) {
+            return tools;
+        }
+
+        tools.push(
             {
                 name: 'find_available_slots',
                 title: 'Find available appointment slots',
@@ -401,7 +407,9 @@ App.Pages.BookingWebMcp = (function () {
                 },
                 execute: prepareBooking,
             },
-        ];
+        );
+
+        return tools;
     }
 
     function initialize() {

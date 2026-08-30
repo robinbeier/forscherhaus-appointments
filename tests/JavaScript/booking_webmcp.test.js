@@ -60,6 +60,7 @@ function createHarness(options = {}) {
     const activeTools = new Map();
     const queryCalls = [];
     const preparationCalls = [];
+    const trackedAvailabilityRequests = new Set();
     const documentListeners = new Map();
     const windowListeners = new Map();
     let registrationAttempt = 0;
@@ -104,11 +105,20 @@ function createHarness(options = {}) {
                     async queryAvailableHours(input) {
                         queryCalls.push(input);
 
-                        if (options.queryAvailableHours) {
-                            return options.queryAvailableHours(input);
+                        const response = options.queryAvailableHours
+                            ? options.queryAvailableHours(input)
+                            : options.availableHours || ['09:00', 'invalid', '10:30'];
+
+                        if (input.trackRequest && response?.abort && response?.always) {
+                            trackedAvailabilityRequests.add(response);
+                            response.always(() => trackedAvailabilityRequests.delete(response));
                         }
 
-                        return options.availableHours || ['09:00', 'invalid', '10:30'];
+                        return response;
+                    },
+                    abortTrackedAvailabilityRequests() {
+                        [...trackedAvailabilityRequests].forEach((request) => request.abort());
+                        trackedAvailabilityRequests.clear();
                     },
                     projectAvailableHour,
                 },
@@ -119,7 +129,7 @@ function createHarness(options = {}) {
                         preparationCalls.push(input);
 
                         if (options.prepareBookingSelection) {
-                            return options.prepareBookingSelection(input);
+                            return options.prepareBookingSelection(input, {bookingHttp: context.App.Http.Booking});
                         }
 
                         if (options.prepareError) {
@@ -172,6 +182,7 @@ function createHarness(options = {}) {
         preparationCalls,
         queryCalls,
         registeredCalls,
+        trackedAvailabilityRequests,
         values,
         windowListeners,
         allowRegistrations() {
@@ -186,6 +197,51 @@ function createHarness(options = {}) {
             assert.ok(deferredRegistration);
             deferredRegistration.resolve();
             deferredRegistration = null;
+        },
+    };
+}
+
+function createAbortableQueryRequest() {
+    let resolvePromise;
+    let rejectPromise;
+    let settled = false;
+    const alwaysCallbacks = [];
+    const promise = new Promise((resolve, reject) => {
+        resolvePromise = resolve;
+        rejectPromise = reject;
+    });
+
+    const finish = () => {
+        alwaysCallbacks.splice(0).forEach((callback) => callback());
+    };
+
+    return {
+        aborted: false,
+        abort() {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            this.aborted = true;
+            finish();
+            rejectPromise(new DOMException('aborted', 'AbortError'));
+        },
+        always(callback) {
+            alwaysCallbacks.push(callback);
+            return this;
+        },
+        then(resolve, reject) {
+            return promise.then(resolve, reject);
+        },
+        resolve(value) {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            finish();
+            resolvePromise(value);
         },
     };
 }
@@ -1007,6 +1063,20 @@ test('registers exactly the three closed-contract tools with narrow schemas', as
     assert.equal(harness.activeTools.get('prepare_booking').annotations.readOnlyHint, false);
 });
 
+test('registers only list_services when the public catalog has no providers', async () => {
+    const harness = createHarness({
+        values: {
+            available_providers: [],
+        },
+    });
+
+    assert.equal(await harness.api.initialize(), true);
+    assert.deepEqual([...harness.activeTools.keys()], ['list_services']);
+
+    const result = await harness.activeTools.get('list_services').execute({}, {signal: new AbortController().signal});
+    assert.deepEqual([...result.services[0].provider_keys], []);
+});
+
 test('list_services returns only minimal public service data and opaque provider keys', async () => {
     const harness = createHarness();
     await harness.api.initialize();
@@ -1240,6 +1310,52 @@ test('prepare_booking delegates only visible selection state and never accepts c
         /Unsupported tool input/,
     );
     assert.equal(harness.preparationCalls.length, 1);
+});
+
+test('prepare_booking does not abort an independent slot search request', async () => {
+    const pendingSearchRequest = createAbortableQueryRequest();
+    const harness = createHarness({
+        queryAvailableHours() {
+            return pendingSearchRequest;
+        },
+        prepareBookingSelection(input, {bookingHttp}) {
+            bookingHttp.abortTrackedAvailabilityRequests();
+
+            return {
+                selected_date: input.selectedDate,
+                selected_time: input.selectedTime,
+            };
+        },
+    });
+    await harness.api.initialize();
+
+    const slotSearch = harness.activeTools.get('find_available_slots').execute(
+        {
+            service_key: 'service_1',
+            provider_key: 'provider_1',
+            start_date: '2026-09-01',
+            end_date: '2026-09-01',
+        },
+        {signal: new AbortController().signal},
+    );
+
+    const prepared = await harness.activeTools.get('prepare_booking').execute(
+        {
+            service_key: 'service_1',
+            provider_key: 'provider_1',
+            date: '2026-09-01',
+            time: '09:00',
+        },
+        {signal: new AbortController().signal},
+    );
+
+    assert.equal(prepared.prepared, true);
+    assert.equal(pendingSearchRequest.aborted, false);
+    assert.equal(harness.trackedAvailabilityRequests.size, 0);
+
+    pendingSearchRequest.resolve(['09:00']);
+    const searchResult = await slotSearch;
+    assert.equal(searchResult.slots.length, 1);
 });
 
 test('prepare_booking rejects dates outside the visible booking window', async () => {
