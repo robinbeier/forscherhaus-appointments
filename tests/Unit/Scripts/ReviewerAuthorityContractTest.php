@@ -65,6 +65,10 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['profiles'] ?? null,
         );
         self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
+        self::assertSame(
+            'materialized_base_blob_outside_worktree',
+            $contract['authority']['reviewer']['invocation_source'] ?? null,
+        );
         self::assertTrue($contract['authority']['reviewer']['requires_base_runner'] ?? false);
         self::assertSame(
             'external_bootstrap_review',
@@ -268,6 +272,17 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('--ephemeral', $capture);
         self::assertStringContainsString("--color\nnever", $capture);
         self::assertSame(1, substr_count($capture, "--output-schema\n"));
+        self::assertSame(
+            1,
+            preg_match(
+                '#--output-schema\n([^\n]+)/scripts/agent/readonly-review-output\.schema\.json\n#',
+                $capture,
+                $trustedRootMatch,
+            ),
+        );
+        $trustedRoot = $trustedRootMatch[1];
+        self::assertStringContainsString($trustedRoot . '/AGENTS.md', $capture);
+        self::assertStringContainsString($trustedRoot . '/code_review.md', $capture);
         self::assertStringNotContainsString("--json\n", $capture);
         self::assertStringContainsString('shell_environment_policy.inherit="none"', $capture);
         self::assertStringContainsString('sandbox_workspace_write.network_access=false', $capture);
@@ -314,7 +329,10 @@ class ReviewerAuthorityContractTest extends TestCase
         fclose($pipes[2]);
         self::assertSame(1, proc_close($process));
         self::assertSame('', (string) $stdout);
-        self::assertStringContainsString('not the trusted copy from the review base', (string) $stderr);
+        self::assertStringContainsString(
+            'must be materialized from the review base outside the worktree',
+            (string) $stderr,
+        );
         self::assertFileDoesNotExist($capturePath, 'The changed head runner must not invoke Codex.');
 
         $environment['REVIEWER_TEST_RESULT'] = '{"not":"a review"}';
@@ -367,7 +385,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertSame(1, $exitCode);
         self::assertSame('', (string) $stdout);
-        self::assertStringContainsString('Reviewer base is not an ancestor', (string) $stderr);
+        self::assertStringContainsString('not the trusted copy from the review base', (string) $stderr);
         self::assertFileDoesNotExist($capturePath, 'Codex must not run for an unrelated base.');
     }
 
@@ -455,6 +473,63 @@ class ReviewerAuthorityContractTest extends TestCase
         );
     }
 
+    public function testOutputValidationRejectsVerdictFindingMismatch(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('verdict does not match its findings');
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'no_findings',
+                    'findings' => [
+                        [
+                            'priority' => 'P2',
+                            'title' => 'Finding',
+                            'file' => 'WORKFLOW.md',
+                            'line' => 1,
+                            'impact' => 'Impact',
+                            'trigger' => 'Trigger',
+                        ],
+                    ],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            $base,
+            $head,
+        );
+    }
+
+    public function testOutputValidationRejectsMalformedFinding(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('finding has unexpected fields');
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'findings',
+                    'findings' => [['priority' => 'P2']],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            $base,
+            $head,
+        );
+    }
+
     public function testProfileResolutionUsesStructuredMachinePolicy(): void
     {
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-profile-' . bin2hex(random_bytes(8));
@@ -533,6 +608,7 @@ class ReviewerAuthorityContractTest extends TestCase
     private function reviewerPolicyForProfile(string $profile): array
     {
         return [
+            'invocation_source' => 'materialized_base_blob_outside_worktree',
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',

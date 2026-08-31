@@ -72,6 +72,7 @@ final class ReadonlyReviewerContract
     private static function assertRuntimeBoundary(array $reviewerPolicy): void
     {
         $expected = [
+            'invocation_source' => 'materialized_base_blob_outside_worktree',
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',

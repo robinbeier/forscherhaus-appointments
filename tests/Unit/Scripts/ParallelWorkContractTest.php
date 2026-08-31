@@ -55,6 +55,35 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsDisabledOrUnknownMachinePolicySemantics(): void
+    {
+        foreach (
+            [
+                'local_implementation_only',
+                'requires_common_base_sha',
+                'requires_disjoint_ownership',
+                'external_mutations_remain_serial',
+                'requires_semantic_independence_attestation',
+            ]
+            as $requirement
+        ) {
+            $policy = $this->policy;
+            $policy[$requirement] = false;
+            self::assertContains(
+                'invalid_policy_requirement:' . $requirement,
+                ParallelWorkContract::validate($this->validManifest(), $policy, $this->ownershipMap),
+                $requirement,
+            );
+        }
+
+        $policy = $this->policy;
+        $policy['filename_stem_prefix_suffix'] = '-';
+        self::assertContains(
+            'invalid_policy_filename_stem_prefix_suffix',
+            ParallelWorkContract::validate($this->validManifest(), $policy, $this->ownershipMap),
+        );
+    }
+
     public function testRejectsMoreThanTwoWriterLanes(): void
     {
         $manifest = $this->validManifest();

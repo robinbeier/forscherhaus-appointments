@@ -16,6 +16,27 @@ final class ParallelWorkContract
     {
         $errors = [];
 
+        foreach (
+            [
+                'local_implementation_only',
+                'requires_common_base_sha',
+                'requires_disjoint_ownership',
+                'external_mutations_remain_serial',
+                'requires_semantic_independence_attestation',
+            ]
+            as $requiredPolicy
+        ) {
+            if (($policy[$requiredPolicy] ?? null) !== true) {
+                $errors[] = 'invalid_policy_requirement:' . $requiredPolicy;
+            }
+        }
+
+        $filenameStemPrefixSuffix = $policy['filename_stem_prefix_suffix'] ?? null;
+        if ($filenameStemPrefixSuffix !== '_') {
+            $errors[] = 'invalid_policy_filename_stem_prefix_suffix';
+            $filenameStemPrefixSuffix = '';
+        }
+
         if (($manifest['schema_version'] ?? null) !== 1) {
             $errors[] = 'unsupported_schema_version';
         }
@@ -30,9 +51,6 @@ final class ParallelWorkContract
             $errors[] = 'invalid_primary_id';
         }
 
-        if (($policy['requires_semantic_independence_attestation'] ?? null) !== true) {
-            $errors[] = 'invalid_policy_semantic_independence_attestation';
-        }
         $semanticIndependence = $manifest['semantic_independence'] ?? null;
         if (!is_array($semanticIndependence) || array_is_list($semanticIndependence)) {
             $errors[] = 'invalid_semantic_independence';
@@ -123,21 +141,21 @@ final class ParallelWorkContract
                         $errors[] = 'invalid_policy_primary_owned_path_prefix';
                         continue;
                     }
-                    if (self::pathsOverlap($path, $primaryOwnedPrefix)) {
+                    if (self::pathsOverlap($path, $primaryOwnedPrefix, $filenameStemPrefixSuffix)) {
                         $errors[] = 'primary_owned_path:' . $index . ':' . $primaryOwnedPrefix;
                     }
                 }
 
                 foreach ($canonicalComponents as $componentId => $component) {
                     foreach ($component['folder_prefixes'] as $folderPrefix) {
-                        if (self::pathMatchesCanonicalPrefix($path, $folderPrefix)) {
+                        if (self::pathMatchesCanonicalPrefix($path, $folderPrefix, $filenameStemPrefixSuffix)) {
                             $requiredComponentIds[$componentId] = true;
                         }
                     }
                 }
 
                 foreach ($ownedPaths as $ownedPath => $owner) {
-                    if (self::pathsOverlap($path, $ownedPath)) {
+                    if (self::pathsOverlap($path, $ownedPath, $filenameStemPrefixSuffix)) {
                         $errors[] = 'ownership_overlap:' . $owner . ':' . $index;
                     }
                 }
@@ -273,23 +291,29 @@ final class ParallelWorkContract
         return true;
     }
 
-    private static function pathsOverlap(string $left, string $right): bool
+    private static function pathsOverlap(string $left, string $right, string $filenameStemPrefixSuffix): bool
     {
-        return self::pathCovers($left, $right) || self::pathCovers($right, $left);
+        return self::pathCovers($left, $right, $filenameStemPrefixSuffix) ||
+            self::pathCovers($right, $left, $filenameStemPrefixSuffix);
     }
 
-    private static function pathMatchesCanonicalPrefix(string $lanePath, string $canonicalPrefix): bool
-    {
+    private static function pathMatchesCanonicalPrefix(
+        string $lanePath,
+        string $canonicalPrefix,
+        string $filenameStemPrefixSuffix,
+    ): bool {
         $normalizedPrefix = rtrim($canonicalPrefix, '/');
-        return self::pathsOverlap($lanePath, $normalizedPrefix);
+        return self::pathsOverlap($lanePath, $normalizedPrefix, $filenameStemPrefixSuffix);
     }
 
-    private static function pathCovers(string $prefix, string $path): bool
+    private static function pathCovers(string $prefix, string $path, string $filenameStemPrefixSuffix): bool
     {
         if ($prefix === $path || str_starts_with($path, $prefix . '/')) {
             return true;
         }
 
-        return str_ends_with(basename($prefix), '_') && str_starts_with($path, $prefix);
+        return $filenameStemPrefixSuffix !== '' &&
+            str_ends_with(basename($prefix), $filenameStemPrefixSuffix) &&
+            str_starts_with($path, $prefix);
     }
 }

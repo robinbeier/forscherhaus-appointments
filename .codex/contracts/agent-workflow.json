@@ -18,6 +18,7 @@
         ],
         "reviewer": {
             "invocation": "scripts/agent/run_readonly_reviewer.sh",
+            "invocation_source": "materialized_base_blob_outside_worktree",
             "trust_anchor": "review_base_commit",
             "requires_base_runner": true,
             "runtime_configuration_change_policy": "external_bootstrap_review",
@@ -81,16 +82,13 @@
     },
     "parallel_work": {
         "local_implementation_only": true,
-        "requires_common_verified_base_sha": true,
-        "requires_separate_worktrees": true,
+        "requires_common_base_sha": true,
         "requires_disjoint_ownership": true,
         "max_local_writer_lanes": 2,
         "writer_role": "implementation_worker",
         "external_mutations_remain_serial": true,
-        "integration_and_landing_remain_serial": true,
-        "remaining_lanes_resync_after_merge": true,
-        "ownership_drift_fails_closed": true,
         "requires_semantic_independence_attestation": true,
+        "filename_stem_prefix_suffix": "_",
         "ownership_map": "docs/maps/component_ownership_map.json",
         "primary_owned_path_prefixes": [
             ".codex/agents/reviewer-correctness.toml",

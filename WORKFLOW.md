@@ -122,8 +122,10 @@ more than two `implementation_worker` lanes. Every lane repeats that
 base SHA, lists normalized repository-relative ownership prefixes, and
 declares an empty `external_mutations` list. Ownership must be disjoint and may
 not include the primary-owned harness, reviewer, workflow, or landing paths in
-the machine contract. Each lane uses its own worktree and branch from the
-already verified common base.
+the machine contract. A prefix whose basename ends in the contract's explicit
+`filename_stem_prefix_suffix` (`_`) owns matching filenames as well as the
+literal path; all other prefixes use exact-file-or-directory semantics. Each
+lane uses its own worktree and branch from the already verified common base.
 
 Exactly one primary remains the external single writer for commits, pushes,
 PRs, checks, Linear, workpads, attestations, merges, and production actions.
@@ -320,7 +322,9 @@ Run final reviewers through the repository-owned external read-only boundary.
 The executable, policy, profiles, schema, and validator must come from the
 already trusted review base, never from the head being reviewed. Materialize
 the base copy of `scripts/agent/run_readonly_reviewer.sh` in a private temporary
-file, then invoke that copy with the checked-out worktree as `--repo-root`:
+file, then invoke that copy with the checked-out worktree as `--repo-root`.
+The checked-out runner is contract data, not an executable entry point; it
+refuses to run while its own source path is inside the worktree:
 
 ```bash
 trusted_runner=$(mktemp "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")

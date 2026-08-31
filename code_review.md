@@ -105,7 +105,9 @@ require three independent final reviews on the same unchanged exact head:
 Invoke each final lens with the exact
 `scripts/agent/run_readonly_reviewer.sh` blob from the already trusted review
 base, materialized outside the worktree as described in `WORKFLOW.md`; never
-use the head copy as its own trust anchor. The base runner also extracts its
+execute the checked-out copy or use the head copy as its own trust anchor. The
+runner rejects a source path inside the worktree before inspecting the head.
+The base runner also extracts its
 single canonical trust-path manifest and then the listed contract, selected
 role, output schema, validator, and review instructions from that base commit.
 Runtime model and reasoning values live in the structured contract; the role

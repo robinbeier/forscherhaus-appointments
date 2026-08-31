@@ -60,6 +60,10 @@ class AgentWorkflowContractTest extends TestCase
             'scripts/agent/run_readonly_reviewer.sh',
             $contract['authority']['reviewer']['invocation'] ?? null,
         );
+        self::assertSame(
+            'materialized_base_blob_outside_worktree',
+            $contract['authority']['reviewer']['invocation_source'] ?? null,
+        );
         self::assertSame('read-only', $contract['authority']['reviewer']['filesystem'] ?? null);
         self::assertSame('denied', $contract['authority']['reviewer']['network'] ?? null);
         self::assertSame('never', $contract['authority']['reviewer']['approval_policy'] ?? null);
@@ -96,16 +100,13 @@ class AgentWorkflowContractTest extends TestCase
         self::assertContains('multi_agent', $contract['authority']['reviewer']['disabled_features'] ?? []);
         self::assertContains('plugins', $contract['authority']['reviewer']['disabled_features'] ?? []);
         self::assertTrue($contract['parallel_work']['local_implementation_only'] ?? null);
-        self::assertTrue($contract['parallel_work']['requires_common_verified_base_sha'] ?? null);
-        self::assertTrue($contract['parallel_work']['requires_separate_worktrees'] ?? null);
+        self::assertTrue($contract['parallel_work']['requires_common_base_sha'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_disjoint_ownership'] ?? null);
         self::assertSame(2, $contract['parallel_work']['max_local_writer_lanes'] ?? null);
         self::assertSame('implementation_worker', $contract['parallel_work']['writer_role'] ?? null);
         self::assertTrue($contract['parallel_work']['external_mutations_remain_serial'] ?? null);
-        self::assertTrue($contract['parallel_work']['integration_and_landing_remain_serial'] ?? null);
-        self::assertTrue($contract['parallel_work']['remaining_lanes_resync_after_merge'] ?? null);
-        self::assertTrue($contract['parallel_work']['ownership_drift_fails_closed'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_semantic_independence_attestation'] ?? null);
+        self::assertSame('_', $contract['parallel_work']['filename_stem_prefix_suffix'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
         self::assertContains('scripts/agent', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
         self::assertContains('.github/workflows', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);

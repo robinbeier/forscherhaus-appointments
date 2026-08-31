@@ -37,26 +37,36 @@ repo_root="$(git -C "${requested_repo_root:-.}" rev-parse --show-toplevel 2>/dev
 }
 cd "$repo_root"
 
-if [[ "$(git rev-parse HEAD)" != "$head_sha" ]]; then
-    echo "Reviewer head does not match the checked-out HEAD." >&2
-    exit 1
-fi
 git cat-file -e "${base_sha}^{commit}" 2>/dev/null || {
     echo "Reviewer base commit is unavailable." >&2
     exit 1
 }
+
+runner_source_directory="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+runner_source="$runner_source_directory/$(basename -- "${BASH_SOURCE[0]}")"
+case "$runner_source" in
+    "$repo_root"/*)
+        echo "Reviewer runner must be materialized from the review base outside the worktree." >&2
+        exit 1
+        ;;
+esac
+
+runner_path="scripts/agent/run_readonly_reviewer.sh"
+if ! git show "${base_sha}:${runner_path}" 2>/dev/null | cmp -s - "$runner_source"; then
+    echo "Reviewer runner is not the trusted copy from the review base; external bootstrap review is required." >&2
+    exit 1
+fi
+
+if [[ "$(git rev-parse HEAD)" != "$head_sha" ]]; then
+    echo "Reviewer head does not match the checked-out HEAD." >&2
+    exit 1
+fi
 git merge-base --is-ancestor "$base_sha" "$head_sha" || {
     echo "Reviewer base is not an ancestor of the reviewed head." >&2
     exit 1
 }
 if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
     echo "Reviewer worktree must be clean." >&2
-    exit 1
-fi
-
-runner_path="scripts/agent/run_readonly_reviewer.sh"
-if ! git show "${base_sha}:${runner_path}" 2>/dev/null | cmp -s - "${BASH_SOURCE[0]}"; then
-    echo "Reviewer runner is not the trusted copy from the review base; external bootstrap review is required." >&2
     exit 1
 fi
 
