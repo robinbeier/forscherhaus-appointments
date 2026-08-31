@@ -11,6 +11,7 @@ $command = $argv[1] ?? '';
 $lens = null;
 $baseSha = null;
 $headSha = null;
+$changedPathsJsonPath = null;
 foreach (array_slice($argv, 2) as $argument) {
     if (str_starts_with($argument, '--lens=')) {
         $lens = substr($argument, strlen('--lens='));
@@ -22,6 +23,10 @@ foreach (array_slice($argv, 2) as $argument) {
     }
     if (str_starts_with($argument, '--base-sha=')) {
         $baseSha = substr($argument, strlen('--base-sha='));
+        continue;
+    }
+    if (str_starts_with($argument, '--changed-paths-json=')) {
+        $changedPathsJsonPath = substr($argument, strlen('--changed-paths-json='));
         continue;
     }
     fwrite(STDERR, "Unknown option.\n");
@@ -74,11 +79,28 @@ try {
         if (!is_string($headSha) || preg_match('/^[a-f0-9]{40}$/D', $headSha) !== 1) {
             throw new InvalidArgumentException('Missing or invalid --head-sha.');
         }
+        if (!is_string($changedPathsJsonPath) || !str_starts_with($changedPathsJsonPath, '/')) {
+            throw new InvalidArgumentException('Missing or invalid --changed-paths-json.');
+        }
+        try {
+            $changedPaths = json_decode(
+                (string) file_get_contents($changedPathsJsonPath),
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+        } catch (Throwable) {
+            throw new InvalidArgumentException('Reviewer changed-path evidence is invalid.');
+        }
+        if (!is_array($changedPaths)) {
+            throw new InvalidArgumentException('Reviewer changed-path evidence is invalid.');
+        }
         $review = ReadonlyReviewerContract::validateOutput(
             (string) stream_get_contents(STDIN),
             $lens,
             $baseSha,
             $headSha,
+            $changedPaths,
         );
         fwrite(STDOUT, json_encode($review, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . PHP_EOL);
         exit(0);
@@ -86,7 +108,7 @@ try {
 
     fwrite(
         STDERR,
-        "Usage: readonly_reviewer_contract.php <resolve|instructions|trusted-paths|validate> --lens=<lens> [--base-sha=<sha>] [--head-sha=<sha>]\n",
+        "Usage: readonly_reviewer_contract.php <resolve|instructions|trusted-paths|validate> --lens=<lens> [--base-sha=<sha>] [--head-sha=<sha>] [--changed-paths-json=<absolute-path>]\n",
     );
     exit(2);
 } catch (Throwable $throwable) {

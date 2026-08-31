@@ -93,7 +93,15 @@ class ReviewerAuthorityContractTest extends TestCase
             'explicit_primary_codex_with_canonical_target',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
+        self::assertSame(
+            'canonical_physical_root',
+            $contract['authority']['reviewer']['repository_root_policy'] ?? null,
+        );
         self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
+        self::assertSame(
+            'normalized_exact_diff_paths',
+            $contract['authority']['reviewer']['finding_path_policy'] ?? null,
+        );
         self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
         self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
         self::assertSame(
@@ -507,6 +515,35 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertFileDoesNotExist($capturePath, 'The changed head runner must not invoke Codex.');
 
+        $symlinkedRunner = $temporaryDirectory . '/symlinked-reviewer-runner';
+        self::assertTrue(symlink($fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh', $symlinkedRunner));
+        $process = proc_open(
+            [
+                $symlinkedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--codex-bin=' . $fakeCodex,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(1, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString(
+            'must be materialized from the review base outside the worktree',
+            (string) $stderr,
+        );
+        self::assertFileDoesNotExist($capturePath, 'A symlink must not hide a repository-owned reviewer runner.');
+
         $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
         $process = proc_open(
             [
@@ -560,6 +597,33 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame('', (string) $stdout);
         self::assertStringContainsString('Codex binary must be outside the reviewed repository', (string) $stderr);
         self::assertFileDoesNotExist($capturePath, 'A symlink must not hide a repository-owned Codex target.');
+
+        $symlinkedRepo = $temporaryDirectory . '/repo-symlink';
+        self::assertTrue(symlink($fixtureRepo, $symlinkedRepo));
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $symlinkedRepo,
+                '--codex-bin=' . $symlinkedCodex,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $temporaryDirectory,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(2, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('Codex binary must be outside the reviewed repository', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'A symlinked repository root must not weaken target checks.');
 
         $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
         $process = proc_open(
@@ -735,11 +799,11 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertSame(
             'no_findings',
-            ReadonlyReviewerContract::validateOutput($valid, 'correctness_security', $base, $head)['verdict'],
+            ReadonlyReviewerContract::validateOutput($valid, 'correctness_security', $base, $head, [])['verdict'],
         );
 
         $this->expectException(\InvalidArgumentException::class);
-        ReadonlyReviewerContract::validateOutput('{"type":"turn.completed"}', 'correctness_security', $base, $head);
+        ReadonlyReviewerContract::validateOutput('{"type":"turn.completed"}', 'correctness_security', $base, $head, []);
     }
 
     public function testOutputValidationRejectsWrongExactHead(): void
@@ -759,6 +823,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             str_repeat('b', 40),
             str_repeat('a', 40),
+            [],
         );
     }
 
@@ -779,6 +844,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             str_repeat('b', 40),
             str_repeat('a', 40),
+            [],
         );
     }
 
@@ -799,6 +865,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             str_repeat('b', 40),
             str_repeat('a', 40),
+            [],
         );
     }
 
@@ -832,10 +899,73 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             $base,
             $head,
+            ['WORKFLOW.md'],
         );
 
         self::assertSame('findings', $validated['verdict']);
         self::assertSame([$finding, $fileFinding], $validated['findings']);
+    }
+
+    public function testOutputValidationRejectsNonChangedOrNonNormalizedFindingFiles(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        foreach (['README.md', '/tmp/reviewer-finding'] as $file) {
+            $output = json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'findings',
+                    'findings' => [
+                        [
+                            'priority' => 'P2',
+                            'title' => 'Finding',
+                            'file' => $file,
+                            'line' => 1,
+                            'impact' => 'Impact',
+                            'trigger' => 'Trigger',
+                        ],
+                    ],
+                ],
+                JSON_THROW_ON_ERROR,
+            );
+
+            try {
+                ReadonlyReviewerContract::validateOutput($output, 'correctness_security', $base, $head, [
+                    'WORKFLOW.md',
+                ]);
+                self::fail('Non-changed or non-normalized finding file was accepted: ' . $file);
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('not a changed repository path', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testOutputValidationRejectsInvalidChangedPathEvidence(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('changed-path evidence is invalid');
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'no_findings',
+                    'findings' => [],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            $base,
+            $head,
+            ['/tmp/not-repository-relative'],
+        );
     }
 
     public function testOutputValidationRejectsVerdictFindingMismatch(): void
@@ -868,6 +998,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             $base,
             $head,
+            ['WORKFLOW.md'],
         );
     }
 
@@ -892,6 +1023,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             $base,
             $head,
+            [],
         );
     }
 
@@ -916,6 +1048,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             $base,
             $head,
+            ['WORKFLOW.md'],
         );
     }
 
@@ -1032,7 +1165,9 @@ class ReviewerAuthorityContractTest extends TestCase
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',
             'tool_path_policy' => 'explicit_primary_codex_with_canonical_target',
+            'repository_root_policy' => 'canonical_physical_root',
             'codex_identity_check' => 'basename_and_version',
+            'finding_path_policy' => 'normalized_exact_diff_paths',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
             'trusted_base_paths' => [

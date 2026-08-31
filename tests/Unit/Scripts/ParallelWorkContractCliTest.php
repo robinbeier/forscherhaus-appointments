@@ -93,7 +93,10 @@ class ParallelWorkContractCliTest extends TestCase
             ],
         ]);
 
-        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+        [$exitCode, $stdout, $stderr] = $this->runCli([
+            '--manifest=' . $manifestPath,
+            '--repo-root=' . $this->repoRoot,
+        ]);
 
         self::assertSame(0, $exitCode, $stderr);
         self::assertSame('', $stderr);
@@ -147,7 +150,10 @@ class ParallelWorkContractCliTest extends TestCase
         );
 
         $manifestPath = $this->writeJsonFixture('base-anchor', $this->manifestForPath('scripts/agent'));
-        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+        [$exitCode, $stdout, $stderr] = $this->runCli([
+            '--manifest=' . $manifestPath,
+            '--repo-root=' . $this->repoRoot,
+        ]);
 
         self::assertSame(1, $exitCode, $stderr);
         self::assertSame('', $stderr);

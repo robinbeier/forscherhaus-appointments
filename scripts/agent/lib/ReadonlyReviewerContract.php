@@ -156,7 +156,9 @@ final class ReadonlyReviewerContract
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',
             'tool_path_policy' => 'explicit_primary_codex_with_canonical_target',
+            'repository_root_policy' => 'canonical_physical_root',
             'codex_identity_check' => 'basename_and_version',
+            'finding_path_policy' => 'normalized_exact_diff_paths',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
             'filesystem' => 'read-only',
@@ -176,13 +178,19 @@ final class ReadonlyReviewerContract
         }
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * @param list<string> $changedPaths
+     * @return array<string, mixed>
+     */
     public static function validateOutput(
         string $output,
         string $expectedLens,
         string $expectedBaseSha,
         string $expectedHeadSha,
+        array $changedPaths,
     ): array {
+        $changedPathSet = self::changedPathSet($changedPaths);
+
         try {
             $review = json_decode(trim($output), true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
@@ -222,13 +230,14 @@ final class ReadonlyReviewerContract
         }
 
         foreach ($findings as $finding) {
-            self::validateFinding($finding);
+            self::validateFinding($finding, $changedPathSet);
         }
 
         return $review;
     }
 
-    private static function validateFinding(mixed $finding): void
+    /** @param array<string, true> $changedPathSet */
+    private static function validateFinding(mixed $finding, array $changedPathSet): void
     {
         if (!is_array($finding) || array_is_list($finding)) {
             throw new \InvalidArgumentException('Reviewer finding has an invalid shape.');
@@ -245,13 +254,38 @@ final class ReadonlyReviewerContract
         if (!in_array($finding['priority'] ?? null, ['P0', 'P1', 'P2', 'P3'], true)) {
             throw new \InvalidArgumentException('Reviewer finding priority is invalid.');
         }
-        foreach (['title', 'file', 'impact', 'trigger'] as $key) {
+        foreach (['title', 'impact', 'trigger'] as $key) {
             if (!is_string($finding[$key] ?? null) || trim($finding[$key]) === '') {
                 throw new \InvalidArgumentException('Reviewer finding text is invalid.');
             }
         }
+        $file = $finding['file'] ?? null;
+        if (!is_string($file) || !RepoPath::isNormalized($file) || !isset($changedPathSet[$file])) {
+            throw new \InvalidArgumentException('Reviewer finding file is not a changed repository path.');
+        }
         if (($finding['line'] ?? null) !== null && (!is_int($finding['line']) || $finding['line'] < 1)) {
             throw new \InvalidArgumentException('Reviewer finding line is invalid.');
         }
+    }
+
+    /**
+     * @param list<string> $changedPaths
+     * @return array<string, true>
+     */
+    private static function changedPathSet(array $changedPaths): array
+    {
+        if (!array_is_list($changedPaths)) {
+            throw new \InvalidArgumentException('Reviewer changed-path evidence is invalid.');
+        }
+
+        $set = [];
+        foreach ($changedPaths as $path) {
+            if (!is_string($path) || !RepoPath::isNormalized($path)) {
+                throw new \InvalidArgumentException('Reviewer changed-path evidence is invalid.');
+            }
+            $set[$path] = true;
+        }
+
+        return $set;
     }
 }

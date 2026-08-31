@@ -80,7 +80,15 @@ class AgentWorkflowContractTest extends TestCase
             'explicit_primary_codex_with_canonical_target',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
+        self::assertSame(
+            'canonical_physical_root',
+            $contract['authority']['reviewer']['repository_root_policy'] ?? null,
+        );
         self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
+        self::assertSame(
+            'normalized_exact_diff_paths',
+            $contract['authority']['reviewer']['finding_path_policy'] ?? null,
+        );
         self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
         self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);

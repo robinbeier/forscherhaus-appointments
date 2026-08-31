@@ -29,7 +29,9 @@
             "git_runtime_configuration": "ignore_ambient_and_disable_helpers",
             "git_lazy_fetch": "disabled",
             "tool_path_policy": "explicit_primary_codex_with_canonical_target",
+            "repository_root_policy": "canonical_physical_root",
             "codex_identity_check": "basename_and_version",
+            "finding_path_policy": "normalized_exact_diff_paths",
             "web_search": "disabled",
             "review_checkout": "private_exact_commit_clone",
             "trusted_base_paths": [
