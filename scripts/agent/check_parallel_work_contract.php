@@ -342,24 +342,32 @@ function collectLaneChanges(string $gitBinary, string $root, string $baseSha): a
         ['diff', '--cached', '--name-only', '-z', '--no-renames', '--no-ext-diff', '--no-textconv', '--'],
         ['ls-files', '--others', '--exclude-standard', '-z', '--'],
     ];
-    $paths = [];
+    $committedPaths = [];
     $localPaths = [];
-    foreach ([...$committedCommands, ...$localCommands] as $commandIndex => $command) {
+    foreach ($committedCommands as $command) {
         [$exitCode, $stdout] = runTrustedGit($gitBinary, $root, $command);
         if ($exitCode !== 0) {
             return [[], [], ['lane_changes_unavailable'], $headSha];
         }
         foreach (explode("\0", $stdout) as $path) {
             if ($path !== '') {
-                $paths[$path] = true;
-                if ($commandIndex >= count($committedCommands)) {
-                    $localPaths[$path] = true;
-                }
+                $committedPaths[$path] = true;
+            }
+        }
+    }
+    foreach ($localCommands as $command) {
+        [$exitCode, $stdout] = runTrustedGit($gitBinary, $root, $command);
+        if ($exitCode !== 0) {
+            return [[], [], ['lane_changes_unavailable'], $headSha];
+        }
+        foreach (explode("\0", $stdout) as $path) {
+            if ($path !== '') {
+                $localPaths[$path] = true;
             }
         }
     }
 
-    $changedPaths = array_keys($paths);
+    $changedPaths = array_keys($committedPaths + $localPaths);
     sort($changedPaths, SORT_STRING);
     $changedLocalPaths = array_keys($localPaths);
     sort($changedLocalPaths, SORT_STRING);

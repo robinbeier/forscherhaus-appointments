@@ -382,8 +382,14 @@ approval escalation. Git and PHP resolve only through a fixed system tool path.
 The primary must supply Codex as an executable absolute `--codex-bin` path; the
 runner resolves its canonical target, rejects repository-owned targets even
 through symlinks, and requires the requested basename and target version output
-to identify as the Codex CLI. Repository-root and runner paths are likewise
+to identify as the Codex CLI, allowing only bounded semantic-version build
+metadata. Repository-root and runner paths are likewise
 resolved to their canonical physical targets before trust-boundary comparisons.
+The host Codex login authenticates only the model-service call and does not grant
+reviewer connector authority: user configuration and rules are ignored,
+connector-capable features are disabled, MCP is empty, command environment
+inheritance is disabled, and the reviewer may not inspect runtime authentication
+state.
 Every pre-trust Git command ignores ambient Git environment,
 global and system configuration, hooks, fsmonitor, replacement objects, lazy
 object fetching, external diff drivers, and text conversion. The runner fetches the named commits into a
@@ -398,8 +404,10 @@ extracts the listed contract, reviewer profiles, schema, validator, and review
 instructions, derives model and reasoning settings from the structured machine
 contract, and
 fail-closed validates the single JSON review object against the requested lens,
-base SHA, exact head, and normalized repository-relative files changed by that
-exact diff. Reviewer output returns to the primary; reviewers do not write
+base SHA, exact head, normalized repository-relative files changed by that
+exact diff, and bounded privacy-safe finding prose. Credential-, capability-,
+contact-, user-home-, URL-, and long hash-like values are rejected. Reviewer
+output returns to the primary; reviewers do not write
 files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not
 delegate. The primary alone decides how findings are integrated or published.
 

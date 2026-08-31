@@ -10,6 +10,27 @@ require_once __DIR__ . '/RepoPath.php';
 
 final class ReadonlyReviewerContract
 {
+    /** @var array<string, int> */
+    private const FINDING_TEXT_MAX_BYTES = [
+        'title' => 160,
+        'impact' => 1200,
+        'trigger' => 1200,
+    ];
+
+    /** @var list<string> */
+    private const SENSITIVE_FINDING_TEXT_PATTERNS = [
+        '/[\x00-\x1F\x7F]/',
+        '/\b(?:Bearer|Basic)\s+[A-Za-z0-9+\/_=.-]{8,}\b/i',
+        '/\b(?:sk|rk|pk|gh[pousr]|xox[baprs])[-_][A-Za-z0-9._-]{12,}\b/i',
+        '/\bAKIA[0-9A-Z]{16}\b/',
+        '/\b(?:password|passwd|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|session[_ -]?id|cookie)\s*[:=]\s*\S+/i',
+        '/\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b/i',
+        '#\b(?:https?|ssh)://\S+#i',
+        '#(?:^|[\s(])/(?:Users|home)/[^/\s]+#',
+        '/\b[0-9a-f]{32,}\b/i',
+        '#(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{48,}={0,2}(?![A-Za-z0-9+/_-])#',
+    ];
+
     /** @var list<string> */
     private const REQUIRED_DISABLED_FEATURES = [
         'apps',
@@ -158,7 +179,10 @@ final class ReadonlyReviewerContract
             'tool_path_policy' => 'explicit_primary_codex_with_canonical_target',
             'repository_root_policy' => 'canonical_physical_root',
             'codex_identity_check' => 'basename_and_version',
+            'codex_version_policy' => 'semver_with_bounded_build_metadata',
+            'codex_authentication_source' => 'host_codex_login_without_connector_authority',
             'finding_path_policy' => 'normalized_exact_diff_paths',
+            'finding_text_policy' => 'bounded_privacy_safe_prose',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
             'filesystem' => 'read-only',
@@ -255,9 +279,7 @@ final class ReadonlyReviewerContract
             throw new \InvalidArgumentException('Reviewer finding priority is invalid.');
         }
         foreach (['title', 'impact', 'trigger'] as $key) {
-            if (!is_string($finding[$key] ?? null) || trim($finding[$key]) === '') {
-                throw new \InvalidArgumentException('Reviewer finding text is invalid.');
-            }
+            self::validateFindingText($key, $finding[$key] ?? null);
         }
         $file = $finding['file'] ?? null;
         if (!is_string($file) || !RepoPath::isNormalized($file) || !isset($changedPathSet[$file])) {
@@ -265,6 +287,20 @@ final class ReadonlyReviewerContract
         }
         if (($finding['line'] ?? null) !== null && (!is_int($finding['line']) || $finding['line'] < 1)) {
             throw new \InvalidArgumentException('Reviewer finding line is invalid.');
+        }
+    }
+
+    private static function validateFindingText(string $field, mixed $value): void
+    {
+        $maxBytes = self::FINDING_TEXT_MAX_BYTES[$field] ?? null;
+        if (!is_int($maxBytes) || !is_string($value) || trim($value) === '' || strlen($value) > $maxBytes) {
+            throw new \InvalidArgumentException('Reviewer finding text is invalid.');
+        }
+
+        foreach (self::SENSITIVE_FINDING_TEXT_PATTERNS as $pattern) {
+            if (preg_match($pattern, $value) === 1) {
+                throw new \InvalidArgumentException('Reviewer finding text is not privacy-safe.');
+            }
         }
     }
 

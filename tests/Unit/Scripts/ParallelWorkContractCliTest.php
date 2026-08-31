@@ -320,6 +320,28 @@ class ParallelWorkContractCliTest extends TestCase
             'ownership_violation:lane-a:scripts/agent/outside.txt',
             json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
         );
+
+        $this->runGit($this->repoRoot, ['add', 'scripts/agent/outside.txt']);
+        [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a');
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertContains(
+            'ownership_violation:lane-a:scripts/agent/outside.txt',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+
+        self::assertNotFalse(
+            file_put_contents(
+                $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
+                "\n// outside-lane unstaged change\n",
+                FILE_APPEND,
+            ),
+        );
+        [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a');
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertContains(
+            'ownership_violation:lane-a:scripts/agent/check_parallel_work_contract.php',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
     }
 
     public function testLaneVerificationRejectsAnInLaneValidator(): void

@@ -122,17 +122,26 @@ Its private trust bundle is created only below fixed system `/tmp`, not ambient
 or repository-local temporary storage.
 Git and PHP resolve through a
 fixed system path, while only the primary may pass a trusted absolute Codex
-binary path; either path must identify as the Codex CLI by basename and version
-output. Pre-trust Git probes ignore ambient Git environment, global and system
+binary path; either path must identify as the Codex CLI by basename and a
+bounded semantic-version output, including bounded build metadata. Pre-trust
+Git probes ignore ambient Git environment, global and system
 configuration, hooks, fsmonitor, replacement objects, lazy object fetching,
 external diff drivers, and text conversion. The runner materializes a private, clean, detached
 exact-commit checkout before the model starts, denies reviewer file/Git/network mutation,
 derives model settings from the selected reviewer profile, and returns one
-lens-, base-, and exact-head-bound JSON result only to the primary. Invalid or
-protocol-event output fails closed. Reviewers must not
+lens-, base-, and exact-head-bound JSON result only to the primary. Finding
+prose is length-bounded and rejected when it contains credential-, capability-,
+contact-, user-home-, URL-, or long hash-like values. Invalid, privacy-unsafe,
+or protocol-event output fails closed. Reviewers must not
 delegate or publish comments, reviews, PR changes, check reruns, merges, Linear
 changes, or workpad updates. The primary remains the only external writer and
 landing owner.
+
+The host Codex login authenticates only the explicitly authorized model-service
+call; it grants no reviewer connector authority. User configuration and rules
+are ignored, connector-capable features are disabled, MCP is empty, command
+environment inheritance is disabled, and reviewer instructions forbid reading
+or reproducing runtime authentication state.
 
 The initial trust-root introduction and changes to runtime-loaded
 `.codex/config.toml` or `AGENTS.md` require a separately enforced external

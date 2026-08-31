@@ -31,7 +31,10 @@
             "tool_path_policy": "explicit_primary_codex_with_canonical_target",
             "repository_root_policy": "canonical_physical_root",
             "codex_identity_check": "basename_and_version",
+            "codex_version_policy": "semver_with_bounded_build_metadata",
+            "codex_authentication_source": "host_codex_login_without_connector_authority",
             "finding_path_policy": "normalized_exact_diff_paths",
+            "finding_text_policy": "bounded_privacy_safe_prose",
             "web_search": "disabled",
             "review_checkout": "private_exact_commit_clone",
             "trusted_base_paths": [

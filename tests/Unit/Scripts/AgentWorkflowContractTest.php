@@ -86,8 +86,20 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
         self::assertSame(
+            'semver_with_bounded_build_metadata',
+            $contract['authority']['reviewer']['codex_version_policy'] ?? null,
+        );
+        self::assertSame(
+            'host_codex_login_without_connector_authority',
+            $contract['authority']['reviewer']['codex_authentication_source'] ?? null,
+        );
+        self::assertSame(
             'normalized_exact_diff_paths',
             $contract['authority']['reviewer']['finding_path_policy'] ?? null,
+        );
+        self::assertSame(
+            'bounded_privacy_safe_prose',
+            $contract['authority']['reviewer']['finding_text_policy'] ?? null,
         );
         self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
         self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
