@@ -37,7 +37,6 @@ class Webhooks_model extends EA_Model
         'name' => 'name',
         'url' => 'url',
         'action' => 'action',
-        'secretToken' => 'secret_token',
         'isActive' => 'is_active',
         'isSslVerified' => 'is_ssl_verified',
         'notes' => 'notes',
@@ -73,7 +72,7 @@ class Webhooks_model extends EA_Model
     public function validate(array $webhook): void
     {
         if (empty($webhook['name']) || empty($webhook['url'])) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($webhook, true));
+            throw new InvalidArgumentException('Not all required webhook fields are provided.');
         }
     }
 
@@ -290,7 +289,6 @@ class Webhooks_model extends EA_Model
             'name' => $webhook['name'],
             'url' => $webhook['url'],
             'actions' => $webhook['actions'],
-            'secret_token' => $webhook['secret_token'],
             'is_ssl_verified' => $webhook['is_ssl_verified'],
             'notes' => $webhook['notes'],
         ];
@@ -325,7 +323,17 @@ class Webhooks_model extends EA_Model
         }
 
         if (array_key_exists('secretToken', $webhook)) {
-            $decoded_resource['secret_token'] = $webhook['secretToken'];
+            $secret_token = $webhook['secretToken'];
+
+            if ($secret_token !== null && !is_string($secret_token)) {
+                throw new InvalidArgumentException('The secretToken field must be a string or null.');
+            }
+
+            if (is_string($secret_token) && strlen($secret_token) > 512) {
+                throw new InvalidArgumentException('The secretToken field must not exceed 512 characters.');
+            }
+
+            $decoded_resource['secret_token'] = $secret_token;
         }
 
         if (array_key_exists('isSslVerified', $webhook)) {

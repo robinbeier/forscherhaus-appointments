@@ -2535,15 +2535,11 @@ components:
                             type: boolean
                         googleCalendar:
                             type: string
-                        googleToken:
-                            type: string
                         caldavSync:
                             type: boolean
                         caldavUrl:
                             type: string
                         caldavUsername:
-                            type: string
-                        caldavPassword:
                             type: string
                         syncFutureDays:
                             type: string
@@ -2574,11 +2570,9 @@ components:
                     calendarView: default
                     googleSync: false
                     googleCalendar: null
-                    googleToken: null
                     caldavSync: false
                     caldavUrl: null
                     caldavUsername: null
-                    caldavPassword: null
                     syncFutureDays: 90
                     syncPastDays: 30
                     workingPlan:
@@ -2655,6 +2649,10 @@ components:
                             type: string
                         googleToken:
                             type: string
+                            maxLength: 65535
+                            nullable: true
+                            writeOnly: true
+                            description: Write-only Google OAuth token. Omit on update to preserve it; send null to clear it.
                         caldavSync:
                             type: boolean
                         caldavUrl:
@@ -2663,6 +2661,11 @@ components:
                             type: string
                         caldavPassword:
                             type: string
+                            format: password
+                            maxLength: 256
+                            nullable: true
+                            writeOnly: true
+                            description: Write-only CalDAV password. Omit on update to preserve it; send null to clear it.
                         syncFutureDays:
                             type: string
                         syncPastDays:
@@ -2691,11 +2694,9 @@ components:
                     calendarView: default
                     googleSync: false
                     googleCalendar: null
-                    googleToken: null
                     caldavSync: false
                     caldavUrl: null
                     caldavUsername: null
-                    caldavPassword: null
                     syncFutureDays: 90
                     syncPastDays: 30
                     workingPlan:
@@ -2876,8 +2877,6 @@ components:
                     type: string
                 actions:
                     type: string
-                secretToken:
-                    type: string
                 isSslVerified:
                     type: boolean
                 notes:
@@ -2887,7 +2886,6 @@ components:
                 name: Test Webhook
                 url: https://example.org/webhook?withTestQueryParam=Value
                 actions: appointment_create,appointment_update,customer_delete,category_create
-                secretToken: SecureSecretTokenHere
                 isSslVerified: true
                 notes: This is a webhook.
         WebhookPayload:
@@ -2901,6 +2899,10 @@ components:
                     type: string
                 secretToken:
                     type: string
+                    nullable: true
+                    writeOnly: true
+                    maxLength: 512
+                    description: Write-only webhook credential. Omit on update to preserve it; send null to clear it.
                 isSslVerified:
                     type: boolean
                 notes:
@@ -2909,7 +2911,6 @@ components:
                 name: Test Webhook
                 url: https://example.org/webhook?withTestQueryParam=Value
                 actions: appointment_create,appointment_update,customer_delete,category_create
-                secretToken: SecureSecretTokenHere
                 isSslVerified: true
                 notes: This is a webhook.
         BlockedPeroidRecord:
