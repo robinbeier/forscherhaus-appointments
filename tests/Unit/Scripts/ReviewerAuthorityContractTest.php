@@ -818,6 +818,40 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertFileDoesNotExist($capturePath, 'Codex must not run for a Codex runtime configuration change.');
         self::assertFileDoesNotExist($fsmonitorMarker, 'Ambient fsmonitor helpers must never execute.');
         self::assertFileDoesNotExist($diffMarker, 'Ambient external diff drivers must never execute.');
+
+        $this->runGit($fixtureRepo, ['checkout', '-q', '--detach', $head]);
+        self::assertTrue(symlink('/etc/hosts', $fixtureRepo . '/tracked-host-link'));
+        $this->runGit($fixtureRepo, ['add', 'tracked-host-link']);
+        $this->runGit($fixtureRepo, ['commit', '-qm', 'tracked symlink']);
+        $symlinkHead = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD']);
+        if (file_exists($capturePath)) {
+            self::assertTrue(unlink($capturePath));
+        }
+
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--codex-bin=' . $fakeCodex,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $symlinkHead,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(1, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('contains a tracked symlink', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'A tracked symlink must fail before Codex starts.');
     }
 
     public function testOutputValidationRejectsCodexEventStreamAndWrongExactHead(): void
@@ -953,6 +987,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'Contact reviewer@example.invalid',
             'Open https://example.invalid/capability/value',
             'Read /Users/example/.codex/auth.json',
+            'Read /root/.codex/auth.json',
             'Token=' . str_repeat('a', 40),
             'Opaque ' . str_repeat('Ab9_', 12),
             str_repeat('x', 1201),
@@ -1257,6 +1292,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'finding_text_policy' => 'bounded_privacy_safe_prose',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
+            'review_checkout_symlink_policy' => 'reject_all_tracked_symlinks',
             'trusted_base_paths' => [
                 '.codex/contracts/agent-workflow.json',
                 $profile,

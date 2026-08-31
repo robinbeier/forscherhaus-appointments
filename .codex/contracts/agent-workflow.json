@@ -37,6 +37,7 @@
             "finding_text_policy": "bounded_privacy_safe_prose",
             "web_search": "disabled",
             "review_checkout": "private_exact_commit_clone",
+            "review_checkout_symlink_policy": "reject_all_tracked_symlinks",
             "trusted_base_paths": [
                 ".codex/contracts/agent-workflow.json",
                 ".codex/agents/reviewer-correctness.toml",

@@ -26,7 +26,7 @@ final class ReadonlyReviewerContract
         '/\b(?:password|passwd|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|session[_ -]?id|cookie)\s*[:=]\s*\S+/i',
         '/\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b/i',
         '#\b(?:https?|ssh)://\S+#i',
-        '#(?:^|[\s(])/(?:Users|home)/[^/\s]+#',
+        '#(?:^|[\s(])/(?:root(?:/|\b)|(?:Users|home)/[^/\s]+)#',
         '/\b[0-9a-f]{32,}\b/i',
         '#(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{48,}={0,2}(?![A-Za-z0-9+/_-])#',
     ];
@@ -185,6 +185,7 @@ final class ReadonlyReviewerContract
             'finding_text_policy' => 'bounded_privacy_safe_prose',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
+            'review_checkout_symlink_policy' => 'reject_all_tracked_symlinks',
             'filesystem' => 'read-only',
             'network' => 'denied',
             'approval_policy' => 'never',

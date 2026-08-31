@@ -278,6 +278,24 @@ if [[ "$(trusted_git -C "$review_root" rev-parse HEAD)" != "$head_sha" || -n "$(
     echo "Reviewer exact-commit checkout failed validation." >&2
     exit 1
 fi
+if ! trusted_git -C "$review_root" ls-files --stage -z | env -u PHPRC -u PHP_INI_SCAN_DIR \
+    "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
+        $raw = (string) stream_get_contents(STDIN);
+        if ($raw !== "" && !str_ends_with($raw, "\0")) {
+            exit(1);
+        }
+        foreach ($raw === "" ? [] : explode("\0", substr($raw, 0, -1)) as $entry) {
+            if (preg_match("/^([0-7]{6}) [0-9a-f]+ [0-3]\t/", $entry, $matches) !== 1) {
+                exit(1);
+            }
+            if ($matches[1] === "120000") {
+                exit(1);
+            }
+        }
+    '; then
+    echo "Reviewer exact-commit checkout contains a tracked symlink or invalid index entry." >&2
+    exit 1
+fi
 
 contract_relative_path=".codex/contracts/agent-workflow.json"
 bootstrap_paths=(

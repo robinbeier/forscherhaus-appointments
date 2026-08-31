@@ -127,7 +127,8 @@ bounded semantic-version output, including bounded build metadata. Pre-trust
 Git probes ignore ambient Git environment, global and system
 configuration, hooks, fsmonitor, replacement objects, lazy object fetching,
 external diff drivers, and text conversion. The runner materializes a private, clean, detached
-exact-commit checkout before the model starts, denies reviewer file/Git/network mutation,
+exact-commit checkout before the model starts, rejects every tracked symlink so
+the checkout cannot escape into host paths, denies reviewer file/Git/network mutation,
 derives model settings from the selected reviewer profile, and returns one
 lens-, base-, and exact-head-bound JSON result only to the primary. Finding
 prose is length-bounded and rejected when it contains credential-, capability-,

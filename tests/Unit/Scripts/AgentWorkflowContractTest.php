@@ -103,6 +103,10 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
         self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
+        self::assertSame(
+            'reject_all_tracked_symlinks',
+            $contract['authority']['reviewer']['review_checkout_symlink_policy'] ?? null,
+        );
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
