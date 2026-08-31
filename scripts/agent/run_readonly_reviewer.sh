@@ -25,15 +25,7 @@ foreach (
         'COLORTERM',
         'CODEX_HOME',
         'OPENAI_API_KEY',
-        'OPENAI_BASE_URL',
         'CODEX_API_KEY',
-        'HTTP_PROXY',
-        'HTTPS_PROXY',
-        'ALL_PROXY',
-        'NO_PROXY',
-        'SSL_CERT_FILE',
-        'SSL_CERT_DIR',
-        'NODE_EXTRA_CA_CERTS',
     ] as $name
 ) {
     $value = getenv($name);

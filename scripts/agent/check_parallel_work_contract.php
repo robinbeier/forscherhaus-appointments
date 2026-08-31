@@ -14,6 +14,7 @@ $manifestPath = null;
 $requestedRepoRoot = null;
 $verifyLane = null;
 $requireClean = false;
+$allowDirtyPrecommit = false;
 
 foreach (array_slice($argv, 1) as $argument) {
     if (str_starts_with($argument, '--manifest=')) {
@@ -30,6 +31,10 @@ foreach (array_slice($argv, 1) as $argument) {
     }
     if ($argument === '--require-clean') {
         $requireClean = true;
+        continue;
+    }
+    if ($argument === '--allow-dirty-precommit') {
+        $allowDirtyPrecommit = true;
         continue;
     }
     fwrite(STDERR, "Unknown option.\n");
@@ -50,6 +55,18 @@ if ($verifyLane !== null && ($requestedRepoRoot === null || $requestedRepoRoot =
 }
 if ($requireClean && $verifyLane === null) {
     fwrite(STDERR, "Parallel-work clean verification requires --verify-lane.\n");
+    exit(2);
+}
+if ($allowDirtyPrecommit && $verifyLane === null) {
+    fwrite(STDERR, "Parallel-work pre-commit verification requires --verify-lane.\n");
+    exit(2);
+}
+if ($requireClean && $allowDirtyPrecommit) {
+    fwrite(STDERR, "Parallel-work verification modes are mutually exclusive.\n");
+    exit(2);
+}
+if ($verifyLane !== null && !$requireClean && !$allowDirtyPrecommit) {
+    fwrite(STDERR, "Parallel-work lane verification requires an explicit evidence mode.\n");
     exit(2);
 }
 
@@ -89,6 +106,18 @@ $baseSha = $manifest['base_sha'] ?? null;
 if (!is_string($baseSha) || preg_match('/^[a-f0-9]{40}$/D', $baseSha) !== 1) {
     fwrite(STDERR, "Parallel-work input has an invalid shape.\n");
     exit(2);
+}
+
+$validatorErrors = verifyValidatorCheckout($gitBinary, $validatorRoot, $baseSha);
+if ($validatorErrors !== []) {
+    fwrite(
+        STDOUT,
+        json_encode(
+            ['schema_version' => 1, 'status' => 'fail', 'errors' => $validatorErrors],
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+        ) . PHP_EOL,
+    );
+    exit(1);
 }
 
 $contractJson = readGitBlob($gitBinary, $root, $baseSha, '.codex/contracts/agent-workflow.json');
@@ -144,13 +173,16 @@ if ($verifyLane !== null && $errors === []) {
             'base_sha' => $baseSha,
             'head_sha' => $headSha,
             'working_tree_clean' => $localPaths === [],
+            'evidence_level' => $requireClean ? 'integration' : 'pre_commit',
+            'integration_ready' => $requireClean && $localPaths === [],
             'changed_paths_sha256' => hash('sha256', implode("\0", $changedPaths)),
         ];
     }
 }
+$status = $errors === [] ? ($allowDirtyPrecommit ? 'provisional_pass' : 'pass') : 'fail';
 $result = [
     'schema_version' => 1,
-    'status' => $errors === [] ? 'pass' : 'fail',
+    'status' => $status,
     'errors' => $errors,
 ];
 if ($verification !== null) {
@@ -228,6 +260,37 @@ function readGitBlob(string $gitBinary, string $root, string $sha, string $path)
     [$exitCode, $stdout] = runTrustedGit($gitBinary, $root, ['show', $sha . ':' . $path]);
 
     return $exitCode === 0 ? $stdout : null;
+}
+
+/** @return list<string> */
+function verifyValidatorCheckout(string $gitBinary, string $validatorRoot, string $baseSha): array
+{
+    $validatorRealRoot = realpath($validatorRoot);
+    if ($validatorRealRoot === false) {
+        return ['validator_checkout_invalid'];
+    }
+
+    [$rootExitCode, $rootOutput] = runTrustedGit($gitBinary, $validatorRealRoot, ['rev-parse', '--show-toplevel']);
+    $resolvedRoot = $rootExitCode === 0 ? realpath(trim($rootOutput)) : false;
+    if ($resolvedRoot === false || $resolvedRoot !== $validatorRealRoot) {
+        return ['validator_checkout_invalid'];
+    }
+
+    [$headExitCode, $headOutput] = runTrustedGit($gitBinary, $validatorRealRoot, ['rev-parse', '--verify', 'HEAD']);
+    if ($headExitCode !== 0 || !hash_equals($baseSha, trim($headOutput))) {
+        return ['validator_base_mismatch'];
+    }
+
+    [$statusExitCode, $statusOutput] = runTrustedGit($gitBinary, $validatorRealRoot, [
+        'status',
+        '--porcelain',
+        '--untracked-files=all',
+    ]);
+    if ($statusExitCode !== 0 || $statusOutput !== '') {
+        return ['validator_worktree_not_clean'];
+    }
+
+    return [];
 }
 
 /** @return list<string> */

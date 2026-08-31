@@ -135,9 +135,15 @@ class AgentWorkflowContractTest extends TestCase
             'scripts/agent/check_parallel_work_contract.sh',
             $contract['parallel_work']['validator_invocation'] ?? null,
         );
-        self::assertSame('declared_base_commit', $contract['parallel_work']['validator_trust_anchor'] ?? null);
+        self::assertSame(
+            'clean_external_checkout_at_declared_base',
+            $contract['parallel_work']['validator_trust_anchor'] ?? null,
+        );
+        self::assertTrue($contract['parallel_work']['admission_requires_clean_exact_base_checkout'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_post_implementation_verification'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_clean_post_commit_verification'] ?? null);
+        self::assertSame('provisional_pass', $contract['parallel_work']['dirty_precommit_status'] ?? null);
+        self::assertSame('pass', $contract['parallel_work']['clean_integration_status'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['parallel_work']['php_runtime_configuration'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
         self::assertSame(

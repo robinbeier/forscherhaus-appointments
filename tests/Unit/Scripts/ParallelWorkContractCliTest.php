@@ -8,15 +8,14 @@ use PHPUnit\Framework\TestCase;
 
 class ParallelWorkContractCliTest extends TestCase
 {
-    private string $sourceRepoRoot;
     private string $repoRoot;
+    private string $trustedValidatorRoot;
     private string $baseSha;
 
     protected function setUp(): void
     {
         parent::setUp();
         $sourceRepoRoot = dirname(__DIR__, 3);
-        $this->sourceRepoRoot = $sourceRepoRoot;
         $this->repoRoot = sys_get_temp_dir() . '/parallel-work-repo-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($this->repoRoot . '/scripts/agent/lib', 0700, true));
         self::assertTrue(mkdir($this->repoRoot . '/.codex/contracts', 0700, true));
@@ -53,6 +52,15 @@ class ParallelWorkContractCliTest extends TestCase
         $this->runGit($this->repoRoot, ['add', '.']);
         $this->runGit($this->repoRoot, ['commit', '-qm', 'trusted base']);
         $this->baseSha = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
+        $this->trustedValidatorRoot = sys_get_temp_dir() . '/parallel-work-validator-' . bin2hex(random_bytes(8));
+        $this->runGit(sys_get_temp_dir(), [
+            'clone',
+            '-q',
+            '--no-hardlinks',
+            $this->repoRoot,
+            $this->trustedValidatorRoot,
+        ]);
+        $this->runGit($this->trustedValidatorRoot, ['checkout', '-q', '--detach', $this->baseSha]);
     }
 
     public function testCliAcceptsValidManifestThroughCanonicalContract(): void
@@ -168,7 +176,8 @@ class ParallelWorkContractCliTest extends TestCase
         $this->runGit($this->repoRoot, ['add', '.codex/contracts/agent-workflow.json']);
         $this->runGit($this->repoRoot, ['commit', '-qm', 'replacement policy']);
         $replacementSha = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
-        $this->runGit($this->repoRoot, ['replace', $this->baseSha, $replacementSha]);
+        $this->runGit($this->trustedValidatorRoot, ['fetch', '-q', $this->repoRoot, $replacementSha]);
+        $this->runGit($this->trustedValidatorRoot, ['replace', $this->baseSha, $replacementSha]);
 
         $ambientDirectory = sys_get_temp_dir() . '/parallel-work-ambient-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($ambientDirectory, 0700));
@@ -272,7 +281,10 @@ class ParallelWorkContractCliTest extends TestCase
         [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a');
         self::assertSame(0, $exitCode, $stderr);
         self::assertSame('', $stderr);
-        self::assertSame('pass', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['status']);
+        $precommitResult = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('provisional_pass', $precommitResult['status']);
+        self::assertSame('pre_commit', $precommitResult['verification']['evidence_level']);
+        self::assertFalse($precommitResult['verification']['integration_ready']);
 
         [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a', true);
         self::assertSame(1, $exitCode, $stderr);
@@ -290,6 +302,8 @@ class ParallelWorkContractCliTest extends TestCase
             $cleanResult['verification']['head_sha'],
         );
         self::assertTrue($cleanResult['verification']['working_tree_clean']);
+        self::assertSame('integration', $cleanResult['verification']['evidence_level']);
+        self::assertTrue($cleanResult['verification']['integration_ready']);
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $cleanResult['verification']['changed_paths_sha256']);
 
         self::assertNotFalse(file_put_contents($this->repoRoot . '/scripts/agent/outside.txt', "outside\n"));
@@ -308,11 +322,15 @@ class ParallelWorkContractCliTest extends TestCase
             'self-verification',
             $this->manifestForPath('tests/Fixtures/parallel/lane-a'),
         );
-        [$exitCode, $stdout, $stderr] = $this->runCli([
-            '--manifest=' . $manifestPath,
-            '--repo-root=' . $this->repoRoot,
-            '--verify-lane=lane-a',
-        ]);
+        [$exitCode, $stdout, $stderr] = $this->runCli(
+            [
+                '--manifest=' . $manifestPath,
+                '--repo-root=' . $this->repoRoot,
+                '--verify-lane=lane-a',
+                '--allow-dirty-precommit',
+            ],
+            $this->repoRoot,
+        );
 
         self::assertSame(1, $exitCode, $stderr);
         self::assertSame('', $stderr);
@@ -320,6 +338,61 @@ class ParallelWorkContractCliTest extends TestCase
             'validator_must_run_outside_lane',
             json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
         );
+    }
+
+    public function testAdmissionRejectsAManifestBaseDifferentFromTheTrustedCheckout(): void
+    {
+        self::assertNotFalse(file_put_contents($this->repoRoot . '/new-base.txt', "new base\n"));
+        $this->runGit($this->repoRoot, ['add', 'new-base.txt']);
+        $this->runGit($this->repoRoot, ['commit', '-qm', 'different base']);
+        $otherBase = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
+        $this->runGit($this->trustedValidatorRoot, ['fetch', '-q', $this->repoRoot, $otherBase]);
+        $manifestPath = $this->writeJsonFixture('different-base', $this->manifestForPath('safe/path', $otherBase));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains('validator_base_mismatch', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors']);
+    }
+
+    public function testAdmissionRejectsADirtyValidatorCheckout(): void
+    {
+        self::assertNotFalse(
+            file_put_contents(
+                $this->trustedValidatorRoot . '/scripts/agent/lib/ParallelWorkContract.php',
+                "\n// untrusted admission-policy change\n",
+                FILE_APPEND,
+            ),
+        );
+        $manifestPath = $this->writeJsonFixture('dirty-validator', $this->manifestForPath('safe/path'));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'validator_worktree_not_clean',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+    }
+
+    public function testLaneVerificationRequiresAnExplicitEvidenceMode(): void
+    {
+        $manifestPath = $this->writeJsonFixture(
+            'missing-evidence-mode',
+            $this->manifestForPath('tests/Fixtures/parallel/lane-a'),
+        );
+
+        [$exitCode, $stdout, $stderr] = $this->runCli([
+            '--manifest=' . $manifestPath,
+            '--repo-root=' . $this->repoRoot,
+            '--verify-lane=lane-a',
+        ]);
+
+        self::assertSame(2, $exitCode);
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('requires an explicit evidence mode', $stderr);
     }
 
     public function testCliRejectsUnknownOptionBeforeReadingInputs(): void
@@ -374,7 +447,7 @@ class ParallelWorkContractCliTest extends TestCase
      */
     private function runCli(array $arguments, ?string $repoRoot = null, ?array $environment = null): array
     {
-        $repoRoot ??= $this->repoRoot;
+        $repoRoot ??= $this->trustedValidatorRoot;
         $process = proc_open(
             [$repoRoot . '/scripts/agent/check_parallel_work_contract.sh', ...$arguments],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
@@ -395,19 +468,21 @@ class ParallelWorkContractCliTest extends TestCase
     private function runTrustedLaneVerification(string $manifestPath, string $laneId, bool $requireClean = false): array
     {
         $arguments = [
-            $this->sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.sh',
+            $this->trustedValidatorRoot . '/scripts/agent/check_parallel_work_contract.sh',
             '--manifest=' . $manifestPath,
             '--repo-root=' . $this->repoRoot,
             '--verify-lane=' . $laneId,
         ];
         if ($requireClean) {
             $arguments[] = '--require-clean';
+        } else {
+            $arguments[] = '--allow-dirty-precommit';
         }
         $process = proc_open(
             $arguments,
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
-            $this->sourceRepoRoot,
+            $this->trustedValidatorRoot,
         );
         self::assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);

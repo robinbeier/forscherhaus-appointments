@@ -78,6 +78,10 @@ class ReviewerAuthorityContractTest extends TestCase
             'clean_bootstrap_environment',
             $contract['authority']['reviewer']['shell_runtime_configuration'] ?? null,
         );
+        self::assertSame(
+            'fixed_direct_no_ambient_proxy_or_endpoint_override',
+            $contract['authority']['reviewer']['transport_environment_policy'] ?? null,
+        );
         self::assertSame('fixed_system_tmp', $contract['authority']['reviewer']['temporary_directory_policy'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertSame(
@@ -249,6 +253,14 @@ class ReviewerAuthorityContractTest extends TestCase
                     printf 'GITHUB_PAT=%s\n' "${GITHUB_PAT-unset}"
                     printf 'LINEAR_API_KEY=%s\n' "${LINEAR_API_KEY-unset}"
                     printf 'LINEAR_TOKEN=%s\n' "${LINEAR_TOKEN-unset}"
+                    printf 'OPENAI_BASE_URL=%s\n' "${OPENAI_BASE_URL-unset}"
+                    printf 'HTTP_PROXY=%s\n' "${HTTP_PROXY-unset}"
+                    printf 'HTTPS_PROXY=%s\n' "${HTTPS_PROXY-unset}"
+                    printf 'ALL_PROXY=%s\n' "${ALL_PROXY-unset}"
+                    printf 'NO_PROXY=%s\n' "${NO_PROXY-unset}"
+                    printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE-unset}"
+                    printf 'SSL_CERT_DIR=%s\n' "${SSL_CERT_DIR-unset}"
+                    printf 'NODE_EXTRA_CA_CERTS=%s\n' "${NODE_EXTRA_CA_CERTS-unset}"
                     printf 'PROMPT\n'
                     cat
                 } > __CAPTURE_PATH__
@@ -298,6 +310,21 @@ class ReviewerAuthorityContractTest extends TestCase
         $environment['GITHUB_PAT'] = 'credential-sentinel';
         $environment['LINEAR_API_KEY'] = 'credential-sentinel';
         $environment['LINEAR_TOKEN'] = 'credential-sentinel';
+        foreach (
+            [
+                'OPENAI_BASE_URL',
+                'HTTP_PROXY',
+                'HTTPS_PROXY',
+                'ALL_PROXY',
+                'NO_PROXY',
+                'SSL_CERT_FILE',
+                'SSL_CERT_DIR',
+                'NODE_EXTRA_CA_CERTS',
+            ]
+            as $transportVariable
+        ) {
+            $environment[$transportVariable] = 'transport-sentinel';
+        }
         $phpMarker = $temporaryDirectory . '/ambient-php-configuration-ran';
         $autoPrepend = $temporaryDirectory . '/auto-prepend.php';
         self::assertNotFalse(
@@ -406,6 +433,22 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("LINEAR_API_KEY=unset\n", $capture);
         self::assertStringContainsString("LINEAR_TOKEN=unset\n", $capture);
         self::assertStringNotContainsString('credential-sentinel', $capture);
+        self::assertStringNotContainsString('transport-sentinel', $capture);
+        foreach (
+            [
+                'OPENAI_BASE_URL',
+                'HTTP_PROXY',
+                'HTTPS_PROXY',
+                'ALL_PROXY',
+                'NO_PROXY',
+                'SSL_CERT_FILE',
+                'SSL_CERT_DIR',
+                'NODE_EXTRA_CA_CERTS',
+            ]
+            as $transportVariable
+        ) {
+            self::assertStringContainsString($transportVariable . "=unset\n", $capture);
+        }
         self::assertStringContainsString('/readonly-reviewer-base.', $capture);
         self::assertStringNotContainsString(
             $fixtureRepo . '/scripts/agent/readonly-review-output.schema.json',

@@ -104,16 +104,19 @@ Parallel work means local implementation only. It is opt-in for explicitly
 approved, independently verifiable lanes; normal PR publication, Linear
 mutation, integration, attestation, and landing remain serial.
 
-Before opening writer lanes, the primary records a small JSON manifest and runs
+Before opening writer lanes, the primary records a small JSON manifest outside
+the validator checkout. From a separate clean primary checkout detached at the
+already verified common base, it runs
 
 ```bash
 scripts/agent/check_parallel_work_contract.sh --manifest=<lane-manifest.json>
 ```
 
 The checker starts PHP without ambient `php.ini`, `PHPRC`, scan directories,
-or prepend/append hooks, then reads both the workflow contract and the ownership
-map from the manifest's declared base commit. Mutable files in the current
-checkout cannot relax the policy used to approve a lane.
+or prepend/append hooks. It first requires its own checkout to be clean and its
+HEAD to equal the manifest's declared base, then reads both the workflow
+contract and the ownership map from that exact commit. A caller-controlled SHA
+or mutable validator checkout cannot relax the policy used to approve a lane.
 
 The manifest names one full lowercase common base SHA, the primary ID, exact
 `primary_approved_component_ids` for any intersected `single-owner` or
@@ -149,18 +152,21 @@ run the validator from a separate clean primary checkout whose validator files
 match the lane's declared base:
 
 ```bash
-scripts/agent/check_parallel_work_contract.sh --manifest=<lane-manifest.json> --repo-root=<absolute-lane-worktree> --verify-lane=<lane-id>
+scripts/agent/check_parallel_work_contract.sh --manifest=<lane-manifest.json> --repo-root=<absolute-lane-worktree> --verify-lane=<lane-id> --allow-dirty-precommit
 ```
 
-Verification fails closed unless the validator wrapper, CLI, shared path
+Verification requires an explicit evidence mode and fails closed unless the validator wrapper, CLI, shared path
 grammar, and contract implementation match their declared-base blobs. It then
 checks that the lane HEAD descends from the base and compares all committed,
 staged, unstaged, and non-ignored untracked paths with the lane's declared ownership. An
 ownership violation, base drift, invalid path, or in-lane validator invocation
-blocks integration. After the primary creates the lane commit, it reruns the
-same command with `--require-clean`; only that clean result is integration
-evidence because it binds the declared base, immutable lane HEAD, clean local
-state, and a changed-path digest. The primary records both passes in the
+blocks integration. `--allow-dirty-precommit` returns only
+`status: provisional_pass` and can never be integration evidence. After the
+primary creates the lane commit, it reruns the same command with
+`--require-clean`; only `status: pass` with `integration_ready: true` is
+integration evidence because it binds the declared base, immutable lane HEAD,
+clean local state, and a changed-path digest. Omitting both evidence modes is a
+usage error. The primary records both results in the
 existing workpad; the worker never runs or publishes this authority check.
 
 A merge invalidates the base of every remaining lane. Before any remaining
