@@ -264,6 +264,7 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("--sandbox\nread-only", $capture);
         self::assertStringContainsString('--ignore-user-config', $capture);
         self::assertSame(1, substr_count($capture, "--ignore-rules\n"));
+        self::assertStringContainsString('--strict-config', $capture);
         self::assertStringContainsString('--ephemeral', $capture);
         self::assertStringContainsString("--color\nnever", $capture);
         self::assertSame(1, substr_count($capture, "--output-schema\n"));
@@ -281,6 +282,9 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringNotContainsString("--json\n", $capture);
         self::assertStringContainsString('shell_environment_policy.inherit="none"', $capture);
         self::assertStringContainsString('sandbox_workspace_write.network_access=false', $capture);
+        self::assertSame(1, substr_count($capture, "mcp_servers={}\n"));
+        self::assertSame(1, substr_count($capture, "agents.max_threads=1\n"));
+        self::assertSame(1, substr_count($capture, "agents.max_depth=0\n"));
         $contract = json_decode(
             (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
             true,
@@ -467,6 +471,39 @@ class ReviewerAuthorityContractTest extends TestCase
             str_repeat('b', 40),
             str_repeat('a', 40),
         );
+    }
+
+    public function testOutputValidationAcceptsValidFindings(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+        $finding = [
+            'priority' => 'P2',
+            'title' => 'Finding',
+            'file' => 'WORKFLOW.md',
+            'line' => 1,
+            'impact' => 'Impact',
+            'trigger' => 'Trigger',
+        ];
+
+        $validated = ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'findings',
+                    'findings' => [$finding],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            $base,
+            $head,
+        );
+
+        self::assertSame('findings', $validated['verdict']);
+        self::assertSame([$finding], $validated['findings']);
     }
 
     public function testOutputValidationRejectsVerdictFindingMismatch(): void
