@@ -102,15 +102,24 @@ require three independent final reviews on the same unchanged exact head:
 - `reviewer_design` for architecture and maintainability
 - `reviewer_tests` for regression coverage and flake risk
 
-Invoke each final lens through
-`scripts/agent/run_readonly_reviewer.sh`. That repository-owned path starts a
-fresh ephemeral review without user config, exec-policy rules, or external connectors, denies
+Invoke each final lens with the exact
+`scripts/agent/run_readonly_reviewer.sh` blob from the already trusted review
+base, materialized outside the worktree as described in `WORKFLOW.md`; never
+use the head copy as its own trust anchor. The base runner also extracts its
+contract, selected role, output schema, validator, and review instructions from
+that base commit. It starts a fresh ephemeral review without user config,
+exec-policy rules, or external connectors, denies
 reviewer file/Git/network mutation, derives model settings from the selected
 reviewer profile, and returns one lens-, base-, and exact-head-bound JSON result only to
 the primary. Invalid or protocol-event output fails closed. Reviewers must not
 delegate or publish comments, reviews, PR changes, check reruns, merges, Linear
 changes, or workpad updates. The primary remains the only external writer and
 landing owner.
+
+The initial trust-root introduction and changes to runtime-loaded
+`.codex/config.toml` or `AGENTS.md` require a separately enforced external
+read-only bootstrap review. The repository runner refuses those cases instead
+of allowing a head to review its own authority boundary.
 
 Any later push invalidates those final reviews and requires exact-head review
 again.

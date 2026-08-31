@@ -60,6 +60,9 @@ final class ReadonlyReviewerContract
     private static function assertRuntimeBoundary(array $reviewerPolicy): void
     {
         $expected = [
+            'trust_anchor' => 'review_base_commit',
+            'requires_base_runner' => true,
+            'runtime_configuration_change_policy' => 'external_bootstrap_review',
             'filesystem' => 'read-only',
             'network' => 'denied',
             'approval_policy' => 'never',
@@ -73,6 +76,21 @@ final class ReadonlyReviewerContract
             if (($reviewerPolicy[$key] ?? null) !== $value) {
                 throw new \RuntimeException('Reviewer runtime boundary is invalid.');
             }
+        }
+
+        $expectedTrustedBasePaths = [
+            '.codex/contracts/agent-workflow.json',
+            '.codex/agents/reviewer-correctness.toml',
+            '.codex/agents/reviewer-design.toml',
+            '.codex/agents/reviewer-tests.toml',
+            'scripts/agent/readonly-review-output.schema.json',
+            'scripts/agent/readonly_reviewer_contract.php',
+            'scripts/agent/lib/ReadonlyReviewerContract.php',
+            'AGENTS.md',
+            'code_review.md',
+        ];
+        if (($reviewerPolicy['trusted_base_paths'] ?? null) !== $expectedTrustedBasePaths) {
+            throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
         }
     }
 

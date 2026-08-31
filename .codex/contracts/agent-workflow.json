@@ -18,6 +18,20 @@
         ],
         "reviewer": {
             "invocation": "scripts/agent/run_readonly_reviewer.sh",
+            "trust_anchor": "review_base_commit",
+            "requires_base_runner": true,
+            "runtime_configuration_change_policy": "external_bootstrap_review",
+            "trusted_base_paths": [
+                ".codex/contracts/agent-workflow.json",
+                ".codex/agents/reviewer-correctness.toml",
+                ".codex/agents/reviewer-design.toml",
+                ".codex/agents/reviewer-tests.toml",
+                "scripts/agent/readonly-review-output.schema.json",
+                "scripts/agent/readonly_reviewer_contract.php",
+                "scripts/agent/lib/ReadonlyReviewerContract.php",
+                "AGENTS.md",
+                "code_review.md"
+            ],
             "profiles": {
                 "correctness_security": ".codex/agents/reviewer-correctness.toml",
                 "design_maintainability": ".codex/agents/reviewer-design.toml",

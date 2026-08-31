@@ -52,6 +52,30 @@ class ReviewerAuthorityContractTest extends TestCase
             ],
             $contract['authority']['reviewer']['profiles'] ?? null,
         );
+        self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
+        self::assertTrue($contract['authority']['reviewer']['requires_base_runner'] ?? false);
+        self::assertSame(
+            'external_bootstrap_review',
+            $contract['authority']['reviewer']['runtime_configuration_change_policy'] ?? null,
+        );
+        self::assertSame(
+            [
+                '.codex/contracts/agent-workflow.json',
+                '.codex/agents/reviewer-correctness.toml',
+                '.codex/agents/reviewer-design.toml',
+                '.codex/agents/reviewer-tests.toml',
+                'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly_reviewer_contract.php',
+                'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'AGENTS.md',
+                'code_review.md',
+            ],
+            $contract['authority']['reviewer']['trusted_base_paths'] ?? null,
+        );
+        $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
+        foreach ($contract['authority']['reviewer']['trusted_base_paths'] as $trustedPath) {
+            self::assertStringContainsString('"' . $trustedPath . '"', $runner, (string) $trustedPath);
+        }
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
         self::assertSame(
@@ -129,8 +153,26 @@ class ReviewerAuthorityContractTest extends TestCase
         $this->runGit($fixtureRepo, ['add', '.']);
         $this->runGit($fixtureRepo, ['commit', '-qm', 'base']);
         $base = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD']);
+
+        file_put_contents(
+            $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
+            "\n# untrusted head-only runner change\n",
+            FILE_APPEND,
+        );
+        foreach (['reviewer-correctness.toml', 'reviewer-design.toml', 'reviewer-tests.toml'] as $filename) {
+            $profilePath = $fixtureRepo . '/.codex/agents/' . $filename;
+            file_put_contents(
+                $profilePath,
+                str_replace(
+                    ['model = "gpt-5.4"', 'model = "gpt-5.4-mini"'],
+                    'model = "untrusted-model"',
+                    (string) file_get_contents($profilePath),
+                ),
+            );
+        }
+        file_put_contents($fixtureRepo . '/scripts/agent/readonly-review-output.schema.json', "{}\n");
         file_put_contents($fixtureRepo . '/fixture.txt', "head\n");
-        $this->runGit($fixtureRepo, ['add', 'fixture.txt']);
+        $this->runGit($fixtureRepo, ['add', '.']);
         $this->runGit($fixtureRepo, ['commit', '-qm', 'head']);
         $head = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD']);
 
@@ -183,6 +225,7 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertSame($environment['REVIEWER_TEST_RESULT'], trim($stdout));
             $capture = (string) file_get_contents($capturePath);
             self::assertStringContainsString("--model\n" . $expectedModel, $capture, $lens);
+            self::assertStringNotContainsString('untrusted-model', $capture, $lens);
         }
 
         self::assertStringContainsString("--ask-for-approval\nnever", $capture);
@@ -209,6 +252,34 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("LINEAR_API_KEY=unset\n", $capture);
         self::assertStringContainsString("LINEAR_TOKEN=unset\n", $capture);
         self::assertStringNotContainsString('credential-sentinel', $capture);
+        self::assertStringNotContainsString(
+            $fixtureRepo . '/scripts/agent/readonly-review-output.schema.json',
+            $capture,
+        );
+
+        self::assertTrue(unlink($capturePath));
+        $process = proc_open(
+            [
+                $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
+                '--repo-root=' . $fixtureRepo,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(1, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('not the trusted copy from the review base', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'The changed head runner must not invoke Codex.');
 
         $environment['REVIEWER_TEST_RESULT'] = '{"not":"a review"}';
         [$exitCode, $stdout, $stderr] = $this->runReviewer(
@@ -237,9 +308,11 @@ class ReviewerAuthorityContractTest extends TestCase
         $unrelatedBase = $this->runGit($fixtureRepo, ['commit-tree', $tree, '-m', 'unrelated']);
         self::assertTrue(unlink($capturePath));
 
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
         $process = proc_open(
             [
-                $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
                 '--lens=correctness_security',
                 '--base-sha=' . $unrelatedBase,
                 '--head-sha=' . $head,
@@ -378,9 +451,11 @@ class ReviewerAuthorityContractTest extends TestCase
         string $base,
         string $head,
     ): array {
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
         $process = proc_open(
             [
-                $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
                 '--lens=' . $lens,
                 '--base-sha=' . $base,
                 '--head-sha=' . $head,
@@ -399,10 +474,45 @@ class ReviewerAuthorityContractTest extends TestCase
         return [proc_close($process), $stdout, $stderr];
     }
 
+    private function materializeTrustedRunner(string $fixtureRepo, string $trustedBase): string
+    {
+        $runnerPath = sys_get_temp_dir() . '/readonly-reviewer-runner-' . bin2hex(random_bytes(8));
+        $process = proc_open(
+            ['git', '-C', $fixtureRepo, 'show', $trustedBase . ':scripts/agent/run_readonly_reviewer.sh'],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        $runner = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), $stderr);
+        self::assertNotSame('', $runner);
+        self::assertNotFalse(file_put_contents($runnerPath, $runner));
+        self::assertTrue(chmod($runnerPath, 0700));
+
+        return $runnerPath;
+    }
+
     /** @return array<string, mixed> */
     private function reviewerPolicyForProfile(string $profile): array
     {
         return [
+            'trust_anchor' => 'review_base_commit',
+            'requires_base_runner' => true,
+            'runtime_configuration_change_policy' => 'external_bootstrap_review',
+            'trusted_base_paths' => [
+                '.codex/contracts/agent-workflow.json',
+                '.codex/agents/reviewer-correctness.toml',
+                '.codex/agents/reviewer-design.toml',
+                '.codex/agents/reviewer-tests.toml',
+                'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly_reviewer_contract.php',
+                'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'AGENTS.md',
+                'code_review.md',
+            ],
             'profiles' => ['tests_regression_flake' => $profile],
             'disabled_features' => ['apps'],
             'filesystem' => 'read-only',

@@ -311,20 +311,37 @@ changes require a third independent lens:
 Final reviews and blocking CI must all target the current unchanged exact PR
 head. A later push makes the earlier evidence stale.
 
-Run final reviewers through the repository-owned external read-only boundary:
+Run final reviewers through the repository-owned external read-only boundary.
+The executable, policy, profiles, schema, and validator must come from the
+already trusted review base, never from the head being reviewed. Materialize
+the base copy of `scripts/agent/run_readonly_reviewer.sh` in a private temporary
+file, then invoke that copy with the checked-out worktree as `--repo-root`:
 
 ```bash
-scripts/agent/run_readonly_reviewer.sh --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
+trusted_runner=$(mktemp "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")
+git show <base-sha>:scripts/agent/run_readonly_reviewer.sh > "$trusted_runner"
+chmod 700 "$trusted_runner"
+"$trusted_runner" --repo-root="$(git rev-parse --show-toplevel)" --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
+rm -f "$trusted_runner"
 ```
 
 The runner starts an ephemeral session without user configuration, user or
 project exec-policy rules, or external connectors, uses a read-only sandbox with network denied for reviewer commands,
 and never permits approval escalation. The machine contract selects the role;
-the runner derives model and reasoning settings from that role's TOML and
+the runner extracts the contract, reviewer profiles, schema, validator, and
+review instructions from the base commit, derives model and reasoning settings
+from that trusted role TOML, and
 fail-closed validates the single JSON review object against the requested lens,
 base SHA, and exact head. Reviewer output returns to the primary; reviewers do not write
 files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not
 delegate. The primary alone decides how findings are integrated or published.
+
+The first introduction of this trust root cannot bootstrap itself. Likewise,
+a change to `.codex/config.toml` or any `AGENTS.md` can affect reviewer runtime
+instructions before repository code runs. Those changes fail closed and need a
+separately enforced external read-only bootstrap review authorized and run by
+the primary. A bootstrap review is review evidence only; it grants no mutation,
+publication, Linear, or landing authority.
 
 After the final reviews are finding-free, record their canonical,
 privacy-safe exact-head attestation on the PR and run the repository-owned
