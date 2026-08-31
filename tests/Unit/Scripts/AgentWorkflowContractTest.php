@@ -51,6 +51,53 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('In Review', $contract['publish']['linear_state'] ?? null);
         self::assertFalse($contract['publish']['may_set_ready_to_merge'] ?? null);
         self::assertTrue($contract['publish']['push_invalidates_exact_head_evidence'] ?? null);
+        self::assertTrue($contract['authority']['primary_external_single_writer'] ?? null);
+        self::assertSame(
+            ['commit', 'push', 'pr_mutation', 'check_rerun', 'merge', 'linear_mutation', 'workpad_update'],
+            $contract['authority']['primary_owned_mutations'] ?? null,
+        );
+        self::assertSame(
+            'scripts/agent/run_readonly_reviewer.sh',
+            $contract['authority']['reviewer']['invocation'] ?? null,
+        );
+        self::assertSame('read-only', $contract['authority']['reviewer']['filesystem'] ?? null);
+        self::assertSame('denied', $contract['authority']['reviewer']['network'] ?? null);
+        self::assertSame('never', $contract['authority']['reviewer']['approval_policy'] ?? null);
+        self::assertFalse($contract['authority']['reviewer']['inherits_user_config'] ?? null);
+        self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
+        self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
+        self::assertSame(
+            [
+                'correctness_security' => '.codex/agents/reviewer-correctness.toml',
+                'design_maintainability' => '.codex/agents/reviewer-design.toml',
+                'tests_regression_flake' => '.codex/agents/reviewer-tests.toml',
+            ],
+            $contract['authority']['reviewer']['profiles'] ?? null,
+        );
+        self::assertContains('multi_agent', $contract['authority']['reviewer']['disabled_features'] ?? []);
+        self::assertContains('plugins', $contract['authority']['reviewer']['disabled_features'] ?? []);
+        self::assertTrue($contract['parallel_work']['local_implementation_only'] ?? null);
+        self::assertTrue($contract['parallel_work']['requires_common_verified_base_sha'] ?? null);
+        self::assertTrue($contract['parallel_work']['requires_separate_worktrees'] ?? null);
+        self::assertTrue($contract['parallel_work']['requires_disjoint_ownership'] ?? null);
+        self::assertSame(2, $contract['parallel_work']['max_local_writer_lanes'] ?? null);
+        self::assertSame('implementation_worker', $contract['parallel_work']['writer_role'] ?? null);
+        self::assertTrue($contract['parallel_work']['external_mutations_remain_serial'] ?? null);
+        self::assertTrue($contract['parallel_work']['integration_and_landing_remain_serial'] ?? null);
+        self::assertTrue($contract['parallel_work']['remaining_lanes_resync_after_merge'] ?? null);
+        self::assertTrue($contract['parallel_work']['ownership_drift_fails_closed'] ?? null);
+        self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
+        self::assertContains('scripts/agent', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
+        self::assertContains('.github/workflows', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
+        self::assertContains('.codex/config.toml', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
+        self::assertContains(
+            '.codex/agents/implementation-worker.toml',
+            $contract['parallel_work']['primary_owned_path_prefixes'] ?? [],
+        );
+        self::assertContains(
+            'docs/maps/component_ownership_map.json',
+            $contract['parallel_work']['primary_owned_path_prefixes'] ?? [],
+        );
         self::assertTrue($contract['land']['requires_exact_head'] ?? null);
         self::assertSame(
             'gh pr merge --merge --match-head-commit <current_head_sha>',

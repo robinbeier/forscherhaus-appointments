@@ -22,7 +22,9 @@ conflict, follow `AGENTS.md`.
 - Do not modify `system/` unless the change is an explicit upstream patch.
 - Use CodeIgniter migrations for DB changes and keep rollback paths complete.
 - Run CI-parity checks through Docker for merge-sensitive changes.
-- For multi-PR work, land one PR completely before starting the next.
+- For multi-PR work, keep publication, integration, and landing serial. Local
+  implementation may overlap only under the controlled parallel-work contract
+  below.
 - Preserve the current invariant: `services.attendants_number == 1` unless the
   product scope changes explicitly.
 - When `docs/maps/component_ownership_map.json` marks a component as
@@ -95,6 +97,40 @@ After a worker returns, the primary agent inspects the diff, reconciles it with
 concurrent work, runs integration-level validation, and obtains independent
 review. A worker's completion report is implementation evidence, not review,
 merge, or production authority.
+
+## Controlled Parallel Work
+
+Parallel work means local implementation only. It is opt-in for explicitly
+approved, independently verifiable lanes; normal PR publication, Linear
+mutation, integration, attestation, and landing remain serial.
+
+Before opening writer lanes, the primary records a small JSON manifest and runs
+
+```bash
+php scripts/agent/check_parallel_work_contract.php --manifest=<lane-manifest.json>
+```
+
+The manifest names one full lowercase common base SHA, the primary ID, exact
+`primary_approved_component_ids` for any intersected `single-owner` or
+`manual_approval_required` entries in `docs/maps/component_ownership_map.json`,
+and no more than two `implementation_worker` lanes. Every lane repeats that
+base SHA, lists normalized repository-relative ownership prefixes, and
+declares an empty `external_mutations` list. Ownership must be disjoint and may
+not include the primary-owned harness, reviewer, workflow, or landing paths in
+the machine contract. Each lane uses its own worktree and branch from the
+already verified common base.
+
+Exactly one primary remains the external single writer for commits, pushes,
+PRs, checks, Linear, workpads, attestations, merges, and production actions.
+Workers may edit only their assigned local ownership. Shared contracts,
+cross-lane integration files, and landing helpers remain primary-owned. Stop a
+lane if it needs another lane's files, its ownership becomes ambiguous, or a
+semantic cross-lane dependency appears.
+
+A merge invalidates the base of every remaining lane. Before any remaining
+lane can publish, the primary synchronizes it with the newly verified
+`origin/main`, resolves integration centrally, and reruns all validation and
+exact-head review evidence invalidated by that synchronization.
 
 ## Linear States
 
@@ -274,6 +310,21 @@ changes require a third independent lens:
 
 Final reviews and blocking CI must all target the current unchanged exact PR
 head. A later push makes the earlier evidence stale.
+
+Run final reviewers through the repository-owned external read-only boundary:
+
+```bash
+scripts/agent/run_readonly_reviewer.sh --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
+```
+
+The runner starts an ephemeral session without user configuration or external
+connectors, uses a read-only sandbox with network denied for reviewer commands,
+and never permits approval escalation. The machine contract selects the role;
+the runner derives model and reasoning settings from that role's TOML and
+fail-closed validates the single JSON review object against the requested lens
+and exact head. Reviewer output returns to the primary; reviewers do not write
+files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not
+delegate. The primary alone decides how findings are integrated or published.
 
 After the final reviews are finding-free, record their canonical,
 privacy-safe exact-head attestation on the PR and run the repository-owned

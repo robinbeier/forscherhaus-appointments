@@ -22,6 +22,9 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 - Treat `services.attendants_number` as fixed to `1` unless product scope changes explicitly.
 - If `docs/maps/component_ownership_map.json` marks a component as `single-owner` or `manual_approval_required`, keep changes narrow and conservative.
 - Prefer small, mergeable, low-risk diffs over broad rewrites, speculative cleanup, or wide refactors.
+- Parallel work means disjoint local implementation only: use a common verified
+  base, separate worktrees, at most two writer lanes, and one primary external
+  single writer. Integration and landing remain serial; see `WORKFLOW.md`.
 - Delegate concrete, bounded, independently verifiable implementation, test,
   and documentation slices to the registered
   `implementation_worker` contract by default. The primary agent retains
@@ -80,7 +83,8 @@ bash ./scripts/ci/pre_pr_quick.sh
 ## PR Expectations
 
 - Keep commits short, imperative, and scoped.
-- Multi-PR work stays sequential: finish and merge one PR before starting the next.
+- Publish, integrate, and land multi-PR work sequentially even when explicitly
+  approved disjoint implementation lanes run locally in parallel.
 - Link infrastructure PRs to Linear only when they truly belong to that issue.
 - For UI-visible changes, update supporting docs or evidence when the repo workflow expects it.
 

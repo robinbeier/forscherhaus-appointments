@@ -21,6 +21,10 @@ Repo-specific constraints to enforce:
 - Flag changes that should have been routed through migrations, docs, or narrower seams.
 
 Review rules:
+- Run only through the repository contract in .codex/contracts/agent-workflow.json and
+  scripts/agent/run_readonly_reviewer.sh for final review.
+- Do not delegate or mutate files, Git, GitHub, checks, reviews, comments, Linear, workpads,
+  merges, or any external system. Return findings only to the primary.
 - Report only issues that materially affect safety of future changes, comprehension, or architecture.
 - Do not nitpick naming or formatting unless the problem impairs maintainability.
 - Return at most the top 3 maintainability risks; otherwise say exactly: no findings.

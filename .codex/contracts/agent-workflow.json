@@ -5,6 +5,93 @@
         "may_set_ready_to_merge": false,
         "push_invalidates_exact_head_evidence": true
     },
+    "authority": {
+        "primary_external_single_writer": true,
+        "primary_owned_mutations": [
+            "commit",
+            "push",
+            "pr_mutation",
+            "check_rerun",
+            "merge",
+            "linear_mutation",
+            "workpad_update"
+        ],
+        "reviewer": {
+            "invocation": "scripts/agent/run_readonly_reviewer.sh",
+            "profiles": {
+                "correctness_security": ".codex/agents/reviewer-correctness.toml",
+                "design_maintainability": ".codex/agents/reviewer-design.toml",
+                "tests_regression_flake": ".codex/agents/reviewer-tests.toml"
+            },
+            "disabled_features": [
+                "apps",
+                "plugins",
+                "browser_use",
+                "browser_use_external",
+                "browser_use_full_cdp_access",
+                "computer_use",
+                "image_generation",
+                "in_app_browser",
+                "memories",
+                "skill_search",
+                "skill_mcp_dependency_install",
+                "auth_elicitation",
+                "tool_call_mcp_elicitation",
+                "multi_agent",
+                "multi_agent_v2",
+                "hooks"
+            ],
+            "filesystem": "read-only",
+            "network": "denied",
+            "approval_policy": "never",
+            "inherits_user_config": false,
+            "allows_external_connectors": false,
+            "allows_delegation": false,
+            "denied_mutations": [
+                "file_write",
+                "commit",
+                "push",
+                "pr_mutation",
+                "pr_comment",
+                "pr_review",
+                "check_rerun",
+                "merge",
+                "linear_mutation",
+                "workpad_update"
+            ]
+        }
+    },
+    "parallel_work": {
+        "local_implementation_only": true,
+        "requires_common_verified_base_sha": true,
+        "requires_separate_worktrees": true,
+        "requires_disjoint_ownership": true,
+        "max_local_writer_lanes": 2,
+        "writer_role": "implementation_worker",
+        "external_mutations_remain_serial": true,
+        "integration_and_landing_remain_serial": true,
+        "remaining_lanes_resync_after_merge": true,
+        "ownership_drift_fails_closed": true,
+        "ownership_map": "docs/maps/component_ownership_map.json",
+        "primary_owned_path_prefixes": [
+            ".codex/agents/reviewer-correctness.toml",
+            ".codex/agents/reviewer-design.toml",
+            ".codex/agents/reviewer-tests.toml",
+            ".codex/agents/implementation-worker.toml",
+            ".codex/config.toml",
+            ".codex/contracts",
+            ".codex/skills/land",
+            ".codex/skills/push",
+            ".github/workflows",
+            "AGENTS.md",
+            "WORKFLOW.md",
+            "code_review.md",
+            "docs/maps/component_ownership_map.json",
+            "scripts/agent",
+            "scripts/ci/exact_head_mergegate.php",
+            "scripts/ci/lib/ExactHeadMergegate.php"
+        ]
+    },
     "land": {
         "requires_exact_head": true,
         "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
@@ -89,6 +176,11 @@
         "WORKFLOW.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
+                "## Controlled Parallel Work": [
+                    "Parallel work means local implementation only",
+                    "Exactly one primary remains the external single writer",
+                    "A merge invalidates the base of every remaining lane"
+                ],
                 "### 3. Validate locally": [
                     "blocking GitHub CI plus final reviews on the unchanged exact PR head establish"
                 ],
@@ -104,6 +196,7 @@
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
                 "## Review Process": [
+                    "scripts/agent/run_readonly_reviewer.sh",
                     "require three independent final reviews on the same unchanged exact head",
                     "Any later push invalidates those final reviews and requires exact-head review",
                     "The read-only exact-head mergegate does not replace reviewer judgment."
@@ -111,6 +204,10 @@
             }
         },
         "docs/agent-harness-index.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_sections": {}
+        },
+        "scripts/agent/run_readonly_reviewer.sh": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {}
         },

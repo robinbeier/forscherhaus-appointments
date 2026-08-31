@@ -102,6 +102,16 @@ require three independent final reviews on the same unchanged exact head:
 - `reviewer_design` for architecture and maintainability
 - `reviewer_tests` for regression coverage and flake risk
 
+Invoke each final lens through
+`scripts/agent/run_readonly_reviewer.sh`. That repository-owned path starts a
+fresh ephemeral review without user config or external connectors, denies
+reviewer file/Git/network mutation, derives model settings from the selected
+reviewer profile, and returns one lens- and exact-head-bound JSON result only to
+the primary. Invalid or protocol-event output fails closed. Reviewers must not
+delegate or publish comments, reviews, PR changes, check reruns, merges, Linear
+changes, or workpad updates. The primary remains the only external writer and
+landing owner.
+
 Any later push invalidates those final reviews and requires exact-head review
 again.
 
