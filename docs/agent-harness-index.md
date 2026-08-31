@@ -25,6 +25,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
+| Read-only exact-head landing decision | `docs/exact-head-mergegate.md`, `scripts/ci/check_exact_head_mergegate.php` | Canonical PR/SHA inputs, exhaustive blocking-check policy, final-review attestation, sanitized report, and fail-closed exit codes. |
 | Local/CI root-host test prerequisites | `docs/root-host-test-harness.md` | Docker Desktop skip boundaries, required Linux-root failures, and security invariants. |
 | CI performance measurement and baseline | `docs/ci-performance-baseline.md` | Versioned workload epoch, timing definitions, exclusions, and post-epoch cohort status. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
@@ -55,8 +56,12 @@ This file stays intentionally short. It is a map, not a second runbook.
 - Full local review-ready gate; not merge authorization:
   - `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
 - Exact-head landing evidence:
-  - follow `WORKFLOW.md`; blocking CI and required final reviews must target the
-    same unchanged current PR head
+  - follow `WORKFLOW.md` and `docs/exact-head-mergegate.md`; after blocking
+    CI and the required final reviews target the same unchanged current PR
+    head, run:
+    `composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<40-character-sha>`
+  - only its exit `0` permits the move to `Ready to Merge`; the command is
+    read-only and never supplies merge or production authority
 - Harness readiness score:
   - `composer check:agent-harness-readiness`
   - The machine contract owns the supported CI-condition tokens and binds

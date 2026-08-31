@@ -105,6 +105,31 @@ require three independent final reviews on the same unchanged exact head:
 Any later push invalidates those final reviews and requires exact-head review
 again.
 
+The read-only exact-head mergegate does not replace reviewer judgment. After
+the three final reviews are finding-free, the primary agent records one
+new, unedited, owner-authored, privacy-safe attestation for their unchanged
+head as described in `docs/exact-head-mergegate.md`. The gate checks that
+attestation, exact review-activity watermarks plus a privacy-safe formal-review
+payload digest, blocking CI, mergeability, and two identical bounded CI-and-
+review evidence observations. PR identity is observed before, between, and
+after those observations; all three reads must remain equal. The gate must run
+from the exact reviewed `HEAD` with its contract and implementation unchanged.
+A still-active `CHANGES_REQUESTED` review, watermark or payload drift, edited
+inline feedback, newer trusted review feedback, or a newer invalid attestation
+marker invalidates the attestation; close or resolve the finding and publish a
+fresh attestation comment before rerunning the gate.
+
+The attestation is an accountable owner assertion, not cryptographic proof of
+agent execution. The repository-local gate is designed to prevent accidental
+or stale landing evidence; a malicious repository owner is outside its threat
+model because that owner can already bypass the local process and merge
+directly. Recording reviews that did not run remains a process violation.
+
+The mergegate's lens source is explicitly
+`review.sensitive_change_lenses` in
+`.codex/contracts/agent-workflow.json`, so review taxonomy changes are
+contract changes and cannot silently drift from the landing policy.
+
 Default reviewer depth should match the change:
 
 - For small scoped product/UI changes, start with `pr_explorer` plus `reviewer_correctness`.
