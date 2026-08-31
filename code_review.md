@@ -107,9 +107,10 @@ Invoke each final lens with the exact
 base, materialized outside the worktree as described in `WORKFLOW.md`; never
 execute the checked-out copy or use the head copy as its own trust anchor. The
 runner rejects a source path inside the worktree before inspecting the head.
-The base runner also extracts its
-single canonical trust-path manifest and then the listed contract, selected
-role, output schema, validator, and review instructions from that base commit.
+The base runner first extracts the structured contract and its bootstrap
+validator, derives and validates the complete trust-path set from that single
+contract, and then extracts the selected role, output schema, and review
+instructions from the same base commit.
 Runtime model and reasoning values live in the structured contract; the role
 TOML contains only the human-readable review instructions. It starts a fresh
 ephemeral review without user config,

@@ -34,7 +34,7 @@ if (!is_string($lens) || $lens === '') {
 }
 
 try {
-    if ($command === 'resolve') {
+    if ($command === 'resolve' || $command === 'trusted-paths') {
         $contract = json_decode(
             (string) file_get_contents($repoRoot . '/.codex/contracts/agent-workflow.json'),
             true,
@@ -43,6 +43,12 @@ try {
         );
         if (!is_array($contract) || !is_array($contract['authority']['reviewer'] ?? null)) {
             throw new RuntimeException('Reviewer policy is invalid.');
+        }
+        if ($command === 'trusted-paths') {
+            foreach (ReadonlyReviewerContract::trustedBasePaths($contract['authority']['reviewer']) as $path) {
+                fwrite(STDOUT, $path . PHP_EOL);
+            }
+            exit(0);
         }
         $invocation = ReadonlyReviewerContract::resolveInvocation($repoRoot, $lens, $contract['authority']['reviewer']);
         fwrite(
@@ -76,7 +82,7 @@ try {
 
     fwrite(
         STDERR,
-        "Usage: readonly_reviewer_contract.php <resolve|validate> --lens=<lens> [--base-sha=<sha>] [--head-sha=<sha>]\n",
+        "Usage: readonly_reviewer_contract.php <resolve|trusted-paths|validate> --lens=<lens> [--base-sha=<sha>] [--head-sha=<sha>]\n",
     );
     exit(2);
 } catch (Throwable $throwable) {

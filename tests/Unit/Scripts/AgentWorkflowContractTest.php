@@ -74,8 +74,18 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
         self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
         self::assertSame(
-            '.codex/contracts/readonly-reviewer-trust-paths.txt',
-            $contract['authority']['reviewer']['trusted_base_paths_file'] ?? null,
+            [
+                '.codex/contracts/agent-workflow.json',
+                '.codex/agents/reviewer-correctness.toml',
+                '.codex/agents/reviewer-design.toml',
+                '.codex/agents/reviewer-tests.toml',
+                'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly_reviewer_contract.php',
+                'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'AGENTS.md',
+                'code_review.md',
+            ],
+            $contract['authority']['reviewer']['trusted_base_paths'] ?? null,
         );
         self::assertSame(
             [
@@ -106,7 +116,6 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('implementation_worker', $contract['parallel_work']['writer_role'] ?? null);
         self::assertTrue($contract['parallel_work']['external_mutations_remain_serial'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_semantic_independence_attestation'] ?? null);
-        self::assertSame('_', $contract['parallel_work']['filename_stem_prefix_suffix'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
         self::assertContains('scripts/agent', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
         self::assertContains('.github/workflows', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);

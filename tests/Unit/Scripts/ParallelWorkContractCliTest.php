@@ -33,14 +33,14 @@ class ParallelWorkContractCliTest extends TestCase
                     'id' => 'lane-a',
                     'role' => 'implementation_worker',
                     'base_sha' => str_repeat('a', 40),
-                    'ownership' => ['tests/Fixtures/parallel/lane-a'],
+                    'ownership' => [['path' => 'tests/Fixtures/parallel/lane-a', 'match' => 'exact_or_descendants']],
                     'external_mutations' => [],
                 ],
                 [
                     'id' => 'lane-b',
                     'role' => 'implementation_worker',
                     'base_sha' => str_repeat('a', 40),
-                    'ownership' => ['tests/Fixtures/parallel/lane-b'],
+                    'ownership' => [['path' => 'tests/Fixtures/parallel/lane-b', 'match' => 'exact_or_descendants']],
                     'external_mutations' => [],
                 ],
             ],
@@ -56,24 +56,47 @@ class ParallelWorkContractCliTest extends TestCase
         );
     }
 
-    public function testCliRejectsOwnershipMapPathOutsideRepository(): void
+    public function testCliRejectsAContractOverrideAndUsesCanonicalPolicy(): void
     {
-        $contract = json_decode(
-            (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
-            true,
-            512,
-            JSON_THROW_ON_ERROR,
-        );
-        self::assertIsArray($contract);
-        $contract['parallel_work']['ownership_map'] = '../outside.json';
-        $contractPath = $this->writeJsonFixture('contract', $contract);
-        $manifestPath = $this->writeJsonFixture('manifest', []);
+        $manifestPath = $this->writeJsonFixture('manifest', $this->manifestForPath('scripts/agent'));
 
-        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath, '--contract=' . $contractPath]);
+        [$exitCode, $stdout, $stderr] = $this->runCli([
+            '--manifest=' . $manifestPath,
+            '--contract=/tmp/permissive.json',
+        ]);
 
         self::assertSame(2, $exitCode);
         self::assertSame('', $stdout);
-        self::assertStringContainsString('ownership-map policy is invalid', $stderr);
+        self::assertStringContainsString('Unknown option', $stderr);
+    }
+
+    public function testCliRejectsCanonicalPrimaryOwnedPath(): void
+    {
+        $manifestPath = $this->writeJsonFixture('manifest', $this->manifestForPath('scripts/agent'));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode);
+        self::assertSame('', $stderr);
+        $result = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+        self::assertContains('primary_owned_path:0:scripts/agent', $result['errors']);
+    }
+
+    public function testCliRejectsInvalidManifestJsonAndShape(): void
+    {
+        $invalidJsonPath = sys_get_temp_dir() . '/parallel-work-invalid-' . bin2hex(random_bytes(8)) . '.json';
+        self::assertNotFalse(file_put_contents($invalidJsonPath, '{'));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $invalidJsonPath]);
+        self::assertSame(2, $exitCode);
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('not valid JSON', $stderr);
+
+        $invalidShapePath = $this->writeJsonFixture('shape', []);
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $invalidShapePath]);
+        self::assertSame(1, $exitCode);
+        self::assertSame('', $stderr);
+        self::assertSame('fail', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['status']);
     }
 
     public function testCliRejectsUnknownOptionBeforeReadingInputs(): void
@@ -92,6 +115,31 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertNotFalse(file_put_contents($path, json_encode($value, JSON_THROW_ON_ERROR)));
 
         return $path;
+    }
+
+    /** @return array<string, mixed> */
+    private function manifestForPath(string $path): array
+    {
+        return [
+            'schema_version' => 1,
+            'base_sha' => str_repeat('a', 40),
+            'primary_id' => 'primary',
+            'primary_approved_component_ids' => [],
+            'semantic_independence' => [
+                'shared_contracts' => [],
+                'cross_lane_dependencies' => [],
+                'coordination_required' => false,
+            ],
+            'lanes' => [
+                [
+                    'id' => 'lane-a',
+                    'role' => 'implementation_worker',
+                    'base_sha' => str_repeat('a', 40),
+                    'ownership' => [['path' => $path, 'match' => 'exact_or_descendants']],
+                    'external_mutations' => [],
+                ],
+            ],
+        ];
     }
 
     /**

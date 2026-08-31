@@ -86,12 +86,21 @@ trusted_root="$(mktemp -d "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")" || {
 }
 trap 'rm -rf "$trusted_root"' EXIT
 
-trusted_paths_file=".codex/contracts/readonly-reviewer-trust-paths.txt"
-mkdir -p "$trusted_root/$(dirname "$trusted_paths_file")"
-if ! git show "${base_sha}:${trusted_paths_file}" > "$trusted_root/$trusted_paths_file"; then
-    echo "Reviewer trust-path manifest is unavailable in the review base." >&2
-    exit 1
-fi
+contract_relative_path=".codex/contracts/agent-workflow.json"
+bootstrap_paths=(
+    "$contract_relative_path"
+    "scripts/agent/readonly_reviewer_contract.php"
+    "scripts/agent/lib/ReadonlyReviewerContract.php"
+)
+for bootstrap_path in "${bootstrap_paths[@]}"; do
+    mkdir -p "$trusted_root/$(dirname "$bootstrap_path")"
+    if ! git show "${base_sha}:${bootstrap_path}" > "$trusted_root/$bootstrap_path"; then
+        echo "Reviewer trust bootstrap is unavailable in the review base." >&2
+        exit 1
+    fi
+done
+
+trusted_paths="$(php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" trusted-paths --lens="$lens")" || exit $?
 
 trusted_path_count=0
 while IFS= read -r trusted_path || [[ -n "$trusted_path" ]]; do
@@ -99,19 +108,21 @@ while IFS= read -r trusted_path || [[ -n "$trusted_path" ]]; do
         echo "Reviewer trust-path manifest is invalid." >&2
         exit 1
     fi
-    mkdir -p "$trusted_root/$(dirname "$trusted_path")"
-    if ! git show "${base_sha}:${trusted_path}" > "$trusted_root/$trusted_path"; then
-        echo "Reviewer trust bundle is unavailable in the review base." >&2
-        exit 1
+    if [[ ! -f "$trusted_root/$trusted_path" ]]; then
+        mkdir -p "$trusted_root/$(dirname "$trusted_path")"
+        if ! git show "${base_sha}:${trusted_path}" > "$trusted_root/$trusted_path"; then
+            echo "Reviewer trust bundle is unavailable in the review base." >&2
+            exit 1
+        fi
     fi
     trusted_path_count=$((trusted_path_count + 1))
-done < "$trusted_root/$trusted_paths_file"
+done <<< "$trusted_paths"
 if [[ "$trusted_path_count" -eq 0 ]]; then
     echo "Reviewer trust-path manifest is empty." >&2
     exit 1
 fi
 
-contract_file="$trusted_root/.codex/contracts/agent-workflow.json"
+contract_file="$trusted_root/$contract_relative_path"
 reviewer_config="$(php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
 IFS=$'\t' read -r role_file model reasoning disabled_features <<< "$reviewer_config"
 if [[ -z "$role_file" || -z "$model" || -z "$reasoning" || -z "$disabled_features" ]]; then

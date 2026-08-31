@@ -1,6 +1,9 @@
 {
   "schema_version": 2,
   "source": "docs/maps/component_ownership_map.json",
+  "prefix_match_overrides": {
+    "application/views/components/booking_": "filename_stem"
+  },
   "components": [
     {
       "component_id": "auth-session",

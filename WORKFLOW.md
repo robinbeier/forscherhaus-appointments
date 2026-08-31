@@ -119,13 +119,15 @@ checker cannot infer semantic coupling from paths; this explicit primary
 attestation makes any known shared contract, cross-lane dependency, or required
 coordination a fail-closed reason to keep the work serial. The manifest has no
 more than two `implementation_worker` lanes. Every lane repeats that
-base SHA, lists normalized repository-relative ownership prefixes, and
+base SHA, lists normalized repository-relative ownership rules, and
 declares an empty `external_mutations` list. Ownership must be disjoint and may
 not include the primary-owned harness, reviewer, workflow, or landing paths in
-the machine contract. A prefix whose basename ends in the contract's explicit
-`filename_stem_prefix_suffix` (`_`) owns matching filenames as well as the
-literal path; all other prefixes use exact-file-or-directory semantics. Each
-lane uses its own worktree and branch from the already verified common base.
+the machine contract. Every ownership rule is an object with `path` and an
+explicit `match` value: `exact_or_descendants` or `filename_stem`. Canonical
+filename-stem exceptions are likewise explicit in
+`docs/maps/component_ownership_map.json#prefix_match_overrides`; spelling alone
+never changes matching semantics. Each lane uses its own worktree and branch
+from the already verified common base.
 
 Exactly one primary remains the external single writer for commits, pushes,
 PRs, checks, Linear, workpads, attestations, merges, and production actions.

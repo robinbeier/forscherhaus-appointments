@@ -74,9 +74,6 @@ class ReviewerAuthorityContractTest extends TestCase
             'external_bootstrap_review',
             $contract['authority']['reviewer']['runtime_configuration_change_policy'] ?? null,
         );
-        $trustedPathsFile = '.codex/contracts/readonly-reviewer-trust-paths.txt';
-        self::assertSame($trustedPathsFile, $contract['authority']['reviewer']['trusted_base_paths_file'] ?? null);
-        $trustedPaths = file($this->repoRoot . '/' . $trustedPathsFile, FILE_IGNORE_NEW_LINES);
         self::assertSame(
             [
                 '.codex/contracts/agent-workflow.json',
@@ -89,10 +86,10 @@ class ReviewerAuthorityContractTest extends TestCase
                 'AGENTS.md',
                 'code_review.md',
             ],
-            $trustedPaths,
+            $contract['authority']['reviewer']['trusted_base_paths'] ?? null,
         );
         $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
-        self::assertStringContainsString('"' . $trustedPathsFile . '"', $runner);
+        self::assertStringContainsString(' trusted-paths --lens=', $runner);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
         self::assertSame(
@@ -158,10 +155,6 @@ class ReviewerAuthorityContractTest extends TestCase
             $this->repoRoot . '/.codex/contracts/agent-workflow.json',
             $fixtureRepo . '/.codex/contracts/agent-workflow.json',
         );
-        copy(
-            $this->repoRoot . '/.codex/contracts/readonly-reviewer-trust-paths.txt',
-            $fixtureRepo . '/.codex/contracts/readonly-reviewer-trust-paths.txt',
-        );
         foreach (['reviewer-correctness.toml', 'reviewer-design.toml', 'reviewer-tests.toml'] as $filename) {
             copy($this->repoRoot . '/.codex/agents/' . $filename, $fixtureRepo . '/.codex/agents/' . $filename);
         }
@@ -223,6 +216,7 @@ class ReviewerAuthorityContractTest extends TestCase
                 printf 'ENV\n'
                 printf 'GH_TOKEN=%s\n' "${GH_TOKEN-unset}"
                 printf 'GITHUB_TOKEN=%s\n' "${GITHUB_TOKEN-unset}"
+                printf 'GITHUB_PAT=%s\n' "${GITHUB_PAT-unset}"
                 printf 'LINEAR_API_KEY=%s\n' "${LINEAR_API_KEY-unset}"
                 printf 'LINEAR_TOKEN=%s\n' "${LINEAR_TOKEN-unset}"
                 printf 'PROMPT\n'
@@ -239,6 +233,7 @@ class ReviewerAuthorityContractTest extends TestCase
         $environment['REVIEWER_TEST_CAPTURE'] = $capturePath;
         $environment['GH_TOKEN'] = 'credential-sentinel';
         $environment['GITHUB_TOKEN'] = 'credential-sentinel';
+        $environment['GITHUB_PAT'] = 'credential-sentinel';
         $environment['LINEAR_API_KEY'] = 'credential-sentinel';
         $environment['LINEAR_TOKEN'] = 'credential-sentinel';
         $lenses = [
@@ -298,6 +293,7 @@ class ReviewerAuthorityContractTest extends TestCase
         }
         self::assertStringContainsString("GH_TOKEN=unset\n", $capture);
         self::assertStringContainsString("GITHUB_TOKEN=unset\n", $capture);
+        self::assertStringContainsString("GITHUB_PAT=unset\n", $capture);
         self::assertStringContainsString("LINEAR_API_KEY=unset\n", $capture);
         self::assertStringContainsString("LINEAR_TOKEN=unset\n", $capture);
         self::assertStringNotContainsString('credential-sentinel', $capture);
@@ -506,6 +502,30 @@ class ReviewerAuthorityContractTest extends TestCase
         );
     }
 
+    public function testOutputValidationRejectsFindingsVerdictWithoutFindings(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('verdict does not match its findings');
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'findings',
+                    'findings' => [],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            $base,
+            $head,
+        );
+    }
+
     public function testOutputValidationRejectsMalformedFinding(): void
     {
         $base = str_repeat('b', 40);
@@ -547,6 +567,16 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertSame('gpt-5.4-mini', $resolved['model']);
         self::assertSame('medium', $resolved['reasoning']);
+    }
+
+    public function testProfileResolutionRejectsAStaleTrustedPathSet(): void
+    {
+        $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
+        array_pop($policy['trusted_base_paths']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('trusted-base policy is invalid');
+        ReadonlyReviewerContract::trustedBasePaths($policy);
     }
 
     /**
@@ -612,8 +642,26 @@ class ReviewerAuthorityContractTest extends TestCase
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
-            'trusted_base_paths_file' => '.codex/contracts/readonly-reviewer-trust-paths.txt',
+            'trusted_base_paths' => [
+                '.codex/contracts/agent-workflow.json',
+                $profile,
+                'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly_reviewer_contract.php',
+                'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'AGENTS.md',
+                'code_review.md',
+            ],
             'profiles' => [
+                'correctness_security' => [
+                    'instructions' => $profile,
+                    'model' => 'gpt-5.4',
+                    'reasoning' => 'high',
+                ],
+                'design_maintainability' => [
+                    'instructions' => $profile,
+                    'model' => 'gpt-5.4-mini',
+                    'reasoning' => 'medium',
+                ],
                 'tests_regression_flake' => [
                     'instructions' => $profile,
                     'model' => 'gpt-5.4-mini',

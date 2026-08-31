@@ -15,10 +15,6 @@ foreach (array_slice($argv, 1) as $argument) {
         $manifestPath = substr($argument, strlen('--manifest='));
         continue;
     }
-    if (str_starts_with($argument, '--contract=')) {
-        $contractPath = substr($argument, strlen('--contract='));
-        continue;
-    }
     fwrite(STDERR, "Unknown option.\n");
     exit(2);
 }

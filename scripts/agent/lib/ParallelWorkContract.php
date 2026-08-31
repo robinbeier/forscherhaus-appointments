@@ -31,12 +31,6 @@ final class ParallelWorkContract
             }
         }
 
-        $filenameStemPrefixSuffix = $policy['filename_stem_prefix_suffix'] ?? null;
-        if ($filenameStemPrefixSuffix !== '_') {
-            $errors[] = 'invalid_policy_filename_stem_prefix_suffix';
-            $filenameStemPrefixSuffix = '';
-        }
-
         if (($manifest['schema_version'] ?? null) !== 1) {
             $errors[] = 'unsupported_schema_version';
         }
@@ -96,7 +90,7 @@ final class ParallelWorkContract
         }
 
         $laneIds = [];
-        $ownedPaths = [];
+        $ownedPathRules = [];
         foreach ($lanes as $index => $lane) {
             if (!is_array($lane)) {
                 $errors[] = 'invalid_lane:' . $index;
@@ -130,36 +124,42 @@ final class ParallelWorkContract
                 continue;
             }
 
-            foreach ($ownership as $path) {
-                if (!is_string($path) || !self::isNormalizedRepoPath($path)) {
-                    $errors[] = 'invalid_ownership_path:' . $index;
+            foreach ($ownership as $ruleIndex => $ownershipRule) {
+                $pathRule = self::readPathRule(
+                    $ownershipRule,
+                    $errors,
+                    'invalid_ownership_path:' . $index . ':' . $ruleIndex,
+                );
+                if ($pathRule === null) {
                     continue;
                 }
+                $path = $pathRule['path'];
+                $match = $pathRule['match'];
 
                 foreach ($primaryOwnedPrefixes as $primaryOwnedPrefix) {
                     if (!is_string($primaryOwnedPrefix) || !self::isNormalizedRepoPath($primaryOwnedPrefix)) {
                         $errors[] = 'invalid_policy_primary_owned_path_prefix';
                         continue;
                     }
-                    if (self::pathsOverlap($path, $primaryOwnedPrefix, $filenameStemPrefixSuffix)) {
+                    if (self::pathRulesOverlap($path, $match, $primaryOwnedPrefix, 'exact_or_descendants')) {
                         $errors[] = 'primary_owned_path:' . $index . ':' . $primaryOwnedPrefix;
                     }
                 }
 
                 foreach ($canonicalComponents as $componentId => $component) {
-                    foreach ($component['folder_prefixes'] as $folderPrefix) {
-                        if (self::pathMatchesCanonicalPrefix($path, $folderPrefix, $filenameStemPrefixSuffix)) {
+                    foreach ($component['path_rules'] as $canonicalRule) {
+                        if (self::pathRulesOverlap($path, $match, $canonicalRule['path'], $canonicalRule['match'])) {
                             $requiredComponentIds[$componentId] = true;
                         }
                     }
                 }
 
-                foreach ($ownedPaths as $ownedPath => $owner) {
-                    if (self::pathsOverlap($path, $ownedPath, $filenameStemPrefixSuffix)) {
-                        $errors[] = 'ownership_overlap:' . $owner . ':' . $index;
+                foreach ($ownedPathRules as $ownedPathRule) {
+                    if (self::pathRulesOverlap($path, $match, $ownedPathRule['path'], $ownedPathRule['match'])) {
+                        $errors[] = 'ownership_overlap:' . $ownedPathRule['owner'] . ':' . $index;
                     }
                 }
-                $ownedPaths[$path] = (string) $index;
+                $ownedPathRules[] = ['path' => $path, 'match' => $match, 'owner' => (string) $index];
             }
         }
 
@@ -211,10 +211,22 @@ final class ParallelWorkContract
     /**
      * @param array<string, mixed> $ownershipMap
      * @param list<string> $errors
-     * @return array<string, array{folder_prefixes: list<string>}>
+     * @return array<string, array{path_rules: list<array{path: string, match: string}>}>
      */
     private static function readCanonicalComponents(array $ownershipMap, array &$errors): array
     {
+        $prefixMatchOverrides = $ownershipMap['prefix_match_overrides'] ?? [];
+        if (!is_array($prefixMatchOverrides) || array_is_list($prefixMatchOverrides)) {
+            $errors[] = 'invalid_canonical_prefix_match_overrides';
+            $prefixMatchOverrides = [];
+        }
+        foreach ($prefixMatchOverrides as $path => $match) {
+            if (!is_string($path) || !self::isNormalizedRepoPath($path) || $match !== 'filename_stem') {
+                $errors[] = 'invalid_canonical_prefix_match_override';
+                unset($prefixMatchOverrides[$path]);
+            }
+        }
+
         $components = $ownershipMap['components'] ?? null;
         if (!is_array($components) || !array_is_list($components)) {
             $errors[] = 'invalid_canonical_ownership_map';
@@ -222,6 +234,7 @@ final class ParallelWorkContract
         }
 
         $canonical = [];
+        $usedPrefixMatchOverrides = [];
         foreach ($components as $component) {
             if (!is_array($component)) {
                 $errors[] = 'invalid_canonical_ownership_component';
@@ -255,21 +268,58 @@ final class ParallelWorkContract
                 $errors[] = 'duplicate_canonical_component_id:' . $componentId;
                 continue;
             }
-            $normalizedPrefixes = [];
+            $pathRules = [];
             foreach ($folderPrefixes as $folderPrefix) {
                 $normalizedPrefix = is_string($folderPrefix) ? rtrim($folderPrefix, '/') : '';
                 if (!self::isNormalizedRepoPath($normalizedPrefix)) {
                     $errors[] = 'invalid_canonical_ownership_prefix:' . $componentId;
                     continue 2;
                 }
-                $normalizedPrefixes[] = str_ends_with((string) $folderPrefix, '/')
-                    ? $normalizedPrefix . '/'
-                    : $normalizedPrefix;
+                $match = $prefixMatchOverrides[$normalizedPrefix] ?? 'exact_or_descendants';
+                if ($match === 'filename_stem') {
+                    $usedPrefixMatchOverrides[$normalizedPrefix] = true;
+                }
+                $pathRules[] = ['path' => $normalizedPrefix, 'match' => $match];
             }
-            $canonical[$componentId] = ['folder_prefixes' => $normalizedPrefixes];
+            $canonical[$componentId] = ['path_rules' => $pathRules];
+        }
+
+        foreach (array_keys($prefixMatchOverrides) as $prefixMatchOverride) {
+            if (!isset($usedPrefixMatchOverrides[$prefixMatchOverride])) {
+                $errors[] = 'unused_canonical_prefix_match_override:' . $prefixMatchOverride;
+            }
         }
 
         return $canonical;
+    }
+
+    /**
+     * @param list<string> $errors
+     * @return array{path: string, match: string}|null
+     */
+    private static function readPathRule(mixed $value, array &$errors, string $error): ?array
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            $errors[] = $error;
+            return null;
+        }
+        $expectedKeys = ['match', 'path'];
+        $actualKeys = array_keys($value);
+        sort($expectedKeys, SORT_STRING);
+        sort($actualKeys, SORT_STRING);
+        $path = $value['path'] ?? null;
+        $match = $value['match'] ?? null;
+        if (
+            $actualKeys !== $expectedKeys ||
+            !is_string($path) ||
+            !self::isNormalizedRepoPath($path) ||
+            !in_array($match, ['exact_or_descendants', 'filename_stem'], true)
+        ) {
+            $errors[] = $error;
+            return null;
+        }
+
+        return ['path' => $path, 'match' => $match];
     }
 
     private static function isNormalizedRepoPath(string $path): bool
@@ -291,29 +341,22 @@ final class ParallelWorkContract
         return true;
     }
 
-    private static function pathsOverlap(string $left, string $right, string $filenameStemPrefixSuffix): bool
-    {
-        return self::pathCovers($left, $right, $filenameStemPrefixSuffix) ||
-            self::pathCovers($right, $left, $filenameStemPrefixSuffix);
-    }
-
-    private static function pathMatchesCanonicalPrefix(
-        string $lanePath,
-        string $canonicalPrefix,
-        string $filenameStemPrefixSuffix,
+    private static function pathRulesOverlap(
+        string $leftPath,
+        string $leftMatch,
+        string $rightPath,
+        string $rightMatch,
     ): bool {
-        $normalizedPrefix = rtrim($canonicalPrefix, '/');
-        return self::pathsOverlap($lanePath, $normalizedPrefix, $filenameStemPrefixSuffix);
+        return self::pathRuleCovers($leftPath, $leftMatch, $rightPath) ||
+            self::pathRuleCovers($rightPath, $rightMatch, $leftPath);
     }
 
-    private static function pathCovers(string $prefix, string $path, string $filenameStemPrefixSuffix): bool
+    private static function pathRuleCovers(string $rulePath, string $match, string $candidatePath): bool
     {
-        if ($prefix === $path || str_starts_with($path, $prefix . '/')) {
-            return true;
+        if ($match === 'filename_stem') {
+            return str_starts_with($candidatePath, $rulePath);
         }
 
-        return $filenameStemPrefixSuffix !== '' &&
-            str_ends_with(basename($prefix), $filenameStemPrefixSuffix) &&
-            str_starts_with($path, $prefix);
+        return $rulePath === $candidatePath || str_starts_with($candidatePath, $rulePath . '/');
     }
 }

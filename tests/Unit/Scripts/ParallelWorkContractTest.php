@@ -30,6 +30,9 @@ class ParallelWorkContractTest extends TestCase
         self::assertIsArray($contract['parallel_work'] ?? null);
         $this->policy = $contract['parallel_work'];
         $this->ownershipMap = [
+            'prefix_match_overrides' => [
+                'application/views/components/booking_' => 'filename_stem',
+            ],
             'components' => [
                 [
                     'component_id' => 'platform-quality-tooling',
@@ -75,13 +78,6 @@ class ParallelWorkContractTest extends TestCase
                 $requirement,
             );
         }
-
-        $policy = $this->policy;
-        $policy['filename_stem_prefix_suffix'] = '-';
-        self::assertContains(
-            'invalid_policy_filename_stem_prefix_suffix',
-            ParallelWorkContract::validate($this->validManifest(), $policy, $this->ownershipMap),
-        );
     }
 
     public function testRejectsMoreThanTwoWriterLanes(): void
@@ -91,7 +87,7 @@ class ParallelWorkContractTest extends TestCase
             'id' => 'lane-c',
             'role' => 'implementation_worker',
             'base_sha' => str_repeat('a', 40),
-            'ownership' => ['tests/Fixtures/third'],
+            'ownership' => [$this->pathRule('tests/Fixtures/third')],
             'external_mutations' => [],
         ];
 
@@ -115,7 +111,7 @@ class ParallelWorkContractTest extends TestCase
     public function testRejectsOverlappingOwnership(): void
     {
         $manifest = $this->validManifest();
-        $manifest['lanes'][1]['ownership'] = ['scripts/github/fixtures'];
+        $manifest['lanes'][1]['ownership'] = [$this->pathRule('scripts/github/fixtures')];
 
         self::assertContains(
             'ownership_overlap:0:1',
@@ -127,10 +123,25 @@ class ParallelWorkContractTest extends TestCase
     {
         $manifest = $this->validManifest();
         $manifest['primary_approved_component_ids'] = ['booking-public', 'platform-quality-tooling'];
-        $manifest['lanes'][0]['ownership'] = ['application/views/components/booking_'];
-        $manifest['lanes'][1]['ownership'] = ['application/views/components/booking_sidebar.php'];
+        $manifest['lanes'][0]['ownership'] = [
+            $this->pathRule('application/views/components/booking_', 'filename_stem'),
+        ];
+        $manifest['lanes'][1]['ownership'] = [$this->pathRule('application/views/components/booking_sidebar.php')];
 
         self::assertContains(
+            'ownership_overlap:0:1',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
+    public function testTrailingUnderscoreDoesNotImplicitlyCreateStemOwnership(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['primary_approved_component_ids'] = ['booking-public', 'platform-quality-tooling'];
+        $manifest['lanes'][0]['ownership'] = [$this->pathRule('application/views/components/booking_')];
+        $manifest['lanes'][1]['ownership'] = [$this->pathRule('application/views/components/booking_sidebar.php')];
+
+        self::assertNotContains(
             'ownership_overlap:0:1',
             ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
         );
@@ -171,7 +182,7 @@ class ParallelWorkContractTest extends TestCase
     public function testRejectsPrimaryOwnedHarnessPath(): void
     {
         $manifest = $this->validManifest();
-        $manifest['lanes'][0]['ownership'] = ['scripts/agent'];
+        $manifest['lanes'][0]['ownership'] = [$this->pathRule('scripts/agent')];
 
         self::assertContains(
             'primary_owned_path:0:scripts/agent',
@@ -193,7 +204,7 @@ class ParallelWorkContractTest extends TestCase
     public function testRejectsUnusedOrUnknownComponentApproval(): void
     {
         $manifest = $this->validManifest();
-        $manifest['lanes'][1]['ownership'] = ['tests/Fixtures/lane-b'];
+        $manifest['lanes'][1]['ownership'] = [$this->pathRule('tests/Fixtures/lane-b')];
 
         $errors = ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap);
         self::assertContains('unused_primary_component_approval:platform-quality-tooling', $errors);
@@ -208,7 +219,7 @@ class ParallelWorkContractTest extends TestCase
     public function testStemStyleCanonicalPrefixRequiresComponentApproval(): void
     {
         $manifest = $this->validManifest();
-        $manifest['lanes'][0]['ownership'] = ['application/views/components/booking_sidebar.php'];
+        $manifest['lanes'][0]['ownership'] = [$this->pathRule('application/views/components/booking_sidebar.php')];
 
         self::assertContains(
             'missing_primary_component_approval:booking-public',
@@ -220,7 +231,7 @@ class ParallelWorkContractTest extends TestCase
     {
         $manifest = $this->validManifest();
         $manifest['primary_approved_component_ids'] = [];
-        $manifest['lanes'][1]['ownership'] = ['scripts/cinder/performance'];
+        $manifest['lanes'][1]['ownership'] = [$this->pathRule('scripts/cinder/performance')];
 
         self::assertSame([], ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap));
     }
@@ -259,6 +270,23 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsMalformedOrUnusedCanonicalPrefixMatchOverride(): void
+    {
+        $ownershipMap = $this->ownershipMap;
+        $ownershipMap['prefix_match_overrides']['application/views/components/booking_'] = 'implicit_magic';
+        self::assertContains(
+            'invalid_canonical_prefix_match_override',
+            ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
+        );
+
+        $ownershipMap = $this->ownershipMap;
+        $ownershipMap['prefix_match_overrides']['tests/not-owned_'] = 'filename_stem';
+        self::assertContains(
+            'unused_canonical_prefix_match_override:tests/not-owned_',
+            ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
+        );
+    }
+
     /** @return array<string, mixed> */
     private function validManifest(): array
     {
@@ -277,17 +305,23 @@ class ParallelWorkContractTest extends TestCase
                     'id' => 'lane-a',
                     'role' => 'implementation_worker',
                     'base_sha' => str_repeat('a', 40),
-                    'ownership' => ['scripts/github'],
+                    'ownership' => [$this->pathRule('scripts/github')],
                     'external_mutations' => [],
                 ],
                 [
                     'id' => 'lane-b',
                     'role' => 'implementation_worker',
                     'base_sha' => str_repeat('a', 40),
-                    'ownership' => ['scripts/ci/performance'],
+                    'ownership' => [$this->pathRule('scripts/ci/performance')],
                     'external_mutations' => [],
                 ],
             ],
         ];
+    }
+
+    /** @return array{path: string, match: string} */
+    private function pathRule(string $path, string $match = 'exact_or_descendants'): array
+    {
+        return ['path' => $path, 'match' => $match];
     }
 }

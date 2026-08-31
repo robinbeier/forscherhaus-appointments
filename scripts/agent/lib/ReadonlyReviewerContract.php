@@ -14,7 +14,7 @@ final class ReadonlyReviewerContract
      */
     public static function resolveInvocation(string $repoRoot, string $lens, array $reviewerPolicy): array
     {
-        self::assertRuntimeBoundary($reviewerPolicy);
+        self::trustedBasePaths($reviewerPolicy);
 
         $profiles = $reviewerPolicy['profiles'] ?? null;
         $profile = is_array($profiles) ? $profiles[$lens] ?? null : null;
@@ -68,6 +68,55 @@ final class ReadonlyReviewerContract
         ];
     }
 
+    /**
+     * @param array<string, mixed> $reviewerPolicy
+     * @return list<string>
+     */
+    public static function trustedBasePaths(array $reviewerPolicy): array
+    {
+        self::assertRuntimeBoundary($reviewerPolicy);
+
+        $profiles = $reviewerPolicy['profiles'] ?? null;
+        if (!is_array($profiles) || array_is_list($profiles)) {
+            throw new \RuntimeException('Reviewer profile policy is invalid.');
+        }
+        $expectedLenses = ['correctness_security', 'design_maintainability', 'tests_regression_flake'];
+        $actualLenses = array_keys($profiles);
+        sort($expectedLenses, SORT_STRING);
+        sort($actualLenses, SORT_STRING);
+        if ($actualLenses !== $expectedLenses) {
+            throw new \RuntimeException('Reviewer profile policy is invalid.');
+        }
+
+        $instructionPaths = [];
+        foreach (['correctness_security', 'design_maintainability', 'tests_regression_flake'] as $lens) {
+            $profile = $profiles[$lens] ?? null;
+            $instructions = is_array($profile) ? $profile['instructions'] ?? null : null;
+            if (!is_string($instructions) || !self::isNormalizedRepoPath($instructions)) {
+                throw new \RuntimeException('Reviewer profile instructions are invalid.');
+            }
+            $instructionPaths[] = $instructions;
+        }
+
+        $expectedPaths = array_values(
+            array_unique([
+                '.codex/contracts/agent-workflow.json',
+                ...$instructionPaths,
+                'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly_reviewer_contract.php',
+                'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'AGENTS.md',
+                'code_review.md',
+            ]),
+        );
+        $trustedPaths = $reviewerPolicy['trusted_base_paths'] ?? null;
+        if ($trustedPaths !== $expectedPaths) {
+            throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
+        }
+
+        return $expectedPaths;
+    }
+
     /** @param array<string, mixed> $reviewerPolicy */
     private static function assertRuntimeBoundary(array $reviewerPolicy): void
     {
@@ -89,13 +138,6 @@ final class ReadonlyReviewerContract
             if (($reviewerPolicy[$key] ?? null) !== $value) {
                 throw new \RuntimeException('Reviewer runtime boundary is invalid.');
             }
-        }
-
-        if (
-            ($reviewerPolicy['trusted_base_paths_file'] ?? null) !==
-            '.codex/contracts/readonly-reviewer-trust-paths.txt'
-        ) {
-            throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
         }
     }
 
