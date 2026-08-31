@@ -258,6 +258,8 @@ final class ExactHeadMergegateCliTest extends TestCase
                             'commit_id' => self::SHA,
                             'created_at' => '2026-08-30T20:00:01Z',
                             'updated_at' => '2026-08-30T20:00:01Z',
+                            'body' => 'inline review comment',
+                            'edit_count' => 0,
                             'user' => ['id' => 42],
                         ],
                     ];
@@ -480,6 +482,8 @@ final class ExactHeadMergegateCliTest extends TestCase
                         'commit_id' => self::SHA,
                         'created_at' => '2026-08-30T20:00:01Z',
                         'user' => ['id' => 42],
+                        'body' => 'inline review comment',
+                        'edit_count' => 0,
                     ],
                 ];
             }
@@ -554,6 +558,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                         'created_at' => '2026-08-30T20:00:01Z',
                         'updated_at' => '2026-08-30T20:00:01Z',
                         'body' => 'later feedback',
+                        'edit_count' => 0,
                     ];
                 }
             }
@@ -790,10 +795,10 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
     }
 
-    public function testGitHubAdapterInvokesOnlyExplicitGetMethodAtRuntime(): void
+    public function testGitHubRestAdapterInvokesOnlyExplicitGetMethodAtRuntime(): void
     {
         $commands = [];
-        $request = buildExactHeadMergegateGitHubGetClosure(static function (
+        $request = buildExactHeadMergegateGitHubReadClosure(static function (
             array $command,
             ?string $workingDirectory,
         ) use (&$commands): string {
@@ -813,6 +818,177 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertSame('/repos/acme/app/pulls/12', $command[array_key_last($command)] ?? null);
         foreach (['POST', 'PUT', 'PATCH', 'DELETE'] as $mutationMethod) {
             self::assertNotContains($mutationMethod, $command);
+        }
+    }
+
+    public function testGitHubAdapterBatchesGraphQlEvidenceForBothCommentTypes(): void
+    {
+        foreach (
+            [
+                '/repos/acme/app/issues/12/comments?per_page=100&page=1' => 'IssueComment',
+                '/repos/acme/app/pulls/12/comments?per_page=100&page=1' => 'PullRequestReviewComment',
+            ]
+            as $path => $typename
+        ) {
+            $commands = [];
+            $request = buildExactHeadMergegateGitHubReadClosure(static function (
+                array $command,
+                ?string $workingDirectory,
+            ) use (&$commands, $typename): string {
+                $commands[] = $command;
+                if (in_array('graphql', $command, true)) {
+                    return json_encode(
+                        [
+                            'data' => [
+                                'nodes' => [
+                                    [
+                                        '__typename' => $typename,
+                                        'id' => 'IC_kwDOabc123',
+                                        'includesCreatedEdit' => true,
+                                        'userContentEdits' => ['totalCount' => 3],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        JSON_THROW_ON_ERROR,
+                    );
+                }
+                return json_encode(
+                    [
+                        [
+                            'id' => 10,
+                            'node_id' => 'IC_kwDOabc123',
+                            'author_association' => 'OWNER',
+                            'created_at' => '2026-08-30T20:00:00Z',
+                            'updated_at' => '2026-08-30T20:00:00Z',
+                            'body' => 'comment',
+                        ],
+                    ],
+                    JSON_THROW_ON_ERROR,
+                );
+            });
+
+            $result = $request($path);
+            self::assertSame(2, $result[0]['edit_count']);
+            self::assertCount(2, $commands);
+            self::assertSame('POST', $commands[1][array_search('--method', $commands[1], true) + 1]);
+            self::assertContains('ids[]=IC_kwDOabc123', $commands[1]);
+            self::assertStringContainsString('userContentEdits(first:1)', implode(' ', $commands[1]));
+            self::assertStringNotContainsString('mutation', implode(' ', $commands[1]));
+        }
+
+        $commands = [];
+        $request = buildExactHeadMergegateGitHubReadClosure(static function (array $command) use (&$commands): string {
+            $commands[] = $command;
+
+            return '[]';
+        });
+        self::assertSame([], $request('/repos/acme/app/issues/12/comments?per_page=100&page=1'));
+        self::assertCount(1, $commands);
+    }
+
+    public function testGitHubAdapterRejectsMalformedGraphQlEvidence(): void
+    {
+        $cases = [
+            [],
+            [
+                [
+                    '__typename' => 'IssueComment',
+                    'id' => 'wrong',
+                    'includesCreatedEdit' => false,
+                    'userContentEdits' => ['totalCount' => 0],
+                ],
+            ],
+            [
+                [
+                    '__typename' => 'PullRequestReviewComment',
+                    'id' => 'IC_kwDOabc123',
+                    'includesCreatedEdit' => false,
+                    'userContentEdits' => ['totalCount' => -1],
+                ],
+            ],
+            [
+                [
+                    '__typename' => 'IssueComment',
+                    'id' => 'IC_kwDOabc123',
+                    'includesCreatedEdit' => false,
+                    'userContentEdits' => ['totalCount' => 0],
+                ],
+                [
+                    '__typename' => 'IssueComment',
+                    'id' => 'IC_kwDOabc123',
+                    'includesCreatedEdit' => false,
+                    'userContentEdits' => ['totalCount' => 0],
+                ],
+            ],
+        ];
+        foreach ($cases as $nodes) {
+            $request = buildExactHeadMergegateGitHubReadClosure(static function (array $command) use ($nodes): string {
+                if (in_array('graphql', $command, true)) {
+                    return json_encode(['data' => ['nodes' => $nodes]], JSON_THROW_ON_ERROR);
+                }
+                return json_encode([['id' => 10, 'node_id' => 'IC_kwDOabc123']], JSON_THROW_ON_ERROR);
+            });
+            try {
+                $request('/repos/acme/app/issues/12/comments?per_page=100&page=1');
+                self::fail('Malformed GraphQL evidence was accepted.');
+            } catch (RuntimeException) {
+                self::assertTrue(true);
+            }
+        }
+    }
+
+    public function testGitHubAdapterRejectsGraphQlErrorsAndDuplicateRestNodeIds(): void
+    {
+        $request = buildExactHeadMergegateGitHubReadClosure(static function (array $command): string {
+            if (in_array('graphql', $command, true)) {
+                return json_encode(
+                    [
+                        'data' => [
+                            'nodes' => [
+                                [
+                                    '__typename' => 'IssueComment',
+                                    'id' => 'IC_kwDOabc123',
+                                    'includesCreatedEdit' => false,
+                                    'userContentEdits' => ['totalCount' => 0],
+                                ],
+                            ],
+                        ],
+                        'errors' => [['message' => 'partial response']],
+                    ],
+                    JSON_THROW_ON_ERROR,
+                );
+            }
+
+            return json_encode([['id' => 10, 'node_id' => 'IC_kwDOabc123']], JSON_THROW_ON_ERROR);
+        });
+        try {
+            $request('/repos/acme/app/issues/12/comments?per_page=100&page=1');
+            self::fail('Partial GraphQL evidence was accepted.');
+        } catch (RuntimeException) {
+            self::assertTrue(true);
+        }
+
+        $graphQlCalled = false;
+        $request = buildExactHeadMergegateGitHubReadClosure(static function (array $command) use (
+            &$graphQlCalled,
+        ): string {
+            if (in_array('graphql', $command, true)) {
+                $graphQlCalled = true;
+
+                return '{}';
+            }
+
+            return json_encode(
+                [['id' => 10, 'node_id' => 'IC_kwDOabc123'], ['id' => 11, 'node_id' => 'IC_kwDOabc123']],
+                JSON_THROW_ON_ERROR,
+            );
+        });
+        try {
+            $request('/repos/acme/app/issues/12/comments?per_page=100&page=1');
+            self::fail('Duplicate REST node IDs were accepted.');
+        } catch (RuntimeException) {
+            self::assertFalse($graphQlCalled);
         }
     }
 
@@ -939,6 +1115,23 @@ final class ExactHeadMergegateCliTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Exact-head mergegate workflow parser contract is malformed.');
+        decodeExactHeadMergegatePolicy(json_encode($contract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+    }
+
+    public function testPolicyDecoderRejectsWeakenedCommentEditEvidence(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $contract = json_decode(
+            (string) file_get_contents($root . '/.codex/contracts/agent-workflow.json'),
+            true,
+            128,
+            JSON_THROW_ON_ERROR,
+        );
+        $contract['land']['exact_head_mergegate']['review_attestation']['comment_edit_evidence'] =
+            'rest_timestamp_equality';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Exact-head mergegate review authority model is malformed.');
         decodeExactHeadMergegatePolicy(json_encode($contract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
     }
 
@@ -1122,6 +1315,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                             'created_at' => '2026-08-30T20:00:00Z',
                             'updated_at' => '2026-08-30T20:00:00Z',
                             'body' => $this->attestation(),
+                            'edit_count' => 0,
                         ],
                     ]
                     : [];

@@ -56,9 +56,9 @@ function runExactHeadMergegateCli(
             $policyLoader !== null
                 ? $policyLoader($root, $config['contract'], $reviewedSha)
                 : loadExactHeadMergegateVerifiedPolicy($root, $config['contract'], $reviewedSha);
-        $githubGet = $request ?? buildExactHeadMergegateGitHubGetClosure();
+        $githubRead = $request ?? buildExactHeadMergegateGitHubReadClosure();
         $snapshot = fetchExactHeadMergegateSnapshot(
-            $githubGet,
+            $githubRead,
             $repository,
             $prNumber,
             $reviewedSha,
@@ -116,7 +116,7 @@ function exactHeadMergegateUsage(): string
         '  --output-json=PATH  Sanitized JSON report path.',
         '  --help              Show this help text.',
         '',
-        'The command performs GitHub GET requests only and never merges or mutates the pull request.',
+        'The command performs read-only GitHub API queries and never merges or mutates the pull request.',
         '',
     ]);
 }
@@ -641,6 +641,7 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         ($attestation['cryptographic_agent_execution_proof'] ?? null) !== false ||
         ($attestation['malicious_repository_owner_in_scope'] ?? null) !== false ||
         ($attestation['requires_unedited_comment'] ?? null) !== true ||
+        ($attestation['comment_edit_evidence'] ?? null) !== 'graphql_user_content_edit_count_excluding_creation' ||
         ($attestation['activity_watermarks'] ?? null) !== ['review_id', 'review_comment_id', 'review_payload_digest']
     ) {
         throw new RuntimeException('Exact-head mergegate review authority model is malformed.');
@@ -737,7 +738,7 @@ function resolveExactHeadMergegateRepository(string $root, ?string $originRemote
  * @param Closure(array<int, string>, ?string): string|null $processRunner
  * @return Closure(string): array<string, mixed>
  */
-function buildExactHeadMergegateGitHubGetClosure(?Closure $processRunner = null): Closure
+function buildExactHeadMergegateGitHubReadClosure(?Closure $processRunner = null): Closure
 {
     $runProcess =
         $processRunner ??
@@ -777,8 +778,103 @@ function buildExactHeadMergegateGitHubGetClosure(?Closure $processRunner = null)
             throw new RuntimeException('GitHub GET response had an invalid shape.');
         }
 
+        $commentEndpoint =
+            preg_match('~^/repos/[^/]+/[^/]+/(issues|pulls)/[1-9][0-9]*/comments\?~D', $path, $endpointMatches) === 1;
+        if ($commentEndpoint) {
+            if (!array_is_list($decoded)) {
+                throw new RuntimeException('GitHub comment collection had an invalid shape.');
+            }
+            if ($decoded !== []) {
+                $decoded = exactHeadMergegateEnrichCommentsWithGraphQl(
+                    $decoded,
+                    $endpointMatches[1] === 'issues' ? 'IssueComment' : 'PullRequestReviewComment',
+                    $runProcess,
+                );
+            }
+        }
+
         return $decoded;
     };
+}
+
+/** @param Closure(array<int, string>, ?string): string $runProcess */
+function exactHeadMergegateEnrichCommentsWithGraphQl(array $items, string $typename, Closure $runProcess): array
+{
+    if (!array_is_list($items) || !in_array($typename, ['IssueComment', 'PullRequestReviewComment'], true)) {
+        throw new RuntimeException('GitHub comment collection had an invalid shape.');
+    }
+    $nodeIds = [];
+    foreach ($items as $item) {
+        if (!is_array($item) || !is_string($item['node_id'] ?? null) || $item['node_id'] === '') {
+            throw new RuntimeException('GitHub comment lacked a valid GraphQL node ID.');
+        }
+        if (in_array($item['node_id'], $nodeIds, true)) {
+            throw new RuntimeException('GitHub comment collection contained duplicate GraphQL node IDs.');
+        }
+        $nodeIds[] = $item['node_id'];
+    }
+    $query =
+        'query($ids:[ID!]!){nodes(ids:$ids){__typename ' .
+        '... on IssueComment{id includesCreatedEdit userContentEdits(first:1){totalCount}} ' .
+        '... on PullRequestReviewComment{id includesCreatedEdit userContentEdits(first:1){totalCount}}}}';
+    $command = [
+        'gh',
+        'api',
+        '--method',
+        'POST',
+        '--hostname',
+        'github.com',
+        '-H',
+        'Accept: application/vnd.github+json',
+        '-H',
+        'X-GitHub-Api-Version: 2022-11-28',
+        'graphql',
+        '-f',
+        'query=' . $query,
+    ];
+    foreach ($nodeIds as $nodeId) {
+        $command[] = '-F';
+        $command[] = 'ids[]=' . $nodeId;
+    }
+    $output = $runProcess($command, null);
+    try {
+        $response = json_decode($output, true, 128, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        throw new RuntimeException('GitHub GraphQL response was not valid JSON.');
+    }
+    if (!is_array($response) || (isset($response['errors']) && $response['errors'] !== [])) {
+        throw new RuntimeException('GitHub GraphQL comment evidence contained errors.');
+    }
+
+    $nodes = is_array($response['data'] ?? null) ? $response['data']['nodes'] ?? null : null;
+    if (!is_array($nodes) || !array_is_list($nodes) || count($nodes) !== count($nodeIds)) {
+        throw new RuntimeException('GitHub GraphQL comment evidence had an invalid shape.');
+    }
+    $byId = [];
+    foreach ($nodes as $node) {
+        if (!is_array($node) || !is_string($node['id'] ?? null) || isset($byId[$node['id']])) {
+            throw new RuntimeException('GitHub GraphQL comment evidence had invalid nodes.');
+        }
+        if (
+            !in_array($node['id'], $nodeIds, true) ||
+            ($node['__typename'] ?? null) !== $typename ||
+            !is_bool($node['includesCreatedEdit'] ?? null) ||
+            !is_array($node['userContentEdits'] ?? null) ||
+            !is_int($node['userContentEdits']['totalCount'] ?? null) ||
+            $node['userContentEdits']['totalCount'] < 0 ||
+            $node['userContentEdits']['totalCount'] < ($node['includesCreatedEdit'] ? 1 : 0)
+        ) {
+            throw new RuntimeException('GitHub GraphQL comment evidence failed validation.');
+        }
+        $creationEntryCount = $node['includesCreatedEdit'] ? 1 : 0;
+        $byId[$node['id']] = $node['userContentEdits']['totalCount'] - $creationEntryCount;
+    }
+    foreach ($items as $index => $item) {
+        $items[$index]['edit_count'] =
+            $byId[$item['node_id']] ?? throw new RuntimeException('GitHub GraphQL node mismatch.');
+    }
+
+    return $items;
 }
 
 /**
@@ -1165,7 +1261,9 @@ function normalizeExactHeadMergegateComment(mixed $comment): array
         !is_string($comment['author_association'] ?? null) ||
         !is_string($comment['created_at'] ?? null) ||
         !is_string($comment['updated_at'] ?? null) ||
-        !is_string($comment['body'] ?? null)
+        !is_string($comment['body'] ?? null) ||
+        !is_int($comment['edit_count'] ?? null) ||
+        ($comment['edit_count'] ?? -1) < 0
     ) {
         throw new RuntimeException('GitHub issue comment had an invalid shape.');
     }
@@ -1176,6 +1274,7 @@ function normalizeExactHeadMergegateComment(mixed $comment): array
         'created_at' => $comment['created_at'] ?? null,
         'updated_at' => $comment['updated_at'] ?? null,
         'body' => $comment['body'] ?? null,
+        'edit_count' => $comment['edit_count'],
     ];
 }
 
@@ -1218,7 +1317,10 @@ function normalizeExactHeadMergegateReviewComment(mixed $comment): array
         !is_int($comment['id'] ?? null) ||
         !is_string($comment['author_association'] ?? null) ||
         !is_string($comment['commit_id'] ?? null) ||
-        !is_string($comment['updated_at'] ?? null)
+        !is_string($comment['updated_at'] ?? null) ||
+        !is_string($comment['body'] ?? null) ||
+        !is_int($comment['edit_count'] ?? null) ||
+        ($comment['edit_count'] ?? -1) < 0
     ) {
         throw new RuntimeException('GitHub review comment had an invalid shape.');
     }
@@ -1231,6 +1333,8 @@ function normalizeExactHeadMergegateReviewComment(mixed $comment): array
         'state' => null,
         'commit_sha' => $comment['commit_id'] ?? null,
         'occurred_at' => $comment['updated_at'],
+        'content_digest' => hash('sha256', $comment['body']),
+        'edit_count' => $comment['edit_count'],
     ];
 }
 

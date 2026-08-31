@@ -283,11 +283,11 @@ read-only verifier:
 composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<40-character-sha>
 ```
 
-The verifier uses GitHub GET requests only. It must run from the exact reviewed
-`HEAD`, loads its policy from that committed tree, and rejects local changes to
-the contract or mergegate implementation. Its workflow parser runs isolated
-and accepts only the YAML runtime file manifest and digest pinned by that
-reviewed policy.
+The verifier uses GitHub REST GET requests plus bounded, read-only GraphQL
+queries. It must run from the exact reviewed `HEAD`, loads its policy from that
+committed tree, and rejects local changes to the contract or mergegate
+implementation. Its workflow parser runs isolated and accepts only the YAML
+runtime file manifest and digest pinned by that reviewed policy.
 It observes all normalized CI and review evidence twice. It reads PR identity
 before, between, and after those bounded observations. All three PR reads and
 both complete evidence observations must remain equal. It requires the open
@@ -296,12 +296,14 @@ blocking check to bind to that PR and SHA. Always-on checks must succeed;
 diff-conditional checks must be either successful or explicitly skipped. It
 also requires the three distinct review lenses from the machine contract in
 one new, unedited, SHA-bound owner attestation with exact review-activity
-watermarks and a privacy-safe formal-review payload digest. A still-active
-trusted `CHANGES_REQUESTED` review, trusted watermark or payload drift, edited
-trusted inline feedback, newer trusted review feedback, or a newer invalid
-attestation marker invalidates that evidence. Missing, pending, duplicated,
-malformed, stale, or wrong-suite evidence fails closed. The report contains no
-raw comment body, reviewer identity, token, capability, or personal data.
+watermarks and a privacy-safe review payload digest. Batched GraphQL edit
+counts bind the attestation's unedited state and each trusted inline review
+comment, while only body digests enter the watermark. A still-active trusted
+`CHANGES_REQUESTED` review, trusted watermark or payload drift, edited trusted
+inline feedback, newer trusted review feedback, or a newer invalid attestation
+marker invalidates that evidence. Missing, pending, duplicated, malformed,
+stale, or wrong-suite evidence fails closed. The report contains no raw comment
+body, reviewer identity, token, capability, or personal data.
 Untrusted review activity neither grants authority nor vetoes landing. See
 `docs/exact-head-mergegate.md`.
 

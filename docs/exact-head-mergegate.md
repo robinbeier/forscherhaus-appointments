@@ -29,8 +29,7 @@ or duplicate input fails closed.
 
 ## Evidence Contract
 
-The command uses authenticated GitHub GET requests and binds all evidence to
-the same pull request and reviewed SHA:
+The command uses authenticated GitHub REST GET requests plus bounded, read-only GraphQL queries and binds all evidence to the same pull request and reviewed SHA:
 
 1. The command must run from the reviewed branch worktree on the exact reviewed
    `HEAD`. The merge policy is loaded from the reviewed commit's own
@@ -62,7 +61,12 @@ the same pull request and reviewed SHA:
    inline review comments for the reviewed SHA and target pull request. The two
    observations must be strictly identical. Any CI rerun, review edit, review
    comment edit, added feedback, deleted evidence, or other drift between those
-   observations blocks the merge.
+   observations blocks the merge. For each non-empty REST comment page, one
+   batched GraphQL node query reads only whether the creation entry is present
+   and the total edit-history count. Their difference is the canonical edit
+   count. Missing, partial, mismatched, duplicated, or malformed node evidence
+   fails closed. This detects same-second edits and edit-then-restore changes
+   without reading edit diffs or editor identities.
 4. GitHub's commit-to-PR association binds that SHA to the pull request, and a
    completed pull_request run of the canonical CI workflow binds the same SHA,
    head branch, head repository, pull request number, and check suite. The
@@ -82,6 +86,8 @@ the same pull request and reviewed SHA:
    exact-SHA formal review payloads observed when it was published. The newest
    owner comment carrying the attestation marker must itself be valid; a newer
    malformed, edited, or wrong-SHA marker comment invalidates older evidence.
+   Unedited means both identical creation/update timestamps and a canonical
+   GraphQL edit count of zero.
 8. No still-active CHANGES_REQUESTED review targets that SHA, no trusted issue
    comment is newer than the selected attestation, the current formal review
    and inline review comment maxima still equal the attested watermarks, and
@@ -124,7 +130,8 @@ The numeric watermarks are the largest current IDs returned for formal reviews
 and inline review comments from the contract's blocking feedback associations,
 or 0 when that trusted evidence set is empty. The payload digest is the
 privacy-safe hash of the normalized exact-SHA formal review payloads plus the
-normalized inline review comment evidence from those same associations.
+normalized inline review comment timestamp, body digest, and edit count from
+those same associations.
 Together they make later trusted activity, trusted inline-comment deletion,
 and trusted formal-review body edits detectable without writing review text or
 identities into the report. A higher, lower, deleted, or otherwise different
@@ -143,8 +150,9 @@ closed and requires fresh evidence.
 Publishing the attestation is a separate, explicit PR write performed only
 after the reviews actually exist. The mergegate itself never publishes or
 updates it. The attestation comment must have identical creation and update
-timestamps; do not edit or reuse it. Any correction, later trusted review
-activity, or later push requires a new comment after fresh final reviews.
+timestamps and a zero GraphQL edit count; do not edit or reuse it. Any
+correction, later trusted review activity, or later push requires a new comment
+after fresh final reviews.
 
 The gate also reads formal reviews and inline review comments from the
 contract's owner/member/collaborator feedback set. A current-SHA

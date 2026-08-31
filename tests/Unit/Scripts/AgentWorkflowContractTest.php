@@ -101,6 +101,10 @@ class AgentWorkflowContractTest extends TestCase
             $contract['land']['exact_head_mergegate']['review_attestation']['requires_unedited_comment'] ?? null,
         );
         self::assertSame(
+            'graphql_user_content_edit_count_excluding_creation',
+            $contract['land']['exact_head_mergegate']['review_attestation']['comment_edit_evidence'] ?? null,
+        );
+        self::assertSame(
             ['review_id', 'review_comment_id', 'review_payload_digest'],
             $contract['land']['exact_head_mergegate']['review_attestation']['activity_watermarks'] ?? null,
         );

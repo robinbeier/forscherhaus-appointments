@@ -118,7 +118,13 @@ final class ExactHeadMergegate
                 continue;
             }
 
-            if (!is_string($activity['commit_sha'] ?? null)) {
+            if (
+                !is_string($activity['commit_sha'] ?? null) ||
+                !is_string($activity['content_digest'] ?? null) ||
+                preg_match('/^[0-9a-f]{64}$/D', $activity['content_digest']) !== 1 ||
+                !is_int($activity['edit_count'] ?? null) ||
+                ($activity['edit_count'] ?? -1) < 0
+            ) {
                 return null;
             }
 
@@ -128,6 +134,8 @@ final class ExactHeadMergegate
                 'actor_ref' => $activity['actor_ref'],
                 'commit_sha' => $activity['commit_sha'],
                 'occurred_at' => self::normalizeGitHubTimestamp($activity['occurred_at']),
+                'content_digest' => $activity['content_digest'],
+                'edit_count' => $activity['edit_count'],
             ];
         }
 
@@ -458,7 +466,12 @@ final class ExactHeadMergegate
                 }
 
                 $updatedAt = self::normalizeGitHubTimestamp($comment['updated_at'] ?? null);
-                if ($updatedAt === null || (!is_int($comment['id'] ?? null) && !is_string($comment['id'] ?? null))) {
+                if (
+                    $updatedAt === null ||
+                    (!is_int($comment['id'] ?? null) && !is_string($comment['id'] ?? null)) ||
+                    !is_int($comment['edit_count'] ?? null) ||
+                    ($comment['edit_count'] ?? -1) < 0
+                ) {
                     $markerEvidenceMalformed = true;
                     continue;
                 }
@@ -536,6 +549,9 @@ final class ExactHeadMergegate
         $createdAt = self::normalizeGitHubTimestamp($comment['created_at'] ?? null);
         $updatedAt = self::normalizeGitHubTimestamp($comment['updated_at'] ?? null);
         if ($createdAt === null || $updatedAt === null || $createdAt !== $updatedAt) {
+            return null;
+        }
+        if (($comment['edit_count'] ?? null) !== 0) {
             return null;
         }
 
@@ -636,7 +652,12 @@ final class ExactHeadMergegate
             }
 
             $updatedAt = self::normalizeGitHubTimestamp($comment['updated_at'] ?? null);
-            if ($updatedAt === null || (!is_int($comment['id'] ?? null) && !is_string($comment['id'] ?? null))) {
+            if (
+                $updatedAt === null ||
+                (!is_int($comment['id'] ?? null) && !is_string($comment['id'] ?? null)) ||
+                !is_int($comment['edit_count'] ?? null) ||
+                ($comment['edit_count'] ?? -1) < 0
+            ) {
                 return true;
             }
             $createdAt = self::normalizeGitHubTimestamp($comment['created_at'] ?? null);
