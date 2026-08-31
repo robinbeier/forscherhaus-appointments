@@ -183,6 +183,64 @@ final class ParallelWorkContract
 
     /**
      * @param array<string, mixed> $manifest
+     * @param list<string> $changedPaths
+     * @return list<string>
+     */
+    public static function validateLaneChanges(array $manifest, string $laneId, array $changedPaths): array
+    {
+        $lanes = $manifest['lanes'] ?? null;
+        if (!is_array($lanes) || !array_is_list($lanes)) {
+            return ['invalid_lanes_for_verification'];
+        }
+
+        $matchingLanes = array_values(
+            array_filter($lanes, static fn(mixed $lane): bool => is_array($lane) && ($lane['id'] ?? null) === $laneId),
+        );
+        if (count($matchingLanes) !== 1) {
+            return ['unknown_lane_for_verification:' . $laneId];
+        }
+
+        $errors = [];
+        $ownership = $matchingLanes[0]['ownership'] ?? null;
+        if (!is_array($ownership) || !array_is_list($ownership) || $ownership === []) {
+            return ['invalid_lane_ownership_for_verification:' . $laneId];
+        }
+
+        $pathRules = [];
+        foreach ($ownership as $ruleIndex => $ownershipRule) {
+            $pathRule = self::readPathRule(
+                $ownershipRule,
+                $errors,
+                'invalid_lane_ownership_for_verification:' . $laneId . ':' . $ruleIndex,
+            );
+            if ($pathRule !== null) {
+                $pathRules[] = $pathRule;
+            }
+        }
+
+        foreach (array_values(array_unique($changedPaths)) as $changedPath) {
+            if (!is_string($changedPath) || !RepoPath::isNormalized($changedPath)) {
+                $errors[] = 'invalid_changed_path:' . $laneId;
+                continue;
+            }
+
+            $covered = false;
+            foreach ($pathRules as $pathRule) {
+                if (self::pathRuleCovers($pathRule['path'], $pathRule['match'], $changedPath)) {
+                    $covered = true;
+                    break;
+                }
+            }
+            if (!$covered) {
+                $errors[] = 'ownership_violation:' . $laneId . ':' . $changedPath;
+            }
+        }
+
+        return array_values(array_unique($errors));
+    }
+
+    /**
+     * @param array<string, mixed> $manifest
      * @param list<string> $errors
      * @return array<string, true>
      */

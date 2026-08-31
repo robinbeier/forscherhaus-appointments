@@ -20,6 +20,6 @@ exec /usr/bin/env -i \
     PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     LANG=C \
     LC_ALL=C \
-    TMPDIR="${TMPDIR:-/tmp}" \
+    TMPDIR=/tmp \
     "$trusted_php" -n -d auto_prepend_file= -d auto_append_file= \
     "$script_directory/check_parallel_work_contract.php" "$@"

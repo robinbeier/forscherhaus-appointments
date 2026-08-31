@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 class ParallelWorkContractCliTest extends TestCase
 {
+    private string $sourceRepoRoot;
     private string $repoRoot;
     private string $baseSha;
 
@@ -15,10 +16,15 @@ class ParallelWorkContractCliTest extends TestCase
     {
         parent::setUp();
         $sourceRepoRoot = dirname(__DIR__, 3);
+        $this->sourceRepoRoot = $sourceRepoRoot;
         $this->repoRoot = sys_get_temp_dir() . '/parallel-work-repo-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($this->repoRoot . '/scripts/agent/lib', 0700, true));
         self::assertTrue(mkdir($this->repoRoot . '/.codex/contracts', 0700, true));
         self::assertTrue(mkdir($this->repoRoot . '/docs/maps', 0700, true));
+        self::assertTrue(mkdir($this->repoRoot . '/tests/Fixtures/parallel/lane-a', 0700, true));
+        self::assertNotFalse(
+            file_put_contents($this->repoRoot . '/tests/Fixtures/parallel/lane-a/tracked.txt', "base\n"),
+        );
         copy(
             $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
             $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
@@ -242,6 +248,80 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertFileDoesNotExist($marker);
     }
 
+    public function testTrustedVerificationBindsActualLaneChangesToDeclaredOwnership(): void
+    {
+        $manifestPath = $this->writeJsonFixture(
+            'lane-verification',
+            $this->manifestForPath('tests/Fixtures/parallel/lane-a'),
+        );
+
+        $committed = $this->repoRoot . '/tests/Fixtures/parallel/lane-a/committed.txt';
+        self::assertNotFalse(file_put_contents($committed, "committed\n"));
+        $this->runGit($this->repoRoot, ['add', 'tests/Fixtures/parallel/lane-a/committed.txt']);
+        $this->runGit($this->repoRoot, ['commit', '-qm', 'lane change']);
+        self::assertNotFalse(
+            file_put_contents($this->repoRoot . '/tests/Fixtures/parallel/lane-a/tracked.txt', "unstaged\n"),
+        );
+        $staged = $this->repoRoot . '/tests/Fixtures/parallel/lane-a/staged.txt';
+        self::assertNotFalse(file_put_contents($staged, "staged\n"));
+        $this->runGit($this->repoRoot, ['add', 'tests/Fixtures/parallel/lane-a/staged.txt']);
+        self::assertNotFalse(
+            file_put_contents($this->repoRoot . '/tests/Fixtures/parallel/lane-a/untracked.txt', "untracked\n"),
+        );
+
+        [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a');
+        self::assertSame(0, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertSame('pass', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['status']);
+
+        [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a', true);
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertContains('lane_worktree_not_clean', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors']);
+
+        $this->runGit($this->repoRoot, ['add', 'tests/Fixtures/parallel/lane-a']);
+        $this->runGit($this->repoRoot, ['commit', '-qm', 'complete lane change']);
+        [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a', true);
+        self::assertSame(0, $exitCode, $stderr);
+        $cleanResult = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('pass', $cleanResult['status']);
+        self::assertSame($this->baseSha, $cleanResult['verification']['base_sha']);
+        self::assertSame(
+            $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']),
+            $cleanResult['verification']['head_sha'],
+        );
+        self::assertTrue($cleanResult['verification']['working_tree_clean']);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $cleanResult['verification']['changed_paths_sha256']);
+
+        self::assertNotFalse(file_put_contents($this->repoRoot . '/scripts/agent/outside.txt', "outside\n"));
+        [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a');
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'ownership_violation:lane-a:scripts/agent/outside.txt',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+    }
+
+    public function testLaneVerificationRejectsAnInLaneValidator(): void
+    {
+        $manifestPath = $this->writeJsonFixture(
+            'self-verification',
+            $this->manifestForPath('tests/Fixtures/parallel/lane-a'),
+        );
+        [$exitCode, $stdout, $stderr] = $this->runCli([
+            '--manifest=' . $manifestPath,
+            '--repo-root=' . $this->repoRoot,
+            '--verify-lane=lane-a',
+        ]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'validator_must_run_outside_lane',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+    }
+
     public function testCliRejectsUnknownOptionBeforeReadingInputs(): void
     {
         [$exitCode, $stdout, $stderr] = $this->runCli(['--bogus']);
@@ -301,6 +381,33 @@ class ParallelWorkContractCliTest extends TestCase
             $pipes,
             $repoRoot,
             $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [proc_close($process), $stdout, $stderr];
+    }
+
+    /** @return array{int, string, string} */
+    private function runTrustedLaneVerification(string $manifestPath, string $laneId, bool $requireClean = false): array
+    {
+        $arguments = [
+            $this->sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.sh',
+            '--manifest=' . $manifestPath,
+            '--repo-root=' . $this->repoRoot,
+            '--verify-lane=' . $laneId,
+        ];
+        if ($requireClean) {
+            $arguments[] = '--require-clean';
+        }
+        $process = proc_open(
+            $arguments,
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $this->sourceRepoRoot,
         );
         self::assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);

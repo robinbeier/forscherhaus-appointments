@@ -118,6 +118,8 @@ exec-policy rules, external connectors, web search, or ambient PHP configuration
 for either its bootstrap or its trusted contract and output validator. The
 bootstrap passes an explicit environment allowlist into Bash, excluding
 `BASH_ENV`, exported functions, shell options, and unrelated ambient variables.
+Its private trust bundle is created only below fixed system `/tmp`, not ambient
+or repository-local temporary storage.
 Git and PHP resolve through a
 fixed system path, while only the primary may pass a trusted absolute Codex
 binary path; either path must identify as the Codex CLI by basename and version

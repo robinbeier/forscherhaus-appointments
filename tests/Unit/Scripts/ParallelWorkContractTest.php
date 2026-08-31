@@ -64,11 +64,46 @@ class ParallelWorkContractTest extends TestCase
         self::assertTrue(RepoPath::isNormalized('scripts/agent/lib/RepoPath.php'));
 
         foreach (
-            ['', '/absolute', 'trailing/', 'double//slash', './dot', '../escape', 'a/../b', 'back\\slash', '*.php']
+            [
+                '',
+                '/absolute',
+                'trailing/',
+                'double//slash',
+                './dot',
+                '../escape',
+                'a/../b',
+                'back\\slash',
+                '*.php',
+                "line\nbreak",
+                "carriage\rreturn",
+                "nul\0byte",
+                "delete\x7fbyte",
+            ]
             as $path
         ) {
             self::assertFalse(RepoPath::isNormalized($path), $path);
         }
+    }
+
+    public function testLaneChangeVerificationAcceptsOnlyDeclaredOwnership(): void
+    {
+        $manifest = $this->validManifest();
+
+        self::assertSame(
+            [],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', [
+                'scripts/github/check.php',
+                'scripts/github/fixtures/example.json',
+            ]),
+        );
+        self::assertSame(
+            ['ownership_violation:lane-a:scripts/ci/outside.php'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', ['scripts/ci/outside.php']),
+        );
+        self::assertSame(
+            ['unknown_lane_for_verification:lane-c'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-c', []),
+        );
     }
 
     public function testRejectsDisabledOrUnknownMachinePolicySemantics(): void

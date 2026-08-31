@@ -78,6 +78,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'clean_bootstrap_environment',
             $contract['authority']['reviewer']['shell_runtime_configuration'] ?? null,
         );
+        self::assertSame('fixed_system_tmp', $contract['authority']['reviewer']['temporary_directory_policy'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertSame(
             'ignore_ambient_and_disable_helpers',
@@ -310,6 +311,7 @@ class ReviewerAuthorityContractTest extends TestCase
         $bashEnvironment = $temporaryDirectory . '/bash-environment';
         self::assertNotFalse(file_put_contents($bashEnvironment, ': > ' . escapeshellarg($bashMarker) . "\n"));
         $environment['BASH_ENV'] = $bashEnvironment;
+        $environment['TMPDIR'] = $temporaryDirectory . '/missing-untrusted-tmp';
         $lenses = [
             'correctness_security' => [
                 'model' => 'gpt-5.4',
@@ -918,6 +920,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
             'shell_runtime_configuration' => 'clean_bootstrap_environment',
+            'temporary_directory_policy' => 'fixed_system_tmp',
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',

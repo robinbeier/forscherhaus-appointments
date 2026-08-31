@@ -69,6 +69,7 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('never', $contract['authority']['reviewer']['approval_policy'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_user_config'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? null);
+        self::assertSame('fixed_system_tmp', $contract['authority']['reviewer']['temporary_directory_policy'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertSame(
             'ignore_ambient_and_disable_helpers',
@@ -134,6 +135,9 @@ class AgentWorkflowContractTest extends TestCase
             'scripts/agent/check_parallel_work_contract.sh',
             $contract['parallel_work']['validator_invocation'] ?? null,
         );
+        self::assertSame('declared_base_commit', $contract['parallel_work']['validator_trust_anchor'] ?? null);
+        self::assertTrue($contract['parallel_work']['requires_post_implementation_verification'] ?? null);
+        self::assertTrue($contract['parallel_work']['requires_clean_post_commit_verification'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['parallel_work']['php_runtime_configuration'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
         self::assertSame(

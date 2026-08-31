@@ -12,7 +12,7 @@ if ($payload === false || $payload === '') {
 
 $environment = [
     'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin',
-    'TMPDIR' => getenv('TMPDIR') ?: '/tmp',
+    'TMPDIR' => '/tmp',
 ];
 foreach (
     [
@@ -235,7 +235,7 @@ if [[ ! "$codex_version" =~ ^codex-cli[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+([+-][A-
     exit 2
 fi
 
-trusted_root="$(mktemp -d "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")" || {
+trusted_root="$(mktemp -d "/tmp/readonly-reviewer-base.XXXXXX")" || {
     echo "Reviewer trust bundle could not be created." >&2
     exit 2
 }

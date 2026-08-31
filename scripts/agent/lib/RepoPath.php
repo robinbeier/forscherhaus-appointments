@@ -12,7 +12,11 @@ final class RepoPath
             return false;
         }
 
-        if (str_contains($path, '\\') || preg_match('/[*?\[\]]/', $path) === 1) {
+        if (
+            str_contains($path, '\\') ||
+            preg_match('/[*?\[\]]/', $path) === 1 ||
+            preg_match('/[\x00-\x1F\x7F]/', $path) === 1
+        ) {
             return false;
         }
 

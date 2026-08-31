@@ -143,6 +143,26 @@ cross-lane integration files, and landing helpers remain primary-owned. Stop a
 lane if it needs another lane's files, its ownership becomes ambiguous, or a
 semantic cross-lane dependency appears.
 
+The manifest pass is admission, not completion evidence. After every worker
+return and again immediately before the primary commits or integrates a lane,
+run the validator from a separate clean primary checkout whose validator files
+match the lane's declared base:
+
+```bash
+scripts/agent/check_parallel_work_contract.sh --manifest=<lane-manifest.json> --repo-root=<absolute-lane-worktree> --verify-lane=<lane-id>
+```
+
+Verification fails closed unless the validator wrapper, CLI, shared path
+grammar, and contract implementation match their declared-base blobs. It then
+checks that the lane HEAD descends from the base and compares all committed,
+staged, unstaged, and non-ignored untracked paths with the lane's declared ownership. An
+ownership violation, base drift, invalid path, or in-lane validator invocation
+blocks integration. After the primary creates the lane commit, it reruns the
+same command with `--require-clean`; only that clean result is integration
+evidence because it binds the declared base, immutable lane HEAD, clean local
+state, and a changed-path digest. The primary records both passes in the
+existing workpad; the worker never runs or publishes this authority check.
+
 A merge invalidates the base of every remaining lane. Before any remaining
 lane can publish, the primary synchronizes it with the newly verified
 `origin/main`, resolves integration centrally, and reruns all validation and
@@ -346,7 +366,8 @@ rm -f "$trusted_runner"
 The runner first enters through a PHP `-n` bootstrap and passes only an explicit
 allowlist of runtime variables into its Bash body, so `BASH_ENV`, exported shell
 functions, shell options, and unrelated ambient variables cannot execute before
-the trust checks. It then starts an ephemeral session without user configuration, user or
+the trust checks. Its trust bundle always uses the fixed system `/tmp`, never an
+ambient or repository-local temporary root. It then starts an ephemeral session without user configuration, user or
 project exec-policy rules, external connectors, or web search. It uses a
 read-only sandbox with network denied for reviewer commands and never permits
 approval escalation. Git and PHP resolve only through a fixed system tool path;

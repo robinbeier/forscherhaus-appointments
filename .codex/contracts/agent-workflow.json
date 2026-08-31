@@ -23,6 +23,7 @@
             "requires_base_runner": true,
             "runtime_configuration_change_policy": "external_bootstrap_review",
             "shell_runtime_configuration": "clean_bootstrap_environment",
+            "temporary_directory_policy": "fixed_system_tmp",
             "php_runtime_configuration": "ignore_ambient_ini",
             "git_runtime_configuration": "ignore_ambient_and_disable_helpers",
             "git_lazy_fetch": "disabled",
@@ -108,6 +109,9 @@
         "external_mutations_remain_serial": true,
         "requires_semantic_independence_attestation": true,
         "validator_invocation": "scripts/agent/check_parallel_work_contract.sh",
+        "validator_trust_anchor": "declared_base_commit",
+        "requires_post_implementation_verification": true,
+        "requires_clean_post_commit_verification": true,
         "php_runtime_configuration": "ignore_ambient_ini",
         "ownership_map": "docs/maps/component_ownership_map.json",
         "primary_owned_path_prefixes": [
