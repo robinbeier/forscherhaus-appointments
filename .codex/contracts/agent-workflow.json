@@ -23,6 +23,7 @@
             "requires_base_runner": true,
             "runtime_configuration_change_policy": "external_bootstrap_review",
             "php_runtime_configuration": "ignore_ambient_ini",
+            "git_runtime_configuration": "ignore_ambient_and_disable_helpers",
             "tool_path_policy": "fixed_system_path_or_explicit_primary_codex",
             "web_search": "disabled",
             "review_checkout": "private_exact_commit_clone",

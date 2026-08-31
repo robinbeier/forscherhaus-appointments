@@ -35,6 +35,40 @@ php_bin="$(command -v php 2>/dev/null)" || {
     exit 2
 }
 
+trusted_git() {
+    env \
+        -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+        -u GIT_ASKPASS \
+        -u GIT_COMMON_DIR \
+        -u GIT_CONFIG_COUNT \
+        -u GIT_CONFIG_PARAMETERS \
+        -u GIT_DIR \
+        -u GIT_EXEC_PATH \
+        -u GIT_INDEX_FILE \
+        -u GIT_NAMESPACE \
+        -u GIT_OBJECT_DIRECTORY \
+        -u GIT_PROXY_COMMAND \
+        -u GIT_SSH \
+        -u GIT_SSH_COMMAND \
+        -u GIT_TEMPLATE_DIR \
+        -u GIT_WORK_TREE \
+        -u SSH_ASKPASS \
+        GIT_ATTR_NOSYSTEM=1 \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_NO_REPLACE_OBJECTS=1 \
+        GIT_OPTIONAL_LOCKS=0 \
+        GIT_PAGER=cat \
+        GIT_TERMINAL_PROMPT=0 \
+        "$git_bin" \
+        -c core.fsmonitor=false \
+        -c core.hooksPath=/dev/null \
+        -c core.untrackedCache=false \
+        -c diff.external= \
+        -c pager.diff=false \
+        "$@"
+}
+
 sha_pattern='^[a-f0-9]{40}$'
 if [[ ! "$base_sha" =~ $sha_pattern || ! "$head_sha" =~ $sha_pattern ]]; then
     echo "Reviewer SHAs must be full lowercase commit IDs." >&2
@@ -45,13 +79,13 @@ if [[ -n "$requested_repo_root" && "$requested_repo_root" != /* ]]; then
     echo "Reviewer repository root must be absolute." >&2
     exit 2
 fi
-repo_root="$("$git_bin" -C "${requested_repo_root:-.}" rev-parse --show-toplevel 2>/dev/null)" || {
+repo_root="$(trusted_git -C "${requested_repo_root:-.}" rev-parse --show-toplevel 2>/dev/null)" || {
     echo "Reviewer must run inside a Git worktree." >&2
     exit 2
 }
 cd "$repo_root"
 
-"$git_bin" cat-file -e "${base_sha}^{commit}" 2>/dev/null || {
+trusted_git cat-file -e "${base_sha}^{commit}" 2>/dev/null || {
     echo "Reviewer base commit is unavailable." >&2
     exit 1
 }
@@ -66,25 +100,25 @@ case "$runner_source" in
 esac
 
 runner_path="scripts/agent/run_readonly_reviewer.sh"
-if ! "$git_bin" show "${base_sha}:${runner_path}" 2>/dev/null | cmp -s - "$runner_source"; then
+if ! trusted_git show "${base_sha}:${runner_path}" 2>/dev/null | cmp -s - "$runner_source"; then
     echo "Reviewer runner is not the trusted copy from the review base; external bootstrap review is required." >&2
     exit 1
 fi
 
-if [[ "$("$git_bin" rev-parse HEAD)" != "$head_sha" ]]; then
+if [[ "$(trusted_git rev-parse HEAD)" != "$head_sha" ]]; then
     echo "Reviewer head does not match the checked-out HEAD." >&2
     exit 1
 fi
-"$git_bin" merge-base --is-ancestor "$base_sha" "$head_sha" || {
+trusted_git merge-base --is-ancestor "$base_sha" "$head_sha" || {
     echo "Reviewer base is not an ancestor of the reviewed head." >&2
     exit 1
 }
-if [[ -n "$("$git_bin" status --porcelain --untracked-files=all)" ]]; then
+if [[ -n "$(trusted_git status --porcelain --untracked-files=all)" ]]; then
     echo "Reviewer worktree must be clean." >&2
     exit 1
 fi
 
-if ! "$git_bin" diff --quiet "$base_sha" "$head_sha" -- .codex/config.toml ':(glob)**/AGENTS.md'; then
+if ! trusted_git diff --quiet --no-ext-diff --no-textconv "$base_sha" "$head_sha" -- .codex/config.toml ':(glob)**/AGENTS.md'; then
     echo "Reviewer runtime configuration changed; external bootstrap review is required." >&2
     exit 1
 fi
@@ -115,22 +149,22 @@ trusted_root="$(mktemp -d "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")" || {
 trap 'rm -rf "$trusted_root"' EXIT
 
 review_root="$trusted_root/review"
-"$git_bin" init --quiet "$review_root" || {
+trusted_git init --quiet "$review_root" || {
     echo "Reviewer exact-commit checkout could not be initialized." >&2
     exit 2
 }
-"$git_bin" -C "$review_root" \
+trusted_git -C "$review_root" \
     -c protocol.file.allow=always \
     -c core.hooksPath=/dev/null \
     fetch --quiet --no-tags "$repo_root" "$base_sha" "$head_sha" || {
     echo "Reviewer exact commits could not be materialized." >&2
     exit 1
 }
-"$git_bin" -C "$review_root" -c core.hooksPath=/dev/null checkout --quiet --detach "$head_sha" || {
+trusted_git -C "$review_root" checkout --quiet --detach "$head_sha" || {
     echo "Reviewer exact head could not be checked out." >&2
     exit 1
 }
-if [[ "$("$git_bin" -C "$review_root" rev-parse HEAD)" != "$head_sha" || -n "$("$git_bin" -C "$review_root" status --porcelain --untracked-files=all)" ]]; then
+if [[ "$(trusted_git -C "$review_root" rev-parse HEAD)" != "$head_sha" || -n "$(trusted_git -C "$review_root" status --porcelain --untracked-files=all)" ]]; then
     echo "Reviewer exact-commit checkout failed validation." >&2
     exit 1
 fi
@@ -144,7 +178,7 @@ bootstrap_paths=(
 )
 for bootstrap_path in "${bootstrap_paths[@]}"; do
     mkdir -p "$trusted_root/$(dirname "$bootstrap_path")"
-    if ! "$git_bin" show "${base_sha}:${bootstrap_path}" > "$trusted_root/$bootstrap_path"; then
+    if ! trusted_git show "${base_sha}:${bootstrap_path}" > "$trusted_root/$bootstrap_path"; then
         echo "Reviewer trust bootstrap is unavailable in the review base." >&2
         exit 1
     fi
@@ -165,7 +199,7 @@ while IFS= read -r trusted_path || [[ -n "$trusted_path" ]]; do
     fi
     if [[ ! -f "$trusted_root/$trusted_path" ]]; then
         mkdir -p "$trusted_root/$(dirname "$trusted_path")"
-        if ! "$git_bin" show "${base_sha}:${trusted_path}" > "$trusted_root/$trusted_path"; then
+        if ! trusted_git show "${base_sha}:${trusted_path}" > "$trusted_root/$trusted_path"; then
             echo "Reviewer trust bundle is unavailable in the review base." >&2
             exit 1
         fi

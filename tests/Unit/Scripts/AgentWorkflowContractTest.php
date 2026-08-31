@@ -71,6 +71,10 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertSame(
+            'ignore_ambient_and_disable_helpers',
+            $contract['authority']['reviewer']['git_runtime_configuration'] ?? null,
+        );
+        self::assertSame(
             'fixed_system_path_or_explicit_primary_codex',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );

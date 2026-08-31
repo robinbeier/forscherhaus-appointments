@@ -117,8 +117,10 @@ ephemeral review without user config,
 exec-policy rules, external connectors, web search, or ambient PHP configuration
 for its trusted contract and output validator. Git and PHP resolve through a
 fixed system path, while only the primary may pass a trusted absolute Codex
-binary path. The runner materializes a private, clean, detached exact-commit
-checkout before the model starts, denies reviewer file/Git/network mutation,
+binary path. Pre-trust Git probes ignore ambient Git environment, global and
+system configuration, hooks, fsmonitor, replacement objects, external diff
+drivers, and text conversion. The runner materializes a private, clean, detached
+exact-commit checkout before the model starts, denies reviewer file/Git/network mutation,
 derives model settings from the selected reviewer profile, and returns one
 lens-, base-, and exact-head-bound JSON result only to the primary. Invalid or
 protocol-event output fails closed. Reviewers must not

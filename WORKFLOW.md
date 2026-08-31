@@ -347,8 +347,11 @@ project exec-policy rules, external connectors, or web search. It uses a
 read-only sandbox with network denied for reviewer commands and never permits
 approval escalation. Git and PHP resolve only through a fixed system tool path;
 Codex does too unless the primary supplies its trusted executable as an absolute
-`--codex-bin` path. The runner fetches the named commits into a private temporary
-repository and gives the reviewer only that clean, detached exact-head checkout,
+`--codex-bin` path. Every pre-trust Git command ignores ambient Git environment,
+global and system configuration, hooks, fsmonitor, replacement objects, external
+diff drivers, and text conversion. The runner fetches the named commits into a
+private temporary repository and gives the reviewer only that clean, detached
+exact-head checkout,
 so changes to the source worktree after preflight cannot alter reviewed content.
 Its trusted PHP contract and output
 validator run without ambient `php.ini` files, `PHPRC`, `PHP_INI_SCAN_DIR`, or

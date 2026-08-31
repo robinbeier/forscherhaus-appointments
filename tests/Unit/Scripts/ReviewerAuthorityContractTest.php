@@ -76,6 +76,10 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertSame(
+            'ignore_ambient_and_disable_helpers',
+            $contract['authority']['reviewer']['git_runtime_configuration'] ?? null,
+        );
+        self::assertSame(
             'fixed_system_path_or_explicit_primary_codex',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
@@ -169,6 +173,7 @@ class ReviewerAuthorityContractTest extends TestCase
         }
         file_put_contents($fixtureRepo . '/AGENTS.md', "fixture\n");
         file_put_contents($fixtureRepo . '/code_review.md', "fixture\n");
+        file_put_contents($fixtureRepo . '/.gitattributes', "AGENTS.md diff=reviewer-attack\n");
         file_put_contents($fixtureRepo . '/fixture.txt', "base\n");
         $this->runGit($fixtureRepo, ['init', '-q']);
         $this->runGit($fixtureRepo, ['config', 'user.name', 'Reviewer Test']);
@@ -249,6 +254,25 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertTrue(chmod($temporaryDirectory . '/' . $binary, 0700));
         }
 
+        $fsmonitorMarker = $temporaryDirectory . '/ambient-fsmonitor-ran';
+        $fsmonitorHelper = $temporaryDirectory . '/fsmonitor-helper';
+        self::assertNotFalse(
+            file_put_contents(
+                $fsmonitorHelper,
+                "#!/bin/sh\n: > " . escapeshellarg($fsmonitorMarker) . "\nprintf '\\n'\n",
+            ),
+        );
+        self::assertTrue(chmod($fsmonitorHelper, 0700));
+        $diffMarker = $temporaryDirectory . '/ambient-diff-driver-ran';
+        $diffHelper = $temporaryDirectory . '/diff-helper';
+        self::assertNotFalse(
+            file_put_contents($diffHelper, "#!/bin/sh\n: > " . escapeshellarg($diffMarker) . "\nexit 0\n"),
+        );
+        self::assertTrue(chmod($diffHelper, 0700));
+        $this->runGit($fixtureRepo, ['config', 'core.fsmonitor', $fsmonitorHelper]);
+        $this->runGit($fixtureRepo, ['config', 'diff.reviewer-attack.command', $diffHelper]);
+        $this->runGit($fixtureRepo, ['config', 'diff.reviewer-attack.trustExitCode', 'true']);
+
         $environment = $_ENV;
         $environment['PATH'] = $temporaryDirectory . ':' . (getenv('PATH') ?: '/usr/bin:/bin');
         $environment['REVIEWER_TEST_CODEX_BIN'] = $fakeCodex;
@@ -301,6 +325,8 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertFileDoesNotExist($phpMarker, $lens);
             self::assertFileDoesNotExist($gitMarker, $lens);
             self::assertFileDoesNotExist($phpBinaryMarker, $lens);
+            self::assertFileDoesNotExist($fsmonitorMarker, $lens);
+            self::assertFileDoesNotExist($diffMarker, $lens);
         }
 
         self::assertStringContainsString("--ask-for-approval\nnever", $capture);
@@ -433,6 +459,43 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame('', (string) $stdout);
         self::assertStringContainsString('not the trusted copy from the review base', (string) $stderr);
         self::assertFileDoesNotExist($capturePath, 'Codex must not run for an unrelated base.');
+
+        $this->runGit($fixtureRepo, ['config', '--unset', 'core.fsmonitor']);
+        file_put_contents($fixtureRepo . '/AGENTS.md', "runtime configuration changed\n");
+        $this->runGit($fixtureRepo, ['add', 'AGENTS.md']);
+        $this->runGit($fixtureRepo, ['commit', '-qm', 'runtime configuration change']);
+        $runtimeConfigurationHead = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD']);
+        $this->runGit($fixtureRepo, ['config', 'core.fsmonitor', $fsmonitorHelper]);
+        self::assertFileDoesNotExist($fsmonitorMarker);
+        self::assertFileDoesNotExist($diffMarker);
+
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--codex-bin=' . $fakeCodex,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $runtimeConfigurationHead,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        self::assertSame(1, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('runtime configuration changed', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'Codex must not run for a runtime configuration change.');
+        self::assertFileDoesNotExist($fsmonitorMarker, 'Ambient fsmonitor helpers must never execute.');
+        self::assertFileDoesNotExist($diffMarker, 'Ambient external diff drivers must never execute.');
     }
 
     public function testOutputValidationRejectsCodexEventStreamAndWrongExactHead(): void
@@ -729,6 +792,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
             'php_runtime_configuration' => 'ignore_ambient_ini',
+            'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'tool_path_policy' => 'fixed_system_path_or_explicit_primary_codex',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
