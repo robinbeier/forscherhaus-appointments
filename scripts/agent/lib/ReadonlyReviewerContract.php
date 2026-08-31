@@ -28,8 +28,15 @@ final class ReadonlyReviewerContract
             throw new \RuntimeException('Reviewer profile is unavailable.');
         }
 
-        $model = self::readTomlString($role, 'model');
-        $reasoning = self::readTomlString($role, 'model_reasoning_effort');
+        $profile = self::readTopLevelTomlStrings($role, ['model', 'model_reasoning_effort']);
+        $model = $profile['model'];
+        $reasoning = $profile['model_reasoning_effort'];
+        if (preg_match('/[\x00-\x20\x7f]/', $model) === 1 || $model === '') {
+            throw new \RuntimeException('Reviewer profile model is invalid.');
+        }
+        if (!in_array($reasoning, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], true)) {
+            throw new \RuntimeException('Reviewer profile reasoning effort is invalid.');
+        }
         $disabledFeatures = $reviewerPolicy['disabled_features'] ?? null;
         if (!is_array($disabledFeatures) || !array_is_list($disabledFeatures) || $disabledFeatures === []) {
             throw new \RuntimeException('Reviewer disabled-feature policy is invalid.');
@@ -57,6 +64,7 @@ final class ReadonlyReviewerContract
             'network' => 'denied',
             'approval_policy' => 'never',
             'inherits_user_config' => false,
+            'inherits_execpolicy_rules' => false,
             'allows_external_connectors' => false,
             'allows_delegation' => false,
         ];
@@ -112,14 +120,76 @@ final class ReadonlyReviewerContract
         return $review;
     }
 
-    private static function readTomlString(string $toml, string $key): string
+    /**
+     * Parse the top-level single-line string fields used by reviewer profiles.
+     * This accepts TOML basic and literal strings plus inline comments while
+     * deliberately ignoring assignments inside multiline instruction strings.
+     *
+     * @param list<string> $keys
+     * @return array<string, string>
+     */
+    private static function readTopLevelTomlStrings(string $toml, array $keys): array
     {
-        $pattern = '/^' . preg_quote($key, '/') . '\s*=\s*"([a-zA-Z0-9._-]+)"\s*$/m';
-        if (preg_match($pattern, $toml, $matches) !== 1) {
-            throw new \RuntimeException('Reviewer profile is missing ' . $key . '.');
+        $wanted = array_fill_keys($keys, true);
+        $values = [];
+        $multilineDelimiter = null;
+
+        foreach (preg_split('/\R/', $toml) ?: [] as $line) {
+            if ($multilineDelimiter !== null) {
+                if (str_contains($line, $multilineDelimiter)) {
+                    $multilineDelimiter = null;
+                }
+                continue;
+            }
+
+            if (preg_match('/^\s*[A-Za-z0-9_-]+\s*=\s*("""|\'\'\')/', $line, $multilineMatch) === 1) {
+                if (substr_count($line, $multilineMatch[1]) < 2) {
+                    $multilineDelimiter = $multilineMatch[1];
+                }
+                continue;
+            }
+
+            if (preg_match('/^\s*([A-Za-z0-9_-]+)\s*=\s*(.*?)\s*$/', $line, $assignment) !== 1) {
+                continue;
+            }
+            $key = $assignment[1];
+            if (!isset($wanted[$key])) {
+                continue;
+            }
+            if (isset($values[$key])) {
+                throw new \RuntimeException('Reviewer profile repeats ' . $key . '.');
+            }
+
+            $values[$key] = self::parseTomlStringLiteral($assignment[2], $key);
         }
 
-        return $matches[1];
+        foreach ($keys as $key) {
+            if (!array_key_exists($key, $values)) {
+                throw new \RuntimeException('Reviewer profile is missing ' . $key . '.');
+            }
+        }
+
+        return $values;
+    }
+
+    private static function parseTomlStringLiteral(string $literal, string $key): string
+    {
+        if (preg_match('/^("(?:[^"\\\\]|\\\\.)*")\s*(?:#.*)?$/', $literal, $match) === 1) {
+            try {
+                $value = json_decode($match[1], true, 512, JSON_THROW_ON_ERROR);
+            } catch (JsonException) {
+                throw new \RuntimeException('Reviewer profile has invalid ' . $key . '.');
+            }
+            if (is_string($value)) {
+                return $value;
+            }
+        }
+
+        if (preg_match("/^'([^']*)'\\s*(?:#.*)?$/", $literal, $match) === 1) {
+            return $match[1];
+        }
+
+        throw new \RuntimeException('Reviewer profile has invalid ' . $key . '.');
     }
 
     private static function isNormalizedRepoPath(string $path): bool

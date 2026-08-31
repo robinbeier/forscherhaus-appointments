@@ -77,6 +77,7 @@ printf '%s\n' "$prompt" | env \
     -u LINEAR_TOKEN \
     "$codex_bin" --ask-for-approval never exec \
         --ignore-user-config \
+        --ignore-rules \
         --strict-config \
         --sandbox read-only \
         --ephemeral \

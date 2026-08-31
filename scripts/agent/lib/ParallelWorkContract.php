@@ -207,7 +207,9 @@ final class ParallelWorkContract
                     $errors[] = 'invalid_canonical_ownership_prefix:' . $componentId;
                     continue 2;
                 }
-                $normalizedPrefixes[] = $normalizedPrefix;
+                $normalizedPrefixes[] = str_ends_with((string) $folderPrefix, '/')
+                    ? $normalizedPrefix . '/'
+                    : $normalizedPrefix;
             }
             $canonical[$componentId] = ['folder_prefixes' => $normalizedPrefixes];
         }
@@ -241,6 +243,14 @@ final class ParallelWorkContract
 
     private static function pathMatchesCanonicalPrefix(string $lanePath, string $canonicalPrefix): bool
     {
-        return self::pathsOverlap($lanePath, $canonicalPrefix) || str_starts_with($lanePath, $canonicalPrefix);
+        $isDirectoryPrefix = str_ends_with($canonicalPrefix, '/');
+        $normalizedPrefix = rtrim($canonicalPrefix, '/');
+        if (self::pathsOverlap($lanePath, $normalizedPrefix)) {
+            return true;
+        }
+
+        return !$isDirectoryPrefix &&
+            str_ends_with(basename($normalizedPrefix), '_') &&
+            str_starts_with($lanePath, $normalizedPrefix);
     }
 }

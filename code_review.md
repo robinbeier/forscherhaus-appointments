@@ -104,7 +104,7 @@ require three independent final reviews on the same unchanged exact head:
 
 Invoke each final lens through
 `scripts/agent/run_readonly_reviewer.sh`. That repository-owned path starts a
-fresh ephemeral review without user config or external connectors, denies
+fresh ephemeral review without user config, exec-policy rules, or external connectors, denies
 reviewer file/Git/network mutation, derives model settings from the selected
 reviewer profile, and returns one lens- and exact-head-bound JSON result only to
 the primary. Invalid or protocol-event output fails closed. Reviewers must not

@@ -45,6 +45,7 @@
             "network": "denied",
             "approval_policy": "never",
             "inherits_user_config": false,
+            "inherits_execpolicy_rules": false,
             "allows_external_connectors": false,
             "allows_delegation": false,
             "denied_mutations": [

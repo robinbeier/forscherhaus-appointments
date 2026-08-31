@@ -153,6 +153,15 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testDirectoryCanonicalPrefixDoesNotMatchSiblingTextPrefix(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['primary_approved_component_ids'] = [];
+        $manifest['lanes'][1]['ownership'] = ['scripts/cinder/performance'];
+
+        self::assertSame([], ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap));
+    }
+
     public function testRejectsDuplicateCanonicalComponentIds(): void
     {
         $ownershipMap = $this->ownershipMap;

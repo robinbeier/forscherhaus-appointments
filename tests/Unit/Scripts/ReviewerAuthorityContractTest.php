@@ -52,6 +52,7 @@ class ReviewerAuthorityContractTest extends TestCase
             ],
             $contract['authority']['reviewer']['profiles'] ?? null,
         );
+        self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
     }
 
     public function testAllFinalReviewerRolesCarryTheSamePrimaryOnlyBoundary(): void
@@ -139,45 +140,35 @@ class ReviewerAuthorityContractTest extends TestCase
         $environment['GITHUB_TOKEN'] = 'credential-sentinel';
         $environment['LINEAR_API_KEY'] = 'credential-sentinel';
         $environment['LINEAR_TOKEN'] = 'credential-sentinel';
-        $environment['REVIEWER_TEST_RESULT'] = json_encode(
-            [
-                'lens' => 'correctness_security',
-                'head_sha' => $head,
-                'verdict' => 'no_findings',
-                'findings' => [],
-            ],
-            JSON_THROW_ON_ERROR,
-        );
+        $lenses = [
+            'correctness_security' => 'gpt-5.4',
+            'design_maintainability' => 'gpt-5.4-mini',
+            'tests_regression_flake' => 'gpt-5.4-mini',
+        ];
+        foreach ($lenses as $lens => $expectedModel) {
+            $environment['REVIEWER_TEST_RESULT'] = json_encode(
+                [
+                    'lens' => $lens,
+                    'head_sha' => $head,
+                    'verdict' => 'no_findings',
+                    'findings' => [],
+                ],
+                JSON_THROW_ON_ERROR,
+            );
+            [$exitCode, $stdout, $stderr] = $this->runReviewer($fixtureRepo, $environment, $lens, $base, $head);
+            self::assertSame(0, $exitCode, $stderr);
+            self::assertSame($environment['REVIEWER_TEST_RESULT'], trim($stdout));
+            $capture = (string) file_get_contents($capturePath);
+            self::assertStringContainsString("--model\n" . $expectedModel, $capture, $lens);
+        }
 
-        $process = proc_open(
-            [
-                $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
-                '--lens=correctness_security',
-                '--base-sha=' . $base,
-                '--head-sha=' . $head,
-            ],
-            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
-            $pipes,
-            $fixtureRepo,
-            $environment,
-        );
-        self::assertIsResource($process);
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
-
-        self::assertSame(0, $exitCode, (string) $stderr);
-        self::assertSame($environment['REVIEWER_TEST_RESULT'], trim((string) $stdout));
-        $capture = (string) file_get_contents($capturePath);
         self::assertStringContainsString("--ask-for-approval\nnever", $capture);
         self::assertStringContainsString("--sandbox\nread-only", $capture);
         self::assertStringContainsString('--ignore-user-config', $capture);
+        self::assertSame(1, substr_count($capture, "--ignore-rules\n"));
         self::assertStringContainsString('--ephemeral', $capture);
         self::assertStringContainsString("--color\nnever", $capture);
         self::assertStringNotContainsString("--json\n", $capture);
-        self::assertStringContainsString("--model\ngpt-5.4", $capture);
         self::assertStringContainsString('shell_environment_policy.inherit="none"', $capture);
         self::assertStringContainsString('sandbox_workspace_write.network_access=false', $capture);
         $contract = json_decode(
@@ -195,6 +186,28 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("LINEAR_API_KEY=unset\n", $capture);
         self::assertStringContainsString("LINEAR_TOKEN=unset\n", $capture);
         self::assertStringNotContainsString('credential-sentinel', $capture);
+
+        $environment['REVIEWER_TEST_RESULT'] = '{"not":"a review"}';
+        [$exitCode, $stdout, $stderr] = $this->runReviewer(
+            $fixtureRepo,
+            $environment,
+            'correctness_security',
+            $base,
+            $head,
+        );
+        self::assertSame(1, $exitCode);
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('not bound to the requested exact head and lens', $stderr);
+
+        $environment['REVIEWER_TEST_RESULT'] = json_encode(
+            [
+                'lens' => 'correctness_security',
+                'head_sha' => $head,
+                'verdict' => 'no_findings',
+                'findings' => [],
+            ],
+            JSON_THROW_ON_ERROR,
+        );
 
         $tree = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD^{tree}']);
         $unrelatedBase = $this->runGit($fixtureRepo, ['commit-tree', $tree, '-m', 'unrelated']);
@@ -263,6 +276,75 @@ class ReviewerAuthorityContractTest extends TestCase
             'correctness_security',
             str_repeat('a', 40),
         );
+    }
+
+    public function testProfileResolutionAcceptsTomlLiteralStringsAndInlineComments(): void
+    {
+        $temporaryDirectory = sys_get_temp_dir() . '/reviewer-profile-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($temporaryDirectory . '/.codex/agents', 0700, true));
+        file_put_contents(
+            $temporaryDirectory . '/.codex/agents/reviewer.toml',
+            "model = 'gpt-5.4-mini' # supported TOML literal\n" .
+                "model_reasoning_effort = \"medium\" # supported basic string\n" .
+                "developer_instructions = \"\"\"\nmodel = 'untrusted-body-value'\n\"\"\"\n",
+        );
+
+        $resolved = ReadonlyReviewerContract::resolveInvocation(
+            $temporaryDirectory,
+            'tests_regression_flake',
+            $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml'),
+        );
+
+        self::assertSame('gpt-5.4-mini', $resolved['model']);
+        self::assertSame('medium', $resolved['reasoning']);
+    }
+
+    /**
+     * @param array<string, string> $environment
+     * @return array{int, string, string}
+     */
+    private function runReviewer(
+        string $fixtureRepo,
+        array $environment,
+        string $lens,
+        string $base,
+        string $head,
+    ): array {
+        $process = proc_open(
+            [
+                $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
+                '--lens=' . $lens,
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [proc_close($process), $stdout, $stderr];
+    }
+
+    /** @return array<string, mixed> */
+    private function reviewerPolicyForProfile(string $profile): array
+    {
+        return [
+            'profiles' => ['tests_regression_flake' => $profile],
+            'disabled_features' => ['apps'],
+            'filesystem' => 'read-only',
+            'network' => 'denied',
+            'approval_policy' => 'never',
+            'inherits_user_config' => false,
+            'inherits_execpolicy_rules' => false,
+            'allows_external_connectors' => false,
+            'allows_delegation' => false,
+        ];
     }
 
     /** @param list<string> $arguments */

@@ -317,8 +317,8 @@ Run final reviewers through the repository-owned external read-only boundary:
 scripts/agent/run_readonly_reviewer.sh --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
 ```
 
-The runner starts an ephemeral session without user configuration or external
-connectors, uses a read-only sandbox with network denied for reviewer commands,
+The runner starts an ephemeral session without user configuration, user or
+project exec-policy rules, or external connectors, uses a read-only sandbox with network denied for reviewer commands,
 and never permits approval escalation. The machine contract selects the role;
 the runner derives model and reasoning settings from that role's TOML and
 fail-closed validates the single JSON review object against the requested lens
