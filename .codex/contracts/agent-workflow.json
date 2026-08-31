@@ -24,7 +24,9 @@
             "runtime_configuration_change_policy": "external_bootstrap_review",
             "php_runtime_configuration": "ignore_ambient_ini",
             "git_runtime_configuration": "ignore_ambient_and_disable_helpers",
+            "git_lazy_fetch": "disabled",
             "tool_path_policy": "fixed_system_path_or_explicit_primary_codex",
+            "codex_identity_check": "basename_and_version",
             "web_search": "disabled",
             "review_checkout": "private_exact_commit_clone",
             "trusted_base_paths": [

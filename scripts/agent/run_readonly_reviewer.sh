@@ -56,6 +56,7 @@ trusted_git() {
         GIT_ATTR_NOSYSTEM=1 \
         GIT_CONFIG_GLOBAL=/dev/null \
         GIT_CONFIG_NOSYSTEM=1 \
+        GIT_NO_LAZY_FETCH=1 \
         GIT_NO_REPLACE_OBJECTS=1 \
         GIT_OPTIONAL_LOCKS=0 \
         GIT_PAGER=cat \
@@ -141,6 +142,18 @@ case "$codex_bin" in
         exit 2
         ;;
 esac
+if [[ "$(basename -- "$codex_bin")" != "codex" ]]; then
+    echo "Reviewer Codex binary does not identify as Codex CLI." >&2
+    exit 2
+fi
+codex_version="$("$codex_bin" --version 2>/dev/null)" || {
+    echo "Reviewer Codex binary does not identify as Codex CLI." >&2
+    exit 2
+}
+if [[ ! "$codex_version" =~ ^codex-cli[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9._-]+)?$ ]]; then
+    echo "Reviewer Codex binary does not identify as Codex CLI." >&2
+    exit 2
+fi
 
 trusted_root="$(mktemp -d "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")" || {
     echo "Reviewer trust bundle could not be created." >&2

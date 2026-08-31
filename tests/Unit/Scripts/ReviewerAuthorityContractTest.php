@@ -79,10 +79,12 @@ class ReviewerAuthorityContractTest extends TestCase
             'ignore_ambient_and_disable_helpers',
             $contract['authority']['reviewer']['git_runtime_configuration'] ?? null,
         );
+        self::assertSame('disabled', $contract['authority']['reviewer']['git_lazy_fetch'] ?? null);
         self::assertSame(
             'fixed_system_path_or_explicit_primary_codex',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
+        self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
         self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
         self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
         self::assertSame(
@@ -102,6 +104,7 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
         self::assertStringContainsString(' trusted-paths --lens=', $runner);
+        self::assertStringContainsString('GIT_NO_LAZY_FETCH=1', $runner);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
         self::assertSame(
@@ -224,6 +227,10 @@ class ReviewerAuthorityContractTest extends TestCase
             $fakeCodex,
             <<<'BASH'
             #!/usr/bin/env bash
+            if [[ "${1:-}" == "--version" ]]; then
+                printf 'codex-cli 0.145.0\n'
+                exit 0
+            fi
             {
                 printf 'ARGS\n'
                 printf '%s\n' "$@"
@@ -416,6 +423,56 @@ class ReviewerAuthorityContractTest extends TestCase
             (string) $stderr,
         );
         self::assertFileDoesNotExist($capturePath, 'The changed head runner must not invoke Codex.');
+
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--codex-bin=' . $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(2, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('Codex binary must be outside the reviewed repository', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'A repository-owned Codex binary must never execute.');
+
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--codex-bin=/bin/true',
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(2, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('does not identify as Codex CLI', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'A non-Codex executable must never act as the reviewer.');
 
         $environment['REVIEWER_TEST_RESULT'] = '{"not":"a review"}';
         [$exitCode, $stdout, $stderr] = $this->runReviewer(
@@ -640,6 +697,9 @@ class ReviewerAuthorityContractTest extends TestCase
             'impact' => 'Impact',
             'trigger' => 'Trigger',
         ];
+        $fileFinding = $finding;
+        $fileFinding['title'] = 'File-level finding';
+        $fileFinding['line'] = null;
 
         $validated = ReadonlyReviewerContract::validateOutput(
             json_encode(
@@ -648,7 +708,7 @@ class ReviewerAuthorityContractTest extends TestCase
                     'base_sha' => $base,
                     'head_sha' => $head,
                     'verdict' => 'findings',
-                    'findings' => [$finding],
+                    'findings' => [$finding, $fileFinding],
                 ],
                 JSON_THROW_ON_ERROR,
             ),
@@ -658,7 +718,7 @@ class ReviewerAuthorityContractTest extends TestCase
         );
 
         self::assertSame('findings', $validated['verdict']);
-        self::assertSame([$finding], $validated['findings']);
+        self::assertSame([$finding, $fileFinding], $validated['findings']);
     }
 
     public function testOutputValidationRejectsVerdictFindingMismatch(): void
@@ -840,7 +900,9 @@ class ReviewerAuthorityContractTest extends TestCase
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
+            'git_lazy_fetch' => 'disabled',
             'tool_path_policy' => 'fixed_system_path_or_explicit_primary_codex',
+            'codex_identity_check' => 'basename_and_version',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
             'trusted_base_paths' => [

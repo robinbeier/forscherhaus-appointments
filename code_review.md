@@ -117,9 +117,10 @@ ephemeral review without user config,
 exec-policy rules, external connectors, web search, or ambient PHP configuration
 for its trusted contract and output validator. Git and PHP resolve through a
 fixed system path, while only the primary may pass a trusted absolute Codex
-binary path. Pre-trust Git probes ignore ambient Git environment, global and
-system configuration, hooks, fsmonitor, replacement objects, external diff
-drivers, and text conversion. The runner materializes a private, clean, detached
+binary path; either path must identify as the Codex CLI by basename and version
+output. Pre-trust Git probes ignore ambient Git environment, global and system
+configuration, hooks, fsmonitor, replacement objects, lazy object fetching,
+external diff drivers, and text conversion. The runner materializes a private, clean, detached
 exact-commit checkout before the model starts, denies reviewer file/Git/network mutation,
 derives model settings from the selected reviewer profile, and returns one
 lens-, base-, and exact-head-bound JSON result only to the primary. Invalid or

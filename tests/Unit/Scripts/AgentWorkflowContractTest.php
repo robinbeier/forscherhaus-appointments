@@ -74,10 +74,12 @@ class AgentWorkflowContractTest extends TestCase
             'ignore_ambient_and_disable_helpers',
             $contract['authority']['reviewer']['git_runtime_configuration'] ?? null,
         );
+        self::assertSame('disabled', $contract['authority']['reviewer']['git_lazy_fetch'] ?? null);
         self::assertSame(
             'fixed_system_path_or_explicit_primary_codex',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
+        self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
         self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
         self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
