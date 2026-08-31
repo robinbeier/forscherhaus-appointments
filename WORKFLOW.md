@@ -113,7 +113,12 @@ php scripts/agent/check_parallel_work_contract.php --manifest=<lane-manifest.jso
 The manifest names one full lowercase common base SHA, the primary ID, exact
 `primary_approved_component_ids` for any intersected `single-owner` or
 `manual_approval_required` entries in `docs/maps/component_ownership_map.json`,
-and no more than two `implementation_worker` lanes. Every lane repeats that
+and a `semantic_independence` object with empty `shared_contracts` and
+`cross_lane_dependencies` arrays plus `coordination_required: false`. The
+checker cannot infer semantic coupling from paths; this explicit primary
+attestation makes any known shared contract, cross-lane dependency, or required
+coordination a fail-closed reason to keep the work serial. The manifest has no
+more than two `implementation_worker` lanes. Every lane repeats that
 base SHA, lists normalized repository-relative ownership prefixes, and
 declares an empty `external_mutations` list. Ownership must be disjoint and may
 not include the primary-owned harness, reviewer, workflow, or landing paths in
@@ -328,9 +333,10 @@ rm -f "$trusted_runner"
 The runner starts an ephemeral session without user configuration, user or
 project exec-policy rules, or external connectors, uses a read-only sandbox with network denied for reviewer commands,
 and never permits approval escalation. The machine contract selects the role;
-the runner extracts the contract, reviewer profiles, schema, validator, and
-review instructions from the base commit, derives model and reasoning settings
-from that trusted role TOML, and
+the runner reads its one canonical trust-path manifest from the base commit,
+extracts the listed contract, reviewer profiles, schema, validator, and review
+instructions, derives model and reasoning settings from the structured machine
+contract, and
 fail-closed validates the single JSON review object against the requested lens,
 base SHA, and exact head. Reviewer output returns to the primary; reviewers do not write
 files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not

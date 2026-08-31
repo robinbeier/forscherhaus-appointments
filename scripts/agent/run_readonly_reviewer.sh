@@ -76,24 +76,30 @@ trusted_root="$(mktemp -d "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")" || {
 }
 trap 'rm -rf "$trusted_root"' EXIT
 
-trusted_paths=(
-    ".codex/contracts/agent-workflow.json"
-    ".codex/agents/reviewer-correctness.toml"
-    ".codex/agents/reviewer-design.toml"
-    ".codex/agents/reviewer-tests.toml"
-    "scripts/agent/readonly-review-output.schema.json"
-    "scripts/agent/readonly_reviewer_contract.php"
-    "scripts/agent/lib/ReadonlyReviewerContract.php"
-    "AGENTS.md"
-    "code_review.md"
-)
-for trusted_path in "${trusted_paths[@]}"; do
+trusted_paths_file=".codex/contracts/readonly-reviewer-trust-paths.txt"
+mkdir -p "$trusted_root/$(dirname "$trusted_paths_file")"
+if ! git show "${base_sha}:${trusted_paths_file}" > "$trusted_root/$trusted_paths_file"; then
+    echo "Reviewer trust-path manifest is unavailable in the review base." >&2
+    exit 1
+fi
+
+trusted_path_count=0
+while IFS= read -r trusted_path || [[ -n "$trusted_path" ]]; do
+    if [[ -z "$trusted_path" || "$trusted_path" == /* || "$trusted_path" == */ || "$trusted_path" == *\\* || "$trusted_path" == *..* || "$trusted_path" == *\** || "$trusted_path" == *\?* || "$trusted_path" == *\[* || "$trusted_path" == *\]* ]]; then
+        echo "Reviewer trust-path manifest is invalid." >&2
+        exit 1
+    fi
     mkdir -p "$trusted_root/$(dirname "$trusted_path")"
     if ! git show "${base_sha}:${trusted_path}" > "$trusted_root/$trusted_path"; then
         echo "Reviewer trust bundle is unavailable in the review base." >&2
         exit 1
     fi
-done
+    trusted_path_count=$((trusted_path_count + 1))
+done < "$trusted_root/$trusted_paths_file"
+if [[ "$trusted_path_count" -eq 0 ]]; then
+    echo "Reviewer trust-path manifest is empty." >&2
+    exit 1
+fi
 
 contract_file="$trusted_root/.codex/contracts/agent-workflow.json"
 reviewer_config="$(php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?

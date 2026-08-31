@@ -21,21 +21,23 @@
             "trust_anchor": "review_base_commit",
             "requires_base_runner": true,
             "runtime_configuration_change_policy": "external_bootstrap_review",
-            "trusted_base_paths": [
-                ".codex/contracts/agent-workflow.json",
-                ".codex/agents/reviewer-correctness.toml",
-                ".codex/agents/reviewer-design.toml",
-                ".codex/agents/reviewer-tests.toml",
-                "scripts/agent/readonly-review-output.schema.json",
-                "scripts/agent/readonly_reviewer_contract.php",
-                "scripts/agent/lib/ReadonlyReviewerContract.php",
-                "AGENTS.md",
-                "code_review.md"
-            ],
+            "trusted_base_paths_file": ".codex/contracts/readonly-reviewer-trust-paths.txt",
             "profiles": {
-                "correctness_security": ".codex/agents/reviewer-correctness.toml",
-                "design_maintainability": ".codex/agents/reviewer-design.toml",
-                "tests_regression_flake": ".codex/agents/reviewer-tests.toml"
+                "correctness_security": {
+                    "instructions": ".codex/agents/reviewer-correctness.toml",
+                    "model": "gpt-5.4",
+                    "reasoning": "high"
+                },
+                "design_maintainability": {
+                    "instructions": ".codex/agents/reviewer-design.toml",
+                    "model": "gpt-5.4-mini",
+                    "reasoning": "medium"
+                },
+                "tests_regression_flake": {
+                    "instructions": ".codex/agents/reviewer-tests.toml",
+                    "model": "gpt-5.4-mini",
+                    "reasoning": "medium"
+                }
             },
             "disabled_features": [
                 "apps",
@@ -88,6 +90,7 @@
         "integration_and_landing_remain_serial": true,
         "remaining_lanes_resync_after_merge": true,
         "ownership_drift_fails_closed": true,
+        "requires_semantic_independence_attestation": true,
         "ownership_map": "docs/maps/component_ownership_map.json",
         "primary_owned_path_prefixes": [
             ".codex/agents/reviewer-correctness.toml",

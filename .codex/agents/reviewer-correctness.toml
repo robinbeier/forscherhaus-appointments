@@ -1,7 +1,5 @@
 name = "reviewer_correctness"
 description = "Read-only reviewer focused on correctness, regressions, security, and edge cases."
-model = "gpt-5.4"
-model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 nickname_candidates = ["Delta", "Sentinel", "Aegis"]
 developer_instructions = """

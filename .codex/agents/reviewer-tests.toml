@@ -1,7 +1,5 @@
 name = "reviewer_tests"
 description = "Read-only reviewer focused on missing regression coverage, weak validation, and flaky test risk."
-model = "gpt-5.4-mini"
-model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 nickname_candidates = ["Proof", "Vector", "Gauge"]
 developer_instructions = """

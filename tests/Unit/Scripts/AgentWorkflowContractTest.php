@@ -68,11 +68,28 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
+        self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
+        self::assertSame(
+            '.codex/contracts/readonly-reviewer-trust-paths.txt',
+            $contract['authority']['reviewer']['trusted_base_paths_file'] ?? null,
+        );
         self::assertSame(
             [
-                'correctness_security' => '.codex/agents/reviewer-correctness.toml',
-                'design_maintainability' => '.codex/agents/reviewer-design.toml',
-                'tests_regression_flake' => '.codex/agents/reviewer-tests.toml',
+                'correctness_security' => [
+                    'instructions' => '.codex/agents/reviewer-correctness.toml',
+                    'model' => 'gpt-5.4',
+                    'reasoning' => 'high',
+                ],
+                'design_maintainability' => [
+                    'instructions' => '.codex/agents/reviewer-design.toml',
+                    'model' => 'gpt-5.4-mini',
+                    'reasoning' => 'medium',
+                ],
+                'tests_regression_flake' => [
+                    'instructions' => '.codex/agents/reviewer-tests.toml',
+                    'model' => 'gpt-5.4-mini',
+                    'reasoning' => 'medium',
+                ],
             ],
             $contract['authority']['reviewer']['profiles'] ?? null,
         );
@@ -88,6 +105,7 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['parallel_work']['integration_and_landing_remain_serial'] ?? null);
         self::assertTrue($contract['parallel_work']['remaining_lanes_resync_after_merge'] ?? null);
         self::assertTrue($contract['parallel_work']['ownership_drift_fails_closed'] ?? null);
+        self::assertTrue($contract['parallel_work']['requires_semantic_independence_attestation'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
         self::assertContains('scripts/agent', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
         self::assertContains('.github/workflows', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);

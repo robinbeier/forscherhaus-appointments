@@ -17,9 +17,24 @@ final class ReadonlyReviewerContract
         self::assertRuntimeBoundary($reviewerPolicy);
 
         $profiles = $reviewerPolicy['profiles'] ?? null;
-        $roleFile = is_array($profiles) ? $profiles[$lens] ?? null : null;
-        if (!is_string($roleFile) || !self::isNormalizedRepoPath($roleFile)) {
+        $profile = is_array($profiles) ? $profiles[$lens] ?? null : null;
+        if (!is_array($profile) || array_is_list($profile)) {
             throw new \InvalidArgumentException('Unsupported reviewer lens.');
+        }
+
+        $expectedProfileKeys = ['instructions', 'model', 'reasoning'];
+        $actualProfileKeys = array_keys($profile);
+        sort($actualProfileKeys, SORT_STRING);
+        sort($expectedProfileKeys, SORT_STRING);
+        if ($actualProfileKeys !== $expectedProfileKeys) {
+            throw new \RuntimeException('Reviewer profile policy is invalid.');
+        }
+
+        $roleFile = $profile['instructions'];
+        $model = $profile['model'];
+        $reasoning = $profile['reasoning'];
+        if (!is_string($roleFile) || !self::isNormalizedRepoPath($roleFile)) {
+            throw new \RuntimeException('Reviewer profile instructions are invalid.');
         }
 
         $rolePath = $repoRoot . '/' . $roleFile;
@@ -28,13 +43,10 @@ final class ReadonlyReviewerContract
             throw new \RuntimeException('Reviewer profile is unavailable.');
         }
 
-        $profile = self::readTopLevelTomlStrings($role, ['model', 'model_reasoning_effort']);
-        $model = $profile['model'];
-        $reasoning = $profile['model_reasoning_effort'];
-        if (preg_match('/[\x00-\x20\x7f]/', $model) === 1 || $model === '') {
+        if (!is_string($model) || preg_match('/[\x00-\x20\x7f]/', $model) === 1 || $model === '') {
             throw new \RuntimeException('Reviewer profile model is invalid.');
         }
-        if (!in_array($reasoning, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], true)) {
+        if (!is_string($reasoning) || !in_array($reasoning, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], true)) {
             throw new \RuntimeException('Reviewer profile reasoning effort is invalid.');
         }
         $disabledFeatures = $reviewerPolicy['disabled_features'] ?? null;
@@ -78,18 +90,10 @@ final class ReadonlyReviewerContract
             }
         }
 
-        $expectedTrustedBasePaths = [
-            '.codex/contracts/agent-workflow.json',
-            '.codex/agents/reviewer-correctness.toml',
-            '.codex/agents/reviewer-design.toml',
-            '.codex/agents/reviewer-tests.toml',
-            'scripts/agent/readonly-review-output.schema.json',
-            'scripts/agent/readonly_reviewer_contract.php',
-            'scripts/agent/lib/ReadonlyReviewerContract.php',
-            'AGENTS.md',
-            'code_review.md',
-        ];
-        if (($reviewerPolicy['trusted_base_paths'] ?? null) !== $expectedTrustedBasePaths) {
+        if (
+            ($reviewerPolicy['trusted_base_paths_file'] ?? null) !==
+            '.codex/contracts/readonly-reviewer-trust-paths.txt'
+        ) {
             throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
         }
     }
@@ -144,78 +148,6 @@ final class ReadonlyReviewerContract
         }
 
         return $review;
-    }
-
-    /**
-     * Parse the top-level single-line string fields used by reviewer profiles.
-     * This accepts TOML basic and literal strings plus inline comments while
-     * deliberately ignoring assignments inside multiline instruction strings.
-     *
-     * @param list<string> $keys
-     * @return array<string, string>
-     */
-    private static function readTopLevelTomlStrings(string $toml, array $keys): array
-    {
-        $wanted = array_fill_keys($keys, true);
-        $values = [];
-        $multilineDelimiter = null;
-
-        foreach (preg_split('/\R/', $toml) ?: [] as $line) {
-            if ($multilineDelimiter !== null) {
-                if (str_contains($line, $multilineDelimiter)) {
-                    $multilineDelimiter = null;
-                }
-                continue;
-            }
-
-            if (preg_match('/^\s*[A-Za-z0-9_-]+\s*=\s*("""|\'\'\')/', $line, $multilineMatch) === 1) {
-                if (substr_count($line, $multilineMatch[1]) < 2) {
-                    $multilineDelimiter = $multilineMatch[1];
-                }
-                continue;
-            }
-
-            if (preg_match('/^\s*([A-Za-z0-9_-]+)\s*=\s*(.*?)\s*$/', $line, $assignment) !== 1) {
-                continue;
-            }
-            $key = $assignment[1];
-            if (!isset($wanted[$key])) {
-                continue;
-            }
-            if (isset($values[$key])) {
-                throw new \RuntimeException('Reviewer profile repeats ' . $key . '.');
-            }
-
-            $values[$key] = self::parseTomlStringLiteral($assignment[2], $key);
-        }
-
-        foreach ($keys as $key) {
-            if (!array_key_exists($key, $values)) {
-                throw new \RuntimeException('Reviewer profile is missing ' . $key . '.');
-            }
-        }
-
-        return $values;
-    }
-
-    private static function parseTomlStringLiteral(string $literal, string $key): string
-    {
-        if (preg_match('/^("(?:[^"\\\\]|\\\\.)*")\s*(?:#.*)?$/', $literal, $match) === 1) {
-            try {
-                $value = json_decode($match[1], true, 512, JSON_THROW_ON_ERROR);
-            } catch (JsonException) {
-                throw new \RuntimeException('Reviewer profile has invalid ' . $key . '.');
-            }
-            if (is_string($value)) {
-                return $value;
-            }
-        }
-
-        if (preg_match("/^'([^']*)'\\s*(?:#.*)?$/", $literal, $match) === 1) {
-            return $match[1];
-        }
-
-        throw new \RuntimeException('Reviewer profile has invalid ' . $key . '.');
     }
 
     private static function isNormalizedRepoPath(string $path): bool

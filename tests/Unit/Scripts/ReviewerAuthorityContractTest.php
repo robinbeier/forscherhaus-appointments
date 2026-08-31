@@ -46,9 +46,21 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertSame(
             [
-                'correctness_security' => '.codex/agents/reviewer-correctness.toml',
-                'design_maintainability' => '.codex/agents/reviewer-design.toml',
-                'tests_regression_flake' => '.codex/agents/reviewer-tests.toml',
+                'correctness_security' => [
+                    'instructions' => '.codex/agents/reviewer-correctness.toml',
+                    'model' => 'gpt-5.4',
+                    'reasoning' => 'high',
+                ],
+                'design_maintainability' => [
+                    'instructions' => '.codex/agents/reviewer-design.toml',
+                    'model' => 'gpt-5.4-mini',
+                    'reasoning' => 'medium',
+                ],
+                'tests_regression_flake' => [
+                    'instructions' => '.codex/agents/reviewer-tests.toml',
+                    'model' => 'gpt-5.4-mini',
+                    'reasoning' => 'medium',
+                ],
             ],
             $contract['authority']['reviewer']['profiles'] ?? null,
         );
@@ -58,6 +70,9 @@ class ReviewerAuthorityContractTest extends TestCase
             'external_bootstrap_review',
             $contract['authority']['reviewer']['runtime_configuration_change_policy'] ?? null,
         );
+        $trustedPathsFile = '.codex/contracts/readonly-reviewer-trust-paths.txt';
+        self::assertSame($trustedPathsFile, $contract['authority']['reviewer']['trusted_base_paths_file'] ?? null);
+        $trustedPaths = file($this->repoRoot . '/' . $trustedPathsFile, FILE_IGNORE_NEW_LINES);
         self::assertSame(
             [
                 '.codex/contracts/agent-workflow.json',
@@ -70,12 +85,10 @@ class ReviewerAuthorityContractTest extends TestCase
                 'AGENTS.md',
                 'code_review.md',
             ],
-            $contract['authority']['reviewer']['trusted_base_paths'] ?? null,
+            $trustedPaths,
         );
         $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
-        foreach ($contract['authority']['reviewer']['trusted_base_paths'] as $trustedPath) {
-            self::assertStringContainsString('"' . $trustedPath . '"', $runner, (string) $trustedPath);
-        }
+        self::assertStringContainsString('"' . $trustedPathsFile . '"', $runner);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
         self::assertSame(
@@ -141,6 +154,10 @@ class ReviewerAuthorityContractTest extends TestCase
             $this->repoRoot . '/.codex/contracts/agent-workflow.json',
             $fixtureRepo . '/.codex/contracts/agent-workflow.json',
         );
+        copy(
+            $this->repoRoot . '/.codex/contracts/readonly-reviewer-trust-paths.txt',
+            $fixtureRepo . '/.codex/contracts/readonly-reviewer-trust-paths.txt',
+        );
         foreach (['reviewer-correctness.toml', 'reviewer-design.toml', 'reviewer-tests.toml'] as $filename) {
             copy($this->repoRoot . '/.codex/agents/' . $filename, $fixtureRepo . '/.codex/agents/' . $filename);
         }
@@ -160,17 +177,31 @@ class ReviewerAuthorityContractTest extends TestCase
             FILE_APPEND,
         );
         foreach (['reviewer-correctness.toml', 'reviewer-design.toml', 'reviewer-tests.toml'] as $filename) {
-            $profilePath = $fixtureRepo . '/.codex/agents/' . $filename;
-            file_put_contents(
-                $profilePath,
-                str_replace(
-                    ['model = "gpt-5.4"', 'model = "gpt-5.4-mini"'],
-                    'model = "untrusted-model"',
-                    (string) file_get_contents($profilePath),
-                ),
-            );
+            file_put_contents($fixtureRepo . '/.codex/agents/' . $filename, "untrusted head profile\n");
         }
+        $headContract = json_decode(
+            (string) file_get_contents($fixtureRepo . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($headContract);
+        foreach (array_keys($headContract['authority']['reviewer']['profiles']) as $lens) {
+            $headContract['authority']['reviewer']['profiles'][$lens]['model'] = 'untrusted-model';
+        }
+        file_put_contents(
+            $fixtureRepo . '/.codex/contracts/agent-workflow.json',
+            json_encode($headContract, JSON_THROW_ON_ERROR),
+        );
         file_put_contents($fixtureRepo . '/scripts/agent/readonly-review-output.schema.json', "{}\n");
+        file_put_contents(
+            $fixtureRepo . '/scripts/agent/readonly_reviewer_contract.php',
+            "<?php fwrite(STDOUT, (string) stream_get_contents(STDIN));\n",
+        );
+        file_put_contents(
+            $fixtureRepo . '/scripts/agent/lib/ReadonlyReviewerContract.php',
+            "<?php // untrusted head validator\n",
+        );
         file_put_contents($fixtureRepo . '/fixture.txt', "head\n");
         $this->runGit($fixtureRepo, ['add', '.']);
         $this->runGit($fixtureRepo, ['commit', '-qm', 'head']);
@@ -190,6 +221,8 @@ class ReviewerAuthorityContractTest extends TestCase
                 printf 'GITHUB_TOKEN=%s\n' "${GITHUB_TOKEN-unset}"
                 printf 'LINEAR_API_KEY=%s\n' "${LINEAR_API_KEY-unset}"
                 printf 'LINEAR_TOKEN=%s\n' "${LINEAR_TOKEN-unset}"
+                printf 'PROMPT\n'
+                cat
             } > "$REVIEWER_TEST_CAPTURE"
             printf '%s\n' "$REVIEWER_TEST_RESULT"
             BASH
@@ -234,6 +267,7 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame(1, substr_count($capture, "--ignore-rules\n"));
         self::assertStringContainsString('--ephemeral', $capture);
         self::assertStringContainsString("--color\nnever", $capture);
+        self::assertSame(1, substr_count($capture, "--output-schema\n"));
         self::assertStringNotContainsString("--json\n", $capture);
         self::assertStringContainsString('shell_environment_policy.inherit="none"', $capture);
         self::assertStringContainsString('sandbox_workspace_write.network_access=false', $capture);
@@ -252,10 +286,12 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("LINEAR_API_KEY=unset\n", $capture);
         self::assertStringContainsString("LINEAR_TOKEN=unset\n", $capture);
         self::assertStringNotContainsString('credential-sentinel', $capture);
+        self::assertStringContainsString('/readonly-reviewer-base.', $capture);
         self::assertStringNotContainsString(
             $fixtureRepo . '/scripts/agent/readonly-review-output.schema.json',
             $capture,
         );
+        self::assertStringNotContainsString($fixtureRepo . '/.codex/agents/reviewer-', $capture);
 
         self::assertTrue(unlink($capturePath));
         $process = proc_open(
@@ -419,15 +455,13 @@ class ReviewerAuthorityContractTest extends TestCase
         );
     }
 
-    public function testProfileResolutionAcceptsTomlLiteralStringsAndInlineComments(): void
+    public function testProfileResolutionUsesStructuredMachinePolicy(): void
     {
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-profile-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($temporaryDirectory . '/.codex/agents', 0700, true));
         file_put_contents(
             $temporaryDirectory . '/.codex/agents/reviewer.toml',
-            "model = 'gpt-5.4-mini' # supported TOML literal\n" .
-                "model_reasoning_effort = \"medium\" # supported basic string\n" .
-                "developer_instructions = \"\"\"\nmodel = 'untrusted-body-value'\n\"\"\"\n",
+            "developer_instructions = \"\"\"\nmodel = 'untrusted-body-value'\n\"\"\"\n",
         );
 
         $resolved = ReadonlyReviewerContract::resolveInvocation(
@@ -502,18 +536,14 @@ class ReviewerAuthorityContractTest extends TestCase
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
-            'trusted_base_paths' => [
-                '.codex/contracts/agent-workflow.json',
-                '.codex/agents/reviewer-correctness.toml',
-                '.codex/agents/reviewer-design.toml',
-                '.codex/agents/reviewer-tests.toml',
-                'scripts/agent/readonly-review-output.schema.json',
-                'scripts/agent/readonly_reviewer_contract.php',
-                'scripts/agent/lib/ReadonlyReviewerContract.php',
-                'AGENTS.md',
-                'code_review.md',
+            'trusted_base_paths_file' => '.codex/contracts/readonly-reviewer-trust-paths.txt',
+            'profiles' => [
+                'tests_regression_flake' => [
+                    'instructions' => $profile,
+                    'model' => 'gpt-5.4-mini',
+                    'reasoning' => 'medium',
+                ],
             ],
-            'profiles' => ['tests_regression_flake' => $profile],
             'disabled_features' => ['apps'],
             'filesystem' => 'read-only',
             'network' => 'denied',

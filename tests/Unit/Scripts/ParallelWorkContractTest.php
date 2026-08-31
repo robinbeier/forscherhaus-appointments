@@ -94,6 +94,40 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsStemPrefixOverlappingConcreteFile(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['primary_approved_component_ids'] = ['booking-public', 'platform-quality-tooling'];
+        $manifest['lanes'][0]['ownership'] = ['application/views/components/booking_'];
+        $manifest['lanes'][1]['ownership'] = ['application/views/components/booking_sidebar.php'];
+
+        self::assertContains(
+            'ownership_overlap:0:1',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
+    public function testRejectsSemanticCrossLaneCoordination(): void
+    {
+        foreach (
+            [
+                ['shared_contracts', ['openapi.yml'], 'shared_contract_requires_serial_work'],
+                ['cross_lane_dependencies', ['lane-a->lane-b'], 'cross_lane_dependency_requires_serial_work'],
+                ['coordination_required', true, 'semantic_coordination_requires_serial_work'],
+            ]
+            as [$field, $value, $expectedError]
+        ) {
+            $manifest = $this->validManifest();
+            $manifest['semantic_independence'][$field] = $value;
+
+            self::assertContains(
+                $expectedError,
+                ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+                (string) $field,
+            );
+        }
+    }
+
     public function testRejectsExternalMutationForWorker(): void
     {
         $manifest = $this->validManifest();
@@ -204,6 +238,11 @@ class ParallelWorkContractTest extends TestCase
             'base_sha' => str_repeat('a', 40),
             'primary_id' => 'primary',
             'primary_approved_component_ids' => ['platform-quality-tooling'],
+            'semantic_independence' => [
+                'shared_contracts' => [],
+                'cross_lane_dependencies' => [],
+                'coordination_required' => false,
+            ],
             'lanes' => [
                 [
                     'id' => 'lane-a',

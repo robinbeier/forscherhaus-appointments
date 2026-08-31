@@ -30,6 +30,31 @@ final class ParallelWorkContract
             $errors[] = 'invalid_primary_id';
         }
 
+        if (($policy['requires_semantic_independence_attestation'] ?? null) !== true) {
+            $errors[] = 'invalid_policy_semantic_independence_attestation';
+        }
+        $semanticIndependence = $manifest['semantic_independence'] ?? null;
+        if (!is_array($semanticIndependence) || array_is_list($semanticIndependence)) {
+            $errors[] = 'invalid_semantic_independence';
+        } else {
+            $expectedSemanticKeys = ['coordination_required', 'cross_lane_dependencies', 'shared_contracts'];
+            $actualSemanticKeys = array_keys($semanticIndependence);
+            sort($expectedSemanticKeys, SORT_STRING);
+            sort($actualSemanticKeys, SORT_STRING);
+            if ($actualSemanticKeys !== $expectedSemanticKeys) {
+                $errors[] = 'invalid_semantic_independence';
+            }
+            if (($semanticIndependence['shared_contracts'] ?? null) !== []) {
+                $errors[] = 'shared_contract_requires_serial_work';
+            }
+            if (($semanticIndependence['cross_lane_dependencies'] ?? null) !== []) {
+                $errors[] = 'cross_lane_dependency_requires_serial_work';
+            }
+            if (($semanticIndependence['coordination_required'] ?? null) !== false) {
+                $errors[] = 'semantic_coordination_requires_serial_work';
+            }
+        }
+
         $approvedComponentIds = self::readApprovedComponentIds($manifest, $errors);
         $canonicalComponents = self::readCanonicalComponents($ownershipMap, $errors);
         $requiredComponentIds = [];
@@ -250,19 +275,21 @@ final class ParallelWorkContract
 
     private static function pathsOverlap(string $left, string $right): bool
     {
-        return $left === $right || str_starts_with($left, $right . '/') || str_starts_with($right, $left . '/');
+        return self::pathCovers($left, $right) || self::pathCovers($right, $left);
     }
 
     private static function pathMatchesCanonicalPrefix(string $lanePath, string $canonicalPrefix): bool
     {
-        $isDirectoryPrefix = str_ends_with($canonicalPrefix, '/');
         $normalizedPrefix = rtrim($canonicalPrefix, '/');
-        if (self::pathsOverlap($lanePath, $normalizedPrefix)) {
+        return self::pathsOverlap($lanePath, $normalizedPrefix);
+    }
+
+    private static function pathCovers(string $prefix, string $path): bool
+    {
+        if ($prefix === $path || str_starts_with($path, $prefix . '/')) {
             return true;
         }
 
-        return !$isDirectoryPrefix &&
-            str_ends_with(basename($normalizedPrefix), '_') &&
-            str_starts_with($lanePath, $normalizedPrefix);
+        return str_ends_with(basename($prefix), '_') && str_starts_with($path, $prefix);
     }
 }
