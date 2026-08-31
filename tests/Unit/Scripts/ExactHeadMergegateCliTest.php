@@ -117,6 +117,27 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
     }
 
+    public function testAssociatedPullRequestEvidenceFailsClosedWhenEntriesAreMalformed(): void
+    {
+        foreach (
+            [
+                'string number' => [['number' => 12], ['number' => '13']],
+                'non-positive number' => [['number' => 12], ['number' => 0]],
+            ]
+            as $case => $payload
+        ) {
+            $exception = null;
+
+            try {
+                normalizeExactHeadMergegateAssociatedPullRequests($payload);
+            } catch (RuntimeException $caught) {
+                $exception = $caught;
+            }
+
+            self::assertInstanceOf(RuntimeException::class, $exception, $case);
+        }
+    }
+
     public function testFailedReadOnlyProcessReportsOnlyBoundedDiagnosticClass(): void
     {
         $sensitiveStderr = 'https://example.invalid/path?token=do-not-leak';

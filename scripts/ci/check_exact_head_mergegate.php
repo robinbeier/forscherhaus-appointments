@@ -1244,9 +1244,10 @@ function normalizeExactHeadMergegateAssociatedPullRequests(array $pullRequests):
 {
     $numbers = [];
     foreach ($pullRequests as $pullRequest) {
-        if (is_array($pullRequest) && is_int($pullRequest['number'] ?? null)) {
-            $numbers[] = $pullRequest['number'];
+        if (!is_array($pullRequest) || !is_int($pullRequest['number'] ?? null) || $pullRequest['number'] < 1) {
+            throw new RuntimeException('GitHub associated pull request had an invalid shape.');
         }
+        $numbers[] = $pullRequest['number'];
     }
 
     return exactHeadMergegateCanonicalPositiveIntList($numbers);
