@@ -20,6 +20,10 @@
  */
 class Providers_model extends EA_Model
 {
+    private const GOOGLE_TOKEN_MAX_LENGTH = 65535;
+
+    private const CALDAV_PASSWORD_MAX_LENGTH = 256;
+
     protected ?int $provider_role_id_cache = null;
 
     /**
@@ -99,7 +103,7 @@ class Providers_model extends EA_Model
 
         // Make sure all required fields are provided.
         if (empty($provider['first_name']) || empty($provider['last_name']) || empty($provider['email'])) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($provider, true));
+            throw new InvalidArgumentException('Not all required provider fields are provided.');
         }
 
         // Validate the email address.
@@ -112,9 +116,7 @@ class Providers_model extends EA_Model
             // Make sure the provided service entries are numeric values.
             foreach ($provider['services'] as $service_id) {
                 if (!is_numeric($service_id)) {
-                    throw new InvalidArgumentException(
-                        'The provided provider services are invalid: ' . print_r($provider, true),
-                    );
+                    throw new InvalidArgumentException('The provided provider services are invalid.');
                 }
             }
         }
@@ -748,11 +750,7 @@ class Providers_model extends EA_Model
             return [];
         }
 
-        $settings_rows = $this->db
-            ->from('user_settings')
-            ->where_in('id_users', $provider_ids)
-            ->get()
-            ->result_array();
+        $settings_rows = $this->db->from('user_settings')->where_in('id_users', $provider_ids)->get()->result_array();
         $settings_map = [];
 
         foreach ($settings_rows as $settings_row) {
@@ -864,9 +862,6 @@ class Providers_model extends EA_Model
                 'googleSync' => array_key_exists('google_sync', $provider['settings'])
                     ? filter_var($provider['settings']['google_sync'], FILTER_VALIDATE_BOOLEAN)
                     : null,
-                'googleToken' => array_key_exists('google_token', $provider['settings'])
-                    ? $provider['settings']['google_token']
-                    : null,
                 'googleCalendar' => array_key_exists('google_calendar', $provider['settings'])
                     ? $provider['settings']['google_calendar']
                     : null,
@@ -878,9 +873,6 @@ class Providers_model extends EA_Model
                     : null,
                 'caldavUsername' => array_key_exists('caldav_username', $provider['settings'])
                     ? $provider['settings']['caldav_username']
-                    : null,
-                'caldavPassword' => array_key_exists('caldav_password', $provider['settings'])
-                    ? $provider['settings']['caldav_password']
                     : null,
                 'syncFutureDays' => array_key_exists('sync_future_days', $provider['settings'])
                     ? (int) $provider['settings']['sync_future_days']
@@ -1010,7 +1002,17 @@ class Providers_model extends EA_Model
             }
 
             if (array_key_exists('googleToken', $provider['settings'])) {
-                $decoded_resource['settings']['google_token'] = $provider['settings']['googleToken'];
+                $google_token = $provider['settings']['googleToken'];
+
+                if ($google_token !== null && !is_string($google_token)) {
+                    throw new InvalidArgumentException('The settings.googleToken field must be a string or null.');
+                }
+
+                if (is_string($google_token) && strlen($google_token) > self::GOOGLE_TOKEN_MAX_LENGTH) {
+                    throw new InvalidArgumentException('The settings.googleToken field exceeds its maximum length.');
+                }
+
+                $decoded_resource['settings']['google_token'] = $google_token;
             }
 
             if (array_key_exists('caldavSync', $provider['settings'])) {
@@ -1026,7 +1028,17 @@ class Providers_model extends EA_Model
             }
 
             if (array_key_exists('caldavPassword', $provider['settings'])) {
-                $decoded_resource['settings']['caldav_password'] = $provider['settings']['caldavPassword'];
+                $caldav_password = $provider['settings']['caldavPassword'];
+
+                if ($caldav_password !== null && !is_string($caldav_password)) {
+                    throw new InvalidArgumentException('The settings.caldavPassword field must be a string or null.');
+                }
+
+                if (is_string($caldav_password) && strlen($caldav_password) > self::CALDAV_PASSWORD_MAX_LENGTH) {
+                    throw new InvalidArgumentException('The settings.caldavPassword field exceeds its maximum length.');
+                }
+
+                $decoded_resource['settings']['caldav_password'] = $caldav_password;
             }
 
             if (array_key_exists('syncFutureDays', $provider['settings'])) {

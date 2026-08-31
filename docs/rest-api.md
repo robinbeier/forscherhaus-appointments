@@ -335,7 +335,6 @@ You can also try the GET requests with your browser by navigating to the respect
         "notifications": true,
         "googleSync": false,
         "googleCalendar": null,
-        "googleToken": null,
         "syncFutureDays": 90,
         "syncPastDays": 30,
         "calendarView": "default",
@@ -406,6 +405,21 @@ You can also try the GET requests with your browser by navigating to the respect
 - `DELETE /api/v1/providers/:id` Remove an existing provider record.
 
 **Note: The `password` field is optional and should only be provided when creating (POST) or updating (PUT) a record.**
+
+#### Write-only integration credentials
+
+Provider `settings.googleToken` and `settings.caldavPassword`, and webhook
+`secretToken`, are write-only REST inputs. They are accepted only in the
+respective provider or webhook POST/PUT payload and are never returned by
+collection, detail, create, or update responses. Query parameters such as
+`fields`, `with`, search, and sorting cannot expose them.
+
+On PUT, omitting one of these properties preserves its currently stored value.
+Providing a string replaces the stored value; providing `null` clears it.
+Successful mutation responses never echo the submitted credential. This
+write-only REST boundary does not change the authenticated backoffice,
+Google/CalDAV synchronization, or webhook-dispatch paths that consume stored
+credentials server-side.
 
 ### Secretaries
 

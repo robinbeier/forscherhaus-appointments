@@ -67,6 +67,24 @@ und eine globale Lock-Reihenfolge ausdrücklich mitzudenken, damit keine
 Prüfung ihre eigene uncommitted Sicht als Authority verwendet oder ein
 Deadlock entsteht.
 
+## Write-only Integrationsgeheimnisse
+
+Die authentifizierte REST-v1-API behandelt
+`providers.settings.googleToken`, `providers.settings.caldavPassword` und
+`webhooks.secretToken` als reine Write-Inputs. Provider- und
+Webhook-Collection, -Detail, -Create- und -Update-Antworten durchlaufen vor
+jeder Query-Projektion dieselbe zentrale secret-freie API-Kodierung.
+`fields`, `with`, Suche und Sortierung dürfen die Werte daher weder direkt
+noch über alternative snake_case-Namen zurückholen.
+
+Beim Update startet die Dekodierung vom aktuellen Datensatz: ein ausgelassenes
+Secret bleibt unverändert, ein expliziter String ersetzt es und `null` löscht
+es. Typ- und Längenfehler werden vor der Mutation mit wertfreien Meldungen
+abgelehnt. OpenAPI führt diese Felder nur in Payload-Schemas mit
+`writeOnly: true`; Record-Schemas und Beispiele enthalten sie nicht.
+Backoffice-, Sync- und Webhook-Dispatch-Consumer bleiben serverseitige
+DB-Consumer und sind keine alternative REST-Leseoberfläche.
+
 ## Evidence-Privacy-Vertrag
 
 Logs, Reports, Tests, PR-Evidenz und Linear-Einträge enthalten weder Secrets
