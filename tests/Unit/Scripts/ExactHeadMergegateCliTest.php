@@ -779,6 +779,88 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertTrue($policy['ci_execution_contract_verified']);
         self::assertSame(['git', 'rev-parse', 'HEAD'], $commands[0]['command']);
         self::assertSame(['git', 'show', self::SHA . ':.codex/contracts/agent-workflow.json'], $commands[2]['command']);
+        self::assertContains(
+            ['git', 'show', self::SHA . ':.github/workflows/ci.yml'],
+            array_column($commands, 'command'),
+        );
+    }
+
+    public function testVerifiedPolicyRejectsManipulatedReviewedContractRuntimeDigest(): void
+    {
+        $commands = [];
+        $exception = null;
+        try {
+            loadExactHeadMergegateVerifiedPolicy(
+                dirname(__DIR__, 3),
+                dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json',
+                self::SHA,
+                $this->verifiedPolicyProcessRunner($commands, null, static function (string $contract): string {
+                    $decoded = json_decode($contract, true, 128, JSON_THROW_ON_ERROR);
+                    $decoded['land']['exact_head_mergegate']['workflow_parser']['runtime_files_sha256'] = str_repeat(
+                        '0',
+                        64,
+                    );
+
+                    return json_encode($decoded, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+                }),
+            );
+        } catch (RuntimeException $caught) {
+            $exception = $caught;
+        }
+
+        self::assertInstanceOf(RuntimeException::class, $exception);
+        self::assertSame('Exact-head mergegate YAML runtime is not bound to reviewed HEAD.', $exception->getMessage());
+        self::assertContains(
+            ['git', 'show', self::SHA . ':.github/workflows/ci.yml'],
+            array_column($commands, 'command'),
+        );
+    }
+
+    public function testYamlRuntimeManifestRejectsMalformedEntriesFailClosed(): void
+    {
+        $root = dirname(__DIR__, 3) . '/vendor/symfony/yaml';
+        $cases = [
+            'empty' => [[], 'Exact-head mergegate YAML runtime manifest is malformed.'],
+            'duplicate' => [['Yaml.php', 'Yaml.php'], 'Exact-head mergegate YAML runtime manifest is malformed.'],
+            'non-canonical' => [
+                ['Yaml.php', 'Parser.php'],
+                'Exact-head mergegate YAML runtime manifest is not canonical.',
+            ],
+            'invalid path' => [
+                ['../Parser.php'],
+                'Exact-head mergegate YAML runtime manifest contains an invalid path.',
+            ],
+            'missing entry' => [['Missing.php'], 'Exact-head mergegate YAML runtime manifest entry is unavailable.'],
+        ];
+
+        foreach ($cases as $case => [$runtimeFiles, $message]) {
+            $exception = null;
+            try {
+                exactHeadMergegateRuntimeSha256($root, $runtimeFiles);
+            } catch (RuntimeException $caught) {
+                $exception = $caught;
+            }
+
+            self::assertInstanceOf(RuntimeException::class, $exception, $case);
+            self::assertSame($message, $exception->getMessage(), $case);
+        }
+    }
+
+    public function testPolicyDecoderRejectsNonCanonicalRuntimeFileList(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $contract = json_decode(
+            (string) file_get_contents($root . '/.codex/contracts/agent-workflow.json'),
+            true,
+            128,
+            JSON_THROW_ON_ERROR,
+        );
+        $runtimeFiles = $contract['land']['exact_head_mergegate']['workflow_parser']['runtime_files'];
+        $contract['land']['exact_head_mergegate']['workflow_parser']['runtime_files'] = array_reverse($runtimeFiles);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Exact-head mergegate workflow parser contract is malformed.');
+        decodeExactHeadMergegatePolicy(json_encode($contract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
     }
 
     public function testVerifiedPolicyRejectsWeakenedFingerprintedAndExactExecution(): void
@@ -1026,11 +1108,19 @@ final class ExactHeadMergegateCliTest extends TestCase
     /**
      * @param array<int, array{command: array<int, string>, working_directory: ?string}> $commands
      * @param null|Closure(string): string $mutateWorkflow
+     * @param null|Closure(string): string $mutateContract
      * @return Closure(array<int, string>, ?string): string
      */
-    private function verifiedPolicyProcessRunner(array &$commands, ?Closure $mutateWorkflow = null): Closure
-    {
-        return static function (array $command, ?string $workingDirectory) use (&$commands, $mutateWorkflow): string {
+    private function verifiedPolicyProcessRunner(
+        array &$commands,
+        ?Closure $mutateWorkflow = null,
+        ?Closure $mutateContract = null,
+    ): Closure {
+        return static function (array $command, ?string $workingDirectory) use (
+            &$commands,
+            $mutateWorkflow,
+            $mutateContract,
+        ): string {
             $commands[] = ['command' => $command, 'working_directory' => $workingDirectory];
             if ($command === ['git', 'rev-parse', 'HEAD']) {
                 return self::SHA . PHP_EOL;
@@ -1064,6 +1154,9 @@ final class ExactHeadMergegateCliTest extends TestCase
                 }
 
                 $contents = (string) file_get_contents(dirname(__DIR__, 3) . '/' . $relativePath);
+                if ($suffix === '.codex/contracts/agent-workflow.json' && $mutateContract !== null) {
+                    return $mutateContract($contents);
+                }
                 if ($suffix === '.github/workflows/ci.yml' && $mutateWorkflow !== null) {
                     return $mutateWorkflow($contents);
                 }
