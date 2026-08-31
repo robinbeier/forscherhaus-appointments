@@ -106,17 +106,27 @@ mutation, integration, attestation, and landing remain serial.
 
 Before opening writer lanes, the primary records a small JSON manifest outside
 the validator checkout. From a separate clean primary checkout detached at the
-already verified common base, it runs
+already verified common base, it materializes the validator wrapper from that
+base outside the checkout and runs
 
 ```bash
-scripts/agent/check_parallel_work_contract.sh --manifest=<lane-manifest.json>
+trusted_validator=$(mktemp "${TMPDIR:-/tmp}/parallel-work-validator-base.XXXXXX")
+git -C <validator-checkout> show <base-sha>:scripts/agent/check_parallel_work_contract.sh > "$trusted_validator"
+chmod 700 "$trusted_validator"
+"$trusted_validator" --validator-checkout=<absolute-validator-checkout> --manifest=<lane-manifest.json>
+rm -f "$trusted_validator"
 ```
 
-The checker starts PHP without ambient `php.ini`, `PHPRC`, scan directories,
-or prepend/append hooks. It first requires its own checkout to be clean and its
-HEAD to equal the manifest's declared base, then reads both the workflow
-contract and the ownership map from that exact commit. A caller-controlled SHA
-or mutable validator checkout cannot relax the policy used to approve a lane.
+The wrapper verifies that it is the checkout's exact HEAD blob, then
+materializes the CLI and both shared validator libraries directly from that
+same commit into a private trust bundle. The checker therefore executes no PHP
+source from the checkout and starts PHP without ambient `php.ini`, `PHPRC`, scan
+directories, or prepend/append hooks. It requires the validator checkout to be
+clean and its HEAD to equal the manifest's declared base, then reads both the
+workflow contract and the ownership map from that exact commit. Checkout-time
+filters, symlink substitutions, assume-unchanged state, a caller-controlled
+SHA, or a mutable validator checkout cannot relax the policy used to approve a
+lane.
 
 The manifest names one full lowercase common base SHA, the primary ID, exact
 `primary_approved_component_ids` for any intersected `single-owner` or
@@ -150,11 +160,15 @@ semantic cross-lane dependency appears.
 
 The manifest pass is admission, not completion evidence. After every worker
 return and again immediately before the primary commits or integrates a lane,
-run the validator from a separate clean primary checkout whose validator files
-match the lane's declared base:
+materialize a fresh wrapper from the same separate clean primary checkout whose
+validator files match the lane's declared base, then run:
 
 ```bash
-scripts/agent/check_parallel_work_contract.sh --manifest=<lane-manifest.json> --repo-root=<absolute-lane-worktree> --verify-lane=<lane-id> --allow-dirty-precommit
+trusted_validator=$(mktemp "${TMPDIR:-/tmp}/parallel-work-validator-base.XXXXXX")
+git -C <validator-checkout> show <base-sha>:scripts/agent/check_parallel_work_contract.sh > "$trusted_validator"
+chmod 700 "$trusted_validator"
+"$trusted_validator" --validator-checkout=<absolute-validator-checkout> --manifest=<lane-manifest.json> --repo-root=<absolute-lane-worktree> --verify-lane=<lane-id> --allow-dirty-precommit
+rm -f "$trusted_validator"
 ```
 
 Verification requires an explicit evidence mode and fails closed unless the validator wrapper, CLI, shared path

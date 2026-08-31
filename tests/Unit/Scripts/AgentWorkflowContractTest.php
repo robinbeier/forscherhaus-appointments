@@ -160,10 +160,11 @@ class AgentWorkflowContractTest extends TestCase
             $contract['parallel_work']['validator_invocation'] ?? null,
         );
         self::assertSame(
-            'clean_external_checkout_at_declared_base',
+            'materialized_declared_base_wrapper_and_source_blobs',
             $contract['parallel_work']['validator_trust_anchor'] ?? null,
         );
         self::assertTrue($contract['parallel_work']['admission_requires_clean_exact_base_checkout'] ?? null);
+        self::assertTrue($contract['parallel_work']['admission_executes_only_declared_base_blobs'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_post_implementation_verification'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_clean_post_commit_verification'] ?? null);
         self::assertSame('provisional_pass', $contract['parallel_work']['dirty_precommit_status'] ?? null);

@@ -405,6 +405,61 @@ class ParallelWorkContractCliTest extends TestCase
         );
     }
 
+    public function testAdmissionRejectsAWrapperExecutedInsideTheValidatorCheckout(): void
+    {
+        $manifestPath = $this->writeJsonFixture('in-checkout-runner', $this->manifestForPath('safe/path'));
+        $process = proc_open(
+            [
+                $this->trustedValidatorRoot . '/scripts/agent/check_parallel_work_contract.sh',
+                '--validator-checkout=' . $this->trustedValidatorRoot,
+                '--manifest=' . $manifestPath,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $this->trustedValidatorRoot,
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        self::assertSame(1, proc_close($process));
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('must be materialized outside the checkout', $stderr);
+    }
+
+    public function testAdmissionExecutesBaseBlobsInsteadOfAssumeUnchangedCheckoutSources(): void
+    {
+        $marker = sys_get_temp_dir() . '/parallel-work-transformed-source-' . bin2hex(random_bytes(8));
+        $sourcePath = $this->trustedValidatorRoot . '/scripts/agent/lib/ParallelWorkContract.php';
+        $source = (string) file_get_contents($sourcePath);
+        $transformed = str_replace(
+            "<?php\n",
+            "<?php\nfile_put_contents(" . var_export($marker, true) . ", 'executed');\n",
+            $source,
+        );
+        self::assertNotSame($source, $transformed);
+        self::assertNotFalse(file_put_contents($sourcePath, $transformed));
+        $this->runGit($this->trustedValidatorRoot, [
+            'update-index',
+            '--assume-unchanged',
+            'scripts/agent/lib/ParallelWorkContract.php',
+        ]);
+        self::assertSame('', $this->runGit($this->trustedValidatorRoot, ['status', '--porcelain']));
+        $manifestPath = $this->writeJsonFixture('transformed-source', $this->manifestForPath('scripts/agent'));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'primary_owned_path:0:scripts/agent',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+        self::assertFileDoesNotExist($marker);
+    }
+
     public function testLaneVerificationRequiresAnExplicitEvidenceMode(): void
     {
         $manifestPath = $this->writeJsonFixture(
@@ -476,8 +531,9 @@ class ParallelWorkContractCliTest extends TestCase
     private function runCli(array $arguments, ?string $repoRoot = null, ?array $environment = null): array
     {
         $repoRoot ??= $this->trustedValidatorRoot;
+        $trustedRunner = $this->materializeValidatorRunner($repoRoot);
         $process = proc_open(
-            [$repoRoot . '/scripts/agent/check_parallel_work_contract.sh', ...$arguments],
+            [$trustedRunner, '--validator-checkout=' . $repoRoot, ...$arguments],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             $repoRoot,
@@ -489,14 +545,19 @@ class ParallelWorkContractCliTest extends TestCase
         fclose($pipes[1]);
         fclose($pipes[2]);
 
-        return [proc_close($process), $stdout, $stderr];
+        $exitCode = proc_close($process);
+        unlink($trustedRunner);
+
+        return [$exitCode, $stdout, $stderr];
     }
 
     /** @return array{int, string, string} */
     private function runTrustedLaneVerification(string $manifestPath, string $laneId, bool $requireClean = false): array
     {
+        $trustedRunner = $this->materializeValidatorRunner($this->trustedValidatorRoot);
         $arguments = [
-            $this->trustedValidatorRoot . '/scripts/agent/check_parallel_work_contract.sh',
+            $trustedRunner,
+            '--validator-checkout=' . $this->trustedValidatorRoot,
             '--manifest=' . $manifestPath,
             '--repo-root=' . $this->repoRoot,
             '--verify-lane=' . $laneId,
@@ -518,11 +579,34 @@ class ParallelWorkContractCliTest extends TestCase
         fclose($pipes[1]);
         fclose($pipes[2]);
 
-        return [proc_close($process), $stdout, $stderr];
+        $exitCode = proc_close($process);
+        unlink($trustedRunner);
+
+        return [$exitCode, $stdout, $stderr];
+    }
+
+    private function materializeValidatorRunner(string $validatorCheckout): string
+    {
+        $runner = sys_get_temp_dir() . '/parallel-work-validator-runner-' . bin2hex(random_bytes(8));
+        self::assertNotFalse(
+            file_put_contents(
+                $runner,
+                $this->runGitRaw($validatorCheckout, ['show', 'HEAD:scripts/agent/check_parallel_work_contract.sh']),
+            ),
+        );
+        self::assertTrue(chmod($runner, 0700));
+
+        return $runner;
     }
 
     /** @param list<string> $arguments */
     private function runGit(string $workingDirectory, array $arguments): string
+    {
+        return trim($this->runGitRaw($workingDirectory, $arguments));
+    }
+
+    /** @param list<string> $arguments */
+    private function runGitRaw(string $workingDirectory, array $arguments): string
     {
         $process = proc_open(
             ['git', '-C', $workingDirectory, ...$arguments],
@@ -536,6 +620,6 @@ class ParallelWorkContractCliTest extends TestCase
         fclose($pipes[2]);
         self::assertSame(0, proc_close($process), (string) $stderr);
 
-        return trim((string) $stdout);
+        return (string) $stdout;
     }
 }

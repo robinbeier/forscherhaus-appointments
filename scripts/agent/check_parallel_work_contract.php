@@ -9,7 +9,17 @@ require_once __DIR__ . '/lib/RepoPath.php';
 require_once __DIR__ . '/lib/ParallelWorkContract.php';
 
 $validatorRoot = dirname(__DIR__, 2);
-$root = $validatorRoot;
+$validatorCheckoutRootInput = getenv('PARALLEL_WORK_VALIDATOR_CHECKOUT_ROOT');
+if (!is_string($validatorCheckoutRootInput) || !str_starts_with($validatorCheckoutRootInput, '/')) {
+    fwrite(STDERR, "Parallel-work validator checkout is unavailable.\n");
+    exit(2);
+}
+$validatorCheckoutRoot = realpath($validatorCheckoutRootInput);
+if ($validatorCheckoutRoot === false || $validatorCheckoutRoot !== $validatorCheckoutRootInput) {
+    fwrite(STDERR, "Parallel-work validator checkout is invalid.\n");
+    exit(2);
+}
+$root = $validatorCheckoutRoot;
 $manifestPath = null;
 $requestedRepoRoot = null;
 $verifyLane = null;
@@ -108,7 +118,10 @@ if (!is_string($baseSha) || preg_match('/^[a-f0-9]{40}$/D', $baseSha) !== 1) {
     exit(2);
 }
 
-$validatorErrors = verifyValidatorCheckout($gitBinary, $validatorRoot, $baseSha);
+$validatorErrors = [
+    ...verifyValidatorCheckout($gitBinary, $validatorCheckoutRoot, $baseSha),
+    ...verifyValidatorSource($gitBinary, $validatorRoot, $validatorCheckoutRoot, $baseSha),
+];
 if ($validatorErrors !== []) {
     fwrite(
         STDOUT,
@@ -160,7 +173,7 @@ if (!is_array($ownershipMap)) {
 $errors = ParallelWorkContract::validate($manifest, $contract['parallel_work'], $ownershipMap);
 $verification = null;
 if ($verifyLane !== null && $errors === []) {
-    $errors = verifyValidatorSource($gitBinary, $validatorRoot, $root, $baseSha);
+    $errors = verifyValidatorSeparation($validatorCheckoutRoot, $root);
     if ($errors === []) {
         [$changedPaths, $localPaths, $verificationErrors, $headSha] = collectLaneChanges($gitBinary, $root, $baseSha);
         $errors = [
@@ -263,9 +276,9 @@ function readGitBlob(string $gitBinary, string $root, string $sha, string $path)
 }
 
 /** @return list<string> */
-function verifyValidatorCheckout(string $gitBinary, string $validatorRoot, string $baseSha): array
+function verifyValidatorCheckout(string $gitBinary, string $validatorCheckoutRoot, string $baseSha): array
 {
-    $validatorRealRoot = realpath($validatorRoot);
+    $validatorRealRoot = realpath($validatorCheckoutRoot);
     if ($validatorRealRoot === false) {
         return ['validator_checkout_invalid'];
     }
@@ -299,7 +312,7 @@ function verifyValidatorSource(string $gitBinary, string $validatorRoot, string 
     $validatorRealRoot = realpath($validatorRoot);
     $rootRealPath = realpath($root);
     if ($validatorRealRoot === false || $rootRealPath === false || $validatorRealRoot === $rootRealPath) {
-        return ['validator_must_run_outside_lane'];
+        return ['untrusted_validator_source'];
     }
 
     foreach (
@@ -316,6 +329,18 @@ function verifyValidatorSource(string $gitBinary, string $validatorRoot, string 
         if (!is_string($source) || $trusted === null || !hash_equals($trusted, $source)) {
             return ['untrusted_validator_source:' . $path];
         }
+    }
+
+    return [];
+}
+
+/** @return list<string> */
+function verifyValidatorSeparation(string $validatorCheckoutRoot, string $laneRoot): array
+{
+    $validatorRealRoot = realpath($validatorCheckoutRoot);
+    $laneRealRoot = realpath($laneRoot);
+    if ($validatorRealRoot === false || $laneRealRoot === false || $validatorRealRoot === $laneRealRoot) {
+        return ['validator_must_run_outside_lane'];
     }
 
     return [];
