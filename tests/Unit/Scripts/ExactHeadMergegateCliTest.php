@@ -56,9 +56,13 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
         self::assertSame(['OWNER'], $policy['trusted_associations']);
         self::assertSame(['OWNER', 'MEMBER', 'COLLABORATOR'], $policy['blocking_feedback_associations']);
+        self::assertSame('vendor/symfony/yaml', $policy['workflow_yaml_package_path']);
         self::assertSame(
             $policy['workflow_yaml_runtime_sha256'],
-            exactHeadMergegateRuntimeSha256($root . '/vendor/symfony/yaml', $policy['workflow_yaml_runtime_files']),
+            exactHeadMergegateRuntimeSha256(
+                $root . '/' . $policy['workflow_yaml_package_path'],
+                $policy['workflow_yaml_runtime_files'],
+            ),
         );
         self::assertNotContains('README.md', $policy['workflow_yaml_runtime_files']);
         self::assertNotContains('Dumper.php', $policy['workflow_yaml_runtime_files']);
@@ -74,6 +78,7 @@ final class ExactHeadMergegateCliTest extends TestCase
         $workflow = parseExactHeadMergegateWorkflowYamlIsolated(
             $root,
             $root . '/.github/workflows/ci.yml',
+            $policy['workflow_yaml_package_path'],
             $policy['workflow_yaml_runtime_files'],
             $policy['workflow_yaml_runtime_sha256'],
         );
@@ -84,9 +89,52 @@ final class ExactHeadMergegateCliTest extends TestCase
         parseExactHeadMergegateWorkflowYamlIsolated(
             $root,
             $root . '/.github/workflows/ci.yml',
+            $policy['workflow_yaml_package_path'],
             $policy['workflow_yaml_runtime_files'],
             str_repeat('0', 64),
         );
+    }
+
+    public function testWorkflowRunPullRequestAssociationsAreCanonicalizedAsASet(): void
+    {
+        $run = normalizeExactHeadMergegateWorkflowRun([
+            'id' => 101,
+            'name' => 'CI',
+            'event' => 'pull_request',
+            'status' => 'completed',
+            'conclusion' => 'success',
+            'head_sha' => self::SHA,
+            'head_branch' => 'codex/example',
+            'head_repository' => ['full_name' => self::REPOSITORY],
+            'pull_requests' => [['number' => 13], ['number' => 12], ['number' => 13]],
+            'check_suite_id' => 202,
+        ]);
+
+        self::assertSame([12, 13], $run['pr_numbers']);
+        self::assertSame(
+            [12, 13],
+            normalizeExactHeadMergegateAssociatedPullRequests([['number' => 13], ['number' => 12], ['number' => 13]]),
+        );
+    }
+
+    public function testFailedReadOnlyProcessReportsOnlyBoundedDiagnosticClass(): void
+    {
+        $sensitiveStderr = 'https://example.invalid/path?token=do-not-leak';
+
+        try {
+            runExactHeadMergegateProcess(
+                [PHP_BINARY, '-r', 'fwrite(STDERR, $argv[1]); exit(17);', $sensitiveStderr],
+                dirname(__DIR__, 3),
+            );
+            self::fail('Failing subprocess was accepted.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Required read-only php command failed (exit_code_17_stderr_present).',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString($sensitiveStderr, $exception->getMessage());
+            self::assertLessThan(128, strlen($exception->getMessage()));
+        }
     }
 
     public function testCheckClassificationAndNamesMatchWorkflowApplicability(): void
@@ -167,6 +215,37 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertStringNotContainsString('token', strtolower($report));
         self::assertStringNotContainsString('login', strtolower($report));
         self::assertStringNotContainsString($this->attestation(), $report);
+    }
+
+    public function testCliRejectsDuplicateAuthorityFlagsBeforeAnyGitHubRead(): void
+    {
+        foreach (
+            [
+                'duplicate PR' => ['--pr=12', '--pr=13', '--reviewed-sha=' . self::SHA],
+                'duplicate reviewed SHA' => [
+                    '--pr=12',
+                    '--reviewed-sha=' . self::SHA,
+                    '--reviewed-sha=' . str_repeat('f', 40),
+                ],
+            ]
+            as $case => $arguments
+        ) {
+            $githubReads = 0;
+            $reportPath = $this->temporaryPath();
+            $exitCode = runExactHeadMergegateCli(
+                array_merge(['check_exact_head_mergegate.php'], $arguments, ['--output-json=' . $reportPath]),
+                static function (string $path) use (&$githubReads): array {
+                    $githubReads++;
+                    return [];
+                },
+                static fn(): string => self::REPOSITORY,
+                dirname(__DIR__, 3),
+                $this->mockPolicyLoader(),
+            );
+
+            self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode, $case);
+            self::assertSame(0, $githubReads, $case);
+        }
     }
 
     public function testCliFailsClosedWhenAnyPullRequestIdentityFieldChangesDuringEvidenceCollection(): void
@@ -1071,6 +1150,42 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
     }
 
+    public function testVerifiedPolicyRejectsManipulatedCanonicalHarnessSupport(): void
+    {
+        foreach (
+            [
+                'readiness' => 'scripts/ci/check_agent_harness_readiness.php',
+                'report dates' => 'scripts/ci/check_harness_report_dates.php',
+            ]
+            as $case => $supportPath
+        ) {
+            $exception = null;
+            $commands = [];
+            try {
+                loadExactHeadMergegateVerifiedPolicy(
+                    dirname(__DIR__, 3),
+                    dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json',
+                    self::SHA,
+                    $this->verifiedPolicyProcessRunner($commands, null, null, static function (
+                        string $path,
+                        string $contents,
+                    ) use ($supportPath): string {
+                        return $path === $supportPath ? $contents . "\n// mutated" : $contents;
+                    }),
+                );
+            } catch (RuntimeException $caught) {
+                $exception = $caught;
+            }
+
+            self::assertInstanceOf(RuntimeException::class, $exception, $case);
+            self::assertSame(
+                'Exact-head mergegate canonical harness support is not bound to reviewed HEAD.',
+                $exception->getMessage(),
+                $case,
+            );
+        }
+    }
+
     public function testYamlRuntimeManifestRejectsMalformedEntriesFailClosed(): void
     {
         $root = dirname(__DIR__, 3) . '/vendor/symfony/yaml';
@@ -1382,17 +1497,20 @@ final class ExactHeadMergegateCliTest extends TestCase
      * @param array<int, array{command: array<int, string>, working_directory: ?string}> $commands
      * @param null|Closure(string): string $mutateWorkflow
      * @param null|Closure(string): string $mutateContract
+     * @param null|Closure(string, string): string $mutateHarnessSupport
      * @return Closure(array<int, string>, ?string): string
      */
     private function verifiedPolicyProcessRunner(
         array &$commands,
         ?Closure $mutateWorkflow = null,
         ?Closure $mutateContract = null,
+        ?Closure $mutateHarnessSupport = null,
     ): Closure {
         return static function (array $command, ?string $workingDirectory) use (
             &$commands,
             $mutateWorkflow,
             $mutateContract,
+            $mutateHarnessSupport,
         ): string {
             $commands[] = ['command' => $command, 'working_directory' => $workingDirectory];
             if ($command === ['git', 'rev-parse', 'HEAD']) {
@@ -1432,6 +1550,16 @@ final class ExactHeadMergegateCliTest extends TestCase
                 }
                 if ($suffix === '.github/workflows/ci.yml' && $mutateWorkflow !== null) {
                     return $mutateWorkflow($contents);
+                }
+                if (
+                    in_array(
+                        $suffix,
+                        ['scripts/ci/check_agent_harness_readiness.php', 'scripts/ci/check_harness_report_dates.php'],
+                        true,
+                    ) &&
+                    $mutateHarnessSupport !== null
+                ) {
+                    return $mutateHarnessSupport($suffix, $contents);
                 }
 
                 return $contents;

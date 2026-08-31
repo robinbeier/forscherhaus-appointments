@@ -210,6 +210,7 @@ function requireExactHeadMergegateCliValue(string $argument, string $prefix): st
  *     required_review_lenses:array<int, string>,
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
+ *     workflow_yaml_package_path:string,
  *     workflow_yaml_runtime_files:array<int, string>,
  *     workflow_yaml_runtime_sha256:string,
  *     attestation_marker:string,
@@ -324,6 +325,7 @@ function loadExactHeadMergegateVerifiedPolicy(
         $ciWorkflow = parseExactHeadMergegateWorkflowYamlIsolated(
             $root,
             $workflowPath,
+            $policy['workflow_yaml_package_path'],
             $policy['workflow_yaml_runtime_files'],
             $policy['workflow_yaml_runtime_sha256'],
         );
@@ -387,6 +389,7 @@ function writeExactHeadMergegateTemporaryInput(string $directory, string $name, 
 function parseExactHeadMergegateWorkflowYamlIsolated(
     string $root,
     string $workflowPath,
+    string $packageRelativePath,
     array $runtimeFiles,
     string $expectedRuntimeSha256,
 ): array {
@@ -394,7 +397,23 @@ function parseExactHeadMergegateWorkflowYamlIsolated(
         throw new RuntimeException('Exact-head mergegate YAML runtime digest is malformed.');
     }
 
-    $packagePath = $root . '/vendor/symfony/yaml';
+    if (preg_match('~^(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+$~D', $packageRelativePath) !== 1) {
+        throw new RuntimeException('Exact-head mergegate YAML package path is malformed.');
+    }
+    $resolvedRoot = realpath($root);
+    $packagePath = $root . '/' . $packageRelativePath;
+    $resolvedPackagePath = realpath($packagePath);
+    $rootPrefix = $resolvedRoot === false ? '' : rtrim(str_replace('\\', '/', $resolvedRoot), '/') . '/';
+    if (
+        $resolvedRoot === false ||
+        $resolvedPackagePath === false ||
+        is_link($packagePath) ||
+        !is_dir($resolvedPackagePath) ||
+        !str_starts_with(str_replace('\\', '/', $resolvedPackagePath), $rootPrefix)
+    ) {
+        throw new RuntimeException('Exact-head mergegate YAML package path is unavailable.');
+    }
+    $packagePath = $resolvedPackagePath;
     $actualRuntimeSha256 = exactHeadMergegateRuntimeSha256($packagePath, $runtimeFiles);
     if (!hash_equals($expectedRuntimeSha256, $actualRuntimeSha256)) {
         throw new RuntimeException('Exact-head mergegate YAML runtime is not bound to reviewed HEAD.');
@@ -567,6 +586,7 @@ function readExactHeadMergegatePolicyContents(string $contractPath): string
  *     required_review_lenses:array<int, string>,
  *     trusted_associations:array<int, string>,
  *     blocking_feedback_associations:array<int, string>,
+ *     workflow_yaml_package_path:string,
  *     workflow_yaml_runtime_files:array<int, string>,
  *     workflow_yaml_runtime_sha256:string,
  *     attestation_marker:string,
@@ -627,7 +647,8 @@ function decodeExactHeadMergegatePolicy(string $contents): array
     );
     if (
         ($workflowParser['isolation'] ?? null) !== 'php_no_ini_scoped_autoloader' ||
-        ($workflowParser['package_path'] ?? null) !== 'vendor/symfony/yaml' ||
+        !is_string($workflowParser['package_path'] ?? null) ||
+        preg_match('~^(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+$~D', $workflowParser['package_path']) !== 1 ||
         $runtimeFiles !== $sortedRuntimeFiles ||
         $invalidRuntimeFiles !== [] ||
         !in_array('Yaml.php', $runtimeFiles, true) ||
@@ -660,6 +681,7 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         'blocking_feedback_associations' => normalizeExactHeadMergegateStringList(
             $attestation['blocking_feedback_author_associations'] ?? null,
         ),
+        'workflow_yaml_package_path' => $workflowParser['package_path'],
         'workflow_yaml_runtime_files' => $runtimeFiles,
         'workflow_yaml_runtime_sha256' => $workflowParser['runtime_files_sha256'],
         'attestation_marker' => requireExactHeadMergegatePolicyString($attestation, 'marker'),
@@ -904,8 +926,16 @@ function runExactHeadMergegateProcess(array $command, ?string $workingDirectory)
     $exitCode = proc_close($process);
 
     if ($exitCode !== 0 || !is_string($stdout)) {
-        unset($stderr);
-        throw new RuntimeException('Required read-only command failed.');
+        $executable = $command[0] ?? '';
+        $tool =
+            $executable === PHP_BINARY ? 'php' : (in_array($executable, ['git', 'gh'], true) ? $executable : 'other');
+        $reason = !is_string($stdout)
+            ? 'invalid_stdout'
+            : 'exit_code_' . (is_int($exitCode) && $exitCode >= 0 && $exitCode <= 255 ? $exitCode : 'unknown');
+        if (is_string($stderr) && $stderr !== '') {
+            $reason .= '_stderr_present';
+        }
+        throw new RuntimeException('Required read-only ' . $tool . ' command failed (' . $reason . ').');
     }
     if (strlen($stdout) > 32 * 1024 * 1024) {
         throw new RuntimeException('Required read-only command returned too much data.');
@@ -1201,7 +1231,7 @@ function normalizeExactHeadMergegateWorkflowRun(mixed $run): array
         'head_sha' => $run['head_sha'],
         'head_branch' => $run['head_branch'],
         'head_repository' => $run['head_repository']['full_name'],
-        'pr_numbers' => array_values(array_unique($prNumbers)),
+        'pr_numbers' => exactHeadMergegateCanonicalPositiveIntList($prNumbers),
         'check_suite_id' => $run['check_suite_id'],
     ];
 }
@@ -1219,7 +1249,19 @@ function normalizeExactHeadMergegateAssociatedPullRequests(array $pullRequests):
         }
     }
 
-    return array_values(array_unique($numbers));
+    return exactHeadMergegateCanonicalPositiveIntList($numbers);
+}
+
+/**
+ * @param array<int, int> $numbers
+ * @return array<int, int>
+ */
+function exactHeadMergegateCanonicalPositiveIntList(array $numbers): array
+{
+    $canonical = array_values(array_unique($numbers));
+    sort($canonical, SORT_NUMERIC);
+
+    return $canonical;
 }
 
 /**
