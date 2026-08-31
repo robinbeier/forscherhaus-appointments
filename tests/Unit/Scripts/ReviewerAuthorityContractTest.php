@@ -292,11 +292,20 @@ class ReviewerAuthorityContractTest extends TestCase
         $environment['PHPRC'] = $phpIni;
         $environment['PHP_INI_SCAN_DIR'] = $temporaryDirectory;
         $lenses = [
-            'correctness_security' => 'gpt-5.4',
-            'design_maintainability' => 'gpt-5.4-mini',
-            'tests_regression_flake' => 'gpt-5.4-mini',
+            'correctness_security' => [
+                'model' => 'gpt-5.4',
+                'role_policy' => 'Review code like an owner responsible for production safety.',
+            ],
+            'design_maintainability' => [
+                'model' => 'gpt-5.4-mini',
+                'role_policy' => 'Review the diff for design quality and long-term maintainability.',
+            ],
+            'tests_regression_flake' => [
+                'model' => 'gpt-5.4-mini',
+                'role_policy' => 'Review whether the change is adequately validated.',
+            ],
         ];
-        foreach ($lenses as $lens => $expectedModel) {
+        foreach ($lenses as $lens => $expectations) {
             $environment['REVIEWER_TEST_RESULT'] = json_encode(
                 [
                     'lens' => $lens,
@@ -311,9 +320,10 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertSame(0, $exitCode, $stderr);
             self::assertSame($environment['REVIEWER_TEST_RESULT'], trim($stdout));
             $capture = (string) file_get_contents($capturePath);
-            self::assertStringContainsString("--model\n" . $expectedModel, $capture, $lens);
+            self::assertStringContainsString("--model\n" . $expectations['model'], $capture, $lens);
             self::assertStringNotContainsString('untrusted-model', $capture, $lens);
             self::assertStringContainsString("independent {$lens} final reviewer", $capture, $lens);
+            self::assertStringContainsString($expectations['role_policy'], $capture, $lens);
             self::assertStringContainsString("committed diff {$base}..{$head}", $capture, $lens);
             self::assertStringContainsString("private exact-commit checkout at head {$head}", $capture, $lens);
             self::assertStringContainsString("Return base_sha {$base} and head_sha {$head}", $capture, $lens);
@@ -494,6 +504,42 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame('', (string) $stdout);
         self::assertStringContainsString('runtime configuration changed', (string) $stderr);
         self::assertFileDoesNotExist($capturePath, 'Codex must not run for a runtime configuration change.');
+        self::assertFileDoesNotExist($fsmonitorMarker, 'Ambient fsmonitor helpers must never execute.');
+        self::assertFileDoesNotExist($diffMarker, 'Ambient external diff drivers must never execute.');
+
+        $this->runGit($fixtureRepo, ['config', '--unset', 'core.fsmonitor']);
+        file_put_contents($fixtureRepo . '/AGENTS.md', "fixture\n");
+        file_put_contents($fixtureRepo . '/.codex/config.toml', "model = \"untrusted-model\"\n");
+        $this->runGit($fixtureRepo, ['add', 'AGENTS.md', '.codex/config.toml']);
+        $this->runGit($fixtureRepo, ['commit', '-qm', 'codex runtime configuration change']);
+        $codexRuntimeConfigurationHead = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD']);
+        $this->runGit($fixtureRepo, ['config', 'core.fsmonitor', $fsmonitorHelper]);
+
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--codex-bin=' . $fakeCodex,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $codexRuntimeConfigurationHead,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        self::assertSame(1, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('runtime configuration changed', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'Codex must not run for a Codex runtime configuration change.');
         self::assertFileDoesNotExist($fsmonitorMarker, 'Ambient fsmonitor helpers must never execute.');
         self::assertFileDoesNotExist($diffMarker, 'Ambient external diff drivers must never execute.');
     }
@@ -713,6 +759,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertSame('gpt-5.4-mini', $resolved['model']);
         self::assertSame('medium', $resolved['reasoning']);
+        self::assertStringContainsString("model = 'untrusted-body-value'", $resolved['role_instructions']);
     }
 
     public function testProfileResolutionRejectsAStaleTrustedPathSet(): void

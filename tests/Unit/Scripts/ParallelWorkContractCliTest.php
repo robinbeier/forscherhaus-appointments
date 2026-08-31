@@ -138,6 +138,58 @@ class ParallelWorkContractCliTest extends TestCase
         );
     }
 
+    public function testCliIgnoresReplaceRefsAndAnAmbientGitBinary(): void
+    {
+        $replacementContract = json_decode(
+            (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($replacementContract);
+        $replacementContract['parallel_work']['primary_owned_path_prefixes'] = [];
+        self::assertNotFalse(
+            file_put_contents(
+                $this->repoRoot . '/.codex/contracts/agent-workflow.json',
+                json_encode($replacementContract, JSON_THROW_ON_ERROR),
+            ),
+        );
+        $this->runGit($this->repoRoot, ['add', '.codex/contracts/agent-workflow.json']);
+        $this->runGit($this->repoRoot, ['commit', '-qm', 'replacement policy']);
+        $replacementSha = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
+        $this->runGit($this->repoRoot, ['replace', $this->baseSha, $replacementSha]);
+
+        $ambientDirectory = sys_get_temp_dir() . '/parallel-work-ambient-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($ambientDirectory, 0700));
+        $ambientGitMarker = $ambientDirectory . '/git-ran';
+        $ambientGit = $ambientDirectory . '/git';
+        self::assertNotFalse(
+            file_put_contents($ambientGit, "#!/bin/sh\n: > " . escapeshellarg($ambientGitMarker) . "\nexit 99\n"),
+        );
+        self::assertTrue(chmod($ambientGit, 0700));
+
+        $manifestPath = $this->writeJsonFixture('replace-ref', $this->manifestForPath('scripts/agent'));
+        [$exitCode, $stdout, $stderr] = $this->runCli(
+            ['--manifest=' . $manifestPath],
+            environment: [
+                'GIT_NO_REPLACE_OBJECTS' => '0',
+                'PATH' => $ambientDirectory,
+            ],
+        );
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'primary_owned_path:0:scripts/agent',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+        self::assertFileDoesNotExist($ambientGitMarker);
+        self::assertStringContainsString(
+            "'GIT_NO_LAZY_FETCH' => '1'",
+            (string) file_get_contents($this->repoRoot . '/scripts/agent/check_parallel_work_contract.php'),
+        );
+    }
+
     public function testCliRejectsInvalidManifestJsonAndShape(): void
     {
         $invalidJsonPath = sys_get_temp_dir() . '/parallel-work-invalid-' . bin2hex(random_bytes(8)) . '.json';
@@ -202,9 +254,10 @@ class ParallelWorkContractCliTest extends TestCase
 
     /**
      * @param list<string> $arguments
+     * @param array<string, string>|null $environment
      * @return array{int, string, string}
      */
-    private function runCli(array $arguments, ?string $repoRoot = null): array
+    private function runCli(array $arguments, ?string $repoRoot = null, ?array $environment = null): array
     {
         $repoRoot ??= $this->repoRoot;
         $process = proc_open(
@@ -212,6 +265,7 @@ class ParallelWorkContractCliTest extends TestCase
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             $repoRoot,
+            $environment,
         );
         self::assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);

@@ -92,10 +92,43 @@ exit($errors === [] ? 0 : 1);
 
 function readGitBlob(string $root, string $sha, string $path): ?string
 {
+    $gitBinary = '/usr/bin/git';
+    if (!is_executable($gitBinary)) {
+        return null;
+    }
+
     $process = proc_open(
-        ['git', '-C', $root, 'show', $sha . ':' . $path],
+        [
+            $gitBinary,
+            '-c',
+            'core.fsmonitor=false',
+            '-c',
+            'core.hooksPath=/dev/null',
+            '-c',
+            'core.untrackedCache=false',
+            '-c',
+            'diff.external=',
+            '-C',
+            $root,
+            'show',
+            $sha . ':' . $path,
+        ],
         [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
         $pipes,
+        $root,
+        [
+            'GIT_ATTR_NOSYSTEM' => '1',
+            'GIT_CONFIG_GLOBAL' => '/dev/null',
+            'GIT_CONFIG_NOSYSTEM' => '1',
+            'GIT_NO_LAZY_FETCH' => '1',
+            'GIT_NO_REPLACE_OBJECTS' => '1',
+            'GIT_OPTIONAL_LOCKS' => '0',
+            'GIT_PAGER' => 'cat',
+            'GIT_TERMINAL_PROMPT' => '0',
+            'LANG' => 'C',
+            'LC_ALL' => 'C',
+            'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
+        ],
     );
     if (!is_resource($process)) {
         return null;

@@ -12,7 +12,13 @@ final class ReadonlyReviewerContract
 {
     /**
      * @param array<string, mixed> $reviewerPolicy
-     * @return array{role_file: string, model: string, reasoning: string, disabled_features: list<string>}
+     * @return array{
+     *     role_file: string,
+     *     role_instructions: string,
+     *     model: string,
+     *     reasoning: string,
+     *     disabled_features: list<string>
+     * }
      */
     public static function resolveInvocation(string $repoRoot, string $lens, array $reviewerPolicy): array
     {
@@ -41,7 +47,7 @@ final class ReadonlyReviewerContract
 
         $rolePath = $repoRoot . '/' . $roleFile;
         $role = file_get_contents($rolePath);
-        if (!is_string($role)) {
+        if (!is_string($role) || trim($role) === '' || str_contains($role, "\0")) {
             throw new \RuntimeException('Reviewer profile is unavailable.');
         }
 
@@ -64,6 +70,7 @@ final class ReadonlyReviewerContract
 
         return [
             'role_file' => $roleFile,
+            'role_instructions' => $role,
             'model' => $model,
             'reasoning' => $reasoning,
             'disabled_features' => array_values($disabledFeatures),

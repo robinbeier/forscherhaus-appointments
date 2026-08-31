@@ -34,7 +34,7 @@ if (!is_string($lens) || $lens === '') {
 }
 
 try {
-    if ($command === 'resolve' || $command === 'trusted-paths') {
+    if ($command === 'resolve' || $command === 'trusted-paths' || $command === 'instructions') {
         $contract = json_decode(
             (string) file_get_contents($repoRoot . '/.codex/contracts/agent-workflow.json'),
             true,
@@ -51,6 +51,10 @@ try {
             exit(0);
         }
         $invocation = ReadonlyReviewerContract::resolveInvocation($repoRoot, $lens, $contract['authority']['reviewer']);
+        if ($command === 'instructions') {
+            fwrite(STDOUT, $invocation['role_instructions']);
+            exit(0);
+        }
         fwrite(
             STDOUT,
             implode("\t", [
@@ -82,7 +86,7 @@ try {
 
     fwrite(
         STDERR,
-        "Usage: readonly_reviewer_contract.php <resolve|trusted-paths|validate> --lens=<lens> [--base-sha=<sha>] [--head-sha=<sha>]\n",
+        "Usage: readonly_reviewer_contract.php <resolve|instructions|trusted-paths|validate> --lens=<lens> [--base-sha=<sha>] [--head-sha=<sha>]\n",
     );
     exit(2);
 } catch (Throwable $throwable) {

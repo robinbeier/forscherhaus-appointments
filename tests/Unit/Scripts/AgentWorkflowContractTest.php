@@ -129,16 +129,26 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['parallel_work']['external_mutations_remain_serial'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_semantic_independence_attestation'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
-        self::assertContains('scripts/agent', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
-        self::assertContains('.github/workflows', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
-        self::assertContains('.codex/config.toml', $contract['parallel_work']['primary_owned_path_prefixes'] ?? []);
-        self::assertContains(
-            '.codex/agents/implementation-worker.toml',
-            $contract['parallel_work']['primary_owned_path_prefixes'] ?? [],
-        );
-        self::assertContains(
-            'docs/maps/component_ownership_map.json',
-            $contract['parallel_work']['primary_owned_path_prefixes'] ?? [],
+        self::assertSame(
+            [
+                '.codex/agents/reviewer-correctness.toml',
+                '.codex/agents/reviewer-design.toml',
+                '.codex/agents/reviewer-tests.toml',
+                '.codex/agents/implementation-worker.toml',
+                '.codex/config.toml',
+                '.codex/contracts',
+                '.codex/skills/land',
+                '.codex/skills/push',
+                '.github/workflows',
+                'AGENTS.md',
+                'WORKFLOW.md',
+                'code_review.md',
+                'docs/maps/component_ownership_map.json',
+                'scripts/agent',
+                'scripts/ci/exact_head_mergegate.php',
+                'scripts/ci/lib/ExactHeadMergegate.php',
+            ],
+            $contract['parallel_work']['primary_owned_path_prefixes'] ?? null,
         );
         self::assertTrue($contract['land']['requires_exact_head'] ?? null);
         self::assertSame(
