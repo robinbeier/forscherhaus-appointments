@@ -186,13 +186,25 @@ final class ParallelWorkContract
             }
             $componentId = $component['component_id'] ?? null;
             $folderPrefixes = $component['folder_prefixes'] ?? null;
-            $requiresApproval =
-                ($component['ownership_mode'] ?? null) === 'single-owner' ||
-                ($component['manual_approval_required'] ?? null) === true;
+            $ownershipMode = $component['ownership_mode'] ?? null;
+            $manualApprovalRequired = $component['manual_approval_required'] ?? null;
             if (!is_string($componentId) || !is_array($folderPrefixes) || !array_is_list($folderPrefixes)) {
                 $errors[] = 'invalid_canonical_ownership_component';
                 continue;
             }
+            if (!is_string($ownershipMode) || !in_array($ownershipMode, ['single-owner', 'multi-owner'], true)) {
+                $errors[] = 'invalid_canonical_ownership_mode:' . $componentId;
+                continue;
+            }
+            if (!is_bool($manualApprovalRequired)) {
+                $errors[] = 'invalid_canonical_manual_approval:' . $componentId;
+                continue;
+            }
+            if ($ownershipMode === 'single-owner' && $manualApprovalRequired !== true) {
+                $errors[] = 'invalid_canonical_single_owner_approval:' . $componentId;
+                continue;
+            }
+            $requiresApproval = $ownershipMode === 'single-owner' || $manualApprovalRequired;
             if (!$requiresApproval) {
                 continue;
             }

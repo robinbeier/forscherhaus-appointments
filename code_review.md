@@ -106,7 +106,7 @@ Invoke each final lens through
 `scripts/agent/run_readonly_reviewer.sh`. That repository-owned path starts a
 fresh ephemeral review without user config, exec-policy rules, or external connectors, denies
 reviewer file/Git/network mutation, derives model settings from the selected
-reviewer profile, and returns one lens- and exact-head-bound JSON result only to
+reviewer profile, and returns one lens-, base-, and exact-head-bound JSON result only to
 the primary. Invalid or protocol-event output fails closed. Reviewers must not
 delegate or publish comments, reviews, PR changes, check reruns, merges, Linear
 changes, or workpad updates. The primary remains the only external writer and

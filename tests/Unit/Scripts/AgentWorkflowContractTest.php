@@ -64,6 +64,8 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('denied', $contract['authority']['reviewer']['network'] ?? null);
         self::assertSame('never', $contract['authority']['reviewer']['approval_policy'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_user_config'] ?? null);
+        self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? null);
+        self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
         self::assertSame(

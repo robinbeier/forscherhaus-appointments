@@ -53,6 +53,28 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['profiles'] ?? null,
         );
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
+        self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
+        self::assertSame(
+            [
+                'apps',
+                'plugins',
+                'browser_use',
+                'browser_use_external',
+                'browser_use_full_cdp_access',
+                'computer_use',
+                'image_generation',
+                'in_app_browser',
+                'memories',
+                'skill_search',
+                'skill_mcp_dependency_install',
+                'auth_elicitation',
+                'tool_call_mcp_elicitation',
+                'multi_agent',
+                'multi_agent_v2',
+                'hooks',
+            ],
+            $contract['authority']['reviewer']['disabled_features'] ?? null,
+        );
     }
 
     public function testAllFinalReviewerRolesCarryTheSamePrimaryOnlyBoundary(): void
@@ -149,6 +171,7 @@ class ReviewerAuthorityContractTest extends TestCase
             $environment['REVIEWER_TEST_RESULT'] = json_encode(
                 [
                     'lens' => $lens,
+                    'base_sha' => $base,
                     'head_sha' => $head,
                     'verdict' => 'no_findings',
                     'findings' => [],
@@ -197,11 +220,12 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertSame(1, $exitCode);
         self::assertSame('', $stdout);
-        self::assertStringContainsString('not bound to the requested exact head and lens', $stderr);
+        self::assertStringContainsString('not bound to the requested base, exact head, and lens', $stderr);
 
         $environment['REVIEWER_TEST_RESULT'] = json_encode(
             [
                 'lens' => 'correctness_security',
+                'base_sha' => $base,
                 'head_sha' => $head,
                 'verdict' => 'no_findings',
                 'findings' => [],
@@ -240,10 +264,12 @@ class ReviewerAuthorityContractTest extends TestCase
 
     public function testOutputValidationRejectsCodexEventStreamAndWrongExactHead(): void
     {
+        $base = str_repeat('b', 40);
         $head = str_repeat('a', 40);
         $valid = json_encode(
             [
                 'lens' => 'correctness_security',
+                'base_sha' => $base,
                 'head_sha' => $head,
                 'verdict' => 'no_findings',
                 'findings' => [],
@@ -253,11 +279,11 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertSame(
             'no_findings',
-            ReadonlyReviewerContract::validateOutput($valid, 'correctness_security', $head)['verdict'],
+            ReadonlyReviewerContract::validateOutput($valid, 'correctness_security', $base, $head)['verdict'],
         );
 
         $this->expectException(\InvalidArgumentException::class);
-        ReadonlyReviewerContract::validateOutput('{"type":"turn.completed"}', 'correctness_security', $head);
+        ReadonlyReviewerContract::validateOutput('{"type":"turn.completed"}', 'correctness_security', $base, $head);
     }
 
     public function testOutputValidationRejectsWrongExactHead(): void
@@ -267,6 +293,7 @@ class ReviewerAuthorityContractTest extends TestCase
             json_encode(
                 [
                     'lens' => 'correctness_security',
+                    'base_sha' => str_repeat('b', 40),
                     'head_sha' => str_repeat('b', 40),
                     'verdict' => 'no_findings',
                     'findings' => [],
@@ -274,6 +301,47 @@ class ReviewerAuthorityContractTest extends TestCase
                 JSON_THROW_ON_ERROR,
             ),
             'correctness_security',
+            str_repeat('b', 40),
+            str_repeat('a', 40),
+        );
+    }
+
+    public function testOutputValidationRejectsWrongBaseSha(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => str_repeat('c', 40),
+                    'head_sha' => str_repeat('a', 40),
+                    'verdict' => 'no_findings',
+                    'findings' => [],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            str_repeat('b', 40),
+            str_repeat('a', 40),
+        );
+    }
+
+    public function testOutputValidationRejectsWrongLens(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'design_maintainability',
+                    'base_sha' => str_repeat('b', 40),
+                    'head_sha' => str_repeat('a', 40),
+                    'verdict' => 'no_findings',
+                    'findings' => [],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            str_repeat('b', 40),
             str_repeat('a', 40),
         );
     }
@@ -342,6 +410,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'approval_policy' => 'never',
             'inherits_user_config' => false,
             'inherits_execpolicy_rules' => false,
+            'output_binds_base_sha' => true,
             'allows_external_connectors' => false,
             'allows_delegation' => false,
         ];

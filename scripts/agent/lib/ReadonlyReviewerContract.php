@@ -65,6 +65,7 @@ final class ReadonlyReviewerContract
             'approval_policy' => 'never',
             'inherits_user_config' => false,
             'inherits_execpolicy_rules' => false,
+            'output_binds_base_sha' => true,
             'allows_external_connectors' => false,
             'allows_delegation' => false,
         ];
@@ -76,8 +77,12 @@ final class ReadonlyReviewerContract
     }
 
     /** @return array<string, mixed> */
-    public static function validateOutput(string $output, string $expectedLens, string $expectedHeadSha): array
-    {
+    public static function validateOutput(
+        string $output,
+        string $expectedLens,
+        string $expectedBaseSha,
+        string $expectedHeadSha,
+    ): array {
         try {
             $review = json_decode(trim($output), true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
@@ -88,16 +93,19 @@ final class ReadonlyReviewerContract
             throw new \InvalidArgumentException('Reviewer output has an invalid shape.');
         }
 
-        $requiredKeys = ['findings', 'head_sha', 'lens', 'verdict'];
+        $requiredKeys = ['base_sha', 'findings', 'head_sha', 'lens', 'verdict'];
         $actualKeys = array_keys($review);
         sort($requiredKeys, SORT_STRING);
         sort($actualKeys, SORT_STRING);
         if (
             $actualKeys !== $requiredKeys ||
             $review['lens'] !== $expectedLens ||
+            $review['base_sha'] !== $expectedBaseSha ||
             $review['head_sha'] !== $expectedHeadSha
         ) {
-            throw new \InvalidArgumentException('Reviewer output is not bound to the requested exact head and lens.');
+            throw new \InvalidArgumentException(
+                'Reviewer output is not bound to the requested base, exact head, and lens.',
+            );
         }
 
         $findings = $review['findings'] ?? null;

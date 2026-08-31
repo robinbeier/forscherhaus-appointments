@@ -2,10 +2,14 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "additionalProperties": false,
-    "required": ["lens", "head_sha", "verdict", "findings"],
+    "required": ["lens", "base_sha", "head_sha", "verdict", "findings"],
     "properties": {
         "lens": {
             "enum": ["correctness_security", "design_maintainability", "tests_regression_flake"]
+        },
+        "base_sha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
         },
         "head_sha": {
             "type": "string",

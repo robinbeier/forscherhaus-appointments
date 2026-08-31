@@ -321,8 +321,8 @@ The runner starts an ephemeral session without user configuration, user or
 project exec-policy rules, or external connectors, uses a read-only sandbox with network denied for reviewer commands,
 and never permits approval escalation. The machine contract selects the role;
 the runner derives model and reasoning settings from that role's TOML and
-fail-closed validates the single JSON review object against the requested lens
-and exact head. Reviewer output returns to the primary; reviewers do not write
+fail-closed validates the single JSON review object against the requested lens,
+base SHA, and exact head. Reviewer output returns to the primary; reviewers do not write
 files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not
 delegate. The primary alone decides how findings are integrated or published.
 

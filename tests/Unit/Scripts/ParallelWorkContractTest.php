@@ -173,6 +173,29 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsMalformedCanonicalOwnershipMetadata(): void
+    {
+        $ownershipMap = $this->ownershipMap;
+        $ownershipMap['components'][0]['ownership_mode'] = 'single-owenr';
+        $ownershipMap['components'][1]['manual_approval_required'] = 'true';
+
+        $errors = ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap);
+
+        self::assertContains('invalid_canonical_ownership_mode:platform-quality-tooling', $errors);
+        self::assertContains('invalid_canonical_manual_approval:booking-public', $errors);
+    }
+
+    public function testRejectsSingleOwnerWithoutManualApproval(): void
+    {
+        $ownershipMap = $this->ownershipMap;
+        $ownershipMap['components'][0]['manual_approval_required'] = false;
+
+        self::assertContains(
+            'invalid_canonical_single_owner_approval:platform-quality-tooling',
+            ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
+        );
+    }
+
     /** @return array<string, mixed> */
     private function validManifest(): array
     {
