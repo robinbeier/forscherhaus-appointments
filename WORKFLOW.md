@@ -126,7 +126,9 @@ more than two `implementation_worker` lanes. Every lane repeats that
 base SHA, lists normalized repository-relative ownership rules, and
 declares an empty `external_mutations` list. Ownership must be disjoint and may
 not include the primary-owned harness, reviewer, workflow, or landing paths in
-the machine contract. Every ownership rule is an object with `path` and an
+the machine contract. The checker, ownership validator, and reviewer trust
+manifest all use `scripts/agent/lib/RepoPath.php` as their single normalized
+repository-path grammar. Every ownership rule is an object with `path` and an
 explicit `match` value: `exact_or_descendants` or `filename_stem`. Canonical
 filename-stem exceptions are likewise explicit in
 `docs/maps/component_ownership_map.json#prefix_match_overrides`; spelling alone
@@ -336,13 +338,19 @@ refuses to run while its own source path is inside the worktree:
 trusted_runner=$(mktemp "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")
 git show <base-sha>:scripts/agent/run_readonly_reviewer.sh > "$trusted_runner"
 chmod 700 "$trusted_runner"
-"$trusted_runner" --repo-root="$(git rev-parse --show-toplevel)" --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
+"$trusted_runner" --repo-root="$(git rev-parse --show-toplevel)" --codex-bin="$(command -v codex)" --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
 rm -f "$trusted_runner"
 ```
 
 The runner starts an ephemeral session without user configuration, user or
-project exec-policy rules, or external connectors, uses a read-only sandbox with network denied for reviewer commands,
-and never permits approval escalation. Its trusted PHP contract and output
+project exec-policy rules, external connectors, or web search. It uses a
+read-only sandbox with network denied for reviewer commands and never permits
+approval escalation. Git and PHP resolve only through a fixed system tool path;
+Codex does too unless the primary supplies its trusted executable as an absolute
+`--codex-bin` path. The runner fetches the named commits into a private temporary
+repository and gives the reviewer only that clean, detached exact-head checkout,
+so changes to the source worktree after preflight cannot alter reviewed content.
+Its trusted PHP contract and output
 validator run without ambient `php.ini` files, `PHPRC`, `PHP_INI_SCAN_DIR`, or
 prepend/append hooks. The machine contract selects the role;
 the runner reads its one canonical trust-path manifest from the base commit,

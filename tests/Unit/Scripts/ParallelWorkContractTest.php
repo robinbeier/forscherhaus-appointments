@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use Forscherhaus\AgentHarness\ParallelWorkContract;
+use Forscherhaus\AgentHarness\RepoPath;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/../../../scripts/agent/lib/ParallelWorkContract.php';
@@ -56,6 +57,18 @@ class ParallelWorkContractTest extends TestCase
             [],
             ParallelWorkContract::validate($this->validManifest(), $this->policy, $this->ownershipMap),
         );
+    }
+
+    public function testSharedRepositoryPathGrammarRejectsAmbiguousOrEscapingPaths(): void
+    {
+        self::assertTrue(RepoPath::isNormalized('scripts/agent/lib/RepoPath.php'));
+
+        foreach (
+            ['', '/absolute', 'trailing/', 'double//slash', './dot', '../escape', 'a/../b', 'back\\slash', '*.php']
+            as $path
+        ) {
+            self::assertFalse(RepoPath::isNormalized($path), $path);
+        }
     }
 
     public function testRejectsDisabledOrUnknownMachinePolicySemantics(): void

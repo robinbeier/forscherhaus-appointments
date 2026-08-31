@@ -6,6 +6,8 @@ namespace Forscherhaus\AgentHarness;
 
 use JsonException;
 
+require_once __DIR__ . '/RepoPath.php';
+
 final class ReadonlyReviewerContract
 {
     /**
@@ -33,7 +35,7 @@ final class ReadonlyReviewerContract
         $roleFile = $profile['instructions'];
         $model = $profile['model'];
         $reasoning = $profile['reasoning'];
-        if (!is_string($roleFile) || !self::isNormalizedRepoPath($roleFile)) {
+        if (!is_string($roleFile) || !RepoPath::isNormalized($roleFile)) {
             throw new \RuntimeException('Reviewer profile instructions are invalid.');
         }
 
@@ -92,7 +94,7 @@ final class ReadonlyReviewerContract
         foreach (['correctness_security', 'design_maintainability', 'tests_regression_flake'] as $lens) {
             $profile = $profiles[$lens] ?? null;
             $instructions = is_array($profile) ? $profile['instructions'] ?? null : null;
-            if (!is_string($instructions) || !self::isNormalizedRepoPath($instructions)) {
+            if (!is_string($instructions) || !RepoPath::isNormalized($instructions)) {
                 throw new \RuntimeException('Reviewer profile instructions are invalid.');
             }
             $instructionPaths[] = $instructions;
@@ -104,6 +106,7 @@ final class ReadonlyReviewerContract
                 ...$instructionPaths,
                 'scripts/agent/readonly-review-output.schema.json',
                 'scripts/agent/readonly_reviewer_contract.php',
+                'scripts/agent/lib/RepoPath.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
                 'AGENTS.md',
                 'code_review.md',
@@ -126,6 +129,9 @@ final class ReadonlyReviewerContract
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
             'php_runtime_configuration' => 'ignore_ambient_ini',
+            'tool_path_policy' => 'fixed_system_path_or_explicit_primary_codex',
+            'web_search' => 'disabled',
+            'review_checkout' => 'private_exact_commit_clone',
             'filesystem' => 'read-only',
             'network' => 'denied',
             'approval_policy' => 'never',
@@ -192,21 +198,6 @@ final class ReadonlyReviewerContract
         }
 
         return $review;
-    }
-
-    private static function isNormalizedRepoPath(string $path): bool
-    {
-        if ($path === '' || str_starts_with($path, '/') || str_ends_with($path, '/') || str_contains($path, '\\')) {
-            return false;
-        }
-
-        foreach (explode('/', $path) as $segment) {
-            if ($segment === '' || $segment === '.' || $segment === '..') {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static function validateFinding(mixed $finding): void

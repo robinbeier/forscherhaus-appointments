@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use Forscherhaus\AgentHarness\ParallelWorkContract;
+use Forscherhaus\AgentHarness\RepoPath;
 
+require_once __DIR__ . '/lib/RepoPath.php';
 require_once __DIR__ . '/lib/ParallelWorkContract.php';
 
 $root = dirname(__DIR__, 2);
@@ -58,7 +60,7 @@ if (!is_array($contract) || !is_array($contract['parallel_work'] ?? null)) {
 }
 
 $ownershipMapPath = $contract['parallel_work']['ownership_map'] ?? null;
-if (!is_string($ownershipMapPath) || !isNormalizedRepoPath($ownershipMapPath)) {
+if (!is_string($ownershipMapPath) || !RepoPath::isNormalized($ownershipMapPath)) {
     fwrite(STDERR, "Parallel-work ownership-map policy is invalid.\n");
     exit(2);
 }
@@ -87,21 +89,6 @@ $result = [
 
 fwrite(STDOUT, json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . PHP_EOL);
 exit($errors === [] ? 0 : 1);
-
-function isNormalizedRepoPath(string $path): bool
-{
-    if ($path === '' || str_starts_with($path, '/') || str_ends_with($path, '/') || str_contains($path, '\\')) {
-        return false;
-    }
-
-    foreach (explode('/', $path) as $segment) {
-        if ($segment === '' || $segment === '.' || $segment === '..') {
-            return false;
-        }
-    }
-
-    return true;
-}
 
 function readGitBlob(string $root, string $sha, string $path): ?string
 {

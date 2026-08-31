@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Forscherhaus\AgentHarness;
 
+require_once __DIR__ . '/RepoPath.php';
+
 final class ParallelWorkContract
 {
     /**
@@ -137,7 +139,7 @@ final class ParallelWorkContract
                 $match = $pathRule['match'];
 
                 foreach ($primaryOwnedPrefixes as $primaryOwnedPrefix) {
-                    if (!is_string($primaryOwnedPrefix) || !self::isNormalizedRepoPath($primaryOwnedPrefix)) {
+                    if (!is_string($primaryOwnedPrefix) || !RepoPath::isNormalized($primaryOwnedPrefix)) {
                         $errors[] = 'invalid_policy_primary_owned_path_prefix';
                         continue;
                     }
@@ -221,7 +223,7 @@ final class ParallelWorkContract
             $prefixMatchOverrides = [];
         }
         foreach ($prefixMatchOverrides as $path => $match) {
-            if (!is_string($path) || !self::isNormalizedRepoPath($path) || $match !== 'filename_stem') {
+            if (!is_string($path) || !RepoPath::isNormalized($path) || $match !== 'filename_stem') {
                 $errors[] = 'invalid_canonical_prefix_match_override';
                 unset($prefixMatchOverrides[$path]);
             }
@@ -271,7 +273,7 @@ final class ParallelWorkContract
             $pathRules = [];
             foreach ($folderPrefixes as $folderPrefix) {
                 $normalizedPrefix = is_string($folderPrefix) ? rtrim($folderPrefix, '/') : '';
-                if (!self::isNormalizedRepoPath($normalizedPrefix)) {
+                if (!RepoPath::isNormalized($normalizedPrefix)) {
                     $errors[] = 'invalid_canonical_ownership_prefix:' . $componentId;
                     continue 2;
                 }
@@ -312,7 +314,7 @@ final class ParallelWorkContract
         if (
             $actualKeys !== $expectedKeys ||
             !is_string($path) ||
-            !self::isNormalizedRepoPath($path) ||
+            !RepoPath::isNormalized($path) ||
             !in_array($match, ['exact_or_descendants', 'filename_stem'], true)
         ) {
             $errors[] = $error;
@@ -320,25 +322,6 @@ final class ParallelWorkContract
         }
 
         return ['path' => $path, 'match' => $match];
-    }
-
-    private static function isNormalizedRepoPath(string $path): bool
-    {
-        if ($path === '' || str_starts_with($path, '/') || str_ends_with($path, '/')) {
-            return false;
-        }
-
-        if (str_contains($path, '\\') || preg_match('/[*?\[\]]/', $path) === 1) {
-            return false;
-        }
-
-        foreach (explode('/', $path) as $segment) {
-            if ($segment === '' || $segment === '.' || $segment === '..') {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static function pathRulesOverlap(

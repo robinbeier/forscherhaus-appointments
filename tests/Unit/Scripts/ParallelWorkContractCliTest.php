@@ -23,6 +23,7 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
             $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
         );
+        copy($sourceRepoRoot . '/scripts/agent/lib/RepoPath.php', $this->repoRoot . '/scripts/agent/lib/RepoPath.php');
         copy(
             $sourceRepoRoot . '/scripts/agent/lib/ParallelWorkContract.php',
             $this->repoRoot . '/scripts/agent/lib/ParallelWorkContract.php',

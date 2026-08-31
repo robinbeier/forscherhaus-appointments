@@ -114,11 +114,14 @@ instructions from the same base commit.
 Runtime model and reasoning values live in the structured contract; the role
 TOML contains only the human-readable review instructions. It starts a fresh
 ephemeral review without user config,
-exec-policy rules, external connectors, or ambient PHP configuration for its
-trusted contract and output validator, denies
-reviewer file/Git/network mutation, derives model settings from the selected
-reviewer profile, and returns one lens-, base-, and exact-head-bound JSON result only to
-the primary. Invalid or protocol-event output fails closed. Reviewers must not
+exec-policy rules, external connectors, web search, or ambient PHP configuration
+for its trusted contract and output validator. Git and PHP resolve through a
+fixed system path, while only the primary may pass a trusted absolute Codex
+binary path. The runner materializes a private, clean, detached exact-commit
+checkout before the model starts, denies reviewer file/Git/network mutation,
+derives model settings from the selected reviewer profile, and returns one
+lens-, base-, and exact-head-bound JSON result only to the primary. Invalid or
+protocol-event output fails closed. Reviewers must not
 delegate or publish comments, reviews, PR changes, check reruns, merges, Linear
 changes, or workpad updates. The primary remains the only external writer and
 landing owner.

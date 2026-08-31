@@ -70,6 +70,12 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['authority']['reviewer']['inherits_user_config'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
+        self::assertSame(
+            'fixed_system_path_or_explicit_primary_codex',
+            $contract['authority']['reviewer']['tool_path_policy'] ?? null,
+        );
+        self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
+        self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
@@ -82,6 +88,7 @@ class AgentWorkflowContractTest extends TestCase
                 '.codex/agents/reviewer-tests.toml',
                 'scripts/agent/readonly-review-output.schema.json',
                 'scripts/agent/readonly_reviewer_contract.php',
+                'scripts/agent/lib/RepoPath.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
                 'AGENTS.md',
                 'code_review.md',

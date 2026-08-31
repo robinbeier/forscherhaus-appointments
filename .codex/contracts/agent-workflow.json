@@ -23,6 +23,9 @@
             "requires_base_runner": true,
             "runtime_configuration_change_policy": "external_bootstrap_review",
             "php_runtime_configuration": "ignore_ambient_ini",
+            "tool_path_policy": "fixed_system_path_or_explicit_primary_codex",
+            "web_search": "disabled",
+            "review_checkout": "private_exact_commit_clone",
             "trusted_base_paths": [
                 ".codex/contracts/agent-workflow.json",
                 ".codex/agents/reviewer-correctness.toml",
@@ -30,6 +33,7 @@
                 ".codex/agents/reviewer-tests.toml",
                 "scripts/agent/readonly-review-output.schema.json",
                 "scripts/agent/readonly_reviewer_contract.php",
+                "scripts/agent/lib/RepoPath.php",
                 "scripts/agent/lib/ReadonlyReviewerContract.php",
                 "AGENTS.md",
                 "code_review.md"
