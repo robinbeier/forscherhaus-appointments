@@ -110,6 +110,10 @@ Before opening writer lanes, the primary records a small JSON manifest and runs
 php scripts/agent/check_parallel_work_contract.php --manifest=<lane-manifest.json>
 ```
 
+The checker reads both the workflow contract and the ownership map from the
+manifest's declared base commit. Mutable files in the current checkout cannot
+relax the policy used to approve a lane.
+
 The manifest names one full lowercase common base SHA, the primary ID, exact
 `primary_approved_component_ids` for any intersected `single-owner` or
 `manual_approval_required` entries in `docs/maps/component_ownership_map.json`,
@@ -338,7 +342,9 @@ rm -f "$trusted_runner"
 
 The runner starts an ephemeral session without user configuration, user or
 project exec-policy rules, or external connectors, uses a read-only sandbox with network denied for reviewer commands,
-and never permits approval escalation. The machine contract selects the role;
+and never permits approval escalation. Its trusted PHP contract and output
+validator run without ambient `php.ini` files, `PHPRC`, `PHP_INI_SCAN_DIR`, or
+prepend/append hooks. The machine contract selects the role;
 the runner reads its one canonical trust-path manifest from the base commit,
 extracts the listed contract, reviewer profiles, schema, validator, and review
 instructions, derives model and reasoning settings from the structured machine

@@ -69,6 +69,7 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('never', $contract['authority']['reviewer']['approval_policy'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_user_config'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? null);
+        self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);

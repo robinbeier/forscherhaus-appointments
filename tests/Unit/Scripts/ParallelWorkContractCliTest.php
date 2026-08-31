@@ -9,20 +9,47 @@ use PHPUnit\Framework\TestCase;
 class ParallelWorkContractCliTest extends TestCase
 {
     private string $repoRoot;
+    private string $baseSha;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->repoRoot = dirname(__DIR__, 3);
+        $sourceRepoRoot = dirname(__DIR__, 3);
+        $this->repoRoot = sys_get_temp_dir() . '/parallel-work-repo-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($this->repoRoot . '/scripts/agent/lib', 0700, true));
+        self::assertTrue(mkdir($this->repoRoot . '/.codex/contracts', 0700, true));
+        self::assertTrue(mkdir($this->repoRoot . '/docs/maps', 0700, true));
+        copy(
+            $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
+            $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
+        );
+        copy(
+            $sourceRepoRoot . '/scripts/agent/lib/ParallelWorkContract.php',
+            $this->repoRoot . '/scripts/agent/lib/ParallelWorkContract.php',
+        );
+        copy(
+            $sourceRepoRoot . '/.codex/contracts/agent-workflow.json',
+            $this->repoRoot . '/.codex/contracts/agent-workflow.json',
+        );
+        copy(
+            $sourceRepoRoot . '/docs/maps/component_ownership_map.json',
+            $this->repoRoot . '/docs/maps/component_ownership_map.json',
+        );
+        $this->runGit($this->repoRoot, ['init', '-q']);
+        $this->runGit($this->repoRoot, ['config', 'user.name', 'Parallel Work Test']);
+        $this->runGit($this->repoRoot, ['config', 'user.email', 'parallel-work-test@example.invalid']);
+        $this->runGit($this->repoRoot, ['add', '.']);
+        $this->runGit($this->repoRoot, ['commit', '-qm', 'trusted base']);
+        $this->baseSha = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
     }
 
     public function testCliAcceptsValidManifestThroughCanonicalContract(): void
     {
         $manifestPath = $this->writeJsonFixture('manifest', [
             'schema_version' => 1,
-            'base_sha' => str_repeat('a', 40),
+            'base_sha' => $this->baseSha,
             'primary_id' => 'primary',
-            'primary_approved_component_ids' => [],
+            'primary_approved_component_ids' => ['platform-quality-tooling'],
             'semantic_independence' => [
                 'shared_contracts' => [],
                 'cross_lane_dependencies' => [],
@@ -32,14 +59,14 @@ class ParallelWorkContractCliTest extends TestCase
                 [
                     'id' => 'lane-a',
                     'role' => 'implementation_worker',
-                    'base_sha' => str_repeat('a', 40),
-                    'ownership' => [['path' => 'tests/Fixtures/parallel/lane-a', 'match' => 'exact_or_descendants']],
+                    'base_sha' => $this->baseSha,
+                    'ownership' => [['path' => 'scripts/ci/performance', 'match' => 'exact_or_descendants']],
                     'external_mutations' => [],
                 ],
                 [
                     'id' => 'lane-b',
                     'role' => 'implementation_worker',
-                    'base_sha' => str_repeat('a', 40),
+                    'base_sha' => $this->baseSha,
                     'ownership' => [['path' => 'tests/Fixtures/parallel/lane-b', 'match' => 'exact_or_descendants']],
                     'external_mutations' => [],
                 ],
@@ -82,6 +109,34 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertContains('primary_owned_path:0:scripts/agent', $result['errors']);
     }
 
+    public function testCliAnchorsPolicyAndOwnershipMapToDeclaredBase(): void
+    {
+        $workingContract = json_decode(
+            (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($workingContract);
+        $workingContract['parallel_work']['primary_owned_path_prefixes'] = [];
+        self::assertNotFalse(
+            file_put_contents(
+                $this->repoRoot . '/.codex/contracts/agent-workflow.json',
+                json_encode($workingContract, JSON_THROW_ON_ERROR),
+            ),
+        );
+
+        $manifestPath = $this->writeJsonFixture('base-anchor', $this->manifestForPath('scripts/agent'));
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'primary_owned_path:0:scripts/agent',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+    }
+
     public function testCliRejectsInvalidManifestJsonAndShape(): void
     {
         $invalidJsonPath = sys_get_temp_dir() . '/parallel-work-invalid-' . bin2hex(random_bytes(8)) . '.json';
@@ -94,9 +149,9 @@ class ParallelWorkContractCliTest extends TestCase
 
         $invalidShapePath = $this->writeJsonFixture('shape', []);
         [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $invalidShapePath]);
-        self::assertSame(1, $exitCode);
-        self::assertSame('', $stderr);
-        self::assertSame('fail', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['status']);
+        self::assertSame(2, $exitCode);
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('invalid shape', $stderr);
     }
 
     public function testCliRejectsUnknownOptionBeforeReadingInputs(): void
@@ -118,11 +173,13 @@ class ParallelWorkContractCliTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function manifestForPath(string $path): array
+    private function manifestForPath(string $path, ?string $baseSha = null): array
     {
+        $baseSha ??= $this->baseSha;
+
         return [
             'schema_version' => 1,
-            'base_sha' => str_repeat('a', 40),
+            'base_sha' => $baseSha,
             'primary_id' => 'primary',
             'primary_approved_component_ids' => [],
             'semantic_independence' => [
@@ -134,7 +191,7 @@ class ParallelWorkContractCliTest extends TestCase
                 [
                     'id' => 'lane-a',
                     'role' => 'implementation_worker',
-                    'base_sha' => str_repeat('a', 40),
+                    'base_sha' => $baseSha,
                     'ownership' => [['path' => $path, 'match' => 'exact_or_descendants']],
                     'external_mutations' => [],
                 ],
@@ -146,13 +203,14 @@ class ParallelWorkContractCliTest extends TestCase
      * @param list<string> $arguments
      * @return array{int, string, string}
      */
-    private function runCli(array $arguments): array
+    private function runCli(array $arguments, ?string $repoRoot = null): array
     {
+        $repoRoot ??= $this->repoRoot;
         $process = proc_open(
-            [PHP_BINARY, $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php', ...$arguments],
+            [PHP_BINARY, $repoRoot . '/scripts/agent/check_parallel_work_contract.php', ...$arguments],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
-            $this->repoRoot,
+            $repoRoot,
         );
         self::assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);
@@ -161,5 +219,23 @@ class ParallelWorkContractCliTest extends TestCase
         fclose($pipes[2]);
 
         return [proc_close($process), $stdout, $stderr];
+    }
+
+    /** @param list<string> $arguments */
+    private function runGit(string $workingDirectory, array $arguments): string
+    {
+        $process = proc_open(
+            ['git', '-C', $workingDirectory, ...$arguments],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), (string) $stderr);
+
+        return trim((string) $stdout);
     }
 }

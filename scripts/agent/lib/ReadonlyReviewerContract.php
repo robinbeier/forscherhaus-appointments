@@ -125,6 +125,7 @@ final class ReadonlyReviewerContract
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
+            'php_runtime_configuration' => 'ignore_ambient_ini',
             'filesystem' => 'read-only',
             'network' => 'denied',
             'approval_policy' => 'never',

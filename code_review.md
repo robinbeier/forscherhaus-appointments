@@ -114,7 +114,8 @@ instructions from the same base commit.
 Runtime model and reasoning values live in the structured contract; the role
 TOML contains only the human-readable review instructions. It starts a fresh
 ephemeral review without user config,
-exec-policy rules, or external connectors, denies
+exec-policy rules, external connectors, or ambient PHP configuration for its
+trusted contract and output validator, denies
 reviewer file/Git/network mutation, derives model settings from the selected
 reviewer profile, and returns one lens-, base-, and exact-head-bound JSON result only to
 the primary. Invalid or protocol-event output fails closed. Reviewers must not

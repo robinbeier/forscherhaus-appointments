@@ -100,7 +100,12 @@ for bootstrap_path in "${bootstrap_paths[@]}"; do
     fi
 done
 
-trusted_paths="$(php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" trusted-paths --lens="$lens")" || exit $?
+trusted_php() {
+    env -u PHPRC -u PHP_INI_SCAN_DIR \
+        php -n -d auto_prepend_file= -d auto_append_file= "$@"
+}
+
+trusted_paths="$(trusted_php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" trusted-paths --lens="$lens")" || exit $?
 
 trusted_path_count=0
 while IFS= read -r trusted_path || [[ -n "$trusted_path" ]]; do
@@ -123,7 +128,7 @@ if [[ "$trusted_path_count" -eq 0 ]]; then
 fi
 
 contract_file="$trusted_root/$contract_relative_path"
-reviewer_config="$(php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
+reviewer_config="$(trusted_php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
 IFS=$'\t' read -r role_file model reasoning disabled_features <<< "$reviewer_config"
 if [[ -z "$role_file" || -z "$model" || -z "$reasoning" || -z "$disabled_features" ]]; then
     echo "Reviewer invocation policy is incomplete." >&2
@@ -163,7 +168,7 @@ printf '%s\n' "$prompt" | env \
         -c 'agents.max_depth=0' \
         -C "$repo_root" \
         - \
-    | php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" validate \
+    | trusted_php "$trusted_root/scripts/agent/readonly_reviewer_contract.php" validate \
         --lens="$lens" \
         --base-sha="$base_sha" \
         --head-sha="$head_sha"
