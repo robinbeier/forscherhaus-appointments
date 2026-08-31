@@ -425,6 +425,85 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertStringNotContainsString('reviewer_ref', (string) file_get_contents($reportPath));
     }
 
+    public function testCliRejectsMalformedNewerWorkflowRunInsteadOfSelectingOlderGreenRun(): void
+    {
+        $requestedPaths = [];
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/actions/workflows/ci.yml/runs?')) {
+                $payload['workflow_runs'][] = [
+                    'id' => 102,
+                    'name' => 'CI',
+                    'event' => 'pull_request',
+                    'status' => 'completed',
+                    'conclusion' => 'success',
+                    'head_sha' => self::SHA,
+                    'head_branch' => 'feature',
+                    'head_repository' => ['full_name' => self::REPOSITORY],
+                    'pull_requests' => [['number' => '12']],
+                    'check_suite_id' => 203,
+                ];
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertStringContainsString('runtime_error', (string) file_get_contents($reportPath));
+    }
+
+    public function testCliRejectsReviewCommentWithoutUpdatedAt(): void
+    {
+        $requestedPaths = [];
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest): array {
+            $payload = $validRequest($path);
+            if (str_contains($path, '/pulls/12/comments?')) {
+                return [
+                    [
+                        'id' => 650,
+                        'author_association' => 'MEMBER',
+                        'commit_id' => self::SHA,
+                        'created_at' => '2026-08-30T20:00:01Z',
+                        'user' => ['id' => 42],
+                    ],
+                ];
+            }
+
+            return $payload;
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertStringContainsString('runtime_error', (string) file_get_contents($reportPath));
+    }
+
     public function testCliCanonicalizesReorderedCheckRunsAcrossObservations(): void
     {
         $requestedPaths = [];

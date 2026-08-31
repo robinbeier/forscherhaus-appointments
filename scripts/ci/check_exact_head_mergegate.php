@@ -1062,33 +1062,51 @@ function normalizeExactHeadMergegatePullRequest(array $pullRequest): array
  */
 function normalizeExactHeadMergegateWorkflowRun(mixed $run): array
 {
-    if (!is_array($run)) {
-        return [];
+    if (
+        !is_array($run) ||
+        !is_int($run['id'] ?? null) ||
+        $run['id'] < 1 ||
+        !is_string($run['name'] ?? null) ||
+        $run['name'] === '' ||
+        !is_string($run['event'] ?? null) ||
+        $run['event'] === '' ||
+        !is_string($run['status'] ?? null) ||
+        $run['status'] === '' ||
+        (!is_string($run['conclusion'] ?? null) && ($run['conclusion'] ?? null) !== null) ||
+        !is_string($run['head_sha'] ?? null) ||
+        $run['head_sha'] === '' ||
+        !is_string($run['head_branch'] ?? null) ||
+        $run['head_branch'] === '' ||
+        !is_array($run['head_repository'] ?? null) ||
+        !is_string($run['head_repository']['full_name'] ?? null) ||
+        $run['head_repository']['full_name'] === '' ||
+        !is_array($run['pull_requests'] ?? null) ||
+        !array_is_list($run['pull_requests']) ||
+        !is_int($run['check_suite_id'] ?? null) ||
+        $run['check_suite_id'] < 1
+    ) {
+        throw new RuntimeException('GitHub workflow run had an invalid shape.');
     }
 
     $prNumbers = [];
-    $pullRequests = $run['pull_requests'] ?? null;
-    if (is_array($pullRequests)) {
-        foreach ($pullRequests as $pullRequest) {
-            if (is_array($pullRequest) && is_int($pullRequest['number'] ?? null)) {
-                $prNumbers[] = $pullRequest['number'];
-            }
+    foreach ($run['pull_requests'] as $pullRequest) {
+        if (!is_array($pullRequest) || !is_int($pullRequest['number'] ?? null) || $pullRequest['number'] < 1) {
+            throw new RuntimeException('GitHub workflow run had an invalid shape.');
         }
+        $prNumbers[] = $pullRequest['number'];
     }
 
     return [
-        'id' => $run['id'] ?? null,
-        'name' => $run['name'] ?? null,
-        'event' => $run['event'] ?? null,
-        'status' => $run['status'] ?? null,
+        'id' => $run['id'],
+        'name' => $run['name'],
+        'event' => $run['event'],
+        'status' => $run['status'],
         'conclusion' => $run['conclusion'] ?? null,
-        'head_sha' => $run['head_sha'] ?? null,
-        'head_branch' => $run['head_branch'] ?? null,
-        'head_repository' => is_array($run['head_repository'] ?? null)
-            ? $run['head_repository']['full_name'] ?? null
-            : null,
+        'head_sha' => $run['head_sha'],
+        'head_branch' => $run['head_branch'],
+        'head_repository' => $run['head_repository']['full_name'],
         'pr_numbers' => array_values(array_unique($prNumbers)),
-        'check_suite_id' => $run['check_suite_id'] ?? null,
+        'check_suite_id' => $run['check_suite_id'],
     ];
 }
 
@@ -1200,7 +1218,7 @@ function normalizeExactHeadMergegateReviewComment(mixed $comment): array
         !is_int($comment['id'] ?? null) ||
         !is_string($comment['author_association'] ?? null) ||
         !is_string($comment['commit_id'] ?? null) ||
-        (!is_string($comment['updated_at'] ?? null) && !is_string($comment['created_at'] ?? null))
+        !is_string($comment['updated_at'] ?? null)
     ) {
         throw new RuntimeException('GitHub review comment had an invalid shape.');
     }
@@ -1212,7 +1230,7 @@ function normalizeExactHeadMergegateReviewComment(mixed $comment): array
         'actor_ref' => exactHeadMergegateOpaqueActorRef($comment['user'] ?? null),
         'state' => null,
         'commit_sha' => $comment['commit_id'] ?? null,
-        'occurred_at' => $comment['updated_at'] ?? ($comment['created_at'] ?? null),
+        'occurred_at' => $comment['updated_at'],
     ];
 }
 
