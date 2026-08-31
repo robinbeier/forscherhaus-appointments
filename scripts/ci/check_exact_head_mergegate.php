@@ -1331,13 +1331,15 @@ function normalizeExactHeadMergegateComment(mixed $comment): array
  */
 function normalizeExactHeadMergegateReview(mixed $review): array
 {
+    $state = is_array($review) ? $review['state'] ?? null : null;
+    $submittedAt = is_array($review) ? $review['submitted_at'] ?? null : null;
     if (
         !is_array($review) ||
         !is_int($review['id'] ?? null) ||
         !is_string($review['author_association'] ?? null) ||
-        !is_string($review['state'] ?? null) ||
+        !is_string($state) ||
         !is_string($review['commit_id'] ?? null) ||
-        !is_string($review['submitted_at'] ?? null) ||
+        (!is_string($submittedAt) && !($state === 'PENDING' && $submittedAt === null)) ||
         !is_string($review['body'] ?? null) ||
         !is_int($review['edit_count'] ?? null) ||
         ($review['edit_count'] ?? -1) < 0
@@ -1350,9 +1352,9 @@ function normalizeExactHeadMergegateReview(mixed $review): array
         'id' => $review['id'] ?? null,
         'author_association' => $review['author_association'] ?? null,
         'actor_ref' => exactHeadMergegateOpaqueActorRef($review['user'] ?? null),
-        'state' => $review['state'] ?? null,
+        'state' => $state,
         'commit_sha' => $review['commit_id'] ?? null,
-        'occurred_at' => $review['submitted_at'] ?? null,
+        'occurred_at' => $submittedAt,
         'content_digest' => hash('sha256', $review['body']),
         'edit_count' => $review['edit_count'],
     ];

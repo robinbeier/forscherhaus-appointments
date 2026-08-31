@@ -455,6 +455,17 @@ final class ExactHeadMergegate
         string $sha,
         array &$gates,
     ): void {
+        if (self::hasPendingTrustedReview($policy, $reviewActivity)) {
+            self::addGate(
+                $gates,
+                'fail',
+                'review_pending',
+                'A trusted pull-request review is still pending submission.',
+            );
+
+            return;
+        }
+
         $candidates = [];
         $markerEvidenceMalformed = false;
         if (is_array($comments)) {
@@ -527,6 +538,27 @@ final class ExactHeadMergegate
                     ? 'Required independent review attestation is missing, stale, malformed, or untrusted.'
                     : 'Trusted review feedback is newer than the attestation or remains changes-requested.'),
         );
+    }
+
+    /** @param array<string, mixed> $policy */
+    private static function hasPendingTrustedReview(array $policy, mixed $reviewActivity): bool
+    {
+        if (!is_array($reviewActivity)) {
+            return false;
+        }
+
+        foreach ($reviewActivity as $activity) {
+            if (
+                is_array($activity) &&
+                ($activity['kind'] ?? null) === 'review' &&
+                ($activity['state'] ?? null) === 'PENDING' &&
+                in_array($activity['author_association'] ?? null, $policy['blocking_feedback_associations'], true)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -469,6 +469,30 @@ final class ExactHeadMergegateTest extends TestCase
         );
     }
 
+    public function testUntrustedPendingReviewCannotVetoAttestation(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [$this->attestationComment()];
+        $snapshot['review_activity'] = [
+            [
+                'kind' => 'review',
+                'id' => 701,
+                'author_association' => 'NONE',
+                'actor_ref' => str_repeat('f', 64),
+                'state' => 'PENDING',
+                'commit_sha' => self::SHA,
+                'occurred_at' => null,
+                'content_digest' => hash('sha256', ''),
+                'edit_count' => 0,
+            ],
+        ];
+
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+
+        self::assertSame('pass', $report['status']);
+        self::assertSame(0, $report['review_activity_watermark']['review_id']);
+    }
+
     public function testMatchingWatermarkStillBlocksOutstandingChangesRequested(): void
     {
         $snapshot = $this->snapshot();

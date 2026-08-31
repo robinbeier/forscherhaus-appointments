@@ -734,6 +734,47 @@ final class ExactHeadMergegateCliTest extends TestCase
         );
     }
 
+    public function testCliTreatsUnsubmittedFormalReviewAsNotReady(): void
+    {
+        $requestedPaths = [];
+        $validRequest = $this->validRequest($requestedPaths);
+        $request = static function (string $path) use ($validRequest): array {
+            if (str_contains($path, '/pulls/12/reviews?')) {
+                return [
+                    [
+                        'id' => 701,
+                        'user' => ['id' => 42],
+                        'author_association' => 'MEMBER',
+                        'state' => 'PENDING',
+                        'commit_id' => self::SHA,
+                        'body' => '',
+                        'edit_count' => 0,
+                    ],
+                ];
+            }
+
+            return $validRequest($path);
+        };
+        $reportPath = $this->temporaryPath();
+        $exitCode = runExactHeadMergegateCli(
+            [
+                'check_exact_head_mergegate.php',
+                '--pr=12',
+                '--reviewed-sha=' . self::SHA,
+                '--output-json=' . $reportPath,
+            ],
+            $request,
+            static fn(): string => self::REPOSITORY,
+            dirname(__DIR__, 3),
+            $this->mockPolicyLoader(),
+        );
+
+        self::assertSame(EXACT_HEAD_MERGEGATE_EXIT_NOT_READY, $exitCode);
+        $report = (string) file_get_contents($reportPath);
+        self::assertStringContainsString('review_pending', $report);
+        self::assertStringNotContainsString('runtime_error', $report);
+    }
+
     public function testCliFailsClosedWhenAttestationIsMissing(): void
     {
         $requestedPaths = [];

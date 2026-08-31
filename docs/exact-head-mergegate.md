@@ -101,7 +101,10 @@ The command uses authenticated GitHub REST GET requests plus bounded, read-only 
    and inline review comment maxima still equal the attested watermarks, and
    the attested formal-review payload digest still matches the current exact-SHA
    formal reviews. An inline review comment whose update timestamp is at or
-   after the attestation timestamp is blocking.
+   after the attestation timestamp is blocking. A trusted formal review that is
+   still `PENDING` has no submission timestamp and produces a dedicated
+   not-ready result until it is submitted or discarded; it is not treated as a
+   malformed GitHub response.
 
 Missing, pending, cancelled, neutral, failed, timed-out, stale, duplicated,
 wrong-suite, wrong-SHA, edited, or malformed blocking evidence blocks the
