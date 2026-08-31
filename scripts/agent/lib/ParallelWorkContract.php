@@ -395,7 +395,15 @@ final class ParallelWorkContract
     private static function pathRuleCovers(string $rulePath, string $match, string $candidatePath): bool
     {
         if ($match === 'filename_stem') {
-            return str_starts_with($candidatePath, $rulePath);
+            $ruleSeparator = strrpos($rulePath, '/');
+            $candidateSeparator = strrpos($candidatePath, '/');
+            $ruleDirectory = $ruleSeparator === false ? '' : substr($rulePath, 0, $ruleSeparator);
+            $candidateDirectory = $candidateSeparator === false ? '' : substr($candidatePath, 0, $candidateSeparator);
+            $ruleFilenameStem = $ruleSeparator === false ? $rulePath : substr($rulePath, $ruleSeparator + 1);
+            $candidateFilename =
+                $candidateSeparator === false ? $candidatePath : substr($candidatePath, $candidateSeparator + 1);
+
+            return $candidateDirectory === $ruleDirectory && str_starts_with($candidateFilename, $ruleFilenameStem);
         }
 
         return $rulePath === $candidatePath || str_starts_with($candidatePath, $rulePath . '/');

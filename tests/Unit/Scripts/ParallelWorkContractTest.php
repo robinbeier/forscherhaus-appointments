@@ -106,6 +106,27 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testStemOwnershipCoversOnlyMatchingFilesInTheSameDirectory(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'] = [
+            $this->pathRule('application/views/components/booking_', 'filename_stem'),
+        ];
+
+        self::assertSame(
+            [],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', [
+                'application/views/components/booking_sidebar.php',
+            ]),
+        );
+        self::assertSame(
+            ['ownership_violation:lane-a:application/views/components/booking_assets/helper.php'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', [
+                'application/views/components/booking_assets/helper.php',
+            ]),
+        );
+    }
+
     public function testRejectsDisabledOrUnknownMachinePolicySemantics(): void
     {
         foreach (
