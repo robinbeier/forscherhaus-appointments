@@ -10,6 +10,26 @@ require_once __DIR__ . '/RepoPath.php';
 
 final class ReadonlyReviewerContract
 {
+    /** @var list<string> */
+    private const REQUIRED_DISABLED_FEATURES = [
+        'apps',
+        'plugins',
+        'browser_use',
+        'browser_use_external',
+        'browser_use_full_cdp_access',
+        'computer_use',
+        'image_generation',
+        'in_app_browser',
+        'memories',
+        'skill_search',
+        'skill_mcp_dependency_install',
+        'auth_elicitation',
+        'tool_call_mcp_elicitation',
+        'multi_agent',
+        'multi_agent_v2',
+        'hooks',
+    ];
+
     /**
      * @param array<string, mixed> $reviewerPolicy
      * @return array{
@@ -58,14 +78,8 @@ final class ReadonlyReviewerContract
             throw new \RuntimeException('Reviewer profile reasoning effort is invalid.');
         }
         $disabledFeatures = $reviewerPolicy['disabled_features'] ?? null;
-        if (!is_array($disabledFeatures) || !array_is_list($disabledFeatures) || $disabledFeatures === []) {
+        if ($disabledFeatures !== self::REQUIRED_DISABLED_FEATURES) {
             throw new \RuntimeException('Reviewer disabled-feature policy is invalid.');
-        }
-
-        foreach ($disabledFeatures as $feature) {
-            if (!is_string($feature) || preg_match('/^[a-z][a-z0-9_]*$/D', $feature) !== 1) {
-                throw new \RuntimeException('Reviewer disabled-feature policy is invalid.');
-            }
         }
 
         return [
@@ -135,6 +149,9 @@ final class ReadonlyReviewerContract
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
+            'shell_runtime_configuration' => 'clean_bootstrap_environment',
+            'transport_environment_policy' => 'fixed_direct_no_ambient_proxy_or_endpoint_override',
+            'temporary_directory_policy' => 'fixed_system_tmp',
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',
@@ -150,6 +167,7 @@ final class ReadonlyReviewerContract
             'output_binds_base_sha' => true,
             'allows_external_connectors' => false,
             'allows_delegation' => false,
+            'disabled_features' => self::REQUIRED_DISABLED_FEATURES,
         ];
         foreach ($expected as $key => $value) {
             if (($reviewerPolicy[$key] ?? null) !== $value) {

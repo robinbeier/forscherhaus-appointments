@@ -896,6 +896,16 @@ class ReviewerAuthorityContractTest extends TestCase
         ReadonlyReviewerContract::trustedBasePaths($policy);
     }
 
+    public function testProfileResolutionRejectsWeakenedDisabledFeatures(): void
+    {
+        $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
+        array_pop($policy['disabled_features']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('runtime boundary is invalid');
+        ReadonlyReviewerContract::trustedBasePaths($policy);
+    }
+
     /**
      * @param array<string, string> $environment
      * @return array{int, string, string}
@@ -963,6 +973,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
             'shell_runtime_configuration' => 'clean_bootstrap_environment',
+            'transport_environment_policy' => 'fixed_direct_no_ambient_proxy_or_endpoint_override',
             'temporary_directory_policy' => 'fixed_system_tmp',
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
@@ -998,7 +1009,7 @@ class ReviewerAuthorityContractTest extends TestCase
                     'reasoning' => 'medium',
                 ],
             ],
-            'disabled_features' => ['apps'],
+            'disabled_features' => $this->requiredDisabledFeatures(),
             'filesystem' => 'read-only',
             'network' => 'denied',
             'approval_policy' => 'never',
@@ -1007,6 +1018,29 @@ class ReviewerAuthorityContractTest extends TestCase
             'output_binds_base_sha' => true,
             'allows_external_connectors' => false,
             'allows_delegation' => false,
+        ];
+    }
+
+    /** @return list<string> */
+    private function requiredDisabledFeatures(): array
+    {
+        return [
+            'apps',
+            'plugins',
+            'browser_use',
+            'browser_use_external',
+            'browser_use_full_cdp_access',
+            'computer_use',
+            'image_generation',
+            'in_app_browser',
+            'memories',
+            'skill_search',
+            'skill_mcp_dependency_install',
+            'auth_elicitation',
+            'tool_call_mcp_elicitation',
+            'multi_agent',
+            'multi_agent_v2',
+            'hooks',
         ];
     }
 
