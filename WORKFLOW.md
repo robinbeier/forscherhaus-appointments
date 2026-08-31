@@ -297,8 +297,8 @@ diff-conditional checks must be either successful or explicitly skipped. It
 also requires the three distinct review lenses from the machine contract in
 one new, unedited, SHA-bound owner attestation with exact review-activity
 watermarks and a privacy-safe review payload digest. Batched GraphQL edit
-counts bind the attestation's unedited state and each trusted inline review
-comment, while only body digests enter the watermark. A still-active trusted
+counts bind the attestation's unedited state plus each trusted formal review
+and inline review comment, while only body digests enter the watermark. A still-active trusted
 `CHANGES_REQUESTED` review, trusted watermark or payload drift, edited trusted
 inline feedback, newer trusted review feedback, or a newer invalid attestation
 marker invalidates that evidence. Missing, pending, duplicated, malformed,

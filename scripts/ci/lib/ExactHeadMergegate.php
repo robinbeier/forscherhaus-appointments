@@ -101,7 +101,9 @@ final class ExactHeadMergegate
                 if (
                     !is_string($activity['state'] ?? null) ||
                     !is_string($activity['content_digest'] ?? null) ||
-                    preg_match('/^[0-9a-f]{64}$/D', $activity['content_digest']) !== 1
+                    preg_match('/^[0-9a-f]{64}$/D', $activity['content_digest']) !== 1 ||
+                    !is_int($activity['edit_count'] ?? null) ||
+                    ($activity['edit_count'] ?? -1) < 0
                 ) {
                     return null;
                 }
@@ -114,6 +116,7 @@ final class ExactHeadMergegate
                     'commit_sha' => $sha,
                     'occurred_at' => self::normalizeGitHubTimestamp($activity['occurred_at']),
                     'content_digest' => $activity['content_digest'],
+                    'edit_count' => $activity['edit_count'],
                 ];
                 continue;
             }
@@ -571,21 +574,22 @@ final class ExactHeadMergegate
 
         if (
             !is_array($attestation) ||
-            array_keys($attestation) !== ['head_sha', 'review_activity_watermark', 'reviews'] ||
+            !self::hasExactKeys($attestation, ['head_sha', 'review_activity_watermark', 'reviews']) ||
             ($attestation['head_sha'] ?? null) !== $sha ||
             !is_array($attestation['review_activity_watermark'] ?? null) ||
-            array_keys($attestation['review_activity_watermark']) !== [
+            !self::hasExactKeys($attestation['review_activity_watermark'], [
                 'review_id',
                 'review_comment_id',
                 'review_payload_digest',
-            ] ||
+            ]) ||
             !is_int($attestation['review_activity_watermark']['review_id'] ?? null) ||
             ($attestation['review_activity_watermark']['review_id'] ?? -1) < 0 ||
             !is_int($attestation['review_activity_watermark']['review_comment_id'] ?? null) ||
             ($attestation['review_activity_watermark']['review_comment_id'] ?? -1) < 0 ||
             !is_string($attestation['review_activity_watermark']['review_payload_digest'] ?? null) ||
             preg_match('/^[0-9a-f]{64}$/D', $attestation['review_activity_watermark']['review_payload_digest']) !== 1 ||
-            !is_array($attestation['reviews'] ?? null)
+            !is_array($attestation['reviews'] ?? null) ||
+            !array_is_list($attestation['reviews'])
         ) {
             return null;
         }
@@ -594,7 +598,7 @@ final class ExactHeadMergegate
         foreach ($attestation['reviews'] as $review) {
             if (
                 !is_array($review) ||
-                array_keys($review) !== ['lens', 'reviewer_ref', 'verdict'] ||
+                !self::hasExactKeys($review, ['lens', 'reviewer_ref', 'verdict']) ||
                 !is_string($review['lens'] ?? null) ||
                 !in_array($review['lens'], $policy['required_review_lenses'], true) ||
                 isset($reviews[$review['lens']]) ||
@@ -620,9 +624,23 @@ final class ExactHeadMergegate
         return [
             'comment_id' => $comment['id'],
             'attested_at' => $createdAt,
-            'review_watermarks' => $attestation['review_activity_watermark'],
+            'review_watermarks' => [
+                'review_id' => $attestation['review_activity_watermark']['review_id'],
+                'review_comment_id' => $attestation['review_activity_watermark']['review_comment_id'],
+                'review_payload_digest' => $attestation['review_activity_watermark']['review_payload_digest'],
+            ],
             'reviews' => $reviews,
         ];
+    }
+
+    /** @param array<string, mixed> $value */
+    private static function hasExactKeys(array $value, array $expectedKeys): bool
+    {
+        $actualKeys = array_keys($value);
+        sort($actualKeys, SORT_STRING);
+        sort($expectedKeys, SORT_STRING);
+
+        return $actualKeys === $expectedKeys;
     }
 
     /**

@@ -705,6 +705,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                         'commit_id' => self::SHA,
                         'submitted_at' => '2026-08-30T20:00:01Z',
                         'body' => 'later review edit',
+                        'edit_count' => 0,
                     ];
                 }
             }
@@ -921,12 +922,13 @@ final class ExactHeadMergegateCliTest extends TestCase
         }
     }
 
-    public function testGitHubAdapterBatchesGraphQlEvidenceForBothCommentTypes(): void
+    public function testGitHubAdapterBatchesGraphQlEvidenceForAllUserContentTypes(): void
     {
         foreach (
             [
                 '/repos/acme/app/issues/12/comments?per_page=100&page=1' => 'IssueComment',
                 '/repos/acme/app/pulls/12/comments?per_page=100&page=1' => 'PullRequestReviewComment',
+                '/repos/acme/app/pulls/12/reviews?per_page=100&page=1' => 'PullRequestReview',
             ]
             as $path => $typename
         ) {
@@ -943,7 +945,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                                 'nodes' => [
                                     [
                                         '__typename' => $typename,
-                                        'id' => 'IC_kwDOabc123',
+                                        'id' => $typename === 'PullRequestReview' ? 'PRR_kwDOabc123' : 'IC_kwDOabc123',
                                         'includesCreatedEdit' => true,
                                         'userContentEdits' => ['totalCount' => 3],
                                     ],
@@ -957,7 +959,7 @@ final class ExactHeadMergegateCliTest extends TestCase
                     [
                         [
                             'id' => 10,
-                            'node_id' => 'IC_kwDOabc123',
+                            'node_id' => $typename === 'PullRequestReview' ? 'PRR_kwDOabc123' : 'IC_kwDOabc123',
                             'author_association' => 'OWNER',
                             'created_at' => '2026-08-30T20:00:00Z',
                             'updated_at' => '2026-08-30T20:00:00Z',
@@ -972,7 +974,10 @@ final class ExactHeadMergegateCliTest extends TestCase
             self::assertSame(2, $result[0]['edit_count']);
             self::assertCount(2, $commands);
             self::assertSame('POST', $commands[1][array_search('--method', $commands[1], true) + 1]);
-            self::assertContains('ids[]=IC_kwDOabc123', $commands[1]);
+            self::assertContains(
+                'ids[]=' . ($typename === 'PullRequestReview' ? 'PRR_kwDOabc123' : 'IC_kwDOabc123'),
+                $commands[1],
+            );
             self::assertStringContainsString('userContentEdits(first:1)', implode(' ', $commands[1]));
             self::assertStringNotContainsString('mutation', implode(' ', $commands[1]));
         }
@@ -1009,6 +1014,14 @@ final class ExactHeadMergegateCliTest extends TestCase
             ],
             [
                 [
+                    '__typename' => 'PullRequestReview',
+                    'id' => 'PRR_kwDOabc123',
+                    'includesCreatedEdit' => false,
+                    'userContentEdits' => ['totalCount' => -1],
+                ],
+            ],
+            [
+                [
                     '__typename' => 'IssueComment',
                     'id' => 'IC_kwDOabc123',
                     'includesCreatedEdit' => false,
@@ -1030,7 +1043,11 @@ final class ExactHeadMergegateCliTest extends TestCase
                 return json_encode([['id' => 10, 'node_id' => 'IC_kwDOabc123']], JSON_THROW_ON_ERROR);
             });
             try {
-                $request('/repos/acme/app/issues/12/comments?per_page=100&page=1');
+                $request(
+                    ($nodes[0]['__typename'] ?? 'IssueComment') === 'PullRequestReview'
+                        ? '/repos/acme/app/pulls/12/reviews?per_page=100&page=1'
+                        : '/repos/acme/app/issues/12/comments?per_page=100&page=1',
+                );
                 self::fail('Malformed GraphQL evidence was accepted.');
             } catch (RuntimeException) {
                 self::assertTrue(true);

@@ -800,18 +800,19 @@ function buildExactHeadMergegateGitHubReadClosure(?Closure $processRunner = null
             throw new RuntimeException('GitHub GET response had an invalid shape.');
         }
 
-        $commentEndpoint =
-            preg_match('~^/repos/[^/]+/[^/]+/(issues|pulls)/[1-9][0-9]*/comments\?~D', $path, $endpointMatches) === 1;
-        if ($commentEndpoint) {
+        $userContentTypename = match (true) {
+            preg_match('~^/repos/[^/]+/[^/]+/issues/[1-9][0-9]*/comments\?~D', $path) === 1 => 'IssueComment',
+            preg_match('~^/repos/[^/]+/[^/]+/pulls/[1-9][0-9]*/comments\?~D', $path) === 1
+                => 'PullRequestReviewComment',
+            preg_match('~^/repos/[^/]+/[^/]+/pulls/[1-9][0-9]*/reviews\?~D', $path) === 1 => 'PullRequestReview',
+            default => null,
+        };
+        if ($userContentTypename !== null) {
             if (!array_is_list($decoded)) {
-                throw new RuntimeException('GitHub comment collection had an invalid shape.');
+                throw new RuntimeException('GitHub user-content collection had an invalid shape.');
             }
             if ($decoded !== []) {
-                $decoded = exactHeadMergegateEnrichCommentsWithGraphQl(
-                    $decoded,
-                    $endpointMatches[1] === 'issues' ? 'IssueComment' : 'PullRequestReviewComment',
-                    $runProcess,
-                );
+                $decoded = exactHeadMergegateEnrichUserContentWithGraphQl($decoded, $userContentTypename, $runProcess);
             }
         }
 
@@ -820,25 +821,29 @@ function buildExactHeadMergegateGitHubReadClosure(?Closure $processRunner = null
 }
 
 /** @param Closure(array<int, string>, ?string): string $runProcess */
-function exactHeadMergegateEnrichCommentsWithGraphQl(array $items, string $typename, Closure $runProcess): array
+function exactHeadMergegateEnrichUserContentWithGraphQl(array $items, string $typename, Closure $runProcess): array
 {
-    if (!array_is_list($items) || !in_array($typename, ['IssueComment', 'PullRequestReviewComment'], true)) {
-        throw new RuntimeException('GitHub comment collection had an invalid shape.');
+    if (
+        !array_is_list($items) ||
+        !in_array($typename, ['IssueComment', 'PullRequestReviewComment', 'PullRequestReview'], true)
+    ) {
+        throw new RuntimeException('GitHub user-content collection had an invalid shape.');
     }
     $nodeIds = [];
     foreach ($items as $item) {
         if (!is_array($item) || !is_string($item['node_id'] ?? null) || $item['node_id'] === '') {
-            throw new RuntimeException('GitHub comment lacked a valid GraphQL node ID.');
+            throw new RuntimeException('GitHub user content lacked a valid GraphQL node ID.');
         }
         if (in_array($item['node_id'], $nodeIds, true)) {
-            throw new RuntimeException('GitHub comment collection contained duplicate GraphQL node IDs.');
+            throw new RuntimeException('GitHub user-content collection contained duplicate GraphQL node IDs.');
         }
         $nodeIds[] = $item['node_id'];
     }
     $query =
         'query($ids:[ID!]!){nodes(ids:$ids){__typename ' .
         '... on IssueComment{id includesCreatedEdit userContentEdits(first:1){totalCount}} ' .
-        '... on PullRequestReviewComment{id includesCreatedEdit userContentEdits(first:1){totalCount}}}}';
+        '... on PullRequestReviewComment{id includesCreatedEdit userContentEdits(first:1){totalCount}} ' .
+        '... on PullRequestReview{id includesCreatedEdit userContentEdits(first:1){totalCount}}}}';
     $command = [
         'gh',
         'api',
@@ -865,17 +870,17 @@ function exactHeadMergegateEnrichCommentsWithGraphQl(array $items, string $typen
         throw new RuntimeException('GitHub GraphQL response was not valid JSON.');
     }
     if (!is_array($response) || (isset($response['errors']) && $response['errors'] !== [])) {
-        throw new RuntimeException('GitHub GraphQL comment evidence contained errors.');
+        throw new RuntimeException('GitHub GraphQL user-content evidence contained errors.');
     }
 
     $nodes = is_array($response['data'] ?? null) ? $response['data']['nodes'] ?? null : null;
     if (!is_array($nodes) || !array_is_list($nodes) || count($nodes) !== count($nodeIds)) {
-        throw new RuntimeException('GitHub GraphQL comment evidence had an invalid shape.');
+        throw new RuntimeException('GitHub GraphQL user-content evidence had an invalid shape.');
     }
     $byId = [];
     foreach ($nodes as $node) {
         if (!is_array($node) || !is_string($node['id'] ?? null) || isset($byId[$node['id']])) {
-            throw new RuntimeException('GitHub GraphQL comment evidence had invalid nodes.');
+            throw new RuntimeException('GitHub GraphQL user-content evidence had invalid nodes.');
         }
         if (
             !in_array($node['id'], $nodeIds, true) ||
@@ -886,7 +891,7 @@ function exactHeadMergegateEnrichCommentsWithGraphQl(array $items, string $typen
             $node['userContentEdits']['totalCount'] < 0 ||
             $node['userContentEdits']['totalCount'] < ($node['includesCreatedEdit'] ? 1 : 0)
         ) {
-            throw new RuntimeException('GitHub GraphQL comment evidence failed validation.');
+            throw new RuntimeException('GitHub GraphQL user-content evidence failed validation.');
         }
         $creationEntryCount = $node['includesCreatedEdit'] ? 1 : 0;
         $byId[$node['id']] = $node['userContentEdits']['totalCount'] - $creationEntryCount;
@@ -1333,7 +1338,9 @@ function normalizeExactHeadMergegateReview(mixed $review): array
         !is_string($review['state'] ?? null) ||
         !is_string($review['commit_id'] ?? null) ||
         !is_string($review['submitted_at'] ?? null) ||
-        !is_string($review['body'] ?? null)
+        !is_string($review['body'] ?? null) ||
+        !is_int($review['edit_count'] ?? null) ||
+        ($review['edit_count'] ?? -1) < 0
     ) {
         throw new RuntimeException('GitHub review had an invalid shape.');
     }
@@ -1347,6 +1354,7 @@ function normalizeExactHeadMergegateReview(mixed $review): array
         'commit_sha' => $review['commit_id'] ?? null,
         'occurred_at' => $review['submitted_at'] ?? null,
         'content_digest' => hash('sha256', $review['body']),
+        'edit_count' => $review['edit_count'],
     ];
 }
 

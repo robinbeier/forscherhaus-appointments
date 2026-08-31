@@ -53,6 +53,42 @@ final class ExactHeadMergegateTest extends TestCase
         self::assertStringNotContainsString('login', json_encode($report, JSON_THROW_ON_ERROR));
     }
 
+    public function testAttestationObjectKeyOrderIsIgnoredButUnknownKeysFailClosed(): void
+    {
+        $body = $this->attestation();
+        $matches = [];
+        self::assertSame(1, preg_match('/<!-- exact-head-review-attestation:v2\n(.*)\n-->/s', $body, $matches));
+        $payload = json_decode($matches[1], true, 128, JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+
+        $reordered = array_reverse($payload, true);
+        $reordered['reviews'] = array_map(
+            static fn(array $review): array => array_reverse($review, true),
+            $payload['reviews'],
+        );
+        $reordered['review_activity_watermark'] = array_reverse($payload['review_activity_watermark'], true);
+        $snapshot = $this->snapshot();
+        $snapshot['comments'] = [
+            array_merge($this->attestationComment(), [
+                'body' =>
+                    "<!-- exact-head-review-attestation:v2\n" .
+                    json_encode($reordered, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) .
+                    "\n-->",
+            ]),
+        ];
+        $reorderedReport = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('pass', $reorderedReport['status'], json_encode($reorderedReport, JSON_THROW_ON_ERROR));
+
+        $reordered['unexpected'] = true;
+        $snapshot['comments'][0]['body'] =
+            "<!-- exact-head-review-attestation:v2\n" .
+            json_encode($reordered, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) .
+            "\n-->";
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_attestation_invalid', array_column($report['gates'], 'code'));
+    }
+
     public function testCompletedWorkflowDoesNotMakeAdvisoryFailuresImplicitlyBlocking(): void
     {
         $snapshot = $this->snapshot();
@@ -101,6 +137,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:30Z',
                 'content_digest' => hash('sha256', 'approved'),
+                'edit_count' => 0,
             ],
         ];
         $digest = $this->reviewPayloadDigest($snapshot['review_activity']);
@@ -415,6 +452,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T20:00:01Z',
                 'content_digest' => hash('sha256', 'drive-by review'),
+                'edit_count' => 0,
             ],
         ];
 
@@ -445,6 +483,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:00Z',
                 'content_digest' => hash('sha256', 'changes requested'),
+                'edit_count' => 0,
             ],
         ];
         $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
@@ -466,6 +505,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:00Z',
                 'content_digest' => hash('sha256', 'changes requested'),
+                'edit_count' => 0,
             ],
             [
                 'kind' => 'review',
@@ -476,6 +516,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:30Z',
                 'content_digest' => hash('sha256', 'commented followup'),
+                'edit_count' => 0,
             ],
         ];
 
@@ -498,6 +539,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:00Z',
                 'content_digest' => hash('sha256', 'changes requested'),
+                'edit_count' => 0,
             ],
             [
                 'kind' => 'review',
@@ -508,6 +550,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:30Z',
                 'content_digest' => hash('sha256', 'approved followup'),
+                'edit_count' => 0,
             ],
         ];
         $snapshot['comments'] = [
@@ -529,6 +572,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:00Z',
                 'content_digest' => hash('sha256', 'changes requested'),
+                'edit_count' => 0,
             ],
             [
                 'kind' => 'review',
@@ -539,6 +583,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:30Z',
                 'content_digest' => hash('sha256', 'dismissed followup'),
+                'edit_count' => 0,
             ],
         ];
         $snapshot['comments'] = [
@@ -743,6 +788,7 @@ final class ExactHeadMergegateTest extends TestCase
                 'commit_sha' => self::SHA,
                 'occurred_at' => '2026-08-30T19:59:00Z',
                 'content_digest' => hash('sha256', 'mutated body'),
+                'edit_count' => 0,
             ],
         ];
         $snapshot['comments'] = [
@@ -765,6 +811,30 @@ final class ExactHeadMergegateTest extends TestCase
 
         $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
 
+        self::assertSame('fail', $report['status']);
+        self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
+    }
+
+    public function testFormalReviewEditCountIsBoundToTheReviewPayloadDigest(): void
+    {
+        $activity = [
+            'kind' => 'review',
+            'id' => 700,
+            'author_association' => 'MEMBER',
+            'actor_ref' => str_repeat('d', 64),
+            'state' => 'APPROVED',
+            'commit_sha' => self::SHA,
+            'occurred_at' => '2026-08-30T19:59:30Z',
+            'content_digest' => hash('sha256', 'approved'),
+            'edit_count' => 0,
+        ];
+        $snapshot = $this->snapshot();
+        $snapshot['review_activity'] = [$activity];
+        $snapshot['comments'] = [$this->attestationComment('OWNER', 700, 0, $this->reviewPayloadDigest([$activity]))];
+        self::assertSame('pass', ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA)['status']);
+
+        $snapshot['review_activity'][0]['edit_count'] = 2;
+        $report = ExactHeadMergegate::evaluate($this->policy(), $snapshot, 12, self::SHA);
         self::assertSame('fail', $report['status']);
         self::assertContains('review_feedback_not_closed', array_column($report['gates'], 'code'));
     }
@@ -913,6 +983,7 @@ final class ExactHeadMergegateTest extends TestCase
                     'commit_sha' => $entry['commit_sha'] ?? null,
                     'occurred_at' => $entry['occurred_at'] ?? null,
                     'content_digest' => $entry['content_digest'] ?? null,
+                    'edit_count' => $entry['edit_count'] ?? 0,
                 ];
                 continue;
             }

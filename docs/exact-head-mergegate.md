@@ -7,6 +7,10 @@ The gate reads GitHub state, evaluates the canonical contract in
 .codex/contracts/agent-workflow.json, writes a sanitized local JSON report,
 and exits non-zero unless every landing invariant is satisfied. It does not
 approve, comment on, label, merge, close, or otherwise mutate a pull request.
+Policy values such as check names, review lenses, parser isolation, and the
+attestation marker are normative only in that JSON contract. This document is
+operational guidance; the verifier consumes those values from the reviewed
+contract instead of maintaining a second policy list.
 
 ## Inputs
 
@@ -61,12 +65,13 @@ The command uses authenticated GitHub REST GET requests plus bounded, read-only 
    inline review comments for the reviewed SHA and target pull request. The two
    observations must be strictly identical. Any CI rerun, review edit, review
    comment edit, added feedback, deleted evidence, or other drift between those
-   observations blocks the merge. For each non-empty REST comment page, one
-   batched GraphQL node query reads only whether the creation entry is present
-   and the total edit-history count. Their difference is the canonical edit
-   count. Missing, partial, mismatched, duplicated, or malformed node evidence
-   fails closed. This detects same-second edits and edit-then-restore changes
-   without reading edit diffs or editor identities.
+   observations blocks the merge. For each non-empty REST issue-comment,
+   formal-review, or inline-review-comment page, one batched GraphQL node query
+   reads only whether the creation entry is present and the total edit-history
+   count. Their difference is the canonical edit count. Missing, partial,
+   mismatched, duplicated, or malformed node evidence fails closed. This
+   detects same-second edits and edit-then-restore changes without reading edit
+   diffs or editor identities.
 4. GitHub's commit-to-PR association binds that SHA to the pull request, and a
    completed pull_request run of the canonical CI workflow binds the same SHA,
    head branch, head repository, pull request number, and check suite. The
@@ -87,7 +92,10 @@ The command uses authenticated GitHub REST GET requests plus bounded, read-only 
    owner comment carrying the attestation marker must itself be valid; a newer
    malformed, edited, or wrong-SHA marker comment invalidates older evidence.
    Unedited means both identical creation/update timestamps and a canonical
-   GraphQL edit count of zero.
+   GraphQL edit count of zero. Each trusted formal review and inline review
+   comment also contributes its canonical edit count to the attested review
+   payload digest, so an edit followed by restoration of the original body is
+   still detected.
 8. No still-active CHANGES_REQUESTED review targets that SHA, no trusted issue
    comment is newer than the selected attestation, the current formal review
    and inline review comment maxima still equal the attested watermarks, and
