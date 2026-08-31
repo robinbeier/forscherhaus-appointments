@@ -288,7 +288,7 @@ final class ParallelWorkContract
         }
 
         $components = $ownershipMap['components'] ?? null;
-        if (!is_array($components) || !array_is_list($components)) {
+        if (!is_array($components) || !array_is_list($components) || $components === []) {
             $errors[] = 'invalid_canonical_ownership_map';
             return [];
         }
@@ -306,6 +306,10 @@ final class ParallelWorkContract
             $manualApprovalRequired = $component['manual_approval_required'] ?? null;
             if (!is_string($componentId) || !is_array($folderPrefixes) || !array_is_list($folderPrefixes)) {
                 $errors[] = 'invalid_canonical_ownership_component';
+                continue;
+            }
+            if ($folderPrefixes === []) {
+                $errors[] = 'invalid_canonical_folder_prefixes:' . $componentId;
                 continue;
             }
             if (!is_string($ownershipMode) || !in_array($ownershipMode, ['single-owner', 'multi-owner'], true)) {

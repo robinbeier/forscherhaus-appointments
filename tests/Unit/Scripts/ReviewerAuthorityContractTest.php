@@ -261,6 +261,8 @@ class ReviewerAuthorityContractTest extends TestCase
                     printf 'GITHUB_PAT=%s\n' "${GITHUB_PAT-unset}"
                     printf 'LINEAR_API_KEY=%s\n' "${LINEAR_API_KEY-unset}"
                     printf 'LINEAR_TOKEN=%s\n' "${LINEAR_TOKEN-unset}"
+                    printf 'OPENAI_API_KEY=%s\n' "${OPENAI_API_KEY-unset}"
+                    printf 'CODEX_API_KEY=%s\n' "${CODEX_API_KEY-unset}"
                     printf 'OPENAI_BASE_URL=%s\n' "${OPENAI_BASE_URL-unset}"
                     printf 'HTTP_PROXY=%s\n' "${HTTP_PROXY-unset}"
                     printf 'HTTPS_PROXY=%s\n' "${HTTPS_PROXY-unset}"
@@ -318,6 +320,8 @@ class ReviewerAuthorityContractTest extends TestCase
         $environment['GITHUB_PAT'] = 'credential-sentinel';
         $environment['LINEAR_API_KEY'] = 'credential-sentinel';
         $environment['LINEAR_TOKEN'] = 'credential-sentinel';
+        $environment['OPENAI_API_KEY'] = 'credential-sentinel';
+        $environment['CODEX_API_KEY'] = 'credential-sentinel';
         foreach (
             [
                 'OPENAI_BASE_URL',
@@ -446,6 +450,8 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("GITHUB_PAT=unset\n", $capture);
         self::assertStringContainsString("LINEAR_API_KEY=unset\n", $capture);
         self::assertStringContainsString("LINEAR_TOKEN=unset\n", $capture);
+        self::assertStringContainsString("OPENAI_API_KEY=unset\n", $capture);
+        self::assertStringContainsString("CODEX_API_KEY=unset\n", $capture);
         self::assertStringNotContainsString('credential-sentinel', $capture);
         self::assertStringNotContainsString('transport-sentinel', $capture);
         foreach (
@@ -1288,6 +1294,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'codex_identity_check' => 'basename_and_version',
             'codex_version_policy' => 'semver_with_bounded_build_metadata',
             'codex_authentication_source' => 'host_codex_login_without_connector_authority',
+            'codex_api_key_override_policy' => 'reject_ambient_api_keys',
             'finding_path_policy' => 'normalized_exact_diff_paths',
             'finding_text_policy' => 'bounded_privacy_safe_prose',
             'web_search' => 'disabled',

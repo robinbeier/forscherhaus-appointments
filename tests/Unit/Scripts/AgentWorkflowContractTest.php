@@ -94,6 +94,10 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['codex_authentication_source'] ?? null,
         );
         self::assertSame(
+            'reject_ambient_api_keys',
+            $contract['authority']['reviewer']['codex_api_key_override_policy'] ?? null,
+        );
+        self::assertSame(
             'normalized_exact_diff_paths',
             $contract['authority']['reviewer']['finding_path_policy'] ?? null,
         );
@@ -165,6 +169,7 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertTrue($contract['parallel_work']['admission_requires_clean_exact_base_checkout'] ?? null);
         self::assertTrue($contract['parallel_work']['admission_executes_only_declared_base_blobs'] ?? null);
+        self::assertTrue($contract['parallel_work']['admission_binds_base_before_source_execution'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_post_implementation_verification'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_clean_post_commit_verification'] ?? null);
         self::assertSame('provisional_pass', $contract['parallel_work']['dirty_precommit_status'] ?? null);

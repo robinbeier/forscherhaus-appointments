@@ -24,8 +24,6 @@ foreach (
         'TERM',
         'COLORTERM',
         'CODEX_HOME',
-        'OPENAI_API_KEY',
-        'CODEX_API_KEY',
     ] as $name
 ) {
     $value = getenv($name);
@@ -67,6 +65,8 @@ __halt_compiler();
 
 set -euo pipefail
 
+# With `bash -s -- <runner> ...`, Bash keeps its own `$0` and assigns the
+# materialized runner path to `$1`.
 runner_source_input="${1:-}"
 if [[ -z "$runner_source_input" ]]; then
     echo "Reviewer trusted source path is unavailable." >&2
@@ -395,6 +395,8 @@ printf '%s\n' "$prompt" | env \
     -u GITHUB_PAT \
     -u LINEAR_API_KEY \
     -u LINEAR_TOKEN \
+    -u OPENAI_API_KEY \
+    -u CODEX_API_KEY \
     "$codex_bin" --ask-for-approval never exec \
         --ignore-user-config \
         --ignore-rules \

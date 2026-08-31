@@ -3,6 +3,7 @@
 set -euo pipefail
 
 validator_checkout=''
+manifest_path=''
 forward_arguments=()
 for argument in "$@"; do
     case "$argument" in
@@ -13,8 +14,20 @@ for argument in "$@"; do
             fi
             validator_checkout="${argument#--validator-checkout=}"
             ;;
-        *)
+        --manifest=*)
+            if [[ -n "$manifest_path" ]]; then
+                echo "Parallel-work manifest may be supplied only once." >&2
+                exit 2
+            fi
+            manifest_path="${argument#--manifest=}"
             forward_arguments+=("$argument")
+            ;;
+        --repo-root=*|--verify-lane=*|--require-clean|--allow-dirty-precommit)
+            forward_arguments+=("$argument")
+            ;;
+        *)
+            echo "Unknown option." >&2
+            exit 2
             ;;
     esac
 done
@@ -37,6 +50,38 @@ for candidate in /usr/bin/php /opt/homebrew/bin/php /usr/local/bin/php /opt/loca
 done
 if [[ -z "$trusted_php" ]]; then
     echo "PHP is unavailable on the fixed parallel-work validator path." >&2
+    exit 2
+fi
+
+if [[ -z "$manifest_path" ]]; then
+    echo "Missing --manifest." >&2
+    exit 2
+fi
+if ! manifest_base="$(
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        LANG=C \
+        LC_ALL=C \
+        "$trusted_php" -n -d auto_prepend_file= -d auto_append_file= -r '
+            $raw = @file_get_contents($argv[1] ?? "");
+            if (!is_string($raw)) {
+                fwrite(STDERR, "Parallel-work manifest is not valid JSON.\n");
+                exit(2);
+            }
+            try {
+                $manifest = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+            } catch (Throwable) {
+                fwrite(STDERR, "Parallel-work manifest is not valid JSON.\n");
+                exit(2);
+            }
+            $base = is_array($manifest) ? ($manifest["base_sha"] ?? null) : null;
+            if (!is_string($base) || preg_match("/^[a-f0-9]{40}$/D", $base) !== 1) {
+                fwrite(STDERR, "Parallel-work input has an invalid shape.\n");
+                exit(2);
+            }
+            fwrite(STDOUT, $base);
+        ' "$manifest_path"
+)"; then
     exit 2
 fi
 
@@ -94,6 +139,10 @@ validator_head="$(trusted_git_run rev-parse --verify HEAD 2>/dev/null)" || {
 if [[ ! "$validator_head" =~ ^[a-f0-9]{40}$ ]]; then
     echo "Parallel-work validator base is invalid." >&2
     exit 2
+fi
+if [[ "$validator_head" != "$manifest_base" ]]; then
+    /usr/bin/printf '%s\n' '{"schema_version":1,"status":"fail","errors":["validator_base_mismatch"]}'
+    exit 1
 fi
 
 if [[ -L "$0" ]]; then

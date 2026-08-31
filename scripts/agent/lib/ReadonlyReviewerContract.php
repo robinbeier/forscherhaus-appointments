@@ -181,6 +181,7 @@ final class ReadonlyReviewerContract
             'codex_identity_check' => 'basename_and_version',
             'codex_version_policy' => 'semver_with_bounded_build_metadata',
             'codex_authentication_source' => 'host_codex_login_without_connector_authority',
+            'codex_api_key_override_policy' => 'reject_ambient_api_keys',
             'finding_path_policy' => 'normalized_exact_diff_paths',
             'finding_text_policy' => 'bounded_privacy_safe_prose',
             'web_search' => 'disabled',

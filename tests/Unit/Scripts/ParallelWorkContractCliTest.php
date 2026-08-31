@@ -384,6 +384,29 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertContains('validator_base_mismatch', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors']);
     }
 
+    public function testAdmissionRejectsDriftBeforeExecutingNewerValidatorSources(): void
+    {
+        $marker = sys_get_temp_dir() . '/parallel-work-newer-validator-' . bin2hex(random_bytes(8));
+        $sourcePath = $this->trustedValidatorRoot . '/scripts/agent/lib/ParallelWorkContract.php';
+        self::assertNotFalse(
+            file_put_contents(
+                $sourcePath,
+                "\nfile_put_contents(" . var_export($marker, true) . ", 'executed');\n",
+                FILE_APPEND,
+            ),
+        );
+        $this->runGit($this->trustedValidatorRoot, ['add', 'scripts/agent/lib/ParallelWorkContract.php']);
+        $this->runGit($this->trustedValidatorRoot, ['commit', '-qm', 'newer validator source']);
+        $manifestPath = $this->writeJsonFixture('validator-drift', $this->manifestForPath('safe/path'));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains('validator_base_mismatch', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors']);
+        self::assertFileDoesNotExist($marker);
+    }
+
     public function testAdmissionRejectsADirtyValidatorCheckout(): void
     {
         self::assertNotFalse(

@@ -359,6 +359,23 @@ class ParallelWorkContractTest extends TestCase
         self::assertContains('invalid_canonical_manual_approval:booking-public', $errors);
     }
 
+    public function testRejectsEmptyCanonicalComponentCoverage(): void
+    {
+        $ownershipMap = $this->ownershipMap;
+        $ownershipMap['components'][0]['folder_prefixes'] = [];
+
+        self::assertContains(
+            'invalid_canonical_folder_prefixes:platform-quality-tooling',
+            ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
+        );
+
+        $ownershipMap['components'] = [];
+        self::assertContains(
+            'invalid_canonical_ownership_map',
+            ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
+        );
+    }
+
     public function testRejectsSingleOwnerWithoutManualApproval(): void
     {
         $ownershipMap = $this->ownershipMap;

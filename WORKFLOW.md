@@ -117,7 +117,9 @@ chmod 700 "$trusted_validator"
 rm -f "$trusted_validator"
 ```
 
-The wrapper verifies that it is the checkout's exact HEAD blob, then
+The wrapper reads the manifest base with a fixed PHP runtime, rejects any
+checkout-HEAD mismatch before executing validator source, verifies that it is
+the checkout's exact base blob, then
 materializes the CLI and both shared validator libraries directly from that
 same commit into a private trust bundle. The checker therefore executes no PHP
 source from the checkout and starts PHP without ambient `php.ini`, `PHPRC`, scan
@@ -402,8 +404,8 @@ resolved to their canonical physical targets before trust-boundary comparisons.
 The host Codex login authenticates only the model-service call and does not grant
 reviewer connector authority: user configuration and rules are ignored,
 connector-capable features are disabled, MCP is empty, command environment
-inheritance is disabled, and the reviewer may not inspect runtime authentication
-state.
+inheritance is disabled, ambient OpenAI or Codex API-key overrides are removed,
+and the reviewer may not inspect runtime authentication state.
 Every pre-trust Git command ignores ambient Git environment,
 global and system configuration, hooks, fsmonitor, replacement objects, lazy
 object fetching, external diff drivers, and text conversion. The runner fetches the named commits into a
