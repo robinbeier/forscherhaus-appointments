@@ -78,6 +78,16 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertProviderSecretsAbsent($this->decodeJsonOutput());
 
         $this->resetRequest();
+        $_GET = ['with' => 'services'];
+        $this->createProvidersController()->show($providerId);
+        $this->assertProviderSecretsAbsent($this->decodeJsonOutput());
+
+        $this->resetRequest();
+        $_GET = ['q' => 'Synthetic'];
+        $this->createProvidersController()->index();
+        $this->assertProviderSecretsAbsentFromList($this->decodeJsonOutput());
+
+        $this->resetRequest();
         $this->setPostPayload($this->providerPayload('rotated-google', 'rotated-caldav'));
         $this->createProvidersController()->update($providerId);
         $this->assertProviderSecretsAbsent($this->decodeJsonOutput());
@@ -101,6 +111,18 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $afterRotation = $this->providerSettings($providerId);
         $this->assertTrue(($afterRotation['google_token'] ?? null) === 'rotated-google');
         $this->assertTrue(($afterRotation['caldav_password'] ?? null) === 'rotated-caldav');
+
+        $this->setPostPayload([
+            'settings' => [
+                'googleToken' => 'rotated-google',
+                'caldavPassword' => 'rotated-caldav',
+            ],
+        ]);
+        $this->createProvidersController()->update($providerId);
+        $this->assertProviderSecretsAbsent($this->decodeJsonOutput());
+        $afterConvergedWrite = $this->providerSettings($providerId);
+        $this->assertTrue(($afterConvergedWrite['google_token'] ?? null) === 'rotated-google');
+        $this->assertTrue(($afterConvergedWrite['caldav_password'] ?? null) === 'rotated-caldav');
     }
 
     public function testWebhookReadsAndWriteResponsesNeverExposeSecrets(): void
@@ -119,6 +141,11 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $_GET = ['fields' => 'secretToken,secret_token'];
         $this->createWebhooksController()->show($webhookId);
         $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
+
+        $this->resetRequest();
+        $_GET = ['q' => 'Synthetic'];
+        $this->createWebhooksController()->index();
+        $this->assertWebhookSecretsAbsentFromList($this->decodeJsonOutput());
 
         $this->resetRequest();
         $this->setPostPayload([
@@ -146,6 +173,12 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
         $afterRotation = (string) $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row()->secret_token;
         $this->assertTrue($afterRotation === 'rotated-webhook-secret');
+
+        $this->setPostPayload(['secretToken' => 'rotated-webhook-secret']);
+        $this->createWebhooksController()->update($webhookId);
+        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
+        $afterConvergedWrite = (string) $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row()->secret_token;
+        $this->assertTrue($afterConvergedWrite === 'rotated-webhook-secret');
     }
 
     public function testExplicitNullClearsStoredCredentialsWithoutEchoingThem(): void
