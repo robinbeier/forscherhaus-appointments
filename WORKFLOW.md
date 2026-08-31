@@ -133,7 +133,9 @@ not include the primary-owned harness, reviewer, workflow, or landing paths in
 the machine contract. The checker, ownership validator, and reviewer trust
 manifest all use `scripts/agent/lib/RepoPath.php` as their single normalized
 repository-path grammar. Every ownership rule is an object with `path` and an
-explicit `match` value: `exact_or_descendants` or `filename_stem`. Canonical
+explicit `match` value: `directory`, `exact_file`, or `filename_stem`.
+`directory` covers descendants only, `exact_file` covers one file, and
+`filename_stem` covers matching sibling files in the same directory. Canonical
 filename-stem exceptions are likewise explicit in
 `docs/maps/component_ownership_map.json#prefix_match_overrides`; spelling alone
 never changes matching semantics. Each lane uses its own worktree and branch
@@ -376,10 +378,11 @@ the trust checks. Its trust bundle always uses the fixed system `/tmp`, never an
 ambient or repository-local temporary root. It then starts an ephemeral session without user configuration, user or
 project exec-policy rules, external connectors, or web search. It uses a
 read-only sandbox with network denied for reviewer commands and never permits
-approval escalation. Git and PHP resolve only through a fixed system tool path;
-Codex does too unless the primary supplies its trusted executable as an absolute
-`--codex-bin` path; either path must identify as the Codex CLI by basename and
-version output. Every pre-trust Git command ignores ambient Git environment,
+approval escalation. Git and PHP resolve only through a fixed system tool path.
+The primary must supply Codex as an executable absolute `--codex-bin` path; the
+runner resolves its canonical target, rejects repository-owned targets even
+through symlinks, and requires the requested basename and target version output
+to identify as the Codex CLI. Every pre-trust Git command ignores ambient Git environment,
 global and system configuration, hooks, fsmonitor, replacement objects, lazy
 object fetching, external diff drivers, and text conversion. The runner fetches the named commits into a
 private temporary repository and gives the reviewer only that clean, detached

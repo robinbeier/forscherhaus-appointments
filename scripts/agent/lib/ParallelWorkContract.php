@@ -143,7 +143,7 @@ final class ParallelWorkContract
                         $errors[] = 'invalid_policy_primary_owned_path_prefix';
                         continue;
                     }
-                    if (self::pathRulesOverlap($path, $match, $primaryOwnedPrefix, 'exact_or_descendants')) {
+                    if (self::pathRulesOverlap($path, $match, $primaryOwnedPrefix, 'directory')) {
                         $errors[] = 'primary_owned_path:' . $index . ':' . $primaryOwnedPrefix;
                     }
                 }
@@ -335,7 +335,9 @@ final class ParallelWorkContract
                     $errors[] = 'invalid_canonical_ownership_prefix:' . $componentId;
                     continue 2;
                 }
-                $match = $prefixMatchOverrides[$normalizedPrefix] ?? 'exact_or_descendants';
+                $match =
+                    $prefixMatchOverrides[$normalizedPrefix] ??
+                    (str_ends_with((string) $folderPrefix, '/') ? 'directory' : 'exact_file');
                 if ($match === 'filename_stem') {
                     $usedPrefixMatchOverrides[$normalizedPrefix] = true;
                 }
@@ -373,7 +375,7 @@ final class ParallelWorkContract
             $actualKeys !== $expectedKeys ||
             !is_string($path) ||
             !RepoPath::isNormalized($path) ||
-            !in_array($match, ['exact_or_descendants', 'filename_stem'], true)
+            !in_array($match, ['directory', 'exact_file', 'filename_stem'], true)
         ) {
             $errors[] = $error;
             return null;
@@ -388,6 +390,16 @@ final class ParallelWorkContract
         string $rightPath,
         string $rightMatch,
     ): bool {
+        if ($leftMatch === 'directory' && $rightMatch === 'directory' && $leftPath === $rightPath) {
+            return true;
+        }
+        if ($leftMatch === 'filename_stem' && $rightMatch === 'directory') {
+            return self::pathRuleCovers($rightPath, $rightMatch, $leftPath);
+        }
+        if ($leftMatch === 'directory' && $rightMatch === 'filename_stem') {
+            return self::pathRuleCovers($leftPath, $leftMatch, $rightPath);
+        }
+
         return self::pathRuleCovers($leftPath, $leftMatch, $rightPath) ||
             self::pathRuleCovers($rightPath, $rightMatch, $leftPath);
     }
@@ -406,6 +418,10 @@ final class ParallelWorkContract
             return $candidateDirectory === $ruleDirectory && str_starts_with($candidateFilename, $ruleFilenameStem);
         }
 
-        return $rulePath === $candidatePath || str_starts_with($candidatePath, $rulePath . '/');
+        if ($match === 'directory') {
+            return str_starts_with($candidatePath, $rulePath . '/');
+        }
+
+        return $rulePath === $candidatePath;
     }
 }

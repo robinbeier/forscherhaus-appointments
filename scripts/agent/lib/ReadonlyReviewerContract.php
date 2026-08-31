@@ -155,7 +155,7 @@ final class ReadonlyReviewerContract
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',
-            'tool_path_policy' => 'fixed_system_path_or_explicit_primary_codex',
+            'tool_path_policy' => 'explicit_primary_codex_with_canonical_target',
             'codex_identity_check' => 'basename_and_version',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',

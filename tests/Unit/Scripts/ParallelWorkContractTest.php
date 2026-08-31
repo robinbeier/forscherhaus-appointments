@@ -166,6 +166,17 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsAmbiguousLegacyPathMatching(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'][0]['match'] = 'exact_or_descendants';
+
+        self::assertContains(
+            'invalid_ownership_path:0:0',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
     public function testRejectsDifferentBaseSha(): void
     {
         $manifest = $this->validManifest();
@@ -195,7 +206,9 @@ class ParallelWorkContractTest extends TestCase
         $manifest['lanes'][0]['ownership'] = [
             $this->pathRule('application/views/components/booking_', 'filename_stem'),
         ];
-        $manifest['lanes'][1]['ownership'] = [$this->pathRule('application/views/components/booking_sidebar.php')];
+        $manifest['lanes'][1]['ownership'] = [
+            $this->pathRule('application/views/components/booking_sidebar.php', 'exact_file'),
+        ];
 
         self::assertContains(
             'ownership_overlap:0:1',
@@ -208,7 +221,9 @@ class ParallelWorkContractTest extends TestCase
         $manifest = $this->validManifest();
         $manifest['primary_approved_component_ids'] = ['booking-public', 'platform-quality-tooling'];
         $manifest['lanes'][0]['ownership'] = [$this->pathRule('application/views/components/booking_')];
-        $manifest['lanes'][1]['ownership'] = [$this->pathRule('application/views/components/booking_sidebar.php')];
+        $manifest['lanes'][1]['ownership'] = [
+            $this->pathRule('application/views/components/booking_sidebar.php', 'exact_file'),
+        ];
 
         self::assertNotContains(
             'ownership_overlap:0:1',
@@ -288,7 +303,9 @@ class ParallelWorkContractTest extends TestCase
     public function testStemStyleCanonicalPrefixRequiresComponentApproval(): void
     {
         $manifest = $this->validManifest();
-        $manifest['lanes'][0]['ownership'] = [$this->pathRule('application/views/components/booking_sidebar.php')];
+        $manifest['lanes'][0]['ownership'] = [
+            $this->pathRule('application/views/components/booking_sidebar.php', 'exact_file'),
+        ];
 
         self::assertContains(
             'missing_primary_component_approval:booking-public',
@@ -301,6 +318,20 @@ class ParallelWorkContractTest extends TestCase
         $manifest = $this->validManifest();
         $manifest['primary_approved_component_ids'] = [];
         $manifest['lanes'][1]['ownership'] = [$this->pathRule('scripts/cinder/performance')];
+
+        self::assertSame([], ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap));
+    }
+
+    public function testStemOwnershipDoesNotOverlapAMatchingSiblingDirectory(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['primary_approved_component_ids'] = ['booking-public'];
+        $manifest['lanes'][0]['ownership'] = [
+            $this->pathRule('application/views/components/booking_', 'filename_stem'),
+        ];
+        $manifest['lanes'][1]['ownership'] = [
+            $this->pathRule('application/views/components/booking_assets', 'directory'),
+        ];
 
         self::assertSame([], ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap));
     }
@@ -389,7 +420,7 @@ class ParallelWorkContractTest extends TestCase
     }
 
     /** @return array{path: string, match: string} */
-    private function pathRule(string $path, string $match = 'exact_or_descendants'): array
+    private function pathRule(string $path, string $match = 'directory'): array
     {
         return ['path' => $path, 'match' => $match];
     }

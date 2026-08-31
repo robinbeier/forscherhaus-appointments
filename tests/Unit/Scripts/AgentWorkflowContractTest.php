@@ -77,7 +77,7 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame('disabled', $contract['authority']['reviewer']['git_lazy_fetch'] ?? null);
         self::assertSame(
-            'fixed_system_path_or_explicit_primary_codex',
+            'explicit_primary_codex_with_canonical_target',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
         self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);

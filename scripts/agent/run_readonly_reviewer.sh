@@ -196,25 +196,38 @@ if ! trusted_git diff --quiet --no-ext-diff --no-textconv "$base_sha" "$head_sha
     exit 1
 fi
 
-if [[ -n "$requested_codex_bin" ]]; then
-    if [[ "$requested_codex_bin" != /* || ! -x "$requested_codex_bin" ]]; then
-        echo "Reviewer Codex binary must be an executable absolute path." >&2
-        exit 2
-    fi
-    codex_bin="$requested_codex_bin"
-else
-    codex_bin="$(command -v codex 2>/dev/null)" || {
-        echo "Codex CLI is unavailable on the fixed reviewer tool path; pass --codex-bin with a trusted absolute path." >&2
-        exit 2
-    }
+if [[ -z "$requested_codex_bin" ]]; then
+    echo "Reviewer Codex binary must be supplied explicitly by the primary." >&2
+    exit 2
+fi
+if [[ "$requested_codex_bin" != /* || ! -x "$requested_codex_bin" ]]; then
+    echo "Reviewer Codex binary must be an executable absolute path." >&2
+    exit 2
+fi
+requested_codex_name="$(basename -- "$requested_codex_bin")"
+codex_bin="$(
+    "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
+        $resolved = realpath($argv[1]);
+        if ($resolved === false) {
+            exit(1);
+        }
+        fwrite(STDOUT, $resolved);
+    ' "$requested_codex_bin"
+)" || {
+    echo "Reviewer Codex binary target could not be resolved." >&2
+    exit 2
+}
+if [[ ! -x "$codex_bin" ]]; then
+    echo "Reviewer Codex binary target must be executable." >&2
+    exit 2
 fi
 case "$codex_bin" in
-    "$repo_root"/*)
+    "$repo_root"|"$repo_root"/*)
         echo "Reviewer Codex binary must be outside the reviewed repository." >&2
         exit 2
         ;;
 esac
-if [[ "$(basename -- "$codex_bin")" != "codex" ]]; then
+if [[ "$requested_codex_name" != "codex" ]]; then
     echo "Reviewer Codex binary does not identify as Codex CLI." >&2
     exit 2
 fi

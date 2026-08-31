@@ -90,7 +90,7 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertSame('disabled', $contract['authority']['reviewer']['git_lazy_fetch'] ?? null);
         self::assertSame(
-            'fixed_system_path_or_explicit_primary_codex',
+            'explicit_primary_codex_with_canonical_target',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
         self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
@@ -457,6 +457,30 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringNotContainsString($fixtureRepo . '/.codex/agents/reviewer-', $capture);
 
         self::assertTrue(unlink($capturePath));
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(2, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('must be supplied explicitly by the primary', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'The reviewer must not discover Codex from ambient lookup.');
+
         $process = proc_open(
             [
                 $fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh',
@@ -507,6 +531,35 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame('', (string) $stdout);
         self::assertStringContainsString('Codex binary must be outside the reviewed repository', (string) $stderr);
         self::assertFileDoesNotExist($capturePath, 'A repository-owned Codex binary must never execute.');
+
+        $symlinkDirectory = $temporaryDirectory . '/symlinked-codex';
+        self::assertTrue(mkdir($symlinkDirectory, 0700));
+        $symlinkedCodex = $symlinkDirectory . '/codex';
+        self::assertTrue(symlink($fixtureRepo . '/scripts/agent/run_readonly_reviewer.sh', $symlinkedCodex));
+        $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
+        $process = proc_open(
+            [
+                $trustedRunner,
+                '--repo-root=' . $fixtureRepo,
+                '--codex-bin=' . $symlinkedCodex,
+                '--lens=correctness_security',
+                '--base-sha=' . $base,
+                '--head-sha=' . $head,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixtureRepo,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(2, proc_close($process));
+        self::assertSame('', (string) $stdout);
+        self::assertStringContainsString('Codex binary must be outside the reviewed repository', (string) $stderr);
+        self::assertFileDoesNotExist($capturePath, 'A symlink must not hide a repository-owned Codex target.');
 
         $trustedRunner = $this->materializeTrustedRunner($fixtureRepo, $base);
         $process = proc_open(
@@ -978,7 +1031,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',
-            'tool_path_policy' => 'fixed_system_path_or_explicit_primary_codex',
+            'tool_path_policy' => 'explicit_primary_codex_with_canonical_target',
             'codex_identity_check' => 'basename_and_version',
             'web_search' => 'disabled',
             'review_checkout' => 'private_exact_commit_clone',
