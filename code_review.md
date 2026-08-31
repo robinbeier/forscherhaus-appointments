@@ -115,7 +115,10 @@ Runtime model and reasoning values live in the structured contract; the role
 TOML contains only the human-readable review instructions. It starts a fresh
 ephemeral review without user config,
 exec-policy rules, external connectors, web search, or ambient PHP configuration
-for its trusted contract and output validator. Git and PHP resolve through a
+for either its bootstrap or its trusted contract and output validator. The
+bootstrap passes an explicit environment allowlist into Bash, excluding
+`BASH_ENV`, exported functions, shell options, and unrelated ambient variables.
+Git and PHP resolve through a
 fixed system path, while only the primary may pass a trusted absolute Codex
 binary path; either path must identify as the Codex CLI by basename and version
 output. Pre-trust Git probes ignore ambient Git environment, global and system

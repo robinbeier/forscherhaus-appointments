@@ -74,6 +74,10 @@ class ReviewerAuthorityContractTest extends TestCase
             'external_bootstrap_review',
             $contract['authority']['reviewer']['runtime_configuration_change_policy'] ?? null,
         );
+        self::assertSame(
+            'clean_bootstrap_environment',
+            $contract['authority']['reviewer']['shell_runtime_configuration'] ?? null,
+        );
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertSame(
             'ignore_ambient_and_disable_helpers',
@@ -222,30 +226,35 @@ class ReviewerAuthorityContractTest extends TestCase
         $head = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD']);
 
         $capturePath = $temporaryDirectory . '/capture.txt';
+        $resultPath = $temporaryDirectory . '/result.json';
         $fakeCodex = $temporaryDirectory . '/codex';
         file_put_contents(
             $fakeCodex,
-            <<<'BASH'
-            #!/usr/bin/env bash
-            if [[ "${1:-}" == "--version" ]]; then
-                printf 'codex-cli 0.145.0\n'
-                exit 0
-            fi
-            {
-                printf 'ARGS\n'
-                printf '%s\n' "$@"
-                printf 'ENV\n'
-                printf 'GH_TOKEN=%s\n' "${GH_TOKEN-unset}"
-                printf 'GITHUB_TOKEN=%s\n' "${GITHUB_TOKEN-unset}"
-                printf 'GITHUB_PAT=%s\n' "${GITHUB_PAT-unset}"
-                printf 'LINEAR_API_KEY=%s\n' "${LINEAR_API_KEY-unset}"
-                printf 'LINEAR_TOKEN=%s\n' "${LINEAR_TOKEN-unset}"
-                printf 'PROMPT\n'
-                cat
-            } > "$REVIEWER_TEST_CAPTURE"
-            printf '%s\n' "$REVIEWER_TEST_RESULT"
-            BASH
-            ,
+            str_replace(
+                ['__CAPTURE_PATH__', '__RESULT_PATH__'],
+                [escapeshellarg($capturePath), escapeshellarg($resultPath)],
+                <<<'BASH'
+                #!/usr/bin/env bash
+                if [[ "${1:-}" == "--version" ]]; then
+                    printf 'codex-cli 0.145.0\n'
+                    exit 0
+                fi
+                {
+                    printf 'ARGS\n'
+                    printf '%s\n' "$@"
+                    printf 'ENV\n'
+                    printf 'GH_TOKEN=%s\n' "${GH_TOKEN-unset}"
+                    printf 'GITHUB_TOKEN=%s\n' "${GITHUB_TOKEN-unset}"
+                    printf 'GITHUB_PAT=%s\n' "${GITHUB_PAT-unset}"
+                    printf 'LINEAR_API_KEY=%s\n' "${LINEAR_API_KEY-unset}"
+                    printf 'LINEAR_TOKEN=%s\n' "${LINEAR_TOKEN-unset}"
+                    printf 'PROMPT\n'
+                    cat
+                } > __CAPTURE_PATH__
+                /bin/cat __RESULT_PATH__
+                BASH
+                ,
+            ),
         );
         chmod($fakeCodex, 0700);
 
@@ -283,7 +292,6 @@ class ReviewerAuthorityContractTest extends TestCase
         $environment = $_ENV;
         $environment['PATH'] = $temporaryDirectory . ':' . (getenv('PATH') ?: '/usr/bin:/bin');
         $environment['REVIEWER_TEST_CODEX_BIN'] = $fakeCodex;
-        $environment['REVIEWER_TEST_CAPTURE'] = $capturePath;
         $environment['GH_TOKEN'] = 'credential-sentinel';
         $environment['GITHUB_TOKEN'] = 'credential-sentinel';
         $environment['GITHUB_PAT'] = 'credential-sentinel';
@@ -298,6 +306,10 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertNotFalse(file_put_contents($phpIni, 'auto_prepend_file=' . $autoPrepend . "\n"));
         $environment['PHPRC'] = $phpIni;
         $environment['PHP_INI_SCAN_DIR'] = $temporaryDirectory;
+        $bashMarker = $temporaryDirectory . '/ambient-bash-configuration-ran';
+        $bashEnvironment = $temporaryDirectory . '/bash-environment';
+        self::assertNotFalse(file_put_contents($bashEnvironment, ': > ' . escapeshellarg($bashMarker) . "\n"));
+        $environment['BASH_ENV'] = $bashEnvironment;
         $lenses = [
             'correctness_security' => [
                 'model' => 'gpt-5.4',
@@ -313,7 +325,7 @@ class ReviewerAuthorityContractTest extends TestCase
             ],
         ];
         foreach ($lenses as $lens => $expectations) {
-            $environment['REVIEWER_TEST_RESULT'] = json_encode(
+            $expectedResult = json_encode(
                 [
                     'lens' => $lens,
                     'base_sha' => $base,
@@ -323,9 +335,10 @@ class ReviewerAuthorityContractTest extends TestCase
                 ],
                 JSON_THROW_ON_ERROR,
             );
+            self::assertNotFalse(file_put_contents($resultPath, $expectedResult));
             [$exitCode, $stdout, $stderr] = $this->runReviewer($fixtureRepo, $environment, $lens, $base, $head);
             self::assertSame(0, $exitCode, $stderr);
-            self::assertSame($environment['REVIEWER_TEST_RESULT'], trim($stdout));
+            self::assertSame($expectedResult, trim($stdout));
             $capture = (string) file_get_contents($capturePath);
             self::assertStringContainsString("--model\n" . $expectations['model'], $capture, $lens);
             self::assertStringNotContainsString('untrusted-model', $capture, $lens);
@@ -340,6 +353,7 @@ class ReviewerAuthorityContractTest extends TestCase
                 $lens,
             );
             self::assertFileDoesNotExist($phpMarker, $lens);
+            self::assertFileDoesNotExist($bashMarker, $lens);
             self::assertFileDoesNotExist($gitMarker, $lens);
             self::assertFileDoesNotExist($phpBinaryMarker, $lens);
             self::assertFileDoesNotExist($fsmonitorMarker, $lens);
@@ -474,7 +488,7 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('does not identify as Codex CLI', (string) $stderr);
         self::assertFileDoesNotExist($capturePath, 'A non-Codex executable must never act as the reviewer.');
 
-        $environment['REVIEWER_TEST_RESULT'] = '{"not":"a review"}';
+        self::assertNotFalse(file_put_contents($resultPath, '{"not":"a review"}'));
         [$exitCode, $stdout, $stderr] = $this->runReviewer(
             $fixtureRepo,
             $environment,
@@ -486,15 +500,20 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame('', $stdout);
         self::assertStringContainsString('not bound to the requested base, exact head, and lens', $stderr);
 
-        $environment['REVIEWER_TEST_RESULT'] = json_encode(
-            [
-                'lens' => 'correctness_security',
-                'base_sha' => $base,
-                'head_sha' => $head,
-                'verdict' => 'no_findings',
-                'findings' => [],
-            ],
-            JSON_THROW_ON_ERROR,
+        self::assertNotFalse(
+            file_put_contents(
+                $resultPath,
+                json_encode(
+                    [
+                        'lens' => 'correctness_security',
+                        'base_sha' => $base,
+                        'head_sha' => $head,
+                        'verdict' => 'no_findings',
+                        'findings' => [],
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
         );
 
         $tree = $this->runGit($fixtureRepo, ['rev-parse', 'HEAD^{tree}']);
@@ -898,6 +917,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
+            'shell_runtime_configuration' => 'clean_bootstrap_environment',
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',

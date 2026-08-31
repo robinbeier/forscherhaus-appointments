@@ -130,6 +130,11 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('implementation_worker', $contract['parallel_work']['writer_role'] ?? null);
         self::assertTrue($contract['parallel_work']['external_mutations_remain_serial'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_semantic_independence_attestation'] ?? null);
+        self::assertSame(
+            'scripts/agent/check_parallel_work_contract.sh',
+            $contract['parallel_work']['validator_invocation'] ?? null,
+        );
+        self::assertSame('ignore_ambient_ini', $contract['parallel_work']['php_runtime_configuration'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
         self::assertSame(
             [

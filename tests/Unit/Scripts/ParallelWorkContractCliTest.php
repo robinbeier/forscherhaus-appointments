@@ -23,6 +23,11 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
             $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
         );
+        copy(
+            $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.sh',
+            $this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh',
+        );
+        self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0700));
         copy($sourceRepoRoot . '/scripts/agent/lib/RepoPath.php', $this->repoRoot . '/scripts/agent/lib/RepoPath.php');
         copy(
             $sourceRepoRoot . '/scripts/agent/lib/ParallelWorkContract.php',
@@ -207,6 +212,36 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertStringContainsString('invalid shape', $stderr);
     }
 
+    public function testCliIgnoresAmbientPhpStartupConfiguration(): void
+    {
+        $ambientDirectory = sys_get_temp_dir() . '/parallel-work-php-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($ambientDirectory, 0700));
+        $marker = $ambientDirectory . '/auto-prepend-ran';
+        $autoPrepend = $ambientDirectory . '/auto-prepend.php';
+        self::assertNotFalse(
+            file_put_contents($autoPrepend, '<?php file_put_contents(' . var_export($marker, true) . ", 'ran');\n"),
+        );
+        $phpIni = $ambientDirectory . '/php.ini';
+        self::assertNotFalse(file_put_contents($phpIni, 'auto_prepend_file=' . $autoPrepend . "\n"));
+
+        $manifestPath = $this->writeJsonFixture('ambient-php', $this->manifestForPath('scripts/agent'));
+        [$exitCode, $stdout, $stderr] = $this->runCli(
+            ['--manifest=' . $manifestPath],
+            environment: [
+                'PHPRC' => $phpIni,
+                'PHP_INI_SCAN_DIR' => $ambientDirectory,
+            ],
+        );
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'primary_owned_path:0:scripts/agent',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+        self::assertFileDoesNotExist($marker);
+    }
+
     public function testCliRejectsUnknownOptionBeforeReadingInputs(): void
     {
         [$exitCode, $stdout, $stderr] = $this->runCli(['--bogus']);
@@ -261,7 +296,7 @@ class ParallelWorkContractCliTest extends TestCase
     {
         $repoRoot ??= $this->repoRoot;
         $process = proc_open(
-            [PHP_BINARY, $repoRoot . '/scripts/agent/check_parallel_work_contract.php', ...$arguments],
+            [$repoRoot . '/scripts/agent/check_parallel_work_contract.sh', ...$arguments],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             $repoRoot,

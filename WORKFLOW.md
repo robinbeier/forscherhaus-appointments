@@ -107,12 +107,13 @@ mutation, integration, attestation, and landing remain serial.
 Before opening writer lanes, the primary records a small JSON manifest and runs
 
 ```bash
-php scripts/agent/check_parallel_work_contract.php --manifest=<lane-manifest.json>
+scripts/agent/check_parallel_work_contract.sh --manifest=<lane-manifest.json>
 ```
 
-The checker reads both the workflow contract and the ownership map from the
-manifest's declared base commit. Mutable files in the current checkout cannot
-relax the policy used to approve a lane.
+The checker starts PHP without ambient `php.ini`, `PHPRC`, scan directories,
+or prepend/append hooks, then reads both the workflow contract and the ownership
+map from the manifest's declared base commit. Mutable files in the current
+checkout cannot relax the policy used to approve a lane.
 
 The manifest names one full lowercase common base SHA, the primary ID, exact
 `primary_approved_component_ids` for any intersected `single-owner` or
@@ -342,7 +343,10 @@ chmod 700 "$trusted_runner"
 rm -f "$trusted_runner"
 ```
 
-The runner starts an ephemeral session without user configuration, user or
+The runner first enters through a PHP `-n` bootstrap and passes only an explicit
+allowlist of runtime variables into its Bash body, so `BASH_ENV`, exported shell
+functions, shell options, and unrelated ambient variables cannot execute before
+the trust checks. It then starts an ephemeral session without user configuration, user or
 project exec-policy rules, external connectors, or web search. It uses a
 read-only sandbox with network denied for reviewer commands and never permits
 approval escalation. Git and PHP resolve only through a fixed system tool path;

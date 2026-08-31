@@ -1,12 +1,92 @@
+#!/usr/bin/env -S PATH=/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin php -n
+<?php
+
+declare(strict_types=1);
+
+$source = (string) file_get_contents(__FILE__);
+$payload = substr($source, __COMPILER_HALT_OFFSET__);
+if ($payload === false || $payload === '') {
+    fwrite(STDERR, "Reviewer bootstrap payload is unavailable.\n");
+    exit(2);
+}
+
+$environment = [
+    'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin',
+    'TMPDIR' => getenv('TMPDIR') ?: '/tmp',
+];
+foreach (
+    [
+        'HOME',
+        'USER',
+        'LOGNAME',
+        'LANG',
+        'LC_ALL',
+        'TERM',
+        'COLORTERM',
+        'CODEX_HOME',
+        'OPENAI_API_KEY',
+        'OPENAI_BASE_URL',
+        'CODEX_API_KEY',
+        'HTTP_PROXY',
+        'HTTPS_PROXY',
+        'ALL_PROXY',
+        'NO_PROXY',
+        'SSL_CERT_FILE',
+        'SSL_CERT_DIR',
+        'NODE_EXTRA_CA_CERTS',
+    ] as $name
+) {
+    $value = getenv($name);
+    if ($value !== false) {
+        $environment[$name] = $value;
+    }
+}
+
+$process = proc_open(
+    ['/bin/bash', '-s', '--', __FILE__, ...array_slice($argv, 1)],
+    [0 => ['pipe', 'r'], 1 => STDOUT, 2 => STDERR],
+    $pipes,
+    getcwd() ?: null,
+    $environment,
+);
+if (!is_resource($process)) {
+    fwrite(STDERR, "Reviewer bootstrap could not start the trusted shell.\n");
+    exit(2);
+}
+
+$offset = 0;
+$length = strlen($payload);
+while ($offset < $length) {
+    $written = fwrite($pipes[0], substr($payload, $offset));
+    if ($written === false || $written === 0) {
+        fclose($pipes[0]);
+        proc_terminate($process);
+        proc_close($process);
+        fwrite(STDERR, "Reviewer bootstrap payload could not be delivered.\n");
+        exit(2);
+    }
+    $offset += $written;
+}
+fclose($pipes[0]);
+exit(proc_close($process));
+
+__halt_compiler();
 #!/bin/bash
 
 set -euo pipefail
+
+runner_source_input="${1:-}"
+if [[ -z "$runner_source_input" ]]; then
+    echo "Reviewer trusted source path is unavailable." >&2
+    exit 2
+fi
+shift
 
 reviewer_system_path="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin"
 export PATH="$reviewer_system_path"
 
 usage() {
-    echo "Usage: $0 [--repo-root=<absolute-path>] [--codex-bin=<absolute-path>] --lens=<lens> --base-sha=<sha> --head-sha=<sha>" >&2
+    echo "Usage: $runner_source_input [--repo-root=<absolute-path>] [--codex-bin=<absolute-path>] --lens=<lens> --base-sha=<sha> --head-sha=<sha>" >&2
 }
 
 lens=""
@@ -91,8 +171,8 @@ trusted_git cat-file -e "${base_sha}^{commit}" 2>/dev/null || {
     exit 1
 }
 
-runner_source_directory="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-runner_source="$runner_source_directory/$(basename -- "${BASH_SOURCE[0]}")"
+runner_source_directory="$(cd -P -- "$(dirname -- "$runner_source_input")" && pwd)"
+runner_source="$runner_source_directory/$(basename -- "$runner_source_input")"
 case "$runner_source" in
     "$repo_root"/*)
         echo "Reviewer runner must be materialized from the review base outside the worktree." >&2
