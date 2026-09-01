@@ -451,6 +451,10 @@ configuration, connectors, delegation, credentials, or external writes;
 non-macOS execution fails closed. The machine contract is the source for model,
 feature, schema, runtime, and trusted-path settings; the runner orchestrates
 separately materialized exact-base bundle and isolated-runtime libraries.
+Commit-derived evidence is rendered through an empty-template private Gitdir
+whose index and materialized `.gitattributes` files are bound to the verified
+head. Source-worktree Git configuration, `.git/info/attributes`, and host Git
+templates cannot influence changed paths, numstat, or patch bytes.
 Bundle construction, model/prompt policy, and output validation remain separate
 modules. Structural output rules come from the exact-base JSON schema; exact
 Base/Head/lens/path binding and privacy are additional semantic checks.

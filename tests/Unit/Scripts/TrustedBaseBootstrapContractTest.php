@@ -180,6 +180,116 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         }
     }
 
+    public function testReviewerEvidenceUsesSterileGitMetadataAndCanonicalObjects(): void
+    {
+        $bundleRuntime = (string) file_get_contents(
+            $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+        );
+
+        self::assertStringContainsString('GIT_CONFIG_GLOBAL=/dev/null', $bundleRuntime);
+        self::assertStringContainsString('GIT_CONFIG_NOSYSTEM=1', $bundleRuntime);
+        self::assertStringContainsString('GIT_ATTR_NOSYSTEM=1', $bundleRuntime);
+        self::assertStringContainsString(
+            'GIT_ALTERNATE_OBJECT_DIRECTORIES="$readonly_reviewer_evidence_objects"',
+            $bundleRuntime,
+        );
+        self::assertStringContainsString('-c core.attributesFile=/dev/null', $bundleRuntime);
+        self::assertStringContainsString('--git-dir="$readonly_reviewer_evidence_git_dir"', $bundleRuntime);
+        self::assertStringContainsString(
+            'evidence_objects="$(trusted_git rev-parse --git-path objects',
+            $bundleRuntime,
+        );
+        self::assertStringContainsString(
+            'evidence_objects_canonical="$(canonical_path "$evidence_objects")"',
+            $bundleRuntime,
+        );
+        self::assertStringContainsString(
+            'evidence_git_dir_canonical="$(canonical_path "$evidence_git_dir")"',
+            $bundleRuntime,
+        );
+        self::assertStringContainsString('--template="$template_dir"', $bundleRuntime);
+        self::assertStringContainsString('--src-prefix=a/ --dst-prefix=b/', $bundleRuntime);
+        self::assertStringContainsString(
+            'readonly_reviewer_bind_evidence_head "$control_root" "$repo_root" "$head_sha"',
+            $bundleRuntime,
+        );
+
+        foreach (['diff --name-only', 'diff --numstat', 'diff --full-index', 'show "${base_sha}:'] as $operation) {
+            self::assertStringContainsString('evidence_git ' . $operation, $bundleRuntime);
+        }
+    }
+
+    public function testSterileReviewerEvidenceIgnoresLocalGitDriftButPreservesCommittedAttributes(): void
+    {
+        $fixture = sys_get_temp_dir() . '/reviewer-evidence-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($fixture, 0700, true));
+
+        try {
+            $this->runGit($fixture, ['init', '-q']);
+            $this->runGit($fixture, ['config', 'user.name', 'Reviewer Evidence Test']);
+            $this->runGit($fixture, ['config', 'user.email', 'reviewer-evidence@example.invalid']);
+            file_put_contents($fixture . '/.gitattributes', "committed.bin binary\n");
+            file_put_contents($fixture . '/committed.bin', "base binary marker\n");
+            file_put_contents($fixture . '/review.txt', "base text\n");
+            $this->runGit($fixture, ['add', '.gitattributes', 'committed.bin', 'review.txt']);
+            $this->runGit($fixture, ['commit', '-qm', 'base']);
+            $base = trim($this->runGit($fixture, ['rev-parse', 'HEAD']));
+
+            file_put_contents($fixture . '/committed.bin', "head binary marker\n");
+            file_put_contents($fixture . '/review.txt', "head text\n");
+            $this->runGit($fixture, ['add', 'committed.bin', 'review.txt']);
+            $this->runGit($fixture, ['commit', '-qm', 'head']);
+            $head = trim($this->runGit($fixture, ['rev-parse', 'HEAD']));
+
+            $sourcePatchBefore = $this->runGit($fixture, [
+                'diff',
+                '--full-index',
+                '--unified=0',
+                '--no-renames',
+                '--no-ext-diff',
+                '--no-textconv',
+                $base,
+                $head,
+            ]);
+            $evidenceBefore = $this->runEvidenceSnapshot($fixture, $base, $head, 'before');
+
+            file_put_contents($fixture . '/.git/info/attributes', "review.txt binary\n");
+            $this->runGit($fixture, ['config', 'color.ui', 'always']);
+            $this->runGit($fixture, ['config', 'diff.noprefix', 'true']);
+            $this->runGit($fixture, ['config', 'diff.algorithm', 'patience']);
+
+            $sourcePatchAfter = $this->runGit($fixture, [
+                'diff',
+                '--full-index',
+                '--unified=0',
+                '--no-renames',
+                '--no-ext-diff',
+                '--no-textconv',
+                $base,
+                $head,
+            ]);
+            $evidenceAfter = $this->runEvidenceSnapshot($fixture, $base, $head, 'after');
+
+            self::assertNotSame($sourcePatchBefore, $sourcePatchAfter);
+            self::assertSame($evidenceBefore, $evidenceAfter);
+            self::assertSame("committed.bin\0review.txt\0", $evidenceAfter['changed_paths']);
+            self::assertMatchesRegularExpression(
+                '/(?:^|\\x00)\\d+\\t\\d+\\treview\\.txt\\x00/',
+                $evidenceAfter['numstat'],
+            );
+            self::assertStringContainsString("-\t-\tcommitted.bin\0", $evidenceAfter['numstat']);
+            self::assertStringContainsString('diff --git a/review.txt b/review.txt', $evidenceAfter['patch']);
+            self::assertStringContainsString('diff --git a/committed.bin b/committed.bin', $evidenceAfter['patch']);
+            self::assertStringContainsString(
+                'Binary files a/committed.bin and b/committed.bin differ',
+                $evidenceAfter['patch'],
+            );
+            self::assertStringNotContainsString("\033[", $evidenceAfter['patch']);
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
     /** @return array{int, string, string} */
     private function runTreeGuard(string $fixture, string $base): array
     {
@@ -210,6 +320,73 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         fclose($pipes[2]);
 
         return [proc_close($process), $stdout, $stderr];
+    }
+
+    /** @return array{changed_paths: string, numstat: string, patch: string} */
+    private function runEvidenceSnapshot(string $fixture, string $base, string $head, string $label): array
+    {
+        $controlRoot = sys_get_temp_dir() . '/reviewer-evidence-control-' . $label . '-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($controlRoot, 0700, true));
+        $trustedRuntime = $this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh';
+        $bundleRuntime = $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh';
+        $script = implode("\n", [
+            'set -euo pipefail',
+            'TRUSTED_BASE_LAUNCHER=1',
+            'source ' . escapeshellarg($trustedRuntime),
+            'source ' . escapeshellarg($bundleRuntime),
+            'trusted_base_repo_root=' . escapeshellarg($fixture),
+            'trusted_git() { trusted_base_git "$@"; }',
+            'canonical_path() { trusted_base_canonical_path "$@"; }',
+            'readonly_reviewer_prepare_evidence_git ' . escapeshellarg($controlRoot) . ' ' . escapeshellarg($fixture),
+            'readonly_reviewer_bind_evidence_head ' .
+            escapeshellarg($controlRoot) .
+            ' ' .
+            escapeshellarg($fixture) .
+            ' ' .
+            escapeshellarg($head),
+            'readonly_reviewer_evidence_git diff --name-only --no-color --no-renames --no-ext-diff --no-textconv -z ' .
+            escapeshellarg($base) .
+            ' ' .
+            escapeshellarg($head) .
+            ' > ' .
+            escapeshellarg($controlRoot . '/changed-paths'),
+            'readonly_reviewer_evidence_git diff --numstat --no-color --no-renames --no-ext-diff --no-textconv -z ' .
+            escapeshellarg($base) .
+            ' ' .
+            escapeshellarg($head) .
+            ' -- > ' .
+            escapeshellarg($controlRoot . '/numstat'),
+            'readonly_reviewer_evidence_git diff --full-index --unified=0 --no-color --src-prefix=a/ --dst-prefix=b/ ' .
+            '--no-renames --no-ext-diff --no-textconv ' .
+            escapeshellarg($base) .
+            ' ' .
+            escapeshellarg($head) .
+            ' -- > ' .
+            escapeshellarg($controlRoot . '/patch'),
+        ]);
+        $process = proc_open(
+            ['/bin/bash', '--noprofile', '--norc', '-c', $script],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixture,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        try {
+            self::assertSame(0, proc_close($process), $stdout . $stderr);
+
+            return [
+                'changed_paths' => (string) file_get_contents($controlRoot . '/changed-paths'),
+                'numstat' => (string) file_get_contents($controlRoot . '/numstat'),
+                'patch' => (string) file_get_contents($controlRoot . '/patch'),
+            ];
+        } finally {
+            $this->removeDirectory($controlRoot);
+        }
     }
 
     private function runGit(string $directory, array $arguments): string
