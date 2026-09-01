@@ -109,7 +109,16 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame([], array_intersect($fixedPlatforms, $archivePlatforms));
         self::assertSame(
-            'a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873',
+            [
+                'url' => 'https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-macos-aarch64.tar.gz',
+                'archive_sha256' => '11b291a5e346d1978f133c523f21691bbbb233d18cfe0499fd2b7cfd8ed1e1a6',
+                'member' => 'php',
+                'member_sha256' => '918e07c4799de22f50fc5767a99a559d14026d0e37759f3a1265de3e38614c3f',
+            ],
+            $contract['authority']['interpreter_trust']['php']['pinned_archive_by_platform']['Darwin-arm64'] ?? null,
+        );
+        self::assertSame(
+            'b9d81b2ab2e48895ecfe285c350d468cdcb2d910d7b560cffe0a1399a0f77e75',
             $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Darwin-arm64'] ?? null,
         );
         self::assertSame(

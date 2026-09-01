@@ -767,7 +767,7 @@ class ParallelWorkContractCliTest extends TestCase
             ) {
                 continue;
             }
-            if ($system === 'Linux' && fileowner($canonicalPath) !== 0) {
+            if (fileowner($canonicalPath) !== 0) {
                 continue;
             }
             $candidate = $logicalPath;

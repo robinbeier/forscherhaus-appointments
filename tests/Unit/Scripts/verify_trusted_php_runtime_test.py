@@ -1,5 +1,6 @@
-import importlib.util
+import contextlib
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -43,6 +44,22 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
     def digest(self):
         return verifier.closure_attestation(self.php, [os.path.realpath(self.php)])
 
+    @contextlib.contextmanager
+    def owned_lstat(self, uid):
+        original = verifier.os.lstat
+
+        class OwnedStat:
+            def __init__(self, metadata):
+                self.st_mode = metadata.st_mode
+                self.st_uid = uid
+                self.st_gid = 0
+
+        verifier.os.lstat = lambda path: OwnedStat(original(path))
+        try:
+            yield
+        finally:
+            verifier.os.lstat = original
+
     def archive_fixture(self, content=b"static-php-fixture", extra_member=False):
         archive_path = os.path.join(self.root, "fixture-runtime.tar.gz")
         with tarfile.open(archive_path, "w:gz") as archive:
@@ -85,25 +102,40 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
 
         return download
 
-    def test_valid_pinned_candidate_prints_canonical_path(self):
-        self.write_contract(
-            candidate_by_platform={"Darwin-arm64": self.php},
-            require_exact_closure_sha256=True,
-            closure_sha256_by_platform={"Darwin-arm64": self.digest()},
-        )
-        self.assertEqual(
-            os.path.realpath(self.php),
-            verifier.attest(self.contract, "Darwin-arm64", self.inspector),
-        )
+    def test_valid_root_owned_fixed_candidate_prints_canonical_path(self):
+        with self.owned_lstat(0):
+            self.write_contract(
+                candidate_by_platform={"Darwin-arm64": self.php},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Darwin-arm64": self.digest()},
+            )
+            self.assertEqual(
+                os.path.realpath(self.php),
+                verifier.attest(self.contract, "Darwin-arm64", self.inspector),
+            )
+
+    def test_user_owned_fixed_candidate_is_rejected_even_when_exactly_pinned(self):
+        with self.owned_lstat(501):
+            self.write_contract(
+                candidate_by_platform={"Darwin-arm64": self.php},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Darwin-arm64": self.digest()},
+            )
+            with self.assertRaisesRegex(
+                verifier.AttestationError,
+                "fixed-path runtime closure is not system-owned",
+            ):
+                verifier.attest(self.contract, "Darwin-arm64", self.inspector)
 
     def test_digest_mismatch_rejected(self):
-        self.write_contract(
-            candidate_by_platform={"Darwin-arm64": self.php},
-            require_exact_closure_sha256=True,
-            closure_sha256_by_platform={"Darwin-arm64": "0" * 64},
-        )
-        with self.assertRaises(verifier.AttestationError):
-            verifier.attest(self.contract, "Darwin-arm64", self.inspector)
+        with self.owned_lstat(0):
+            self.write_contract(
+                candidate_by_platform={"Darwin-arm64": self.php},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Darwin-arm64": "0" * 64},
+            )
+            with self.assertRaises(verifier.AttestationError):
+                verifier.attest(self.contract, "Darwin-arm64", self.inspector)
 
     def test_valid_pinned_archive_is_materialized_privately_and_attested(self):
         archive_path, descriptor, closure_sha256 = self.archive_fixture()
@@ -260,20 +292,21 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
                 )
             return ""
 
-        paths, sealed = verifier.dependency_closure(self.php, "Darwin", inspect)
-        digest = verifier.closure_attestation(self.php, paths, sealed)
-        self.write_contract(
-            candidate_by_platform={"Darwin-arm64": self.php},
-            require_exact_closure_sha256=True,
-            closure_sha256_by_platform={"Darwin-arm64": digest},
-        )
-        os.chmod(dependency, 0o755)
-        with open(dependency, "wb") as stream:
-            stream.write(b"drifted-dependency")
-        os.chmod(dependency, 0o555)
+        with self.owned_lstat(0):
+            paths, sealed = verifier.dependency_closure(self.php, "Darwin", inspect)
+            digest = verifier.closure_attestation(self.php, paths, sealed)
+            self.write_contract(
+                candidate_by_platform={"Darwin-arm64": self.php},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Darwin-arm64": digest},
+            )
+            os.chmod(dependency, 0o755)
+            with open(dependency, "wb") as stream:
+                stream.write(b"drifted-dependency")
+            os.chmod(dependency, 0o555)
 
-        with self.assertRaises(verifier.AttestationError):
-            verifier.attest(self.contract, "Darwin-arm64", inspect)
+            with self.assertRaises(verifier.AttestationError):
+                verifier.attest(self.contract, "Darwin-arm64", inspect)
 
     def test_writable_candidate_rejected(self):
         os.chmod(self.php, 0o775)

@@ -122,15 +122,15 @@ Both agent-harness entry points establish a root-owned POSIX-shell boundary,
 discard caller startup configuration, and use isolated `/usr/bin/python3`
 before any PHP runs. `scripts/agent/verify_trusted_php_runtime.py` then binds
 PHP and its dynamic dependency closure to the exact-base machine contract.
-Every admitted platform requires an exact closure pin, including root-owned
-Linux runtimes; a missing platform pin or any pin drift fails closed and
-requires a reviewed contract update. A platform may use either one fixed host
-path or one HTTPS archive whose URL, archive digest, sole member, member digest,
-private extraction mode, static non-system closure, and aggregate closure are
-all exact-base-bound. The Intel macOS runtime uses that bounded archive path;
-it is downloaded without ambient proxy or credential state, verified before
-extraction, and never executed from the archive. Platforms absent from both
-runtime-source maps and the closure-pin map are deliberately unsupported.
+Every admitted platform requires an exact closure pin; a missing platform pin
+or any pin drift fails closed and requires a reviewed contract update. A
+fixed-host-path closure must also be entirely system-owned. Alternatively, a
+platform may use one HTTPS archive whose URL, archive digest, sole member,
+member digest, private extraction mode, static non-system closure, and aggregate
+closure are all exact-base-bound. Both macOS runtimes use that bounded archive
+path; they are downloaded without ambient proxy or credential state, verified
+before extraction, and never executed from the archive. Platforms absent from
+both runtime-source maps and the closure-pin map are deliberately unsupported.
 Ambient `PATH` never grants interpreter authority. The centralized ownership
 matcher is also Primary-owned because it defines shared lane and CI semantics.
 

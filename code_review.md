@@ -119,12 +119,13 @@ login authenticates only the authorized model request and cannot be refreshed by
 the harness. Consult the contract and runner for implementation details.
 Before any PHP helper executes, a root-owned clean bootstrap and isolated
 system Python attest the PHP binary plus its dynamic dependency closure against
-an exact per-platform pin in the exact-base contract. Root ownership alone is
-never sufficient; missing pins and ambient or drifted runtimes fail closed. An
-admitted platform may instead materialize the single runtime member from an
-exact URL and archive/member digest into its private control directory. That
-path rejects extra archive members and non-system dynamic dependencies, and it
-still must match the exact aggregate closure pin before PHP executes.
+an exact per-platform pin in the exact-base contract. Fixed host closures must
+also be entirely system-owned; missing pins and ambient, user-owned, or drifted
+runtimes fail closed. An admitted platform may instead materialize the single
+runtime member from an exact URL and archive/member digest into its private
+control directory. That path rejects extra archive members and non-system
+dynamic dependencies, and it still must match the exact aggregate closure pin
+before PHP executes.
 
 The initial trust-root introduction and changes to runtime-loaded
 `.codex/config.toml` or `AGENTS.md` require a separately enforced external

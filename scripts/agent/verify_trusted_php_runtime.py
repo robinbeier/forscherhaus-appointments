@@ -481,8 +481,8 @@ def attest(contract_path, requested_platform, inspector=None, materialize_root=N
     paths, sealed_dependencies = dependency_closure(canonical, system, inspector=inspector)
     if path_labels is not None and paths != [canonical]:
         raise AttestationError("materialized runtime has a non-system dynamic dependency")
-    if system == "Linux" and any(os.lstat(path).st_uid != 0 for path in paths):
-        raise AttestationError("Linux runtime closure is not system-owned")
+    if path_labels is None and any(os.lstat(path).st_uid != 0 for path in paths):
+        raise AttestationError("fixed-path runtime closure is not system-owned")
     digest = closure_attestation(logical, paths, sealed_dependencies, path_labels=path_labels)
     if digest != pin:
         raise AttestationError("runtime closure digest mismatch")
