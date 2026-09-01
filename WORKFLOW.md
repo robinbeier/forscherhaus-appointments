@@ -390,16 +390,21 @@ rm -f "$trusted_runner"
 The runner first enters through a PHP `-n` bootstrap and passes only an explicit
 allowlist of runtime variables into its Bash body, so `BASH_ENV`, exported shell
 functions, shell options, and unrelated ambient variables cannot execute before
-the trust checks. Its trust bundle always uses the fixed system `/tmp`, never an
-ambient or repository-local temporary root. It then starts an ephemeral session without user configuration, user or
-project exec-policy rules, external connectors, or web search. It uses a
-read-only sandbox with network denied for reviewer commands and never permits
-approval escalation. Git and PHP resolve only through a fixed system tool path.
+the trust checks. It resolves the effective account through the OS account
+database and ignores caller-supplied `HOME` and `CODEX_HOME`. A private random
+review root below `/private/tmp` holds only generated review evidence and
+short-lived runtime state; its absolute path contains no account name. It then
+starts an ephemeral session without user
+configuration, user or project exec-policy rules, external connectors, or web
+search and never permits approval escalation. Git and PHP resolve only through a
+fixed system tool path.
 The primary must supply Codex as an executable absolute `--codex-bin` path; the
 runner resolves its canonical target, rejects repository-owned targets even
 through symlinks, and requires the requested basename and target version output
-to identify as the Codex CLI, allowing only bounded semantic-version build
-metadata. Repository-root and runner paths are likewise
+to identify as Codex CLI 0.145.0 exactly, allowing only bounded build metadata.
+The exact pin is intentional: a Codex upgrade can change the available tool
+surface or sandbox behavior and therefore requires a reviewed contract update.
+Repository-root and runner paths are likewise
 resolved to their canonical physical targets before trust-boundary comparisons.
 The host Codex login authenticates only the model-service call and does not grant
 reviewer connector authority: user configuration and rules are ignored,
@@ -408,11 +413,40 @@ inheritance is disabled, ambient OpenAI or Codex API-key overrides are removed,
 and the reviewer may not inspect runtime authentication state.
 Every pre-trust Git command ignores ambient Git environment,
 global and system configuration, hooks, fsmonitor, replacement objects, lazy
-object fetching, external diff drivers, and text conversion. The runner fetches the named commits into a
-private temporary repository and gives the reviewer only that clean, detached
-exact-head checkout. Every tracked symlink is rejected before Codex starts, so
-reviewed paths cannot escape into the host filesystem. Changes to the source
-worktree after preflight cannot alter reviewed content.
+object fetching, external diff drivers, and text conversion. The runner rejects
+tracked symlinks in both exact commit trees and materializes only a deterministic
+review bundle from immutable Git objects: the binary full-index patch, sorted
+changed-path list, per-path base and head blobs, trusted base policy, and a
+timestamp-free manifest binding every readable artifact by SHA-256, byte count,
+base SHA, head SHA, and lens. It exposes neither a `.git` directory nor the
+original worktree to the model. Changes to the source worktree after preflight
+cannot alter reviewed content.
+
+The runner serializes that bounded bundle into deterministic JSON and supplies
+it over standard input; the model receives no filesystem path as its source of
+review context. On macOS the Codex process itself runs inside a repository-owned
+Seatbelt profile that starts with `deny default`. It permits only the system
+runtime, read-only Codex system policy, the exact private review root, and the
+canonical host `auth.json` file. The actual `CODEX_HOME` is never exposed: a
+non-writable temporary runtime home contains only a read-only link to that exact
+login file, a synthetic installation ID, and two explicitly writable scratch
+subtrees that are deleted after the call. The host login authenticates only the
+outer model-service request; its contents are never copied into the bundle or
+prompt.
+The reviewer cannot refresh or rewrite that login; an expired login fails closed
+and must be refreshed outside the reviewer harness before a later attempt.
+
+Before the call, the same Seatbelt profile must read an in-bundle canary and
+must reject canaries in a foreign temp directory, the account home, and the
+original worktree. Any deviation fails closed. The runner derives a one-model
+catalog from the pinned CLI and removes shell, unified execution, patch, image,
+search, experimental, connector, delegation, and workspace-dependency tool
+surfaces. The model therefore cannot turn the outer broker's network or exact
+login-file access into host, GitHub, or Linear access. Non-macOS execution fails
+closed until an equivalent repository-enforced boundary exists. Do not combine
+this contract with legacy `sandbox_mode`, `--sandbox`, or permission-profile
+overrides.
+
 Its trusted PHP contract and output
 validator run without ambient `php.ini` files, `PHPRC`, `PHP_INI_SCAN_DIR`, or
 prepend/append hooks. The machine contract selects the role;

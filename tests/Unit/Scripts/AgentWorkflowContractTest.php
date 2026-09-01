@@ -64,12 +64,21 @@ class AgentWorkflowContractTest extends TestCase
             'materialized_base_blob_outside_worktree',
             $contract['authority']['reviewer']['invocation_source'] ?? null,
         );
-        self::assertSame('read-only', $contract['authority']['reviewer']['filesystem'] ?? null);
-        self::assertSame('denied', $contract['authority']['reviewer']['network'] ?? null);
-        self::assertSame('never', $contract['authority']['reviewer']['approval_policy'] ?? null);
+        self::assertSame(
+            'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
+            $contract['authority']['reviewer']['filesystem'] ?? null,
+        );
+        self::assertSame(
+            'outer_codex_transport_no_model_network_tool_or_external_credentials',
+            $contract['authority']['reviewer']['network'] ?? null,
+        );
+        self::assertSame('outer_sandbox_no_model_tools', $contract['authority']['reviewer']['approval_policy'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_user_config'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? null);
-        self::assertSame('fixed_system_tmp', $contract['authority']['reviewer']['temporary_directory_policy'] ?? null);
+        self::assertSame(
+            'private_system_temp_bundle_and_internal_runtime_only',
+            $contract['authority']['reviewer']['temporary_directory_policy'] ?? null,
+        );
         self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
         self::assertSame(
             'ignore_ambient_and_disable_helpers',
@@ -86,12 +95,16 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
         self::assertSame(
-            'semver_with_bounded_build_metadata',
+            'exact_0_145_0_with_bounded_build_metadata',
             $contract['authority']['reviewer']['codex_version_policy'] ?? null,
         );
         self::assertSame(
             'host_codex_login_without_connector_authority',
             $contract['authority']['reviewer']['codex_authentication_source'] ?? null,
+        );
+        self::assertSame(
+            'isolated_runtime_home_read_only_link_to_canonical_auth_file',
+            $contract['authority']['reviewer']['codex_authentication_home_policy'] ?? null,
         );
         self::assertSame(
             'reject_ambient_api_keys',
@@ -106,10 +119,49 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['finding_text_policy'] ?? null,
         );
         self::assertSame('disabled', $contract['authority']['reviewer']['web_search'] ?? null);
-        self::assertSame('private_exact_commit_clone', $contract['authority']['reviewer']['review_checkout'] ?? null);
+        self::assertSame(
+            'deterministic_exact_commit_bundle',
+            $contract['authority']['reviewer']['review_checkout'] ?? null,
+        );
         self::assertSame(
             'reject_all_tracked_symlinks',
             $contract['authority']['reviewer']['review_checkout_symlink_policy'] ?? null,
+        );
+        self::assertSame(
+            'private_system_temp_random_directory',
+            $contract['authority']['reviewer']['review_bundle_parent_policy'] ?? null,
+        );
+        self::assertSame(
+            'committed_patch_manifest_changed_base_head_and_trusted_policy',
+            $contract['authority']['reviewer']['review_bundle_contents'] ?? null,
+        );
+        self::assertSame(
+            'deterministic_sha256_base_head_binding',
+            $contract['authority']['reviewer']['review_bundle_manifest_policy'] ?? null,
+        );
+        self::assertSame(
+            'bounded_deterministic_json_serialization_over_stdin',
+            $contract['authority']['reviewer']['review_input_policy'] ?? null,
+        );
+        self::assertSame(
+            'not_model_visible',
+            $contract['authority']['reviewer']['review_original_worktree_access'] ?? null,
+        );
+        self::assertSame(
+            'darwin_seatbelt_fail_closed_elsewhere',
+            $contract['authority']['reviewer']['isolation_platform'] ?? null,
+        );
+        self::assertSame(
+            'default_deny_runtime_allowlist_exact_bundle_and_auth_read_only',
+            $contract['authority']['reviewer']['isolation_profile'] ?? null,
+        );
+        self::assertSame(
+            'bundle_readable_temp_home_and_original_worktree_denied',
+            $contract['authority']['reviewer']['isolation_preflight'] ?? null,
+        );
+        self::assertSame(
+            'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
+            $contract['authority']['reviewer']['model_tool_surface'] ?? null,
         );
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
@@ -152,6 +204,34 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertContains('multi_agent', $contract['authority']['reviewer']['disabled_features'] ?? []);
         self::assertContains('plugins', $contract['authority']['reviewer']['disabled_features'] ?? []);
+        self::assertContains('shell_tool', $contract['authority']['reviewer']['disabled_features'] ?? []);
+        self::assertContains('code_mode_host', $contract['authority']['reviewer']['disabled_features'] ?? []);
+        self::assertContains('workspace_dependencies', $contract['authority']['reviewer']['disabled_features'] ?? []);
+        foreach (
+            [
+                'shell_tool',
+                'unified_exec',
+                'code_mode',
+                'code_mode_only',
+                'plugins',
+                'apps',
+                'browser_use',
+                'image_generation',
+                'multi_agent',
+                'hooks',
+            ]
+            as $feature
+        ) {
+            self::assertContains($feature, $contract['authority']['reviewer']['disabled_features'] ?? [], $feature);
+        }
+        self::assertSame(
+            'bounded_deterministic_json_serialization_over_stdin',
+            $contract['authority']['reviewer']['review_input_policy'] ?? null,
+        );
+        self::assertSame(
+            'private_system_temp_bundle_and_internal_runtime_only',
+            $contract['authority']['reviewer']['temporary_directory_policy'] ?? null,
+        );
         self::assertTrue($contract['parallel_work']['local_implementation_only'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_common_base_sha'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_disjoint_ownership'] ?? null);

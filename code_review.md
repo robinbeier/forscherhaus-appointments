@@ -118,17 +118,42 @@ exec-policy rules, external connectors, web search, or ambient PHP configuration
 for either its bootstrap or its trusted contract and output validator. The
 bootstrap passes an explicit environment allowlist into Bash, excluding
 `BASH_ENV`, exported functions, shell options, and unrelated ambient variables.
-Its private trust bundle is created only below fixed system `/tmp`, not ambient
-or repository-local temporary storage.
+Caller-provided `HOME` and `CODEX_HOME` are ignored. The runner derives the
+canonical OS account and creates a private random review root below
+`/private/tmp`; the path contains no account name and is removed after the call.
 Git and PHP resolve through a
 fixed system path, while only the primary may pass a trusted absolute Codex
 binary path; either path must identify as the Codex CLI by basename and a
-bounded semantic-version output, including bounded build metadata. Pre-trust
+bounded semantic-version output at exactly version 0.145.0, including bounded
+build metadata. A CLI upgrade requires a reviewed contract update because its
+tool and sandbox semantics are part of the isolation boundary. Pre-trust
 Git probes ignore ambient Git environment, global and system
 configuration, hooks, fsmonitor, replacement objects, lazy object fetching,
-external diff drivers, and text conversion. The runner materializes a private, clean, detached
-exact-commit checkout before the model starts, rejects every tracked symlink so
-the checkout cannot escape into host paths, denies reviewer file/Git/network mutation,
+external diff drivers, and text conversion. The runner rejects every tracked
+symlink in the exact base and head trees, then materializes a deterministic
+bundle containing the full-index patch, sorted changed paths, committed base and
+head blobs, trusted base policy, and a SHA-256 manifest. It serializes that
+bounded bundle into deterministic JSON over standard input; the model receives
+no `.git` directory, original-worktree path, or filesystem review tool.
+
+On macOS the outer Codex process runs in a repository-owned Seatbelt profile
+with `deny default`. Only the system runtime, read-only Codex system policy, the
+exact private review root, and the canonical host `auth.json` are readable. The
+real `CODEX_HOME` is not exposed: a non-writable temporary runtime home holds a
+read-only auth link, a synthetic installation ID, and explicitly writable
+scratch subtrees that are removed afterward. Direct canaries must prove that
+the bundle is readable while a foreign temp path, an account-home sibling, and
+the original worktree are denied. Non-macOS execution fails closed.
+The harness cannot refresh the host login; expiry is an external prerequisite,
+not a reason to widen reviewer write access.
+
+The pinned CLI's bundled model catalog is reduced to one text-only model with
+shell, unified execution, patch, image, search, experimental, connector,
+delegation, and workspace-dependency tools removed. The host login therefore
+authenticates only the outer model-service request and is not a reviewer
+capability; no credential content enters the bundle or prompt. Do not mix this
+boundary with legacy `sandbox_mode`, `--sandbox`, or permission-profile
+configuration. The runner denies reviewer file/Git/external mutation,
 derives model settings from the selected reviewer profile, and returns one
 lens-, base-, and exact-head-bound JSON result only to the primary. Finding
 prose is length-bounded and rejected when it contains credential-, capability-,
