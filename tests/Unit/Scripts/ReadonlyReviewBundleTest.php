@@ -110,6 +110,69 @@ class ReadonlyReviewBundleTest extends TestCase
         self::assertSame([], $catalog['models'][0]['experimental_supported_tools']);
     }
 
+    public function testModelCatalogRestrictionDropsUnknownFutureCapabilityFields(): void
+    {
+        $catalog = ReadonlyReviewerModelPolicy::restrictModelCatalog(
+            json_encode(
+                [
+                    'models' => [
+                        [
+                            'slug' => 'review-model',
+                            'shell_type' => 'shell_command',
+                            'apply_patch_tool_type' => 'freeform',
+                            'input_modalities' => ['text'],
+                            'supports_search_tool' => false,
+                            'experimental_supported_tools' => [],
+                            'future_capability' => ['network' => true],
+                        ],
+                    ],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'review-model',
+        );
+
+        self::assertSame(
+            [
+                'models' => [
+                    [
+                        'slug' => 'review-model',
+                        'shell_type' => 'disabled',
+                        'apply_patch_tool_type' => null,
+                        'input_modalities' => ['text'],
+                        'supports_search_tool' => false,
+                        'experimental_supported_tools' => [],
+                    ],
+                ],
+            ],
+            $catalog,
+        );
+    }
+
+    public function testModelCatalogRestrictionRejectsSchemaTypeDrift(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('schema is invalid');
+        ReadonlyReviewerModelPolicy::restrictModelCatalog(
+            json_encode(
+                [
+                    'models' => [
+                        [
+                            'slug' => 'review-model',
+                            'shell_type' => ['unexpected' => true],
+                            'apply_patch_tool_type' => 'freeform',
+                            'input_modalities' => ['text'],
+                            'supports_search_tool' => false,
+                            'experimental_supported_tools' => [],
+                        ],
+                    ],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'review-model',
+        );
+    }
+
     public function testDeveloperInstructionsAreBoundToExactCommitsAndExplicitlyToolFree(): void
     {
         $base = str_repeat('a', 40);

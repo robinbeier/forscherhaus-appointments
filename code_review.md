@@ -124,9 +124,10 @@ and trusted paths; its deterministic committed reviewer-policy snapshot must
 pass `php scripts/agent/generate_reviewer_policy_snapshot.php --check`. That
 snapshot generator never mutates runtime code. The separate
 `php scripts/agent/generate_reviewer_runtime_attestation.php --check` command
-guards the delimited code-side attestation over every reviewer policy field,
-while explicit security floors remain independently enforced; changes to
-either generator are themselves bootstrap-reviewed. Bundle
+guards a dedicated generated code-side attestation artifact over every reviewer
+policy field without rewriting runtime enforcement code, while explicit
+security floors remain independently enforced; changes to either generator are
+themselves bootstrap-reviewed. Bundle
 construction, model/prompt policy, and output
 validation are separate modules. Structural output rules come from the
 exact-base schema; exact Base/Head/lens/path and privacy are additional semantic

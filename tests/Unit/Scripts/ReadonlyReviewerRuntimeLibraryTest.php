@@ -91,6 +91,13 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 "#!/bin/bash\n" .
                     "set -euo pipefail\n" .
                     "arguments=\" \$* \"\n" .
+                    "for required_flag in --ignore-user-config --ignore-rules --strict-config; do\n" .
+                    "  if [[ \"\$arguments\" != *\" \$required_flag \"* ]]; then\n" .
+                    "    echo \"Missing required isolated-config flag: \$required_flag\" >&2\n" .
+                    "    exit 91\n" .
+                    "  fi\n" .
+                    "done\n" .
+                    "/usr/bin/printf '%s\\n' \"\$*\" >> \"\$TMPDIR/codex-args.log\"\n" .
                     "if [[ \"\$arguments\" == *\" debug models --bundled \"* ]]; then\n" .
                     '  /usr/bin/printf ' .
                     escapeshellarg("%s\n") .
@@ -222,6 +229,14 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
             fclose($pipes[2]);
 
             $exitCode = proc_close($process);
+            $invocationLog = (string) file_get_contents($controlRoot . '/runtime-tmp/codex-args.log');
+            $invocations = array_values(array_filter(explode("\n", trim($invocationLog))));
+            self::assertGreaterThanOrEqual(2, count($invocations));
+            foreach (array_slice($invocations, 0, 2) as $invocation) {
+                self::assertStringContainsString('--ignore-user-config', $invocation);
+                self::assertStringContainsString('--ignore-rules', $invocation);
+                self::assertStringContainsString('--strict-config', $invocation);
+            }
             if ($scenario === 'invalid') {
                 self::assertSame(1, $exitCode);
                 self::assertSame('', $stdout);

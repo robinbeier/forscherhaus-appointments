@@ -106,7 +106,12 @@ final class ReadonlyReviewerModelPolicy
     public static function restrictModelCatalog(string $rawCatalog, string $model): array
     {
         $catalog = json_decode($rawCatalog, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($catalog) || array_keys($catalog) !== ['models'] || !is_array($catalog['models'])) {
+        if (
+            !is_array($catalog) ||
+            array_keys($catalog) !== ['models'] ||
+            !is_array($catalog['models']) ||
+            !array_is_list($catalog['models'])
+        ) {
             throw new RuntimeException('Reviewer model catalog is invalid.');
         }
         $matches = array_values(
@@ -119,27 +124,56 @@ final class ReadonlyReviewerModelPolicy
             throw new RuntimeException('Reviewer model is unavailable.');
         }
         $entry = $matches[0];
-        foreach (
-            [
-                'shell_type',
-                'apply_patch_tool_type',
-                'input_modalities',
-                'supports_search_tool',
-                'experimental_supported_tools',
-            ]
-            as $key
-        ) {
+        $requiredKeys = [
+            'slug',
+            'shell_type',
+            'apply_patch_tool_type',
+            'input_modalities',
+            'supports_search_tool',
+            'experimental_supported_tools',
+        ];
+        foreach ($requiredKeys as $key) {
             if (!array_key_exists($key, $entry)) {
                 throw new RuntimeException('Reviewer model tool surface is incomplete.');
             }
         }
-        $entry['shell_type'] = 'disabled';
-        $entry['apply_patch_tool_type'] = null;
-        $entry['input_modalities'] = ['text'];
-        $entry['supports_search_tool'] = false;
-        $entry['experimental_supported_tools'] = [];
+        if (
+            !is_string($entry['slug']) ||
+            !is_string($entry['shell_type']) ||
+            !(is_string($entry['apply_patch_tool_type']) || $entry['apply_patch_tool_type'] === null) ||
+            !is_array($entry['input_modalities']) ||
+            !array_is_list($entry['input_modalities']) ||
+            !array_reduce(
+                $entry['input_modalities'],
+                static fn(bool $valid, mixed $value): bool => $valid && is_string($value),
+                true,
+            ) ||
+            !is_bool($entry['supports_search_tool']) ||
+            !is_array($entry['experimental_supported_tools']) ||
+            !array_is_list($entry['experimental_supported_tools']) ||
+            !array_reduce(
+                $entry['experimental_supported_tools'],
+                static fn(bool $valid, mixed $value): bool => $valid && is_string($value),
+                true,
+            )
+        ) {
+            throw new RuntimeException('Reviewer model catalog schema is invalid.');
+        }
 
-        return ['models' => [$entry]];
+        // Rebuild the entry explicitly: future catalog fields must not become
+        // reviewer capabilities merely because the upstream schema grows.
+        return [
+            'models' => [
+                [
+                    'slug' => $entry['slug'],
+                    'shell_type' => 'disabled',
+                    'apply_patch_tool_type' => null,
+                    'input_modalities' => ['text'],
+                    'supports_search_tool' => false,
+                    'experimental_supported_tools' => [],
+                ],
+            ],
+        ];
     }
 
     private static function assertSha(string $sha): void

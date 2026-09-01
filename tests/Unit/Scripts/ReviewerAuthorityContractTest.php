@@ -148,6 +148,7 @@ class ReviewerAuthorityContractTest extends TestCase
         foreach (
             [
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'scripts/agent/lib/GeneratedReviewerRuntimeAttestation.php',
                 'scripts/agent/lib/ReadonlyReviewOutput.php',
                 'scripts/agent/lib/RepoPath.php',
                 '.codex/contracts/agent-workflow.json',

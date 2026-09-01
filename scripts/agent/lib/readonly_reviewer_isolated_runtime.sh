@@ -93,7 +93,11 @@ readonly_reviewer_execute_isolated() (
 
     model_catalog="$control_root/models.json"
     if ! readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" \
-        "${reviewer_environment[@]}" "$codex_bin" debug models --bundled 2>/dev/null \
+        "${reviewer_environment[@]}" "$codex_bin" \
+        --ignore-user-config \
+        --ignore-rules \
+        --strict-config \
+        debug models --bundled 2>/dev/null \
         | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" model-catalog \
             --model="$model" > "$model_catalog"; then
         echo "Reviewer tool-free model catalog could not be derived." >&2
@@ -103,6 +107,9 @@ readonly_reviewer_execute_isolated() (
     prompt_role_probe='UNTRUSTED-REVIEW-BUNDLE-PROBE'
     if ! readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" \
         "${reviewer_environment[@]}" "$codex_bin" \
+            --ignore-user-config \
+            --ignore-rules \
+            --strict-config \
             "${disable_arguments[@]}" \
             -c "developer_instructions=$developer_instructions_toml" \
             -c 'mcp_servers={}' \

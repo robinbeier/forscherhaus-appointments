@@ -88,6 +88,7 @@ return json_decode(
             "scripts/agent/lib/ReadonlyReviewBundle.php",
             "scripts/agent/lib/ReadonlyReviewerContract.php",
             "scripts/agent/lib/GeneratedReviewerPolicy.php",
+            "scripts/agent/lib/GeneratedReviewerRuntimeAttestation.php",
             "scripts/agent/lib/ReadonlyReviewerModelPolicy.php",
             "scripts/agent/lib/ReadonlyReviewOutput.php",
             "scripts/agent/lib/readonly_reviewer_bundle_runtime.sh",

@@ -6,93 +6,10 @@ namespace Forscherhaus\AgentHarness;
 
 require_once __DIR__ . '/RepoPath.php';
 require_once __DIR__ . '/ReadonlyReviewOutput.php';
+require_once __DIR__ . '/GeneratedReviewerRuntimeAttestation.php';
 
 final class ReadonlyReviewerContract
 {
-    /**
-     * Every independently attested reviewer-policy field. The dedicated runtime
-     * attestation generator owns this delimited block so policy evolution keeps
-     * the code-side pin exact without hand-editing a key projection or digest.
-     * Runtime enforcement remains independent from the JSON authority and any
-     * update still changes a bootstrap-reviewed PHP source file.
-     *
-     * @var list<string>
-     */
-    // BEGIN GENERATED REVIEWER RUNTIME BOUNDARY ATTESTATION
-    private const RUNTIME_BOUNDARY_ATTESTATION_KEYS = [
-        'allows_delegation',
-        'allows_external_connectors',
-        'approval_policy',
-        'bootstrap_materialization_policy',
-        'bootstrap_paths',
-        'codex_api_key_override_policy',
-        'codex_approval_policy',
-        'codex_authentication_home_policy',
-        'codex_authentication_source',
-        'codex_binary_materialization_policy',
-        'codex_binary_sha256_by_platform',
-        'codex_closure_sha256_by_platform',
-        'codex_dynamic_dependency_policy',
-        'codex_identity_check',
-        'codex_release_archive_sha256_by_platform',
-        'codex_sandbox_mode',
-        'codex_version',
-        'codex_version_policy',
-        'denied_mutations',
-        'direct_checkout_execution',
-        'disabled_features',
-        'filesystem',
-        'finding_path_policy',
-        'finding_text_policy',
-        'git_lazy_fetch',
-        'git_runtime_configuration',
-        'inherits_execpolicy_rules',
-        'inherits_user_config',
-        'invocation',
-        'invocation_source',
-        'isolation_platform',
-        'isolation_preflight',
-        'isolation_profile',
-        'launcher_materialization_guard',
-        'model_tool_surface',
-        'network',
-        'output_binds_base_sha',
-        'output_schema_path',
-        'payload_path',
-        'php_runtime_configuration',
-        'policy_context_paths',
-        'profiles',
-        'prompt_role_preflight',
-        'repository_root_policy',
-        'requires_base_runner',
-        'review_base_policy',
-        'review_base_ref',
-        'review_base_remote_transport',
-        'review_base_remote_url',
-        'review_bundle_binary_policy',
-        'review_bundle_contents',
-        'review_bundle_context_policy',
-        'review_bundle_file_allowlist',
-        'review_bundle_hunk_header_policy',
-        'review_bundle_manifest_policy',
-        'review_bundle_parent_policy',
-        'review_checkout',
-        'review_checkout_tree_entry_policy',
-        'review_input_policy',
-        'review_instruction_policy',
-        'review_original_worktree_access',
-        'runtime_configuration_change_policy',
-        'shell_runtime_configuration',
-        'temporary_directory_policy',
-        'tool_path_policy',
-        'transport_environment_policy',
-        'trust_anchor',
-        'web_search',
-    ];
-
-    private const RUNTIME_BOUNDARY_ATTESTATION_SHA256 = '528f24636a91507bc1cd890a292a408e2274fdd96ff90d20b4c5f8d33cb7f8d9';
-    // END GENERATED REVIEWER RUNTIME BOUNDARY ATTESTATION
-
     /** @var list<string> */
     private const MINIMUM_DISABLED_FEATURES = [
         'apps',
@@ -350,7 +267,7 @@ final class ReadonlyReviewerContract
         self::disabledFeatures($reviewerPolicy);
 
         $attestedBoundary = [];
-        foreach (self::RUNTIME_BOUNDARY_ATTESTATION_KEYS as $key) {
+        foreach (GeneratedReviewerRuntimeAttestation::KEYS as $key) {
             if (!array_key_exists($key, $reviewerPolicy)) {
                 throw new \RuntimeException('Reviewer runtime boundary is missing: ' . $key . '.');
             }
@@ -359,7 +276,7 @@ final class ReadonlyReviewerContract
         ksort($attestedBoundary, SORT_STRING);
         $encodedBoundary = json_encode($attestedBoundary, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $actualBoundarySha256 = hash('sha256', $encodedBoundary);
-        if (!hash_equals(self::RUNTIME_BOUNDARY_ATTESTATION_SHA256, $actualBoundarySha256)) {
+        if (!hash_equals(GeneratedReviewerRuntimeAttestation::SHA256, $actualBoundarySha256)) {
             throw new \RuntimeException(
                 'Reviewer runtime boundary attestation is invalid: actual sha256 ' . $actualBoundarySha256 . '.',
             );

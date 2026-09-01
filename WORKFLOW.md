@@ -206,11 +206,13 @@ requires both the deterministic committed snapshot and the complete code-side
 policy attestation to match that policy exactly. Run
 `php scripts/agent/generate_reviewer_policy_snapshot.php` only for the snapshot
 and `php scripts/agent/generate_reviewer_runtime_attestation.php` only for the
-delimited PHP source block containing every top-level reviewer-policy key and
-its independent digest. Each generator has a side-effect-free `--check` mode;
-neither silently owns the other's artifact. Explicit disabled-feature floors
-remain hand-enforced. Both generators are trusted bootstrap paths, so changing
-either generation contract also requires the external bootstrap-review path.
+separate `GeneratedReviewerRuntimeAttestation.php` artifact containing every
+top-level reviewer-policy key and its independent digest. Neither generator
+rewrites runtime enforcement code. Each generator has a side-effect-free
+`--check` mode and owns only its named artifact. Explicit disabled-feature
+floors remain hand-enforced. Both generators and both generated artifacts are
+trusted bootstrap paths, so changing either generation contract also requires
+the external bootstrap-review path.
 
 These repeated checks are distinct trust anchors, not competing policy
 implementations. The launcher proves the exact-base materialization contract
