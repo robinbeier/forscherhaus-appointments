@@ -64,5 +64,79 @@
         {"name": "parent-segment", "rule": {"path": "docs/../WORKFLOW.md", "match": "exact_file"}},
         {"name": "trailing-slash", "rule": {"path": "application/models/", "match": "directory"}},
         {"name": "wildcard", "rule": {"path": "application/*.php", "match": "filename_prefix"}}
+    ],
+    "overlap_cases": [
+        {
+            "name": "nested-directories",
+            "left": {"path": "foo", "match": "directory"},
+            "right": {"path": "foo/bar", "match": "directory"},
+            "overlaps": true
+        },
+        {
+            "name": "directory-prefix-same-directory",
+            "left": {"path": "foo", "match": "directory"},
+            "right": {"path": "foo/b", "match": "filename_prefix"},
+            "overlaps": true
+        },
+        {
+            "name": "directory-prefix-different-directory",
+            "left": {"path": "foo/bar", "match": "directory"},
+            "right": {"path": "foo/b", "match": "filename_prefix"},
+            "overlaps": false
+        },
+        {
+            "name": "prefix-compatible",
+            "left": {"path": "foo/a", "match": "filename_prefix"},
+            "right": {"path": "foo/ab", "match": "filename_prefix"},
+            "overlaps": true
+        },
+        {
+            "name": "prefix-different-directory",
+            "left": {"path": "foo/a", "match": "filename_prefix"},
+            "right": {"path": "bar/a", "match": "filename_prefix"},
+            "overlaps": false
+        },
+        {
+            "name": "exact-under-directory",
+            "left": {"path": "foo", "match": "directory"},
+            "right": {"path": "foo/x", "match": "exact_file"},
+            "overlaps": true
+        },
+        {
+            "name": "exact-directory-self",
+            "left": {"path": "foo", "match": "directory"},
+            "right": {"path": "foo", "match": "exact_file"},
+            "overlaps": false
+        },
+        {
+            "name": "root-prefix-compatible",
+            "left": {"path": "a", "match": "filename_prefix"},
+            "right": {"path": "ab", "match": "filename_prefix"},
+            "overlaps": true
+        },
+        {
+            "name": "root-prefix-incompatible",
+            "left": {"path": "a", "match": "filename_prefix"},
+            "right": {"path": "b", "match": "filename_prefix"},
+            "overlaps": false
+        },
+        {
+            "name": "root-prefix-nested-directory",
+            "left": {"path": "a", "match": "filename_prefix"},
+            "right": {"path": "nested", "match": "directory"},
+            "overlaps": false
+        },
+        {
+            "name": "root-prefix-same-name-directory",
+            "left": {"path": "a", "match": "filename_prefix"},
+            "right": {"path": "a", "match": "directory"},
+            "overlaps": false
+        },
+        {
+            "name": "root-exact-root-prefix",
+            "left": {"path": "a-file", "match": "exact_file"},
+            "right": {"path": "a", "match": "filename_prefix"},
+            "overlaps": true
+        }
     ]
 }

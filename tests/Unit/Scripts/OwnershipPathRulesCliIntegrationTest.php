@@ -11,6 +11,23 @@ require_once __DIR__ . '/../../../scripts/agent/lib/ParallelWorkOwnershipContrac
 
 final class OwnershipPathRulesCliIntegrationTest extends TestCase
 {
+    private string|false $previousEngine = false;
+
+    protected function setUp(): void
+    {
+        $this->previousEngine = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . dirname(__DIR__, 3) . '/scripts/ci/ownership_path_rules.py');
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->previousEngine === false) {
+            putenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        } else {
+            putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $this->previousEngine);
+        }
+    }
+
     public function testPhpAndPythonExecuteTheSameLanguageNeutralSemanticsContract(): void
     {
         $contractPath = dirname(__DIR__, 3) . '/.codex/contracts/ownership-path-rules.json';
@@ -30,6 +47,7 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
             "contract": str(rules.CONTRACT_PATH.relative_to(pathlib.Path.cwd())),
             "match_cases": len(rules.CONTRACT["match_cases"]),
             "invalid_rule_cases": len(rules.CONTRACT["invalid_rule_cases"]),
+            "overlap_cases": len(rules.CONTRACT["overlap_cases"]),
         }, sort_keys=True))
         PYTHON;
         $python = json_decode(
@@ -41,11 +59,19 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         self::assertSame('.codex/contracts/ownership-path-rules.json', $python['contract'] ?? null);
         self::assertSame(count($contract['match_cases']), $python['match_cases'] ?? null);
         self::assertSame(count($contract['invalid_rule_cases']), $python['invalid_rule_cases'] ?? null);
+        self::assertSame(count($contract['overlap_cases']), $python['overlap_cases'] ?? null);
 
         $drifted = $contract;
         $drifted['match_cases'][1]['matches'] = true;
         self::assertContains(
             'ownership_path_rule_match_case_failed:directory-self-is-not-a-file-match',
+            ParallelWorkOwnershipContract::validateSemanticsContract($drifted),
+        );
+
+        $drifted = $contract;
+        $drifted['overlap_cases'][0]['overlaps'] = false;
+        self::assertContains(
+            'ownership_path_rule_overlap_case_failed:nested-directories',
             ParallelWorkOwnershipContract::validateSemanticsContract($drifted),
         );
     }
@@ -138,6 +164,63 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         } finally {
             $this->removeDirectory($root);
         }
+    }
+
+    public function testPhpFailsClosedWhenCanonicalEngineIsUnavailable(): void
+    {
+        $previous = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=/tmp/ownership-engine-does-not-exist');
+        try {
+            $this->expectException(\RuntimeException::class);
+            ParallelWorkOwnershipContract::pathRuleCoversChangedPath(
+                ['path' => 'tests/Unit/Scripts', 'match' => 'directory'],
+                'tests/Unit/Scripts/example.php',
+            );
+        } finally {
+            if ($previous === false) {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+            } else {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $previous);
+            }
+        }
+    }
+
+    public function testPhpFailsClosedOnMalformedCanonicalEngineOutput(): void
+    {
+        $root = sys_get_temp_dir() . '/ownership-engine-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root . '/scripts/ci', 0700, true));
+        $engine = $root . '/scripts/ci/ownership_path_rules.py';
+        self::assertNotFalse(file_put_contents($engine, "#!/usr/bin/python3\nprint('{}')\n"));
+        self::assertTrue(chmod($engine, 0700));
+        $previous = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $engine);
+        try {
+            $this->expectException(\RuntimeException::class);
+            ParallelWorkOwnershipContract::pathRuleCoversChangedPath(
+                ['path' => 'tests/Unit/Scripts', 'match' => 'directory'],
+                'tests/Unit/Scripts/example.php',
+            );
+        } finally {
+            if ($previous === false) {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+            } else {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $previous);
+            }
+            unlink($engine);
+            rmdir($root . '/scripts/ci');
+            rmdir($root . '/scripts');
+            rmdir($root);
+        }
+    }
+
+    public function testPhpDelegatesMatchAndOverlapToCanonicalEngine(): void
+    {
+        $source = (string) file_get_contents(
+            dirname(__DIR__, 3) . '/scripts/agent/lib/ParallelWorkOwnershipContract.php',
+        );
+        self::assertStringContainsString('runCanonicalEngine', $source);
+        self::assertStringNotContainsString('private static function pathRuleCovers', $source);
+        self::assertStringNotContainsString('private static function pathRulesOverlap', $source);
     }
 
     /** @return list<string> */

@@ -8,6 +8,7 @@ startup instead of maintaining untested independent semantics.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,12 +25,14 @@ def _load_contract() -> dict[str, Any]:
     }
     if (
         not isinstance(contract, dict)
-        or set(contract) != {
+        or set(contract)
+        != {
             "schema_version",
             "candidate_path_policy",
             "match_modes",
             "match_cases",
             "invalid_rule_cases",
+            "overlap_cases",
         }
         or contract.get("schema_version") != 1
         or contract.get("candidate_path_policy") != "strict_normalized_repository_relative"
@@ -119,31 +122,154 @@ def codeowners_pattern(rule: dict[str, str]) -> str:
     return f"/{normalized_rule['path']}"
 
 
-def _assert_contract_conformance() -> None:
-    seen: set[str] = set()
-    for case in CONTRACT["match_cases"]:
-        if not isinstance(case, dict) or set(case) != {"name", "rule", "candidate", "matches"}:
-            raise RuntimeError("Ownership path-rule match case is invalid")
-        name = case["name"]
-        if not isinstance(name, str) or not name or name in seen or not isinstance(case["matches"], bool):
-            raise RuntimeError("Ownership path-rule match case is invalid")
-        seen.add(name)
-        if path_rule_matches(case["rule"], case["candidate"]) is not case["matches"]:
-            raise RuntimeError(f"Ownership path-rule match case failed: {name}")
+def validate_contract(contract: Any) -> list[str]:
+    """Validate a supplied contract using this engine's canonical semantics."""
+    if not isinstance(contract, dict):
+        return ["invalid_ownership_path_rule_contract"]
+    expected_modes = {
+        "directory": "descendants_only",
+        "exact_file": "exact_path_only",
+        "filename_prefix": "same_directory_filename_prefix",
+    }
+    if (
+        set(contract)
+        != {
+            "schema_version",
+            "candidate_path_policy",
+            "match_modes",
+            "match_cases",
+            "invalid_rule_cases",
+            "overlap_cases",
+        }
+        or contract.get("schema_version") != 1
+        or contract.get("candidate_path_policy") != "strict_normalized_repository_relative"
+        or contract.get("match_modes") != expected_modes
+    ):
+        return ["invalid_ownership_path_rule_contract"]
 
-    invalid_seen: set[str] = set()
-    for case in CONTRACT["invalid_rule_cases"]:
-        if not isinstance(case, dict) or set(case) != {"name", "rule"}:
-            raise RuntimeError("Ownership path-rule invalid case is invalid")
-        name = case["name"]
-        if not isinstance(name, str) or not name or name in invalid_seen:
-            raise RuntimeError("Ownership path-rule invalid case is invalid")
-        invalid_seen.add(name)
-        try:
-            parse_path_rule(case["rule"], name)
-        except ValueError:
-            continue
-        raise RuntimeError(f"Ownership path-rule invalid case was accepted: {name}")
+    errors: list[str] = []
+    match_cases = contract.get("match_cases")
+    if not isinstance(match_cases, list) or not match_cases:
+        errors.append("invalid_ownership_path_rule_match_cases")
+    else:
+        seen: set[str] = set()
+        for index, case in enumerate(match_cases):
+            if not isinstance(case, dict) or set(case) != {"name", "rule", "candidate", "matches"}:
+                errors.append(f"invalid_ownership_path_rule_match_case:{index}")
+                continue
+            name = case["name"]
+            if not isinstance(name, str) or not name or name in seen or not isinstance(case["matches"], bool):
+                errors.append(f"invalid_ownership_path_rule_match_case:{index}")
+                continue
+            seen.add(name)
+            try:
+                actual = path_rule_matches(case["rule"], case["candidate"])
+            except (TypeError, ValueError):
+                errors.append(f"invalid_ownership_path_rule_match_case:{name}")
+                continue
+            if actual is not case["matches"]:
+                errors.append(f"ownership_path_rule_match_case_failed:{name}")
+
+    invalid_cases = contract.get("invalid_rule_cases")
+    if not isinstance(invalid_cases, list) or not invalid_cases:
+        errors.append("invalid_ownership_path_rule_invalid_cases")
+    else:
+        seen = set()
+        for index, case in enumerate(invalid_cases):
+            if not isinstance(case, dict) or set(case) != {"name", "rule"}:
+                errors.append(f"invalid_ownership_path_rule_invalid_case:{index}")
+                continue
+            name = case["name"]
+            if not isinstance(name, str) or not name or name in seen:
+                errors.append(f"invalid_ownership_path_rule_invalid_case:{index}")
+                continue
+            seen.add(name)
+            try:
+                parse_path_rule(case["rule"], name)
+            except (TypeError, ValueError):
+                continue
+            errors.append(f"ownership_path_rule_invalid_case_accepted:{name}")
+    overlap_cases = contract.get("overlap_cases")
+    if not isinstance(overlap_cases, list) or not overlap_cases:
+        errors.append("invalid_ownership_path_rule_overlap_cases")
+    else:
+        seen = set()
+        for index, case in enumerate(overlap_cases):
+            if not isinstance(case, dict) or set(case) != {"name", "left", "right", "overlaps"}:
+                errors.append(f"invalid_ownership_path_rule_overlap_case:{index}")
+                continue
+            name = case["name"]
+            if not isinstance(name, str) or not name or name in seen or not isinstance(case["overlaps"], bool):
+                errors.append(f"invalid_ownership_path_rule_overlap_case:{index}")
+                continue
+            seen.add(name)
+            try:
+                actual = path_rules_overlap(case["left"], case["right"])
+            except (TypeError, ValueError):
+                errors.append(f"invalid_ownership_path_rule_overlap_case:{name}")
+                continue
+            if actual is not case["overlaps"]:
+                errors.append(f"ownership_path_rule_overlap_case_failed:{name}")
+    return errors
+
+
+def path_rules_overlap(left: Any, right: Any) -> bool:
+    """Return whether two validated rules cover at least one common path."""
+    left_rule = parse_path_rule(left, "left path rule")
+    right_rule = parse_path_rule(right, "right path rule")
+    left_mode, right_mode = left_rule["match"], right_rule["match"]
+    if left_mode == "exact_file":
+        return path_rule_matches(right_rule, left_rule["path"])
+    if right_mode == "exact_file":
+        return path_rule_matches(left_rule, right_rule["path"])
+    if left_mode == "directory" and right_mode == "directory":
+        return (
+            left_rule["path"] == right_rule["path"]
+            or left_rule["path"].startswith(right_rule["path"] + "/")
+            or right_rule["path"].startswith(left_rule["path"] + "/")
+        )
+    if left_mode == "directory" and right_mode == "filename_prefix":
+        right_directory = right_rule["path"].rpartition("/")[0]
+        return right_directory == left_rule["path"] or right_directory.startswith(left_rule["path"] + "/")
+    if right_mode == "directory" and left_mode == "filename_prefix":
+        left_directory = left_rule["path"].rpartition("/")[0]
+        return left_directory == right_rule["path"] or left_directory.startswith(right_rule["path"] + "/")
+    left_dir, _, left_name = left_rule["path"].rpartition("/")
+    right_dir, _, right_name = right_rule["path"].rpartition("/")
+    return left_dir == right_dir and (left_name.startswith(right_name) or right_name.startswith(left_name))
+
+
+def _assert_contract_conformance() -> None:
+    errors = validate_contract(CONTRACT)
+    if errors:
+        raise RuntimeError(errors[0])
+
+
+def _cli() -> None:
+    """Process one JSON request; callers must treat malformed output as failure."""
+    try:
+        request = json.load(sys.stdin)
+        operation = request.get("operation") if isinstance(request, dict) else None
+        if operation == "validate_contract":
+            result: Any = {"errors": validate_contract(request.get("contract"))}
+        elif operation == "parse":
+            try:
+                result = {"valid": True, "rule": parse_path_rule(request.get("rule"))}
+            except (TypeError, ValueError):
+                result = {"valid": False, "rule": None}
+        elif operation == "covers":
+            result = {"matches": path_rule_matches(request.get("rule"), request.get("candidate"))}
+        elif operation == "overlap":
+            result = {"overlaps": path_rules_overlap(request.get("left"), request.get("right"))}
+        else:
+            raise ValueError("unknown operation")
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        print(json.dumps({"error": str(error)}, sort_keys=True, separators=(",", ":")))
+        raise SystemExit(1)
 
 
 _assert_contract_conformance()
+
+if __name__ == "__main__":
+    _cli()

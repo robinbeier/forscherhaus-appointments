@@ -330,12 +330,6 @@ if ! materialize_exact_base_file "$payload_path" "$materialized_payload" "$paylo
     echo "Trusted-base launcher private payload boundary is invalid." >&2
     exit 2
 fi
-combined_payload="$materialized_root/combined-payload.sh"
-if ! /bin/cat -- "$materialized_runtime" "$materialized_payload" > "$combined_payload"; then
-    echo "Trusted-base launcher could not assemble the verified payload seam." >&2
-    exit 2
-fi
-chmod 0500 "$combined_payload"
 
 account_record="$(trusted_python -c '
 import os
@@ -399,7 +393,7 @@ esac
 
 set +e
 "${payload_environment[@]}" \
-    /bin/bash --noprofile --norc "$combined_payload" "$materialized_payload" \
+    /bin/bash --noprofile --norc "$materialized_runtime" "$materialized_payload" \
         "${payload_prefix_arguments[@]}" "${payload_arguments[@]}"
 payload_status=$?
 set -e

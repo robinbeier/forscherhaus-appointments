@@ -107,8 +107,9 @@ Invoke final lenses through the fixed-system-Git exact-base protocol in
 `WORKFLOW.md`; never execute either checked-out harness script. The launcher
 resolves the shared runtime and reviewer payload only from the exact-base
 `trusted_base_bootstrap` manifest and materializes both only after the base
-boundary is established. The shared runtime validates that same manifest and
-owns clean Git/Python plus exact-base declared
+boundary is established. The launcher starts that attested runtime directly;
+the runtime dispatches only the separately attested payload, validates the
+same manifest, and owns clean Git/Python plus exact-base declared
 path materialization for reviewer and parallel-work payloads. The declared
 reviewer payload remains `scripts/agent/run_readonly_reviewer.sh`. The runner and
 `.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
@@ -116,7 +117,9 @@ deterministic SHA-256 bundle construction, and trusted-path selection. Do not
 duplicate its bootstrap and materialization internals here. The contract pins
 the official 0.145.0 release digest.
 The machine contract owns runtime pins, disabled reviewer tools, output schema,
-and trusted paths. Bundle construction, model/prompt policy, and output
+and trusted paths; its deterministic committed reviewer-policy snapshot must
+pass `php scripts/agent/generate_reviewer_policy_snapshot.php --check`. Bundle
+construction, model/prompt policy, and output
 validation are separate modules. Structural output rules come from the
 exact-base schema; exact Base/Head/lens/path and privacy are additional semantic
 checks. The runner orchestrates separately materialized exact-base

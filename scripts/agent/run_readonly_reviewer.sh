@@ -7,8 +7,8 @@ if [[ "${TRUSTED_BASE_LAUNCHER:-}" != "1" ]]; then
     exit 2
 fi
 
-# The launcher executes one private script assembled from the verified shared
-# runtime and this payload, then supplies the materialized payload path as `$1`.
+# The launcher executes the verified shared runtime, which dispatches only this
+# separately attested payload and supplies its materialized path as `$1`.
 runner_source_input="${1:-}"
 if [[ -z "$runner_source_input" ]]; then
     echo "Reviewer trusted source path is unavailable." >&2

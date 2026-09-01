@@ -7,8 +7,8 @@ if [[ "${TRUSTED_BASE_LAUNCHER:-}" != "1" ]]; then
     exit 2
 fi
 
-# The launcher executes one private script assembled from the verified shared
-# runtime and this payload, then supplies the materialized payload path as `$1`.
+# The launcher executes the verified shared runtime, which dispatches only this
+# separately attested payload and supplies its materialized path as `$1`.
 runner_source_input="${1:-}"
 if [[ -z "$runner_source_input" ]]; then
     echo "Parallel-work validator trusted source path is unavailable." >&2
@@ -144,6 +144,15 @@ if ! trusted_base_materialize_declared_paths \
     echo "Parallel-work validator bootstrap-path policy is invalid." >&2
     exit 2
 fi
+ownership_engine="$trusted_root/scripts/ci/ownership_path_rules.py"
+ownership_engine_canonical="$(trusted_base_canonical_path "$ownership_engine")" || {
+    echo "Parallel-work ownership engine path cannot be resolved." >&2
+    exit 2
+}
+if [[ ! -f "$ownership_engine" || -L "$ownership_engine" || "$ownership_engine_canonical" != "$ownership_engine" ]]; then
+    echo "Parallel-work ownership engine is not an exact regular file." >&2
+    exit 2
+fi
 
 validator_os_name="$(/usr/bin/uname -s 2>/dev/null)" || {
     echo "Parallel-work validator operating system is unavailable." >&2
@@ -171,5 +180,6 @@ fi
     LC_ALL=C \
     TMPDIR=/tmp \
     PARALLEL_WORK_VALIDATOR_CHECKOUT_ROOT="$validator_checkout" \
+    PARALLEL_WORK_OWNERSHIP_ENGINE="$ownership_engine" \
     "$trusted_php" -n -d auto_prepend_file= -d auto_append_file= \
     "$trusted_root/scripts/agent/check_parallel_work_contract.php" "${forward_arguments[@]}"

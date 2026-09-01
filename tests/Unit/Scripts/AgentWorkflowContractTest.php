@@ -436,6 +436,7 @@ class AgentWorkflowContractTest extends TestCase
                 'scripts/agent/lib/trusted_base_payload_runtime.sh',
                 'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
+                'scripts/ci/ownership_path_rules.py',
             ]
             as $validatorBootstrapPath
         ) {

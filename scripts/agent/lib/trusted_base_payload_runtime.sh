@@ -337,3 +337,26 @@ trusted_base_payload_initialize() {
         return 2
     fi
 }
+
+trusted_base_dispatch_payload() {
+    local payload_source="${1:-}"
+    if [[ -z "$payload_source" ]]; then
+        echo 'Trusted-base shared runtime payload is unavailable.' >&2
+        return 2
+    fi
+    shift
+    if [[ "$payload_source" != "${TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH:-}" || \
+        "$payload_source" != /* || ! -f "$payload_source" || -L "$payload_source" ]]; then
+        echo 'Trusted-base shared runtime payload is not launcher-bound.' >&2
+        return 2
+    fi
+
+    # Source only the exact materialized payload. The payload immediately calls
+    # trusted_base_payload_initialize(), which re-attests both this runtime and
+    # the payload against the declared base before repository work begins.
+    source "$payload_source" "$payload_source" "$@"
+}
+
+if [[ "${BASH_SOURCE[0]:-}" == "$0" ]]; then
+    trusted_base_dispatch_payload "$@"
+fi

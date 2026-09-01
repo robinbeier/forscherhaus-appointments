@@ -152,7 +152,12 @@ final class ReadonlyReviewerContract
             throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
         }
 
-        return array_values(array_unique([...$bootstrapPaths, ...$instructionPaths, ...$policyContextPaths]));
+        $trustedBasePaths = array_values(
+            array_unique([...$bootstrapPaths, ...$instructionPaths, ...$policyContextPaths]),
+        );
+        self::assertGeneratedPolicy($reviewerPolicy);
+
+        return $trustedBasePaths;
     }
 
     /**
@@ -186,6 +191,8 @@ final class ReadonlyReviewerContract
         ) {
             throw new \InvalidArgumentException('Reviewer Codex binary platform is not pinned.');
         }
+
+        self::assertGeneratedPolicy($reviewerPolicy);
 
         return [
             'version' => $version,
@@ -355,6 +362,20 @@ final class ReadonlyReviewerContract
             }
         }
         self::disabledFeatures($reviewerPolicy);
+    }
+
+    /** @param array<string, mixed> $reviewerPolicy */
+    private static function assertGeneratedPolicy(array $reviewerPolicy): void
+    {
+        $snapshotPath = __DIR__ . '/GeneratedReviewerPolicy.php';
+        if (!is_file($snapshotPath) || is_link($snapshotPath) || realpath($snapshotPath) !== $snapshotPath) {
+            throw new \RuntimeException('Reviewer policy snapshot is unavailable.');
+        }
+        /** @var mixed $generatedPolicy */
+        $generatedPolicy = require $snapshotPath;
+        if (!is_array($generatedPolicy) || $reviewerPolicy !== $generatedPolicy) {
+            throw new \RuntimeException('Reviewer policy must match the generated exact-base snapshot.');
+        }
     }
 
     /** @param array<string, mixed> $reviewerPolicy

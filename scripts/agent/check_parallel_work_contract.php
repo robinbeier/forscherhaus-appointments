@@ -191,10 +191,15 @@ if (!is_array($pathRuleContract) || array_is_list($pathRuleContract)) {
     exit(2);
 }
 
-$errors = [
-    ...Forscherhaus\AgentHarness\ParallelWorkOwnershipContract::validateSemanticsContract($pathRuleContract),
-    ...ParallelWorkContract::validate($manifest, $contract['parallel_work'], $ownershipMap),
-];
+try {
+    $errors = [
+        ...Forscherhaus\AgentHarness\ParallelWorkOwnershipContract::validateSemanticsContract($pathRuleContract),
+        ...ParallelWorkContract::validate($manifest, $contract['parallel_work'], $ownershipMap),
+    ];
+} catch (Throwable) {
+    fwrite(STDERR, "Parallel-work ownership engine failed.\n");
+    exit(2);
+}
 $verification = null;
 if ($verifyLane !== null && $errors === []) {
     $errors = verifyValidatorSeparation($validatorCheckoutRoot, $root);
@@ -231,10 +236,8 @@ exit($errors === [] ? 0 : 1);
 
 function trustedGitBinary(): ?string
 {
-    foreach (['/usr/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git', '/opt/local/bin/git'] as $candidate) {
-        if (is_executable($candidate)) {
-            return $candidate;
-        }
+    if (is_executable('/usr/bin/git')) {
+        return '/usr/bin/git';
     }
 
     return null;

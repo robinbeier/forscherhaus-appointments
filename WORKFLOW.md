@@ -116,17 +116,20 @@ already verified declared base, verifies its exact blob and non-executable tree
 mode, and only then starts it in clean Bash. The launcher in turn privately
 reads the `trusted_base_bootstrap` manifest from that exact base, then
 materializes and verifies its declared shared runtime and payload before any
-checkout code can execute. The shared runtime independently validates the same
-manifest and owns clean Git/Python plus declared-path materialization for both
-agent-harness payloads.
+checkout code can execute. It starts the attested shared runtime directly;
+that runtime dispatches only the separately attested, manifest-bound payload,
+independently validates the same manifest, and owns clean Git/Python plus
+declared-path materialization for both agent-harness payloads.
 Direct execution of any checked-out bootstrap script is forbidden and fails
 closed. The validator verifies provisional pre-commit ownership and clean
-post-commit integration evidence. PHP validation and Python CI/documentation
-consumers execute the same language-neutral semantics and conformance cases in
-`.codex/contracts/ownership-path-rules.json`; neither runtime may silently
-normalize caller-supplied ownership candidates. Do not reproduce the bootstrap
-command in other docs or duplicate validator internals; use this canonical
-command and the machine contract.
+post-commit integration evidence. One exact-base Python engine owns ownership
+path normalization, validation, matching, and overlap semantics for the lane
+validator plus Python CI/documentation consumers. PHP consumes only its
+strictly validated JSON result. The language-neutral match, overlap, and
+invalid-rule cases live in `.codex/contracts/ownership-path-rules.json`;
+callers may not silently normalize supplied ownership candidates. Do not
+reproduce the bootstrap command in other docs or duplicate validator internals;
+use this canonical command and the machine contract.
 Do not replace this with an ambient `git show` or a checked-out wrapper. The
 machine contract owns the fixed system-Git bootstrap and payload selection.
 
@@ -187,12 +190,16 @@ both runtime-source maps and the closure-pin map are deliberately unsupported.
 Ambient `PATH` never grants interpreter authority. The centralized ownership
 matcher is also Primary-owned because it defines shared lane and CI semantics.
 
-The JSON contract is the configuration authority. Shell, PHP, and focused test
-checks independently mirror only security-critical boundary values so a single
-permissive parser or stale implementation fails closed; they are deliberately
-not generated from untrusted head code at runtime. Keep descriptive prose out
-of those mirrors, and name the exact drifted key in diagnostics so coordinated
-contract updates remain reviewable instead of opaque.
+The exact-base JSON contract is the sole declarative configuration authority
+for reviewer profiles, runtime pins, disabled features, and trusted paths. PHP
+requires the deterministic committed snapshot produced by
+`php scripts/agent/generate_reviewer_policy_snapshot.php` to match that policy
+exactly; `--check` detects a stale snapshot without changing it. Shell, PHP, and
+focused behavior tests independently enforce only the small set of
+security-critical runtime boundaries needed to fail closed. Descriptive policy
+prose is not mirrored in code or tests. Name the exact drifted boundary in
+diagnostics so coordinated contract updates remain reviewable instead of
+opaque.
 
 External review input is deliberately narrower than a checkout. It contains a
 zero-context UTF-8 patch (changed lines only), the normalized changed-path

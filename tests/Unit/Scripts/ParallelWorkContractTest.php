@@ -12,6 +12,8 @@ require_once __DIR__ . '/../../../scripts/agent/lib/ParallelWorkContract.php';
 
 class ParallelWorkContractTest extends TestCase
 {
+    private string|false $previousEngine = false;
+
     /** @var array<string, mixed> */
     private array $policy;
 
@@ -21,6 +23,8 @@ class ParallelWorkContractTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->previousEngine = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . dirname(__DIR__, 3) . '/scripts/ci/ownership_path_rules.py');
         $contract = json_decode(
             (string) file_get_contents(dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json'),
             true,
@@ -47,6 +51,16 @@ class ParallelWorkContractTest extends TestCase
                 ],
             ],
         ];
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->previousEngine === false) {
+            putenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        } else {
+            putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $this->previousEngine);
+        }
+        parent::tearDown();
     }
 
     public function testAcceptsTwoDisjointWriterLanesOnOneBase(): void

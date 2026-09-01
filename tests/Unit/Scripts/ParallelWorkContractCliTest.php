@@ -19,6 +19,7 @@ class ParallelWorkContractCliTest extends TestCase
         $sourceRepoRoot = dirname(__DIR__, 3);
         $this->repoRoot = sys_get_temp_dir() . '/parallel-work-repo-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($this->repoRoot . '/scripts/agent/lib', 0700, true));
+        self::assertTrue(mkdir($this->repoRoot . '/scripts/ci', 0700, true));
         self::assertTrue(mkdir($this->repoRoot . '/.codex/contracts', 0700, true));
         self::assertTrue(mkdir($this->repoRoot . '/docs/maps', 0700, true));
         self::assertTrue(mkdir($this->repoRoot . '/tests/Fixtures/parallel/lane-a', 0700, true));
@@ -60,6 +61,10 @@ class ParallelWorkContractCliTest extends TestCase
         copy(
             $sourceRepoRoot . '/scripts/agent/lib/trusted_runtime_primitives.py',
             $this->repoRoot . '/scripts/agent/lib/trusted_runtime_primitives.py',
+        );
+        copy(
+            $sourceRepoRoot . '/scripts/ci/ownership_path_rules.py',
+            $this->repoRoot . '/scripts/ci/ownership_path_rules.py',
         );
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0644));
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/trusted_base_launcher.sh', 0644));
@@ -365,6 +370,15 @@ class ParallelWorkContractCliTest extends TestCase
             "'GIT_NO_LAZY_FETCH' => '1'",
             (string) file_get_contents($this->repoRoot . '/scripts/agent/check_parallel_work_contract.php'),
         );
+    }
+
+    public function testValidatorUsesOnlyTheFixedSystemGitPath(): void
+    {
+        $source = (string) file_get_contents($this->repoRoot . '/scripts/agent/check_parallel_work_contract.php');
+        self::assertStringContainsString("is_executable('/usr/bin/git')", $source);
+        self::assertStringNotContainsString('/opt/homebrew/bin/git', $source);
+        self::assertStringNotContainsString('/usr/local/bin/git', $source);
+        self::assertStringNotContainsString('/opt/local/bin/git', $source);
     }
 
     public function testCliRejectsInvalidManifestJsonAndShape(): void

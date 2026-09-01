@@ -17,94 +17,10 @@ final class ParallelWorkOwnershipContract
      */
     public static function validateSemanticsContract(array $contract): array
     {
-        $errors = [];
-        $expectedKeys = ['candidate_path_policy', 'invalid_rule_cases', 'match_cases', 'match_modes', 'schema_version'];
-        $actualKeys = array_keys($contract);
-        sort($expectedKeys, SORT_STRING);
-        sort($actualKeys, SORT_STRING);
-        if (
-            $actualKeys !== $expectedKeys ||
-            ($contract['schema_version'] ?? null) !== 1 ||
-            ($contract['candidate_path_policy'] ?? null) !== 'strict_normalized_repository_relative' ||
-            ($contract['match_modes'] ?? null) !== [
-                'directory' => 'descendants_only',
-                'exact_file' => 'exact_path_only',
-                'filename_prefix' => 'same_directory_filename_prefix',
-            ]
-        ) {
-            return ['invalid_ownership_path_rule_contract'];
-        }
-
-        $matchCases = $contract['match_cases'] ?? null;
-        if (!is_array($matchCases) || !array_is_list($matchCases) || $matchCases === []) {
-            $errors[] = 'invalid_ownership_path_rule_match_cases';
-        } else {
-            $seen = [];
-            foreach ($matchCases as $index => $case) {
-                if (!is_array($case) || array_is_list($case)) {
-                    $errors[] = 'invalid_ownership_path_rule_match_case:' . $index;
-                    continue;
-                }
-                $expectedCaseKeys = ['candidate', 'matches', 'name', 'rule'];
-                $actualCaseKeys = array_keys($case);
-                sort($expectedCaseKeys, SORT_STRING);
-                sort($actualCaseKeys, SORT_STRING);
-                $name = $case['name'] ?? null;
-                $candidate = $case['candidate'] ?? null;
-                $matches = $case['matches'] ?? null;
-                if (
-                    $actualCaseKeys !== $expectedCaseKeys ||
-                    !is_string($name) ||
-                    $name === '' ||
-                    isset($seen[$name]) ||
-                    !is_string($candidate) ||
-                    !RepoPath::isNormalized($candidate) ||
-                    !is_bool($matches)
-                ) {
-                    $errors[] = 'invalid_ownership_path_rule_match_case:' . $index;
-                    continue;
-                }
-                $seen[$name] = true;
-                $ruleErrors = [];
-                $rule = self::readPathRule($case['rule'] ?? null, $ruleErrors, 'invalid');
-                if ($rule === null || $ruleErrors !== []) {
-                    $errors[] = 'invalid_ownership_path_rule_match_case:' . $name;
-                    continue;
-                }
-                if (self::pathRuleCoversChangedPath($rule, $candidate) !== $matches) {
-                    $errors[] = 'ownership_path_rule_match_case_failed:' . $name;
-                }
-            }
-        }
-
-        $invalidCases = $contract['invalid_rule_cases'] ?? null;
-        if (!is_array($invalidCases) || !array_is_list($invalidCases) || $invalidCases === []) {
-            $errors[] = 'invalid_ownership_path_rule_invalid_cases';
-        } else {
-            $seen = [];
-            foreach ($invalidCases as $index => $case) {
-                if (!is_array($case) || array_is_list($case)) {
-                    $errors[] = 'invalid_ownership_path_rule_invalid_case:' . $index;
-                    continue;
-                }
-                $expectedCaseKeys = ['name', 'rule'];
-                $actualCaseKeys = array_keys($case);
-                sort($expectedCaseKeys, SORT_STRING);
-                sort($actualCaseKeys, SORT_STRING);
-                $name = $case['name'] ?? null;
-                if ($actualCaseKeys !== $expectedCaseKeys || !is_string($name) || $name === '' || isset($seen[$name])) {
-                    $errors[] = 'invalid_ownership_path_rule_invalid_case:' . $index;
-                    continue;
-                }
-                $seen[$name] = true;
-                $ruleErrors = [];
-                if (self::readPathRule($case['rule'] ?? null, $ruleErrors, 'invalid') !== null) {
-                    $errors[] = 'ownership_path_rule_invalid_case_accepted:' . $name;
-                }
-            }
-        }
-
-        return array_values(array_unique($errors));
+        $output = self::runCanonicalEngine(['operation' => 'validate_contract', 'contract' => $contract]);
+        return is_array($output['errors'] ?? null)
+            ? array_values(array_unique($output['errors']))
+            : ['ownership_path_rule_engine_output_invalid'];
     }
 
     /**
@@ -214,48 +130,30 @@ final class ParallelWorkOwnershipContract
      */
     public static function readPathRule(mixed $value, array &$errors, string $error): ?array
     {
-        if (!is_array($value) || array_is_list($value)) {
+        try {
+            $output = self::runCanonicalEngine(['operation' => 'parse', 'rule' => $value]);
+        } catch (\RuntimeException) {
             $errors[] = $error;
             return null;
         }
-        $expectedKeys = ['match', 'path'];
-        $actualKeys = array_keys($value);
-        sort($expectedKeys, SORT_STRING);
-        sort($actualKeys, SORT_STRING);
-        $path = $value['path'] ?? null;
-        $match = $value['match'] ?? null;
         if (
-            $actualKeys !== $expectedKeys ||
-            !is_string($path) ||
-            !RepoPath::isNormalized($path) ||
-            !in_array($match, ['directory', 'exact_file', 'filename_prefix'], true)
+            ($output['valid'] ?? null) !== true ||
+            !is_array($output['rule'] ?? null) ||
+            array_is_list($output['rule'])
         ) {
             $errors[] = $error;
             return null;
         }
-
-        return ['path' => $path, 'match' => $match];
-    }
-
-    private static function pathRuleCovers(string $rulePath, string $match, string $candidatePath): bool
-    {
-        if ($match === 'directory') {
-            return str_starts_with($candidatePath, $rulePath . '/');
+        $rule = $output['rule'];
+        if (
+            array_keys($rule) !== ['match', 'path'] ||
+            !is_string($rule['path'] ?? null) ||
+            !is_string($rule['match'] ?? null)
+        ) {
+            $errors[] = $error;
+            return null;
         }
-
-        if ($match === 'filename_prefix') {
-            $ruleSeparator = strrpos($rulePath, '/');
-            $candidateSeparator = strrpos($candidatePath, '/');
-            $ruleDirectory = $ruleSeparator === false ? '' : substr($rulePath, 0, $ruleSeparator);
-            $candidateDirectory = $candidateSeparator === false ? '' : substr($candidatePath, 0, $candidateSeparator);
-            $filenamePrefix = $ruleSeparator === false ? $rulePath : substr($rulePath, $ruleSeparator + 1);
-            $candidateName =
-                $candidateSeparator === false ? $candidatePath : substr($candidatePath, $candidateSeparator + 1);
-
-            return $ruleDirectory === $candidateDirectory && str_starts_with($candidateName, $filenamePrefix);
-        }
-
-        return $rulePath === $candidatePath;
+        return ['path' => $rule['path'], 'match' => $rule['match']];
     }
 
     public static function pathRulesOverlap(
@@ -264,17 +162,106 @@ final class ParallelWorkOwnershipContract
         string $rightPath,
         string $rightMatch,
     ): bool {
-        if ($leftMatch === 'directory' && $rightMatch === 'directory' && $leftPath === $rightPath) {
-            return true;
+        $output = self::runCanonicalEngine([
+            'operation' => 'overlap',
+            'left' => ['path' => $leftPath, 'match' => $leftMatch],
+            'right' => ['path' => $rightPath, 'match' => $rightMatch],
+        ]);
+        if (!is_bool($output['overlaps'] ?? null)) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
         }
-
-        return self::pathRuleCovers($leftPath, $leftMatch, $rightPath) ||
-            self::pathRuleCovers($rightPath, $rightMatch, $leftPath);
+        return $output['overlaps'];
     }
 
     /** @param array{path: string, match: string} $pathRule */
     public static function pathRuleCoversChangedPath(array $pathRule, string $changedPath): bool
     {
-        return self::pathRuleCovers($pathRule['path'], $pathRule['match'], $changedPath);
+        $output = self::runCanonicalEngine([
+            'operation' => 'covers',
+            'rule' => $pathRule,
+            'candidate' => $changedPath,
+        ]);
+        if (!is_bool($output['matches'] ?? null)) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
+        }
+        return $output['matches'];
+    }
+
+    /** @param array<string, mixed> $request @return array<string, mixed> */
+    private static function runCanonicalEngine(array $request): array
+    {
+        $engine = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        if (
+            !is_string($engine) ||
+            !str_starts_with($engine, '/') ||
+            is_link($engine) ||
+            !is_file($engine) ||
+            realpath($engine) !== $engine
+        ) {
+            throw new \RuntimeException('Ownership path-rule engine unavailable');
+        }
+        $root = dirname(__DIR__, 3);
+        $process = proc_open(
+            ['/usr/bin/python3', '-I', '-B', $engine],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $root,
+            [
+                'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
+                'LANG' => 'C',
+                'LC_ALL' => 'C',
+                'TMPDIR' => '/tmp',
+                'PYTHONPATH' => '',
+            ],
+        );
+        if (!is_resource($process)) {
+            throw new \RuntimeException('Ownership path-rule engine unavailable');
+        }
+        $encodedRequest = json_encode($request, JSON_THROW_ON_ERROR);
+        if (fwrite($pipes[0], $encodedRequest) !== strlen($encodedRequest)) {
+            fclose($pipes[0]);
+            stream_get_contents($pipes[1]);
+            stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($process);
+            throw new \RuntimeException('Ownership path-rule engine input incomplete');
+        }
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+        if ($exitCode !== 0 || !is_string($stdout) || $stderr !== '') {
+            throw new \RuntimeException('Ownership path-rule engine failed');
+        }
+        $output = json_decode($stdout, true);
+        $expectedKeys = match ($request['operation'] ?? null) {
+            'parse' => ['rule', 'valid'],
+            'covers' => ['matches'],
+            'overlap' => ['overlaps'],
+            'validate_contract' => ['errors'],
+            default => [],
+        };
+        if (!is_array($output) || array_keys($output) !== $expectedKeys) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
+        }
+        if (
+            ($request['operation'] ?? null) === 'parse' &&
+            (!is_bool($output['valid']) ||
+                ($output['valid'] && (!is_array($output['rule']) || array_is_list($output['rule']))))
+        ) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
+        }
+        if (
+            ($request['operation'] ?? null) === 'validate_contract' &&
+            (!is_array($output['errors']) ||
+                !array_is_list($output['errors']) ||
+                array_filter($output['errors'], 'is_string') !== $output['errors'])
+        ) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
+        }
+        return $output;
     }
 }

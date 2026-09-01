@@ -158,6 +158,7 @@
                 "scripts/agent/lib/RepoPath.php",
                 "scripts/agent/lib/ReadonlyReviewBundle.php",
                 "scripts/agent/lib/ReadonlyReviewerContract.php",
+                "scripts/agent/lib/GeneratedReviewerPolicy.php",
                 "scripts/agent/lib/ReadonlyReviewerModelPolicy.php",
                 "scripts/agent/lib/ReadonlyReviewOutput.php",
                 "scripts/agent/lib/readonly_reviewer_bundle_runtime.sh",
@@ -261,6 +262,7 @@
             "scripts/agent/lib/ParallelWorkOwnershipContract.php",
             "scripts/agent/lib/ParallelWorkPolicyContract.php",
             "scripts/agent/lib/RepoPath.php",
+            "scripts/ci/ownership_path_rules.py",
             ".codex/contracts/ownership-path-rules.json"
         ],
         "canonical_base_ref": "refs/remotes/origin/main",

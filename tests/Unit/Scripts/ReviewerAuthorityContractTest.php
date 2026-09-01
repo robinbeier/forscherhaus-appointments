@@ -42,6 +42,68 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame(0, proc_close($process), $stdout . $stderr);
     }
 
+    public function testReviewerPolicySnapshotMatchesTheSingleJsonAuthority(): void
+    {
+        $contract = json_decode(
+            (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        $snapshot = require $this->repoRoot . '/scripts/agent/lib/GeneratedReviewerPolicy.php';
+        self::assertSame($contract['authority']['reviewer'] ?? null, $snapshot);
+        [$status, , $stderr] = $this->runPolicyGenerator(['--check']);
+        self::assertSame(0, $status, $stderr);
+    }
+
+    public function testReviewerPolicySnapshotGeneratorIsDeterministic(): void
+    {
+        [$firstStatus, $firstOutput, $firstError] = $this->runPolicyGenerator(['--stdout']);
+        [$secondStatus, $secondOutput, $secondError] = $this->runPolicyGenerator(['--stdout']);
+
+        self::assertSame(0, $firstStatus, $firstError);
+        self::assertSame(0, $secondStatus, $secondError);
+        self::assertSame($firstOutput, $secondOutput);
+        self::assertSame(
+            (string) file_get_contents($this->repoRoot . '/scripts/agent/lib/GeneratedReviewerPolicy.php'),
+            $firstOutput,
+        );
+    }
+
+    public function testReviewerPolicySnapshotRejectsTamperedPolicyBeforeInvocation(): void
+    {
+        $policy = $this->canonicalReviewerPolicy();
+        $policy['profiles']['tests_regression_flake']['model'] = 'untrusted-model';
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('generated exact-base snapshot');
+        ReadonlyReviewerContract::trustedBasePaths($policy);
+    }
+
+    /**
+     * @param list<string> $arguments
+     * @return array{int, string, string}
+     */
+    private function runPolicyGenerator(array $arguments): array
+    {
+        $command = array_merge(
+            [PHP_BINARY, $this->repoRoot . '/scripts/agent/generate_reviewer_policy_snapshot.php'],
+            $arguments,
+        );
+        $process = proc_open(
+            $command,
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $this->repoRoot,
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        return [proc_close($process), $stdout, $stderr];
+    }
+
     public function testMachineContractDeniesEveryExternalReviewerMutation(): void
     {
         $contract = json_decode(
@@ -354,10 +416,16 @@ class ReviewerAuthorityContractTest extends TestCase
             'shared_runtime_path="scripts/agent/lib/trusted_base_payload_runtime.sh"',
             $launcher,
         );
-        self::assertStringContainsString('combined-payload.sh', $launcher);
+        self::assertStringNotContainsString('combined-payload.sh', $launcher);
+        self::assertStringContainsString(
+            '/bin/bash --noprofile --norc "$materialized_runtime" "$materialized_payload"',
+            $launcher,
+        );
         self::assertStringContainsString('trusted_base_payload_initialize', $sharedRuntime);
         self::assertStringContainsString('trusted_base_assert_materialized_blob', $sharedRuntime);
         self::assertStringContainsString('trusted_base_assert_bootstrap_manifest', $sharedRuntime);
+        self::assertStringContainsString('trusted_base_dispatch_payload', $sharedRuntime);
+        self::assertStringContainsString('source "$payload_source" "$payload_source" "$@"', $sharedRuntime);
         self::assertStringStartsWith("#!/bin/bash\n", $runner);
         self::assertStringContainsString('must be launched from the exact-base trusted launcher', $runner);
         self::assertStringContainsString('trusted_base_payload_initialize', $runner);
@@ -482,7 +550,7 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
-    public function testSystemBootstrapDropsAmbientPhpAndShellStartupConfiguration(): void
+    public function testSystemBootstrapDropsAmbientPhpAndShellStartupConfigurationBeforePlatformGate(): void
     {
         $fixture = $this->runnerFixture('reviewer-clean-bootstrap', "#!/bin/sh\nexit 0\n", 'reviewer-bin');
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-bootstrap-' . bin2hex(random_bytes(8));
@@ -525,7 +593,7 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
-    public function testReviewerBootstrapNeverExecutesPhpResolvedFromAmbientPath(): void
+    public function testReviewerBootstrapNeverExecutesPhpResolvedFromAmbientPathBeforePlatformGate(): void
     {
         $fixture = $this->runnerFixture('reviewer-ambient-php', "#!/bin/sh\nexit 0\n", 'reviewer-bin');
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-path-bootstrap-' . bin2hex(random_bytes(8));
@@ -555,7 +623,7 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
-    public function testRunnerRejectsAnExecutableWhoseBasenameIsNotCodex(): void
+    public function testRunnerRejectsAnExecutableWhoseBasenameIsNotCodexBeforePlatformGate(): void
     {
         // This fixture is intentionally invalid before the Darwin-only runtime gate.
         $fixture = $this->runnerFixture('reviewer-not-codex', "#!/bin/sh\nexit 0\n", 'reviewer-bin');
@@ -1020,6 +1088,10 @@ class ReviewerAuthorityContractTest extends TestCase
             'Open https://example.invalid/capability/value',
             'Read /Users/example/.codex/auth.json',
             'Read /root/.codex/auth.json',
+            'Read `/Users/example/.codex/auth.json`',
+            'Read "/home/example/.codex/auth.json"',
+            "Read '/root/.codex/auth.json'",
+            'Inspect [auth](/Users/example/.codex/auth.json)',
             'Token=' . str_repeat('a', 40),
             'Opaque ' . str_repeat('Ab9_', 12),
             str_repeat('x', 1201),
@@ -1253,22 +1325,28 @@ class ReviewerAuthorityContractTest extends TestCase
     {
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-profile-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($temporaryDirectory . '/.codex/agents', 0700, true));
-        file_put_contents(
-            $temporaryDirectory . '/.codex/agents/reviewer.toml',
-            "developer_instructions = \"\"\"\nmodel = 'untrusted-body-value'\n\"\"\"\n",
+        self::assertNotFalse(
+            file_put_contents(
+                $temporaryDirectory . '/.codex/agents/reviewer-tests.toml',
+                "developer_instructions = \"\"\"\nmodel = 'untrusted-body-value'\n\"\"\"\n",
+            ),
         );
 
-        $resolved = ReadonlyReviewerContract::resolveInvocation(
-            $temporaryDirectory,
-            'tests_regression_flake',
-            $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml'),
-        );
+        try {
+            $resolved = ReadonlyReviewerContract::resolveInvocation(
+                $temporaryDirectory,
+                'tests_regression_flake',
+                $this->canonicalReviewerPolicy(),
+            );
 
-        self::assertSame('gpt-5.4-mini', $resolved['model']);
-        self::assertSame('medium', $resolved['reasoning']);
-        self::assertSame('scripts/agent/readonly-review-output.schema.json', $resolved['output_schema_path']);
-        self::assertContains('.codex/agents/reviewer.toml', $resolved['trusted_base_paths']);
-        self::assertStringContainsString("model = 'untrusted-body-value'", $resolved['role_instructions']);
+            self::assertSame('gpt-5.4-mini', $resolved['model']);
+            self::assertSame('medium', $resolved['reasoning']);
+            self::assertSame('scripts/agent/readonly-review-output.schema.json', $resolved['output_schema_path']);
+            self::assertContains('.codex/agents/reviewer-tests.toml', $resolved['trusted_base_paths']);
+            self::assertStringContainsString("model = 'untrusted-body-value'", $resolved['role_instructions']);
+        } finally {
+            $this->removeDirectory($temporaryDirectory);
+        }
     }
 
     public function testTestsRegressionFlakeLensResolvesTheCanonicalRepositoryRole(): void
@@ -1300,10 +1378,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
     public function testRuntimeConfigurationBindsOfficialPlatformDigests(): void
     {
-        $runtime = ReadonlyReviewerContract::runtimeConfiguration(
-            $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml'),
-            'Darwin-arm64',
-        );
+        $runtime = ReadonlyReviewerContract::runtimeConfiguration($this->canonicalReviewerPolicy(), 'Darwin-arm64');
 
         self::assertSame('0.145.0', $runtime['version']);
         self::assertSame('1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590', $runtime['binary_sha256']);
@@ -1319,7 +1394,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
     public function testProfileResolutionRejectsAnInvalidBootstrapPathSet(): void
     {
-        $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
+        $policy = $this->canonicalReviewerPolicy();
         $policy['bootstrap_paths'][] = '../escaped-policy';
 
         $this->expectException(\RuntimeException::class);
@@ -1329,7 +1404,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
     public function testProfileResolutionRejectsWeakenedDisabledFeatures(): void
     {
-        $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
+        $policy = $this->canonicalReviewerPolicy();
         array_pop($policy['disabled_features']);
 
         $this->expectException(\RuntimeException::class);
@@ -1339,7 +1414,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
     public function testRuntimeBoundaryDiagnosticNamesTheDriftedKey(): void
     {
-        $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
+        $policy = $this->canonicalReviewerPolicy();
         $policy['invocation_source'] = 'permissive-checkout-entrypoint';
 
         $this->expectException(\RuntimeException::class);
@@ -1348,7 +1423,7 @@ class ReviewerAuthorityContractTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function reviewerPolicyForProfile(string $profile): array
+    private function canonicalReviewerPolicy(): array
     {
         $contract = json_decode(
             (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
@@ -1360,9 +1435,6 @@ class ReviewerAuthorityContractTest extends TestCase
         $policy = $contract['authority']['reviewer'] ?? null;
         self::assertIsArray($policy);
         self::assertIsArray($policy['profiles'] ?? null);
-        foreach (array_keys($policy['profiles']) as $lens) {
-            $policy['profiles'][$lens]['instructions'] = $profile;
-        }
         return $policy;
     }
 
