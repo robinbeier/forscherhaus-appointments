@@ -155,9 +155,13 @@ The materialized wrapper enters through a `php -n` bootstrap before Bash can
 process caller startup state. That bootstrap passes only fixed `PATH`, `TMPDIR`,
 `LANG`, and `LC_ALL` values into the Bash payload, excluding `BASH_ENV`,
 exported functions, shell options, `HOME`, `CODEX_HOME`, and other ambient
-variables. The wrapper then reads the manifest base with a fixed PHP runtime,
-rejects any checkout-HEAD mismatch before executing validator source, verifies
-that it is the checkout's exact base blob, then
+variables. Before executing validator source, the wrapper resolves
+`refs/heads/main` via unauthenticated read-only `git ls-remote` against the
+fixed public canonical repository URL in a separate empty Git environment. It
+requires that live SHA, the local `refs/remotes/origin/main`, the manifest base,
+and the clean validator checkout HEAD all match exactly. The wrapper then reads
+the manifest base with a fixed PHP runtime, verifies that it is the checkout's
+exact base blob, and
 materializes the CLI and both shared validator libraries directly from that
 same commit into a private trust bundle. The checker therefore executes no PHP
 source from the checkout and starts PHP without ambient `php.ini`, `PHPRC`, scan
@@ -165,8 +169,8 @@ directories, or prepend/append hooks. It requires the validator checkout to be
 clean and its HEAD to equal the manifest's declared base, then reads both the
 workflow contract and the ownership map from that exact commit. Checkout-time
 filters, symlink substitutions, assume-unchanged state, a caller-controlled
-SHA, or a mutable validator checkout cannot relax the policy used to approve a
-lane.
+SHA, a rewritten tracking ref, or a mutable validator checkout cannot relax the
+policy used to approve a lane.
 
 The manifest names one full lowercase common base SHA, the primary ID, exact
 `primary_approved_component_ids` for any intersected `single-owner` or

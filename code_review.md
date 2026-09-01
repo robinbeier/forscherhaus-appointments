@@ -106,9 +106,13 @@ Invoke each final lens with the exact
 `scripts/agent/run_readonly_reviewer.sh` blob from the already trusted review
 base, materialized outside the worktree as described in `WORKFLOW.md`; never
 execute the checked-out copy or use the head copy as its own trust anchor. The
-base must be the exact merge base of the reviewed head and the freshly fetched
-canonical `refs/remotes/origin/main` ref; the runner rejects a caller-selected
-narrower ancestor. The
+runner resolves `refs/heads/main` through unauthenticated read-only
+`git ls-remote` against the fixed public canonical repository URL in an empty
+environment without credentials, proxies, endpoint overrides, helpers, or
+ambient Git configuration. The local `refs/remotes/origin/main` must match that
+live SHA, and the base must be its exact merge base with the reviewed head; a
+stale or rewritten tracking ref and a caller-selected narrower ancestor both
+fail closed. The
 initial extraction itself uses the absolute system Git binary in an empty
 environment with replacement objects, lazy fetching, global/system config,
 hooks, fsmonitor, helpers, and external diffs disabled; an ambient `git show`

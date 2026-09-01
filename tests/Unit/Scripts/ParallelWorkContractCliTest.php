@@ -10,6 +10,7 @@ class ParallelWorkContractCliTest extends TestCase
 {
     private string $repoRoot;
     private string $trustedValidatorRoot;
+    private string $canonicalRemoteRoot;
     private string $baseSha;
 
     protected function setUp(): void
@@ -24,13 +25,25 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertNotFalse(
             file_put_contents($this->repoRoot . '/tests/Fixtures/parallel/lane-a/tracked.txt', "base\n"),
         );
+        $parallelWrapper = (string) file_get_contents(
+            $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.sh',
+        );
+        $this->canonicalRemoteRoot = sys_get_temp_dir() . '/parallel-work-canonical-' . bin2hex(random_bytes(8));
+        self::assertNotFalse(
+            file_put_contents(
+                $this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh',
+                str_replace(
+                    'https://github.com/robinbeier/forscherhaus-appointments.git',
+                    $this->canonicalRemoteRoot,
+                    $parallelWrapper,
+                    $replacementCount,
+                ),
+            ),
+        );
+        self::assertSame(1, $replacementCount);
         copy(
             $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
             $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
-        );
-        copy(
-            $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.sh',
-            $this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh',
         );
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0700));
         copy($sourceRepoRoot . '/scripts/agent/lib/RepoPath.php', $this->repoRoot . '/scripts/agent/lib/RepoPath.php');
@@ -52,6 +65,10 @@ class ParallelWorkContractCliTest extends TestCase
         $this->runGit($this->repoRoot, ['add', '.']);
         $this->runGit($this->repoRoot, ['commit', '-qm', 'trusted base']);
         $this->baseSha = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
+        $this->runGit(sys_get_temp_dir(), ['init', '-q', '--bare', $this->canonicalRemoteRoot]);
+        $this->runGit($this->repoRoot, ['remote', 'add', 'origin', $this->canonicalRemoteRoot]);
+        $this->runGit($this->repoRoot, ['push', '-q', 'origin', 'HEAD:main']);
+        $this->runGit($this->repoRoot, ['fetch', '-q', 'origin', 'main']);
         $this->trustedValidatorRoot = sys_get_temp_dir() . '/parallel-work-validator-' . bin2hex(random_bytes(8));
         $this->runGit(sys_get_temp_dir(), [
             'clone',
@@ -61,6 +78,18 @@ class ParallelWorkContractCliTest extends TestCase
             $this->trustedValidatorRoot,
         ]);
         $this->runGit($this->trustedValidatorRoot, ['checkout', '-q', '--detach', $this->baseSha]);
+        $this->runGit($this->trustedValidatorRoot, ['update-ref', 'refs/remotes/origin/main', $this->baseSha]);
+    }
+
+    protected function tearDown(): void
+    {
+        foreach (['trustedValidatorRoot', 'repoRoot', 'canonicalRemoteRoot'] as $property) {
+            if (isset($this->{$property})) {
+                $this->removeDirectory($this->{$property});
+            }
+        }
+
+        parent::tearDown();
     }
 
     public function testCliAcceptsValidManifestThroughCanonicalContract(): void
@@ -102,6 +131,52 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertSame('', $stderr);
         self::assertSame(
             ['schema_version' => 1, 'status' => 'pass', 'errors' => []],
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    public function testAdmissionRejectsARewrittenLocalOriginMain(): void
+    {
+        self::assertNotFalse(file_put_contents($this->repoRoot . '/lane-only.txt', "lane\n"));
+        $this->runGit($this->repoRoot, ['add', 'lane-only.txt']);
+        $this->runGit($this->repoRoot, ['commit', '-qm', 'lane-only commit']);
+        $rewrittenSha = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
+        $this->runGit($this->trustedValidatorRoot, ['fetch', '-q', $this->repoRoot, $rewrittenSha]);
+        $this->runGit($this->trustedValidatorRoot, ['update-ref', 'refs/remotes/origin/main', $rewrittenSha]);
+
+        $manifestPath = $this->writeJsonFixture('rewritten-origin-main', $this->manifestForPath('safe/path'));
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertSame(
+            ['schema_version' => 1, 'status' => 'fail', 'errors' => ['canonical_main_mismatch']],
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    public function testAdmissionRejectsALaterAncestorThatCouldHideAnEarlierOwnershipViolation(): void
+    {
+        self::assertNotFalse(
+            file_put_contents(
+                $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
+                "\n// primary-owned change that must not be hidden by a later manifest base\n",
+                FILE_APPEND,
+            ),
+        );
+        $this->runGit($this->repoRoot, ['add', 'scripts/agent/check_parallel_work_contract.php']);
+        $this->runGit($this->repoRoot, ['commit', '-qm', 'later ancestor with ownership violation']);
+        $laterSha = $this->runGit($this->repoRoot, ['rev-parse', 'HEAD']);
+        $this->runGit($this->trustedValidatorRoot, ['fetch', '-q', $this->repoRoot, $laterSha]);
+        $this->runGit($this->trustedValidatorRoot, ['checkout', '-q', '--detach', $laterSha]);
+
+        $manifestPath = $this->writeJsonFixture('later-ancestor', $this->manifestForPath('safe/path', $laterSha));
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertSame(
+            ['schema_version' => 1, 'status' => 'fail', 'errors' => ['validator_base_mismatch']],
             json_decode($stdout, true, 512, JSON_THROW_ON_ERROR),
         );
     }
@@ -681,5 +756,25 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertSame(0, proc_close($process), (string) $stderr);
 
         return (string) $stdout;
+    }
+
+    private function removeDirectory(string $directory): void
+    {
+        if (!is_dir($directory) || is_link($directory)) {
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $entry) {
+            if ($entry->isDir() && !$entry->isLink()) {
+                rmdir($entry->getPathname());
+            } else {
+                unlink($entry->getPathname());
+            }
+        }
+        rmdir($directory);
     }
 }

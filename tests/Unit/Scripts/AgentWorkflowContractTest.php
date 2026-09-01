@@ -189,8 +189,16 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
         self::assertSame('refs/remotes/origin/main', $contract['authority']['reviewer']['review_base_ref'] ?? null);
         self::assertSame(
-            'exact_merge_base_with_canonical_remote_tracking_ref',
+            'https://github.com/robinbeier/forscherhaus-appointments.git',
+            $contract['authority']['reviewer']['review_base_remote_url'] ?? null,
+        );
+        self::assertSame(
+            'exact_merge_base_with_live_pinned_public_remote_main_and_matching_tracking_ref',
             $contract['authority']['reviewer']['review_base_policy'] ?? null,
+        );
+        self::assertSame(
+            'unauthenticated_read_only_ls_remote_clean_environment',
+            $contract['authority']['reviewer']['review_base_remote_transport'] ?? null,
         );
         self::assertSame(
             [
@@ -274,6 +282,19 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame(
             'hardened_system_git_materialized_declared_base_wrapper_and_source_blobs',
             $contract['parallel_work']['validator_trust_anchor'] ?? null,
+        );
+        self::assertSame('refs/remotes/origin/main', $contract['parallel_work']['canonical_base_ref'] ?? null);
+        self::assertSame(
+            'https://github.com/robinbeier/forscherhaus-appointments.git',
+            $contract['parallel_work']['canonical_base_remote_url'] ?? null,
+        );
+        self::assertSame(
+            'live_pinned_public_remote_main_and_matching_tracking_ref',
+            $contract['parallel_work']['canonical_base_policy'] ?? null,
+        );
+        self::assertSame(
+            'unauthenticated_read_only_ls_remote_clean_environment',
+            $contract['parallel_work']['canonical_base_remote_transport'] ?? null,
         );
         self::assertTrue($contract['parallel_work']['admission_requires_clean_exact_base_checkout'] ?? null);
         self::assertTrue($contract['parallel_work']['admission_executes_only_declared_base_blobs'] ?? null);

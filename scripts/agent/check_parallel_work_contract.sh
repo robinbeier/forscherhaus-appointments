@@ -176,6 +176,51 @@ trusted_git_run() {
         -C "$validator_checkout" "$@"
 }
 
+canonical_repository_url='https://github.com/robinbeier/forscherhaus-appointments.git'
+canonical_main_record="$(
+    /usr/bin/env -i \
+        GIT_ATTR_NOSYSTEM=1 \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_SYSTEM=/dev/null \
+        GIT_NO_LAZY_FETCH=1 \
+        GIT_NO_REPLACE_OBJECTS=1 \
+        GIT_OPTIONAL_LOCKS=0 \
+        GIT_PAGER=cat \
+        GIT_TERMINAL_PROMPT=0 \
+        LANG=C \
+        LC_ALL=C \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        TMPDIR=/tmp \
+        "$trusted_git" \
+        -c core.fsmonitor=false \
+        -c core.hooksPath=/dev/null \
+        -c core.untrackedCache=false \
+        -c credential.helper= \
+        -c diff.external= \
+        -c http.proxy= \
+        -c https.proxy= \
+        -c core.excludesfile=/dev/null \
+        ls-remote --exit-code --refs "$canonical_repository_url" refs/heads/main 2>/dev/null
+)" || {
+    echo "Parallel-work canonical main is unavailable." >&2
+    exit 2
+}
+if [[ ! "$canonical_main_record" =~ ^([a-f0-9]{40})$'\t'refs/heads/main$ ]]; then
+    echo "Parallel-work canonical main is invalid." >&2
+    exit 2
+fi
+canonical_main_sha="${BASH_REMATCH[1]}"
+
+local_origin_main="$(trusted_git_run rev-parse --verify refs/remotes/origin/main 2>/dev/null)" || {
+    echo "Parallel-work local origin/main is unavailable." >&2
+    exit 2
+}
+if [[ ! "$local_origin_main" =~ ^[a-f0-9]{40}$ || "$local_origin_main" != "$canonical_main_sha" ]]; then
+    /usr/bin/printf '%s\n' '{"schema_version":1,"status":"fail","errors":["canonical_main_mismatch"]}'
+    exit 1
+fi
+
 resolved_checkout="$(trusted_git_run rev-parse --show-toplevel 2>/dev/null)" || {
     echo "Parallel-work validator checkout is invalid." >&2
     exit 2
@@ -197,7 +242,7 @@ if [[ ! "$validator_head" =~ ^[a-f0-9]{40}$ ]]; then
     echo "Parallel-work validator base is invalid." >&2
     exit 2
 fi
-if [[ "$validator_head" != "$manifest_base" ]]; then
+if [[ "$validator_head" != "$manifest_base" || "$manifest_base" != "$canonical_main_sha" ]]; then
     /usr/bin/printf '%s\n' '{"schema_version":1,"status":"fail","errors":["validator_base_mismatch"]}'
     exit 1
 fi

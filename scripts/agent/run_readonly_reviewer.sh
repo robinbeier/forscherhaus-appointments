@@ -148,6 +148,7 @@ trusted_git() {
         GIT_ATTR_NOSYSTEM=1 \
         GIT_CONFIG_GLOBAL=/dev/null \
         GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_SYSTEM=/dev/null \
         GIT_NO_LAZY_FETCH=1 \
         GIT_NO_REPLACE_OBJECTS=1 \
         GIT_OPTIONAL_LOCKS=0 \
@@ -158,7 +159,38 @@ trusted_git() {
         -c core.hooksPath=/dev/null \
         -c core.untrackedCache=false \
         -c diff.external= \
+        -c http.proxy= \
+        -c https.proxy= \
         -c pager.diff=false \
+        "$@"
+}
+
+trusted_remote_git() {
+    /usr/bin/env -i \
+        GIT_ATTR_NOSYSTEM=1 \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_SYSTEM=/dev/null \
+        GIT_NO_LAZY_FETCH=1 \
+        GIT_NO_REPLACE_OBJECTS=1 \
+        GIT_OPTIONAL_LOCKS=0 \
+        GIT_PAGER=cat \
+        GIT_TERMINAL_PROMPT=0 \
+        LANG=C \
+        LC_ALL=C \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin \
+        TMPDIR=/tmp \
+        "$git_bin" \
+        -c credential.helper= \
+        -c core.askPass= \
+        -c core.fsmonitor=false \
+        -c core.hooksPath=/dev/null \
+        -c core.untrackedCache=false \
+        -c diff.external= \
+        -c http.proxy= \
+        -c https.proxy= \
+        -c pager.diff=false \
+        -C /tmp \
         "$@"
 }
 
@@ -186,16 +218,36 @@ if [[ ! -d "$repo_root" ]]; then
 fi
 cd "$repo_root"
 
+review_base_ref="refs/remotes/origin/main"
+canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'
+remote_main_record="$(
+    trusted_remote_git ls-remote --exit-code --refs "$canonical_main_remote" refs/heads/main 2>/dev/null
+)" || {
+    echo "Reviewer live canonical main is unavailable." >&2
+    exit 1
+}
+if [[ ! "$remote_main_record" =~ ^([a-f0-9]{40})$'\t'refs/heads/main$ ]]; then
+    echo "Reviewer live canonical main is invalid." >&2
+    exit 1
+fi
+remote_main_sha="${BASH_REMATCH[1]}"
+tracking_main_sha="$(trusted_git rev-parse --verify "${review_base_ref}^{commit}" 2>/dev/null)" || {
+    echo "Reviewer canonical base ref is unavailable; fetch origin/main before review." >&2
+    exit 1
+}
+if [[ "$tracking_main_sha" != "$remote_main_sha" ]]; then
+    echo "Reviewer origin/main does not match live canonical main; fetch before review." >&2
+    exit 1
+fi
+trusted_git cat-file -e "${remote_main_sha}^{commit}" 2>/dev/null || {
+    echo "Reviewer live canonical main commit is unavailable; fetch before review." >&2
+    exit 1
+}
 trusted_git cat-file -e "${base_sha}^{commit}" 2>/dev/null || {
     echo "Reviewer base commit is unavailable." >&2
     exit 1
 }
-review_base_ref="refs/remotes/origin/main"
-trusted_git rev-parse --verify "${review_base_ref}^{commit}" >/dev/null 2>&1 || {
-    echo "Reviewer canonical base ref is unavailable; fetch origin/main before review." >&2
-    exit 1
-}
-expected_base_sha="$(trusted_git merge-base "$review_base_ref" "$head_sha")" || {
+expected_base_sha="$(trusted_git merge-base "$remote_main_sha" "$head_sha")" || {
     echo "Reviewer canonical merge base could not be resolved." >&2
     exit 1
 }

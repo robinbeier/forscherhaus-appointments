@@ -67,8 +67,12 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
         self::assertSame('refs/remotes/origin/main', $contract['authority']['reviewer']['review_base_ref'] ?? null);
         self::assertSame(
-            'exact_merge_base_with_canonical_remote_tracking_ref',
+            'exact_merge_base_with_live_pinned_public_remote_main_and_matching_tracking_ref',
             $contract['authority']['reviewer']['review_base_policy'] ?? null,
+        );
+        self::assertSame(
+            'https://github.com/robinbeier/forscherhaus-appointments.git',
+            $contract['authority']['reviewer']['review_base_remote_url'] ?? null,
         );
         self::assertSame(
             'hardened_system_git_materialized_base_blob_outside_worktree',
@@ -272,6 +276,19 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertStringContainsString('env -i', $runner);
         self::assertStringContainsString('GIT_NO_REPLACE_OBJECTS=1', $runner);
+        self::assertStringContainsString('trusted_remote_git()', $runner);
+        $remoteGitStart = strpos($runner, 'trusted_remote_git() {');
+        self::assertNotFalse($remoteGitStart);
+        $remoteGitEnd = strpos($runner, "\n}\n\nsha_pattern=", $remoteGitStart);
+        self::assertNotFalse($remoteGitEnd);
+        $remoteGit = substr($runner, $remoteGitStart, $remoteGitEnd - $remoteGitStart);
+        self::assertStringContainsString('GIT_CONFIG_SYSTEM=/dev/null', $remoteGit);
+        self::assertStringContainsString('-c http.proxy=', $remoteGit);
+        self::assertStringContainsString('-c https.proxy=', $remoteGit);
+        self::assertStringContainsString(
+            "canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'",
+            $runner,
+        );
         self::assertStringContainsString('materialized_codex="$control_root/codex"', $runner);
         self::assertStringContainsString('validate-codex-copy', $runner);
         self::assertStringContainsString('readonly_review_bundle.php', $runner);
@@ -465,6 +482,27 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertSame(1, $exitCode);
             self::assertSame('', $stdout);
             self::assertStringContainsString('does not match the canonical origin/main merge base', $stderr);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+        }
+    }
+
+    public function testRunnerRejectsARewrittenLocalOriginMainTrackingRef(): void
+    {
+        $fixture = $this->runnerFixture('reviewer-rewritten-origin-main', "#!/bin/sh\nexit 0\n", 'codex');
+
+        try {
+            self::assertNotFalse(file_put_contents($fixture['root'] . '/head.txt', "head\n"));
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Add untrusted head');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+            $this->runGitCommand(['update-ref', 'refs/remotes/origin/main', $head], $fixture['root']);
+
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $head, $head);
+
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertStringContainsString('does not match live canonical main', $stderr);
         } finally {
             $this->removeRunnerFixture($fixture);
         }
@@ -885,15 +923,24 @@ class ReviewerAuthorityContractTest extends TestCase
         return $policy;
     }
 
-    /** @return array{root: string, runner: string, binary: string, base: string} */
+    /** @return array{root: string, runner: string, binary: string, base: string, remote: string} */
     private function runnerFixture(string $label, string $binarySource, string $binaryName): array
     {
         $root = sys_get_temp_dir() . '/' . $label . '-' . bin2hex(random_bytes(8));
+        $remote = sys_get_temp_dir() . '/' . $label . '-remote-' . bin2hex(random_bytes(8)) . '.git';
+        $this->runGitCommand(['init', '--bare', '-q', $remote], null);
         $this->runGitCommand(['init', '-q', $root], null);
         $runnerPath = 'scripts/agent/run_readonly_reviewer.sh';
         $fixtureRunner = $root . '/' . $runnerPath;
         self::assertTrue(mkdir(dirname($fixtureRunner), 0700, true));
-        self::assertTrue(copy($this->repoRoot . '/' . $runnerPath, $fixtureRunner), $runnerPath);
+        $runnerSource = (string) file_get_contents($this->repoRoot . '/' . $runnerPath);
+        $fixtureSource = str_replace(
+            "canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'",
+            "canonical_main_remote='file://{$remote}'",
+            $runnerSource,
+        );
+        self::assertNotSame($runnerSource, $fixtureSource);
+        self::assertNotFalse(file_put_contents($fixtureRunner, $fixtureSource));
         $this->runGitCommand(['add', '--all'], $root);
         $this->runGitCommand(
             [
@@ -912,7 +959,9 @@ class ReviewerAuthorityContractTest extends TestCase
             ],
             $root,
         );
+        $this->runGitCommand(['branch', '-M', 'main'], $root);
         $base = $this->runGitCommand(['rev-parse', 'HEAD'], $root);
+        $this->runGitCommand(['push', '-q', $remote, 'HEAD:refs/heads/main'], $root);
         $this->runGitCommand(['update-ref', 'refs/remotes/origin/main', $base], $root);
         $runner = sys_get_temp_dir() . '/reviewer-runner-' . bin2hex(random_bytes(8));
         self::assertNotFalse(
@@ -925,10 +974,10 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertNotFalse(file_put_contents($binary, $binarySource));
         self::assertTrue(chmod($binary, 0700));
 
-        return ['root' => $root, 'runner' => $runner, 'binary' => $binary, 'base' => $base];
+        return ['root' => $root, 'runner' => $runner, 'binary' => $binary, 'base' => $base, 'remote' => $remote];
     }
 
-    /** @param array{root: string, runner: string, binary: string, base: string} $fixture
+    /** @param array{root: string, runner: string, binary: string, base: string, remote: string} $fixture
      *  @return array{int, string, string}
      */
     private function runRunnerFixture(array $fixture, ?string $base = null, ?string $head = null): array
@@ -976,7 +1025,7 @@ class ReviewerAuthorityContractTest extends TestCase
         );
     }
 
-    /** @param array{root: string, runner: string, binary: string, base: string} $fixture */
+    /** @param array{root: string, runner: string, binary: string, base: string, remote: string} $fixture */
     private function removeRunnerFixture(array $fixture): void
     {
         if (is_file($fixture['binary'])) {
@@ -990,6 +1039,7 @@ class ReviewerAuthorityContractTest extends TestCase
             unlink($fixture['runner']);
         }
         $this->removeDirectory($fixture['root']);
+        $this->removeDirectory($fixture['remote']);
     }
 
     private function removeDirectory(string $directory): void
