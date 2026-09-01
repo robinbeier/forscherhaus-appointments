@@ -806,6 +806,26 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertStringContainsString('requires an explicit evidence mode', $stderr);
     }
 
+    public function testLaneVerificationRejectsConflictingCleanAndDirtyEvidenceModesBeforeProducingResult(): void
+    {
+        $manifestPath = $this->writeJsonFixture(
+            'conflicting-evidence-modes',
+            $this->manifestForPath('tests/Fixtures/parallel/lane-a'),
+        );
+
+        [$exitCode, $stdout, $stderr] = $this->runCli([
+            '--manifest=' . $manifestPath,
+            '--repo-root=' . $this->repoRoot,
+            '--verify-lane=lane-a',
+            '--require-clean',
+            '--allow-dirty-precommit',
+        ]);
+
+        self::assertSame(2, $exitCode);
+        self::assertSame('', $stdout);
+        self::assertSame("Parallel-work verification modes are mutually exclusive.\n", $stderr);
+    }
+
     public function testCliRejectsUnknownOptionBeforeReadingInputs(): void
     {
         [$exitCode, $stdout, $stderr] = $this->runCli(['--bogus']);

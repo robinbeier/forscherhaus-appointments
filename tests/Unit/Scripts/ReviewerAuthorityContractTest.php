@@ -831,6 +831,32 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
+    public function testDiagnosticRejectsAProvidedCodexBinaryBeforeAnyModelExecution(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-diagnostic-conflict-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-diagnostic-conflict',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 99\n",
+            'codex',
+        );
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture(
+                $fixture,
+                diagnostic: true,
+                additionalReviewerArguments: ['--codex-bin=' . $fixture['binary']],
+            );
+
+            self::assertSame(2, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame("Reviewer bootstrap diagnostic must not receive a Codex binary.\n", $stderr);
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
+        }
+    }
+
     public function testRuntimeValidatorRejectsUnpinnedCodexNamedExecutable(): void
     {
         $binary = sys_get_temp_dir() . '/codex-' . bin2hex(random_bytes(8));
@@ -1833,8 +1859,10 @@ class ReviewerAuthorityContractTest extends TestCase
         ?string $head = null,
         ?array $environment = null,
         bool $diagnostic = false,
+        array $additionalReviewerArguments = [],
     ): array {
         $reviewerArguments = $diagnostic ? ['--diagnostic-bootstrap-only'] : ['--codex-bin=' . $fixture['binary']];
+        array_push($reviewerArguments, ...$additionalReviewerArguments);
         $reviewerArguments[] = '--lens=correctness_security';
         $reviewerArguments[] = '--head-sha=' . ($head ?? $fixture['base']);
         $process = proc_open(
