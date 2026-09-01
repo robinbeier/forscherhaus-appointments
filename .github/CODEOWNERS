@@ -85,7 +85,13 @@
 /application/models/Settings_model.php @robinbeier
 /application/models/Unavailabilities_model.php @robinbeier
 /application/models/Webhooks_model.php @robinbeier
-/application/views/components/booking_* @robinbeier
+/application/views/components/booking_cancellation_frame.php @robinbeier
+/application/views/components/booking_final_step.php @robinbeier
+/application/views/components/booking_footer.php @robinbeier
+/application/views/components/booking_header.php @robinbeier
+/application/views/components/booking_info_step.php @robinbeier
+/application/views/components/booking_time_step.php @robinbeier
+/application/views/components/booking_type_step.php @robinbeier
 /application/views/components/jquery_compat_inline.php @robinbeier
 /application/views/pages/account.php @robinbeier
 /application/views/pages/admins.php @robinbeier
