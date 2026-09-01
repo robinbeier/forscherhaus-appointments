@@ -170,6 +170,8 @@ final class ReadonlyReviewerContract
                 'scripts/agent/lib/RepoPath.php',
                 'scripts/agent/lib/ReadonlyReviewBundle.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+                'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
                 'AGENTS.md',
                 'code_review.md',
             ]),

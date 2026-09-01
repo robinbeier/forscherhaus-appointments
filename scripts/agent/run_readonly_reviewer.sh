@@ -291,6 +291,29 @@ if ! trusted_git diff --quiet --no-ext-diff --no-textconv "$base_sha" "$head_sha
     exit 1
 fi
 
+assert_tree_has_no_symlinks() {
+    local tree_sha="$1"
+    trusted_git ls-tree -r -z "$tree_sha" | env -u PHPRC -u PHP_INI_SCAN_DIR \
+        "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
+            $raw = (string) stream_get_contents(STDIN);
+            if ($raw !== "" && !str_ends_with($raw, "\0")) {
+                exit(1);
+            }
+            foreach ($raw === "" ? [] : explode("\0", substr($raw, 0, -1)) as $entry) {
+                if (preg_match("/^([0-7]{6}) (?:blob|commit) [0-9a-f]{40,64}\t/sD", $entry, $matches) !== 1) {
+                    exit(1);
+                }
+                if ($matches[1] === "120000") {
+                    exit(1);
+                }
+            }
+        '
+}
+if ! assert_tree_has_no_symlinks "$base_sha" || ! assert_tree_has_no_symlinks "$head_sha"; then
+    echo "Reviewer exact commit tree contains a tracked symlink or invalid entry." >&2
+    exit 1
+fi
+
 if [[ -z "$requested_codex_bin" ]]; then
     echo "Reviewer Codex binary must be supplied explicitly by the primary." >&2
     exit 2
@@ -390,29 +413,6 @@ trusted_php() {
         "$php_bin" -n -d auto_prepend_file= -d auto_append_file= "$@"
 }
 
-assert_tree_has_no_symlinks() {
-    local tree_sha="$1"
-    trusted_git ls-tree -r -z "$tree_sha" | env -u PHPRC -u PHP_INI_SCAN_DIR \
-        "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
-            $raw = (string) stream_get_contents(STDIN);
-            if ($raw !== "" && !str_ends_with($raw, "\0")) {
-                exit(1);
-            }
-            foreach ($raw === "" ? [] : explode("\0", substr($raw, 0, -1)) as $entry) {
-                if (preg_match("/^([0-7]{6}) (?:blob|commit) [0-9a-f]{40,64}\t/sD", $entry, $matches) !== 1) {
-                    exit(1);
-                }
-                if ($matches[1] === "120000") {
-                    exit(1);
-                }
-            }
-        '
-}
-if ! assert_tree_has_no_symlinks "$base_sha" || ! assert_tree_has_no_symlinks "$head_sha"; then
-    echo "Reviewer exact commit tree contains a tracked symlink or invalid entry." >&2
-    exit 1
-fi
-
 contract_relative_path=".codex/contracts/agent-workflow.json"
 bootstrap_paths=(
     "$contract_relative_path"
@@ -422,6 +422,8 @@ bootstrap_paths=(
     "scripts/agent/lib/RepoPath.php"
     "scripts/agent/lib/ReadonlyReviewBundle.php"
     "scripts/agent/lib/ReadonlyReviewerContract.php"
+    "scripts/agent/lib/readonly_reviewer_bundle_runtime.sh"
+    "scripts/agent/lib/readonly_reviewer_isolated_runtime.sh"
 )
 for bootstrap_path in "${bootstrap_paths[@]}"; do
     mkdir -p "$control_root/$(dirname "$bootstrap_path")"
@@ -490,306 +492,14 @@ if ! "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
     exit 2
 fi
 
-changed_paths_file="$control_root/changed-paths.json"
-if ! trusted_git diff --name-only --no-renames --no-ext-diff --no-textconv -z "$base_sha" "$head_sha" \
-    | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" changed-paths > "$changed_paths_file"; then
-    echo "Reviewer changed-path evidence could not be materialized." >&2
-    exit 1
-fi
+trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" trusted-paths --lens="$lens" >/dev/null || exit $?
 
-trusted_paths="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" trusted-paths --lens="$lens")" || exit $?
+# These libraries are exact base blobs from the hard-coded bootstrap set. The
+# validated machine contract also requires both paths in the complete trust set.
+# shellcheck source=scripts/agent/lib/readonly_reviewer_bundle_runtime.sh
+source "$control_root/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh"
+# shellcheck source=scripts/agent/lib/readonly_reviewer_isolated_runtime.sh
+source "$control_root/scripts/agent/lib/readonly_reviewer_isolated_runtime.sh"
 
-trusted_path_count=0
-trusted_paths_file="$control_root/trusted-paths.txt"
-: > "$trusted_paths_file"
-while IFS= read -r trusted_path || [[ -n "$trusted_path" ]]; do
-    if [[ -z "$trusted_path" ]]; then
-        echo "Reviewer trust-path manifest is invalid." >&2
-        exit 1
-    fi
-    printf '%s\n' "$trusted_path" >> "$trusted_paths_file"
-    if [[ ! -f "$control_root/$trusted_path" ]]; then
-        mkdir -p "$control_root/$(dirname "$trusted_path")"
-        if ! trusted_git show "${base_sha}:${trusted_path}" > "$control_root/$trusted_path"; then
-            echo "Reviewer trust bundle is unavailable in the review base." >&2
-            exit 1
-        fi
-    fi
-    mkdir -p "$review_root/policy/$(dirname "$trusted_path")"
-    if ! trusted_git show "${base_sha}:${trusted_path}" > "$review_root/policy/$trusted_path"; then
-        echo "Reviewer readable base policy is unavailable." >&2
-        exit 1
-    fi
-    trusted_path_count=$((trusted_path_count + 1))
-done <<< "$trusted_paths"
-if [[ "$trusted_path_count" -eq 0 ]]; then
-    echo "Reviewer trust-path manifest is empty." >&2
-    exit 1
-fi
-
-reviewer_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
-IFS=$'\t' read -r role_file model reasoning disabled_features output_schema_path <<< "$reviewer_config"
-if [[ -z "$role_file" || -z "$model" || -z "$reasoning" || -z "$disabled_features" || -z "$output_schema_path" ]]; then
-    echo "Reviewer invocation policy is incomplete." >&2
-    exit 1
-fi
-if [[ ! -f "$control_root/$output_schema_path" ]]; then
-    echo "Reviewer output schema is unavailable from the trusted policy bundle." >&2
-    exit 1
-fi
-
-disable_arguments=()
-IFS=',' read -r -a disabled_feature_list <<< "$disabled_features"
-for feature in "${disabled_feature_list[@]}"; do
-    disable_arguments+=(--disable "$feature")
-done
-
-trusted_role_instructions="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" instructions --lens="$lens")" || exit $?
-if [[ -z "$trusted_role_instructions" ]]; then
-    echo "Reviewer role instructions are empty." >&2
-    exit 1
-fi
-
-if ! trusted_git diff --binary --full-index --no-renames --no-ext-diff --no-textconv "$base_sha" "$head_sha" -- > "$review_root/review.patch"; then
-    echo "Reviewer committed patch could not be materialized." >&2
-    exit 1
-fi
-if ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" changed-paths-nul \
-    --input="$changed_paths_file" > "$control_root/changed-paths.nul"; then
-    echo "Reviewer changed-path stream could not be materialized." >&2
-    exit 1
-fi
-
-materialize_changed_blob() {
-    local commit_sha="$1"
-    local side="$2"
-    local changed_path="$3"
-    local entry=""
-    local mode=""
-    local object=""
-    local object_type=""
-    local object_bytes=""
-    local target=""
-
-    entry="$(trusted_git ls-tree "$commit_sha" -- ":(literal)$changed_path")" || return 1
-    if [[ -z "$entry" ]]; then
-        printf 'absent\t\t\t'
-        return 0
-    fi
-    if [[ ! "$entry" =~ ^([0-7]{6})[[:space:]]+(blob|tree|commit)[[:space:]]+([0-9a-f]{40,64})$'\t'(.+)$ ]]; then
-        return 1
-    fi
-    mode="${BASH_REMATCH[1]}"
-    object_type="${BASH_REMATCH[2]}"
-    object="${BASH_REMATCH[3]}"
-    if [[ "${BASH_REMATCH[4]}" != "$changed_path" ]]; then
-        return 1
-    fi
-    if [[ "$object_type" == "tree" && "$mode" == "040000" ]]; then
-        printf 'absent\t\t\t'
-        return 0
-    fi
-    if [[ "$object_type" != "blob" ]]; then
-        return 1
-    fi
-    case "$mode" in
-        100644|100755) ;;
-        *) return 1 ;;
-    esac
-    object_bytes="$(trusted_git cat-file -s "$object")" || return 1
-    if [[ ! "$object_bytes" =~ ^[0-9]+$ ]]; then
-        return 1
-    fi
-    target="$review_root/$side/$changed_path"
-    mkdir -p "$(dirname "$target")" || return 1
-    trusted_git cat-file blob "$object" > "$target" || return 1
-    printf 'file\t%s\t%s\t%s' "$mode" "$object" "$object_bytes"
-}
-
-blob_evidence_file="$control_root/blob-evidence.tsv"
-: > "$blob_evidence_file"
-while IFS= read -r -d '' changed_path; do
-    if ! base_blob="$(materialize_changed_blob "$base_sha" base "$changed_path")"; then
-        echo "Reviewer base context could not be materialized." >&2
-        exit 1
-    fi
-    if ! head_blob="$(materialize_changed_blob "$head_sha" head "$changed_path")"; then
-        echo "Reviewer head context could not be materialized." >&2
-        exit 1
-    fi
-    printf '%s\t%s\t%s\n' "$changed_path" "$base_blob" "$head_blob" >> "$blob_evidence_file"
-done < "$control_root/changed-paths.nul"
-
-if ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" manifest \
-    --bundle-root="$review_root" \
-    --lens="$lens" \
-    --base-sha="$base_sha" \
-    --head-sha="$head_sha" \
-    --changed-paths="$changed_paths_file" \
-    --blob-evidence="$blob_evidence_file" \
-    --trusted-paths="$trusted_paths_file" > "$review_root/manifest.json"; then
-    echo "Reviewer deterministic bundle manifest could not be materialized." >&2
-    exit 1
-fi
-trusted_php -r 'copy($argv[1], $argv[2]) || exit(1);' "$changed_paths_file" "$review_root/changed-paths.json" || {
-    echo "Reviewer readable changed-path evidence could not be materialized." >&2
-    exit 1
-}
-
-review_input="$control_root/review-input.json"
-if ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" serialize \
-    --bundle-root="$review_root" \
-    --max-raw-bytes=8000000 > "$review_input"; then
-    echo "Reviewer deterministic input could not be serialized." >&2
-    exit 1
-fi
-
-developer_instructions_file="$control_root/developer-instructions.txt"
-if ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" developer-instructions \
-    --role="$control_root/$role_file" \
-    --lens="$lens" \
-    --base-sha="$base_sha" \
-    --head-sha="$head_sha" > "$developer_instructions_file"; then
-    echo "Reviewer developer instructions could not be materialized." >&2
-    exit 1
-fi
-developer_instructions_toml="$(trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" toml-string \
-    --input="$developer_instructions_file")" || {
-    echo "Reviewer developer instructions could not be encoded." >&2
-    exit 1
-}
-
-runtime_home="$control_root/codex-home"
-runtime_tmp="$control_root/runtime-tmp"
-arg0_root="$runtime_home/tmp/arg0"
-sqlite_root="$runtime_tmp/sqlite"
-log_root="$runtime_tmp/log"
-installation_id="$runtime_home/installation_id"
-mkdir -m 0700 "$runtime_home" "$runtime_home/tmp" "$arg0_root" "$runtime_tmp" "$sqlite_root" "$log_root"
-printf '%s' '11111111-1111-4111-8111-111111111111' > "$installation_id"
-chmod 0644 "$installation_id"
-ln -s "$auth_source" "$runtime_home/auth.json"
-chmod 0500 "$runtime_home"
-
-seatbelt_profile="$control_root/scripts/agent/readonly-reviewer.sb"
-
-seatbelt_run() {
-    "$sandbox_exec" \
-        -D CODEX_BIN="$codex_bin" \
-        -D SEALED_ROOT="$sealed_root" \
-        -D ARG0_ROOT="$arg0_root" \
-        -D RUNTIME_TMP="$runtime_tmp" \
-        -D AUTH_FILE="$auth_source" \
-        -D INSTALLATION_ID="$installation_id" \
-        -f "$seatbelt_profile" \
-        "$@"
-}
-
-reviewer_environment=(
-    env -i
-    PATH="$reviewer_system_path"
-    HOME="$reviewer_os_home"
-    USER="${USER:-}"
-    LOGNAME="${LOGNAME:-}"
-    CODEX_HOME="$runtime_home"
-    CODEX_SQLITE_HOME="$sqlite_root"
-    TMPDIR="$runtime_tmp"
-    TMP="$runtime_tmp"
-    TEMP="$runtime_tmp"
-    XDG_CACHE_HOME="$runtime_tmp"
-    LANG="C.UTF-8"
-)
-
-cd "$sealed_root"
-
-model_catalog="$control_root/models.json"
-if ! seatbelt_run "${reviewer_environment[@]}" "$codex_bin" debug models --bundled 2>/dev/null \
-    | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" model-catalog \
-        --model="$model" > "$model_catalog"; then
-    echo "Reviewer tool-free model catalog could not be derived." >&2
-    exit 1
-fi
-
-prompt_role_probe='UNTRUSTED-REVIEW-BUNDLE-PROBE'
-if ! seatbelt_run "${reviewer_environment[@]}" "$codex_bin" \
-        "${disable_arguments[@]}" \
-        -c "developer_instructions=$developer_instructions_toml" \
-        -c 'mcp_servers={}' \
-        -c 'agents.max_threads=1' \
-        -c 'agents.max_depth=0' \
-        debug prompt-input "$prompt_role_probe" 2>/dev/null \
-    | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" validate-prompt-roles \
-        --developer="$developer_instructions_file" \
-        --user-probe="$prompt_role_probe"; then
-    echo "Reviewer pinned CLI did not preserve developer/user prompt priority." >&2
-    exit 1
-fi
-
-allowed_canary="$review_root/.review-bundle-readable-canary"
-: > "$allowed_canary"
-outside_canary_root="$(mktemp -d /private/tmp/forscherhaus-readonly-review-denied.XXXXXX)" || {
-    echo "Reviewer external temp canary could not be created." >&2
-    exit 2
-}
-outside_canary="$outside_canary_root/denied"
-: > "$outside_canary"
-home_canary="$(mktemp "$reviewer_os_home/.forscherhaus-readonly-review-denied.XXXXXX")" || {
-    echo "Reviewer home canary could not be created." >&2
-    exit 2
-}
-chmod -R a-w "$review_root"
-chmod a-w "$outside_canary" "$home_canary" "$developer_instructions_file" "$review_input" "$model_catalog"
-
-if ! seatbelt_run /bin/cat "$allowed_canary" >/dev/null 2>&1; then
-    echo "Reviewer Seatbelt profile did not admit the exact bundle." >&2
-    exit 1
-fi
-if seatbelt_run /bin/cat "$outside_canary" >/dev/null 2>&1; then
-    echo "Reviewer Seatbelt profile did not deny foreign temp data." >&2
-    exit 1
-fi
-if seatbelt_run /bin/cat "$home_canary" >/dev/null 2>&1; then
-    echo "Reviewer Seatbelt profile did not deny host-home data." >&2
-    exit 1
-fi
-if seatbelt_run /bin/cat "$repo_root/AGENTS.md" >/dev/null 2>&1; then
-    echo "Reviewer Seatbelt profile did not deny the original worktree." >&2
-    exit 1
-fi
-
-codex_stderr="$runtime_tmp/codex.stderr"
-set +e
-seatbelt_run "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never exec \
-        --dangerously-bypass-approvals-and-sandbox \
-        --ignore-user-config \
-        --ignore-rules \
-        --strict-config \
-        --ephemeral \
-        --skip-git-repo-check \
-        --color never \
-        --model "$model" \
-        --output-schema "$control_root/$output_schema_path" \
-        "${disable_arguments[@]}" \
-        -c "model_catalog_json=\"$model_catalog\"" \
-        -c "model_reasoning_effort=\"$reasoning\"" \
-        -c "log_dir=\"$log_root\"" \
-        -c "developer_instructions=$developer_instructions_toml" \
-        -c 'project_root_markers=[]' \
-        -c 'web_search="disabled"' \
-        -c 'shell_environment_policy.inherit="none"' \
-        -c 'mcp_servers={}' \
-        -c 'agents.max_threads=1' \
-        -c 'agents.max_depth=0' \
-        -C "$sealed_root" \
-        - < "$review_input" 2> "$codex_stderr" \
-    | trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" validate \
-        --lens="$lens" \
-        --base-sha="$base_sha" \
-        --head-sha="$head_sha" \
-        --changed-paths-json="$changed_paths_file"
-review_pipeline_status=("${PIPESTATUS[@]}")
-set -e
-if [[ "${review_pipeline_status[0]:-1}" -ne 0 || "${review_pipeline_status[1]:-1}" -ne 0 ]]; then
-    echo "Reviewer isolated model call or output validation failed." >&2
-    exit 1
-fi
+readonly_reviewer_materialize_bundle
+readonly_reviewer_execute_isolated

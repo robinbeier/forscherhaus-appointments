@@ -215,15 +215,23 @@ class ReviewerAuthorityContractTest extends TestCase
                 'scripts/agent/lib/RepoPath.php',
                 'scripts/agent/lib/ReadonlyReviewBundle.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+                'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
                 'AGENTS.md',
                 'code_review.md',
             ],
             $contract['authority']['reviewer']['trusted_base_paths'] ?? null,
         );
         $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
+        $bundleRuntime = (string) file_get_contents(
+            $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+        );
+        $isolatedRuntime = (string) file_get_contents(
+            $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
+        );
         self::assertStringContainsString(' trusted-paths --lens=', $runner);
-        self::assertStringContainsString('output_schema_path', $runner);
-        self::assertStringContainsString('--output-schema "$control_root/$output_schema_path"', $runner);
+        self::assertStringContainsString('output_schema_path', $bundleRuntime);
+        self::assertStringContainsString('--output-schema "$control_root/$output_schema_path"', $isolatedRuntime);
         self::assertStringContainsString('GIT_NO_LAZY_FETCH=1', $runner);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
@@ -280,8 +288,14 @@ class ReviewerAuthorityContractTest extends TestCase
     public function testSeatbeltAndToolFreeInvariantsAreEncodedInRunner(): void
     {
         $runner = file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
+        $bundleRuntime = file_get_contents($this->repoRoot . '/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh');
+        $isolatedRuntime = file_get_contents(
+            $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
+        );
         $seatbelt = file_get_contents($this->repoRoot . '/scripts/agent/readonly-reviewer.sb');
         self::assertIsString($runner);
+        self::assertIsString($bundleRuntime);
+        self::assertIsString($isolatedRuntime);
         self::assertIsString($seatbelt);
 
         self::assertStringContainsString('env -i', $runner);
@@ -301,22 +315,31 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertStringContainsString('materialized_codex="$control_root/codex"', $runner);
         self::assertStringContainsString('validate-codex-copy', $runner);
-        self::assertStringContainsString('readonly_review_bundle.php', $runner);
-        self::assertStringContainsString('-f "$seatbelt_profile"', $runner);
-        self::assertStringContainsString('Reviewer Seatbelt profile did not deny foreign temp data.', $runner);
-        self::assertStringContainsString('Reviewer Seatbelt profile did not deny host-home data.', $runner);
-        self::assertStringContainsString('Reviewer Seatbelt profile did not deny the original worktree.', $runner);
-        self::assertStringContainsString('--ignore-user-config', $runner);
-        self::assertStringContainsString('mcp_servers={}', $runner);
-        self::assertStringContainsString('agents.max_depth=0', $runner);
-        self::assertStringContainsString('-c "developer_instructions=$developer_instructions_toml"', $runner);
-        self::assertStringContainsString('- < "$review_input"', $runner);
-        self::assertStringContainsString('validate-prompt-roles', $runner);
-        self::assertStringNotContainsString('review-prompt.txt', $runner);
+        self::assertStringContainsString('readonly_reviewer_materialize_bundle', $runner);
+        self::assertStringContainsString('readonly_reviewer_execute_isolated', $runner);
+        self::assertStringNotContainsString('--dangerously-bypass-approvals-and-sandbox', $runner);
+        self::assertStringContainsString('readonly_review_bundle.php', $bundleRuntime);
+        self::assertStringNotContainsString('sandbox_exec', $bundleRuntime);
+        self::assertStringNotContainsString('--ask-for-approval', $bundleRuntime);
+        self::assertStringContainsString('-f "$seatbelt_profile"', $isolatedRuntime);
+        self::assertStringNotContainsString('trusted_git diff --binary', $isolatedRuntime);
+        self::assertStringContainsString('Reviewer Seatbelt profile did not deny foreign temp data.', $isolatedRuntime);
+        self::assertStringContainsString('Reviewer Seatbelt profile did not deny host-home data.', $isolatedRuntime);
+        self::assertStringContainsString(
+            'Reviewer Seatbelt profile did not deny the original worktree.',
+            $isolatedRuntime,
+        );
+        self::assertStringContainsString('--ignore-user-config', $isolatedRuntime);
+        self::assertStringContainsString('mcp_servers={}', $isolatedRuntime);
+        self::assertStringContainsString('agents.max_depth=0', $isolatedRuntime);
+        self::assertStringContainsString('-c "developer_instructions=$developer_instructions_toml"', $isolatedRuntime);
+        self::assertStringContainsString('- < "$review_input"', $isolatedRuntime);
+        self::assertStringContainsString('validate-prompt-roles', $isolatedRuntime);
+        self::assertStringNotContainsString('review-prompt.txt', $runner . $bundleRuntime . $isolatedRuntime);
 
-        $sealedRootPosition = strpos($runner, 'cd "$sealed_root"');
-        $modelCatalogPosition = strpos($runner, 'model_catalog="$control_root/models.json"');
-        $promptRoleProbePosition = strpos($runner, "prompt_role_probe='UNTRUSTED-REVIEW-BUNDLE-PROBE'");
+        $sealedRootPosition = strpos($isolatedRuntime, 'cd "$sealed_root"');
+        $modelCatalogPosition = strpos($isolatedRuntime, 'model_catalog="$control_root/models.json"');
+        $promptRoleProbePosition = strpos($isolatedRuntime, "prompt_role_probe='UNTRUSTED-REVIEW-BUNDLE-PROBE'");
         self::assertNotFalse($sealedRootPosition);
         self::assertNotFalse($modelCatalogPosition);
         self::assertNotFalse($promptRoleProbePosition);
@@ -393,6 +416,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
     public function testRunnerRejectsAnExecutableWhoseBasenameIsNotCodex(): void
     {
+        // This fixture is intentionally invalid before the Darwin-only runtime gate.
         $fixture = $this->runnerFixture('reviewer-not-codex', "#!/bin/sh\nexit 0\n", 'reviewer-bin');
 
         try {
@@ -469,6 +493,38 @@ class ReviewerAuthorityContractTest extends TestCase
             }
             if (is_dir($directory)) {
                 rmdir($directory);
+            }
+        }
+    }
+
+    public function testRunnerRejectsATrackedSymlinkBeforeAnyModelExecution(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-symlink-executed-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-tracked-symlink',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+            'codex',
+        );
+
+        try {
+            self::assertNotFalse(file_put_contents($fixture['root'] . '/tracked-target.txt', "target\n"));
+            self::assertTrue(symlink('tracked-target.txt', $fixture['root'] . '/tracked-link.txt'));
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Add tracked symlink fixture');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+            // The tree-integrity check is deliberately before the Darwin-only Seatbelt gate,
+            // so this remains a deterministic pre-platform rejection on every host OS.
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
+
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame("Reviewer exact commit tree contains a tracked symlink or invalid entry.\n", $stderr);
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            if (is_file($executionMarker)) {
+                unlink($executionMarker);
             }
         }
     }
@@ -928,6 +984,8 @@ class ReviewerAuthorityContractTest extends TestCase
             'scripts/agent/lib/RepoPath.php',
             'scripts/agent/lib/ReadonlyReviewBundle.php',
             'scripts/agent/lib/ReadonlyReviewerContract.php',
+            'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+            'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
             'AGENTS.md',
             'code_review.md',
         ];

@@ -102,110 +102,21 @@ require three independent final reviews on the same unchanged exact head:
 - `reviewer_design` for architecture and maintainability
 - `reviewer_tests` for regression coverage and flake risk
 
-Invoke each final lens with the exact
-`scripts/agent/run_readonly_reviewer.sh` blob from the already trusted review
-base, materialized outside the worktree as described in `WORKFLOW.md`; never
-execute the checked-out copy or use the head copy as its own trust anchor. The
-runner resolves `refs/heads/main` through unauthenticated read-only
-`git ls-remote` against the fixed public canonical repository URL in an empty
-environment without credentials, proxies, endpoint overrides, helpers, or
-ambient Git configuration. The local `refs/remotes/origin/main` must match that
-live SHA, and the base must be its exact merge base with the reviewed head; a
-stale or rewritten tracking ref and a caller-selected narrower ancestor both
-fail closed. The
-initial extraction itself uses the absolute system Git binary in an empty
-environment with replacement objects, lazy fetching, global/system config,
-hooks, fsmonitor, helpers, and external diffs disabled; an ambient `git show`
-is not an acceptable trust bootstrap. The
-runner rejects a source path inside the worktree before inspecting the head.
-The base runner first extracts the structured contract and its bootstrap
-validator, derives and validates the complete trust-path set from that single
-contract, and then extracts the selected role, output schema, and review
-instructions from the same base commit.
-The entrypoint retains only bootstrap, Git-object materialization, and process
-orchestration. Deterministic path, manifest, serialization, developer-
-instruction construction, and model-
-catalog behavior lives in the separately unit-tested
-`scripts/agent/lib/ReadonlyReviewBundle.php`; the Seatbelt rules live in
-`scripts/agent/readonly-reviewer.sb`. Both are exact base blobs in the same
-trusted-path manifest, so this split reduces maintenance coupling without
-widening the trust root.
-Runtime model and reasoning values live in the structured contract; the role
-TOML contains only the human-readable review instructions. It starts a fresh
-ephemeral review without user config,
-exec-policy rules, external connectors, web search, or ambient PHP configuration
-for either its bootstrap or its trusted contract and output validator. The
-bootstrap passes an explicit environment allowlist into Bash, excluding
-`BASH_ENV`, exported functions, shell options, and unrelated ambient variables.
-Caller-provided `HOME` and `CODEX_HOME` are ignored. The runner derives the
-canonical OS account and creates a private random review root below
-`/private/tmp`; the path contains no account name and is removed after the call.
-Git and PHP resolve through a fixed system path. The primary passes an absolute
-Codex launcher only to locate a source binary; the runner never executes that
-source. It requires safe ownership and permissions, copies the source into the
-private sealed root, makes the copy non-writable, and verifies its SHA-256
-against the platform-specific official 0.145.0 release digest in the trusted
-base contract before the first execution. It then validates a bounded
-`codex-cli 0.145.0` version output. The contract also records the matching
-official release-archive digests for provenance. A CLI upgrade requires a
-reviewed version and digest update because its tool and sandbox semantics are
-part of the isolation boundary. Pre-trust
-Git probes ignore ambient Git environment, global and system
-configuration, hooks, fsmonitor, replacement objects, lazy object fetching,
-external diff drivers, and text conversion. The runner rejects every tracked
-symlink in the exact base and head trees, then materializes a deterministic
-bundle containing the full-index patch, sorted changed paths, committed base and
-head blobs, trusted base policy, and a SHA-256 manifest. It serializes that
-bounded bundle into deterministic JSON. For a newly added UTF-8 text file, the
-exact head metadata remains in the manifest while its redundant `head/` blob
-is omitted only after its exact bytes match a complete textual new-file hunk in
-the binary/full-index `review.patch`. Binary patch forms, unsupported path or
-hunk forms, content mismatches, NUL-containing additions, and non-UTF-8
-additions retain the independently hashed head blob.
-This optional metadata is schema-compatible
-(`content_source.kind: full_index_patch_added_text_file` points to
-`review.patch`) and the deduplication operation fails closed on any evidence
-mismatch. The trusted role and exact Base/Head
-binding are supplied as developer instructions; only the serialized bundle is
-sent as the untrusted user message over standard input. Patch content can
-therefore never occupy the reviewer policy's instruction priority. Before the
-model call, the pinned CLI's own prompt renderer must prove the developer/user
-role split with a synthetic non-sensitive probe. The model
-receives no `.git` directory, original-worktree path, or filesystem review tool.
-
-On macOS the outer Codex process runs in a repository-owned Seatbelt profile
-with `deny default`. Only the system runtime, read-only Codex system policy, the
-exact private review root, and the canonical host `auth.json` are readable. The
-real `CODEX_HOME` is not exposed: a non-writable temporary runtime home holds a
-read-only auth link, a synthetic installation ID, and explicitly writable
-scratch subtrees that are removed afterward. Direct canaries must prove that
-the bundle is readable while a foreign temp path, an account-home sibling, and
-the original worktree are denied. Non-macOS execution fails closed.
-The harness cannot refresh the host login; expiry is an external prerequisite,
-not a reason to widen reviewer write access.
-
-The pinned CLI's bundled model catalog is reduced to one text-only model with
-shell, unified execution, patch, image, search, experimental, connector,
-delegation, and workspace-dependency tools removed. The host login therefore
-authenticates only the outer model-service request and is not a reviewer
-capability; no credential content enters the bundle or prompt. Do not mix this
-boundary with legacy `sandbox_mode`, `--sandbox`, or permission-profile
-configuration. The runner denies reviewer file/Git/external mutation,
-uses the exact base validator to resolve the selected profile, output schema,
-disabled features, and trust paths from the machine contract, and returns one
-lens-, base-, and exact-head-bound JSON result only to the primary. Finding
-prose is length-bounded and rejected when it contains credential-, capability-,
-contact-, user-home-, URL-, or long hash-like values. Invalid, privacy-unsafe,
-or protocol-event output fails closed. Reviewers must not
-delegate or publish comments, reviews, PR changes, check reruns, merges, Linear
-changes, or workpad updates. The primary remains the only external writer and
-landing owner.
-
-The host Codex login authenticates only the explicitly authorized model-service
-call; it grants no reviewer connector authority. User configuration and rules
-are ignored, connector-capable features are disabled, MCP is empty, command
-environment inheritance is disabled, and reviewer instructions forbid reading
-or reproducing runtime authentication state.
+Invoke final lenses through `scripts/agent/run_readonly_reviewer.sh`, using the
+exact trusted base artifact described in `WORKFLOW.md`. The runner and
+`.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
+deterministic SHA-256 bundle construction, and trusted-path selection. Do not
+execute the checked-out runner or duplicate its bootstrap and materialization
+internals here. The contract pins the official 0.145.0 release digest.
+The machine contract owns runtime pins, disabled reviewer tools, output schema,
+and trusted paths. The runner orchestrates separately materialized exact-base
+bundle and isolated-runtime libraries for deterministic SHA-256 serialization,
+macOS Seatbelt default-deny isolation, canaries, and bounded privacy-safe
+output. The sealed bundle is the sole review input; the original
+worktree, `.git`, user configuration, connectors, delegation, credentials, and
+external writes remain unavailable. Non-macOS execution fails closed. The host
+login authenticates only the authorized model request and cannot be refreshed by
+the harness. Consult the contract and runner for implementation details.
 
 The initial trust-root introduction and changes to runtime-loaded
 `.codex/config.toml` or `AGENTS.md` require a separately enforced external

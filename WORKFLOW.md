@@ -104,130 +104,26 @@ Parallel work means local implementation only. It is opt-in for explicitly
 approved, independently verifiable lanes; normal PR publication, Linear
 mutation, integration, attestation, and landing remain serial.
 
-Before executing any wrapper extracted from a commit, materialize it with the
-following host bootstrap. This is the trust boundary: it uses the absolute
-system Git binary in an empty environment, disables replacement objects, lazy
-fetching, user/system configuration, hooks, fsmonitor, external diff helpers,
-and interactive credential helpers. Do not replace it with an ambient `git
-show` command.
-
-```bash
-materialize_trusted_blob() {
-    local checkout="$1" commit_sha="$2" repo_path="$3" destination="$4"
-    [[ "$checkout" = /* && "$destination" = /private/tmp/* ]]
-    [[ "$commit_sha" =~ ^[a-f0-9]{40}$ ]]
-    [[ "$repo_path" != /* && "$repo_path" != *..* && "$repo_path" != *\\* ]]
-    /usr/bin/env -i \
-        PATH=/usr/bin:/bin \
-        TMPDIR=/private/tmp \
-        GIT_ATTR_NOSYSTEM=1 \
-        GIT_CONFIG_GLOBAL=/dev/null \
-        GIT_CONFIG_NOSYSTEM=1 \
-        GIT_NO_LAZY_FETCH=1 \
-        GIT_NO_REPLACE_OBJECTS=1 \
-        GIT_OPTIONAL_LOCKS=0 \
-        GIT_PAGER=cat \
-        GIT_TERMINAL_PROMPT=0 \
-        /usr/bin/git --no-replace-objects \
-        -c core.fsmonitor=false \
-        -c core.hooksPath=/dev/null \
-        -c core.untrackedCache=false \
-        -c diff.external= \
-        -c pager.diff=false \
-        -C "$checkout" show "${commit_sha}:${repo_path}" > "$destination"
-}
-```
-
-Before opening writer lanes, the primary records a small JSON manifest outside
-the validator checkout. From a separate clean primary checkout detached at the
-already verified common base, it materializes the validator wrapper from that
-base outside the checkout and runs
-
-```bash
-trusted_validator=$(mktemp "/private/tmp/parallel-work-validator-base.XXXXXX")
-materialize_trusted_blob <absolute-validator-checkout> <base-sha> scripts/agent/check_parallel_work_contract.sh "$trusted_validator"
-chmod 700 "$trusted_validator"
-"$trusted_validator" --validator-checkout=<absolute-validator-checkout> --manifest=<lane-manifest.json>
-rm -f "$trusted_validator"
-```
-
-The materialized wrapper enters through a `php -n` bootstrap before Bash can
-process caller startup state. That bootstrap passes only fixed `PATH`, `TMPDIR`,
-`LANG`, and `LC_ALL` values into the Bash payload, excluding `BASH_ENV`,
-exported functions, shell options, `HOME`, `CODEX_HOME`, and other ambient
-variables. Before executing validator source, the wrapper resolves
-`refs/heads/main` via unauthenticated read-only `git ls-remote` against the
-fixed public canonical repository URL in a separate empty Git environment. It
-requires that live SHA, the local `refs/remotes/origin/main`, the manifest base,
-and the clean validator checkout HEAD all match exactly. The wrapper then reads
-the manifest base with a fixed PHP runtime, verifies that it is the checkout's
-exact base blob, and materializes the CLI plus the orchestration, policy,
-ownership, and shared-path validator libraries directly from that
-same commit into a private trust bundle. The checker therefore executes no PHP
-source from the checkout and starts PHP without ambient `php.ini`, `PHPRC`, scan
-directories, or prepend/append hooks. It requires the validator checkout to be
-clean and its HEAD to equal the manifest's declared base, then reads both the
-workflow contract and the ownership map from that exact commit. Checkout-time
-filters, symlink substitutions, assume-unchanged state, a caller-controlled
-SHA, a rewritten tracking ref, or a mutable validator checkout cannot relax the
-policy used to approve a lane.
-
-The manifest names one full lowercase common base SHA, the primary ID, exact
-`primary_approved_component_ids` for any intersected `single-owner` or
-`manual_approval_required` entries in `docs/maps/component_ownership_map.json`,
-and a `semantic_independence` object with empty `shared_contracts` and
-`cross_lane_dependencies` arrays plus `coordination_required: false`. The
-checker cannot infer semantic coupling from paths; this explicit primary
-attestation makes any known shared contract, cross-lane dependency, or required
-coordination a fail-closed reason to keep the work serial. The manifest has no
-more than two `implementation_worker` lanes. Every lane repeats that
-base SHA, lists normalized repository-relative ownership rules, and
-declares an empty `external_mutations` list. Ownership must be disjoint and may
-not include the primary-owned harness, reviewer, workflow, or landing paths in
-the machine contract. PHP admission and lane verification use
-`scripts/agent/lib/RepoPath.php`; ownership-map validation, component matching,
-generated architecture docs, and CODEOWNERS projection share
-`scripts/ci/ownership_path_rules.py`. Every ownership rule is an object with `path` and an
-explicit `match` value: `directory` or `exact_file`. `directory` covers
-descendants only and `exact_file` covers one file. Canonical ownership maps
-use the same explicit object grammar; trailing slashes, underscores, and other
-filename spelling never create implicit ownership. Maps list each file
-explicitly when a component spans sibling files. Each lane uses its own worktree and branch
-from the already verified common base.
+The machine-readable contract and validator are the implementation authority:
+`.codex/contracts/agent-workflow.json` and
+`scripts/agent/check_parallel_work_contract.sh`. They bind the live canonical
+main, exact common base, clean validator checkout, explicit disjoint
+`directory`/`exact_file` ownership, semantic-independence attestation, component
+approvals, primary-reserved paths, and at most two implementation-worker lanes.
+The validator is materialized from the declared base with a hardened empty
+environment; it verifies provisional pre-commit ownership and clean
+post-commit integration evidence. Shared path matching is centralized in
+`scripts/ci/ownership_path_rules.py`. Do not reproduce bootstrap commands or
+validator internals here; use the validator CLI and its machine contract.
+Do not replace it with an ambient `git show`. The validator owns the trusted
+bootstrap.
 
 Exactly one primary remains the external single writer for commits, pushes,
 PRs, checks, Linear, workpads, attestations, merges, and production actions.
 Workers may edit only their assigned local ownership. Shared contracts,
 cross-lane integration files, and landing helpers remain primary-owned. Stop a
-lane if it needs another lane's files, its ownership becomes ambiguous, or a
+lane if it needs another lane's files, ownership becomes ambiguous, or a
 semantic cross-lane dependency appears.
-
-The manifest pass is admission, not completion evidence. After every worker
-return and again immediately before the primary commits or integrates a lane,
-materialize a fresh wrapper from the same separate clean primary checkout whose
-validator files match the lane's declared base, then run:
-
-```bash
-trusted_validator=$(mktemp "/private/tmp/parallel-work-validator-base.XXXXXX")
-materialize_trusted_blob <absolute-validator-checkout> <base-sha> scripts/agent/check_parallel_work_contract.sh "$trusted_validator"
-chmod 700 "$trusted_validator"
-"$trusted_validator" --validator-checkout=<absolute-validator-checkout> --manifest=<lane-manifest.json> --repo-root=<absolute-lane-worktree> --verify-lane=<lane-id> --allow-dirty-precommit
-rm -f "$trusted_validator"
-```
-
-Verification requires an explicit evidence mode and fails closed unless the validator wrapper, CLI, shared path
-grammar, and contract implementation match their declared-base blobs. It then
-checks that the lane HEAD descends from the base and compares all committed,
-staged, unstaged, and non-ignored untracked paths with the lane's declared ownership. An
-ownership violation, base drift, invalid path, or in-lane validator invocation
-blocks integration. `--allow-dirty-precommit` returns only
-`status: provisional_pass` and can never be integration evidence. After the
-primary creates the lane commit, it reruns the same command with
-`--require-clean`; only `status: pass` with `integration_ready: true` is
-integration evidence because it binds the declared base, immutable lane HEAD,
-clean local state, and a changed-path digest. Omitting both evidence modes is a
-usage error. The primary records both results in the
-existing workpad; the worker never runs or publishes this authority check.
 
 A merge invalidates the base of every remaining lane. Before any remaining
 lane can publish, the primary synchronizes it with the newly verified
@@ -413,125 +309,23 @@ changes require a third independent lens:
 Final reviews and blocking CI must all target the current unchanged exact PR
 head. A later push makes the earlier evidence stale.
 
-Run final reviewers through the repository-owned external read-only boundary.
-The executable, policy, profiles, schema, and validator must come from the
-already trusted review base, never from the head being reviewed. Materialize
-the base copy of `scripts/agent/run_readonly_reviewer.sh` in a private temporary
-file, then invoke that copy with the checked-out worktree as `--repo-root`.
-The checked-out runner is contract data, not an executable entry point; it
-refuses to run while its own source path is inside the worktree:
+Run final reviewers through the repository-owned sealed-bundle boundary using
+the exact-base invocation documented by
+`scripts/agent/run_readonly_reviewer.sh`. The runner, policy, profiles, schema,
+and validator are trusted base artifacts, never head artifacts. It requires
+the live canonical main, local tracking ref, exact merge base, and reviewed
+head to match; later pushes invalidate all review evidence.
 
-```bash
-trusted_runner=$(mktemp "/private/tmp/readonly-reviewer-base.XXXXXX")
-materialize_trusted_blob <absolute-worktree> <base-sha> scripts/agent/run_readonly_reviewer.sh "$trusted_runner"
-chmod 700 "$trusted_runner"
-"$trusted_runner" --repo-root=<absolute-worktree> --codex-bin=<absolute-codex-launcher> --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
-rm -f "$trusted_runner"
-```
-
-Before materialization, fetch `origin/main`. The supplied base SHA must equal
-the merge base of the exact head and the canonical local
-`refs/remotes/origin/main` tracking ref; an arbitrary older or newer ancestor
-is rejected. This preserves the complete branch diff even when `origin/main`
-has advanced and prevents a caller from narrowing review scope to a later
-branch commit.
-
-The runner first enters through a PHP `-n` bootstrap and passes only an explicit
-allowlist of runtime variables into its Bash body, so `BASH_ENV`, exported shell
-functions, shell options, and unrelated ambient variables cannot execute before
-the trust checks. It resolves the effective account through the OS account
-database and ignores caller-supplied `HOME` and `CODEX_HOME`. A private random
-review root below `/private/tmp` holds only generated review evidence and
-short-lived runtime state; its absolute path contains no account name. It then
-starts an ephemeral session without user
-configuration, user or project exec-policy rules, external connectors, or web
-search and never permits approval escalation. Git and PHP resolve only through a
-fixed system tool path.
-The primary must supply Codex as an executable absolute `--codex-bin` path; the
-runner resolves its canonical target, rejects repository-owned targets even
-through symlinks, and requires safe source ownership and permissions. It copies
-that target into the private review root, removes write permission, verifies the
-copy against the platform-specific official-release binary SHA-256 from the
-trusted base contract, and only then executes it to require Codex CLI 0.145.0
-exactly, allowing only bounded build metadata. The same contract records the
-matching official release-archive SHA-256 for provenance. The exact pins are
-intentional: a Codex upgrade can change the available tool surface or sandbox
-behavior and therefore requires a reviewed version-and-digest contract update.
-Repository-root and runner paths are likewise
-resolved to their canonical physical targets before trust-boundary comparisons.
-The host Codex login authenticates only the model-service call and does not grant
-reviewer connector authority: user configuration and rules are ignored,
-connector-capable features are disabled, MCP is empty, command environment
-inheritance is disabled, ambient OpenAI or Codex API-key overrides are removed,
-and the reviewer may not inspect runtime authentication state.
-Every pre-trust Git command ignores ambient Git environment,
-global and system configuration, hooks, fsmonitor, replacement objects, lazy
-object fetching, external diff drivers, and text conversion. The runner rejects
-tracked symlinks in both exact commit trees and materializes only a deterministic
-review bundle from immutable Git objects: the binary full-index patch, sorted
-changed-path list, per-path base and head blobs, trusted base policy, and a
-timestamp-free manifest binding every readable artifact by SHA-256, byte count,
-base SHA, head SHA, and lens. It exposes neither a `.git` directory nor the
-original worktree to the model. Changes to the source worktree after preflight
-cannot alter reviewed content.
-
-A newly added UTF-8 head blob is omitted only when the bundle builder can match
-its exact bytes to one complete textual new-file hunk in the bound patch. A
-binary patch, unsupported or quoted path form, incomplete hunk, or any content
-mismatch keeps the independently hashed head blob in the serialized bundle.
-
-The runner places the trusted base role, exact Base/Head binding, and review
-rules in Codex developer instructions. It serializes the bounded bundle into
-deterministic JSON and supplies that serialization alone as the untrusted user
-message over standard input. Committed patch, path, text, JSON, and binary data
-therefore cannot share instruction priority with the reviewer policy. The model
-call starts only after the pinned CLI's prompt renderer proves that the trusted
-policy appears in a `developer` message and a synthetic bundle probe appears in
-a separate `user` message. The model receives no filesystem path as its source
-of review context. On macOS the Codex
-process itself runs inside a repository-owned
-Seatbelt profile that starts with `deny default`. It permits only the system
-runtime, read-only Codex system policy, the exact private review root, and the
-canonical host `auth.json` file. The actual `CODEX_HOME` is never exposed: a
-non-writable temporary runtime home contains only a read-only link to that exact
-login file, a synthetic installation ID, and two explicitly writable scratch
-subtrees that are deleted after the call. The host login authenticates only the
-outer model-service request; its contents are never copied into the bundle or
-prompt.
-The reviewer cannot refresh or rewrite that login; an expired login fails closed
-and must be refreshed outside the reviewer harness before a later attempt.
-
-Before the call, the same Seatbelt profile must read an in-bundle canary and
-must reject canaries in a foreign temp directory, the account home, and the
-original worktree. Any deviation fails closed. The runner derives a one-model
-catalog from the pinned CLI and removes shell, unified execution, patch, image,
-search, experimental, connector, delegation, and workspace-dependency tool
-surfaces. The model therefore cannot turn the outer broker's network or exact
-login-file access into host, GitHub, or Linear access. Non-macOS execution fails
-closed until an equivalent repository-enforced boundary exists. Do not combine
-this contract with legacy `sandbox_mode`, `--sandbox`, or permission-profile
-overrides.
-
-Its trusted PHP contract and output
-validator run without ambient `php.ini` files, `PHPRC`, `PHP_INI_SCAN_DIR`, or
-prepend/append hooks. The machine contract selects the role and output schema.
-Its exact validator resolves the role, model, reasoning, disabled features,
-schema, and canonical trust-path manifest; the shell runner does not maintain a
-second operational copy of those values. The runner reads that resolved trust manifest from the base commit,
-extracts the listed contract, reviewer profiles, schema, validator, and review
-instructions, derives model and reasoning settings from the structured machine
-contract, and
-fail-closed validates the single JSON review object against the requested lens,
-base SHA, exact head, normalized repository-relative files changed by that
-exact diff, and bounded privacy-safe finding prose. Credential-, capability-,
-contact-, user-home-, URL-, and long hash-like values are rejected. Reviewer
-output returns to the primary; reviewers do not write
-files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not
-delegate. The primary alone decides how findings are integrated or published.
-Model, reasoning, feature-disable, runtime-pin, output-schema, and trusted-path changes start in
-`.codex/contracts/agent-workflow.json`. The trusted helper enforces the
-independent exact fail-closed safety invariants; focused tests exercise the
-resolver and behavior rather than reproducing shell policy.
+The harness enforces the deterministic sealed bundle, exact Base/Head binding,
+macOS Seatbelt default-deny isolation, pinned runtime, disabled reviewer tools,
+and privacy-safe fail-closed output. It exposes no worktree or `.git`, user
+configuration, connectors, delegation, credentials, or external writes;
+non-macOS execution fails closed. The machine contract is the source for model,
+feature, schema, runtime, and trusted-path settings; the runner orchestrates
+separately materialized exact-base bundle and isolated-runtime libraries.
+Consult
+`.codex/contracts/agent-workflow.json` and
+`scripts/agent/run_readonly_reviewer.sh` for those implementation details.
 
 The first introduction of this trust root cannot bootstrap itself. Likewise,
 a change to `.codex/config.toml` or any `AGENTS.md` can affect reviewer runtime
