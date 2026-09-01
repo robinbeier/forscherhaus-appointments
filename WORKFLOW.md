@@ -104,14 +104,48 @@ Parallel work means local implementation only. It is opt-in for explicitly
 approved, independently verifiable lanes; normal PR publication, Linear
 mutation, integration, attestation, and landing remain serial.
 
+Before executing any wrapper extracted from a commit, materialize it with the
+following host bootstrap. This is the trust boundary: it uses the absolute
+system Git binary in an empty environment, disables replacement objects, lazy
+fetching, user/system configuration, hooks, fsmonitor, external diff helpers,
+and interactive credential helpers. Do not replace it with an ambient `git
+show` command.
+
+```bash
+materialize_trusted_blob() {
+    local checkout="$1" commit_sha="$2" repo_path="$3" destination="$4"
+    [[ "$checkout" = /* && "$destination" = /private/tmp/* ]]
+    [[ "$commit_sha" =~ ^[a-f0-9]{40}$ ]]
+    [[ "$repo_path" != /* && "$repo_path" != *..* && "$repo_path" != *\\* ]]
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin \
+        TMPDIR=/private/tmp \
+        GIT_ATTR_NOSYSTEM=1 \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_NO_LAZY_FETCH=1 \
+        GIT_NO_REPLACE_OBJECTS=1 \
+        GIT_OPTIONAL_LOCKS=0 \
+        GIT_PAGER=cat \
+        GIT_TERMINAL_PROMPT=0 \
+        /usr/bin/git --no-replace-objects \
+        -c core.fsmonitor=false \
+        -c core.hooksPath=/dev/null \
+        -c core.untrackedCache=false \
+        -c diff.external= \
+        -c pager.diff=false \
+        -C "$checkout" show "${commit_sha}:${repo_path}" > "$destination"
+}
+```
+
 Before opening writer lanes, the primary records a small JSON manifest outside
 the validator checkout. From a separate clean primary checkout detached at the
 already verified common base, it materializes the validator wrapper from that
 base outside the checkout and runs
 
 ```bash
-trusted_validator=$(mktemp "${TMPDIR:-/tmp}/parallel-work-validator-base.XXXXXX")
-git -C <validator-checkout> show <base-sha>:scripts/agent/check_parallel_work_contract.sh > "$trusted_validator"
+trusted_validator=$(mktemp "/private/tmp/parallel-work-validator-base.XXXXXX")
+materialize_trusted_blob <absolute-validator-checkout> <base-sha> scripts/agent/check_parallel_work_contract.sh "$trusted_validator"
 chmod 700 "$trusted_validator"
 "$trusted_validator" --validator-checkout=<absolute-validator-checkout> --manifest=<lane-manifest.json>
 rm -f "$trusted_validator"
@@ -145,12 +179,10 @@ not include the primary-owned harness, reviewer, workflow, or landing paths in
 the machine contract. The checker, ownership validator, and reviewer trust
 manifest all use `scripts/agent/lib/RepoPath.php` as their single normalized
 repository-path grammar. Every ownership rule is an object with `path` and an
-explicit `match` value: `directory`, `exact_file`, or `filename_stem`.
-`directory` covers descendants only, `exact_file` covers one file, and
-`filename_stem` covers matching sibling files in the same directory. Canonical
-filename-stem exceptions are likewise explicit in
-`docs/maps/component_ownership_map.json#prefix_match_overrides`; spelling alone
-never changes matching semantics. Each lane uses its own worktree and branch
+explicit `match` value: `directory` or `exact_file`. `directory` covers
+descendants only and `exact_file` covers one file. Canonical ownership maps
+list each file explicitly when a component spans sibling files; filename
+spelling never creates implicit ownership. Each lane uses its own worktree and branch
 from the already verified common base.
 
 Exactly one primary remains the external single writer for commits, pushes,
@@ -166,8 +198,8 @@ materialize a fresh wrapper from the same separate clean primary checkout whose
 validator files match the lane's declared base, then run:
 
 ```bash
-trusted_validator=$(mktemp "${TMPDIR:-/tmp}/parallel-work-validator-base.XXXXXX")
-git -C <validator-checkout> show <base-sha>:scripts/agent/check_parallel_work_contract.sh > "$trusted_validator"
+trusted_validator=$(mktemp "/private/tmp/parallel-work-validator-base.XXXXXX")
+materialize_trusted_blob <absolute-validator-checkout> <base-sha> scripts/agent/check_parallel_work_contract.sh "$trusted_validator"
 chmod 700 "$trusted_validator"
 "$trusted_validator" --validator-checkout=<absolute-validator-checkout> --manifest=<lane-manifest.json> --repo-root=<absolute-lane-worktree> --verify-lane=<lane-id> --allow-dirty-precommit
 rm -f "$trusted_validator"
@@ -380,10 +412,10 @@ The checked-out runner is contract data, not an executable entry point; it
 refuses to run while its own source path is inside the worktree:
 
 ```bash
-trusted_runner=$(mktemp "${TMPDIR:-/tmp}/readonly-reviewer-base.XXXXXX")
-git show <base-sha>:scripts/agent/run_readonly_reviewer.sh > "$trusted_runner"
+trusted_runner=$(mktemp "/private/tmp/readonly-reviewer-base.XXXXXX")
+materialize_trusted_blob <absolute-worktree> <base-sha> scripts/agent/run_readonly_reviewer.sh "$trusted_runner"
 chmod 700 "$trusted_runner"
-"$trusted_runner" --repo-root="$(git rev-parse --show-toplevel)" --codex-bin="$(command -v codex)" --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
+"$trusted_runner" --repo-root=<absolute-worktree> --codex-bin=<absolute-codex-launcher> --lens=<lens> --base-sha=<base-sha> --head-sha=<head-sha>
 rm -f "$trusted_runner"
 ```
 
@@ -400,10 +432,14 @@ search and never permits approval escalation. Git and PHP resolve only through a
 fixed system tool path.
 The primary must supply Codex as an executable absolute `--codex-bin` path; the
 runner resolves its canonical target, rejects repository-owned targets even
-through symlinks, and requires the requested basename and target version output
-to identify as Codex CLI 0.145.0 exactly, allowing only bounded build metadata.
-The exact pin is intentional: a Codex upgrade can change the available tool
-surface or sandbox behavior and therefore requires a reviewed contract update.
+through symlinks, and requires safe source ownership and permissions. It copies
+that target into the private review root, removes write permission, verifies the
+copy against the platform-specific official-release binary SHA-256 from the
+trusted base contract, and only then executes it to require Codex CLI 0.145.0
+exactly, allowing only bounded build metadata. The same contract records the
+matching official release-archive SHA-256 for provenance. The exact pins are
+intentional: a Codex upgrade can change the available tool surface or sandbox
+behavior and therefore requires a reviewed version-and-digest contract update.
 Repository-root and runner paths are likewise
 resolved to their canonical physical targets before trust-boundary comparisons.
 The host Codex login authenticates only the model-service call and does not grant

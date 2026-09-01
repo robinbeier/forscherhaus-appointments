@@ -66,8 +66,12 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
         self::assertSame(
-            'materialized_base_blob_outside_worktree',
+            'hardened_system_git_materialized_base_blob_outside_worktree',
             $contract['authority']['reviewer']['invocation_source'] ?? null,
+        );
+        self::assertSame(
+            'absolute_system_git_clean_environment_no_replace_objects',
+            $contract['authority']['reviewer']['bootstrap_materialization_policy'] ?? null,
         );
         self::assertTrue($contract['authority']['reviewer']['requires_base_runner'] ?? false);
         self::assertSame(
@@ -93,17 +97,31 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertSame('disabled', $contract['authority']['reviewer']['git_lazy_fetch'] ?? null);
         self::assertSame(
-            'explicit_primary_codex_with_canonical_target',
+            'explicit_primary_codex_with_verified_private_copy',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
         self::assertSame(
             'canonical_physical_root',
             $contract['authority']['reviewer']['repository_root_policy'] ?? null,
         );
-        self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
+        self::assertSame(
+            'official_release_binary_sha256_platform_and_version',
+            $contract['authority']['reviewer']['codex_identity_check'] ?? null,
+        );
         self::assertSame(
             'exact_0_145_0_with_bounded_build_metadata',
             $contract['authority']['reviewer']['codex_version_policy'] ?? null,
+        );
+        self::assertSame(
+            'private_copy_rehashed_before_first_execution',
+            $contract['authority']['reviewer']['codex_binary_materialization_policy'] ?? null,
+        );
+        self::assertSame(
+            [
+                'Darwin-arm64' => '1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590',
+                'Darwin-x86_64' => '6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af',
+            ],
+            $contract['authority']['reviewer']['codex_binary_sha256_by_platform'] ?? null,
         );
         self::assertSame(
             'isolated_runtime_home_read_only_link_to_canonical_auth_file',
@@ -165,8 +183,11 @@ class ReviewerAuthorityContractTest extends TestCase
                 '.codex/agents/reviewer-design.toml',
                 '.codex/agents/reviewer-tests.toml',
                 'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly-reviewer.sb',
+                'scripts/agent/readonly_review_bundle.php',
                 'scripts/agent/readonly_reviewer_contract.php',
                 'scripts/agent/lib/RepoPath.php',
+                'scripts/agent/lib/ReadonlyReviewBundle.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
                 'AGENTS.md',
                 'code_review.md',
@@ -231,61 +252,32 @@ class ReviewerAuthorityContractTest extends TestCase
     public function testSeatbeltAndToolFreeInvariantsAreEncodedInRunner(): void
     {
         $runner = file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
+        $seatbelt = file_get_contents($this->repoRoot . '/scripts/agent/readonly-reviewer.sb');
         self::assertIsString($runner);
+        self::assertIsString($seatbelt);
 
-        foreach (
-            [
-                "'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin'",
-                "'HOME' => \$osHome",
-                "'CODEX_HOME' => \$osHome . '/.codex'",
-                'env -i',
-                'codex_minor != 145',
-                'codex_patch != 0',
-                '/usr/bin/uname -s',
-                'sandbox_exec="/usr/bin/sandbox-exec"',
-                '($mode & 0o022) !== 0',
-                'mktemp -d "/private/tmp/forscherhaus-readonly-review.XXXXXX"',
-                'assert_tree_has_no_symlinks "$base_sha"',
-                'assert_tree_has_no_symlinks "$head_sha"',
-                'trusted_git diff --binary --full-index --no-renames',
-                '"sha256" => hash_file("sha256", $absolutePath)',
-                'review-input.json',
-                'strlen($prompt) > 12000000',
-                'ln -s "$auth_source" "$runtime_home/auth.json"',
-                '11111111-1111-4111-8111-111111111111',
-                '(deny default)',
-                '(allow file-read* file-test-existence (subpath (param "SEALED_ROOT")))',
-                '(allow file-write* (subpath (param "ARG0_ROOT")) (subpath (param "RUNTIME_TMP"))',
-                'debug models --bundled',
-                '$entry["shell_type"] = "disabled"',
-                '$entry["apply_patch_tool_type"] = null',
-                '$entry["input_modalities"] = ["text"]',
-                '$entry["supports_search_tool"] = false',
-                '$entry["experimental_supported_tools"] = []',
-                'Reviewer Seatbelt profile did not deny foreign temp data.',
-                'Reviewer Seatbelt profile did not deny host-home data.',
-                'Reviewer Seatbelt profile did not deny the original worktree.',
-                '--dangerously-bypass-approvals-and-sandbox',
-                '--ignore-user-config',
-                '--ignore-rules',
-                '--strict-config',
-                '--ephemeral',
-                '--skip-git-repo-check',
-                'project_root_markers=[]',
-                'web_search="disabled"',
-                'shell_environment_policy.inherit="none"',
-                'mcp_servers={}',
-                'agents.max_threads=1',
-                'agents.max_depth=0',
-                ' - < "$prompt_file" 2> "$codex_stderr"',
-                'readonly_reviewer_contract.php" validate',
-                'review_pipeline_status=("${PIPESTATUS[@]}")',
-                'Reviewer isolated model call or output validation failed.',
-            ]
-            as $requiredFragment
-        ) {
-            self::assertStringContainsString($requiredFragment, $runner, $requiredFragment);
-        }
+        self::assertStringContainsString('env -i', $runner);
+        self::assertStringContainsString('GIT_NO_REPLACE_OBJECTS=1', $runner);
+        self::assertStringContainsString('materialized_codex="$control_root/codex"', $runner);
+        self::assertStringContainsString('validate-codex-copy', $runner);
+        self::assertStringContainsString('readonly_review_bundle.php', $runner);
+        self::assertStringContainsString('-f "$seatbelt_profile"', $runner);
+        self::assertStringContainsString('Reviewer Seatbelt profile did not deny foreign temp data.', $runner);
+        self::assertStringContainsString('Reviewer Seatbelt profile did not deny host-home data.', $runner);
+        self::assertStringContainsString('Reviewer Seatbelt profile did not deny the original worktree.', $runner);
+        self::assertStringContainsString('--ignore-user-config', $runner);
+        self::assertStringContainsString('mcp_servers={}', $runner);
+        self::assertStringContainsString('agents.max_depth=0', $runner);
+
+        self::assertStringStartsWith("(version 1)\n(deny default)\n", $seatbelt);
+        self::assertStringContainsString(
+            '(allow file-read* file-test-existence (subpath (param "SEALED_ROOT")))',
+            $seatbelt,
+        );
+        self::assertStringContainsString(
+            '(allow file-write* (subpath (param "ARG0_ROOT")) (subpath (param "RUNTIME_TMP"))',
+            $seatbelt,
+        );
 
         self::assertStringNotContainsString('--permission-profile', $runner);
         self::assertStringNotContainsString('default_permissions=', $runner);
@@ -343,6 +335,56 @@ class ReviewerAuthorityContractTest extends TestCase
             }
             rmdir($temporaryDirectory);
         }
+    }
+
+    public function testRunnerRejectsAnExecutableWhoseBasenameIsNotCodex(): void
+    {
+        $fixture = $this->runnerFixture('reviewer-not-codex', "#!/bin/sh\nexit 0\n", 'reviewer-bin');
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture);
+
+            self::assertNotSame(0, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertStringContainsString('does not identify as Codex CLI', $stderr);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+        }
+    }
+
+    public function testRuntimeValidatorRejectsUnpinnedCodexNamedExecutable(): void
+    {
+        $binary = sys_get_temp_dir() . '/codex-' . bin2hex(random_bytes(8));
+        self::assertNotFalse(file_put_contents($binary, "#!/bin/sh\necho 'codex-cli 0.145.0'\n"));
+        self::assertTrue(chmod($binary, 0500));
+        $canonicalBinary = realpath($binary);
+        self::assertIsString($canonicalBinary);
+
+        try {
+            try {
+                ReadonlyReviewerContract::assertMaterializedCodex(
+                    $canonicalBinary,
+                    (int) fileowner($binary),
+                    str_repeat('a', 64),
+                );
+                self::fail('An unpinned Codex-named executable was accepted.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString(
+                    'does not match the pinned official release',
+                    $exception->getMessage(),
+                );
+            }
+        } finally {
+            unlink($binary);
+        }
+    }
+
+    public function testRuntimeValidatorRejectsUnsupportedCodexVersion(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('must match the isolated runtime contract exactly');
+
+        ReadonlyReviewerContract::assertCodexVersion('codex-cli 0.144.0');
     }
 
     public function testOutputValidationRejectsCodexEventStreamAndWrongExactHead(): void
@@ -484,34 +526,36 @@ class ReviewerAuthorityContractTest extends TestCase
             str_repeat('x', 1201),
         ];
 
-        foreach ($unsafeValues as $unsafeValue) {
-            $output = json_encode(
-                [
-                    'lens' => 'correctness_security',
-                    'base_sha' => $base,
-                    'head_sha' => $head,
-                    'verdict' => 'findings',
-                    'findings' => [
-                        [
-                            'priority' => 'P2',
-                            'title' => 'Privacy-safe title',
-                            'file' => 'WORKFLOW.md',
-                            'line' => 1,
-                            'impact' => $unsafeValue,
-                            'trigger' => 'A bounded technical trigger without sensitive values.',
-                        ],
+        foreach (['title', 'impact', 'trigger'] as $field) {
+            foreach ($unsafeValues as $unsafeValue) {
+                $finding = [
+                    'priority' => 'P2',
+                    'title' => 'Privacy-safe title',
+                    'file' => 'WORKFLOW.md',
+                    'line' => 1,
+                    'impact' => 'A bounded technical impact without sensitive values.',
+                    'trigger' => 'A bounded technical trigger without sensitive values.',
+                ];
+                $finding[$field] = $unsafeValue;
+                $output = json_encode(
+                    [
+                        'lens' => 'correctness_security',
+                        'base_sha' => $base,
+                        'head_sha' => $head,
+                        'verdict' => 'findings',
+                        'findings' => [$finding],
                     ],
-                ],
-                JSON_THROW_ON_ERROR,
-            );
+                    JSON_THROW_ON_ERROR,
+                );
 
-            try {
-                ReadonlyReviewerContract::validateOutput($output, 'correctness_security', $base, $head, [
-                    'WORKFLOW.md',
-                ]);
-                self::fail('Sensitive or unbounded reviewer finding text was accepted.');
-            } catch (\InvalidArgumentException $exception) {
-                self::assertStringContainsString('Reviewer finding text', $exception->getMessage());
+                try {
+                    ReadonlyReviewerContract::validateOutput($output, 'correctness_security', $base, $head, [
+                        'WORKFLOW.md',
+                    ]);
+                    self::fail('Sensitive or unbounded reviewer finding text was accepted in ' . $field . '.');
+                } catch (\InvalidArgumentException $exception) {
+                    self::assertStringContainsString('Reviewer finding text', $exception->getMessage());
+                }
             }
         }
     }
@@ -682,6 +726,21 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("model = 'untrusted-body-value'", $resolved['role_instructions']);
     }
 
+    public function testRuntimeConfigurationBindsOfficialPlatformDigests(): void
+    {
+        $runtime = ReadonlyReviewerContract::runtimeConfiguration(
+            $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml'),
+            'Darwin-arm64',
+        );
+
+        self::assertSame('0.145.0', $runtime['version']);
+        self::assertSame('1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590', $runtime['binary_sha256']);
+        self::assertSame(
+            '072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe',
+            $runtime['release_archive_sha256'],
+        );
+    }
+
     public function testProfileResolutionRejectsAStaleTrustedPathSet(): void
     {
         $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
@@ -706,7 +765,8 @@ class ReviewerAuthorityContractTest extends TestCase
     private function reviewerPolicyForProfile(string $profile): array
     {
         return [
-            'invocation_source' => 'materialized_base_blob_outside_worktree',
+            'invocation_source' => 'hardened_system_git_materialized_base_blob_outside_worktree',
+            'bootstrap_materialization_policy' => 'absolute_system_git_clean_environment_no_replace_objects',
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
@@ -716,10 +776,19 @@ class ReviewerAuthorityContractTest extends TestCase
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',
-            'tool_path_policy' => 'explicit_primary_codex_with_canonical_target',
+            'tool_path_policy' => 'explicit_primary_codex_with_verified_private_copy',
             'repository_root_policy' => 'canonical_physical_root',
-            'codex_identity_check' => 'basename_and_version',
+            'codex_identity_check' => 'official_release_binary_sha256_platform_and_version',
             'codex_version_policy' => 'exact_0_145_0_with_bounded_build_metadata',
+            'codex_binary_materialization_policy' => 'private_copy_rehashed_before_first_execution',
+            'codex_binary_sha256_by_platform' => [
+                'Darwin-arm64' => '1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590',
+                'Darwin-x86_64' => '6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af',
+            ],
+            'codex_release_archive_sha256_by_platform' => [
+                'Darwin-arm64' => '072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe',
+                'Darwin-x86_64' => '4216d7a40aa49d74b65fab93d2a86d2e25a902482b827dbdb3f357777b09fadf',
+            ],
             'codex_authentication_source' => 'host_codex_login_without_connector_authority',
             'codex_authentication_home_policy' => 'isolated_runtime_home_read_only_link_to_canonical_auth_file',
             'codex_api_key_override_policy' => 'reject_ambient_api_keys',
@@ -741,8 +810,11 @@ class ReviewerAuthorityContractTest extends TestCase
                 '.codex/contracts/agent-workflow.json',
                 $profile,
                 'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly-reviewer.sb',
+                'scripts/agent/readonly_review_bundle.php',
                 'scripts/agent/readonly_reviewer_contract.php',
                 'scripts/agent/lib/RepoPath.php',
+                'scripts/agent/lib/ReadonlyReviewBundle.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
                 'AGENTS.md',
                 'code_review.md',
@@ -813,5 +885,125 @@ class ReviewerAuthorityContractTest extends TestCase
             'request_permissions_tool',
             'default_mode_request_user_input',
         ];
+    }
+
+    /** @return array{root: string, runner: string, binary: string, base: string} */
+    private function runnerFixture(string $label, string $binarySource, string $binaryName): array
+    {
+        $root = sys_get_temp_dir() . '/' . $label . '-' . bin2hex(random_bytes(8));
+        $this->runGitCommand(['init', '-q', $root], null);
+        $runnerPath = 'scripts/agent/run_readonly_reviewer.sh';
+        $fixtureRunner = $root . '/' . $runnerPath;
+        self::assertTrue(mkdir(dirname($fixtureRunner), 0700, true));
+        self::assertTrue(copy($this->repoRoot . '/' . $runnerPath, $fixtureRunner), $runnerPath);
+        $this->runGitCommand(['add', '--all'], $root);
+        $this->runGitCommand(
+            [
+                '-c',
+                'user.name=Reviewer Fixture',
+                '-c',
+                'user.email=reviewer-fixture.invalid',
+                '-c',
+                'commit.gpgsign=false',
+                '-c',
+                'core.hooksPath=/dev/null',
+                'commit',
+                '-q',
+                '-m',
+                'Build reviewer fixture',
+            ],
+            $root,
+        );
+        $base = $this->runGitCommand(['rev-parse', 'HEAD'], $root);
+        $runner = sys_get_temp_dir() . '/reviewer-runner-' . bin2hex(random_bytes(8));
+        self::assertNotFalse(
+            file_put_contents($runner, (string) file_get_contents($root . '/scripts/agent/run_readonly_reviewer.sh')),
+        );
+        self::assertTrue(chmod($runner, 0700));
+        $binaryDirectory = sys_get_temp_dir() . '/reviewer-binary-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($binaryDirectory, 0700));
+        $binary = $binaryDirectory . '/' . $binaryName;
+        self::assertNotFalse(file_put_contents($binary, $binarySource));
+        self::assertTrue(chmod($binary, 0700));
+
+        return ['root' => $root, 'runner' => $runner, 'binary' => $binary, 'base' => $base];
+    }
+
+    /** @param array{root: string, runner: string, binary: string, base: string} $fixture
+     *  @return array{int, string, string}
+     */
+    private function runRunnerFixture(array $fixture): array
+    {
+        $process = proc_open(
+            [
+                $fixture['runner'],
+                '--repo-root=' . $fixture['root'],
+                '--codex-bin=' . $fixture['binary'],
+                '--lens=correctness_security',
+                '--base-sha=' . $fixture['base'],
+                '--head-sha=' . $fixture['base'],
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $fixture['root'],
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [proc_close($process), $stdout, $stderr];
+    }
+
+    /** @param array{root: string, runner: string, binary: string, base: string} $fixture */
+    private function removeRunnerFixture(array $fixture): void
+    {
+        if (is_file($fixture['binary'])) {
+            unlink($fixture['binary']);
+        }
+        $binaryDirectory = dirname($fixture['binary']);
+        if (is_dir($binaryDirectory)) {
+            rmdir($binaryDirectory);
+        }
+        if (is_file($fixture['runner'])) {
+            unlink($fixture['runner']);
+        }
+        $this->removeDirectory($fixture['root']);
+    }
+
+    private function removeDirectory(string $directory): void
+    {
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $directory . '/' . $entry;
+            if (is_dir($path) && !is_link($path)) {
+                $this->removeDirectory($path);
+            } else {
+                unlink($path);
+            }
+        }
+        rmdir($directory);
+    }
+
+    /** @param list<string> $arguments */
+    private function runGitCommand(array $arguments, ?string $directory): string
+    {
+        $process = proc_open(
+            ['git', ...$arguments],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $directory,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), (string) $stderr);
+
+        return trim((string) $stdout);
     }
 }

@@ -310,7 +310,10 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertTrue($cleanResult['verification']['working_tree_clean']);
         self::assertSame('integration', $cleanResult['verification']['evidence_level']);
         self::assertTrue($cleanResult['verification']['integration_ready']);
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $cleanResult['verification']['changed_paths_sha256']);
+        self::assertSame(
+            '2bbe628e41adeb51021ac4d7aa895fa5b9d798ba54fa9f2e602f679f576ef984',
+            $cleanResult['verification']['changed_paths_sha256'],
+        );
 
         self::assertNotFalse(file_put_contents($this->repoRoot . '/scripts/agent/outside.txt', "outside\n"));
         [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a');

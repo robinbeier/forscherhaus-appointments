@@ -61,8 +61,12 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['invocation'] ?? null,
         );
         self::assertSame(
-            'materialized_base_blob_outside_worktree',
+            'hardened_system_git_materialized_base_blob_outside_worktree',
             $contract['authority']['reviewer']['invocation_source'] ?? null,
+        );
+        self::assertSame(
+            'absolute_system_git_clean_environment_no_replace_objects',
+            $contract['authority']['reviewer']['bootstrap_materialization_policy'] ?? null,
         );
         self::assertSame(
             'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
@@ -86,17 +90,24 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame('disabled', $contract['authority']['reviewer']['git_lazy_fetch'] ?? null);
         self::assertSame(
-            'explicit_primary_codex_with_canonical_target',
+            'explicit_primary_codex_with_verified_private_copy',
             $contract['authority']['reviewer']['tool_path_policy'] ?? null,
         );
         self::assertSame(
             'canonical_physical_root',
             $contract['authority']['reviewer']['repository_root_policy'] ?? null,
         );
-        self::assertSame('basename_and_version', $contract['authority']['reviewer']['codex_identity_check'] ?? null);
+        self::assertSame(
+            'official_release_binary_sha256_platform_and_version',
+            $contract['authority']['reviewer']['codex_identity_check'] ?? null,
+        );
         self::assertSame(
             'exact_0_145_0_with_bounded_build_metadata',
             $contract['authority']['reviewer']['codex_version_policy'] ?? null,
+        );
+        self::assertSame(
+            'private_copy_rehashed_before_first_execution',
+            $contract['authority']['reviewer']['codex_binary_materialization_policy'] ?? null,
         );
         self::assertSame(
             'host_codex_login_without_connector_authority',
@@ -174,8 +185,11 @@ class AgentWorkflowContractTest extends TestCase
                 '.codex/agents/reviewer-design.toml',
                 '.codex/agents/reviewer-tests.toml',
                 'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly-reviewer.sb',
+                'scripts/agent/readonly_review_bundle.php',
                 'scripts/agent/readonly_reviewer_contract.php',
                 'scripts/agent/lib/RepoPath.php',
+                'scripts/agent/lib/ReadonlyReviewBundle.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
                 'AGENTS.md',
                 'code_review.md',
@@ -244,7 +258,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['parallel_work']['validator_invocation'] ?? null,
         );
         self::assertSame(
-            'materialized_declared_base_wrapper_and_source_blobs',
+            'hardened_system_git_materialized_declared_base_wrapper_and_source_blobs',
             $contract['parallel_work']['validator_trust_anchor'] ?? null,
         );
         self::assertTrue($contract['parallel_work']['admission_requires_clean_exact_base_checkout'] ?? null);

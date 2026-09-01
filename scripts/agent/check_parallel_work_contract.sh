@@ -110,6 +110,7 @@ trusted_git_run() {
         LANG=C \
         LC_ALL=C \
         PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        TMPDIR=/tmp \
         "$trusted_git" \
         -c core.fsmonitor=false \
         -c core.hooksPath=/dev/null \

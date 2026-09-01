@@ -106,11 +106,22 @@ Invoke each final lens with the exact
 `scripts/agent/run_readonly_reviewer.sh` blob from the already trusted review
 base, materialized outside the worktree as described in `WORKFLOW.md`; never
 execute the checked-out copy or use the head copy as its own trust anchor. The
+initial extraction itself uses the absolute system Git binary in an empty
+environment with replacement objects, lazy fetching, global/system config,
+hooks, fsmonitor, helpers, and external diffs disabled; an ambient `git show`
+is not an acceptable trust bootstrap. The
 runner rejects a source path inside the worktree before inspecting the head.
 The base runner first extracts the structured contract and its bootstrap
 validator, derives and validates the complete trust-path set from that single
 contract, and then extracts the selected role, output schema, and review
 instructions from the same base commit.
+The entrypoint retains only bootstrap, Git-object materialization, and process
+orchestration. Deterministic path, manifest, serialization, prompt, and model-
+catalog behavior lives in the separately unit-tested
+`scripts/agent/lib/ReadonlyReviewBundle.php`; the Seatbelt rules live in
+`scripts/agent/readonly-reviewer.sb`. Both are exact base blobs in the same
+trusted-path manifest, so this split reduces maintenance coupling without
+widening the trust root.
 Runtime model and reasoning values live in the structured contract; the role
 TOML contains only the human-readable review instructions. It starts a fresh
 ephemeral review without user config,
@@ -121,12 +132,16 @@ bootstrap passes an explicit environment allowlist into Bash, excluding
 Caller-provided `HOME` and `CODEX_HOME` are ignored. The runner derives the
 canonical OS account and creates a private random review root below
 `/private/tmp`; the path contains no account name and is removed after the call.
-Git and PHP resolve through a
-fixed system path, while only the primary may pass a trusted absolute Codex
-binary path; either path must identify as the Codex CLI by basename and a
-bounded semantic-version output at exactly version 0.145.0, including bounded
-build metadata. A CLI upgrade requires a reviewed contract update because its
-tool and sandbox semantics are part of the isolation boundary. Pre-trust
+Git and PHP resolve through a fixed system path. The primary passes an absolute
+Codex launcher only to locate a source binary; the runner never executes that
+source. It requires safe ownership and permissions, copies the source into the
+private sealed root, makes the copy non-writable, and verifies its SHA-256
+against the platform-specific official 0.145.0 release digest in the trusted
+base contract before the first execution. It then validates a bounded
+`codex-cli 0.145.0` version output. The contract also records the matching
+official release-archive digests for provenance. A CLI upgrade requires a
+reviewed version and digest update because its tool and sandbox semantics are
+part of the isolation boundary. Pre-trust
 Git probes ignore ambient Git environment, global and system
 configuration, hooks, fsmonitor, replacement objects, lazy object fetching,
 external diff drivers, and text conversion. The runner rejects every tracked

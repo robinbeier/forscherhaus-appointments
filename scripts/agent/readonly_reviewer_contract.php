@@ -12,6 +12,11 @@ $lens = null;
 $baseSha = null;
 $headSha = null;
 $changedPathsJsonPath = null;
+$platform = null;
+$versionOutput = null;
+$runtimePath = null;
+$expectedOwner = null;
+$expectedSha256 = null;
 foreach (array_slice($argv, 2) as $argument) {
     if (str_starts_with($argument, '--lens=')) {
         $lens = substr($argument, strlen('--lens='));
@@ -29,16 +34,85 @@ foreach (array_slice($argv, 2) as $argument) {
         $changedPathsJsonPath = substr($argument, strlen('--changed-paths-json='));
         continue;
     }
+    if (str_starts_with($argument, '--platform=')) {
+        $platform = substr($argument, strlen('--platform='));
+        continue;
+    }
+    if (str_starts_with($argument, '--version-output=')) {
+        $versionOutput = substr($argument, strlen('--version-output='));
+        continue;
+    }
+    if (str_starts_with($argument, '--path=')) {
+        $runtimePath = substr($argument, strlen('--path='));
+        continue;
+    }
+    if (str_starts_with($argument, '--expected-owner=')) {
+        $expectedOwner = substr($argument, strlen('--expected-owner='));
+        continue;
+    }
+    if (str_starts_with($argument, '--expected-sha256=')) {
+        $expectedSha256 = substr($argument, strlen('--expected-sha256='));
+        continue;
+    }
     fwrite(STDERR, "Unknown option.\n");
     exit(2);
 }
 
-if (!is_string($lens) || $lens === '') {
+if (
+    in_array($command, ['resolve', 'trusted-paths', 'instructions', 'validate'], true) &&
+    (!is_string($lens) || $lens === '')
+) {
     fwrite(STDERR, "Missing --lens.\n");
     exit(2);
 }
 
 try {
+    if ($command === 'runtime') {
+        if (!is_string($platform) || $platform === '') {
+            throw new InvalidArgumentException('Missing --platform.');
+        }
+        $contract = json_decode(
+            (string) file_get_contents($repoRoot . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        if (!is_array($contract) || !is_array($contract['authority']['reviewer'] ?? null)) {
+            throw new RuntimeException('Reviewer policy is invalid.');
+        }
+        $runtime = ReadonlyReviewerContract::runtimeConfiguration($contract['authority']['reviewer'], $platform);
+        fwrite(STDOUT, implode("\t", $runtime) . PHP_EOL);
+        exit(0);
+    }
+
+    if ($command === 'validate-version') {
+        if (!is_string($versionOutput) || $versionOutput === '') {
+            throw new InvalidArgumentException('Missing --version-output.');
+        }
+        ReadonlyReviewerContract::assertCodexVersion($versionOutput);
+        exit(0);
+    }
+
+    if ($command === 'validate-codex-source' || $command === 'validate-codex-copy') {
+        if (
+            !is_string($runtimePath) ||
+            !str_starts_with($runtimePath, '/') ||
+            !is_string($expectedOwner) ||
+            preg_match('/^(?:0|[1-9][0-9]*)$/D', $expectedOwner) !== 1
+        ) {
+            throw new InvalidArgumentException('Missing or invalid Codex binary validation input.');
+        }
+        if ($command === 'validate-codex-source') {
+            ReadonlyReviewerContract::assertCodexSource($runtimePath, (int) $expectedOwner);
+            exit(0);
+        }
+        if (!is_string($expectedSha256)) {
+            throw new InvalidArgumentException('Missing --expected-sha256.');
+        }
+        ReadonlyReviewerContract::assertMaterializedCodex($runtimePath, (int) $expectedOwner, $expectedSha256);
+        exit(0);
+    }
+
     if ($command === 'resolve' || $command === 'trusted-paths' || $command === 'instructions') {
         $contract = json_decode(
             (string) file_get_contents($repoRoot . '/.codex/contracts/agent-workflow.json'),
@@ -108,7 +182,7 @@ try {
 
     fwrite(
         STDERR,
-        "Usage: readonly_reviewer_contract.php <resolve|instructions|trusted-paths|validate> --lens=<lens> [--base-sha=<sha>] [--head-sha=<sha>] [--changed-paths-json=<absolute-path>]\n",
+        "Usage: readonly_reviewer_contract.php <resolve|instructions|trusted-paths|runtime|validate-version|validate-codex-source|validate-codex-copy|validate> [--lens=<lens>] [--platform=<platform>] [--version-output=<value>] [--path=<absolute-path>] [--expected-owner=<uid>] [--expected-sha256=<sha256>] [--base-sha=<sha>] [--head-sha=<sha>] [--changed-paths-json=<absolute-path>]\n",
     );
     exit(2);
 } catch (Throwable $throwable) {

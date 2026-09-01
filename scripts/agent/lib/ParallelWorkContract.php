@@ -275,18 +275,6 @@ final class ParallelWorkContract
      */
     private static function readCanonicalComponents(array $ownershipMap, array &$errors): array
     {
-        $prefixMatchOverrides = $ownershipMap['prefix_match_overrides'] ?? [];
-        if (!is_array($prefixMatchOverrides) || array_is_list($prefixMatchOverrides)) {
-            $errors[] = 'invalid_canonical_prefix_match_overrides';
-            $prefixMatchOverrides = [];
-        }
-        foreach ($prefixMatchOverrides as $path => $match) {
-            if (!is_string($path) || !RepoPath::isNormalized($path) || $match !== 'filename_stem') {
-                $errors[] = 'invalid_canonical_prefix_match_override';
-                unset($prefixMatchOverrides[$path]);
-            }
-        }
-
         $components = $ownershipMap['components'] ?? null;
         if (!is_array($components) || !array_is_list($components) || $components === []) {
             $errors[] = 'invalid_canonical_ownership_map';
@@ -294,7 +282,6 @@ final class ParallelWorkContract
         }
 
         $canonical = [];
-        $usedPrefixMatchOverrides = [];
         foreach ($components as $component) {
             if (!is_array($component)) {
                 $errors[] = 'invalid_canonical_ownership_component';
@@ -339,21 +326,10 @@ final class ParallelWorkContract
                     $errors[] = 'invalid_canonical_ownership_prefix:' . $componentId;
                     continue 2;
                 }
-                $match =
-                    $prefixMatchOverrides[$normalizedPrefix] ??
-                    (str_ends_with((string) $folderPrefix, '/') ? 'directory' : 'exact_file');
-                if ($match === 'filename_stem') {
-                    $usedPrefixMatchOverrides[$normalizedPrefix] = true;
-                }
+                $match = str_ends_with((string) $folderPrefix, '/') ? 'directory' : 'exact_file';
                 $pathRules[] = ['path' => $normalizedPrefix, 'match' => $match];
             }
             $canonical[$componentId] = ['path_rules' => $pathRules];
-        }
-
-        foreach (array_keys($prefixMatchOverrides) as $prefixMatchOverride) {
-            if (!isset($usedPrefixMatchOverrides[$prefixMatchOverride])) {
-                $errors[] = 'unused_canonical_prefix_match_override:' . $prefixMatchOverride;
-            }
         }
 
         return $canonical;
@@ -379,7 +355,7 @@ final class ParallelWorkContract
             $actualKeys !== $expectedKeys ||
             !is_string($path) ||
             !RepoPath::isNormalized($path) ||
-            !in_array($match, ['directory', 'exact_file', 'filename_stem'], true)
+            !in_array($match, ['directory', 'exact_file'], true)
         ) {
             $errors[] = $error;
             return null;
@@ -397,31 +373,12 @@ final class ParallelWorkContract
         if ($leftMatch === 'directory' && $rightMatch === 'directory' && $leftPath === $rightPath) {
             return true;
         }
-        if ($leftMatch === 'filename_stem' && $rightMatch === 'directory') {
-            return self::pathRuleCovers($rightPath, $rightMatch, $leftPath);
-        }
-        if ($leftMatch === 'directory' && $rightMatch === 'filename_stem') {
-            return self::pathRuleCovers($leftPath, $leftMatch, $rightPath);
-        }
-
         return self::pathRuleCovers($leftPath, $leftMatch, $rightPath) ||
             self::pathRuleCovers($rightPath, $rightMatch, $leftPath);
     }
 
     private static function pathRuleCovers(string $rulePath, string $match, string $candidatePath): bool
     {
-        if ($match === 'filename_stem') {
-            $ruleSeparator = strrpos($rulePath, '/');
-            $candidateSeparator = strrpos($candidatePath, '/');
-            $ruleDirectory = $ruleSeparator === false ? '' : substr($rulePath, 0, $ruleSeparator);
-            $candidateDirectory = $candidateSeparator === false ? '' : substr($candidatePath, 0, $candidateSeparator);
-            $ruleFilenameStem = $ruleSeparator === false ? $rulePath : substr($rulePath, $ruleSeparator + 1);
-            $candidateFilename =
-                $candidateSeparator === false ? $candidatePath : substr($candidatePath, $candidateSeparator + 1);
-
-            return $candidateDirectory === $ruleDirectory && str_starts_with($candidateFilename, $ruleFilenameStem);
-        }
-
         if ($match === 'directory') {
             return str_starts_with($candidatePath, $rulePath . '/');
         }

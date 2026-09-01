@@ -10,6 +10,8 @@ require_once __DIR__ . '/RepoPath.php';
 
 final class ReadonlyReviewerContract
 {
+    private const CODEX_VERSION = '0.145.0';
+
     /** @var array<string, int> */
     private const FINDING_TEXT_MAX_BYTES = [
         'title' => 160,
@@ -163,8 +165,11 @@ final class ReadonlyReviewerContract
                 '.codex/contracts/agent-workflow.json',
                 ...$instructionPaths,
                 'scripts/agent/readonly-review-output.schema.json',
+                'scripts/agent/readonly-reviewer.sb',
+                'scripts/agent/readonly_review_bundle.php',
                 'scripts/agent/readonly_reviewer_contract.php',
                 'scripts/agent/lib/RepoPath.php',
+                'scripts/agent/lib/ReadonlyReviewBundle.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
                 'AGENTS.md',
                 'code_review.md',
@@ -178,11 +183,96 @@ final class ReadonlyReviewerContract
         return $expectedPaths;
     }
 
+    /**
+     * @param array<string, mixed> $reviewerPolicy
+     * @return array{version: string, binary_sha256: string, release_archive_sha256: string}
+     */
+    public static function runtimeConfiguration(array $reviewerPolicy, string $platform): array
+    {
+        self::assertRuntimeBoundary($reviewerPolicy);
+
+        $binaryDigests = $reviewerPolicy['codex_binary_sha256_by_platform'];
+        $archiveDigests = $reviewerPolicy['codex_release_archive_sha256_by_platform'];
+        $binarySha256 = is_array($binaryDigests) ? $binaryDigests[$platform] ?? null : null;
+        $archiveSha256 = is_array($archiveDigests) ? $archiveDigests[$platform] ?? null : null;
+        if (
+            !is_string($binarySha256) ||
+            preg_match('/^[a-f0-9]{64}$/D', $binarySha256) !== 1 ||
+            !is_string($archiveSha256) ||
+            preg_match('/^[a-f0-9]{64}$/D', $archiveSha256) !== 1
+        ) {
+            throw new \InvalidArgumentException('Reviewer Codex binary platform is not pinned.');
+        }
+
+        return [
+            'version' => self::CODEX_VERSION,
+            'binary_sha256' => $binarySha256,
+            'release_archive_sha256' => $archiveSha256,
+        ];
+    }
+
+    public static function assertCodexVersion(string $versionOutput): void
+    {
+        if (
+            preg_match(
+                '/^codex-cli[[:space:]]+([0-9]+)\.([0-9]+)\.([0-9]+)([+-][A-Za-z0-9._-]+)?(?:[[:space:]]+\([A-Za-z0-9._\/+\:\ -]{1,80}\))?$/D',
+                trim($versionOutput),
+                $matches,
+            ) !== 1
+        ) {
+            throw new \InvalidArgumentException('Reviewer Codex binary does not identify as Codex CLI.');
+        }
+        $actualVersion = sprintf('%d.%d.%d', (int) $matches[1], (int) $matches[2], (int) $matches[3]);
+        if ($actualVersion !== self::CODEX_VERSION) {
+            throw new \InvalidArgumentException(
+                'Reviewer Codex CLI must match the isolated runtime contract exactly (' . self::CODEX_VERSION . ').',
+            );
+        }
+    }
+
+    public static function assertCodexSource(string $path, int $expectedOwner): void
+    {
+        self::assertExecutableRegularFile($path);
+        $owner = fileowner($path);
+        $mode = fileperms($path);
+        if (!in_array($owner, [0, $expectedOwner], true) || !is_int($mode) || ($mode & 0o022) !== 0) {
+            throw new \InvalidArgumentException('Reviewer Codex binary target ownership is unsafe.');
+        }
+    }
+
+    public static function assertMaterializedCodex(string $path, int $expectedOwner, string $expectedSha256): void
+    {
+        self::assertExecutableRegularFile($path);
+        if (preg_match('/^[a-f0-9]{64}$/D', $expectedSha256) !== 1) {
+            throw new \InvalidArgumentException('Reviewer Codex binary digest policy is invalid.');
+        }
+        $owner = fileowner($path);
+        $mode = fileperms($path);
+        $sha256 = hash_file('sha256', $path);
+        if (
+            $owner !== $expectedOwner ||
+            !is_int($mode) ||
+            ($mode & 0o277) !== 0 ||
+            !is_string($sha256) ||
+            !hash_equals($expectedSha256, $sha256)
+        ) {
+            throw new \InvalidArgumentException('Reviewer Codex binary does not match the pinned official release.');
+        }
+    }
+
+    private static function assertExecutableRegularFile(string $path): void
+    {
+        if (!is_file($path) || is_link($path) || realpath($path) !== $path || !is_executable($path)) {
+            throw new \InvalidArgumentException('Reviewer Codex binary target is invalid.');
+        }
+    }
+
     /** @param array<string, mixed> $reviewerPolicy */
     private static function assertRuntimeBoundary(array $reviewerPolicy): void
     {
         $expected = [
-            'invocation_source' => 'materialized_base_blob_outside_worktree',
+            'invocation_source' => 'hardened_system_git_materialized_base_blob_outside_worktree',
+            'bootstrap_materialization_policy' => 'absolute_system_git_clean_environment_no_replace_objects',
             'trust_anchor' => 'review_base_commit',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
@@ -192,10 +282,19 @@ final class ReadonlyReviewerContract
             'php_runtime_configuration' => 'ignore_ambient_ini',
             'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
             'git_lazy_fetch' => 'disabled',
-            'tool_path_policy' => 'explicit_primary_codex_with_canonical_target',
+            'tool_path_policy' => 'explicit_primary_codex_with_verified_private_copy',
             'repository_root_policy' => 'canonical_physical_root',
-            'codex_identity_check' => 'basename_and_version',
+            'codex_identity_check' => 'official_release_binary_sha256_platform_and_version',
             'codex_version_policy' => 'exact_0_145_0_with_bounded_build_metadata',
+            'codex_binary_materialization_policy' => 'private_copy_rehashed_before_first_execution',
+            'codex_binary_sha256_by_platform' => [
+                'Darwin-arm64' => '1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590',
+                'Darwin-x86_64' => '6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af',
+            ],
+            'codex_release_archive_sha256_by_platform' => [
+                'Darwin-arm64' => '072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe',
+                'Darwin-x86_64' => '4216d7a40aa49d74b65fab93d2a86d2e25a902482b827dbdb3f357777b09fadf',
+            ],
             'codex_authentication_source' => 'host_codex_login_without_connector_authority',
             'codex_authentication_home_policy' => 'isolated_runtime_home_read_only_link_to_canonical_auth_file',
             'codex_api_key_override_policy' => 'reject_ambient_api_keys',

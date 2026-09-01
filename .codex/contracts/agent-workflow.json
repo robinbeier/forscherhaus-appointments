@@ -18,7 +18,8 @@
         ],
         "reviewer": {
             "invocation": "scripts/agent/run_readonly_reviewer.sh",
-            "invocation_source": "materialized_base_blob_outside_worktree",
+            "invocation_source": "hardened_system_git_materialized_base_blob_outside_worktree",
+            "bootstrap_materialization_policy": "absolute_system_git_clean_environment_no_replace_objects",
             "trust_anchor": "review_base_commit",
             "requires_base_runner": true,
             "runtime_configuration_change_policy": "external_bootstrap_review",
@@ -28,10 +29,19 @@
             "php_runtime_configuration": "ignore_ambient_ini",
             "git_runtime_configuration": "ignore_ambient_and_disable_helpers",
             "git_lazy_fetch": "disabled",
-            "tool_path_policy": "explicit_primary_codex_with_canonical_target",
+            "tool_path_policy": "explicit_primary_codex_with_verified_private_copy",
             "repository_root_policy": "canonical_physical_root",
-            "codex_identity_check": "basename_and_version",
+            "codex_identity_check": "official_release_binary_sha256_platform_and_version",
             "codex_version_policy": "exact_0_145_0_with_bounded_build_metadata",
+            "codex_binary_materialization_policy": "private_copy_rehashed_before_first_execution",
+            "codex_binary_sha256_by_platform": {
+                "Darwin-arm64": "1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590",
+                "Darwin-x86_64": "6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af"
+            },
+            "codex_release_archive_sha256_by_platform": {
+                "Darwin-arm64": "072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe",
+                "Darwin-x86_64": "4216d7a40aa49d74b65fab93d2a86d2e25a902482b827dbdb3f357777b09fadf"
+            },
             "codex_authentication_source": "host_codex_login_without_connector_authority",
             "codex_authentication_home_policy": "isolated_runtime_home_read_only_link_to_canonical_auth_file",
             "codex_api_key_override_policy": "reject_ambient_api_keys",
@@ -55,8 +65,11 @@
                 ".codex/agents/reviewer-design.toml",
                 ".codex/agents/reviewer-tests.toml",
                 "scripts/agent/readonly-review-output.schema.json",
+                "scripts/agent/readonly-reviewer.sb",
+                "scripts/agent/readonly_review_bundle.php",
                 "scripts/agent/readonly_reviewer_contract.php",
                 "scripts/agent/lib/RepoPath.php",
+                "scripts/agent/lib/ReadonlyReviewBundle.php",
                 "scripts/agent/lib/ReadonlyReviewerContract.php",
                 "AGENTS.md",
                 "code_review.md"
@@ -143,7 +156,7 @@
         "external_mutations_remain_serial": true,
         "requires_semantic_independence_attestation": true,
         "validator_invocation": "scripts/agent/check_parallel_work_contract.sh",
-        "validator_trust_anchor": "materialized_declared_base_wrapper_and_source_blobs",
+        "validator_trust_anchor": "hardened_system_git_materialized_declared_base_wrapper_and_source_blobs",
         "admission_requires_clean_exact_base_checkout": true,
         "admission_executes_only_declared_base_blobs": true,
         "admission_binds_base_before_source_execution": true,
@@ -258,6 +271,7 @@
             "required_sections": {
                 "## Controlled Parallel Work": [
                     "Parallel work means local implementation only",
+                    "Do not replace it with an ambient `git",
                     "Exactly one primary remains the external single writer",
                     "A merge invalidates the base of every remaining lane"
                 ],
@@ -277,6 +291,7 @@
             "required_sections": {
                 "## Review Process": [
                     "scripts/agent/run_readonly_reviewer.sh",
+                    "official 0.145.0 release digest",
                     "require three independent final reviews on the same unchanged exact head",
                     "Any later push invalidates those final reviews and requires exact-head review",
                     "The read-only exact-head mergegate does not replace reviewer judgment."
