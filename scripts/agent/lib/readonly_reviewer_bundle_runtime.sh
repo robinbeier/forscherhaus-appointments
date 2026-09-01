@@ -5,6 +5,11 @@
 # review-bundle materialization; it must not perform network or model calls.
 
 readonly_reviewer_materialize_bundle() {
+    local control_root="$1" review_root="$2" base_sha="$3" head_sha="$4" lens="$5"
+    local changed_paths_file trusted_paths trusted_path trusted_path_count trusted_paths_file
+    local reviewer_config role_file model reasoning disabled_features output_schema_path
+    local trusted_role_instructions review_input developer_instructions_file
+
     changed_paths_file="$control_root/changed-paths.json"
     if ! trusted_git diff --name-only --no-renames --no-ext-diff --no-textconv -z "$base_sha" "$head_sha" \
         | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" changed-paths > "$changed_paths_file"; then
@@ -52,12 +57,6 @@ readonly_reviewer_materialize_bundle() {
         echo "Reviewer output schema is unavailable from the trusted policy bundle." >&2
         exit 1
     fi
-
-    disable_arguments=()
-    IFS=',' read -r -a disabled_feature_list <<< "$disabled_features"
-    for feature in "${disabled_feature_list[@]}"; do
-        disable_arguments+=(--disable "$feature")
-    done
 
     trusted_role_instructions="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" instructions --lens="$lens")" || exit $?
     if [[ -z "$trusted_role_instructions" ]]; then
@@ -111,9 +110,4 @@ readonly_reviewer_materialize_bundle() {
         echo "Reviewer developer instructions could not be materialized." >&2
         exit 1
     fi
-    developer_instructions_toml="$(trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" toml-string \
-        --input="$developer_instructions_file")" || {
-        echo "Reviewer developer instructions could not be encoded." >&2
-        exit 1
-    }
 }

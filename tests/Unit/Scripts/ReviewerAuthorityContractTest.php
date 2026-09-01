@@ -97,20 +97,36 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['review_base_remote_url'] ?? null,
         );
         self::assertSame(
-            'hardened_system_git_materialized_base_blob_outside_worktree',
+            'external_system_git_materialized_exact_base_launcher_then_private_exact_base_payload',
             $contract['authority']['reviewer']['invocation_source'] ?? null,
         );
         self::assertSame(
-            'absolute_system_git_clean_environment_no_replace_objects',
+            'scripts/agent/trusted_base_launcher.sh',
+            $contract['authority']['reviewer']['invocation'] ?? null,
+        );
+        self::assertSame(
+            'scripts/agent/run_readonly_reviewer.sh',
+            $contract['authority']['reviewer']['payload_path'] ?? null,
+        );
+        self::assertSame(
+            'absolute_system_git_clean_environment_private_blob_verification_before_any_repository_code_execution',
             $contract['authority']['reviewer']['bootstrap_materialization_policy'] ?? null,
         );
+        self::assertSame(
+            'required_external_exact_blob_path_and_marker',
+            $contract['authority']['reviewer']['launcher_materialization_guard'] ?? null,
+        );
         self::assertTrue($contract['authority']['reviewer']['requires_base_runner'] ?? false);
+        self::assertSame(
+            'forbidden_fail_closed',
+            $contract['authority']['reviewer']['direct_checkout_execution'] ?? null,
+        );
         self::assertSame(
             'external_bootstrap_review',
             $contract['authority']['reviewer']['runtime_configuration_change_policy'] ?? null,
         );
         self::assertSame(
-            'root_owned_posix_bootstrap_and_clean_bash_environment',
+            'root_owned_system_git_then_clean_bash_environment',
             $contract['authority']['reviewer']['shell_runtime_configuration'] ?? null,
         );
         self::assertSame(
@@ -329,7 +345,7 @@ class ReviewerAuthorityContractTest extends TestCase
         foreach (['reviewer-correctness.toml', 'reviewer-design.toml', 'reviewer-tests.toml'] as $filename) {
             $role = (string) file_get_contents($this->repoRoot . '/.codex/agents/' . $filename);
             self::assertStringContainsString('.codex/contracts/agent-workflow.json', $role, $filename);
-            self::assertStringContainsString('scripts/agent/run_readonly_reviewer.sh', $role, $filename);
+            self::assertStringContainsString('scripts/agent/trusted_base_launcher.sh', $role, $filename);
             self::assertStringContainsString('Do not delegate or mutate files, Git, GitHub', $role, $filename);
             self::assertStringContainsString('Return findings only to the primary', $role, $filename);
         }
@@ -338,17 +354,24 @@ class ReviewerAuthorityContractTest extends TestCase
     public function testSeatbeltAndToolFreeInvariantsAreEncodedInRunner(): void
     {
         $runner = file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
+        $launcher = file_get_contents($this->repoRoot . '/scripts/agent/trusted_base_launcher.sh');
         $bundleRuntime = file_get_contents($this->repoRoot . '/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh');
         $isolatedRuntime = file_get_contents(
             $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
         );
         $seatbelt = file_get_contents($this->repoRoot . '/scripts/agent/readonly-reviewer.sb');
         self::assertIsString($runner);
+        self::assertIsString($launcher);
         self::assertIsString($bundleRuntime);
         self::assertIsString($isolatedRuntime);
         self::assertIsString($seatbelt);
 
-        self::assertStringStartsWith("#!/bin/sh\n", $runner);
+        self::assertStringStartsWith("#!/bin/bash\n", $launcher);
+        self::assertStringContainsString('/usr/bin/git', $launcher);
+        self::assertStringContainsString('hash-object --no-filters', $launcher);
+        self::assertStringContainsString('TRUSTED_BASE_LAUNCHER=1', $launcher);
+        self::assertStringStartsWith("#!/bin/bash\n", $runner);
+        self::assertStringContainsString('must be launched from the exact-base trusted launcher', $runner);
         self::assertStringContainsString('env -i', $runner);
         self::assertStringContainsString('/usr/bin/python3', $runner);
         self::assertStringContainsString('-I -B', $runner);
@@ -432,8 +455,39 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringNotContainsString('sandbox_workspace_write', $runner);
     }
 
+    public function testCheckedOutHarnessEntrypointsAreDataOnlyAndFailClosed(): void
+    {
+        $paths = [
+            'scripts/agent/trusted_base_launcher.sh' => 'must be externally materialized from the verified base',
+            'scripts/agent/run_readonly_reviewer.sh' => 'must be launched from the exact-base trusted launcher',
+            'scripts/agent/check_parallel_work_contract.sh' => 'must be launched from the exact-base trusted launcher',
+        ];
+
+        foreach ($paths as $path => $expectedError) {
+            $absolutePath = $this->repoRoot . '/' . $path;
+            self::assertSame(0, fileperms($absolutePath) & 0o111, $path);
+            $process = proc_open(
+                ['/bin/bash', '--noprofile', '--norc', $absolutePath],
+                [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+                $pipes,
+                $this->repoRoot,
+                [],
+            );
+            self::assertIsResource($process);
+            $stdout = (string) stream_get_contents($pipes[1]);
+            $stderr = (string) stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            self::assertSame(2, proc_close($process), $path);
+            self::assertSame('', $stdout, $path);
+            self::assertStringContainsString($expectedError, $stderr, $path);
+        }
+    }
+
     public function testSystemBootstrapDropsAmbientPhpAndShellStartupConfiguration(): void
     {
+        $fixture = $this->runnerFixture('reviewer-clean-bootstrap', "#!/bin/sh\nexit 0\n", 'reviewer-bin');
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-bootstrap-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($temporaryDirectory, 0700));
         $bashMarker = $temporaryDirectory . '/bash-startup-ran';
@@ -456,25 +510,15 @@ class ReviewerAuthorityContractTest extends TestCase
         $environment['CODEX_HOME'] = $temporaryDirectory . '/caller-codex-home';
 
         try {
-            $process = proc_open(
-                [$this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh'],
-                [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
-                $pipes,
-                $this->repoRoot,
-                $environment,
-            );
-            self::assertIsResource($process);
-            $stdout = stream_get_contents($pipes[1]);
-            $stderr = stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, environment: $environment);
 
-            self::assertSame(2, proc_close($process));
-            self::assertSame('', (string) $stdout);
-            self::assertStringContainsString('Reviewer SHAs must be full lowercase commit IDs.', (string) $stderr);
+            self::assertSame(2, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertStringContainsString('does not identify as Codex CLI', $stderr);
             self::assertFileDoesNotExist($bashMarker);
             self::assertFileDoesNotExist($phpMarker);
         } finally {
+            $this->removeRunnerFixture($fixture);
             foreach ([$bashMarker, $phpMarker, $bashEnvironment, $autoPrepend, $phpIni] as $path) {
                 if (is_file($path)) {
                     unlink($path);
@@ -486,6 +530,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
     public function testReviewerBootstrapNeverExecutesPhpResolvedFromAmbientPath(): void
     {
+        $fixture = $this->runnerFixture('reviewer-ambient-php', "#!/bin/sh\nexit 0\n", 'reviewer-bin');
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-path-bootstrap-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($temporaryDirectory, 0700));
         $marker = $temporaryDirectory . '/ambient-php-ran';
@@ -496,22 +541,15 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertTrue(chmod($ambientPhp, 0700));
 
         try {
-            $process = proc_open(
-                [$this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh'],
-                [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
-                $pipes,
-                $this->repoRoot,
-                array_merge($_ENV, ['PATH' => $temporaryDirectory]),
+            [$exitCode, , $stderr] = $this->runRunnerFixture(
+                $fixture,
+                environment: array_merge($_ENV, ['PATH' => $temporaryDirectory]),
             );
-            self::assertIsResource($process);
-            stream_get_contents($pipes[1]);
-            $stderr = (string) stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
 
-            self::assertNotSame(0, proc_close($process));
+            self::assertNotSame(0, $exitCode);
             self::assertFileDoesNotExist($marker, $stderr);
         } finally {
+            $this->removeRunnerFixture($fixture);
             if (is_file($marker)) {
                 unlink($marker);
             }
@@ -632,6 +670,41 @@ class ReviewerAuthorityContractTest extends TestCase
             if (is_file($executionMarker)) {
                 unlink($executionMarker);
             }
+        }
+    }
+
+    public function testExactBaseLauncherNeverExecutesTamperedCheckoutEntrypoints(): void
+    {
+        $fixture = $this->runnerFixture('reviewer-tampered-entrypoints', "#!/bin/sh\nexit 0\n", 'codex');
+        $launcherMarker = sys_get_temp_dir() . '/reviewer-launcher-canary-' . bin2hex(random_bytes(8));
+        $payloadMarker = sys_get_temp_dir() . '/reviewer-payload-canary-' . bin2hex(random_bytes(8));
+
+        try {
+            self::assertNotFalse(
+                file_put_contents(
+                    $fixture['root'] . '/scripts/agent/trusted_base_launcher.sh',
+                    "#!/bin/bash\n: > " . escapeshellarg($launcherMarker) . "\nexit 99\n",
+                ),
+            );
+            self::assertNotFalse(
+                file_put_contents(
+                    $fixture['root'] . '/scripts/agent/run_readonly_reviewer.sh',
+                    "#!/bin/bash\n: > " . escapeshellarg($payloadMarker) . "\nexit 99\n",
+                ),
+            );
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Tamper checked-out reviewer entrypoints');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+            [$exitCode, , $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
+
+            self::assertNotSame(0, $exitCode, $stderr);
+            self::assertFileDoesNotExist($launcherMarker);
+            self::assertFileDoesNotExist($payloadMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($launcherMarker);
+            @unlink($payloadMarker);
         }
     }
 
@@ -810,6 +883,43 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertSame('findings', $validated['verdict']);
         self::assertSame([$finding, $fileFinding], $validated['findings']);
+    }
+
+    public function testOutputValidationRejectsZeroAndNegativeFindingLines(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        foreach ([0, -1] as $line) {
+            $output = json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'findings',
+                    'findings' => [
+                        [
+                            'priority' => 'P2',
+                            'title' => 'Invalid line',
+                            'file' => 'WORKFLOW.md',
+                            'line' => $line,
+                            'impact' => 'Impact',
+                            'trigger' => 'Trigger',
+                        ],
+                    ],
+                ],
+                JSON_THROW_ON_ERROR,
+            );
+
+            try {
+                ReadonlyReviewerContract::validateOutput($output, 'correctness_security', $base, $head, [
+                    'WORKFLOW.md',
+                ]);
+                self::fail('Invalid reviewer finding line was accepted: ' . $line);
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('finding line is invalid', $exception->getMessage());
+            }
+        }
     }
 
     public function testOutputValidationRejectsSensitiveOrUnboundedFindingText(): void
@@ -1068,6 +1178,16 @@ class ReviewerAuthorityContractTest extends TestCase
         ReadonlyReviewerContract::trustedBasePaths($policy);
     }
 
+    public function testRuntimeBoundaryDiagnosticNamesTheDriftedKey(): void
+    {
+        $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
+        $policy['invocation_source'] = 'permissive-checkout-entrypoint';
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('runtime boundary is invalid: invocation_source');
+        ReadonlyReviewerContract::trustedBasePaths($policy);
+    }
+
     /** @return array<string, mixed> */
     private function reviewerPolicyForProfile(string $profile): array
     {
@@ -1114,6 +1234,12 @@ class ReviewerAuthorityContractTest extends TestCase
         $runnerPath = 'scripts/agent/run_readonly_reviewer.sh';
         $fixtureRunner = $root . '/' . $runnerPath;
         self::assertTrue(mkdir(dirname($fixtureRunner), 0700, true));
+        $launcherPath = 'scripts/agent/trusted_base_launcher.sh';
+        $fixtureLauncher = $root . '/' . $launcherPath;
+        self::assertNotFalse(
+            file_put_contents($fixtureLauncher, (string) file_get_contents($this->repoRoot . '/' . $launcherPath)),
+        );
+        self::assertTrue(chmod($fixtureLauncher, 0644));
         $runnerSource = (string) file_get_contents($this->repoRoot . '/' . $runnerPath);
         $fixtureSource = str_replace(
             "canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'",
@@ -1122,6 +1248,7 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertNotSame($runnerSource, $fixtureSource);
         self::assertNotFalse(file_put_contents($fixtureRunner, $fixtureSource));
+        self::assertTrue(chmod($fixtureRunner, 0644));
         $this->runGitCommand(['add', '--all'], $root);
         $this->runGitCommand(
             [
@@ -1144,11 +1271,14 @@ class ReviewerAuthorityContractTest extends TestCase
         $base = $this->runGitCommand(['rev-parse', 'HEAD'], $root);
         $this->runGitCommand(['push', '-q', $remote, 'HEAD:refs/heads/main'], $root);
         $this->runGitCommand(['update-ref', 'refs/remotes/origin/main', $base], $root);
-        $runner = sys_get_temp_dir() . '/reviewer-runner-' . bin2hex(random_bytes(8));
+        $runner = sys_get_temp_dir() . '/reviewer-launcher-' . bin2hex(random_bytes(8));
         self::assertNotFalse(
-            file_put_contents($runner, (string) file_get_contents($root . '/scripts/agent/run_readonly_reviewer.sh')),
+            file_put_contents(
+                $runner,
+                $this->runTrustedGitBlob($root, $base, 'scripts/agent/trusted_base_launcher.sh'),
+            ),
         );
-        self::assertTrue(chmod($runner, 0700));
+        self::assertTrue(chmod($runner, 0500));
         $binaryDirectory = sys_get_temp_dir() . '/reviewer-binary-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($binaryDirectory, 0700));
         $binary = $binaryDirectory . '/' . $binaryName;
@@ -1161,20 +1291,38 @@ class ReviewerAuthorityContractTest extends TestCase
     /** @param array{root: string, runner: string, binary: string, base: string, remote: string} $fixture
      *  @return array{int, string, string}
      */
-    private function runRunnerFixture(array $fixture, ?string $base = null, ?string $head = null): array
-    {
+    private function runRunnerFixture(
+        array $fixture,
+        ?string $base = null,
+        ?string $head = null,
+        ?array $environment = null,
+    ): array {
         $process = proc_open(
             [
+                '/usr/bin/env',
+                '-i',
+                'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
+                'TMPDIR=/tmp',
+                'LANG=C',
+                'LC_ALL=C',
+                'TRUSTED_BASE_MATERIALIZED=1',
+                'TRUSTED_BASE_LAUNCHER_SOURCE_PATH=' . $fixture['runner'],
+                '/bin/bash',
+                '--noprofile',
+                '--norc',
                 $fixture['runner'],
                 '--repo-root=' . $fixture['root'],
+                '--base-sha=' . ($base ?? $fixture['base']),
+                '--payload=reviewer',
+                '--',
                 '--codex-bin=' . $fixture['binary'],
                 '--lens=correctness_security',
-                '--base-sha=' . ($base ?? $fixture['base']),
                 '--head-sha=' . ($head ?? $fixture['base']),
             ],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             $fixture['root'],
+            $environment,
         );
         self::assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);
@@ -1183,6 +1331,39 @@ class ReviewerAuthorityContractTest extends TestCase
         fclose($pipes[2]);
 
         return [proc_close($process), $stdout, $stderr];
+    }
+
+    private function runTrustedGitBlob(string $root, string $commit, string $path): string
+    {
+        $process = proc_open(
+            [
+                '/usr/bin/env',
+                '-i',
+                'GIT_CONFIG_GLOBAL=/dev/null',
+                'GIT_CONFIG_NOSYSTEM=1',
+                'GIT_CONFIG_SYSTEM=/dev/null',
+                'GIT_NO_LAZY_FETCH=1',
+                'GIT_NO_REPLACE_OBJECTS=1',
+                'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
+                '/usr/bin/git',
+                '-c',
+                'core.hooksPath=/dev/null',
+                '-C',
+                $root,
+                'show',
+                $commit . ':' . $path,
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), $stderr);
+
+        return $stdout;
     }
 
     private function commitRunnerFixture(string $root, string $message): void

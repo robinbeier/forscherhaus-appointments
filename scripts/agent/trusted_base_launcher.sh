@@ -1,0 +1,317 @@
+#!/bin/bash
+
+# Machine contract: .codex/contracts/agent-workflow.json
+# This file is data in the checkout, not an executable entry point. The Primary
+# must materialize this exact file from the verified base commit with fixed
+# /usr/bin/git, verify its blob and mode, and only then execute it with clean
+# /bin/bash. Only that external boundary may authorize a payload launch.
+
+set -euo pipefail
+
+launcher_source_input="${TRUSTED_BASE_LAUNCHER_SOURCE_PATH:-}"
+if [[ "${TRUSTED_BASE_MATERIALIZED:-}" != "1" || "$launcher_source_input" != /* ]]; then
+    echo "Trusted-base launcher must be externally materialized from the verified base." >&2
+    exit 2
+fi
+unset TRUSTED_BASE_MATERIALIZED TRUSTED_BASE_LAUNCHER_SOURCE_PATH
+unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PHPRC PHP_INI_SCAN_DIR
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+
+usage() {
+    echo "Usage: trusted-base-launcher --repo-root=<absolute-path> --base-sha=<sha> --payload=<reviewer|parallel> -- <payload-options>" >&2
+}
+
+repo_root_input=""
+base_sha=""
+payload_name=""
+payload_arguments=()
+parsing_payload=false
+
+for argument in "$@"; do
+    if [[ "$parsing_payload" == true ]]; then
+        payload_arguments+=("$argument")
+        continue
+    fi
+    case "$argument" in
+        --repo-root=*) repo_root_input="${argument#*=}" ;;
+        --base-sha=*) base_sha="${argument#*=}" ;;
+        --payload=*) payload_name="${argument#*=}" ;;
+        --) parsing_payload=true ;;
+        *) usage; exit 2 ;;
+    esac
+done
+
+if [[ "$parsing_payload" != true ]]; then
+    usage
+    exit 2
+fi
+if [[ "$repo_root_input" != /* || ! "$base_sha" =~ ^[a-f0-9]{40}$ ]]; then
+    echo "Trusted-base launcher requires an absolute repository root and full lowercase base commit." >&2
+    exit 2
+fi
+
+case "$payload_name" in
+    reviewer) payload_path="scripts/agent/run_readonly_reviewer.sh" ;;
+    parallel) payload_path="scripts/agent/check_parallel_work_contract.sh" ;;
+    *)
+        echo "Trusted-base launcher payload is not allowlisted." >&2
+        exit 2
+        ;;
+esac
+
+git_bin=/usr/bin/git
+python_bin=/usr/bin/python3
+
+assert_system_tool() {
+    local tool_path="$1" metadata="" mode=""
+    if [[ ! -x "$tool_path" || ! -f "$tool_path" ]]; then
+        return 1
+    fi
+    case "$(/usr/bin/uname -s 2>/dev/null)" in
+        Darwin) metadata="$(/usr/bin/stat -Lf '%u:%OLp' "$tool_path" 2>/dev/null)" ;;
+        Linux) metadata="$(/usr/bin/stat -Lc '%u:%a' "$tool_path" 2>/dev/null)" ;;
+        *) return 1 ;;
+    esac
+    mode="${metadata#*:}"
+    [[ "$metadata" =~ ^0:[0-7]{3,4}$ ]] || return 1
+    (( (8#$mode & 0022) == 0 ))
+}
+
+if ! assert_system_tool "$git_bin" || ! assert_system_tool "$python_bin"; then
+    echo "Trusted-base launcher requires root-owned, non-writable system Git and Python." >&2
+    exit 2
+fi
+
+trusted_python() {
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        LANG=C \
+        LC_ALL=C \
+        TMPDIR=/tmp \
+        "$python_bin" -I -B "$@"
+}
+
+canonical_path() {
+    trusted_python -c '
+import os
+import sys
+
+resolved = os.path.realpath(sys.argv[1])
+if not os.path.exists(resolved):
+    raise SystemExit(1)
+sys.stdout.write(resolved)
+' "$1"
+}
+
+repo_root="$(canonical_path "$repo_root_input")" || {
+    echo "Trusted-base launcher repository root is invalid." >&2
+    exit 2
+}
+if [[ ! -d "$repo_root" ]]; then
+    echo "Trusted-base launcher repository root is invalid." >&2
+    exit 2
+fi
+
+trusted_git() {
+    /usr/bin/env -i \
+        GIT_ATTR_NOSYSTEM=1 \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_SYSTEM=/dev/null \
+        GIT_NO_LAZY_FETCH=1 \
+        GIT_NO_REPLACE_OBJECTS=1 \
+        GIT_OPTIONAL_LOCKS=0 \
+        GIT_PAGER=cat \
+        GIT_TERMINAL_PROMPT=0 \
+        LANG=C \
+        LC_ALL=C \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        TMPDIR=/tmp \
+        "$git_bin" \
+        -c core.fsmonitor=false \
+        -c core.hooksPath=/dev/null \
+        -c core.untrackedCache=false \
+        -c diff.external= \
+        -c core.excludesfile=/dev/null \
+        -C "$repo_root" "$@"
+}
+
+resolved_root="$(trusted_git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "Trusted-base launcher must target a Git worktree." >&2
+    exit 2
+}
+resolved_root="$(canonical_path "$resolved_root")" || exit 2
+if [[ "$resolved_root" != "$repo_root" ]]; then
+    echo "Trusted-base launcher repository root is not canonical." >&2
+    exit 2
+fi
+
+resolved_base="$(trusted_git rev-parse --verify "${base_sha}^{commit}" 2>/dev/null)" || {
+    echo "Trusted-base launcher base commit is unavailable." >&2
+    exit 2
+}
+if [[ "$resolved_base" != "$base_sha" ]]; then
+    echo "Trusted-base launcher base commit is not exact." >&2
+    exit 2
+fi
+
+launcher_source="$(canonical_path "$launcher_source_input")" || {
+    echo "Trusted-base launcher materialization path is invalid." >&2
+    exit 2
+}
+case "$launcher_source" in
+    "$repo_root"|"$repo_root"/*)
+        echo "Trusted-base launcher must be materialized outside the checkout." >&2
+        exit 2
+        ;;
+esac
+launcher_tree_entry="$(trusted_git ls-tree "$base_sha" -- scripts/agent/trusted_base_launcher.sh)" || exit 2
+IFS=$' \t' read -r launcher_mode launcher_type launcher_blob launcher_tree_path <<< "$launcher_tree_entry"
+if [[ "$launcher_mode" != "100644" || "$launcher_type" != "blob" || \
+    ! "$launcher_blob" =~ ^[a-f0-9]{40}$ || \
+    "$launcher_tree_path" != "scripts/agent/trusted_base_launcher.sh" ]]; then
+    echo "Trusted-base launcher base blob has an unsafe tree record." >&2
+    exit 2
+fi
+if [[ "$(trusted_git hash-object --no-filters "$launcher_source")" != "$launcher_blob" ]] || \
+    ! trusted_git show "${base_sha}:scripts/agent/trusted_base_launcher.sh" | /usr/bin/cmp -s - "$launcher_source"; then
+    echo "Trusted-base launcher is not the exact verified-base blob." >&2
+    exit 2
+fi
+trusted_python -c '
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+metadata = os.stat(path, follow_symlinks=False)
+if os.path.islink(path) or not stat.S_ISREG(metadata.st_mode):
+    raise SystemExit(1)
+if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o500:
+    raise SystemExit(1)
+' "$launcher_source" || {
+    echo "Trusted-base launcher materialization ownership or mode is unsafe." >&2
+    exit 2
+}
+
+tree_entry="$(trusted_git ls-tree "$base_sha" -- "$payload_path")" || exit 2
+IFS=$' \t' read -r payload_mode payload_type payload_blob payload_tree_path <<< "$tree_entry"
+if [[ "$payload_mode" != "100644" || "$payload_type" != "blob" || ! "$payload_blob" =~ ^[a-f0-9]{40}$ || "$payload_tree_path" != "$payload_path" ]]; then
+    echo "Trusted-base launcher payload is absent or has an unsafe tree mode." >&2
+    exit 2
+fi
+
+case "$(/usr/bin/uname -s 2>/dev/null)" in
+    Darwin) private_parent=/private/tmp ;;
+    Linux) private_parent=/tmp ;;
+    *)
+        echo "Trusted-base launcher platform is unsupported." >&2
+        exit 2
+        ;;
+esac
+
+umask 077
+materialized_root="$(/usr/bin/mktemp -d "$private_parent/forscherhaus-trusted-base.XXXXXX")" || {
+    echo "Trusted-base launcher could not create a private materialization root." >&2
+    exit 2
+}
+cleanup_materialized_root() {
+    chmod -R u+w -- "$materialized_root" 2>/dev/null || true
+    /bin/rm -rf -- "$materialized_root"
+}
+trap cleanup_materialized_root EXIT
+
+materialized_payload="$materialized_root/$(/usr/bin/basename -- "$payload_path")"
+if ! trusted_git show "${base_sha}:${payload_path}" > "$materialized_payload"; then
+    echo "Trusted-base launcher could not materialize the exact base payload." >&2
+    exit 2
+fi
+materialized_blob="$(trusted_git hash-object --no-filters "$materialized_payload")" || exit 2
+if [[ "$materialized_blob" != "$payload_blob" ]]; then
+    echo "Trusted-base launcher materialized payload digest mismatch." >&2
+    exit 2
+fi
+chmod 0500 "$materialized_payload"
+
+trusted_python -c '
+import os
+import stat
+import sys
+
+payload, root, repository = map(os.path.realpath, sys.argv[1:4])
+metadata = os.stat(payload, follow_symlinks=False)
+if os.path.islink(sys.argv[1]) or not stat.S_ISREG(metadata.st_mode):
+    raise SystemExit(1)
+if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o500:
+    raise SystemExit(1)
+if os.path.commonpath([payload, root]) != root:
+    raise SystemExit(1)
+if os.path.commonpath([payload, repository]) == repository:
+    raise SystemExit(1)
+' "$materialized_payload" "$materialized_root" "$repo_root" || {
+    echo "Trusted-base launcher private payload boundary is invalid." >&2
+    exit 2
+}
+
+account_record="$(trusted_python -c '
+import os
+import pwd
+import sys
+
+account = pwd.getpwuid(os.geteuid())
+home = os.path.realpath(account.pw_dir)
+if not account.pw_name or not os.path.isabs(home) or not os.path.isdir(home):
+    raise SystemExit(2)
+metadata = os.stat(home)
+if os.geteuid() != 0 and metadata.st_uid != os.geteuid():
+    raise SystemExit(2)
+sys.stdout.write(f"{os.geteuid()}\n{account.pw_name}\n{home}\n")
+')" || {
+    echo "Trusted-base launcher OS account could not be resolved." >&2
+    exit 2
+}
+reviewer_effective_uid="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '1p')"
+reviewer_os_user="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '2p')"
+reviewer_os_home="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '3p')"
+if [[ -z "$reviewer_effective_uid" || -z "$reviewer_os_user" || -z "$reviewer_os_home" ]]; then
+    echo "Trusted-base launcher OS account could not be resolved." >&2
+    exit 2
+fi
+
+payload_prefix_arguments=()
+payload_environment=(
+    /usr/bin/env -i
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin
+    TMPDIR=/tmp
+    LANG=C
+    LC_ALL=C
+    TRUSTED_BASE_LAUNCHER=1
+    TRUSTED_BASE_LAUNCHER_BASE_SHA="$base_sha"
+    TRUSTED_BASE_LAUNCHER_PAYLOAD="$payload_path"
+    TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH="$materialized_payload"
+)
+case "$payload_name" in
+    reviewer)
+        payload_prefix_arguments=("--repo-root=$repo_root" "--base-sha=$base_sha")
+        payload_environment+=(
+            HOME="$reviewer_os_home"
+            USER="$reviewer_os_user"
+            LOGNAME="$reviewer_os_user"
+            CODEX_HOME="$reviewer_os_home/.codex"
+            REVIEWER_OS_HOME="$reviewer_os_home"
+            REVIEWER_EFFECTIVE_UID="$reviewer_effective_uid"
+        )
+        ;;
+    parallel)
+        payload_prefix_arguments=("--validator-checkout=$repo_root")
+        ;;
+esac
+
+set +e
+"${payload_environment[@]}" \
+    "$materialized_payload" "$materialized_payload" \
+        "${payload_prefix_arguments[@]}" "${payload_arguments[@]}"
+payload_status=$?
+set -e
+exit "$payload_status"

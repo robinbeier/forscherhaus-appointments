@@ -4,18 +4,60 @@
 # Seatbelt runtime and model invocation; bundle construction stays separate.
 
 readonly_reviewer_seatbelt_run() {
+    local sandbox_exec="$1" seatbelt_profile="$2" codex_bin="$3" sealed_root="$4"
+    local arg0_root="$5" runtime_tmp="$6" auth_source="$7" installation_id="$8"
+    shift 8
     "$sandbox_exec" \
-        -D CODEX_BIN="$codex_bin" \
-        -D SEALED_ROOT="$sealed_root" \
-        -D ARG0_ROOT="$arg0_root" \
-        -D RUNTIME_TMP="$runtime_tmp" \
-        -D AUTH_FILE="$auth_source" \
-        -D INSTALLATION_ID="$installation_id" \
+        -D CODEX_BIN="$codex_bin" -D SEALED_ROOT="$sealed_root" \
+        -D ARG0_ROOT="$arg0_root" -D RUNTIME_TMP="$runtime_tmp" \
+        -D AUTH_FILE="$auth_source" -D INSTALLATION_ID="$installation_id" \
         -f "$seatbelt_profile" \
         "$@"
 }
 
-readonly_reviewer_execute_isolated() {
+readonly_reviewer_execute_isolated() (
+    local control_root="$1" review_root="$2" sealed_root="$3" repo_root="$4"
+    local auth_source="$5" codex_bin="$6" reviewer_system_path="$7" reviewer_os_home="$8"
+    local sandbox_exec="$9" lens="${10}" base_sha="${11}" head_sha="${12}"
+    local runtime_home runtime_tmp arg0_root sqlite_root log_root installation_id seatbelt_profile
+    local model_catalog prompt_role_probe allowed_canary outside_canary_root outside_canary home_canary
+    local private_temp_parent reviewer_os_user
+    local codex_stderr review_pipeline_status
+    local ignored_role model reasoning disabled_features output_schema_path developer_instructions_toml
+    local developer_instructions_file review_input changed_paths_file
+    local reviewer_config feature
+    local -a disable_arguments disabled_feature_list reviewer_environment
+
+    reviewer_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
+    IFS=$'\t' read -r ignored_role model reasoning disabled_features output_schema_path <<< "$reviewer_config"
+    if [[ -z "$model" || -z "$reasoning" || -z "$disabled_features" || -z "$output_schema_path" ]]; then
+        echo "Reviewer invocation policy is incomplete." >&2
+        exit 1
+    fi
+    developer_instructions_file="$control_root/developer-instructions.txt"
+    review_input="$control_root/review-input.json"
+    changed_paths_file="$control_root/changed-paths.json"
+    developer_instructions_toml="$(trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" toml-string \
+        --input="$developer_instructions_file")" || {
+        echo "Reviewer developer instructions could not be encoded." >&2
+        exit 1
+    }
+    disable_arguments=()
+    IFS=',' read -r -a disabled_feature_list <<< "$disabled_features"
+    for feature in "${disabled_feature_list[@]}"; do
+        disable_arguments+=(--disable "$feature")
+    done
+
+    case "$(/usr/bin/uname -s 2>/dev/null)" in
+        Darwin) reviewer_os_user="$(/usr/bin/stat -f '%Su' "$reviewer_os_home" 2>/dev/null)" ;;
+        Linux) reviewer_os_user="$(/usr/bin/stat -Lc '%U' "$reviewer_os_home" 2>/dev/null)" ;;
+        *) reviewer_os_user="" ;;
+    esac
+    if [[ ! "$reviewer_os_user" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "Reviewer OS account name is unavailable." >&2
+        exit 2
+    fi
+
     runtime_home="$control_root/codex-home"
     runtime_tmp="$control_root/runtime-tmp"
     arg0_root="$runtime_home/tmp/arg0"
@@ -33,8 +75,8 @@ readonly_reviewer_execute_isolated() {
         env -i
         PATH="$reviewer_system_path"
         HOME="$reviewer_os_home"
-        USER="${USER:-}"
-        LOGNAME="${LOGNAME:-}"
+        USER="$reviewer_os_user"
+        LOGNAME="$reviewer_os_user"
         CODEX_HOME="$runtime_home"
         CODEX_SQLITE_HOME="$sqlite_root"
         TMPDIR="$runtime_tmp"
@@ -47,7 +89,8 @@ readonly_reviewer_execute_isolated() {
     cd "$sealed_root"
 
     model_catalog="$control_root/models.json"
-    if ! readonly_reviewer_seatbelt_run "${reviewer_environment[@]}" "$codex_bin" debug models --bundled 2>/dev/null \
+    if ! readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" \
+        "${reviewer_environment[@]}" "$codex_bin" debug models --bundled 2>/dev/null \
         | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" model-catalog \
             --model="$model" > "$model_catalog"; then
         echo "Reviewer tool-free model catalog could not be derived." >&2
@@ -55,7 +98,8 @@ readonly_reviewer_execute_isolated() {
     fi
 
     prompt_role_probe='UNTRUSTED-REVIEW-BUNDLE-PROBE'
-    if ! readonly_reviewer_seatbelt_run "${reviewer_environment[@]}" "$codex_bin" \
+    if ! readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" \
+        "${reviewer_environment[@]}" "$codex_bin" \
             "${disable_arguments[@]}" \
             -c "developer_instructions=$developer_instructions_toml" \
             -c 'mcp_servers={}' \
@@ -71,7 +115,8 @@ readonly_reviewer_execute_isolated() {
 
     allowed_canary="$review_root/.review-bundle-readable-canary"
     : > "$allowed_canary"
-    outside_canary_root="$(mktemp -d /private/tmp/forscherhaus-readonly-review-denied.XXXXXX)" || {
+    private_temp_parent="$(dirname -- "$sealed_root")"
+    outside_canary_root="$(mktemp -d "$private_temp_parent/forscherhaus-readonly-review-denied.XXXXXX")" || {
         echo "Reviewer external temp canary could not be created." >&2
         exit 2
     }
@@ -81,29 +126,40 @@ readonly_reviewer_execute_isolated() {
         echo "Reviewer home canary could not be created." >&2
         exit 2
     }
+    cleanup_runtime_canaries() {
+        if [[ -n "$outside_canary_root" ]]; then
+            chmod -R u+w -- "$outside_canary_root" 2>/dev/null || true
+            rm -rf -- "$outside_canary_root"
+        fi
+        if [[ -n "$home_canary" ]]; then
+            rm -f -- "$home_canary"
+        fi
+    }
+    trap cleanup_runtime_canaries EXIT
     chmod -R a-w "$review_root"
     chmod a-w "$outside_canary" "$home_canary" "$developer_instructions_file" "$review_input" "$model_catalog"
 
-    if ! readonly_reviewer_seatbelt_run /bin/cat "$allowed_canary" >/dev/null 2>&1; then
+    if ! readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$allowed_canary" >/dev/null 2>&1; then
         echo "Reviewer Seatbelt profile did not admit the exact bundle." >&2
         exit 1
     fi
-    if readonly_reviewer_seatbelt_run /bin/cat "$outside_canary" >/dev/null 2>&1; then
+    if readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$outside_canary" >/dev/null 2>&1; then
         echo "Reviewer Seatbelt profile did not deny foreign temp data." >&2
         exit 1
     fi
-    if readonly_reviewer_seatbelt_run /bin/cat "$home_canary" >/dev/null 2>&1; then
+    if readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$home_canary" >/dev/null 2>&1; then
         echo "Reviewer Seatbelt profile did not deny host-home data." >&2
         exit 1
     fi
-    if readonly_reviewer_seatbelt_run /bin/cat "$repo_root/AGENTS.md" >/dev/null 2>&1; then
+    if readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$repo_root/AGENTS.md" >/dev/null 2>&1; then
         echo "Reviewer Seatbelt profile did not deny the original worktree." >&2
         exit 1
     fi
 
     codex_stderr="$runtime_tmp/codex.stderr"
     set +e
-    readonly_reviewer_seatbelt_run "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never exec \
+    readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" \
+        "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never exec \
             --dangerously-bypass-approvals-and-sandbox \
             --ignore-user-config \
             --ignore-rules \
@@ -137,4 +193,4 @@ readonly_reviewer_execute_isolated() {
         echo "Reviewer isolated model call or output validation failed." >&2
         exit 1
     fi
-}
+)

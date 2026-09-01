@@ -19,7 +19,7 @@ Repo-specific constraints to enforce:
 
 Review rules:
 - Run only through the repository contract in .codex/contracts/agent-workflow.json and
-  scripts/agent/run_readonly_reviewer.sh for final review.
+  scripts/agent/trusted_base_launcher.sh and its exact-base reviewer payload for final review.
 - Do not delegate or mutate files, Git, GitHub, checks, reviews, comments, Linear, workpads,
   merges, or any external system. Return findings only to the primary.
 - Assess whether the current tests prove the change is correct.

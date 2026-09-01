@@ -102,12 +102,15 @@ require three independent final reviews on the same unchanged exact head:
 - `reviewer_design` for architecture and maintainability
 - `reviewer_tests` for regression coverage and flake risk
 
-Invoke final lenses through `scripts/agent/run_readonly_reviewer.sh`, using the
-exact trusted base artifact described in `WORKFLOW.md`. The runner and
+Invoke final lenses through the fixed-system-Git exact-base protocol in
+`scripts/agent/trusted_base_launcher.sh`, using the trusted base described in
+`WORKFLOW.md`; never execute either checked-out harness script. The launcher
+privately materializes `scripts/agent/run_readonly_reviewer.sh` only after the
+base boundary is established. The runner and
 `.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
 deterministic SHA-256 bundle construction, and trusted-path selection. Do not
-execute the checked-out runner or duplicate its bootstrap and materialization
-internals here. The contract pins the official 0.145.0 release digest.
+duplicate its bootstrap and materialization internals here. The contract pins
+the official 0.145.0 release digest.
 The machine contract owns runtime pins, disabled reviewer tools, output schema,
 and trusted paths. The runner orchestrates separately materialized exact-base
 bundle and isolated-runtime libraries for deterministic SHA-256 serialization,

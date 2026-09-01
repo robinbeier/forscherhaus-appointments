@@ -288,16 +288,22 @@ final class ReadonlyReviewerContract
     private static function assertRuntimeBoundary(array $reviewerPolicy): void
     {
         $expected = [
-            'invocation_source' => 'hardened_system_git_materialized_base_blob_outside_worktree',
-            'bootstrap_materialization_policy' => 'absolute_system_git_clean_environment_no_replace_objects',
+            'invocation' => 'scripts/agent/trusted_base_launcher.sh',
+            'payload_path' => 'scripts/agent/run_readonly_reviewer.sh',
+            'invocation_source' =>
+                'external_system_git_materialized_exact_base_launcher_then_private_exact_base_payload',
+            'bootstrap_materialization_policy' =>
+                'absolute_system_git_clean_environment_private_blob_verification_before_any_repository_code_execution',
+            'launcher_materialization_guard' => 'required_external_exact_blob_path_and_marker',
             'trust_anchor' => 'review_base_commit',
             'review_base_ref' => 'refs/remotes/origin/main',
             'review_base_remote_url' => 'https://github.com/robinbeier/forscherhaus-appointments.git',
             'review_base_policy' => 'exact_merge_base_with_live_pinned_public_remote_main_and_matching_tracking_ref',
             'review_base_remote_transport' => 'unauthenticated_read_only_ls_remote_clean_environment',
             'requires_base_runner' => true,
+            'direct_checkout_execution' => 'forbidden_fail_closed',
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
-            'shell_runtime_configuration' => 'root_owned_posix_bootstrap_and_clean_bash_environment',
+            'shell_runtime_configuration' => 'root_owned_system_git_then_clean_bash_environment',
             'transport_environment_policy' => 'fixed_direct_no_ambient_proxy_or_endpoint_override',
             'temporary_directory_policy' => 'private_system_temp_bundle_and_internal_runtime_only',
             'php_runtime_configuration' => 'exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini',
@@ -346,7 +352,7 @@ final class ReadonlyReviewerContract
         ];
         foreach ($expected as $key => $value) {
             if (($reviewerPolicy[$key] ?? null) !== $value) {
-                throw new \RuntimeException('Reviewer runtime boundary is invalid.');
+                throw new \RuntimeException('Reviewer runtime boundary is invalid: ' . $key . '.');
             }
         }
         $version = $reviewerPolicy['codex_version'] ?? null;

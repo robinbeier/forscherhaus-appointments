@@ -1,43 +1,11 @@
-#!/bin/sh
-
-# Establish a clean, root-owned shell boundary before any repository-selected
-# interpreter is resolved. Non-interactive POSIX sh does not evaluate BASH_ENV.
-set -eu
-unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PHPRC PHP_INI_SCAN_DIR
-
-bootstrap_python=/usr/bin/python3
-if [ ! -x "$bootstrap_python" ]; then
-    echo "Parallel-work system Python bootstrap is unavailable." >&2
-    exit 2
-fi
-case "$(/usr/bin/uname -s 2>/dev/null)" in
-    Darwin) bootstrap_python_metadata="$(/usr/bin/stat -f '%u:%OLp' "$bootstrap_python" 2>/dev/null)" ;;
-    Linux) bootstrap_python_metadata="$(/usr/bin/stat -Lc '%u:%a' "$bootstrap_python" 2>/dev/null)" ;;
-    *) bootstrap_python_metadata='' ;;
-esac
-bootstrap_python_mode="${bootstrap_python_metadata#*:}"
-bootstrap_python_group_other="$(/usr/bin/printf '%s\n' "$bootstrap_python_mode" | /usr/bin/sed 's/.*\(..\)$/\1/')"
-case "$bootstrap_python_metadata:$bootstrap_python_group_other" in
-    0:[0-7][0-7][0-7]:[0145][0145]|0:[0-7][0-7][0-7][0-7]:[0145][0145]) ;;
-    *)
-        echo "Parallel-work system Python bootstrap ownership is unsafe." >&2
-        exit 2
-        ;;
-esac
-
-/usr/bin/sed '1,/^__ROB501_BASH_PAYLOAD__$/d' "$0" | \
-    /usr/bin/env -i \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        TMPDIR=/tmp \
-        LANG=C \
-        LC_ALL=C \
-        /bin/bash --noprofile --norc -s -- "$0" "$@"
-exit $?
-
-__ROB501_BASH_PAYLOAD__
 #!/bin/bash
 
 set -euo pipefail
+
+if [[ "${TRUSTED_BASE_LAUNCHER:-}" != "1" ]]; then
+    echo "Parallel-work validator must be launched from the exact-base trusted launcher." >&2
+    exit 2
+fi
 
 # With `bash -s -- <runner> ...`, Bash retains its own `$0` and exposes the
 # materialized declared-base runner as `$1`.
@@ -125,6 +93,10 @@ if not isinstance(base, str) or re.fullmatch(r"[a-f0-9]{40}", base) is None:
 sys.stdout.write(base)
 ' "$manifest_path"
 )"; then
+    exit 2
+fi
+if [[ "${TRUSTED_BASE_LAUNCHER_PAYLOAD:-}" != "scripts/agent/check_parallel_work_contract.sh" ]]; then
+    echo "Parallel-work validator is not bound to the trusted launcher context." >&2
     exit 2
 fi
 
@@ -227,6 +199,10 @@ if [[ "$validator_head" != "$manifest_base" || "$manifest_base" != "$canonical_m
     /usr/bin/printf '%s\n' '{"schema_version":1,"status":"fail","errors":["validator_base_mismatch"]}'
     exit 1
 fi
+if [[ "${TRUSTED_BASE_LAUNCHER_BASE_SHA:-}" != "$validator_head" ]]; then
+    echo "Parallel-work validator is not bound to the trusted launcher base." >&2
+    exit 2
+fi
 
 if [[ -L "$runner_source_input" ]]; then
     echo "Parallel-work validator runner is invalid." >&2
@@ -239,6 +215,10 @@ runner_directory="$(CDPATH= cd -- "$(/usr/bin/dirname -- "$runner_source_input")
 runner_source="$runner_directory/$(/usr/bin/basename -- "$runner_source_input")"
 if [[ ! -f "$runner_source" ]]; then
     echo "Parallel-work validator runner is invalid." >&2
+    exit 2
+fi
+if [[ "${TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH:-}" != "$runner_source" ]]; then
+    echo "Parallel-work validator materialization is not bound to the trusted launcher." >&2
     exit 2
 fi
 case "$runner_source" in
@@ -261,6 +241,7 @@ trap '/bin/rm -rf "$trusted_root"' EXIT
 
 trusted_paths=(
     .codex/contracts/agent-workflow.json
+    scripts/agent/trusted_base_launcher.sh
     scripts/agent/check_parallel_work_contract.sh
     scripts/agent/check_parallel_work_contract.php
     scripts/agent/verify_trusted_php_runtime.py

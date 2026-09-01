@@ -57,16 +57,28 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['primary_owned_mutations'] ?? null,
         );
         self::assertSame(
-            'scripts/agent/run_readonly_reviewer.sh',
+            'scripts/agent/trusted_base_launcher.sh',
             $contract['authority']['reviewer']['invocation'] ?? null,
         );
         self::assertSame(
-            'hardened_system_git_materialized_base_blob_outside_worktree',
+            'scripts/agent/run_readonly_reviewer.sh',
+            $contract['authority']['reviewer']['payload_path'] ?? null,
+        );
+        self::assertSame(
+            'external_system_git_materialized_exact_base_launcher_then_private_exact_base_payload',
             $contract['authority']['reviewer']['invocation_source'] ?? null,
         );
         self::assertSame(
-            'absolute_system_git_clean_environment_no_replace_objects',
+            'absolute_system_git_clean_environment_private_blob_verification_before_any_repository_code_execution',
             $contract['authority']['reviewer']['bootstrap_materialization_policy'] ?? null,
+        );
+        self::assertSame(
+            'required_external_exact_blob_path_and_marker',
+            $contract['authority']['reviewer']['launcher_materialization_guard'] ?? null,
+        );
+        self::assertSame(
+            'forbidden_fail_closed',
+            $contract['authority']['reviewer']['direct_checkout_execution'] ?? null,
         );
         self::assertSame(
             'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
@@ -378,12 +390,20 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['parallel_work']['external_mutations_remain_serial'] ?? null);
         self::assertTrue($contract['parallel_work']['requires_semantic_independence_attestation'] ?? null);
         self::assertSame(
-            'scripts/agent/check_parallel_work_contract.sh',
+            'scripts/agent/trusted_base_launcher.sh',
             $contract['parallel_work']['validator_invocation'] ?? null,
         );
         self::assertSame(
-            'hardened_system_git_materialized_declared_base_wrapper_and_source_blobs',
+            'scripts/agent/check_parallel_work_contract.sh',
+            $contract['parallel_work']['validator_payload_path'] ?? null,
+        );
+        self::assertSame(
+            'external_system_git_materialized_declared_base_launcher_then_private_declared_base_payload',
             $contract['parallel_work']['validator_trust_anchor'] ?? null,
+        );
+        self::assertSame(
+            'required_external_exact_blob_path_and_marker',
+            $contract['parallel_work']['validator_launcher_materialization_guard'] ?? null,
         );
         self::assertSame('refs/remotes/origin/main', $contract['parallel_work']['canonical_base_ref'] ?? null);
         self::assertSame(
@@ -410,7 +430,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['parallel_work']['php_runtime_configuration'] ?? null,
         );
         self::assertSame(
-            'root_owned_posix_shell_before_clean_bash_and_attested_php',
+            'root_owned_system_git_before_clean_bash_and_attested_php',
             $contract['parallel_work']['shell_bootstrap'] ?? null,
         );
         self::assertSame(

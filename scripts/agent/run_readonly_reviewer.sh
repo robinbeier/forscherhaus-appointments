@@ -1,81 +1,11 @@
-#!/bin/sh
-
-# POSIX sh does not evaluate BASH_ENV for a non-interactive script. It is the
-# root-owned bootstrap used to discard all caller startup/runtime configuration
-# before the Bash payload or any repository-selected interpreter can execute.
-set -eu
-unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PHPRC PHP_INI_SCAN_DIR
-
-bootstrap_python=/usr/bin/python3
-if [ ! -x "$bootstrap_python" ]; then
-    echo "Reviewer system Python bootstrap is unavailable." >&2
-    exit 2
-fi
-case "$(/usr/bin/uname -s 2>/dev/null)" in
-    Darwin) bootstrap_python_metadata="$(/usr/bin/stat -f '%u:%OLp' "$bootstrap_python" 2>/dev/null)" ;;
-    Linux) bootstrap_python_metadata="$(/usr/bin/stat -Lc '%u:%a' "$bootstrap_python" 2>/dev/null)" ;;
-    *) bootstrap_python_metadata='' ;;
-esac
-bootstrap_python_mode="${bootstrap_python_metadata#*:}"
-bootstrap_python_group_other="$(/usr/bin/printf '%s\n' "$bootstrap_python_mode" | /usr/bin/sed 's/.*\(..\)$/\1/')"
-case "$bootstrap_python_metadata:$bootstrap_python_group_other" in
-    0:[0-7][0-7][0-7]:[0145][0145]|0:[0-7][0-7][0-7][0-7]:[0145][0145]) ;;
-    *)
-        echo "Reviewer system Python bootstrap ownership is unsafe." >&2
-        exit 2
-        ;;
-esac
-
-account_record="$(
-    /usr/bin/env -i \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        LANG=C \
-        LC_ALL=C \
-        "$bootstrap_python" -I -B -c '
-import os
-import pwd
-import sys
-
-account = pwd.getpwuid(os.geteuid())
-home = os.path.realpath(account.pw_dir)
-if not account.pw_name or not os.path.isabs(home) or not os.path.isdir(home):
-    raise SystemExit(2)
-stat_result = os.stat(home)
-if os.geteuid() != 0 and stat_result.st_uid != os.geteuid():
-    raise SystemExit(2)
-sys.stdout.write(f"{os.geteuid()}\n{account.pw_name}\n{home}\n")
-' 2>/dev/null
-)" || {
-    echo "Reviewer OS account could not be resolved." >&2
-    exit 2
-}
-reviewer_effective_uid="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '1p')"
-reviewer_os_user="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '2p')"
-reviewer_os_home="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '3p')"
-if [ -z "$reviewer_effective_uid" ] || [ -z "$reviewer_os_user" ] || [ -z "$reviewer_os_home" ]; then
-    echo "Reviewer OS account could not be resolved." >&2
-    exit 2
-fi
-
-/usr/bin/sed '1,/^__ROB501_BASH_PAYLOAD__$/d' "$0" | \
-    /usr/bin/env -i \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        TMPDIR=/tmp \
-        LANG=C \
-        LC_ALL=C \
-        HOME="$reviewer_os_home" \
-        USER="$reviewer_os_user" \
-        LOGNAME="$reviewer_os_user" \
-        CODEX_HOME="$reviewer_os_home/.codex" \
-        REVIEWER_OS_HOME="$reviewer_os_home" \
-        REVIEWER_EFFECTIVE_UID="$reviewer_effective_uid" \
-        /bin/bash --noprofile --norc -s -- "$0" "$@"
-exit $?
-
-__ROB501_BASH_PAYLOAD__
 #!/bin/bash
 
 set -euo pipefail
+
+if [[ "${TRUSTED_BASE_LAUNCHER:-}" != "1" ]]; then
+    echo "Reviewer runner must be launched from the exact-base trusted launcher." >&2
+    exit 2
+fi
 
 # With `bash -s -- <runner> ...`, Bash keeps its own `$0` and assigns the
 # materialized runner path to `$1`.
@@ -109,6 +39,12 @@ for argument in "$@"; do
         *) usage; exit 2 ;;
     esac
 done
+
+if [[ "${TRUSTED_BASE_LAUNCHER_BASE_SHA:-}" != "$base_sha" || \
+    "${TRUSTED_BASE_LAUNCHER_PAYLOAD:-}" != "scripts/agent/run_readonly_reviewer.sh" ]]; then
+    echo "Reviewer runner is not bound to the trusted launcher context." >&2
+    exit 2
+fi
 
 git_bin=/usr/bin/git
 if [[ ! -x "$git_bin" ]]; then
@@ -275,6 +211,10 @@ runner_source="$(canonical_path "$runner_source_input")" || {
     echo "Reviewer trusted source path could not be resolved." >&2
     exit 2
 }
+if [[ "${TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH:-}" != "$runner_source" ]]; then
+    echo "Reviewer runner materialization is not bound to the trusted launcher." >&2
+    exit 2
+fi
 case "$runner_source" in
     "$repo_root"|"$repo_root"/*)
         echo "Reviewer runner must be materialized from the review base outside the worktree." >&2
@@ -402,16 +342,7 @@ case "$sealed_root" in
         exit 2
         ;;
 esac
-outside_canary_root=""
-home_canary=""
 cleanup_sealed_review() {
-    if [[ -n "$outside_canary_root" ]]; then
-        chmod -R u+w -- "$outside_canary_root" 2>/dev/null || true
-        rm -rf -- "$outside_canary_root"
-    fi
-    if [[ -n "$home_canary" ]]; then
-        rm -f -- "$home_canary"
-    fi
     chmod -R u+w -- "$sealed_root" 2>/dev/null || true
     rm -rf -- "$sealed_root"
 }
@@ -545,5 +476,8 @@ source "$control_root/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh"
 # shellcheck source=scripts/agent/lib/readonly_reviewer_isolated_runtime.sh
 source "$control_root/scripts/agent/lib/readonly_reviewer_isolated_runtime.sh"
 
-readonly_reviewer_materialize_bundle
-readonly_reviewer_execute_isolated
+readonly_reviewer_materialize_bundle "$control_root" "$review_root" "$base_sha" "$head_sha" "$lens"
+readonly_reviewer_execute_isolated \
+    "$control_root" "$review_root" "$sealed_root" "$repo_root" \
+    "$auth_source" "$codex_bin" "$reviewer_system_path" "$reviewer_os_home" \
+    "$sandbox_exec" "$lens" "$base_sha" "$head_sha"

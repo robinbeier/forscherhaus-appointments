@@ -105,22 +105,67 @@ approved, independently verifiable lanes; normal PR publication, Linear
 mutation, integration, attestation, and landing remain serial.
 
 The machine-readable contract and validator are the implementation authority:
-`.codex/contracts/agent-workflow.json` and
+`.codex/contracts/agent-workflow.json`,
+`scripts/agent/trusted_base_launcher.sh`, and the validator payload
 `scripts/agent/check_parallel_work_contract.sh`. They bind the live canonical
 main, exact common base, clean validator checkout, explicit disjoint
 `directory`/`exact_file` ownership, semantic-independence attestation, component
 approvals, primary-reserved paths, and at most two implementation-worker lanes.
-The validator is materialized from the declared base with a hardened empty
-environment; it verifies provisional pre-commit ownership and clean
+The Primary privately materializes the launcher with fixed system Git from the
+already verified declared base, verifies its exact blob and non-executable tree
+mode, and only then starts it in clean Bash. The launcher in turn privately
+materializes and verifies the exact-base validator before any checkout code can
+execute. Direct execution of either checked-out script is forbidden and fails
+closed. The validator verifies provisional pre-commit ownership and clean
 post-commit integration evidence. Shared path matching is centralized in
-`scripts/ci/ownership_path_rules.py`. Do not reproduce bootstrap commands or
-validator internals here; use the validator CLI and its machine contract.
-Do not replace it with an ambient `git show`. The validator owns the trusted
-bootstrap.
+`scripts/ci/ownership_path_rules.py`. Do not reproduce the bootstrap command in
+other docs or duplicate validator internals; use this canonical command and the
+machine contract.
+Do not replace this with an ambient `git show` or a checked-out wrapper. The
+machine contract owns the fixed system-Git bootstrap and payload selection.
 
-Both agent-harness entry points establish a root-owned POSIX-shell boundary,
-discard caller startup configuration, and use isolated `/usr/bin/python3`
-before any PHP runs. `scripts/agent/verify_trusted_php_runtime.py` then binds
+The canonical Primary-owned invocation shape is below. Supply an absolute
+repository root, its verified 40-character base, one allowlisted payload name,
+and only that payload's documented arguments. The outer command is static host
+code: complete materialization and blob verification must succeed before any
+repository-selected Bash can run.
+
+```bash
+/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash --noprofile --norc -c '
+  set -euo pipefail
+  repo_root="$1"
+  base_sha="$2"
+  payload="$3"
+  shift 3
+  [[ "$repo_root" == /* && "$base_sha" =~ ^[a-f0-9]{40}$ ]]
+  case "$(/usr/bin/uname -s)" in
+    Darwin) private_parent=/private/tmp ;;
+    Linux) private_parent=/tmp ;;
+    *) exit 2 ;;
+  esac
+  umask 077
+  bootstrap_root="$(/usr/bin/mktemp -d "$private_parent/forscherhaus-trusted-launcher.XXXXXX")"
+  case "$bootstrap_root" in "$private_parent"/forscherhaus-trusted-launcher.*) ;; *) exit 2 ;; esac
+  cleanup() { /bin/chmod -R u+w -- "$bootstrap_root" 2>/dev/null || true; /bin/rm -rf -- "$bootstrap_root"; }
+  trap cleanup EXIT
+  git_read() {
+    /usr/bin/env -i GIT_ATTR_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_PAGER=cat GIT_TERMINAL_PROMPT=0 LANG=C LC_ALL=C PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/git -c core.hooksPath=/dev/null -C "$repo_root" "$@"
+  }
+  launcher_path="$bootstrap_root/trusted_base_launcher.sh"
+  launcher_entry="$(git_read ls-tree "$base_sha" -- scripts/agent/trusted_base_launcher.sh)"
+  read -r launcher_mode launcher_type launcher_blob launcher_tree_path <<< "$launcher_entry"
+  [[ "$launcher_mode" == 100644 && "$launcher_type" == blob && "$launcher_blob" =~ ^[a-f0-9]{40}$ && "$launcher_tree_path" == scripts/agent/trusted_base_launcher.sh ]]
+  git_read show "$base_sha:scripts/agent/trusted_base_launcher.sh" > "$launcher_path"
+  [[ "$(git_read hash-object --no-filters "$launcher_path")" == "$launcher_blob" ]]
+  /bin/chmod 0500 "$launcher_path"
+  /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR=/tmp LANG=C LC_ALL=C TRUSTED_BASE_MATERIALIZED=1 TRUSTED_BASE_LAUNCHER_SOURCE_PATH="$launcher_path" /bin/bash --noprofile --norc "$launcher_path" --repo-root="$repo_root" --base-sha="$base_sha" --payload="$payload" -- "$@"
+' trusted-base-launcher /absolute/repository <base-sha> <reviewer-or-parallel> <payload-options>
+```
+
+Both agent-harness entry points begin with the same exact-base system-Git
+launcher, discard caller startup configuration, and use isolated
+`/usr/bin/python3` before any PHP runs.
+`scripts/agent/verify_trusted_php_runtime.py` then binds
 PHP and its dynamic dependency closure to the exact-base machine contract.
 Every admitted platform requires an exact closure pin; a missing platform pin
 or any pin drift fails closed and requires a reviewed contract update. A
@@ -133,6 +178,13 @@ before extraction, and never executed from the archive. Platforms absent from
 both runtime-source maps and the closure-pin map are deliberately unsupported.
 Ambient `PATH` never grants interpreter authority. The centralized ownership
 matcher is also Primary-owned because it defines shared lane and CI semantics.
+
+The JSON contract is the configuration authority. Shell, PHP, and focused test
+checks independently mirror only security-critical boundary values so a single
+permissive parser or stale implementation fails closed; they are deliberately
+not generated from untrusted head code at runtime. Keep descriptive prose out
+of those mirrors, and name the exact drifted key in diagnostics so coordinated
+contract updates remain reviewable instead of opaque.
 
 External review input is deliberately narrower than a checkout. It contains a
 zero-context UTF-8 patch (changed lines only), the normalized changed-path
@@ -335,8 +387,12 @@ Final reviews and blocking CI must all target the current unchanged exact PR
 head. A later push makes the earlier evidence stale.
 
 Run final reviewers through the repository-owned sealed-bundle boundary using
-the exact-base invocation documented by
-`scripts/agent/run_readonly_reviewer.sh`. The runner, policy, profiles, schema,
+the exact-base launcher contract in `scripts/agent/trusted_base_launcher.sh`;
+never execute the checked-out launcher or reviewer payload. Fixed system Git
+must completely materialize and verify the launcher from the verified base
+before clean Bash starts it; only then may it privately materialize
+`scripts/agent/run_readonly_reviewer.sh`.
+The runner, policy, profiles, schema,
 and validator are trusted base artifacts, never head artifacts. It requires
 the live canonical main, local tracking ref, exact merge base, and reviewed
 head to match; later pushes invalidate all review evidence.
@@ -351,9 +407,9 @@ configuration, connectors, delegation, credentials, or external writes;
 non-macOS execution fails closed. The machine contract is the source for model,
 feature, schema, runtime, and trusted-path settings; the runner orchestrates
 separately materialized exact-base bundle and isolated-runtime libraries.
-Consult
-`.codex/contracts/agent-workflow.json` and
-`scripts/agent/run_readonly_reviewer.sh` for those implementation details.
+Consult `.codex/contracts/agent-workflow.json`,
+`scripts/agent/trusted_base_launcher.sh`, and the reviewer payload for those
+implementation details.
 
 The first introduction of this trust root cannot bootstrap itself. Likewise,
 a change to `.codex/config.toml` or any `AGENTS.md` can affect reviewer runtime
