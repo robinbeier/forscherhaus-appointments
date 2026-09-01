@@ -109,17 +109,33 @@ trusted_base_remote_git() {
         -C /tmp "$@"
 }
 
+# Post-dispatch exact-base blob-type gate shared by both payloads.
+trusted_base_declared_tree_entry=''
+trusted_base_assert_declared_blob() {
+    local repository_path="$1"
+    local tree_entry='' tree_header='' tree_path=''
+
+    # A pathspec can resolve to more than one tree record (for example when a
+    # caller supplies an ambiguous path).  Require one, and only one, exact
+    # regular-file blob record before allowing git show to consume it.
+    tree_entry="$(trusted_base_git ls-tree "$trusted_base_base_sha" -- "$repository_path")" || return 1
+    tree_header="${tree_entry%%$'\t'*}"
+    tree_path="${tree_entry#*$'\t'}"
+    if [[ -z "$tree_entry" || "$tree_entry" == *$'\n'* || "$tree_path" != "$repository_path" ||
+        ! "$tree_header" =~ ^100644[[:space:]]blob[[:space:]][a-f0-9]{40}$ ]]; then
+        return 1
+    fi
+    trusted_base_declared_tree_entry="$tree_entry"
+}
+
 trusted_base_assert_materialized_blob() {
     local materialized_path="$1" repository_path="$2" expected_mode="$3"
     local expected_blob="${4:-}"
     local tree_entry='' tree_mode='' tree_type='' tree_blob='' tree_path=''
 
-    tree_entry="$(trusted_base_git ls-tree "$trusted_base_base_sha" -- "$repository_path")" || return 1
+    trusted_base_assert_declared_blob "$repository_path" || return 1
+    tree_entry="$trusted_base_declared_tree_entry"
     IFS=$' \t' read -r tree_mode tree_type tree_blob tree_path <<< "$tree_entry"
-    if [[ "$tree_mode" != '100644' || "$tree_type" != 'blob' || \
-        ! "$tree_blob" =~ ^[a-f0-9]{40}$ || "$tree_path" != "$repository_path" ]]; then
-        return 1
-    fi
     if [[ -n "$expected_blob" && "$tree_blob" != "$expected_blob" ]] || \
         [[ "$(trusted_base_git hash-object --no-filters "$materialized_path")" != "$tree_blob" ]] || \
         ! trusted_base_git show "${trusted_base_base_sha}:${repository_path}" | /usr/bin/cmp -s - "$materialized_path"; then
@@ -157,6 +173,9 @@ trusted_base_assert_bootstrap_manifest() {
     if ! trusted_base_assert_materialized_blob "$parser_source" "$parser_path" "$parser_mode" "$parser_blob"; then
         return 1
     fi
+    # Reattest the contract tree entry before the runtime consumes its bytes;
+    # the launcher performs the corresponding independent pre-dispatch check.
+    trusted_base_assert_declared_blob "$contract_path" || return 1
     if ! trusted_base_git show "${trusted_base_base_sha}:${contract_path}" 2>/dev/null | \
         trusted_base_python "$parser_source" "$expected_payload_id" >/dev/null; then
         return 1
@@ -241,6 +260,7 @@ if os.path.commonpath([root, repository]) == repository:
     raise SystemExit(1)
 ' "$target_root" "$trusted_base_repo_root" || return 1
 
+    trusted_base_assert_declared_blob "$contract_path" || return 1
     /bin/mkdir -p "$target_root/$(/usr/bin/dirname -- "$contract_path")"
     if ! trusted_base_git show "${trusted_base_base_sha}:${contract_path}" > "$target_root/$contract_path"; then
         return 1
@@ -278,10 +298,17 @@ for path in value:
     print(path)
 ' "$target_root/$contract_path" "$selector" "$contract_path")" || return 1
 
+    # Validate every declared path before materializing any of them.  This
+    # keeps a malformed, symlink, tree, gitlink, missing, or ambiguous entry
+    # from producing a partially populated bootstrap boundary.
     while IFS= read -r path || [[ -n "$path" ]]; do
         if [[ -z "$path" ]]; then
             return 1
         fi
+        trusted_base_assert_declared_blob "$path" || return 1
+    done <<< "$paths_output"
+
+    while IFS= read -r path || [[ -n "$path" ]]; do
         /bin/mkdir -p "$target_root/$(/usr/bin/dirname -- "$path")"
         if [[ "$path" != "$contract_path" ]] && \
             ! trusted_base_git show "${trusted_base_base_sha}:${path}" > "$target_root/$path"; then

@@ -29,15 +29,63 @@ head_sha=""
 requested_repo_root=""
 requested_codex_bin=""
 diagnostic_bootstrap_only=false
+lens_seen=false
+base_sha_seen=false
+head_sha_seen=false
+repo_root_seen=false
+codex_bin_seen=false
+diagnostic_seen=false
 
 for argument in "$@"; do
     case "$argument" in
-        --lens=*) lens="${argument#*=}" ;;
-        --base-sha=*) base_sha="${argument#*=}" ;;
-        --head-sha=*) head_sha="${argument#*=}" ;;
-        --repo-root=*) requested_repo_root="${argument#*=}" ;;
-        --codex-bin=*) requested_codex_bin="${argument#*=}" ;;
-        --diagnostic-bootstrap-only) diagnostic_bootstrap_only=true ;;
+        --lens=*)
+            if [[ "$lens_seen" == true ]]; then
+                echo "Reviewer option may be supplied only once: --lens." >&2
+                exit 2
+            fi
+            lens_seen=true
+            lens="${argument#*=}"
+            ;;
+        --base-sha=*)
+            if [[ "$base_sha_seen" == true ]]; then
+                echo "Reviewer option may be supplied only once: --base-sha." >&2
+                exit 2
+            fi
+            base_sha_seen=true
+            base_sha="${argument#*=}"
+            ;;
+        --head-sha=*)
+            if [[ "$head_sha_seen" == true ]]; then
+                echo "Reviewer option may be supplied only once: --head-sha." >&2
+                exit 2
+            fi
+            head_sha_seen=true
+            head_sha="${argument#*=}"
+            ;;
+        --repo-root=*)
+            if [[ "$repo_root_seen" == true ]]; then
+                echo "Reviewer option may be supplied only once: --repo-root." >&2
+                exit 2
+            fi
+            repo_root_seen=true
+            requested_repo_root="${argument#*=}"
+            ;;
+        --codex-bin=*)
+            if [[ "$codex_bin_seen" == true ]]; then
+                echo "Reviewer option may be supplied only once: --codex-bin." >&2
+                exit 2
+            fi
+            codex_bin_seen=true
+            requested_codex_bin="${argument#*=}"
+            ;;
+        --diagnostic-bootstrap-only)
+            if [[ "$diagnostic_seen" == true ]]; then
+                echo "Reviewer option may be supplied only once: --diagnostic-bootstrap-only." >&2
+                exit 2
+            fi
+            diagnostic_seen=true
+            diagnostic_bootstrap_only=true
+            ;;
         *) usage; exit 2 ;;
     esac
 done
@@ -74,6 +122,9 @@ if [[ ! "$base_sha" =~ $sha_pattern || ! "$head_sha" =~ $sha_pattern ]]; then
 fi
 
 review_base_ref="refs/remotes/origin/main"
+# Keep the canonical remote as an immutable transport/identity floor. The
+# reviewed repository's mutable configuration must not choose the source used
+# to verify the live main commit.
 canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'
 remote_main_record="$(
     trusted_remote_git ls-remote --exit-code --refs "$canonical_main_remote" refs/heads/main 2>/dev/null

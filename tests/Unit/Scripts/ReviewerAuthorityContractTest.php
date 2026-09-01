@@ -857,6 +857,71 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
+    public function testRunnerRejectsASecondForeignRepoRootBeforeAnyModelExecution(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-duplicate-foreign-root-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-duplicate-foreign-root',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 99\n",
+            'codex',
+        );
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture(
+                $fixture,
+                additionalReviewerArguments: ['--repo-root=/tmp/foreign-review-root'],
+            );
+
+            self::assertSame(2, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame("Reviewer option may be supplied only once: --repo-root.\n", $stderr);
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
+        }
+    }
+
+    public function testRunnerRejectsASecondIdenticalRepoRootBeforeAnyModelExecution(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-duplicate-identical-root-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-duplicate-identical-root',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 99\n",
+            'codex',
+        );
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture(
+                $fixture,
+                additionalReviewerArguments: ['--repo-root=' . $fixture['root']],
+            );
+
+            self::assertSame(2, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame("Reviewer option may be supplied only once: --repo-root.\n", $stderr);
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
+        }
+    }
+
+    public function testRunnerAcceptsTheSingleLauncherProvidedRepoRoot(): void
+    {
+        $fixture = $this->runnerFixture('reviewer-single-launcher-root', "#!/bin/sh\nexit 0\n", 'codex');
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture);
+
+            self::assertNotSame(0, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertStringNotContainsString('may be supplied only once: --repo-root', $stderr);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+        }
+    }
+
     public function testRuntimeValidatorRejectsUnpinnedCodexNamedExecutable(): void
     {
         $binary = sys_get_temp_dir() . '/codex-' . bin2hex(random_bytes(8));

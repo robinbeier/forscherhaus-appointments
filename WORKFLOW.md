@@ -212,6 +212,18 @@ neither silently owns the other's artifact. Explicit disabled-feature floors
 remain hand-enforced. Both generators are trusted bootstrap paths, so changing
 either generation contract also requires the external bootstrap-review path.
 
+These repeated checks are distinct trust anchors, not competing policy
+implementations. The launcher proves the exact-base materialization contract
+before repository code runs; the shared runtime reattests that same contract
+after dispatch; the generated snapshot makes the declarative policy reviewable;
+and the complete PHP attestation keeps an independently changed JSON file from
+redirecting enforcement. For the same reason, the canonical remote remains a
+literal fail-closed transport/identity floor in each external-boundary payload
+instead of being read only from mutable policy JSON. Changes to one of these
+anchors must update its exact-base peers and tests together. Do not centralize
+them into a head helper or one policy-derived lookup: a partial update is meant
+to fail closed.
+
 External review input is deliberately narrower than a checkout. It contains a
 zero-context UTF-8 patch (changed lines only), the normalized changed-path
 index, its deterministic manifest, and the allowlisted trusted base policy.
