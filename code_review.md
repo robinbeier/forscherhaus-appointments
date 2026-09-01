@@ -158,8 +158,10 @@ bundle containing the full-index patch, sorted changed paths, committed base and
 head blobs, trusted base policy, and a SHA-256 manifest. It serializes that
 bounded bundle into deterministic JSON. For a newly added UTF-8 text file, the
 exact head metadata remains in the manifest while its redundant `head/` blob
-is omitted because `review.patch` is binary/full-index and carries the complete
-added text; binary, NUL-containing, or non-UTF-8 additions remain serialized.
+is omitted only after its exact bytes match a complete textual new-file hunk in
+the binary/full-index `review.patch`. Binary patch forms, unsupported path or
+hunk forms, content mismatches, NUL-containing additions, and non-UTF-8
+additions retain the independently hashed head blob.
 This optional metadata is schema-compatible
 (`content_source.kind: full_index_patch_added_text_file` points to
 `review.patch`) and the deduplication operation fails closed on any evidence

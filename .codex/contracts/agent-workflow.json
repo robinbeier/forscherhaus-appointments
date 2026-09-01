@@ -58,6 +58,7 @@
             "review_bundle_parent_policy": "private_system_temp_random_directory",
             "review_bundle_contents": "committed_patch_manifest_changed_base_head_and_trusted_policy",
             "review_bundle_manifest_policy": "deterministic_sha256_base_head_binding",
+            "review_bundle_added_text_deduplication": "exact_complete_textual_new_file_hunk_matches_head_else_retain_blob",
             "review_instruction_policy": "trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input",
             "prompt_role_preflight": "pinned_cli_requires_developer_policy_and_user_bundle_channels",
             "review_input_policy": "bounded_deterministic_json_serialization_as_untrusted_user_stdin",

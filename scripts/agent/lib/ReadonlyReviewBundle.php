@@ -288,8 +288,8 @@ final class ReadonlyReviewBundle
             if (str_contains($contents, "\0") || preg_match('//u', $contents) !== 1) {
                 continue;
             }
-            if (!str_contains($patchContents, "\n+++ b/{$path}\n")) {
-                throw new RuntimeException('Reviewer added-head patch evidence is invalid.');
+            if (!self::patchCarriesCompleteAddedText($patchContents, $path, $head['mode'], $contents)) {
+                continue;
             }
             if (!unlink($headPath)) {
                 throw new RuntimeException('Reviewer added-head deduplication failed.');
@@ -302,6 +302,71 @@ final class ReadonlyReviewBundle
         $manifest['changed_paths'] = $records;
 
         return $manifest;
+    }
+
+    private static function patchCarriesCompleteAddedText(
+        string $patch,
+        string $path,
+        string $mode,
+        string $contents,
+    ): bool {
+        $fileHeader = "diff --git a/{$path} b/{$path}\n";
+        if (str_starts_with($patch, $fileHeader)) {
+            $sectionStart = 0;
+        } else {
+            $prefixedHeader = "\n" . $fileHeader;
+            $prefixedStart = strpos($patch, $prefixedHeader);
+            if ($prefixedStart === false) {
+                return false;
+            }
+            $sectionStart = $prefixedStart + 1;
+        }
+        if (strpos($patch, $fileHeader, $sectionStart + strlen($fileHeader)) !== false) {
+            return false;
+        }
+
+        $nextSection = strpos($patch, "\ndiff --git ", $sectionStart + strlen($fileHeader));
+        $section =
+            $nextSection === false
+                ? substr($patch, $sectionStart)
+                : substr($patch, $sectionStart, $nextSection - $sectionStart + 1);
+        if (
+            !str_starts_with($section, $fileHeader . "new file mode {$mode}\n") ||
+            str_contains($section, "\nGIT binary patch\n") ||
+            str_contains($section, "\nBinary files ")
+        ) {
+            return false;
+        }
+
+        $hasFinalNewline = str_ends_with($contents, "\n");
+        $lineCount = substr_count($contents, "\n") + ($hasFinalNewline ? 0 : 1);
+        if ($lineCount === 0) {
+            return false;
+        }
+        $newRange = $lineCount === 1 ? '+1' : '+1,' . $lineCount;
+        $hunkPrefix = "\n--- /dev/null\n+++ b/{$path}\n@@ -0,0 {$newRange} @@";
+        $hunkStart = strpos($section, $hunkPrefix);
+        if ($hunkStart === false) {
+            return false;
+        }
+        $hunkHeaderEnd = strpos($section, "\n", $hunkStart + strlen($hunkPrefix));
+        if ($hunkHeaderEnd === false) {
+            return false;
+        }
+
+        $lines = explode("\n", $contents);
+        if ($hasFinalNewline) {
+            array_pop($lines);
+        }
+        $expectedPatchBody = '';
+        foreach ($lines as $line) {
+            $expectedPatchBody .= '+' . $line . "\n";
+        }
+        if (!$hasFinalNewline) {
+            $expectedPatchBody .= "\\ No newline at end of file\n";
+        }
+
+        return substr($section, $hunkHeaderEnd + 1) === $expectedPatchBody;
     }
 
     public static function buildDeveloperInstructions(

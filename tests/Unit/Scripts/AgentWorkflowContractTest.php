@@ -152,6 +152,10 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_manifest_policy'] ?? null,
         );
         self::assertSame(
+            'exact_complete_textual_new_file_hunk_matches_head_else_retain_blob',
+            $contract['authority']['reviewer']['review_bundle_added_text_deduplication'] ?? null,
+        );
+        self::assertSame(
             'trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input',
             $contract['authority']['reviewer']['review_instruction_policy'] ?? null,
         );

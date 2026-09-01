@@ -155,6 +155,10 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_contents'] ?? null,
         );
         self::assertSame(
+            'exact_complete_textual_new_file_hunk_matches_head_else_retain_blob',
+            $contract['authority']['reviewer']['review_bundle_added_text_deduplication'] ?? null,
+        );
+        self::assertSame(
             'deterministic_sha256_base_head_binding',
             $contract['authority']['reviewer']['review_bundle_manifest_policy'] ?? null,
         );

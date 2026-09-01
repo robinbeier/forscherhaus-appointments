@@ -474,6 +474,11 @@ base SHA, head SHA, and lens. It exposes neither a `.git` directory nor the
 original worktree to the model. Changes to the source worktree after preflight
 cannot alter reviewed content.
 
+A newly added UTF-8 head blob is omitted only when the bundle builder can match
+its exact bytes to one complete textual new-file hunk in the bound patch. A
+binary patch, unsupported or quoted path form, incomplete hunk, or any content
+mismatch keeps the independently hashed head blob in the serialized bundle.
+
 The runner places the trusted base role, exact Base/Head binding, and review
 rules in Codex developer instructions. It serializes the bounded bundle into
 deterministic JSON and supplies that serialization alone as the untrusted user

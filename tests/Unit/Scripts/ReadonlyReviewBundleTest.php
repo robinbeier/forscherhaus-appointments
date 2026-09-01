@@ -231,6 +231,58 @@ class ReadonlyReviewBundleTest extends TestCase
         }
     }
 
+    public function testAddedUtf8HeadRemainsSerializedWhenPatchDoesNotCarryItsText(): void
+    {
+        $root = sys_get_temp_dir() . '/readonly-review-binary-text-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root . '/head', 0700, true));
+        $contents = "added\n";
+        $patch =
+            "diff --git a/added.txt b/added.txt\n" .
+            "new file mode 100644\n" .
+            "index 0000000..abc\n" .
+            "--- /dev/null\n" .
+            "+++ b/added.txt\n" .
+            "GIT binary patch\n" .
+            "literal 6\n";
+        $metadata = [
+            'path' => 'head/added.txt',
+            'mode' => '100644',
+            'git_object' => str_repeat('e', 40),
+            'bytes' => strlen($contents),
+            'sha256' => hash('sha256', $contents),
+        ];
+        $manifest = [
+            'schema_version' => 1,
+            'patch' => [
+                'path' => 'review.patch',
+                'bytes' => strlen($patch),
+                'sha256' => hash('sha256', $patch),
+            ],
+            'changed_paths' => [['path' => 'added.txt', 'base' => null, 'head' => $metadata]],
+        ];
+
+        try {
+            self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
+            self::assertNotFalse(file_put_contents($root . '/head/added.txt', $contents));
+            $result = ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
+
+            self::assertSame($metadata, $result['changed_paths'][0]['head']);
+            self::assertFileExists($root . '/head/added.txt');
+        } finally {
+            foreach ([$root . '/review.patch', $root . '/head/added.txt'] as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
+            if (is_dir($root . '/head')) {
+                rmdir($root . '/head');
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
+        }
+    }
+
     public function testAddedTextDeduplicationRejectsPatchDigestMismatch(): void
     {
         $root = sys_get_temp_dir() . '/readonly-review-patch-dedup-' . bin2hex(random_bytes(8));
